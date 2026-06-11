@@ -729,21 +729,39 @@ impl<'a> Checker<'a> {
         if want == got {
             return;
         }
+        if option_used_where_plain_expected(want, got) {
+            self.diags.push(Diagnostic::error(
+                "E0310",
+                format!("this needs {}, but the value is {}", want.show(), got.show()),
+                "a plain value is required here, not an optional one".to_string(),
+                format!(
+                    "test with `== {}(...)` or `== {}` first, e.g. `if x == {}(n) {{ ... }}`",
+                    syntax::LIT_VALUE,
+                    syntax::LIT_NULL,
+                    syntax::LIT_VALUE
+                ),
+                Some(span),
+            ));
+            return;
+        }
         if let Type::Option(inner) = got {
-            if **inner != *want {
+            if want.unwrap_option().is_some() {
+                if let Some(want_inner) = want.unwrap_option() {
+                    if **inner != *want_inner {
+                        self.report_option_mismatch(want, got, span);
+                    }
+                }
+            } else if **inner != *want {
                 self.report_option_mismatch(want, got, span);
             }
             return;
         }
         if want.unwrap_option().is_some() && got.unwrap_option().is_none() {
             self.diags.push(Diagnostic::error(
-                "E0310",
+                "E0108",
                 format!("this needs {}, but the value is {}", want.show(), got.show()),
-                "a plain value can't stand in for an optional one".to_string(),
-                format!(
-                    "wrap it with `{}(...)`, or test with `==` first",
-                    syntax::LIT_VALUE
-                ),
+                "an optional value is required here".to_string(),
+                format!("wrap it with `{}(...)`", syntax::LIT_VALUE),
                 Some(span),
             ));
         }
@@ -1129,6 +1147,21 @@ impl<'a> Checker<'a> {
             Expr::PatternTest { subject, pattern, span } => {
                 self.check_pattern_test(subject, pattern, *span)
             }
+            Expr::Binary(BinOp::Eq, l, r, span) => {
+                let subj_name = match l.as_ref() {
+                    Expr::Ident(n, _) => Some(n.clone()),
+                    _ => None,
+                };
+                if let Some(lt) = self.infer(l) {
+                    if let Some(pattern) =
+                        self.eq_unit_variant_pattern(l, r, subj_name.as_deref(), &lt)
+                    {
+                        return self.validate_pattern(&lt, &pattern, *span);
+                    }
+                }
+                self.require_bool(cond, "a condition");
+                HashMap::new()
+            }
             Expr::Binary(BinOp::And, l, r, _) => {
                 let left_bindings = self.check_condition_with_bindings(l);
                 let mut right_bindings = self.check_condition_with_bindings(r);
@@ -1156,57 +1189,58 @@ impl<'a> Checker<'a> {
             Expr::Ident(n, _) => Some(n.clone()),
             _ => None,
         };
-        let all_pattern = !arms.is_empty()
+        let all_pattern = subj_ty.is_some()
+            && !arms.is_empty()
             && arms.iter().all(|a| {
-                matches!(
+                self.switch_arm_pattern(
                     &a.cond,
-                    Expr::PatternTest { subject: s, .. }
-                        if subj_name.as_ref().is_some_and(|n| expr_is_same_ident(s, n))
+                    subj_name.as_deref(),
+                    subj_ty.as_ref().unwrap(),
                 )
+                .is_some()
             });
         let mut covered = HashSet::new();
         let mut branches: Vec<&mut Vec<Stmt>> = Vec::new();
         for arm in arms.iter_mut() {
             if all_pattern {
-                if let Expr::PatternTest {
-                    pattern,
-                    span: pspan,
-                    ..
-                } = &arm.cond
-                {
-                    if let Some(ref st) = subj_ty {
-                        if let Some(variant) = pattern_variant_name(pattern) {
-                            if covered.contains(&variant) {
-                                self.diags.push(Diagnostic::lint(
-                                    "L0301",
-                                    format!("arm `{}` is unreachable — that case is already handled", variant),
-                                    "every earlier arm already covers this pattern".to_string(),
-                                    "remove this arm or merge it with the one above".to_string(),
-                                    Some(*pspan),
-                                ));
-                            } else {
-                                covered.insert(variant);
-                            }
-                        }
-                        let bindings = self.validate_pattern(st, pattern, *pspan);
-                        self.scopes.push(HashMap::new());
-                        for (name, ty) in bindings {
-                            self.declare(
-                                &name,
-                                *pspan,
-                                LocalInfo {
-                                    ty,
-                                    mutable: false,
-                                    param_conv: None,
-                                    decl_loop_depth: self.loop_depth,
-                                },
-                            );
-                        }
-                        self.check_block(&mut arm.body, false);
-                        self.scopes.pop();
-                        branches.push(&mut arm.body);
+                if let Some(ref st) = subj_ty {
+                    let Some(pattern) =
+                        self.switch_arm_pattern(&arm.cond, subj_name.as_deref(), st)
+                    else {
                         continue;
+                    };
+                    let pspan = pattern.span();
+                    if let Some(variant) = pattern_variant_name(&pattern) {
+                        if covered.contains(&variant) {
+                            self.diags.push(Diagnostic::lint(
+                                "L0301",
+                                format!("arm `{}` is unreachable — that case is already handled", variant),
+                                "every earlier arm already covers this pattern".to_string(),
+                                "remove this arm or merge it with the one above".to_string(),
+                                Some(pspan),
+                            ));
+                        } else {
+                            covered.insert(variant);
+                        }
                     }
+                    let bindings = self.validate_pattern(st, &pattern, pspan);
+                    self.scopes.push(HashMap::new());
+                    for (name, ty) in bindings {
+                        self.declare(
+                            &name,
+                            pspan,
+                            LocalInfo {
+                                ty,
+                                mutable: false,
+                                param_conv: None,
+                                decl_loop_depth: self.loop_depth,
+                            },
+                        );
+                    }
+                    self.check_block(&mut arm.body, false);
+                    self.scopes.pop();
+                    branches.push(&mut arm.body);
+                    continue;
                 }
             }
             self.require_bool(&mut arm.cond, "a `switch` arm's condition");
@@ -1811,7 +1845,10 @@ impl<'a> Checker<'a> {
                 let arg_ty = self.infer(&mut arg.expr);
                 if let Some(arg_ty) = arg_ty {
                     self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
-                    if arg_ty != *param_ty && !matches!(param_ty, Type::Named(_)) {
+                    if arg_ty != *param_ty
+                        && !matches!(param_ty, Type::Named(_))
+                        && !option_used_where_plain_expected(param_ty, &arg_ty)
+                    {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
@@ -1884,8 +1921,8 @@ impl<'a> Checker<'a> {
                 }
             } else {
                 self.diags.push(Diagnostic::error(
-                    "E0302",
-                    format!("`{}` has no field `{}`", type_name, name),
+                    "E0303",
+                    format!("struct literal for `{}` has no field `{}`", type_name, name),
                     "struct literals may only set fields that exist on the type".to_string(),
                     suggest_field(name, &self.registry.field_names(type_name))
                         .map(|s| format!("did you mean `{}`?", s))
@@ -2057,6 +2094,62 @@ impl<'a> Checker<'a> {
         ty
     }
 
+    /// S31: `subject == Red` when `Red` is a unit variant, not a variable.
+    fn eq_unit_variant_pattern(
+        &self,
+        lhs: &Expr,
+        rhs: &Expr,
+        subject_name: Option<&str>,
+        subj_ty: &Type,
+    ) -> Option<Pattern> {
+        if !subject_name.is_some_and(|n| expr_is_same_ident(lhs, n)) {
+            return None;
+        }
+        let Expr::Ident(variant, rhs_span) = rhs else {
+            return None;
+        };
+        if self.lookup(variant).is_some() || self.consts.contains_key(variant) {
+            return None;
+        }
+        let Type::Named(enum_name) = subj_ty else {
+            return None;
+        };
+        if !self
+            .registry
+            .enum_variants(enum_name)
+            .is_some_and(|variants| variants.contains_key(variant))
+        {
+            return None;
+        }
+        Some(Pattern::Variant {
+            variant: variant.clone(),
+            bindings: Vec::new(),
+            span: *rhs_span,
+        })
+    }
+
+    /// S31: pattern carried as `PatternTest` or as `subject == UnitVariant`.
+    fn switch_arm_pattern(
+        &self,
+        cond: &Expr,
+        subject_name: Option<&str>,
+        subj_ty: &Type,
+    ) -> Option<Pattern> {
+        match cond {
+            Expr::PatternTest { subject, pattern, .. } => {
+                if subject_name.is_some_and(|n| expr_is_same_ident(subject, n)) {
+                    Some(pattern.clone())
+                } else {
+                    None
+                }
+            }
+            Expr::Binary(BinOp::Eq, lhs, rhs, _) => {
+                self.eq_unit_variant_pattern(lhs, rhs, subject_name, subj_ty)
+            }
+            _ => None,
+        }
+    }
+
     fn check_pattern_test(
         &mut self,
         subject: &mut Box<Expr>,
@@ -2225,6 +2318,34 @@ impl<'a> Checker<'a> {
         }
 
         let lt = self.infer(lhs);
+
+        // S31: pattern-shaped `==` before RHS name lookup.
+        if op == BinOp::Eq {
+            let subj_name = match lhs.as_ref() {
+                Expr::Ident(n, _) => Some(n.as_str()),
+                _ => None,
+            };
+            if let Some(lt) = &lt {
+                if let Some(pattern) = self.eq_unit_variant_pattern(lhs, rhs, subj_name, lt) {
+                    self.validate_pattern(lt, &pattern, span);
+                    return Some(Type::Bool);
+                }
+                if let Expr::Ident(name, rhs_span) = rhs.as_ref() {
+                    if self.lookup(name).is_none() && !self.consts.contains_key(name) {
+                        if matches!(lt, Type::Option(_) | Type::Named(_)) {
+                            let pattern = Pattern::Variant {
+                                variant: name.clone(),
+                                bindings: Vec::new(),
+                                span: *rhs_span,
+                            };
+                            self.validate_pattern(lt, &pattern, span);
+                            return Some(Type::Bool);
+                        }
+                    }
+                }
+            }
+        }
+
         let rt = self.infer(rhs);
         let (lt, rt) = (lt?, rt?);
 
@@ -2483,7 +2604,10 @@ impl<'a> Checker<'a> {
 
             if let Some(arg_ty) = &arg_ty {
                 self.check_type_assignable(param_ty, arg_ty, arg.expr.span());
-                if arg_ty != param_ty && !matches!(param_ty, Type::Named(_)) {
+                if arg_ty != param_ty
+                    && !matches!(param_ty, Type::Named(_))
+                    && !option_used_where_plain_expected(param_ty, arg_ty)
+                {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
@@ -2690,6 +2814,11 @@ fn compound_why(op: BinOp) -> String {
         }
         _ => format!("`{}` is a whole-number operation (Int only)", op.spell()),
     }
+}
+
+/// `T?` passed where plain `T` is expected (E0310).
+fn option_used_where_plain_expected(want: &Type, got: &Type) -> bool {
+    matches!(got, Type::Option(inner) if want.unwrap_option().is_none() && **inner == *want)
 }
 
 fn type_fix_hint(want: &Type, got: &Type) -> String {

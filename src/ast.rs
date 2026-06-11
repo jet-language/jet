@@ -175,6 +175,15 @@ pub enum Pattern {
     Absent(Span),
 }
 
+impl Pattern {
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Variant { span, .. } | Pattern::Present { span, .. } => *span,
+            Pattern::Absent(span) => *span,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum EnumLitArg {
     Positional(Expr),

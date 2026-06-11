@@ -227,6 +227,8 @@ e.g. `if s == Circle(r) { … }`, switch arms `s == Rect(w, h) -> { … };`,
 (S24-compatible). When every arm of a `switch` is `subject == <pattern>`,
 sema checks exhaustiveness and `else` may be omitted; mixed arms keep
 S24's mandatory `else`. Otherwise `==` is ordinary value equality (S13).
+A bare name on the right is a variable when one is in scope; to test a
+unit variant with the same spelling, qualify it (e.g. `Light.Red`).
 Rejected: `is` keyword, Rust `match`, accessor-only extraction.
 
 **S32 — Absence / Option (M3)** *(ratified 2026-06-11)*: `**T?`** marks

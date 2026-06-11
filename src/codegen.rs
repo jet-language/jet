@@ -781,7 +781,7 @@ fn emit_stmt(
             else_body,
             ..
         } => {
-            if is_exhaustive_pattern_switch(subject, arms) {
+            if is_exhaustive_pattern_switch(cx, subject, arms) {
                 emit_pattern_match_switch(cx, subject, arms, else_body, env, out, indent);
             } else {
                 emit_mixed_switch(cx, subject, arms, else_body, env, out, indent, view_return);
@@ -802,14 +802,36 @@ fn emit_stmt(
     }
 }
 
-fn is_exhaustive_pattern_switch(subject: &Expr, arms: &[crate::ast::SwitchArm]) -> bool {
+fn switch_arm_pattern_owned(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
+    match cond {
+        Expr::PatternTest {
+            subject: s,
+            pattern,
+            ..
+        } if pattern_subjects_match(s, subject) => Some(pattern.clone()),
+        Expr::Binary(crate::ast::BinOp::Eq, lhs, rhs, span)
+            if pattern_subjects_match(lhs, subject) =>
+        {
+            if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
+                if cx.variant_owner.contains_key(variant) {
+                    return Some(Pattern::Variant {
+                        variant: variant.clone(),
+                        bindings: Vec::new(),
+                        span: *rhs_span,
+                    });
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn is_exhaustive_pattern_switch(cx: &Cx, subject: &Expr, arms: &[crate::ast::SwitchArm]) -> bool {
     !arms.is_empty()
-        && arms.iter().all(|a| {
-            matches!(
-                &a.cond,
-                Expr::PatternTest { subject: s, .. } if pattern_subjects_match(s, subject)
-            )
-        })
+        && arms
+            .iter()
+            .all(|a| switch_arm_pattern_owned(cx, &a.cond, subject).is_some())
 }
 
 fn pattern_subjects_match(a: &Expr, b: &Expr) -> bool {
@@ -831,20 +853,18 @@ fn emit_pattern_match_switch(
     let pad = "    ".repeat(indent);
     let subj = emit_expr(cx, subject, env);
     let enum_type = arms.iter().find_map(|a| {
-        if let Expr::PatternTest {
-            pattern: Pattern::Variant { variant, .. },
-            ..
-        } = &a.cond
-        {
-            cx.variant_owner.get(variant).cloned()
-        } else {
-            None
-        }
+        switch_arm_pattern_owned(cx, &a.cond, subject).and_then(|pattern| {
+            if let Pattern::Variant { variant, .. } = pattern {
+                cx.variant_owner.get(&variant).cloned()
+            } else {
+                None
+            }
+        })
     });
     out.push_str(&format!("{}match {} {{\n", pad, subj));
     for arm in arms {
-        if let Expr::PatternTest { pattern, .. } = &arm.cond {
-            let pat = emit_match_pattern(cx, pattern, enum_type.as_deref());
+        if let Some(pattern) = switch_arm_pattern_owned(cx, &arm.cond, subject) {
+            let pat = emit_match_pattern(cx, &pattern, enum_type.as_deref());
             out.push_str(&format!("{}    {} => {{\n", pad, pat));
             emit_stmts(cx, &arm.body, env, out, indent + 2, false);
             out.push_str(&format!("{}    }}\n", pad));
@@ -904,13 +924,16 @@ fn emit_mixed_switch(
 }
 
 fn emit_switch_arm_cond(cx: &Cx, cond: &Expr, env: &HashMap<String, Slot>) -> String {
-    match cond {
-        Expr::PatternTest { subject, pattern, .. } => {
-            let subj = emit_expr(cx, subject, env);
-            emit_pattern_matches(cx, &subj, pattern)
-        }
-        other => emit_expr(cx, other, env),
+    let subject = match cond {
+        Expr::PatternTest { subject, .. } => subject.as_ref(),
+        Expr::Binary(crate::ast::BinOp::Eq, lhs, _, _) => lhs.as_ref(),
+        _ => return emit_expr(cx, cond, env),
+    };
+    if let Some(pattern) = switch_arm_pattern_owned(cx, cond, subject) {
+        let subj = emit_expr(cx, subject, env);
+        return emit_pattern_matches(cx, &subj, &pattern);
     }
+    emit_expr(cx, cond, env)
 }
 
 fn enum_type_prefix(cx: &Cx, variant: &str) -> String {

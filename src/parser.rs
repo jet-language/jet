@@ -1437,6 +1437,11 @@ impl<'a> Parser<'a> {
     }
 
     /// S31: try to parse a pattern on the right of `==`.
+    ///
+    /// Only unambiguous pattern spellings: `null`, `value(n)`, and
+    /// `Variant(bindings)`. A bare identifier is ordinary value equality
+    /// (`a == b`); unit-variant tests like `light == Red` are resolved in
+    /// sema when `Red` is not a variable but is a variant on the subject.
     fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwNull => {
@@ -1453,28 +1458,23 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, binding_span.end),
                 }));
             }
-            TokKind::Ident(variant) => {
+            TokKind::Ident(variant) if matches!(self.toks.get(self.pos + 1).map(|t| &t.kind), Some(TokKind::LParen)) => {
                 let variant = variant.clone();
                 let span = self.peek().span;
                 self.bump();
-                let bindings = if matches!(self.peek().kind, TokKind::LParen) {
-                    self.bump();
-                    let mut bindings = Vec::new();
-                    if !matches!(self.peek().kind, TokKind::RParen) {
-                        loop {
-                            let (b, _) = self.expect_ident("for a pattern binding")?;
-                            bindings.push(b);
-                            if matches!(self.peek().kind, TokKind::RParen) {
-                                break;
-                            }
-                            self.expect(TokKind::Comma, "between pattern bindings")?;
+                self.bump();
+                let mut bindings = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RParen) {
+                    loop {
+                        let (b, _) = self.expect_ident("for a pattern binding")?;
+                        bindings.push(b);
+                        if matches!(self.peek().kind, TokKind::RParen) {
+                            break;
                         }
+                        self.expect(TokKind::Comma, "between pattern bindings")?;
                     }
-                    self.expect(TokKind::RParen, "after pattern bindings")?;
-                    bindings
-                } else {
-                    Vec::new()
-                };
+                }
+                self.expect(TokKind::RParen, "after pattern bindings")?;
                 let end = self.toks[self.pos.saturating_sub(1)].span.end;
                 return Ok(Some(Pattern::Variant {
                     variant,
