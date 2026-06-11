@@ -36,14 +36,14 @@ Test syntax (S43, recommended — first-class blocks, only at top level):
 
 ```jet
 test "parse_age accepts plain digits" {
-    assert(parse_age("42") == ok(42));
-    assert_eq(parse_age(""), err(ParseError.Empty));
+    require(parse_age("42") == ok(42));
+    require_eq(parse_age(""), err(ParseError.Empty));
 }
 ```
 
 - `test "name" { … }` parses like a parameterless fn body; only allowed
   at top level (E0601 elsewhere). Duplicate names → E0105.
-- `assert_eq(a, b)` joins `assert` (M4): on failure prints both values
+- `require_eq(a, b)` joins `require` (M4/S36): on failure prints both values
   ("left: …, right: …") then the runtime report.
 - `jet test file.jet` (or a directory) compiles ONE binary containing
   all tests + a tiny generated harness (no cargo, R9): each test runs,

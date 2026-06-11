@@ -9,49 +9,9 @@ milestone starts (plans in docs/plans/ are blocked on these IDs).
 
 ---
 
-## Group 3 — Errors (decide before M4)
-
-**S34 — Spelling a fallible return type.**
-
-- A. `fn parse(s: String) -> Int or ParseError` — `or` in the type
-- B. `Result[Int, ParseError]` (Rust spelling, S33 brackets)
-- C. Zig-style `!Int` with inferred error sets
-
-Rust: B. Experts: B is known; A says the same thing and reads aloud;
-C hides the error type (Zig users like it, everyone else greps for it).
-Beginners: A by a mile. → **A.** The error side is any enum, struct, or
-`String` (low-friction prototyping: `-> Int or String` is legal).
-
-**S35 — Handling errors without ceremony.**
-
-- A. `or` fallback expression: `parse(x) or 0`, `parse(x) or return`,
-`parse(x) or panic("…")` — plus `**== ok(v)` / `== err(e)`** patterns
-(S31-style) and `?` for propagation
-- B. methods only: `.unwrap_or(0)`, `.expect("…")` (Rust)
-- C. patterns + `?` only, no fallback sugar
-
-Rust: B + `?`. Experts: A is Zig's `catch` with better reading; loved.
-Beginners: A — `val n = parse(x) or 0;` needs no explanation.
-→ **A.** Also works on `T?` (`m.get(k) or 0`), giving one habit for
-both absence and failure.
-
-**S36 — Stopping the program on a bug.**
-
-- A. `panic("msg")` + `assert(cond)` / `assert(cond, "msg")` builtins
-- B. `panic` only
-- C. `abort`/`fatal` naming instead
-
-Rust: `panic!`/`assert!` macros. Experts: A, the names are lingua
-franca. Beginners: fine — the runtime report ("The program stopped: …")
-does the teaching. → **A.** `assert_eq(a, b)` joins in M6 for tests.
-
----
-
 ## Group 4 — Collections & strings (decide before M5)
 
-**S37 — List literal.** `[1, 2, 3]` vs `List(1, 2, 3)` vs `{1, 2, 3}`.
-Rust: `vec![…]`. Everyone everywhere: square brackets.
-→ `**[1, 2, 3]`**, empty `[]` with an annotation when ambiguous.
+**S37 — List literal.** `[1, 2, 3]` vs `List(1, 2, 3)` vs `{1, 2, 3}`. Keep A.
 
 **S38 — Map literal.**
 
@@ -59,11 +19,7 @@ Rust: `vec![…]`. Everyone everywhere: square brackets.
 - B. `{"name": 1}` braces (Python/JS/JSON)
 - C. no literal; `Map.new()` + inserts
 
-Rust: no literal (C). Experts: any; B collides with blocks/struct
-literals in expression position. Beginners: B is JSON-familiar, but A is
-learned in one example. → **A** — uniform "brackets = collections,
-braces = code/structs" rule keeps the grammar LL and error messages
-crisp.
+Keep A
 
 **S39 — Out-of-bounds behavior.**
 
@@ -72,17 +28,14 @@ for safe access (Rust's split)
 - B. `xs[i]` returns `T?` always (total safety, unwrap ceremony)
 - C. B for maps, A for lists
 
-Rust: A. Experts: A — Option-returning indexing makes numeric code
-miserable. Beginners: A *with a great message* ("the list has 3 items,
-so position 99 doesn't exist") teaches better than a mystery absent
-value. → **A** for lists and map reads (missing key = report;
-`m.get(k) or 0` is the safe idiom).
+Keep A
 
 **S40 — Slicing.** `xs[1..3]` inclusive (S22-consistent), copies the
 elements (tier 1: no exposed references). Rust: `&xs[1..3]` half-open
 borrow. Experts: will note the copy cost — countered by lint L0501 and
 honest docs. Beginners: inclusive matches what `1..3` already means in
-`for`. → **Inclusive, copying `xs[a..b]`**; same for `s.slice(a..b)`.
+`for`. → **Inclusive, copying `xs[a..b]`**; same for `s.slice(a..b)`.  
+**Note: In mathematical notation, it would be [ or ] for inclusive & ( or) for exclusive. Is it possible to do that?**
 
 **S41 — Strings & `Char`.**
 
@@ -91,10 +44,7 @@ honest docs. Beginners: inclusive matches what `1..3` already means in
 - B. Rust model: byte length, `.chars()` iterator, no indexing
 - C. UTF-32 strings, O(1) indexing (memory cost)
 
-Rust: B. Experts: B is "correct" but bytes-by-default surprises
-everyone outside systems code. Beginners: A — "héllo".len() == 5.
-→ **A** (`len` may be O(n); document it; byte APIs arrive in M10 as
-`.bytes()` for experts).
+Keep A.
 
 **S42 — Numbers beyond `Int`/`Float`.**
 
@@ -114,13 +64,11 @@ evidence (FFI in M7 may force it — revisit then). Beginners: A.
 
 **S43 — Test syntax.**
 
-- A. first-class blocks: `test "name" { … }` with `assert`/`assert_eq`
+- A. first-class blocks: `test "name" { … }` with `require`/`require_eq`
 - B. Rust attribute style `#[test] fn …`
-- C. naming convention `fn test_*`
+- C. naming convention `fn test_`*
 
-Rust: B. Experts: A is what they praise in newer languages (Zig
-`test "…"`). Beginners: A — string names mean no underscore-mangled
-prose. → **A.**
+Keep A.
 
 **S44 — The one true format.** 4-space indent, same-line `{`, width 100,
 spaces around binary operators. Rust: same but width 100/rustfmt.
@@ -204,7 +152,7 @@ post-1.0 only if trait bounds prove insufficient.
 **S51 — Std library access.** `import "std/fs" as fs;` reusing S16
 machinery (reserved `std/` prefix) vs auto-available globals vs a `std.`
 mega-namespace. Rust: `use std::fs`. Experts: explicit imports, grep
-friendly. Beginners: one import line, copy-pasteable. → `**import "std/fs" as fs;`** — `print`/`assert`/`panic` stay prelude builtins;
+friendly. Beginners: one import line, copy-pasteable. → `**import "std/fs" as fs;`** — `print`/`require`/`panic` stay prelude builtins;
 everything else is imported.
 
 **S54 — Naming convention.** Enforce snake_case for fn/vars and
@@ -246,11 +194,10 @@ three lines. → **A.** Single files stay manifest-free forever (R9).
 
 | Group                   | IDs                     | Needed by | Status |
 | ----------------------- | ----------------------- | --------- | ------ |
-| 3 Errors                | S34 S35 S36             | M4        | ☐      |
 | 4 Collections & strings | S37 S38 S39 S40 S41 S42 | M5        | ☐      |
 | 5 Tooling & FFI         | S43 S44 S49 S50         | M6/M7     | ☐      |
 | 6 Functions & generics  | S46 S47 S45 S28 S48 S26 | M8/M9     | ☐      |
 | 7 Platform              | S51 S54 S53 S52         | M10–M12   | ☐      |
 
 
-Ratified (see docs/02): Group 1 confirmations; Group 2 — S29–S33.
+Ratified (see docs/02): Group 1 confirmations; Group 2 — S29–S33; Group 3 — S34–S36.

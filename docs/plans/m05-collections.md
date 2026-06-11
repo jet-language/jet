@@ -53,8 +53,8 @@ fn main() {
   `s.replace(a, b)`, `s.to_upper()`, `s.to_lower()`, `s.repeat(n)`,
   `s.slice(a..b) -> String` (char positions). No `s[i]` indexing
   (E0503 teaches `.chars()` / `.slice(…)` — strings aren't arrays).
-- Conversions (S42): `Int.parse(s) -> Int or ParseError`,
-  `Float.parse(s) -> Float or ParseError`, `x.to_string()`,
+- Conversions (S42): `Int.parse(s) -> Result[Int, ParseError]`,
+  `Float.parse(s) -> Result[Float, ParseError]`, `x.to_string()`,
   `n.to_float()`, `f.to_int()` (truncates — say so in docs). No `as`
   keyword (recognized only for a teaching error, E0026).
 

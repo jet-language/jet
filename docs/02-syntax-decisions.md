@@ -153,8 +153,8 @@ a teaching error (S14). Rejected: propagation-only-via-explicit-handling.
 **S13 — Logical and comparison operators (M1)** *(ratified 2026-06-11)*:
 `**&&` `||` `!`** for logic; `**==` `!=` `<` `>` `<=` `>=**` for
 comparisons. Word forms (`and`, `or`, `not`) recognized only for teaching
-errors (S14). Note: `or` as a *type* and *fallback* operator (S34/S35) is
-a separate token in expression/type context — not logical OR.
+errors (S14). Note: `or` as a *fallback* operator (S35) is a separate
+token in expression context — not logical OR.
 
 **S17 — Compound assignment (M1)** *(ratified 2026-06-11)*: the full
 C-family set `**+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=*`*.
@@ -242,9 +242,32 @@ null on non-option types.
 
 **S33 — Generic type argument brackets (M3+)** *(ratified 2026-06-11)*:
 `**Type[Args]`** — square brackets for type arguments, e.g. `List[Int]`,
-`Map[String, Int]`, and (when S34 is ratified) `T or E` result sides.
+`Map[String, Int]`, and `Result[T, E]` fallible returns (S34).
 Rejected: angle brackets `List<Int>` (comparison/`>` ambiguity; no
 turbofish).
+
+**S34 — Fallible return type (M4)** *(ratified 2026-06-11)*:
+`**Result[T, E]**` — e.g. `fn parse(s: String) -> Result[Int, ParseError]`.
+`Result` is a prelude builtin (S33 square brackets); `E` is any enum,
+struct, or `String`. Codegen lowers to Rust `Result<T, E>`. Rejected:
+`T or E` in type position (A), Zig `!T` with inferred error sets (C).
+
+**S35 — Error handling ergonomics (M4)** *(ratified 2026-06-11)*:
+`**or` fallback** on a fallible or optional value — e.g. `parse(x) or 0`,
+`parse(x) or return`, `parse(x) or panic("…")`, `m.get(k) or 0` on `T?`.
+Plus **`== ok(v)` / `== err(e)`** pattern tests (S31 machinery) and
+postfix **`?`** propagation (S7). Rejected: Rust `.unwrap_or` / `.expect`
+methods only (B), patterns + `?` with no `or` sugar (C).
+
+**S36 — Bug stops (M4)** *(ratified 2026-06-11)*: `**panic("msg")**`
+stops the program with a friendly runtime report (file, line, exit 70);
+`**require(cond)**` and `**require(cond, "msg")**` panic when the
+condition is false — for programmer invariants and preconditions, not
+recoverable user errors (`Result[T, E]`). Both are prelude builtins like
+`print`. Prefix `assert` is recognized only for a teaching error (S14)
+pointing at `require`. Rejected: `assert` as the canonical builtin name,
+user-facing `abort`/`fatal` (S15 already uses *abort* as a build-mode
+name), panic-only without `require` sugar.
 
 ## Enforcement
 
@@ -309,9 +332,6 @@ flexibility.
 
 | ID  | Question                                        | Needed by |
 | --- | ----------------------------------------------- | --------- |
-| S34 | fallible return type spelling (`T or E`)        | M4        |
-| S35 | error handling ergonomics (`or` fallback)       | M4        |
-| S36 | `panic` / `assert` builtins                     | M4        |
 | S37 | list literal                                    | M5        |
 | S38 | map literal                                     | M5        |
 | S39 | indexing & out-of-bounds behavior               | M5        |
@@ -375,5 +395,8 @@ S26's recommendation is close-as-rejected once S28/S45 are ratified).
 | 2026-06-11 | S31 | `==` pattern tests on enums and `T?`        | owner |
 | 2026-06-11 | S32 | `T?`, `value` / `null`                      | owner |
 | 2026-06-11 | S33 | generic args `Type[T]` square brackets      | owner |
+| 2026-06-11 | S34 | fallible returns `Result[T, E]`             | owner |
+| 2026-06-11 | S35 | `or` fallback + patterns + `?`              | owner |
+| 2026-06-11 | S36 | `panic` + `require` for bug stops           | owner |
 
 

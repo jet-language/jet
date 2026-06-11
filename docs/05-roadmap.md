@@ -67,10 +67,10 @@ out of M3 — they land in M9.
 and E0020–E0023 has a ui snapshot; exhaustiveness errors list missing
 cases verbatim. ✓
 
-## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; ballots: Group 3)*
+## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; S34–S36 ratified)*
 
-`T or E` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
-fallback, `panic`/`assert` for bugs with a friendly runtime report.
+`Result[T, E]` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
+fallback, `panic`/`require` for bugs with a friendly runtime report.
 No exceptions, no null, no silently ignored failures.
 **Exit:** a file-parsing example showing the happy path staying clean;
 the runtime report format pinned by a golden stderr test.
@@ -125,7 +125,7 @@ instantiation soundness matrix test.
 ## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; ballots: Group 7)*
 
 `import "std/…"`: fs, io, env, process, math, random, time, json —
-exact v1 APIs frozen in the plan; every fallible call returns `T or E`.
+exact v1 APIs frozen in the plan; every fallible call returns `Result[T, E]`.
 `Byte` and byte/string conversions. Enough batteries for real CLI tools.
 **Exit:** file-transform, JSON, and mini-CLI examples with golden tests.
 

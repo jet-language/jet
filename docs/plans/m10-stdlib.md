@@ -12,7 +12,7 @@ Enough batteries to rewrite real CLI tools: files, stdin/args/env,
 process control, math, time, random, JSON. Implemented as compiler-known
 modules backed by Rust std in the generated prelude (no Jet-source
 stdlib yet — that wants packages, M12). Every fallible operation returns
-`T or E` with a small set of well-named error enums; nothing panics
+`Result[T, E]` with a small set of well-named error enums; nothing panics
 except programmer errors.
 
 ## Surface (uses ballot recommendations — substitute ratified choices)
