@@ -35,7 +35,7 @@
 
           meta = with pkgs.lib; {
             description = "Compiler for the Jet programming language";
-            homepage = "https://github.com/HalcyonOmega/lex-lang";
+            homepage = "https://github.com/jet-language/jet";
             mainProgram = "jet";
             platforms = platforms.unix;
           };

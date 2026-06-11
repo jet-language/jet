@@ -1,6 +1,6 @@
 //! jet — compiler library.
 //!
-//! Pipeline: jet -> parse -> sema -> codegen (docs/03-architecture.md).
+//! Pipeline: lex -> parse -> sema -> codegen (docs/03-architecture.md).
 //! The front end (everything before codegen) owns ALL user-facing
 //! correctness and every diagnostic. The Rust backend is a verifier and
 //! optimizer, never a source of user-facing errors.
@@ -8,7 +8,7 @@
 pub mod ast;
 pub mod codegen;
 pub mod diag;
-pub mod jeter;
+pub mod lexer;
 pub mod parser;
 pub mod sema;
 pub mod syntax;
@@ -22,12 +22,12 @@ pub struct CompileOutput {
     pub lints: Vec<Diagnostic>,
 }
 
-/// Run the full front end on source text. All jet errors (then all parse
+/// Run the full front end on source text. All lex errors (then all parse
 /// errors) surface in one run — M1 error recovery.
 pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let (toks, jet_diags) = jeter::jet(src);
-    if !jet_diags.is_empty() {
-        return Err(jet_diags);
+    let (toks, lex_diags) = lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
     }
     let mut prog = parser::parse(&toks)?;
     let diags = sema::check(&mut prog);

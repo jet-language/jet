@@ -9,7 +9,7 @@ Depends on M6 phase 4 (LSP v0 skeleton), M12 (multi-package projects).
 Make Jet feel first-class in an editor. The compiler front end already
 owns every fact the server needs; this milestone is about exposing it
 with good latency and never crashing. Architecture rule: the LSP reuses
-jeter/parser/sema as libraries — zero duplicated language knowledge.
+lexer/parser/sema as libraries — zero duplicated language knowledge.
 
 ## Capabilities (exact scope, in priority order — ship incrementally)
 

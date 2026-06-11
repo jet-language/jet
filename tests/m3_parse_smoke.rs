@@ -11,7 +11,7 @@ fn find_even(limit: Int) -> Int? {
 }
 fn main() {}
 "#;
-    let (toks, _) = jet::jeter::jet(src);
+    let (toks, _) = jet::lexer::lex(src);
     let prog = jet::parser::parse(&toks).expect("parse");
     assert_eq!(prog.items.len(), 2);
 }
