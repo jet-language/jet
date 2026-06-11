@@ -88,7 +88,7 @@ expr     = precedence climbing over:
 ### Staged errors
 
 Features that exist in the roadmap but not the language yet fail with an
-error naming the milestone (E0006 `?` → M4).
+error naming the milestone (E0019 `import` → M6).
 A future feature must never die as a generic syntax error. Teaching
 errors (S14, E0008–E0016) recognize foreign spellings — `def`, `let`,
 `set`, `println`, `and`/`or`/`not`, `Text`, `try`, `use`, `match` — and
@@ -151,6 +151,34 @@ impl Circle {
 - Static methods omit `self` (e.g. `Circle.unit()`).
 - Enum `switch` arms must be exhaustive; missing cases are a compile error.
 - **Traits/interfaces (S28)** are deferred; no `trait` / `implements` syntax yet.
+
+## M4 — errors as values (done)
+
+Fallible functions return **`Result[T, E]`** (S34): `T` is the success
+payload, `E` is any enum, struct, or `String`. Build outcomes with
+**`ok(v)`** and **`err(e)`**; test them with **`== ok(n)`** / **`== err(e)`**
+(same pattern machinery as M3 optionals).
+
+- Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
+  enclosing function must return a compatible `Result[…, E]` (same error
+  type in v1). On **`T?`**, `?` propagates `null` when the function returns
+  an optional.
+- **`or <expr>`** (S35) is the fallback operator on a fallible value:
+  yields the success payload or evaluates the right side. Precedence is
+  looser than **`&&`** / **`||`**, so `a? or b` and `x == 1 || y or 0`
+  parse predictably. The right side may be a value, **`return`**, **`return expr`**,
+  or **`panic(…)`**.
+- **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
+  (S36) stop the program with a friendly report on stderr and exit code 70.
+- In **`switch <fallible-expr> { … }`**, when the subject is not a plain
+  name, **`it`** names the subject for pattern arms like **`it == ok(n)`**.
+- **`main`** may not return a fallible type; handle errors with **`or`**, a
+  full **`switch`**, or **`panic`**.
+
+Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
+bad propagation (**E0403**), `ok`/`err` outside a result context (**E0404**),
+and fallback type mismatches (**E0405**) are compile errors with fixes that
+name **`?`**, **`or`**, and pattern tests.
 
 ## Deliberately absent
 

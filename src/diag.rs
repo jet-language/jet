@@ -117,6 +117,10 @@ impl Diagnostic {
 }
 
 /// 1-based (line, column). Columns count characters, not bytes.
+pub fn span_line_col(src: &str, offset: usize) -> (usize, usize) {
+    line_col(src, offset)
+}
+
 fn line_col(src: &str, offset: usize) -> (usize, usize) {
     let mut line = 1;
     let mut col = 1;

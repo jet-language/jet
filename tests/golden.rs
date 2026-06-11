@@ -33,9 +33,10 @@ fn examples_compile_and_run() {
             continue;
         }
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let shown = format!("examples/{}.{}", stem, ext);
         let src = fs::read_to_string(&path).unwrap();
 
-        let rust_code = match jet::compile(&src) {
+        let rust_code = match jet::compile_with_path(&src, &shown) {
             Ok(c) => c.rust,
             Err(diags) => panic!(
                 "example {} failed the front end:\n{}",
@@ -75,14 +76,43 @@ fn examples_compile_and_run() {
                 String::from_utf8_lossy(&out.stderr)
             );
             let run = Command::new(&bin).output().unwrap();
-            let expected = fs::read_to_string(ex_dir.join("expected").join(format!("{}.out", stem)))
+            let err_path = ex_dir.join("expected").join(format!("{}.err.out", stem));
+            if err_path.exists() {
+                let expected_err =
+                    fs::read_to_string(&err_path).unwrap_or_else(|_| {
+                        panic!("missing examples/expected/{}.err.out", stem)
+                    });
+                assert_eq!(
+                    run.status.code(),
+                    Some(70),
+                    "exit code mismatch for example {}",
+                    stem
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&run.stderr),
+                    expected_err,
+                    "stderr mismatch for example {}",
+                    stem
+                );
+            } else {
+                assert!(
+                    run.status.success(),
+                    "example {} failed at runtime:\nstdout: {}\nstderr: {}",
+                    stem,
+                    String::from_utf8_lossy(&run.stdout),
+                    String::from_utf8_lossy(&run.stderr)
+                );
+                let expected = fs::read_to_string(
+                    ex_dir.join("expected").join(format!("{}.out", stem)),
+                )
                 .unwrap_or_else(|_| panic!("missing examples/expected/{}.out", stem));
-            assert_eq!(
-                String::from_utf8_lossy(&run.stdout),
-                expected,
-                "output mismatch for example {}",
-                stem
-            );
+                assert_eq!(
+                    String::from_utf8_lossy(&run.stdout),
+                    expected,
+                    "output mismatch for example {}",
+                    stem
+                );
+            }
         }
         checked += 1;
     }

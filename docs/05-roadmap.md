@@ -67,13 +67,13 @@ out of M3 — they land in M9.
 and E0020–E0023 has a ui snapshot; exhaustiveness errors list missing
 cases verbatim. ✓
 
-## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; S34–S36 ratified)*
+## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; done 2026-06-11)*
 
 `Result[T, E]` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
 fallback, `panic`/`require` for bugs with a friendly runtime report.
 No exceptions, no null, no silently ignored failures.
 **Exit:** a file-parsing example showing the happy path staying clean;
-the runtime report format pinned by a golden stderr test.
+the runtime report format pinned by a golden stderr test. ✓
 
 ## M5 — Collections & one string story  *(plan: docs/plans/m05-collections.md; ballots: Group 4)*
 

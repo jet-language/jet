@@ -9,8 +9,8 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr,
-    Func, IfStmt, Item, Pattern, Program, RustConstKind, Stmt, StrPart, StructDef, Type, UnOp,
-    VariantPayload,
+    Func, IfStmt, Item, OrFallback, Pattern, Program, RustConstKind, Stmt, StrPart, StructDef, Type,
+    UnOp, VariantPayload,
 };
 use crate::diag::{Diagnostic, Span};
 use crate::syntax;
@@ -146,14 +146,17 @@ pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
     for item in &prog.items {
         match item {
             Item::Func(f) => {
-                if f.name == syntax::BUILTIN_PRINT {
+                if f.name == syntax::BUILTIN_PRINT
+                    || f.name == syntax::BUILTIN_PANIC
+                    || f.name == syntax::BUILTIN_REQUIRE
+                {
                     diags.push(Diagnostic::error(
                         "E0106",
                         format!(
                             "the name `{}` is built in and can't be redefined",
-                            syntax::BUILTIN_PRINT
+                            f.name
                         ),
-                        format!("`{}` is provided by the language itself", syntax::BUILTIN_PRINT),
+                        format!("`{}` is provided by the language itself", f.name),
                         "choose a different name for this function".to_string(),
                         Some(f.name_span),
                     ));
@@ -713,6 +716,10 @@ impl<'a> Checker<'a> {
                 self.check_declared_type(inner, span);
             }
             Type::List(inner) | Type::Shared(inner) => self.check_declared_type(inner, span),
+            Type::Result { ok, err } => {
+                self.check_declared_type(ok, span);
+                self.check_declared_type(err, span);
+            }
             _ => {}
         }
     }
@@ -721,12 +728,29 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Named(n) => self.registry.contains(n),
             Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => self.type_known(inner),
+            Type::Result { ok, err } => self.type_known(ok) && self.type_known(err),
             _ => true,
         }
     }
 
     fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) {
         if want == got {
+            return;
+        }
+        if result_used_where_plain_expected(want, got) {
+            self.diags.push(Diagnostic::error(
+                "E0401",
+                format!("this needs {}, but the value is {}", want.show(), got.show()),
+                "a fallible result must be checked before its value is used".to_string(),
+                format!(
+                    "use `{}`, `{}`, or test with `== {}(...)` / `== {}(...)`",
+                    syntax::OP_TRY_SUFFIX,
+                    syntax::OP_OR_FALLBACK,
+                    syntax::LIT_OK,
+                    syntax::LIT_ERR
+                ),
+                Some(span),
+            ));
             return;
         }
         if option_used_where_plain_expected(want, got) {
@@ -908,12 +932,22 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Expr(expr) => {
-                if let Expr::Call(call) = expr {
-                    self.check_call(call, false);
-                } else if let Expr::MethodCall { .. } = expr {
-                    self.infer(expr);
-                } else {
-                    self.infer(expr);
+                if let Some(ty) = self.infer_fallible_stmt(expr) {
+                    if ty.is_fallible() {
+                        self.diags.push(Diagnostic::error(
+                            "E0402",
+                            "this call can fail and nothing checks it".to_string(),
+                            "a fallible result can't be ignored — handle it or say failure is impossible"
+                                .to_string(),
+                            format!(
+                                "use `{}`, `{}`, or `{} ...` if failure can't happen here",
+                                syntax::OP_TRY_SUFFIX,
+                                syntax::OP_OR_FALLBACK,
+                                syntax::BUILTIN_PANIC
+                            ),
+                            Some(expr.span()),
+                        ));
+                    }
                 }
             }
             Stmt::Return(expr, span) => {
@@ -1187,8 +1221,27 @@ impl<'a> Checker<'a> {
         let subj_ty = self.infer(subject);
         let subj_name = match &*subject {
             Expr::Ident(n, _) => Some(n.clone()),
+            _ if subj_ty.as_ref().is_some_and(|t| t.is_fallible()) => {
+                Some(syntax::KW_IT.to_string())
+            }
             _ => None,
         };
+        let it_scope = subj_name.as_deref() == Some(syntax::KW_IT);
+        if it_scope {
+            self.scopes.push(HashMap::new());
+            if let Some(st) = subj_ty.clone() {
+                self.declare(
+                    syntax::KW_IT,
+                    span,
+                    LocalInfo {
+                        ty: st,
+                        mutable: false,
+                        param_conv: None,
+                        decl_loop_depth: self.loop_depth,
+                    },
+                );
+            }
+        }
         let all_pattern = subj_ty.is_some()
             && !arms.is_empty()
             && arms.iter().all(|a| {
@@ -1200,8 +1253,10 @@ impl<'a> Checker<'a> {
                 .is_some()
             });
         let mut covered = HashSet::new();
-        let mut branches: Vec<&mut Vec<Stmt>> = Vec::new();
+        let move_before = self.moved.clone();
+        let mut move_after = move_before.clone();
         for arm in arms.iter_mut() {
+            self.moved = move_before.clone();
             if all_pattern {
                 if let Some(ref st) = subj_ty {
                     let Some(pattern) =
@@ -1239,13 +1294,39 @@ impl<'a> Checker<'a> {
                     }
                     self.check_block(&mut arm.body, false);
                     self.scopes.pop();
-                    branches.push(&mut arm.body);
+                    for (k, v) in self.moved.drain() {
+                        move_after.entry(k).or_insert(v);
+                    }
                     continue;
                 }
             }
-            self.require_bool(&mut arm.cond, "a `switch` arm's condition");
-            self.check_block(&mut arm.body, true);
-            branches.push(&mut arm.body);
+            let bindings = self.check_condition_with_bindings(&mut arm.cond);
+            if bindings.is_empty() {
+                self.require_bool(&mut arm.cond, "a `switch` arm's condition");
+                self.check_block(&mut arm.body, true);
+            } else {
+                self.scopes.push(HashMap::new());
+                for (name, ty) in bindings {
+                    self.declare(
+                        &name,
+                        arm.cond.span(),
+                        LocalInfo {
+                            ty,
+                            mutable: false,
+                            param_conv: None,
+                            decl_loop_depth: self.loop_depth,
+                        },
+                    );
+                }
+                self.check_block(&mut arm.body, false);
+                self.scopes.pop();
+            }
+            for (k, v) in self.moved.drain() {
+                move_after.entry(k).or_insert(v);
+            }
+        }
+        if it_scope {
+            self.scopes.pop();
         }
         if all_pattern {
             if let Some(st) = subj_ty {
@@ -1271,9 +1352,13 @@ impl<'a> Checker<'a> {
             ));
         }
         if let Some(body) = else_body {
-            branches.push(body);
+            self.moved = move_before.clone();
+            self.check_block(body, true);
+            for (k, v) in self.moved.drain() {
+                move_after.entry(k).or_insert(v);
+            }
         }
-        self.check_branches(&mut branches);
+        self.moved = move_after;
     }
 
     fn check_binding(&mut self, b: &mut Binding) {
@@ -1621,6 +1706,285 @@ impl<'a> Checker<'a> {
                 self.check_pattern_test(subject, pattern, *span);
                 Some(Type::Bool)
             }
+            Expr::Ok(inner, span) => self.infer_ok(inner, *span),
+            Expr::Err(inner, span) => self.infer_err(inner, *span),
+            Expr::Try(inner, span) => self.infer_try(inner, *span),
+            Expr::OrFallback {
+                value,
+                fallback,
+                span,
+                is_option,
+            } => self.infer_or_fallback(value, fallback, *span, is_option),
+        }
+    }
+
+    fn infer_ok(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
+        let payload = self.infer(inner)?;
+        if let Some(expected) = self.expected_type.clone() {
+            if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
+                if payload != *ok_ty {
+                    self.diags.push(Diagnostic::error(
+                        "E0108",
+                        format!(
+                            "this `{}` holds {}, but {} was expected",
+                            syntax::LIT_OK,
+                            payload.show(),
+                            ok_ty.show()
+                        ),
+                        "the success value must match the result's value type".to_string(),
+                        type_fix_hint(ok_ty, &payload),
+                        Some(span),
+                    ));
+                }
+                return Some(Type::Result {
+                    ok: Box::new(ok_ty.clone()),
+                    err: Box::new(err_ty.clone()),
+                });
+            }
+        }
+        self.diags.push(Diagnostic::error(
+            "E0404",
+            format!("`{}(...)` only fits where a fallible result is expected", syntax::LIT_OK),
+            format!(
+                "`{}` builds the success side of `Result[T, E]`",
+                syntax::LIT_OK
+            ),
+            "use it in a return type, a binding annotated with `Result[...]`, or a call that expects one"
+                .to_string(),
+            Some(span),
+        ));
+        None
+    }
+
+    fn infer_err(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
+        let payload = self.infer(inner)?;
+        if let Some(expected) = self.expected_type.clone() {
+            if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
+                if payload != *err_ty {
+                    self.diags.push(Diagnostic::error(
+                        "E0108",
+                        format!(
+                            "this `{}` holds {}, but {} was expected",
+                            syntax::LIT_ERR,
+                            payload.show(),
+                            err_ty.show()
+                        ),
+                        "the failure value must match the result's error type".to_string(),
+                        type_fix_hint(err_ty, &payload),
+                        Some(span),
+                    ));
+                }
+                return Some(Type::Result {
+                    ok: Box::new(ok_ty.clone()),
+                    err: Box::new(err_ty.clone()),
+                });
+            }
+        }
+        self.diags.push(Diagnostic::error(
+            "E0404",
+            format!("`{}(...)` only fits where a fallible result is expected", syntax::LIT_ERR),
+            format!(
+                "`{}` builds the failure side of `Result[T, E]`",
+                syntax::LIT_ERR
+            ),
+            "use it in a return type, a binding annotated with `Result[...]`, or a call that expects one"
+                .to_string(),
+            Some(span),
+        ));
+        None
+    }
+
+    fn infer_try(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
+        let inner_ty = self.infer(inner)?;
+        match inner_ty {
+            Type::Result { ok, err } => {
+                let ret = self.ret.clone().unwrap_or(Type::Int);
+                match &ret {
+                    Type::Result {
+                        ok: ret_ok,
+                        err: ret_err,
+                    } if *ret_ok == ok && *ret_err == err => Some((*ok).clone()),
+                    Type::Result { err: ret_err, .. } => {
+                        self.diags.push(Diagnostic::error(
+                            "E0403",
+                            format!(
+                                "`{}` can't pass a {} error into a function that returns {}",
+                                syntax::OP_TRY_SUFFIX,
+                                err.show(),
+                                ret_err.show()
+                            ),
+                            "the error type must match exactly — there's no conversion in v1"
+                                .to_string(),
+                            format!(
+                                "handle the failure here with `== {}`, or change the return type to match",
+                                syntax::LIT_ERR
+                            ),
+                            Some(span),
+                        ));
+                        None
+                    }
+                    _ => {
+                        self.diags.push(Diagnostic::error(
+                            "E0403",
+                            format!(
+                                "`{}` only works inside a function that returns a fallible result",
+                                syntax::OP_TRY_SUFFIX
+                            ),
+                            "propagation early-returns the failure to the caller".to_string(),
+                            format!(
+                                "add `-> Result[..., {}]` to this function, or handle the result with `{}`",
+                                err.name(),
+                                syntax::OP_OR_FALLBACK
+                            ),
+                            Some(span),
+                        ));
+                        None
+                    }
+                }
+            }
+            Type::Option(ref inner) => {
+                let ret = self.ret.clone().unwrap_or(Type::Int);
+                if let Type::Option(ret_inner) = &ret {
+                    if **ret_inner == **inner {
+                        return Some((**inner).clone());
+                    }
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0403",
+                    format!(
+                        "`{}` on `{}` needs a function that returns the same optional type",
+                        syntax::OP_TRY_SUFFIX,
+                        inner_ty.name()
+                    ),
+                    "propagation passes `null` back to the caller".to_string(),
+                    format!(
+                        "add `-> {}` to this function, or handle it with `{}`",
+                        inner_ty.name(),
+                        syntax::OP_OR_FALLBACK
+                    ),
+                    Some(span),
+                ));
+                None
+            }
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0403",
+                    format!(
+                        "`{}` only works on a fallible value, not {}",
+                        syntax::OP_TRY_SUFFIX,
+                        other.show()
+                    ),
+                    "postfix `?` unwraps success or returns early with the failure".to_string(),
+                    format!(
+                        "call something that returns `Result[T, E]` or `T?`, or remove `{}`",
+                        syntax::OP_TRY_SUFFIX
+                    ),
+                    Some(span),
+                ));
+                None
+            }
+        }
+    }
+
+    fn infer_or_fallback(
+        &mut self,
+        value: &mut Box<Expr>,
+        fallback: &OrFallback,
+        span: Span,
+        is_option: &mut bool,
+    ) -> Option<Type> {
+        let val_ty = self.infer(value)?;
+        *is_option = matches!(val_ty, Type::Option(_));
+        let payload = match &val_ty {
+            Type::Result { ok, .. } if !*is_option => (**ok).clone(),
+            Type::Option(inner) if *is_option => (**inner).clone(),
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0405",
+                    format!(
+                        "`{}` only works on a fallible value, not {}",
+                        syntax::OP_OR_FALLBACK,
+                        other.show()
+                    ),
+                    "the left side must be a `Result` or optional value".to_string(),
+                    format!(
+                        "call something that can fail, then write `... {} fallback`",
+                        syntax::OP_OR_FALLBACK
+                    ),
+                    Some(span),
+                ));
+                return None;
+            }
+        };
+        match fallback {
+            OrFallback::Value(e) => {
+                let mut e2 = e.as_ref().clone();
+                let ft = self.infer(&mut e2)?;
+                if ft != payload {
+                    self.diags.push(Diagnostic::error(
+                        "E0405",
+                        format!(
+                            "the fallback is {}, but the success value is {}",
+                            ft.show(),
+                            payload.show()
+                        ),
+                        format!(
+                            "both sides of `{}` must be the same type",
+                            syntax::OP_OR_FALLBACK
+                        ),
+                        type_fix_hint(&payload, &ft),
+                        Some(e.span()),
+                    ));
+                }
+                Some(payload)
+            }
+            OrFallback::Return(ret_expr, ret_span) => {
+                let ret = self.ret.clone();
+                match (&ret, ret_expr) {
+                    (Some(rt), Some(e)) => {
+                        let mut e2 = e.as_ref().clone();
+                        let saved = self.expected_type.clone();
+                        self.expected_type = Some(rt.clone());
+                        let et = self.infer(&mut e2);
+                        self.expected_type = saved;
+                        if let Some(et) = et {
+                            self.check_type_assignable(rt, &et, e2.span());
+                        }
+                    }
+                    (Some(_), None) => {}
+                    (None, _) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0405",
+                            format!("`{} return` can't leave this function early", syntax::OP_OR_FALLBACK),
+                            "a bare return needs a function with a return type".to_string(),
+                            "add `-> Type` to the function, or give a fallback value instead"
+                                .to_string(),
+                            Some(*ret_span),
+                        ));
+                    }
+                }
+                Some(payload)
+            }
+            OrFallback::Panic { name_span, args } => {
+                let mut call = Call {
+                    name: syntax::BUILTIN_PANIC.to_string(),
+                    name_span: *name_span,
+                    args: args.clone(),
+                };
+                self.check_panic_call(&mut call);
+                Some(payload)
+            }
+        }
+    }
+
+    fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
+        match expr {
+            Expr::Call(call) => match self.check_call(call, false) {
+                Some(Some(t)) => Some(t),
+                _ => None,
+            },
+            Expr::MethodCall { .. } => self.infer(expr),
+            _ => self.infer(expr),
         }
     }
 
@@ -2176,6 +2540,33 @@ impl<'a> Checker<'a> {
                 map
             }
             (Type::Option(_), Pattern::Absent(_)) => HashMap::new(),
+            (Type::Result { ok, .. }, Pattern::Ok { binding, .. }) => {
+                let mut map = HashMap::new();
+                map.insert(binding.clone(), (**ok).clone());
+                map
+            }
+            (Type::Result { err, .. }, Pattern::Err { binding, .. }) => {
+                let mut map = HashMap::new();
+                map.insert(binding.clone(), (**err).clone());
+                map
+            }
+            (Type::Result { .. }, Pattern::Present { .. } | Pattern::Absent(_)) => {
+                self.diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "this pattern belongs to an optional value, not {}",
+                        subject_ty.name()
+                    ),
+                    "use `== ok(...)` or `== err(...)` on a fallible result".to_string(),
+                    format!(
+                        "write `== {}(...)` or `== {}(...)` instead",
+                        syntax::LIT_OK,
+                        syntax::LIT_ERR
+                    ),
+                    Some(span),
+                ));
+                HashMap::new()
+            }
             (Type::Named(enum_name), Pattern::Variant { variant, bindings, .. }) => {
                 let Some(variants) = self.registry.enum_variants(enum_name) else {
                     self.diags.push(Diagnostic::error(
@@ -2243,7 +2634,110 @@ impl<'a> Checker<'a> {
                 ));
                 HashMap::new()
             }
+            (_, Pattern::Ok { .. } | Pattern::Err { .. }) => {
+                self.diags.push(Diagnostic::error(
+                    "E0305",
+                    format!(
+                        "this pattern belongs to a fallible result, not {}",
+                        subject_ty.name()
+                    ),
+                    format!(
+                        "use `== {}(...)` or `== {}(...)` on `Result[T, E]`",
+                        syntax::LIT_OK,
+                        syntax::LIT_ERR
+                    ),
+                    "check the type of the value being tested".to_string(),
+                    Some(span),
+                ));
+                HashMap::new()
+            }
             _ => HashMap::new(),
+        }
+    }
+
+    fn check_panic_call(&mut self, call: &mut Call) {
+        if call.args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0103",
+                format!("`{}` needs exactly one message", syntax::BUILTIN_PANIC),
+                "a panic report needs something to show the user".to_string(),
+                format!("e.g. {}(\"something went wrong\")", syntax::BUILTIN_PANIC),
+                Some(call.name_span),
+            ));
+        }
+        for arg in call.args.iter_mut() {
+            let t = self.infer(&mut arg.expr);
+            if let Some(t) = t {
+                if t != Type::String {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`{}` needs text, but this is {}",
+                            syntax::BUILTIN_PANIC,
+                            t.show()
+                        ),
+                        "the panic message is shown to the user as text".to_string(),
+                        "put the message in quotes".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn check_require_call(&mut self, call: &mut Call) {
+        if call.args.is_empty() || call.args.len() > 2 {
+            self.diags.push(Diagnostic::error(
+                "E0103",
+                format!(
+                    "`{}` needs one condition, or a condition and a message",
+                    syntax::BUILTIN_REQUIRE
+                ),
+                "require checks a yes/no condition and stops when it's false".to_string(),
+                format!(
+                    "e.g. {}(x > 0) or {}(x > 0, \"x must be positive\")",
+                    syntax::BUILTIN_REQUIRE,
+                    syntax::BUILTIN_REQUIRE
+                ),
+                Some(call.name_span),
+            ));
+        }
+        if let Some(arg) = call.args.first_mut() {
+            let t = self.infer(&mut arg.expr);
+            if let Some(t) = t {
+                if t != Type::Bool {
+                    self.diags.push(Diagnostic::error(
+                        "E0110",
+                        format!(
+                            "`{}` needs {}, but this is {}",
+                            syntax::BUILTIN_REQUIRE,
+                            Type::Bool.show(),
+                            t.show()
+                        ),
+                        "the condition must be true or false".to_string(),
+                        "compare values first, e.g. `x > 0`".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                }
+            }
+        }
+        if let Some(arg) = call.args.get_mut(1) {
+            let t = self.infer(&mut arg.expr);
+            if let Some(t) = t {
+                if t != Type::String {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`{}` message must be text, but this is {}",
+                            syntax::BUILTIN_REQUIRE,
+                            t.show()
+                        ),
+                        "the optional message is shown when the condition is false".to_string(),
+                        "put the message in quotes".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                }
+            }
         }
     }
 
@@ -2528,6 +3022,16 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
+            return Some(None);
+        }
+
+        if call.name == syntax::BUILTIN_PANIC {
+            self.check_panic_call(call);
+            return Some(None);
+        }
+
+        if call.name == syntax::BUILTIN_REQUIRE {
+            self.check_require_call(call);
             return Some(None);
         }
 
@@ -2926,6 +3430,7 @@ fn is_cloneable(
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             is_cloneable(inner, registry, structs)
         }
+        Type::Result { ok, err } => is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs),
         Type::Named(name) => {
             if name == "NoClone" {
                 return false;
@@ -3049,6 +3554,18 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
         }
         Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
         Expr::Absent(_) => {}
+        Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _) => {
+            walk_expr_for_const_refs(inner, const_names, taken);
+        }
+        Expr::OrFallback { value, fallback, is_option, .. } => {
+            walk_expr_for_const_refs(value, const_names, taken);
+            match fallback {
+                OrFallback::Value(e) => walk_expr_for_const_refs(e, const_names, taken),
+                OrFallback::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
+                OrFallback::Return(None, _) | OrFallback::Panic { .. } => {}
+            }
+            let _ = is_option;
+        }
         Expr::PatternTest { subject, .. } => walk_expr_for_const_refs(subject, const_names, taken),
         Expr::Binary(_, l, r, _) => {
             walk_expr_for_const_refs(l, const_names, taken);
@@ -3067,6 +3584,8 @@ fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
         Pattern::Variant { variant, .. } => Some(variant.clone()),
         Pattern::Present { .. } => Some(syntax::LIT_VALUE.to_string()),
         Pattern::Absent(_) => Some(syntax::LIT_NULL.to_string()),
+        Pattern::Ok { .. } => Some(syntax::LIT_OK.to_string()),
+        Pattern::Err { .. } => Some(syntax::LIT_ERR.to_string()),
     }
 }
 
@@ -3103,8 +3622,27 @@ fn missing_pattern_coverage(
                 Some(missing)
             }
         }
+        Type::Result { .. } => {
+            let mut missing = Vec::new();
+            if !covered.contains(syntax::LIT_OK) {
+                missing.push(format!("{}(...)", syntax::LIT_OK));
+            }
+            if !covered.contains(syntax::LIT_ERR) {
+                missing.push(format!("{}(...)", syntax::LIT_ERR));
+            }
+            if missing.is_empty() {
+                None
+            } else {
+                Some(missing)
+            }
+        }
         _ => None,
     }
+}
+
+/// `Result[T, E]` passed where plain `T` is expected (E0401).
+fn result_used_where_plain_expected(want: &Type, got: &Type) -> bool {
+    matches!(got, Type::Result { ok, .. } if want.unwrap_result().is_none() && **ok == *want)
 }
 
 fn pattern_binding_types(payload: &VariantPayload) -> Vec<Type> {
@@ -3130,6 +3668,7 @@ fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String => true,
         Type::Option(inner) => is_printable(inner, registry),
+        Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
         Type::Named(n) => registry.contains(n),
         Type::List(_) | Type::Shared(_) => false,
     }
@@ -3139,6 +3678,9 @@ fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String => true,
         Type::Option(inner) => types_comparable(inner, registry),
+        Type::Result { ok, err } => {
+            types_comparable(ok, registry) && types_comparable(err, registry)
+        }
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
         Type::List(_) | Type::Shared(_) => false,
     }
@@ -3173,6 +3715,9 @@ fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
             None => Some("?".to_string()),
         },
         Type::Option(inner) => incomparable_field(inner, registry),
+        Type::Result { ok, err } => {
+            incomparable_field(ok, registry).or_else(|| incomparable_field(err, registry))
+        }
         _ => Some("?".to_string()),
     }
 }

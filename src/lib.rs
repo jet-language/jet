@@ -25,6 +25,10 @@ pub struct CompileOutput {
 /// Run the full front end on source text. All lex errors (then all parse
 /// errors) surface in one run — M1 error recovery.
 pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_with_path(src, "input.jet")
+}
+
+pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     let (toks, lex_diags) = lexer::lex(src);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
@@ -43,7 +47,7 @@ pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
         return Err(errors);
     }
     Ok(CompileOutput {
-        rust: codegen::emit(&prog),
+        rust: codegen::emit(&prog, src, file),
         lints,
     })
 }

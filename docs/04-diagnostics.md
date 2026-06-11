@@ -49,7 +49,7 @@ before continuing.
 - Ownership errors (M2) use the human framing: *while something is being
   changed, nobody else may be looking at it.*
 - Staged features name their milestone and give today's workaround
-  (see E0006/E0117). A future feature must never die as a generic error.
+  (see E0019/E0117). A future feature must never die as a generic error.
 - Teaching errors (S14, E0008–E0016) recognize a familiar foreign
   spelling, name the one Jet form, and then keep going as if the canonical
   form had been written — one foreign word never hides the rest of the
@@ -67,7 +67,7 @@ before continuing.
 | E0003 | parse | expected X, found Y                       |
 | E0004 | parse | *retired in M1* (was: parameters staged)  |
 | E0005 | parse | *retired in M1* (was: variables staged)   |
-| E0006 | parse | staged: `?` (errors as values) arrives in M4 |
+| E0006 | parse | *retired in M4* (was: `?` staged)         |
 | E0007 | jet   | integer too large for 64 bits             |
 | E0008 | parse | teaching: `def`/`func` → `fn` (S14)       |
 | E0009 | parse | teaching: `let`/`let mut` → `val`/`var`   |
@@ -75,12 +75,15 @@ before continuing.
 | E0011 | sema  | teaching: `println` → `print`             |
 | E0012 | parse | teaching: `and`/`or`/`not` → `&&`/`\|\|`/`!` |
 | E0013 | parse | teaching: `Text` → `String`               |
-| E0014 | parse | teaching: `try` → `?` (M4)                |
+| E0014 | parse | teaching: `try` → `?` (M4 — real feature)   |
 | E0015 | parse | teaching: `use` → `import` (M6)           |
 | E0016 | parse | teaching: `match` → `switch` (S24)        |
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
 | E0018 | parse | teaching: `write` → `mut` (S10)          |
 | E0019 | parse | staged: `import` (multi-file) arrives in M6 (S16) |
+| E0024 | parse | teaching: `catch`/`except` → `or` / `== err` (M4) |
+| E0025 | parse | teaching: `unwrap`/`expect` → `or panic(…)` (M4) |
+| E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -128,6 +131,11 @@ before continuing.
 | E0311 | sema  | static/instance method confusion          |
 | E0312 | sema  | value `==` unsupported (field detail)     |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
+| E0401 | sema  | fallible value used where plain `T` expected |
+| E0402 | sema  | fallible call ignored as a statement      |
+| E0403 | sema  | `?` error type / return context mismatch  |
+| E0404 | sema  | `ok`/`err` need a fallible context        |
+| E0405 | sema  | `or` fallback type mismatch               |
 
 ## Process for a new diagnostic
 

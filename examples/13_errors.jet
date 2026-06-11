@@ -1,0 +1,32 @@
+// 13 — Errors as values (M4, S34/S35/S36/S7).
+
+enum ParseError {
+    Empty;
+    BadDigit(String);
+}
+
+fn parse_age(raw: String) -> Result[Int, ParseError] {
+    if raw == "" {
+        return err(ParseError.Empty);
+    }
+    if raw == "x" {
+        return err(ParseError.BadDigit(raw));
+    }
+    return ok(42);
+}
+
+fn load() -> Result[Int, ParseError] {
+    val n = parse_age("7")?;
+    return ok(n * 2);
+}
+
+fn main() {
+    val a = parse_age("42") or 0;
+    print(a);
+    val doubled = load() or 0;
+    print(doubled);
+    switch parse_age("x") {
+        it == ok(n) -> { print(n); };
+        it == err(e) -> { print(e); };
+    }
+}

@@ -61,7 +61,7 @@ fn ratified_decisions_enforced() {
     const SURFACE_IN_SYNTAX_RS: &[&str] = &[
         "N1", "N2", "S1", "S2", "S3", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S13", "S16",
         "S17", "S18", "S19", "S20", "S22", "S23", "S24", "S27", "S29", "S30",
-        "S32",
+        "S32", "S34", "S35", "S36",
     ];
     for id in SURFACE_IN_SYNTAX_RS {
         if ratified.contains(*id) {
@@ -95,11 +95,13 @@ fn ratified_decisions_enforced() {
         );
     }
 
-    // S7 and S16 are the Group 1 staged surface decisions.
-    assert!(staged.contains_key("S7"), "S7 must be listed under Staged implementation");
+    // S16 is the Group 1 staged surface decision (S7 landed in M4).
     assert!(staged.contains_key("S16"), "S16 must be listed under Staged implementation");
-    assert_eq!(staged.get("S7").map(String::as_str), Some("E0006"));
     assert_eq!(staged.get("S16").map(String::as_str), Some("E0019"));
+    assert!(
+        !staged.contains_key("S7"),
+        "S7 must not remain staged after M4"
+    );
 }
 
 fn extract_section_ids(docs: &str, start: &str, end: &str) -> BTreeSet<String> {

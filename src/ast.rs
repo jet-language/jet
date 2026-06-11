@@ -24,6 +24,11 @@ pub enum Type {
     Shared(Box<Type>),
     /// S32: `T?` optional value.
     Option(Box<Type>),
+    /// S34: `Result[T, E]` fallible return.
+    Result {
+        ok: Box<Type>,
+        err: Box<Type>,
+    },
     Named(String),
 }
 
@@ -38,6 +43,9 @@ impl Type {
             Type::List(inner) => format!("List[{}]", inner.name()),
             Type::Shared(inner) => format!("Shared[{}]", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
+            Type::Result { ok, err } => {
+                format!("Result[{}, {}]", ok.name(), err.name())
+            }
             Type::Named(n) => format!("`{}`", n),
         }
     }
@@ -52,6 +60,7 @@ impl Type {
             Type::List(inner) => format!("List[{}]", inner.name()),
             Type::Shared(inner) => format!("Shared[{}]", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
+            Type::Result { ok, err } => format!("Result[{}, {}]", ok.name(), err.name()),
             Type::Named(n) => n.clone(),
         }
     }
@@ -65,6 +74,17 @@ impl Type {
             Type::Option(inner) => Some(inner),
             _ => None,
         }
+    }
+
+    pub fn unwrap_result(&self) -> Option<(&Type, &Type)> {
+        match self {
+            Type::Result { ok, err } => Some((ok, err)),
+            _ => None,
+        }
+    }
+
+    pub fn is_fallible(&self) -> bool {
+        matches!(self, Type::Option(_) | Type::Result { .. })
     }
 }
 
@@ -173,12 +193,36 @@ pub enum Pattern {
         span: Span,
     },
     Absent(Span),
+    /// S34: `ok(binding)` pattern on `Result[T, E]`.
+    Ok {
+        binding: String,
+        span: Span,
+    },
+    /// S34: `err(binding)` pattern on `Result[T, E]`.
+    Err {
+        binding: String,
+        span: Span,
+    },
+}
+
+/// S35: right-hand side of `expr or …`.
+#[derive(Debug, Clone)]
+pub enum OrFallback {
+    Value(Box<Expr>),
+    Return(Option<Box<Expr>>, Span),
+    Panic {
+        name_span: Span,
+        args: Vec<CallArg>,
+    },
 }
 
 impl Pattern {
     pub fn span(&self) -> Span {
         match self {
-            Pattern::Variant { span, .. } | Pattern::Present { span, .. } => *span,
+            Pattern::Variant { span, .. }
+            | Pattern::Present { span, .. }
+            | Pattern::Ok { span, .. }
+            | Pattern::Err { span, .. } => *span,
             Pattern::Absent(span) => *span,
         }
     }
@@ -422,6 +466,20 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
+    /// S34: `ok(expr)` — success value for `Result[T, E]`.
+    Ok(Box<Expr>, Span),
+    /// S34: `err(expr)` — failure value for `Result[T, E]`.
+    Err(Box<Expr>, Span),
+    /// S7: postfix `?` — propagate a fallible value.
+    Try(Box<Expr>, Span),
+    /// S35: `value or fallback`.
+    OrFallback {
+        value: Box<Expr>,
+        fallback: OrFallback,
+        /// Set during typechecking: `true` when the left side is `T?`.
+        is_option: bool,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -440,6 +498,10 @@ impl Expr {
             | Expr::EnumLit { span: s, .. }
             | Expr::Present(_, s)
             | Expr::Absent(s)
+            | Expr::Ok(_, s)
+            | Expr::Err(_, s)
+            | Expr::Try(_, s)
+            | Expr::OrFallback { span: s, .. }
             | Expr::PatternTest { span: s, .. } => *s,
             Expr::Call(c) => c.name_span,
             Expr::MethodCall { method_span, .. } => *method_span,

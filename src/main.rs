@@ -52,7 +52,7 @@ fn main() {
         }
     };
 
-    let rust_code = match jet::compile(&src) {
+    let rust_code = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
                 eprint!("{}", jet::render_diagnostics(file, &src, &out.lints));

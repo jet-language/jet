@@ -217,3 +217,28 @@ pub const FOREIGN_DEFAULT: &str = "default";
 pub const FOREIGN_READ: &str = "read";
 pub const FOREIGN_WRITE: &str = "write";
 pub const FOREIGN_OWNED: &str = "owned";
+
+/// S34 (ratified M4): fallible return type constructor.
+pub const TYPE_RESULT: &str = "Result";
+
+/// S34 (ratified M4): success / failure constructors for `Result[T, E]`.
+pub const LIT_OK: &str = "ok";
+pub const LIT_ERR: &str = "err";
+
+/// S35 (ratified M4): fallback when a fallible value is absent.
+pub const OP_OR_FALLBACK: &str = "or";
+
+/// S36 (ratified M4): bug-stop builtins (like `print`).
+pub const BUILTIN_PANIC: &str = "panic";
+pub const BUILTIN_REQUIRE: &str = "require";
+
+/// M4: synthetic name for a `switch` subject that isn't a plain identifier.
+pub const KW_IT: &str = "it";
+
+/// S14 (M4): foreign error spellings for teaching errors.
+pub const FOREIGN_THROW: &str = "throw";
+pub const FOREIGN_RAISE: &str = "raise";
+pub const FOREIGN_CATCH: &str = "catch";
+pub const FOREIGN_EXCEPT: &str = "except";
+pub const FOREIGN_UNWRAP: &str = "unwrap";
+pub const FOREIGN_EXPECT: &str = "expect";
