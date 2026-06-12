@@ -12,6 +12,7 @@ pub mod diag;
 pub mod fmt;
 pub mod lexer;
 pub mod loader;
+pub mod lsp;
 pub mod parser;
 pub mod sema;
 pub mod syntax;
@@ -37,7 +38,7 @@ pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Dia
 }
 
 fn compile_bundle_path(file: &str, mode: sema::CompileMode) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let mut bundle = loader::load_entry(file)?;
+    let mut bundle = loader::load_entry_with_overlay(file, None, false)?;
     let diags = sema::check_bundle(&mut bundle, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
@@ -59,7 +60,7 @@ fn compile_bundle_path(file: &str, mode: sema::CompileMode) -> Result<CompileOut
 /// Compile for `jet test`: optional `main`, at least one test block required.
 pub fn compile_tests_with_path(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
     let _ = src;
-    let mut bundle = loader::load_entry(file)?;
+    let mut bundle = loader::load_entry_with_overlay(file, None, false)?;
     let diags = sema::check_bundle(&mut bundle, sema::CompileMode::Test);
     let mut errors = Vec::new();
     for d in diags {
@@ -111,4 +112,9 @@ pub use diag::render_all as render_diagnostics;
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
     fmt::format_source(src)
+}
+
+/// Front-end check for one document (LSP / editor integration).
+pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
+    lsp::check_document(path, text)
 }

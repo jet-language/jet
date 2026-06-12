@@ -28,6 +28,26 @@ pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, true)
 }
 
+/// Parse for editor/LSP check: recover through S14 teaching errors, return them
+/// alongside the AST so sema can still run (M6 phase 4).
+pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let toks = crate::lexer::without_comments(toks);
+    let mut p = Parser {
+        toks: &toks,
+        pos: 0,
+        diags: Vec::new(),
+        pending_type_gt: false,
+    };
+    let prog = p.program();
+    if p.diags.is_empty() {
+        Ok((prog, Vec::new()))
+    } else if p.diags.iter().all(|d| is_teaching_parse_diag(d.code)) {
+        Ok((prog, p.diags))
+    } else {
+        Err(p.diags)
+    }
+}
+
 fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>> {
     let toks = crate::lexer::without_comments(toks);
     let mut p = Parser {
@@ -794,13 +814,14 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 let is_mut = matches!(self.peek().kind, TokKind::KwMutate);
                 if is_mut {
-                    self.bump();
+                    let mut_tok = self.bump();
+                    let full_span = Span::new(t.span.start, mut_tok.span.end);
                     self.diags.push(Diagnostic::error(
                         "E0009",
                         format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_LET_MUT),
                         binding_why(),
                         format!("replace `{}` with `{}`", syntax::FOREIGN_LET_MUT, syntax::KW_VAR),
-                        Some(t.span),
+                        Some(full_span),
                     ));
                 } else {
                     self.diags.push(Diagnostic::error(

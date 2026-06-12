@@ -28,6 +28,13 @@ pub enum Severity {
     Lint,
 }
 
+/// A single-span text replacement (LSP quick-fix / M6 S14 autocorrect).
+#[derive(Debug, Clone)]
+pub struct TextEdit {
+    pub span: Span,
+    pub new_text: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -36,6 +43,36 @@ pub struct Diagnostic {
     pub why: String,
     pub fix: String,
     pub span: Option<Span>,
+    /// Mechanical fix when the `fix` line is a simple replace/remove (S14).
+    pub edit: Option<TextEdit>,
+}
+
+impl Diagnostic {
+    /// If `fix` is `replace \`from\` with \`to\`` or `remove \`tok\` …`, attach
+    /// a span edit for LSP/CLI autocorrect (M6 phase 4).
+    pub fn attach_teaching_edit(&mut self) {
+        if self.edit.is_some() {
+            return;
+        }
+        let span = match self.span {
+            Some(s) => s,
+            None => return,
+        };
+        let new_text = if let Some(rest) = self.fix.strip_prefix("replace `") {
+            if let Some((_from, rest2)) = rest.split_once("` with `") {
+                rest2.strip_suffix('`').map(str::to_string)
+            } else {
+                None
+            }
+        } else if let Some(rest) = self.fix.strip_prefix("remove `") {
+            rest.split_once('`').map(|_| String::new())
+        } else {
+            None
+        };
+        if let Some(text) = new_text {
+            self.edit = Some(TextEdit { span, new_text: text });
+        }
+    }
 }
 
 impl Diagnostic {
@@ -46,14 +83,17 @@ impl Diagnostic {
         fix: String,
         span: Option<Span>,
     ) -> Self {
-        Diagnostic {
+        let mut d = Diagnostic {
             severity: Severity::Error,
             code,
             what,
             why,
             fix,
             span,
-        }
+            edit: None,
+        };
+        d.attach_teaching_edit();
+        d
     }
 
     pub fn lint(
@@ -70,6 +110,7 @@ impl Diagnostic {
             why,
             fix,
             span,
+            edit: None,
         }
     }
 

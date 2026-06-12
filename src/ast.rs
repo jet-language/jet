@@ -130,6 +130,8 @@ pub struct ProgramBundle {
     /// Directory containing the entry file (project root until M12 `jet.toml`).
     pub project_root: std::path::PathBuf,
     pub modules: Vec<LoadedModule>,
+    /// S14 teaching diagnostics collected during a lenient parse (LSP check).
+    pub parse_teaching: Vec<crate::diag::Diagnostic>,
 }
 
 #[derive(Debug)]

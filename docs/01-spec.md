@@ -223,9 +223,10 @@ and exit **1** when any test fails. **`require_eq`** failures print
 Example: `examples/20_tests.jet`. Goldens: `examples/expected/20_tests.test.out`,
 `tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`.
 
-During development, run **`cargo build`** then **`./target/debug/jet`** — the
-nix-profile `jet` is only updated after **`nix build`** and reinstalling the
-package.
+**NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
+and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
+`jet run …` / `jet lsp` / `cargo test --test lsp`. Editor setup:
+`editors/vscode/README.md`. Release binary: `nix build .#jet`.
 
 ## M6 phase 3 — multi-file imports (done)
 
@@ -243,6 +244,24 @@ Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
 **E0604** import cycle · **E0605** private item · **E0606** ambiguous module.
 Example: `examples/21_imports/` (three files; file import + `as alias`). UI
 fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambiguous}/`.
+
+## M6 phase 4 — `--small` + LSP v0 (done)
+
+**`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.
+Smaller binaries than the default speed-oriented profile (`tests/small.rs` on
+`examples/16_wordcount.jet`).
+
+**`jet lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
+Capabilities: full-document diagnostics on open/change (real front end, including
+import graph from disk with an in-memory overlay for the open buffer), S14
+teaching-error quick-fixes (`Diagnostic.edit`), and formatting via `jet fmt`.
+Scripted tests: `tests/lsp.rs`.
+
+**VS Code / Cursor**: `editors/vscode/` — TextMate grammar + LSP client (plain
+JS, no compile step; `install.sh` packs and installs the vsix). The client
+auto-discovers the server: `jet.languageServerPath` setting, then
+`<workspaceFolder>/target/debug/jet`, then `jet` on PATH. `jet lsp` never
+invokes rustc, so the cargo debug binary is sufficient.
 
 ## Deliberately absent
 

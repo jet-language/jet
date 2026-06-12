@@ -1,0 +1,54 @@
+{
+  "name": "jet",
+  "displayName": "Jet",
+  "description": "Syntax highlighting and LSP v0 for the Jet language",
+  "version": "0.1.2",
+  "publisher": "jet-lang",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onLanguage:jet"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "jet",
+        "aliases": ["Jet", "jet"],
+        "extensions": [".jet"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "jet",
+        "scopeName": "source.jet",
+        "path": "./syntaxes/jet.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "jet.restartServer",
+        "title": "Jet: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Jet",
+      "properties": {
+        "jet.languageServerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a jet binary (must support `jet lsp`). Leave empty to auto-discover: ${workspaceFolder}/target/debug/jet, then `jet` on PATH."
+        }
+      }
+    }
+  }
+}

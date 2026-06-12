@@ -92,7 +92,7 @@ emits ONE Rust file with `mod` blocks. Name mangling becomes
 - **Exit:** a 3-file example program; ui fixtures for E0602–E0606 (including
   private fields, E0605).
 
-## Phase 4 — `--small` profile + LSP v0
+## Phase 4 — `--small` profile + LSP v0 ✓ 2026-06-12
 
 - `jet build --small`: `opt-level="z"`, full LTO, and the S15-ratified
 panic stance. Exit criterion: measurably smaller binary than default

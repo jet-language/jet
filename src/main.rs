@@ -1,4 +1,4 @@
-//! jet CLI: check / build / run / test / new / fmt.
+//! jet CLI: check / build / run / test / new / fmt / lsp.
 //!
 //! The driver owns invariant I2: rustc's voice never reaches the user as
 //! if it were their fault. A rustc failure on generated code is reported
@@ -7,6 +7,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+
+#[derive(Clone, Copy)]
+enum BuildProfile {
+    /// Default: speed-oriented (`-O`, thin LTO).
+    Default,
+    /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
+    Small,
+}
 
 fn usage() -> String {
     format!(
@@ -20,10 +28,12 @@ usage:
   {bin} test  <file|dir>       compile and run top-level test blocks
   {bin} new   <name>           create a new project folder
   {bin} fmt   <file.{ext}>     rewrite file to canonical style (S44)
+  {bin} lsp                    language server (stdio JSON-RPC)
 
 flags:
   --emit-rust                  also print the generated Rust code
   --check                      with fmt: exit 1 if file would change (CI)
+  --small                      with build/run: smallest binary (S15)
 ",
         bin = jet::syntax::BINARY_NAME,
         lang = jet::syntax::LANG_NAME,
@@ -35,7 +45,16 @@ fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let emit_rust = raw.iter().any(|a| a == "--emit-rust");
     let fmt_check = raw.iter().any(|a| a == "--check");
+    let small = raw.iter().any(|a| a == "--small");
     let args: Vec<&String> = raw.iter().filter(|a| !a.starts_with("--")).collect();
+
+    if args.len() == 1 && args[0].as_str() == "lsp" {
+        if let Err(e) = jet::lsp::run_stdio() {
+            eprintln!("error: language server failed: {}", e);
+            exit(1);
+        }
+        return;
+    }
 
     let (cmd, target) = match (args.first(), args.get(1)) {
         (Some(c), Some(f)) => (c.as_str(), f.as_str()),
@@ -49,11 +68,13 @@ fn main() {
         "fmt" => run_fmt(target, fmt_check),
         "new" => run_new(target),
         "test" => run_test(target),
-        _ => run_compile_cmd(cmd, target, emit_rust),
+        _ => run_compile_cmd(cmd, target, emit_rust, small),
     }
 }
 
-fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool) {
+fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
+    let profile = if small { BuildProfile::Small } else { BuildProfile::Default };
+
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -96,12 +117,12 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool) {
             println!("ok: `{}` has no problems", file);
         }
         "build" => {
-            build(file, &rust_code, bin_path(file));
+            build(file, &rust_code, bin_path(file), profile);
             println!("built: {}", bin_path(file).display());
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone());
+            build(file, &rust_code, out.clone(), profile);
             let status = Command::new(&out).status().unwrap_or_else(|e| {
                 eprintln!("error: couldn't run the built program: {}", e);
                 exit(1);
@@ -201,7 +222,7 @@ fn run_test_file(path: &Path) -> bool {
         }
     };
     let bin = test_bin_path(path);
-    build(&shown, &rust_code, bin.clone());
+    build(&shown, &rust_code, bin.clone(), BuildProfile::Default);
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
         exit(1);
@@ -257,7 +278,7 @@ fn test_bin_path(path: &Path) -> PathBuf {
     PathBuf::from("build").join(format!("test_{}", stem(&path.to_string_lossy())))
 }
 
-fn build(file: &str, rust_code: &str, bin: PathBuf) {
+fn build(file: &str, rust_code: &str, bin: PathBuf, profile: BuildProfile) {
     fs::create_dir_all("build").unwrap_or_else(|e| {
         eprintln!("error: couldn't create the build/ folder: {}", e);
         exit(1);
@@ -268,19 +289,30 @@ fn build(file: &str, rust_code: &str, bin: PathBuf) {
         exit(1);
     });
 
-    let out = Command::new("rustc")
-        .args([
-            "--edition", "2021",
-            "-O",
-            "-C", "strip=symbols",
-            "-C", "lto=thin",
-        ])
-        .arg(&rs_path)
-        .arg("-o")
-        .arg(&bin)
-        .output();
+    let mut cmd = Command::new("rustc");
+    cmd.arg("--edition").arg("2021");
+    match profile {
+        BuildProfile::Default => {
+            cmd.arg("-O")
+                .arg("-C")
+                .arg("strip=symbols")
+                .arg("-C")
+                .arg("lto=thin");
+        }
+        BuildProfile::Small => {
+            cmd.arg("-C")
+                .arg("opt-level=z")
+                .arg("-C")
+                .arg("lto=fat")
+                .arg("-C")
+                .arg("panic=abort")
+                .arg("-C")
+                .arg("strip=symbols");
+        }
+    }
+    cmd.arg(&rs_path).arg("-o").arg(&bin);
 
-    let out = match out {
+    let out = match cmd.output() {
         Ok(o) => o,
         Err(_) => {
             eprintln!("error: couldn't find `rustc` on this machine");

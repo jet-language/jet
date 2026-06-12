@@ -51,10 +51,16 @@ nix build
 ## Development
 
 ```bash
-nix develop          # cargo, rustc, gcc, jet on PATH
+nix develop          # cargo, rustc, gcc, nodejs, jet on PATH
+cargo build
 cargo test
 jet run examples/01_hello.jet
 ```
+
+Editor extension (id **`jet-lang.jet`**): `editors/vscode/install.sh` packs and
+installs it, then open the repo normally (`cursor .`). The extension finds the
+language server at `target/debug/jet` (falling back to `jet` on PATH) — no
+settings needed. See `editors/vscode/README.md`.
 
 Legacy: `nix-shell` uses the same dev shell via `shell.nix`.
 

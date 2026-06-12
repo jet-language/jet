@@ -47,6 +47,12 @@ types and their fields (M3), and any future module-level bindings.
 Within a file, private and `pub` items are equally visible to each other;
 `pub` only controls what other files may access via `import` (S16, M6+).
 Rejected: public-by-default (Go), explicit `private` keyword (noisy).
+Considered and declined (owner, 2026-06-12): grouped visibility —
+Jai-style `pub { }` blocks, `pub:`/`private:` section markers, and
+top-of-file export lists. Reasons: a file mostly nested in a `pub`
+block hollows out private-by-default, and positional grouping dictates
+how users must structure their files. Per-item `pub` stands; revisit
+only with post-v1 evidence of real boilerplate pain.
 
 **S10 — Ownership keywords (M2)** *(ratified 2026-06-11)*: `**mut`**
 (mutable borrow), `**take**` (move), `**view**` (borrow return type),

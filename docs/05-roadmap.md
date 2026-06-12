@@ -84,7 +84,7 @@ one string type.
 **Exit:** wordcount example; out-of-bounds and iterator-invalidation
 mistakes produce great errors, not Rust concepts. ✓
 
-## M6 — Tooling I  *(plan: docs/plans/m06-tooling.md; ballots: Group 5; four phases)*
+## M6 — Tooling I  *(plan: docs/plans/m06-tooling.md; ballots: Group 5; four phases)* ✓ 2026-06-12
 
 `jet fmt` (one true style, zero config), `jet test` (`test "name" { }`
 blocks), `jet new`. Multi-file imports (S16: `import "path" as alias;`)

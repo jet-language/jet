@@ -1,0 +1,83 @@
+{
+  "name": "Jet",
+  "scopeName": "source.jet",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.jet",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.jet",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.jet",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.interpolation.jet",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [{ "include": "$self" }]
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.jet",
+          "match": "\\b(if|else|while|for|in|break|continue|switch|return|or|import|as|pub|struct|enum|impl|const|test|unsafe)\\b"
+        },
+        {
+          "name": "keyword.other.jet",
+          "match": "\\b(fn|val|var|mut|take|view|ref|self)\\b"
+        },
+        {
+          "name": "keyword.operator.jet",
+          "match": "\\?|\\->|&&|\\|\\||==|!=|<=|>=|[-+*/%]=|\\.{2}"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.jet",
+          "match": "\\b(Int|Float|Bool|String|List|Map|Char|Shared|Result)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.jet",
+          "match": "\\b(true|false|null|value|ok|err|it)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.jet",
+          "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+        }
+      ]
+    }
+  }
+}

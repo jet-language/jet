@@ -16,13 +16,19 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+
+        # jet build/run shells out to rustc; keep this path in one place.
+        jetRuntimePath = pkgs.lib.makeBinPath [
+          pkgs.rustc
+          pkgs.stdenv.cc
+        ];
+
         jet = pkgs.rustPlatform.buildRustPackage {
           pname = "jet";
           version = "0.1.0";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
-          # jet invokes rustc at runtime to compile generated code.
           nativeBuildInputs = [ pkgs.makeWrapper ];
           buildInputs = [ pkgs.rustc ];
 
@@ -30,7 +36,7 @@
 
           postInstall = ''
             wrapProgram $out/bin/jet \
-              --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.rustc pkgs.stdenv.cc ]}"
+              --prefix PATH : "${jetRuntimePath}"
           '';
 
           meta = with pkgs.lib; {
@@ -40,10 +46,38 @@
             platforms = platforms.unix;
           };
         };
+
+        # `jet` in the dev shell: run the cargo-built debug binary from anywhere
+        # in the repo, with rustc + cc on PATH for `jet build`/`jet run`.
+        jetDev = pkgs.writeShellScriptBin "jet" ''
+          set -euo pipefail
+          root="''${JET_ROOT:-}"
+          if [ -z "$root" ]; then
+            dir="$PWD"
+            while [ "$dir" != "/" ]; do
+              if [ -f "$dir/Cargo.toml" ] && [ -f "$dir/flake.nix" ]; then
+                root="$dir"
+                break
+              fi
+              dir=$(dirname "$dir")
+            done
+          fi
+          root="''${root:-$PWD}"
+          bin="$root/target/debug/jet"
+          export PATH="${jetRuntimePath}:$PATH"
+          if [ ! -x "$bin" ]; then
+            echo "jet: no debug binary at $bin" >&2
+            echo "fix: cargo build" >&2
+            exit 1
+          fi
+          exec "$bin" "$@"
+        '';
       in
       {
-        packages.default = jet;
-        packages.jet = jet;
+        packages = {
+          default = jet;
+          inherit jet;
+        };
 
         apps.default = {
           type = "app";
@@ -51,17 +85,23 @@
         };
 
         devShells.default = pkgs.mkShell {
-          # Toolchain only — do not list `jet` here: that forces a nix build of
-          # the package (clean source, no untracked files) before the shell opens.
-          # Build locally with `cargo build`; `jet run` needs rustc + cc on PATH.
           packages = with pkgs; [
             cargo
             rustc
             gcc
+            nodejs_22
+            jetDev
           ];
+
           shellHook = ''
-            echo "Jet dev shell — \`cargo build\`, then \`./target/debug/jet\` (test/new/fmt/run)"
-            echo "  profile \`jet\` is stale until: nix build .#jet && nix profile install .#jet"
+            export JET_ROOT="$PWD"
+
+            echo "Jet dev shell"
+            echo "  build:    cargo build"
+            echo "  run:      jet run examples/01_hello.jet"
+            echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
+            echo "  editor:   editors/vscode/install.sh   (then open the repo in Cursor)"
+            echo "  release:  nix build .#jet"
           '';
         };
 

@@ -13,6 +13,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    load_entry_with_overlay(entry_path, None, false)
+}
+
+/// Load a program, optionally substituting in-memory source for one file
+/// (LSP unsaved buffer for the document being edited).
+pub fn load_entry_with_overlay(
+    entry_path: &str,
+    overlay: Option<(&Path, &str)>,
+    for_check: bool,
+) -> Result<ProgramBundle, Vec<Diagnostic>> {
     let entry = PathBuf::from(entry_path);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let entry_abs = if entry.is_absolute() {
@@ -29,6 +39,7 @@ pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
     let mut modules = Vec::new();
     let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
     let mut stack: Vec<PathBuf> = Vec::new();
+    let mut parse_teaching = Vec::new();
 
     load_file(
         &entry_abs,
@@ -37,6 +48,9 @@ pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
         &mut modules,
         &mut path_to_idx,
         &mut stack,
+        overlay,
+        for_check,
+        &mut parse_teaching,
     )?;
 
     let entry_idx = *path_to_idx.get(&entry_abs).ok_or_else(|| {
@@ -53,6 +67,7 @@ pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
         entry: entry_idx,
         project_root,
         modules,
+        parse_teaching,
     })
 }
 
@@ -63,6 +78,9 @@ fn load_file(
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
+    overlay: Option<(&Path, &str)>,
+    for_check: bool,
+    parse_teaching: &mut Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let norm = normalize_path(path);
     if stack.contains(&norm) {
@@ -83,16 +101,21 @@ fn load_file(
         return Ok(());
     }
 
-    let source = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(_) => {
-            return Err(vec![Diagnostic::error(
-                "E0603",
-                format!("can't find the file `{}`", display),
-                "an import path must point at an existing `.jet` file".to_string(),
-                "check the spelling, or create the missing file".to_string(),
-                None,
-            )]);
+    let norm_overlay = overlay.map(|(p, _)| normalize_path(p));
+    let source = if norm_overlay.as_ref() == Some(&norm) {
+        overlay.unwrap().1.to_string()
+    } else {
+        match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(vec![Diagnostic::error(
+                    "E0603",
+                    format!("can't find the file `{}`", display),
+                    "an import path must point at an existing `.jet` file".to_string(),
+                    "check the spelling, or create the missing file".to_string(),
+                    None,
+                )]);
+            }
         }
     };
 
@@ -100,9 +123,19 @@ fn load_file(
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let mut prog = match parser::parse(&toks) {
-        Ok(p) => p,
-        Err(diags) => return Err(diags),
+    let mut prog = if for_check {
+        match parser::parse_for_check(&toks) {
+            Ok((p, teaching)) => {
+                parse_teaching.extend(teaching);
+                p
+            }
+            Err(diags) => return Err(diags),
+        }
+    } else {
+        match parser::parse(&toks) {
+            Ok(p) => p,
+            Err(diags) => return Err(diags),
+        }
     };
 
     let alias = default_module_alias(path);
@@ -136,6 +169,9 @@ fn load_file(
             modules,
             path_to_idx,
             stack,
+            overlay,
+            for_check,
+            parse_teaching,
         ) {
             stack.pop();
             return Err(diags);
