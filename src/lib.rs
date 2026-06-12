@@ -31,12 +31,40 @@ pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 }
 
 pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_with_mode(src, file, sema::CompileMode::Run)
+}
+
+/// Compile for `jet test`: optional `main`, at least one test block required.
+pub fn compile_tests_with_path(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
     let (toks, lex_diags) = lexer::lex(src);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
     let mut prog = parser::parse(&toks)?;
-    let diags = sema::check(&mut prog);
+    let diags = sema::check_with_mode(&mut prog, sema::CompileMode::Test);
+    let mut errors = Vec::new();
+    for d in diags {
+        if d.severity == Severity::Error {
+            errors.push(d);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(codegen::emit_tests(&prog, src, file))
+}
+
+fn compile_with_mode(
+    src: &str,
+    file: &str,
+    mode: sema::CompileMode,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let (toks, lex_diags) = lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
+    }
+    let mut prog = parser::parse(&toks)?;
+    let diags = sema::check_with_mode(&mut prog, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
     for d in diags {

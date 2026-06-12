@@ -249,6 +249,11 @@ pub const OP_OR_FALLBACK: &str = "or";
 /// S36 (ratified M4): bug-stop builtins (like `print`).
 pub const BUILTIN_PANIC: &str = "panic";
 pub const BUILTIN_REQUIRE: &str = "require";
+/// S43 (ratified M6): equality assertion in test blocks.
+pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
+
+/// S43 (ratified M6): top-level test block keyword.
+pub const KW_TEST: &str = "test";
 
 /// M4: synthetic name for a `switch` subject that isn't a plain identifier.
 pub const KW_IT: &str = "it";

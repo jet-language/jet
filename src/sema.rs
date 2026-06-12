@@ -133,9 +133,23 @@ struct LocalInfo {
     decl_loop_depth: usize,
 }
 
+/// What the driver is compiling — affects `main` / test requirements (M6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompileMode {
+    /// `jet run` / `jet build` — needs `main`, ignores test blocks in codegen.
+    Run,
+    /// `jet test` — needs at least one test; `main` is optional.
+    Test,
+}
+
 pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
+    check_with_mode(prog, CompileMode::Run)
+}
+
+pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut funcs: HashMap<String, FuncSig> = HashMap::new();
+    let mut tests: HashMap<String, Span> = HashMap::new();
     let mut registry = TypeRegistry {
         types: HashMap::new(),
     };
@@ -150,6 +164,7 @@ pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
                 if f.name == syntax::BUILTIN_PRINT
                     || f.name == syntax::BUILTIN_PANIC
                     || f.name == syntax::BUILTIN_REQUIRE
+                    || f.name == syntax::BUILTIN_REQUIRE_EQ
                 {
                     diags.push(Diagnostic::error(
                         "E0106",
@@ -187,38 +202,71 @@ pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
                 }
             }
             Item::Const(c) => register_const(c, &mut consts, &mut diags, &funcs, &registry),
+            Item::Test(t) => {
+                if name_defined(&t.name, &funcs, &registry, &consts) || tests.contains_key(&t.name)
+                {
+                    diags.push(Diagnostic::error(
+                        "E0105",
+                        format!("`{}` is defined twice", t.name),
+                        "every test needs a unique name so failures are easy to find".to_string(),
+                        "rename or remove one of the definitions".to_string(),
+                        Some(t.name_span),
+                    ));
+                } else {
+                    tests.insert(t.name.clone(), t.name_span);
+                }
+            }
         }
     }
 
     register_type_methods(prog, &mut registry, &mut diags);
     register_impl_methods(prog, &mut registry, &mut diags);
 
-    match funcs.get("main") {
-        None => {
+    match mode {
+        CompileMode::Run => match funcs.get("main") {
+            None => {
+                diags.push(Diagnostic::error(
+                    "E0101",
+                    "this program has no `main` function".to_string(),
+                    "running a program starts at `fn main`, and this file doesn't define one"
+                        .to_string(),
+                    "add one to this file: fn main() { ... }".to_string(),
+                    None,
+                ));
+            }
+            Some(sig) => {
+                if !sig.params.is_empty() || sig.return_type.is_some() {
+                    let span = prog.items.iter().find_map(|i| match i {
+                        Item::Func(f) if f.name == "main" => Some(f.name_span),
+                        _ => None,
+                    });
+                    diags.push(Diagnostic::error(
+                        "E0122",
+                        "`main` takes no parameters and returns nothing".to_string(),
+                        "`main` is where running starts; nothing calls it with values".to_string(),
+                        "write it as: fn main() { ... }".to_string(),
+                        span,
+                    ));
+                }
+            }
+        },
+        CompileMode::Test if tests.is_empty() => {
             diags.push(Diagnostic::error(
-                "E0101",
-                "this program has no `main` function".to_string(),
-                "running a program starts at `fn main`, and this file doesn't define one"
-                    .to_string(),
-                "add one to this file: fn main() { ... }".to_string(),
+                "E0601",
+                format!("no `{}` blocks found to run", syntax::KW_TEST),
+                format!(
+                    "add at least one top-level block: {} \"describes what this checks\" {{ ... }}",
+                    syntax::KW_TEST
+                ),
+                format!(
+                    "use `{}` and `{}` inside the block to check results",
+                    syntax::BUILTIN_REQUIRE,
+                    syntax::BUILTIN_REQUIRE_EQ
+                ),
                 None,
             ));
         }
-        Some(sig) => {
-            if !sig.params.is_empty() || sig.return_type.is_some() {
-                let span = prog.items.iter().find_map(|i| match i {
-                    Item::Func(f) if f.name == "main" => Some(f.name_span),
-                    _ => None,
-                });
-                diags.push(Diagnostic::error(
-                    "E0122",
-                    "`main` takes no parameters and returns nothing".to_string(),
-                    "`main` is where running starts; nothing calls it with values".to_string(),
-                    "write it as: fn main() { ... }".to_string(),
-                    span,
-                ));
-            }
-        }
+        CompileMode::Test => {}
     }
 
     let const_names: Vec<String> = consts.keys().cloned().collect();
@@ -304,7 +352,27 @@ pub fn check(prog: &mut Program) -> Vec<Diagnostic> {
                     ));
                 }
             }
-            _ => {}
+            Item::Test(t) => {
+                let mut synthetic = crate::ast::Func {
+                    is_pub: false,
+                    name: format!("__test_{}", t.name),
+                    name_span: t.name_span,
+                    params: Vec::new(),
+                    return_type: None,
+                    is_view_return: false,
+                    body: std::mem::take(&mut t.body),
+                };
+                diags.extend(check_func_body(
+                    &mut synthetic,
+                    &funcs,
+                    &registry,
+                    &struct_fields_legacy,
+                    &consts,
+                    None,
+                ));
+                t.body = synthetic.body;
+            }
+            Item::Const(_) => {}
         }
     }
 
@@ -3255,6 +3323,80 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_require_eq_call(&mut self, call: &mut Call) {
+        if call.args.len() != 2 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`{}` needs exactly two values to compare",
+                    syntax::BUILTIN_REQUIRE_EQ
+                ),
+                "require_eq checks that two values are equal".to_string(),
+                format!(
+                    "e.g. {}(got, expected)",
+                    syntax::BUILTIN_REQUIRE_EQ
+                ),
+                Some(call.name_span),
+            ));
+            for arg in call.args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return;
+        }
+        let mut left = call.args[0].expr.clone();
+        let mut right = call.args[1].expr.clone();
+        let lt = self.infer(&mut left);
+        let rt = self.infer(&mut right);
+        call.args[0].expr = left;
+        call.args[1].expr = right;
+        match (lt, rt) {
+            (Some(lt), Some(rt)) => {
+                if lt != rt {
+                    self.diags.push(Diagnostic::error(
+                        "E0108",
+                        format!(
+                            "`{}` compared {} and {}, which don't match",
+                            syntax::BUILTIN_REQUIRE_EQ,
+                            lt.show(),
+                            rt.show()
+                        ),
+                        "both sides must be the same type to compare them".to_string(),
+                        "convert one side, or compare fields that have the same type".to_string(),
+                        Some(call.name_span),
+                    ));
+                } else if !types_comparable(&lt, self.registry) {
+                    if let Some(field) = incomparable_field(&lt, self.registry) {
+                        self.diags.push(Diagnostic::error(
+                            "E0312",
+                            format!(
+                                "`{}` can't compare values of type `{}` (field `{}` isn't comparable)",
+                                syntax::BUILTIN_REQUIRE_EQ,
+                                lt.name(),
+                                field
+                            ),
+                            "equality needs types whose fields can all be compared".to_string(),
+                            "compare the fields you care about instead".to_string(),
+                            Some(call.name_span),
+                        ));
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0312",
+                            format!(
+                                "`{}` can't compare values of type `{}`",
+                                syntax::BUILTIN_REQUIRE_EQ,
+                                lt.show()
+                            ),
+                            "this type doesn't support `==`".to_string(),
+                            "compare fields individually, or use a different check".to_string(),
+                            Some(call.name_span),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Binary operators, including comparison distribution (S25):
     /// `day == "mon" || "tue"` re-applies the nearest comparison.
     fn infer_binary(
@@ -3546,6 +3688,11 @@ impl<'a> Checker<'a> {
 
         if call.name == syntax::BUILTIN_REQUIRE {
             self.check_require_call(call);
+            return Some(None);
+        }
+
+        if call.name == syntax::BUILTIN_REQUIRE_EQ {
+            self.check_require_eq_call(call);
             return Some(None);
         }
 

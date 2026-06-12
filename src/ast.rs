@@ -111,6 +111,15 @@ pub enum Item {
     Enum(EnumDef),
     Impl(ImplDef),
     Const(ConstDef),
+    /// S43 (M6): `test "name" { … }` — only at file top level.
+    Test(TestDef),
+}
+
+#[derive(Debug)]
+pub struct TestDef {
+    pub name: String,
+    pub name_span: Span,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Debug)]

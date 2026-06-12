@@ -60,7 +60,8 @@
             gcc
           ];
           shellHook = ''
-            echo "Jet dev shell — \`cargo build\`, then \`./target/debug/jet fmt …\`"
+            echo "Jet dev shell — \`cargo build\`, then \`./target/debug/jet\` (test/new/fmt/run)"
+            echo "  profile \`jet\` is stale until: nix build .#jet && nix profile install .#jet"
           '';
         };
 

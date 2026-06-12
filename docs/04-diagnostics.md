@@ -147,6 +147,7 @@ before continuing.
 | E0027 | parse | teaching: `append` → `push`               |
 | E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
 | E0030 | parse | teaching: `as` → `.to_float()` etc.       |
+| E0601 | sema  | `test` block in wrong position / none found |
 
 ## Process for a new diagnostic
 

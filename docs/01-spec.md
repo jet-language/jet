@@ -182,6 +182,51 @@ bad propagation (**E0403**), `ok`/`err` outside a result context (**E0404**),
 and fallback type mismatches (**E0405**) are compile errors with fixes that
 name **`?`**, **`or`**, and pattern tests.
 
+## M6 phase 1 — `jet fmt` (done)
+
+**`jet fmt <file.jet>`** rewrites the file in place to canonical Jet style
+(S44). **`jet fmt --check <file>`** prints a unified diff and exits **1**
+when the file would change (CI mode). Formatting is lex → parse → print;
+sema and rustc are not run.
+
+Style (zero configuration): 4-space indent, `{` on the same line as its
+header, one statement per line, at most one blank line between top-level
+items, spaces around binary operators, no space before `;`/`,`/call `(`,
+trailing `;` on statements (S6). **Line width is not enforced in v1.**
+
+`//` comments are preserved and re-attached by source span. When S14
+teaching recovery has already lowered foreign spellings in the AST (`let` →
+`val`, `def` → `fn`, …), fmt prints the canonical form. Real parse errors
+still block fmt.
+
+Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
+`tests/ui/*.fixed.jet` (`tests/fmt.rs`).
+
+## M6 phase 2 — `jet test` + `jet new` (done)
+
+**`test "name" { … }`** (S43) — top-level blocks only. Bodies parse like a
+parameterless function; use **`require(cond)`** / **`require(cond, "msg")`**
+and **`require_eq(a, b)`** (S36) for checks. Duplicate test names → **E0105**;
+a nested `test` block → **E0601**. **`jet run`** / **`jet build`** ignore test
+blocks; only **`jet test`** compiles and runs them.
+
+**`jet test <file.jet>`** (or a directory of `*.jet` files) builds one harness
+binary per file (no cargo project; R9). Each test runs in isolation; failures
+use a generated unwind boundary (not observable in user code). Output is one
+line per test (`name: pass` / `name: FAIL`), a summary (`N passed, M failed`),
+and exit **1** when any test fails. **`require_eq`** failures print
+`left: …, right: …` on stderr.
+
+**`jet new <name>`** creates `<name>/main.jet` (hello world) and
+`<name>/.gitignore` (`build/`). No manifest (M12; opt-in).
+
+Example: `examples/20_tests.jet`. Goldens: `examples/expected/20_tests.test.out`,
+`tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`.
+
+During development, run **`cargo build`** then **`./target/debug/jet`** — the
+nix-profile `jet` is only updated after **`nix build`** and reinstalling the
+package.
+
 ## Deliberately absent
 
 See non-goals in docs/00-philosophy.md. The parser should produce staged

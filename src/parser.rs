@@ -18,6 +18,17 @@ use crate::lexer::{describe, StrTokPart, TokKind, Token};
 use crate::syntax;
 
 pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
+    parse_inner(toks, false)
+}
+
+/// Parse for `jet fmt`: succeeds when the AST is recoverable, even if S14
+/// teaching diagnostics were emitted (foreign spellings already lowered in
+/// the tree as `val`, `fn`, `&&`, …).
+pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
+    parse_inner(toks, true)
+}
+
+fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>> {
     let toks = crate::lexer::without_comments(toks);
     let mut p = Parser {
         toks: &toks,
@@ -27,10 +38,23 @@ pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     };
     let prog = p.program();
     if p.diags.is_empty() {
+        return Ok(prog);
+    }
+    if for_fmt && p.diags.iter().all(|d| is_teaching_parse_diag(d.code)) {
         Ok(prog)
     } else {
         Err(p.diags)
     }
+}
+
+/// S14 (+ staged S16 E0019): recovered in the AST; fmt may rewrite to canon.
+fn is_teaching_parse_diag(code: &str) -> bool {
+    matches!(
+        code,
+        "E0008" | "E0009" | "E0010" | "E0012" | "E0013" | "E0014" | "E0015" | "E0016"
+            | "E0017" | "E0018" | "E0019" | "E0020" | "E0021" | "E0023" | "E0024" | "E0025"
+            | "E0026" | "E0027" | "E0028" | "E0030" | "E0034"
+    )
 }
 
 struct Parser<'a> {
@@ -145,6 +169,7 @@ impl<'a> Parser<'a> {
             let r = match &self.peek().kind {
                 TokKind::Eof => break,
                 TokKind::KwFn | TokKind::KwPub => self.func().map(Item::Func),
+                TokKind::KwTest => self.test_def().map(Item::Test),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwImpl => self.impl_def().map(Item::Impl),
@@ -248,16 +273,18 @@ impl<'a> Parser<'a> {
                     let d = Diagnostic::error(
                         "E0003",
                         format!(
-                            "expected `{}`, `{}`, or `{}` here, found {}",
+                            "expected `{}`, `{}`, `{}`, or `{}` here, found {}",
                             syntax::KW_FN,
+                            syntax::KW_TEST,
                             syntax::KW_STRUCT,
                             syntax::KW_CONST,
                             describe(other)
                         ),
                         "at the top level of a file, only definitions can appear".to_string(),
                         format!(
-                            "define a function ({} main() {{ ... }}), struct, or const",
-                            syntax::KW_FN
+                            "define a function ({} main() {{ ... }}), {} block, struct, or const",
+                            syntax::KW_FN,
+                            syntax::KW_TEST
                         ),
                         Some(self.peek().span),
                     );
@@ -276,6 +303,61 @@ impl<'a> Parser<'a> {
             }
         }
         Program { items }
+    }
+
+    fn test_def(&mut self) -> Result<crate::ast::TestDef, Diagnostic> {
+        self.expect_kw(TokKind::KwTest, "to start a test block")?;
+        let (name, name_span) = self.expect_test_name()?;
+        self.expect(TokKind::LBrace, "to open the test body")?;
+        let body = self.block_stmts();
+        Ok(crate::ast::TestDef {
+            name,
+            name_span,
+            body,
+        })
+    }
+
+    /// Test names are plain string literals — no interpolation (S43).
+    fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
+        let parts = match &self.peek().kind {
+            TokKind::Str(parts) => parts.clone(),
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a test name in quotes after `{}`, found {}",
+                        syntax::KW_TEST,
+                        describe(other)
+                    ),
+                    "each test block needs a name so failures are easy to find".to_string(),
+                    format!(
+                        "write: {} \"describes what this checks\" {{ ... }}",
+                        syntax::KW_TEST
+                    ),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let span = self.bump().span;
+        if parts.len() != 1 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a test name must be one piece of quoted text".to_string(),
+                "test names are labels, not interpolated messages".to_string(),
+                format!("write: {} \"my test name\" {{ ... }}", syntax::KW_TEST),
+                Some(span),
+            ));
+        }
+        match &parts[0] {
+            StrTokPart::Lit(s) => Ok((s.clone(), span)),
+            StrTokPart::Interp(_) => Err(Diagnostic::error(
+                "E0003",
+                "a test name can't contain `{ }` interpolation".to_string(),
+                "test names are fixed labels".to_string(),
+                format!("write: {} \"my test name\" {{ ... }}", syntax::KW_TEST),
+                Some(span),
+            )),
+        }
     }
 
     fn func(&mut self) -> Result<Func, Diagnostic> {
@@ -597,6 +679,30 @@ impl<'a> Parser<'a> {
 
     fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
+            TokKind::KwTest => {
+                let span = self.peek().span;
+                self.bump();
+                if matches!(self.peek().kind, TokKind::Str(_)) {
+                    self.bump();
+                }
+                if matches!(self.peek().kind, TokKind::LBrace) {
+                    self.bump();
+                    let _ = self.block_stmts();
+                } else {
+                    self.sync_stmt();
+                }
+                Err(Diagnostic::error(
+                    "E0601",
+                    format!("`{}` blocks only belong at the top of a file", syntax::KW_TEST),
+                    "test blocks group checks that `jet test` runs separately from `main`"
+                        .to_string(),
+                    format!(
+                        "move this block to the top level, after your functions: {} \"name\" {{ ... }}",
+                        syntax::KW_TEST
+                    ),
+                    Some(span),
+                ))
+            }
             TokKind::KwVal | TokKind::KwVar => {
                 let binding = self.binding()?;
                 self.finish_stmt()?;

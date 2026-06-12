@@ -10,13 +10,14 @@ This milestone is four separable phases; implement and commit in order.
 Each phase has its own exit criterion and can be a separate agent run if
 needed (prompts: "Implement M6 phase N per docs/plans/m06-tooling.md").
 
-## Phase 1 — `jet fmt`
+## Phase 1 — `jet fmt` ✓ 2026-06-12
 
 One true style, zero configuration (philosophy #4). Style constants
 (S44): 4-space indent; same-line `{`; one statement per
 line; single blank line max between items; spaces around binary
-operators; no space before `;`/`,`/`(` of a call; line width 100 with
-simple argument-per-line overflow; trailing `;` per S6 untouched.
+operators; no space before `;`/`,`/`(` of a call; trailing `;` per S6
+untouched. **Line width 100 deferred** (v1 does not wrap; future org
+config may add width + enforcement).
 
 - `jet fmt file.jet` rewrites in place; `--check` exits 1 on diff
   (CI mode), printing a unified diff.
@@ -30,7 +31,7 @@ simple argument-per-line overflow; trailing `;` per S6 untouched.
 - **Exit:** `jet fmt` is idempotent (fmt(fmt(x)) == fmt(x)) across every
   file in examples/ and tests/ui/*.fixed.jet, enforced by a new test.
 
-## Phase 2 — `jet test` + `jet new`
+## Phase 2 — `jet test` + `jet new` ✓ 2026-06-12
 
 Test syntax (S43 — first-class blocks, only at top level):
 

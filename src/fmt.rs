@@ -1,8 +1,9 @@
 //! Pretty-printer for Jet source (M6 phase 1, S44).
 //!
-//! One true style: 4-space indent, same-line `{`, width 100, spaces around
-//! binary operators, semicolons on statements. Comments are preserved from
-//! the original source and re-attached by span.
+//! One true style: 4-space indent, same-line `{`, spaces around binary
+//! operators, semicolons on statements. Line width is not enforced in v1
+//! (S44 width-100 may land with optional org config later). Comments are
+//! preserved from the original source and re-attached by span.
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
@@ -15,7 +16,6 @@ use crate::lexer::{line_comments, Token, TokKind};
 use crate::syntax;
 
 const INDENT: usize = 4;
-const WIDTH: usize = 100;
 
 /// Format a parsed program back to canonical Jet source.
 pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> String {
@@ -125,6 +125,9 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                 .rfind("const")
                 .unwrap_or(c.name_span.start)
         }
+        Item::Test(t) => src[..t.name_span.start]
+            .rfind(syntax::KW_TEST)
+            .unwrap_or(t.name_span.start),
     }
 }
 
@@ -162,6 +165,7 @@ fn item_span_end(item: &Item) -> usize {
         Item::Impl(i) => i.methods.last().map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
             .unwrap_or(i.type_span.end),
         Item::Const(c) => c.value.span().end,
+        Item::Test(t) => t.body.last().map(stmt_end).unwrap_or(t.name_span.end),
     }
 }
 
@@ -254,7 +258,11 @@ impl<'a> Fmt<'a> {
     }
 
     fn emit_comment_line(&mut self, text: &str) {
-        self.newline();
+        // Start the line without a spurious leading newline at BOF (S44 has no
+        // "blank line before first item" rule).
+        if !self.out.is_empty() {
+            self.newline();
+        }
         self.write_indent();
         self.write(text);
         self.newline();
@@ -304,7 +312,25 @@ impl<'a> Fmt<'a> {
             Item::Enum(e) => self.fmt_enum(e, true),
             Item::Impl(i) => self.fmt_impl(i),
             Item::Const(c) => self.fmt_const(c),
+            Item::Test(t) => self.fmt_test(t),
         }
+    }
+
+    fn fmt_test(&mut self, t: &crate::ast::TestDef) {
+        self.write(syntax::KW_TEST);
+        self.write(" ");
+        self.write("\"");
+        self.write(&t.name.replace('\\', "\\\\").replace('"', "\\\""));
+        self.write("\"");
+        self.write(" ");
+        self.write(syntax::BLOCK_OPEN);
+        self.newline();
+        self.with_indent(|f| {
+            for stmt in &t.body {
+                f.fmt_stmt(stmt);
+            }
+        });
+        self.end_block();
     }
 
     fn fmt_pub(&mut self, is_pub: bool) {
@@ -1085,7 +1111,7 @@ pub fn format_source(src: &str) -> Result<String, Vec<crate::diag::Diagnostic>> 
         return Err(lex_diags);
     }
     let comments = line_comments(&toks);
-    let prog = crate::parser::parse(&toks)?;
+    let prog = crate::parser::parse_for_fmt(&toks)?;
     Ok(format_program(&prog, src, &comments))
 }
 
