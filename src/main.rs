@@ -17,9 +17,11 @@ usage:
   {bin} check <file.{ext}>     look for problems, build nothing
   {bin} build <file.{ext}>     compile to a native binary in ./build/
   {bin} run   <file.{ext}>     build, then run
+  {bin} fmt   <file.{ext}>     rewrite file to canonical style (S44)
 
 flags:
   --emit-rust                  also print the generated Rust code
+  --check                      with fmt: exit 1 if file would change (CI)
 ",
         bin = jet::syntax::BINARY_NAME,
         lang = jet::syntax::LANG_NAME,
@@ -30,6 +32,7 @@ flags:
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let emit_rust = raw.iter().any(|a| a == "--emit-rust");
+    let fmt_check = raw.iter().any(|a| a == "--check");
     let args: Vec<&String> = raw.iter().filter(|a| !a.starts_with("--")).collect();
 
     let (cmd, file) = match (args.first(), args.get(1)) {
@@ -39,6 +42,11 @@ fn main() {
             exit(2);
         }
     };
+
+    if cmd == "fmt" {
+        run_fmt(file, fmt_check);
+        return;
+    }
 
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -103,6 +111,37 @@ fn main() {
             exit(2);
         }
     }
+}
+
+fn run_fmt(file: &str, check_only: bool) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            exit(1);
+        }
+    };
+    let formatted = match jet::format_source(&src) {
+        Ok(s) => s,
+        Err(diags) => {
+            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+            exit(1);
+        }
+    };
+    if formatted == src {
+        if check_only {
+            // already canonical
+        }
+        return;
+    }
+    if check_only {
+        print!("{}", jet::fmt::unified_diff(file, &src, &formatted));
+        exit(1);
+    }
+    fs::write(file, &formatted).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", file, e);
+        exit(1);
+    });
 }
 
 fn stem(file: &str) -> String {

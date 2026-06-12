@@ -1,5 +1,12 @@
 # jetpack — the Jet package manager (start-to-finish guide)
 
+> **STATUS (owner, 2026-06-12): NOT RATIFIED — exploration only.**
+> Developed separately from the language roadmap. No decision in this
+> file (D-JP1…D-JP5) has been made. It conflicts with
+> docs/plans/m12-packages.md (manifest format, pin policy, resolver)
+> and must be reconciled with M12 before any package-manager work
+> starts. Agents: do not implement anything from this file.
+
 Audience: the project owner (new to package-manager internals) and the agents
 building it. Plain language first, spec second. jetos is a SEPARATE project
 built on top of jetpack — see 07-jetos.md. Nothing in this file is about

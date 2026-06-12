@@ -104,6 +104,8 @@ pub enum TokKind {
     CaretEq,
     ShlEq,
     ShrEq,
+    /// S5: `//` through end of line (M6 fmt preserves these).
+    LineComment(String),
     Eof,
 }
 
@@ -219,8 +221,30 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::CaretEq => "`^=`".to_string(),
         TokKind::ShlEq => "`<<=`".to_string(),
         TokKind::ShrEq => "`>>=`".to_string(),
+        TokKind::LineComment(_) => "a comment".to_string(),
         TokKind::Eof => "the end of the file".to_string(),
     }
+}
+
+/// True when this token is comment trivia (not code).
+pub fn is_comment(kind: &TokKind) -> bool {
+    matches!(kind, TokKind::LineComment(_))
+}
+
+/// Drop comment tokens; the parser and sema work on code tokens only.
+pub fn without_comments(toks: &[Token]) -> Vec<Token> {
+    toks.iter()
+        .filter(|t| !is_comment(&t.kind))
+        .cloned()
+        .collect()
+}
+
+/// Collect `//` comments in source order (for fmt).
+pub fn line_comments(toks: &[Token]) -> Vec<Token> {
+    toks.iter()
+        .filter(|t| matches!(t.kind, TokKind::LineComment(_)))
+        .cloned()
+        .collect()
 }
 
 fn keyword(name: &str) -> Option<TokKind> {
@@ -315,11 +339,17 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            // Line comments (decision S5).
+            // Line comments (decision S5) — retained for fmt (M6/S44).
             if c == '/' && self.at(self.i + 1) == '/' {
+                let comment_start = self.pos(self.i);
                 while self.i < self.chars.len() && self.at(self.i) != '\n' {
                     self.i += 1;
                 }
+                let text = self.src[comment_start..self.pos(self.i)].to_string();
+                toks.push(Token {
+                    kind: TokKind::LineComment(text),
+                    span: Span::new(comment_start, self.pos(self.i)),
+                });
                 continue;
             }
 

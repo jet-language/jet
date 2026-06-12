@@ -191,3 +191,62 @@ forever in token/AST form by S26 — the sanctioned path is S56), Mutex/
 shared-state concurrency, networking std modules, self-hosting, debugger
 source maps (DAP), comptime layer 3: typed reflection / user-defined
 derives (S56).
+
+## Committed future additions (owner direction 2026-06-12 — need plans)
+
+Promoted from "maybe" to "needed, post-v1, in roughly this order."
+Each requires a docs/plans/ file and (where marked) a decision ballot
+before work starts. None of these may compromise the v1 milestones.
+
+1. **Tier-2 references** — stored/returned references behind explicit
+   syntax: the full Rust-class borrow checker surfaced gradually. The
+   single biggest unlock for Rust-territory programs (zero-copy
+   parsing, graphs, arenas). Needs a plan file and ballots.
+2. **Generics v1.5** — associated types and default method bodies, the
+   minimum for serious library-building. Trait inheritance/blanket
+   impls re-evaluated on evidence.
+3. **Error conversion for `?`** — propagate across differing error
+   types (a `From`-equivalent, beginner-safe spelling TBD). The "same
+   error type only" v1 rule does not survive multi-module programs.
+4. **Streaming I/O** — file handles/readers; whole-file reads stop
+   scaling exactly when programs get real.
+5. **Networking std modules** — blocking sockets + HTTP client over
+   tasks/channels (no async). This is the Go-territory stdlib buildout.
+6. **Expert low-level tier** (S58) — `std/mem`-style gated access to
+   allocators, layout, volatile, raw memory; never in onboarding.
+7. **C FFI** (S59) — `extern c` import and a Jet-export story; the
+   gateway to the non-Rust ecosystem and to embedded toolchains.
+8. **Freestanding profile** — `no_std`-class output for embedded/
+   kernels (long-horizon target per docs/00 owner direction).
+9. **Pure-function marking & evaluation** (S60) — `jet eval --pure`
+   over marked-pure functions; the Nix-replacement direction
+   (docs/jetpack.md, unratified).
+10. **Rapid-prototype execution mode** (owner direction 2026-06-12) —
+    compile speed is a product priority: instant iteration while
+    prototyping, full compilation when the product is ready. Components
+    required (each needs a docs/plans/ file before work starts):
+    - **`jet dev` watch server** — a long-running process in the
+      TypeScript `tsc --watch`/tsserver mold: watches the import graph,
+      re-checks incrementally on save, re-runs instantly, streams
+      diagnostics. **Shares its foundation with the M13 LSP server**
+      (SourceProvider overlay, file-granular incremental front end,
+      crash policy) — build that machinery once, host both; M13 carries
+      a design note to this effect.
+    - **Execution phase 1: interpreter.** The M9.5 comptime
+      tree-walking interpreter extended to whole programs. Its
+      differential battery (bit-for-bit agreement with compiled output,
+      P0 on divergence) extends to dev mode — same semantics guarantee,
+      already CI-enforced.
+    - **Execution phase 2: JIT.** Optional native-speed dev execution
+      (e.g. Cranelift-backed); requires owner crate approval (I6) and
+      its own plan; never replaces rustc for release builds.
+    - **Boundaries:** FFI calls and tasks need real native code — dev
+      mode either bridges to prebuilt artifacts or says plainly "this
+      program needs a full build." Interpreted/JIT performance is for
+      iteration, never benchmarks; `jet build` (rustc, full
+      optimization) remains the only release path.
+
+**Unreconciled:** docs/jetpack.md and docs/jetos.md are separate,
+unratified explorations that conflict with M12 (manifest format, pin
+policy, resolver). The owner will reconcile them before M12 begins; no
+agent may treat either file as a spec.

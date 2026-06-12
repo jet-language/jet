@@ -1,5 +1,11 @@
 # jetos — a declarative OS on top of jetpack (start-to-finish guide)
 
+> **STATUS (owner, 2026-06-12): NOT RATIFIED — exploration only.**
+> Developed separately from the language roadmap. No decision in this
+> file (D-OS1…D-OS7) has been made, and the jetpack foundation it
+> assumes is itself unratified (see docs/jetpack.md banner). Agents:
+> do not implement anything from this file.
+
 Audience: the project owner and implementing agents. Assumes you have read
 06-jetpack.md. jetos does not exist until jetpack milestones JP0–JP5 do;
 this doc can be written, ratified, and prototyped against `jet eval` before

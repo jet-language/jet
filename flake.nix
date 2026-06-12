@@ -51,14 +51,16 @@
         };
 
         devShells.default = pkgs.mkShell {
+          # Toolchain only — do not list `jet` here: that forces a nix build of
+          # the package (clean source, no untracked files) before the shell opens.
+          # Build locally with `cargo build`; `jet run` needs rustc + cc on PATH.
           packages = with pkgs; [
             cargo
             rustc
             gcc
-            jet
           ];
           shellHook = ''
-            echo "Jet dev shell — rustc on PATH for \`jet run\`"
+            echo "Jet dev shell — \`cargo build\`, then \`./target/debug/jet fmt …\`"
           '';
         };
 

@@ -95,8 +95,8 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         ("trim" | "to_upper" | "to_lower" | "to_string", 0) => Some(Some(Type::String)),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
-        ("split", 1) => Some(Some(Type::List(Box::new(Type::String))),
-        ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char))),
+        ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
         _ => None,
     }

@@ -62,6 +62,13 @@ lexer/parser/sema as libraries — zero duplicated language knowledge.
   through a `SourceProvider` trait (overlay of open buffers over disk).
   This refactor is prerequisite work — do it first, keep `jet run`
   byte-identical.
+- **Shared foundation (owner direction 2026-06-12):** the long-running
+  server, `SourceProvider`, incremental file-granular front end, and
+  crash policy are also the foundation for the future `jet dev` watch /
+  rapid-execution mode (docs/05 future addition #10). Design these as
+  reusable library pieces, not LSP-private internals — the same process
+  should later be able to host both. No dev-mode features are in M13
+  scope.
 - JSON-RPC layer: revisit the M6 hand-rolled JSON under load; if it's
   the bottleneck or bug source, request owner approval for serde_json
   in the tooling binary (I6 protocol) rather than gold-plating.

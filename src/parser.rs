@@ -18,8 +18,9 @@ use crate::lexer::{describe, StrTokPart, TokKind, Token};
 use crate::syntax;
 
 pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
+    let toks = crate::lexer::without_comments(toks);
     let mut p = Parser {
-        toks,
+        toks: &toks,
         pos: 0,
         diags: Vec::new(),
         pending_type_gt: false,

@@ -468,6 +468,61 @@ where one suffices), `const` (a second binding keyword competing with
 `val`), silent const-folding with no keyword (invisible, unpredictable,
 and kills the comptime-panic feature).
 
+**S58 — Expert low-level tier** *(ratified 2026-06-12; post-1.0
+milestone pending)*: **two gates, one keyword.**
+`**import "std/mem"**` is the discovery gate — unlocks the low-level
+vocabulary: explicit **Zig-style allocators** (allocating APIs take an
+allocator parameter; a fixed arena works on embedded), `**Ptr<T>**`,
+layout/repr control, volatile wrappers. The keyword `**unsafe**` is the
+audit gate for operations that can violate memory safety — pointer
+**deref**, pointer math, transmute-class casts, FFI pointer crossings —
+in block form (`unsafe { … }`) and contract form (`unsafe fn`; calling
+one requires an enclosing block, Rust's rule). Taking a pointer (`&x`)
+is legal outside a block (a pointer is inert data); *using* one (`*p`,
+`.offset`) requires the block. `&`/`*` are **core grammar, sema-gated**:
+outside the gates they keep producing E0208-family teaching errors.
+Codegen lowers blocks to Rust `unsafe`; **I1 is amended** — generated
+`unsafe` appears only inside user-gated regions plus vetted std/mem
+internals. Onboarding materials never mention any of it. Rejected:
+`trust` spelling, library-only gating (Swift style), ungated sigils
+(C/Zig style).
+
+**S61 — Argument labels & defaults** *(ratified 2026-06-12; post-1.0
+milestone pending)*: **optional labels, positional order fixed.** A
+caller may write `name: value` on any argument for readability —
+`schedule("backup", delay: 30, repeat: 5, urgent: true);` — but
+arguments always stay in **declaration order**; labels never reorder.
+A label that doesn't match the parameter at that position is a compile
+error showing the correct order — labels are compiler-checked
+documentation and catch transposed arguments for free. Default
+parameter values ride along: `fn f(x: Int, urgent: Bool = false)` —
+trailing parameters with defaults may be omitted at call sites.
+Rejected: Swift-style required labels (ceremony), Kotlin/Python
+reordering by name (two call shapes for one function), no labels at all.
+
+**S62 — Trait delegation** *(ratified 2026-06-12; post-1.0, lands only
+after M9 traits show real usage)*: `**impl Trait using field;**` — the
+compiler writes the forwarding methods for that one trait to that one
+named field. Mirrors S28's two impl spellings: in-type
+(`impl Logger using logger;`) or top-level
+(`impl Service: Logger using logger;`). The field's type must implement
+the trait; forwarding is all-or-nothing in v1 (partial override
+deferred). Rejected: Jai-style field hoisting / `using` member
+injection (invisible names), Rust Deref-abuse delegation.
+
+**S63 — Resource cleanup** *(ratified 2026-06-12; binding from
+streaming-I/O work onward)*: **automatic scope-end cleanup (RAII)** is
+the single user-facing story. Std resource types (files, channels,
+tasks, …) clean themselves up when the value goes out of scope, on
+every exit path — taught as one sentence: *"when a value goes out of
+scope, Jet cleans it up."* Backed by Rust `Drop` in codegen (already
+true for memory today — this ratifies the contract, not new machinery).
+An LSP inlay hint may later visualize cleanup points. A `**defer**`
+statement is **noted as a potential later complement** for non-resource
+actions (timers, logging) — owner-gated, and never required for
+correctness. Rejected: `defer`-as-primary (leak-by-omission, Go's
+perennial bug class), `with`-blocks (nesting pyramids).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -519,6 +574,8 @@ implementation milestone is pending.
 | S53 | concurrency surface (tasks + channels)          | M11       |
 | S52 | package manifest format & commands (`jet.toml`) | M12       |
 | S56 | typed reflection / user derives (deferred)      | post-1.0  |
+| S59 | C FFI surface (`extern c`; Jet-export story)    | post-1.0  |
+| S60 | pure-function marking & evaluation (`pure` fns) | post-1.0  |
 
 
 Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) is fully ratified above.
@@ -587,5 +644,9 @@ ratified layering.
 | 2026-06-12 | S46 | `(x) => …` lambda syntax                    | owner |
 | 2026-06-12 | S47 | `fn(T)->R`; M2 captures; `take` on escape  | owner |
 | 2026-06-12 | S55 | hybrid derive: auto Print/Eq; opt-in Cmp/Serialize | owner |
+| 2026-06-12 | S58 | low-level tier: `std/mem` + `unsafe` gates  | owner |
+| 2026-06-12 | S61 | optional arg labels; positional order fixed | owner |
+| 2026-06-12 | S62 | trait delegation `impl Trait using field;`  | owner |
+| 2026-06-12 | S63 | RAII scope-end cleanup; `defer` maybe later | owner |
 
 

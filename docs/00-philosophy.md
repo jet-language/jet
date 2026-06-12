@@ -81,3 +81,39 @@ friction by default, control when wanted, with performance and safety
 enforced underneath by the Rust backend and the ownership model. The
 roadmap (docs/05) reflects this; the ranked priorities above do not
 change — beginner experience still outranks everything but safety.
+
+**Owner direction (2026-06-12):** Jet's identity is the **best hybrid
+language** — learn from every modern and long-standing language, adopt
+the best non-conflicting parts, with exceptional readability, ergonomic
+defaults, and a batteries-included experience that is approachable for
+beginners and loved by experts. Consequences, recorded here so plans
+stop inheriting the older, smaller vision:
+
+- **Long-horizon targets now include embedded systems and kernels.**
+  The "Not (yet)" audience line below stands for v1.x, but post-v1
+  work must not paint us into a corner that forecloses freestanding
+  targets. The Rust backend (`no_std`/`core`) is the enabling path.
+- **An expert low-level tier is required** — true C/C++/Rust/Zig-class
+  control (raw memory, layout, volatile, allocators), gated so it never
+  confuses beginners and never slows programs that don't use it.
+  Gating ratified as S58 (`std/mem` import + `unsafe` blocks,
+  Zig-style allocators). Onboarding materials never mention it until
+  needed.
+- **C FFI is a needed future addition** (S59 registered). Rust FFI
+  (M7) ships first; the C ABI story follows post-v1.
+- **Purity is a product feature, not just a comptime detail.** A way
+  to mark functions as pure and evaluate them (S60) so Jet can
+  eventually replace the Nix language for declarative configuration
+  (see docs/jetpack.md, unratified).
+- **Go's territory (networking etc.) is standard-library scope**, built
+  out post-v1 — never core-language scope.
+- Invariant **I1 will need a measured amendment** when the expert tier
+  lands: user-facing Jet stays safe-by-default, but vetted, audited
+  low-level helpers in generated code (volatile/MMIO and similar)
+  cannot be expressed without Rust `unsafe` internally. The amendment
+  is owner-gated and not yet drafted.
+
+**Status note (2026-06-12):** docs/jetpack.md and docs/jetos.md were
+developed separately, are **not ratified**, contain **no decided
+syntax or semantics**, and conflict with docs/plans/m12-packages.md.
+They must be reconciled with M12 before any package-manager work starts.

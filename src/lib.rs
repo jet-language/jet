@@ -9,6 +9,7 @@ pub mod ast;
 pub mod collections;
 pub mod codegen;
 pub mod diag;
+pub mod fmt;
 pub mod lexer;
 pub mod parser;
 pub mod sema;
@@ -59,3 +60,8 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
 }
 
 pub use diag::render_all as render_diagnostics;
+
+/// Pretty-print source to canonical Jet style (M6/S44).
+pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
+    fmt::format_source(src)
+}
