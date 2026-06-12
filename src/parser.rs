@@ -32,11 +32,13 @@ pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
 /// alongside the AST so sema can still run (M6 phase 4).
 pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
     let toks = crate::lexer::without_comments(toks);
+    check_token_nesting(&toks)?;
     let mut p = Parser {
         toks: &toks,
         pos: 0,
         diags: Vec::new(),
         pending_type_gt: false,
+        depth: 0,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -50,11 +52,13 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
 
 fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>> {
     let toks = crate::lexer::without_comments(toks);
+    check_token_nesting(&toks)?;
     let mut p = Parser {
         toks: &toks,
         pos: 0,
         diags: Vec::new(),
         pending_type_gt: false,
+        depth: 0,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -95,9 +99,16 @@ fn is_teaching_parse_diag(code: &str) -> bool {
         code,
         "E0008" | "E0009" | "E0010" | "E0012" | "E0013" | "E0014" | "E0015" | "E0016"
             | "E0017" | "E0018" | "E0020" | "E0021" | "E0023" | "E0024" | "E0025"
-            | "E0026" | "E0027" | "E0028" | "E0030" | "E0034"
+            | "E0026" | "E0027" | "E0028" | "E0030" | "E0031" | "E0034"
     )
 }
+
+/// Hard cap on recursive parser nesting (parentheses, unary chains,
+/// literals-with-expressions, generic types). Recursive descent here — and
+/// the recursive passes downstream (sema, codegen, fmt) — use the call
+/// stack, so unbounded nesting in adversarial input would abort the compiler
+/// with a stack overflow instead of a diagnostic (E0035).
+const MAX_NESTING: usize = 128;
 
 struct Parser<'a> {
     toks: &'a [Token],
@@ -105,6 +116,40 @@ struct Parser<'a> {
     diags: Vec<Diagnostic>,
     /// S33: when `>>` is split while closing nested `Type<…>`.
     pending_type_gt: bool,
+    /// Current recursive parser nesting depth.
+    depth: usize,
+}
+
+fn too_deep(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0035",
+        "this code is nested too deeply".to_string(),
+        format!(
+            "the compiler keeps things simple by allowing at most {} levels of nesting",
+            MAX_NESTING
+        ),
+        "split the expression into smaller steps with `val` bindings".to_string(),
+        Some(span),
+    )
+}
+
+fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
+    let mut depth = 0usize;
+    for t in toks {
+        match t.kind {
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
+                depth += 1;
+                if depth > MAX_NESTING {
+                    return Err(vec![too_deep(t.span)]);
+                }
+            }
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 impl<'a> Parser<'a> {
@@ -122,6 +167,20 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
         t
+    }
+
+    fn with_nesting<T>(
+        &mut self,
+        span: Span,
+        f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        if self.depth >= MAX_NESTING {
+            return Err(too_deep(span));
+        }
+        self.depth += 1;
+        let result = f(self);
+        self.depth -= 1;
+        result
     }
 
     fn peek_is_ident(&self, name: &str) -> bool {
@@ -260,6 +319,33 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 },
+                TokKind::KwUnsafe => {
+                    let t = self.bump();
+                    let ffi_attempt = matches!(&self.peek().kind, TokKind::KwExtern);
+                    self.diags.push(Diagnostic::error(
+                        "E0031",
+                        format!(
+                            "{} doesn't use `{}` to call Rust crates",
+                            syntax::LANG_NAME,
+                            syntax::KW_UNSAFE
+                        ),
+                        "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
+                            .to_string(),
+                        format!(
+                            "write: {} {} \"crate@version\" {{ fn name(...) -> T = \"rust::path\"; }}",
+                            syntax::KW_EXTERN,
+                            syntax::KW_RUST
+                        ),
+                        Some(t.span),
+                    ));
+                    if ffi_attempt {
+                        self.extern_rust_block().map(Item::ExternRust)
+                    } else {
+                        self.sync_top();
+                        continue;
+                    }
+                }
+                TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
                 TokKind::KwPub => match self.peek2().kind {
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
@@ -448,6 +534,142 @@ impl<'a> Parser<'a> {
                 "a test name can't contain `{ }` interpolation".to_string(),
                 "test names are fixed labels".to_string(),
                 format!("write: {} \"my test name\" {{ ... }}", syntax::KW_TEST),
+                Some(span),
+            )),
+        }
+    }
+
+    /// S50 (M7): `extern rust "crate@version" { fn … = "rust::path"; }`
+    fn extern_rust_block(&mut self) -> Result<crate::ast::ExternRustBlock, Diagnostic> {
+        let start = self.bump().span;
+        if !matches!(&self.peek().kind, TokKind::Ident(n) if n == syntax::KW_RUST) {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected `{}` after `{}`, found {}",
+                    syntax::KW_RUST,
+                    syntax::KW_EXTERN,
+                    describe(&self.peek().kind)
+                ),
+                format!(
+                    "foreign Rust functions are declared in `{} {} \"crate@version\" {{ … }}`",
+                    syntax::KW_EXTERN,
+                    syntax::KW_RUST
+                ),
+                format!(
+                    "write: {} {} \"std\" {{ fn name() -> Int = \"std::path\"; }}",
+                    syntax::KW_EXTERN,
+                    syntax::KW_RUST
+                ),
+                Some(self.peek().span),
+            ));
+        }
+        self.bump();
+        let (crate_spec, crate_span) = self.expect_plain_string(
+            "after `extern rust`",
+            "the crate name must be one piece of quoted text",
+            "write: extern rust \"base64@0.22\" { ... }",
+        )?;
+        self.expect(TokKind::LBrace, "to open the extern block")?;
+        let mut functions = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            functions.push(self.extern_fn()?);
+        }
+        self.expect(TokKind::RBrace, "to close the extern block")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::ast::ExternRustBlock {
+            crate_spec,
+            crate_span,
+            functions,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    fn extern_fn(&mut self) -> Result<crate::ast::ExternFn, Diagnostic> {
+        let fn_span = self.peek().span;
+        self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;
+        let fn_start = fn_span.start;
+        let (name, name_span) = self.expect_ident("after `fn`")?;
+        self.expect(TokKind::LParen, "after the function name")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                params.push(self.param()?);
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between parameters")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the parameter list")?;
+
+        let mut return_type = None;
+        let mut is_view_return = false;
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::KwView) {
+                is_view_return = true;
+                self.bump();
+            }
+            let (ty, _) = self.type_()?;
+            return_type = Some(ty);
+        }
+
+        self.expect(TokKind::Eq, "before the Rust path")?;
+        let (rust_path, rust_path_span) = self.expect_plain_string(
+            "after `=`",
+            "the Rust path must be one piece of quoted text",
+            "write: = \"crate::function\"",
+        )?;
+        self.expect(TokKind::Semi, "after the foreign path")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::ast::ExternFn {
+            name,
+            name_span,
+            params,
+            return_type,
+            is_view_return,
+            rust_path,
+            rust_path_span,
+            span: Span::new(fn_start, end),
+        })
+    }
+
+    fn expect_plain_string(
+        &mut self,
+        context: &str,
+        why_interp: &str,
+        fix: &str,
+    ) -> Result<(String, Span), Diagnostic> {
+        let parts = match &self.peek().kind {
+            TokKind::Str(parts) => parts.clone(),
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected a piece of quoted text {}, found {}", context, describe(other)),
+                    why_interp.to_string(),
+                    fix.to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let span = self.bump().span;
+        if parts.len() != 1 {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("expected a piece of quoted text {}, found interpolation", context),
+                why_interp.to_string(),
+                fix.to_string(),
+                Some(span),
+            ));
+        }
+        match &parts[0] {
+            StrTokPart::Lit(s) => Ok((s.clone(), span)),
+            StrTokPart::Interp(_) => Err(Diagnostic::error(
+                "E0003",
+                format!("expected a piece of quoted text {}, found interpolation", context),
+                why_interp.to_string(),
+                fix.to_string(),
                 Some(span),
             )),
         }
@@ -943,7 +1165,9 @@ impl<'a> Parser<'a> {
                 let inner = self.block_stmts();
                 Ok(Stmt::Unsafe(inner, span))
             }
-            TokKind::Ident(_) => {
+            // `self.items.push(x);` — method bodies state effects on `self`
+            // exactly like on any other name (S27).
+            TokKind::Ident(_) | TokKind::KwSelf => {
                 let expr = self.expr()?;
                 let next = &self.peek().kind;
                 if matches!(next, TokKind::Eq) || next.compound_op().is_some() {
@@ -1144,11 +1368,13 @@ impl<'a> Parser<'a> {
     // --- expressions -----------------------------------------------------
 
     fn expr(&mut self) -> Result<Expr, Diagnostic> {
-        self.expr_or_fallback(true)
+        let span = self.peek().span;
+        self.with_nesting(span, |p| p.expr_or_fallback(true))
     }
 
     fn expr_no_struct_lit(&mut self) -> Result<Expr, Diagnostic> {
-        self.expr_or_fallback(false)
+        let span = self.peek().span;
+        self.with_nesting(span, |p| p.expr_or_fallback(false))
     }
 
     /// S35: `or` fallback binds looser than `&&` / `||`.
@@ -1362,6 +1588,11 @@ impl<'a> Parser<'a> {
     }
 
     fn expr_unary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let span = self.peek().span;
+        self.with_nesting(span, |p| p.expr_unary_inner(allow_struct_lit))
+    }
+
+    fn expr_unary_inner(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         match &self.peek().kind {
             TokKind::Minus => {
                 let span = self.bump().span;
@@ -1431,6 +1662,7 @@ impl<'a> Parser<'a> {
                             method: member,
                             method_span: member_span,
                             args,
+                            recv_type: None,
                         };
                     } else {
                         expr = Expr::Field(Box::new(expr), member, member_span);
@@ -1499,7 +1731,12 @@ impl<'a> Parser<'a> {
                 index,
                 span,
                 ..
-            } => Ok(LValue::Index { base, index, span }),
+            } => Ok(LValue::Index {
+                base,
+                index,
+                span,
+                kind: crate::ast::IndexKind::Unknown,
+            }),
             other => Err(Diagnostic::error(
                 "E0003",
                 "this value can't be assigned to".to_string(),
@@ -1658,6 +1895,7 @@ impl<'a> Parser<'a> {
                                 pos: 0,
                                 diags: Vec::new(),
                                 pending_type_gt: false,
+                                depth: self.depth,
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {
@@ -1794,6 +2032,7 @@ impl<'a> Parser<'a> {
                             method: member,
                             method_span: member_span,
                             args,
+                            recv_type: None,
                         });
                     }
                     return Ok(Expr::Field(
@@ -2196,6 +2435,11 @@ impl<'a> Parser<'a> {
     }
 
     fn type_(&mut self) -> Result<(Type, Span), Diagnostic> {
+        let span = self.peek().span;
+        self.with_nesting(span, |p| p.type_inner())
+    }
+
+    fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
             TokKind::Ident(name) => {

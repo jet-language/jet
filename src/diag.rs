@@ -45,6 +45,8 @@ pub struct Diagnostic {
     pub span: Option<Span>,
     /// Mechanical fix when the `fix` line is a simple replace/remove (S14).
     pub edit: Option<TextEdit>,
+    /// Extra indented detail (e.g. tool output for E0704).
+    pub detail: Option<String>,
 }
 
 impl Diagnostic {
@@ -91,6 +93,7 @@ impl Diagnostic {
             fix,
             span,
             edit: None,
+            detail: None,
         };
         d.attach_teaching_edit();
         d
@@ -111,7 +114,13 @@ impl Diagnostic {
             fix,
             span,
             edit: None,
+            detail: None,
         }
+    }
+
+    pub fn with_detail(mut self, detail: String) -> Self {
+        self.detail = Some(detail);
+        self
     }
 
     /// Render in the exact format specified by docs/04-diagnostics.md.
@@ -153,6 +162,12 @@ impl Diagnostic {
         }
         out.push_str(&format!(" Why: {}\n", self.why));
         out.push_str(&format!(" Fix: {}\n", self.fix));
+        if let Some(detail) = &self.detail {
+            out.push_str(detail);
+            if !detail.ends_with('\n') {
+                out.push('\n');
+            }
+        }
         out
     }
 }

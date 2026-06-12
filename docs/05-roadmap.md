@@ -96,14 +96,14 @@ files (philosophy: minimal configuration).
 C-style snippet into canonical Jet; `--small` produces a measurably
 smaller binary than the default; a new project runs in two commands.
 
-## M7 — Rust FFI (interop tier)  *(plan: docs/plans/m07-ffi.md; ballots: Group 5)*
+## M7 — Rust FFI (interop tier)  *(plan: docs/plans/m07-ffi.md; done 2026-06-12)*
 
 `extern rust` blocks for calling vetted Rust functions across an
 owned/copied boundary (no borrowed returns), version-pinned, built via a
 hidden cached cargo bridge — the user's directory never grows a cargo
 project. This is C2's resolution: interop without importing Rust's type
 system.
-**Exit:** an example calling a real Rust crate function.
+**Exit:** an example calling a real Rust crate function. ✓
 
 ## M8 — Functions as values  *(plan: docs/plans/m08-closures.md; S46/S47 ratified)*
 

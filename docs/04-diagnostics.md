@@ -147,12 +147,18 @@ before continuing.
 | E0027 | parse | teaching: `append` → `push`               |
 | E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
 | E0030 | parse | teaching: `as` → `.to_float()` etc.       |
+| E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0601 | sema  | `test` block in wrong position / none found |
 | E0602 | jet   | import path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | imported file / module not found |
 | E0604 | jet   | import cycle (lists the loop) |
 | E0605 | sema  | item exists in another file but is private |
 | E0606 | jet   | ambiguous module name (lists every matching path) |
+| E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
+| E0702 | sema  | type or access mode can't cross the FFI boundary |
+| E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
+| E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
+| E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
 
 ## Process for a new diagnostic
 

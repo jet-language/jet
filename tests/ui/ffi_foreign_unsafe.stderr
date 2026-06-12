@@ -1,0 +1,7 @@
+Error [E0031]: Jet doesn't use `unsafe` to call Rust crates
+  --> tests/ui/ffi_foreign_unsafe.jet:1:1
+    |
+  1 | unsafe extern rust "std" {
+    | ^^^^^^
+ Why: foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`
+ Fix: write: extern rust "crate@version" { fn name(...) -> T = "rust::path"; }

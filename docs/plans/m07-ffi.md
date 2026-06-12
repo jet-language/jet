@@ -78,7 +78,7 @@ Teaching: E0031 `unsafe` → not in Jet; whole blocks live behind
 
 ## Examples & tests
 
-- `examples/18_ffi.jet` — calls a real crate function (pick one with a
+- `examples/22_ffi.jet` — calls a real crate function (pick one with a
   tiny dep tree and deterministic output for goldens — e.g. a hashing or
   base64 crate rather than rand).
 - ui fixtures for E0701/E0702/E0705 (+ fixed companions).

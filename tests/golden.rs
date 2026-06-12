@@ -17,6 +17,7 @@ fn examples_compile_and_run() {
     let ex_dir = root.join("examples");
     let ext = jet::syntax::FILE_EXT;
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
@@ -49,14 +50,22 @@ fn examples_compile_and_run() {
     for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
-        let rust_code = match jet::compile_with_path(&src, &shown) {
-            Ok(c) => c.rust,
+        if stem == "22_ffi" && !have_cargo {
+            eprintln!("note: skipping examples/22_ffi.jet golden (need cargo for FFI bridge)");
+            checked += 1;
+            continue;
+        }
+
+        let compiled = match jet::compile_with_path(&src, &shown) {
+            Ok(c) => c,
             Err(diags) => panic!(
                 "example {} failed the front end:\n{}",
                 stem,
                 jet::render_diagnostics(&format!("examples/{}.{}", stem, ext), &src, &diags)
             ),
         };
+        let rust_code = compiled.rust;
+        let ffi_link = compiled.ffi;
 
         // I1: memory safety is never traded away.
         assert!(
@@ -75,13 +84,23 @@ fn examples_compile_and_run() {
             let rs = dir.join(format!("jet_golden_{}.rs", stem));
             let bin = dir.join(format!("jet_golden_{}", stem));
             fs::write(&rs, &rust_code).unwrap();
-            let out = Command::new("rustc")
+            let mut rustc_cmd = Command::new("rustc");
+            rustc_cmd
                 .args(["--edition", "2021"])
                 .arg(&rs)
                 .arg("-o")
-                .arg(&bin)
-                .output()
-                .unwrap();
+                .arg(&bin);
+            if let Some(link) = &ffi_link {
+                rustc_cmd
+                    .arg("--extern")
+                    .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+                if link.deps_dir.is_dir() {
+                    rustc_cmd
+                        .arg("-L")
+                        .arg(format!("dependency={}", link.deps_dir.display()));
+                }
+            }
+            let out = rustc_cmd.output().unwrap();
             assert!(
                 out.status.success(),
                 "I2 violated: rustc rejected generated code for {} — this is a jet bug:\n{}",

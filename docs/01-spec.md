@@ -228,6 +228,30 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 `jet run …` / `jet lsp` / `cargo test --test lsp`. Editor setup:
 `editors/vscode/README.md`. Release binary: `nix build .#jet`.
 
+## M7 — Rust FFI (`extern rust`, done)
+
+**`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
+entry is a normal Jet signature plus **`= "rust::path"`** naming the target
+item. **`extern rust "std" { … }`** works for standard-library items with no
+extra dependency. Non-`std` crates require an exact version pin (**E0701**).
+
+Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
+`Char`, `List`/`Map`/`T?`/`Result<…>` built from allowed types, and
+structs/enums whose fields are allowed. No `mut`/`take`/`view` parameters, no
+borrowed returns, no callbacks (**E0702**).
+
+When any crate dependency is needed, the driver builds a hidden cached cargo
+bridge under `~/.cache/jet/ffi/` and links it into the generated program (R9:
+the user's folder never grows a manifest). Missing **`cargo`** → **E0703**;
+fetch/build failures → **E0704** (cargo output in an indented block); a wrong
+foreign path or signature → **E0705**. Panics inside foreign code are caught
+at the boundary and become the M4 runtime report (exit 70).
+
+Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**).
+
+Example: `examples/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
+Integration: `tests/ffi.rs` (gated on `cargo`).
+
 ## M6 phase 3 — multi-file imports (done)
 
 Two import forms (S16): **`import "path/to/file";`** (relative to the importing

@@ -155,6 +155,31 @@ pub enum Item {
     Const(ConstDef),
     /// S43 (M6): `test "name" { … }` — only at file top level.
     Test(TestDef),
+    /// S50 (M7): `extern rust "crate@version" { … }`.
+    ExternRust(ExternRustBlock),
+}
+
+/// S50: one `extern rust` block declaring foreign functions.
+#[derive(Debug, Clone)]
+pub struct ExternRustBlock {
+    /// `"std"` or `"crate@version"`.
+    pub crate_spec: String,
+    pub crate_span: Span,
+    pub functions: Vec<ExternFn>,
+    pub span: Span,
+}
+
+/// S50: foreign function — Jet signature plus `= "rust::path"`, no body.
+#[derive(Debug, Clone)]
+pub struct ExternFn {
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<Param>,
+    pub return_type: Option<Type>,
+    pub is_view_return: bool,
+    pub rust_path: String,
+    pub rust_path_span: Span,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -175,7 +200,7 @@ pub struct Func {
     pub body: Vec<Stmt>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Param {
     pub convention: AccessConvention,
     pub name: String,
@@ -397,6 +422,9 @@ pub enum LValue {
         base: Box<Expr>,
         index: Box<Expr>,
         span: Span,
+        /// Filled by sema (like `Expr::Index`) so codegen picks the right
+        /// runtime helper for `xs[i] = v` vs `m[k] = v`.
+        kind: IndexKind,
     },
 }
 
@@ -561,6 +589,9 @@ pub enum Expr {
         method: String,
         method_span: Span,
         args: Vec<CallArg>,
+        /// Filled by sema when the method resolves to a user-defined type,
+        /// so codegen can apply the parameter conventions (`&`/`&mut`).
+        recv_type: Option<String>,
     },
     /// S29: `Type { field: expr, ... }` or `alias.Type { ... }` across imports (S16).
     StructLit {

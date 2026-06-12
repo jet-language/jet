@@ -63,6 +63,19 @@ pub fn load_entry_with_overlay(
         )]
     })?;
 
+    // Two files with the same stem (a/util.jet, b/util.jet) would emit two
+    // `mod user_util` blocks; make every module alias unique.
+    let mut seen_aliases: HashSet<String> = HashSet::new();
+    for m in modules.iter_mut() {
+        if !seen_aliases.insert(m.alias.clone()) {
+            let mut n = 2usize;
+            while !seen_aliases.insert(format!("{}_{}", m.alias, n)) {
+                n += 1;
+            }
+            m.alias = format!("{}_{}", m.alias, n);
+        }
+    }
+
     Ok(ProgramBundle {
         entry: entry_idx,
         project_root,
@@ -336,11 +349,33 @@ fn skip_search_dir(dir: &Path) -> bool {
     name == "build" || name == "target" || name.starts_with('.')
 }
 
+/// File stems become Rust `mod user_<alias>` names, so the alias must be a
+/// valid identifier: non-alphanumeric characters map to `_`, and a leading
+/// digit gets a `_` prefix.
 fn default_module_alias(path: &Path) -> String {
-    path.file_stem()
+    let stem = path
+        .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("module")
-        .to_string()
+        .unwrap_or("module");
+    sanitize_alias(stem)
+}
+
+fn sanitize_alias(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        out.push_str("module");
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
 }
 
 fn default_import_alias(kind: &ImportKind) -> String {

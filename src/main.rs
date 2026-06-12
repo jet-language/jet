@@ -19,7 +19,7 @@ enum BuildProfile {
 fn usage() -> String {
     format!(
         "\
-{bin} — compiler for {lang}
+Welcome to {lang}! (v{ver})
 
 usage:
   {bin} check <file.{ext}>     look for problems, build nothing
@@ -37,6 +37,7 @@ flags:
 ",
         bin = jet::syntax::BINARY_NAME,
         lang = jet::syntax::LANG_NAME,
+        ver = env!("CARGO_PKG_VERSION"),
         ext = jet::syntax::FILE_EXT,
     )
 }
@@ -87,7 +88,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
         }
     };
 
-    let rust_code = match jet::compile_with_path(&src, file) {
+    let (rust_code, ffi_link) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
                 eprint!("{}", jet::render_diagnostics(file, &src, &out.lints));
@@ -98,7 +99,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
                     if n == 1 { "" } else { "s" }
                 );
             }
-            out.rust
+            (out.rust, out.ffi)
         }
         Err(diags) => {
             eprint!("{}", jet::render_diagnostics(file, &src, &diags));
@@ -117,12 +118,12 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
             println!("ok: `{}` has no problems", file);
         }
         "build" => {
-            build(file, &rust_code, bin_path(file), profile);
+            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref());
             println!("built: {}", bin_path(file).display());
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone(), profile);
+            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref());
             let status = Command::new(&out).status().unwrap_or_else(|e| {
                 eprintln!("error: couldn't run the built program: {}", e);
                 exit(1);
@@ -214,7 +215,7 @@ fn run_test_file(path: &Path) -> bool {
             return false;
         }
     };
-    let rust_code = match jet::compile_tests_with_path(&src, &shown) {
+    let (rust_code, ffi_link) = match jet::compile_tests_with_path(&src, &shown) {
         Ok(r) => r,
         Err(diags) => {
             eprint!("{}", jet::render_diagnostics(&shown, &src, &diags));
@@ -222,7 +223,13 @@ fn run_test_file(path: &Path) -> bool {
         }
     };
     let bin = test_bin_path(path);
-    build(&shown, &rust_code, bin.clone(), BuildProfile::Default);
+    build(
+        &shown,
+        &rust_code,
+        bin.clone(),
+        BuildProfile::Default,
+        ffi_link.as_ref(),
+    );
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
         exit(1);
@@ -278,7 +285,13 @@ fn test_bin_path(path: &Path) -> PathBuf {
     PathBuf::from("build").join(format!("test_{}", stem(&path.to_string_lossy())))
 }
 
-fn build(file: &str, rust_code: &str, bin: PathBuf, profile: BuildProfile) {
+fn build(
+    file: &str,
+    rust_code: &str,
+    bin: PathBuf,
+    profile: BuildProfile,
+    ffi: Option<&jet::ffi::FfiLink>,
+) {
     fs::create_dir_all("build").unwrap_or_else(|e| {
         eprintln!("error: couldn't create the build/ folder: {}", e);
         exit(1);
@@ -293,24 +306,32 @@ fn build(file: &str, rust_code: &str, bin: PathBuf, profile: BuildProfile) {
     cmd.arg("--edition").arg("2021");
     match profile {
         BuildProfile::Default => {
-            cmd.arg("-O")
-                .arg("-C")
-                .arg("strip=symbols")
-                .arg("-C")
-                .arg("lto=thin");
+            cmd.arg("-O").arg("-C").arg("strip=symbols");
+            // FFI rlibs come from a separate cargo build without LTO bitcode.
+            if ffi.is_none() {
+                cmd.arg("-C").arg("lto=thin");
+            }
         }
         BuildProfile::Small => {
             cmd.arg("-C")
                 .arg("opt-level=z")
                 .arg("-C")
-                .arg("lto=fat")
-                .arg("-C")
                 .arg("panic=abort")
                 .arg("-C")
                 .arg("strip=symbols");
+            if ffi.is_none() {
+                cmd.arg("-C").arg("lto=fat");
+            }
         }
     }
     cmd.arg(&rs_path).arg("-o").arg(&bin);
+    if let Some(link) = ffi {
+        cmd.arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        if link.deps_dir.is_dir() {
+            cmd.arg("-L").arg(format!("dependency={}", link.deps_dir.display()));
+        }
+    }
 
     let out = match cmd.output() {
         Ok(o) => o,

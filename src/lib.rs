@@ -9,6 +9,7 @@ pub mod ast;
 pub mod collections;
 pub mod codegen;
 pub mod diag;
+pub mod ffi;
 pub mod fmt;
 pub mod lexer;
 pub mod loader;
@@ -24,6 +25,8 @@ use diag::{Diagnostic, Severity};
 pub struct CompileOutput {
     pub rust: String,
     pub lints: Vec<Diagnostic>,
+    /// Built FFI bridge when the program declares `extern rust` (M7).
+    pub ffi: Option<ffi::FfiLink>,
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -51,14 +54,22 @@ fn compile_bundle_path(file: &str, mode: sema::CompileMode) -> Result<CompileOut
     if !errors.is_empty() {
         return Err(errors);
     }
+    let ffi = match ffi::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(ffi_diags),
+    };
     Ok(CompileOutput {
-        rust: codegen::emit_bundle(&bundle, mode),
+        rust: codegen::emit_bundle(&bundle, mode, ffi.as_ref()),
         lints,
+        ffi,
     })
 }
 
 /// Compile for `jet test`: optional `main`, at least one test block required.
-pub fn compile_tests_with_path(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
+pub fn compile_tests_with_path(
+    src: &str,
+    file: &str,
+) -> Result<(String, Option<ffi::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
     let mut bundle = loader::load_entry_with_overlay(file, None, false)?;
     let diags = sema::check_bundle(&mut bundle, sema::CompileMode::Test);
@@ -71,7 +82,11 @@ pub fn compile_tests_with_path(src: &str, file: &str) -> Result<String, Vec<Diag
     if !errors.is_empty() {
         return Err(errors);
     }
-    Ok(codegen::emit_bundle_tests(&bundle))
+    let ffi = match ffi::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(ffi_diags),
+    };
+    Ok((codegen::emit_bundle_tests(&bundle, ffi.as_ref()), ffi))
 }
 
 fn compile_with_mode(
@@ -96,9 +111,27 @@ fn compile_with_mode(
     if !errors.is_empty() {
         return Err(errors);
     }
+    let bundle = ast::ProgramBundle {
+        entry: 0,
+        project_root: std::path::PathBuf::from("."),
+        modules: vec![ast::LoadedModule {
+            path: std::path::PathBuf::from(file),
+            display: file.to_string(),
+            alias: "main".to_string(),
+            imports: std::mem::take(&mut prog.imports),
+            items: std::mem::take(&mut prog.items),
+            source: src.to_string(),
+        }],
+        parse_teaching: Vec::new(),
+    };
+    let ffi = match ffi::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(ffi_diags),
+    };
     Ok(CompileOutput {
-        rust: codegen::emit(&prog, src, file),
+        rust: codegen::emit_bundle(&bundle, mode, ffi.as_ref()),
         lints,
+        ffi,
     })
 }
 

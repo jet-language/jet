@@ -1,0 +1,15 @@
+Error [E0702]: `s` can't use `mut` at the FFI boundary
+  --> tests/ui/ffi_bad_type.jet:2:16
+    |
+  2 |     fn bad(mut s: String) -> String = "std::convert::identity";
+    |                ^
+ Why: foreign functions take owned copies — `mut`, `take`, and `view` aren't allowed here
+ Fix: remove the access keyword and pass by value
+
+Error [E0102]: nothing named `bad` exists here
+  --> tests/ui/ffi_bad_type.jet:6:11
+    |
+  6 |     print(bad("hi"));
+    |           ^^^
+ Why: only functions that have been defined (or built in, like `print`) can be called
+ Fix: define it first (fn bad() { ... }), or call one that exists

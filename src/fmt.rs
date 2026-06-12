@@ -7,9 +7,9 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
-    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, ImportDecl, ImportKind, Item,
-    LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, Type, UnOp,
-    Variant, VariantPayload,
+    EnumLitArg, Expr, ExternFn, ExternRustBlock, Field, ForKind, Func, IfStmt, ImplDef, ImportDecl,
+    ImportKind, Item, LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
+    SwitchArm, Type, UnOp, Variant, VariantPayload,
 };
 use crate::diag::Span;
 use crate::lexer::{line_comments, Token, TokKind};
@@ -139,6 +139,9 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Test(t) => src[..t.name_span.start]
             .rfind(syntax::KW_TEST)
             .unwrap_or(t.name_span.start),
+        Item::ExternRust(b) => src[..b.crate_span.start]
+            .rfind(syntax::KW_EXTERN)
+            .unwrap_or(b.span.start),
     }
 }
 
@@ -177,6 +180,7 @@ fn item_span_end(item: &Item) -> usize {
             .unwrap_or(i.type_span.end),
         Item::Const(c) => c.value.span().end,
         Item::Test(t) => t.body.last().map(stmt_end).unwrap_or(t.name_span.end),
+        Item::ExternRust(b) => b.span.end,
     }
 }
 
@@ -324,7 +328,50 @@ impl<'a> Fmt<'a> {
             Item::Impl(i) => self.fmt_impl(i),
             Item::Const(c) => self.fmt_const(c),
             Item::Test(t) => self.fmt_test(t),
+            Item::ExternRust(b) => self.fmt_extern_rust(b),
         }
+    }
+
+    fn fmt_extern_rust(&mut self, block: &ExternRustBlock) {
+        self.write(syntax::KW_EXTERN);
+        self.write(" ");
+        self.write(syntax::KW_RUST);
+        self.write(" \"");
+        self.write(&block.crate_spec);
+        self.write("\" ");
+        self.write(syntax::BLOCK_OPEN);
+        self.newline();
+        self.with_indent(|f| {
+            for ef in &block.functions {
+                f.fmt_extern_fn(ef);
+            }
+        });
+        self.end_block();
+    }
+
+    fn fmt_extern_fn(&mut self, ef: &ExternFn) {
+        self.write("fn ");
+        self.write(&ef.name);
+        self.write("(");
+        for (i, p) in ef.params.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.fmt_param(p);
+        }
+        self.write(")");
+        if let Some(ret) = &ef.return_type {
+            self.write(" -> ");
+            if ef.is_view_return {
+                self.write("view ");
+            }
+            self.fmt_type(ret);
+        }
+        self.write(" = \"");
+        self.write(&ef.rust_path);
+        self.write("\"");
+        self.write(syntax::STMT_SEP);
+        self.newline();
     }
 
     fn fmt_test(&mut self, t: &crate::ast::TestDef) {

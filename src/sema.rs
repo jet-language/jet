@@ -9,8 +9,9 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr,
-    ForKind, Func, IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, ProgramBundle,
-    RustConstKind, Stmt, StrPart, StructDef, Type, UnOp, VariantPayload,
+    ExternFn, ExternRustBlock, ForKind, Func, IfStmt, IndexKind, Item, LValue, OrFallback,
+    Pattern, Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, Type, UnOp,
+    VariantPayload,
 };
 use crate::loader;
 use crate::collections::{self, is_map_key_type, is_reserved_type};
@@ -22,8 +23,9 @@ use std::collections::{HashMap, HashSet};
 pub struct FuncSig {
     pub params: Vec<(AccessConvention, Type)>,
     pub return_type: Option<Type>,
-    #[allow(dead_code)]
     pub is_view_return: bool,
+    /// S50: declared in `extern rust`, implemented by the FFI bridge.
+    pub is_extern: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -121,7 +123,174 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .collect(),
         return_type: f.return_type.clone(),
         is_view_return: f.is_view_return,
+        is_extern: false,
     }
+}
+
+fn extern_to_sig(ef: &ExternFn) -> FuncSig {
+    FuncSig {
+        params: ef
+            .params
+            .iter()
+            .map(|p| (p.convention, p.ty.clone()))
+            .collect(),
+        return_type: ef.return_type.clone(),
+        is_view_return: ef.is_view_return,
+        is_extern: true,
+    }
+}
+
+fn check_extern_block(
+    block: &ExternRustBlock,
+    registry: &TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let mut ok = true;
+    if crate::ffi::crate_spec_needs_version(&block.crate_spec) {
+        diags.push(Diagnostic::error(
+            "E0701",
+            format!(
+                "the crate `{}` needs a version pin",
+                block.crate_spec
+            ),
+            "every non-`std` `extern rust` crate must pin an exact version so builds stay reproducible"
+                .to_string(),
+            format!(
+                "write: extern rust \"{}@0.1\" {{ ... }}",
+                block.crate_spec
+            ),
+            Some(block.crate_span),
+        ));
+        ok = false;
+    }
+    for ef in &block.functions {
+        if !check_extern_fn(ef, registry, diags) {
+            ok = false;
+        }
+    }
+    ok
+}
+
+fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mut Vec<Diagnostic>) -> bool {
+    let mut ok = true;
+    if ef.is_view_return {
+        diags.push(ffi_type_error(
+            "a `view` return can't cross into Rust",
+            "foreign functions must return owned values — nothing borrowed across the boundary",
+            "return the value directly, or wrap it in a `List` or `String`",
+            ef.name_span,
+        ));
+        ok = false;
+    }
+    for p in &ef.params {
+        if p.convention != AccessConvention::Read {
+            diags.push(ffi_type_error(
+                &format!("`{}` can't use `{}` at the FFI boundary", p.name, access_keyword(p.convention)),
+                "foreign functions take owned copies — `mut`, `take`, and `view` aren't allowed here",
+                "remove the access keyword and pass by value",
+                p.name_span,
+            ));
+            ok = false;
+        }
+        if !is_ffi_type(&p.ty, registry) {
+            diags.push(ffi_type_error(
+                &format!("`{}` has type `{}`, which can't cross into Rust", p.name, p.ty.name()),
+                "only plain value types can cross the `extern rust` boundary — no references, callbacks, or trait objects",
+                "use `Int`, `Float`, `Bool`, `String`, `Char`, collections of those, or a struct whose fields are allowed",
+                p.ty_span,
+            ));
+            ok = false;
+        }
+    }
+    if let Some(rt) = &ef.return_type {
+        if !is_ffi_type(rt, registry) {
+            diags.push(ffi_type_error(
+                &format!("the return type `{}` can't cross from Rust", rt.name()),
+                "foreign functions must return owned values Jet understands",
+                "use an allowed return type, or flatten the result into simpler parts",
+                ef.name_span,
+            ));
+            ok = false;
+        }
+    }
+    ok
+}
+
+fn access_keyword(c: AccessConvention) -> &'static str {
+    match c {
+        AccessConvention::Read => "read",
+        AccessConvention::Mutate => syntax::KW_MUTATE,
+        AccessConvention::Move => syntax::KW_MOVE,
+    }
+}
+
+fn ffi_type_error(what: &str, why: &str, fix: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0702",
+        what.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        Some(span),
+    )
+}
+
+fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::Shared(_) => false,
+        Type::List(inner) | Type::Option(inner) => is_ffi_type(inner, registry),
+        Type::Map { key, value } => is_ffi_type(key, registry) && is_ffi_type(value, registry),
+        Type::Result { ok, err } => is_ffi_type(ok, registry) && is_ffi_type(err, registry),
+        Type::Named(name) => ffi_named_type_ok(name, registry),
+    }
+}
+
+fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
+    match registry.types.get(name) {
+        Some(TypeDef::Struct { fields, .. }) => fields
+            .iter()
+            .all(|(_, _, ty, _, _)| is_ffi_type(ty, registry)),
+        Some(TypeDef::Enum { variants, .. }) => variants.values().all(|(_, payload)| match payload {
+            VariantPayload::Unit => true,
+            VariantPayload::Single(ty, _) => is_ffi_type(ty, registry),
+            VariantPayload::Named(fs) => fs.iter().all(|f| is_ffi_type(&f.ty, registry)),
+        }),
+        None => false,
+    }
+}
+
+fn register_extern_fn(
+    ef: &ExternFn,
+    funcs: &mut HashMap<String, FuncSig>,
+    registry: &TypeRegistry,
+    consts: &HashMap<String, Type>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if ef.name == syntax::BUILTIN_PRINT
+        || ef.name == syntax::BUILTIN_PANIC
+        || ef.name == syntax::BUILTIN_REQUIRE
+        || ef.name == syntax::BUILTIN_REQUIRE_EQ
+    {
+        diags.push(Diagnostic::error(
+            "E0106",
+            format!("the name `{}` is built in and can't be redefined", ef.name),
+            format!("`{}` is provided by the language itself", ef.name),
+            "choose a different name for this foreign function".to_string(),
+            Some(ef.name_span),
+        ));
+        return;
+    }
+    if name_defined(&ef.name, funcs, registry, consts) {
+        diags.push(Diagnostic::error(
+            "E0105",
+            format!("`{}` is defined twice", ef.name),
+            "every function needs a unique name so calls aren't ambiguous".to_string(),
+            "rename or remove one of the definitions".to_string(),
+            Some(ef.name_span),
+        ));
+        return;
+    }
+    funcs.insert(ef.name.clone(), extern_to_sig(ef));
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +384,13 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ));
                 } else {
                     tests.insert(t.name.clone(), t.name_span);
+                }
+            }
+            Item::ExternRust(block) => {
+                if check_extern_block(block, &registry, &mut diags) {
+                    for ef in &block.functions {
+                        register_extern_fn(ef, &mut funcs, &registry, &consts, &mut diags);
+                    }
                 }
             }
         }
@@ -373,7 +549,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 ));
                 t.body = synthetic.body;
             }
-            Item::Const(_) => {}
+            Item::Const(_) | Item::ExternRust(_) => {}
         }
     }
 
@@ -675,61 +851,70 @@ fn check_func_body(
         expected_type: None,
         owner_type: owner_type.map(str::to_string),
         iter_borrowed: HashSet::new(),
+        borrow_ctx: false,
     };
-    for p in &f.params {
-        let skip_type_check = p.name == syntax::KW_SELF
-            && matches!(&p.ty, Type::Named(n) if n.is_empty());
-        if !skip_type_check {
-            ck.check_declared_type(&p.ty, p.ty_span);
-        }
-        if p.name == syntax::KW_SELF {
-            if let Some(owner) = owner_type {
-                let self_ty = Type::Named(owner.to_string());
-                ck.scopes.last_mut().unwrap().insert(
+    ck.check_params_and_body(f, owner_type);
+    ck.diags
+}
+
+impl<'a> Checker<'a> {
+    /// Shared tail of `check_func_body` / `check_func_body_bundle`:
+    /// declare parameters, check the body, enforce definite return.
+    fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+        for p in &f.params {
+            let skip_type_check = p.name == syntax::KW_SELF
+                && matches!(&p.ty, Type::Named(n) if n.is_empty());
+            if !skip_type_check {
+                self.check_declared_type(&p.ty, p.ty_span);
+            }
+            if p.name == syntax::KW_SELF {
+                if let Some(owner) = owner_type {
+                    let self_ty = Type::Named(owner.to_string());
+                    self.scopes.last_mut().unwrap().insert(
+                        p.name.clone(),
+                        LocalInfo {
+                            ty: self_ty,
+                            mutable: matches!(p.convention, AccessConvention::Mutate),
+                            param_conv: Some(p.convention),
+                            decl_loop_depth: 0,
+                        },
+                    );
+                }
+                continue;
+            }
+            if self.lookup(&p.name).is_some() {
+                self.diags.push(already_defined(&p.name, p.name_span));
+            } else {
+                self.scopes.last_mut().unwrap().insert(
                     p.name.clone(),
                     LocalInfo {
-                        ty: self_ty,
+                        ty: p.ty.clone(),
                         mutable: matches!(p.convention, AccessConvention::Mutate),
                         param_conv: Some(p.convention),
                         decl_loop_depth: 0,
                     },
                 );
             }
-            continue;
         }
-        if ck.lookup(&p.name).is_some() {
-            ck.diags.push(already_defined(&p.name, p.name_span));
-        } else {
-            ck.scopes.last_mut().unwrap().insert(
-                p.name.clone(),
-                LocalInfo {
-                    ty: p.ty.clone(),
-                    mutable: matches!(p.convention, AccessConvention::Mutate),
-                    param_conv: Some(p.convention),
-                    decl_loop_depth: 0,
-                },
-            );
+        self.check_block(&mut f.body, false);
+        if f.return_type.is_some() && !block_definitely_returns(&f.body) {
+            let rt = f.return_type.clone().unwrap();
+            self.diags.push(Diagnostic::error(
+                "E0114",
+                format!(
+                    "`{}` promises to return {}, but a path can reach the end without `return`",
+                    f.name,
+                    rt.show()
+                ),
+                "every way through the function must hand back a value".to_string(),
+                format!(
+                    "add a final `return ...;`, or an `{}` branch that returns",
+                    syntax::KW_ELSE
+                ),
+                Some(f.name_span),
+            ));
         }
     }
-    ck.check_block(&mut f.body, false);
-    if f.return_type.is_some() && !block_definitely_returns(&f.body) {
-        let rt = f.return_type.clone().unwrap();
-        ck.diags.push(Diagnostic::error(
-            "E0114",
-            format!(
-                "`{}` promises to return {}, but a path can reach the end without `return`",
-                f.name,
-                rt.show()
-            ),
-            "every way through the function must hand back a value".to_string(),
-            format!(
-                "add a final `return ...;`, or an `{}` branch that returns",
-                syntax::KW_ELSE
-            ),
-            Some(f.name_span),
-        ));
-    }
-    ck.diags
 }
 
 fn already_defined(name: &str, span: Span) -> Diagnostic {
@@ -782,6 +967,10 @@ struct Checker<'a> {
     owner_type: Option<String>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
+    /// True while inferring an expression that the generated Rust will only
+    /// borrow (method receivers, field/index bases, lvalues). Field reads in
+    /// borrow position must NOT be rewritten to `.clone()`.
+    borrow_ctx: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -879,9 +1068,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) {
+    /// Returns true when a diagnostic was emitted (the mismatch is already
+    /// reported); callers may add a context-specific error otherwise.
+    fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
         if want == got {
-            return;
+            return false;
         }
         if result_used_where_plain_expected(want, got) {
             self.diags.push(Diagnostic::error(
@@ -897,7 +1088,7 @@ impl<'a> Checker<'a> {
                 ),
                 Some(span),
             ));
-            return;
+            return true;
         }
         if option_used_where_plain_expected(want, got) {
             self.diags.push(Diagnostic::error(
@@ -912,19 +1103,21 @@ impl<'a> Checker<'a> {
                 ),
                 Some(span),
             ));
-            return;
+            return true;
         }
         if let Type::Option(inner) = got {
             if want.unwrap_option().is_some() {
                 if let Some(want_inner) = want.unwrap_option() {
                     if **inner != *want_inner {
                         self.report_option_mismatch(want, got, span);
+                        return true;
                     }
                 }
             } else if **inner != *want {
                 self.report_option_mismatch(want, got, span);
+                return true;
             }
-            return;
+            return false;
         }
         if want.unwrap_option().is_some() && got.unwrap_option().is_none() {
             self.diags.push(Diagnostic::error(
@@ -934,7 +1127,9 @@ impl<'a> Checker<'a> {
                 format!("wrap it with `{}(...)`", syntax::LIT_VALUE),
                 Some(span),
             ));
+            return true;
         }
+        false
     }
 
     fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {
@@ -986,7 +1181,7 @@ impl<'a> Checker<'a> {
             Stmt::Assign {
                 target,
                 op,
-                op_span,
+                op_span: _,
                 value,
             } => {
                 if let (Some(op), LValue::Index { span, .. }) = (op, &*target) {
@@ -1078,9 +1273,39 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    LValue::Index { base, index, span } => {
+                    LValue::Index { base, index, span, kind } => {
+                        self.borrow_ctx = true;
                         let base_ty = self.infer(base);
                         let idx_ty = self.infer(index);
+                        match &base_ty {
+                            Some(Type::Map { .. }) => *kind = IndexKind::Map,
+                            Some(Type::List(_)) => *kind = IndexKind::List,
+                            _ => {}
+                        }
+                        // Writing through `[ ]` changes the owner: the root
+                        // name must be changeable and not under a `for` borrow.
+                        if matches!(base_ty, Some(Type::Map { .. }) | Some(Type::List(_))) {
+                            if let Some(root) = expr_root_ident(base) {
+                                let root = root.to_string();
+                                if self.iter_borrowed.contains(&root) {
+                                    self.diags.push(collection_changed_in_loop(&root, *span));
+                                }
+                                if let Some(info) = self.lookup(&root) {
+                                    if !info.mutable {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0202",
+                                            format!(
+                                                "`{}` must be declared with `{}` to change it",
+                                                root, syntax::KW_VAR
+                                            ),
+                                            "assigning into a collection changes it".to_string(),
+                                            format!("declare `var {}: ...`", root),
+                                            Some(*span),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
                         if idx_ty.as_ref() != Some(&Type::Int)
                             && !matches!(base_ty, Some(Type::Map { .. }))
                         {
@@ -1131,23 +1356,21 @@ impl<'a> Checker<'a> {
                                     ));
                                 }
                             }
-                            if let Expr::Ident(n, _) = base.as_ref() {
-                                if self.iter_borrowed.contains(n) {
-                                    self.diags.push(collection_changed_in_loop(n, *span));
-                                }
-                                if let Some(info) = self.lookup(n) {
-                                    if !info.mutable {
-                                        self.diags.push(Diagnostic::error(
-                                            "E0202",
-                                            format!(
-                                                "`{}` must be declared with `{}` to change it",
-                                                n, syntax::KW_VAR
-                                            ),
-                                            "inserting into a map changes the map".to_string(),
-                                            format!("declare `var {}: ...`", n),
-                                            Some(*span),
-                                        ));
-                                    }
+                        } else if let Some(Type::List(elem_ty)) = base_ty {
+                            if let Some(vt) = vt {
+                                if vt != *elem_ty {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0108",
+                                        format!(
+                                            "this list holds {}, not {}",
+                                            elem_ty.show(),
+                                            vt.show()
+                                        ),
+                                        "every item stored in a list must have the same type"
+                                            .to_string(),
+                                        type_fix_hint(&elem_ty, &vt),
+                                        Some(value.span()),
+                                    ));
                                 }
                             }
                         } else if let Some(Type::String) = base_ty {
@@ -1186,6 +1409,9 @@ impl<'a> Checker<'a> {
                     (Some(e), Some(rt)) => {
                         let saved_expected = self.expected_type.clone();
                         self.expected_type = Some(rt.clone());
+                        // In a `-> view` function the returned value stays a
+                        // borrow, so a view call may flow straight through.
+                        self.borrow_ctx = self.view_return;
                         let et = self.infer(e);
                         self.expected_type = saved_expected;
                         // Returning a borrowed parameter would move out of a
@@ -1571,6 +1797,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     let bindings = self.validate_pattern(st, &pattern, pspan);
+                    self.mark_pattern_subject_moved(subject, &bindings);
                     self.scopes.push(HashMap::new());
                     for (name, ty) in bindings {
                         self.declare(
@@ -1823,7 +2050,77 @@ impl<'a> Checker<'a> {
 
     /// Infer and check an expression. Returns None when a problem was
     /// already reported (avoids error cascades).
+    ///
+    /// This wrapper owns two rules that depend on *where* the expression
+    /// appears (`borrow_ctx`):
+    ///  - a struct-field read in owning position is rewritten to `.clone()`
+    ///    so the generated Rust never moves a field out of its struct;
+    ///  - a `-> view` call result may only be read in place (borrow
+    ///    positions); storing or giving it away is E0206.
     fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+        let borrowed = std::mem::take(&mut self.borrow_ctx);
+        let ty = self.infer_inner(e);
+        if !borrowed {
+            if self.is_view_call(e) {
+                self.diags.push(Diagnostic::error(
+                    "E0206",
+                    "this borrowed view can only be read where it is".to_string(),
+                    "a `view` result points into someone else's value, so it can't be stored or given away".to_string(),
+                    "read it in place (print it, compare a field, call a method on it), or call a function that returns an owned value".to_string(),
+                    Some(e.span()),
+                ));
+                return None;
+            }
+            if let Some(t) = &ty {
+                if !type_is_copy(t) && field_read_to_clone(e, self.registry, self.imports) {
+                    let span = e.span();
+                    let old = std::mem::replace(e, Expr::Absent(span));
+                    *e = Expr::MethodCall {
+                        receiver: Box::new(old),
+                        method: "clone".to_string(),
+                        method_span: span,
+                        args: Vec::new(),
+                        recv_type: None,
+                    };
+                }
+            }
+        }
+        ty
+    }
+
+    /// Whether `e` is a call to something declared `-> view T` (its Rust
+    /// value is a reference).
+    fn is_view_call(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Call(c) => self
+                .funcs
+                .get(&c.name)
+                .is_some_and(|s| s.is_view_return),
+            Expr::MethodCall {
+                recv_type: Some(t),
+                method,
+                ..
+            } => self
+                .registry
+                .method(t, method)
+                .is_some_and(|m| m.is_view_return),
+            Expr::MethodCall { receiver, method, .. } => {
+                // Cross-file call through an import alias.
+                if let Expr::Ident(alias, _) = receiver.as_ref() {
+                    if let (Some(&idx), Some(mods)) = (self.imports.get(alias), self.modules) {
+                        return mods[idx]
+                            .funcs
+                            .get(method)
+                            .is_some_and(|s| s.is_view_return);
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         match e {
             Expr::Int(_, _) => Some(Type::Int),
             Expr::Float(_, _) => Some(Type::Float),
@@ -1831,6 +2128,8 @@ impl<'a> Checker<'a> {
             Expr::Str(parts, _) => {
                 for p in parts.iter_mut() {
                     if let StrPart::Interp(inner) = p {
+                        // Interpolation borrows (`.jet_show()`); never moves.
+                        self.borrow_ctx = true;
                         let t = self.infer(inner);
                         if let Some(t) = t {
                             if !is_printable(&t, self.registry) {
@@ -1954,7 +2253,8 @@ impl<'a> Checker<'a> {
                 method,
                 method_span,
                 args,
-            } => self.infer_method_call(receiver, method, *method_span, args),
+                recv_type,
+            } => self.infer_method_call(receiver, method, *method_span, args, recv_type),
             Expr::StructLit {
                 type_name,
                 import_ns,
@@ -1972,7 +2272,7 @@ impl<'a> Checker<'a> {
                 args,
                 span,
             } => Some(self.check_enum_lit(type_name, variant, args, *span)),
-            Expr::Present(inner, span) => {
+            Expr::Present(inner, _span) => {
                 let t = self.infer(inner)?;
                 Some(Type::Option(Box::new(t)))
             }
@@ -2192,7 +2492,7 @@ impl<'a> Checker<'a> {
     fn infer_or_fallback(
         &mut self,
         value: &mut Box<Expr>,
-        fallback: &OrFallback,
+        fallback: &mut OrFallback,
         span: Span,
         is_option: &mut bool,
     ) -> Option<Type> {
@@ -2221,8 +2521,9 @@ impl<'a> Checker<'a> {
         };
         match fallback {
             OrFallback::Value(e) => {
-                let mut e2 = e.as_ref().clone();
-                let ft = self.infer(&mut e2)?;
+                // Infer in place: sema rewrites inside the fallback (index
+                // kinds, S25 distribution, field clones) must reach codegen.
+                let ft = self.infer(e)?;
                 if ft != payload {
                     self.diags.push(Diagnostic::error(
                         "E0405",
@@ -2245,13 +2546,13 @@ impl<'a> Checker<'a> {
                 let ret = self.ret.clone();
                 match (&ret, ret_expr) {
                     (Some(rt), Some(e)) => {
-                        let mut e2 = e.as_ref().clone();
                         let saved = self.expected_type.clone();
                         self.expected_type = Some(rt.clone());
-                        let et = self.infer(&mut e2);
+                        let et = self.infer(e);
                         self.expected_type = saved;
                         if let Some(et) = et {
-                            self.check_type_assignable(rt, &et, e2.span());
+                            let espan = e.span();
+                            self.check_type_assignable(rt, &et, espan);
                         }
                     }
                     (Some(_), None) => {}
@@ -2272,9 +2573,10 @@ impl<'a> Checker<'a> {
                 let mut call = Call {
                     name: syntax::BUILTIN_PANIC.to_string(),
                     name_span: *name_span,
-                    args: args.clone(),
+                    args: std::mem::take(args),
                 };
                 self.check_panic_call(&mut call);
+                *args = call.args;
                 Some(payload)
             }
         }
@@ -2301,21 +2603,42 @@ impl<'a> Checker<'a> {
         ret: Option<Type>,
     ) -> Option<Type> {
         if collections::builtin_needs_mut_receiver(recv_ty, method) {
-            if let Expr::Ident(n, nspan) = receiver {
-                if self.iter_borrowed.contains(n) {
-                    self.diags.push(collection_changed_in_loop(n, *nspan));
+            if let Some(root) = expr_root_ident(receiver) {
+                let root = root.to_string();
+                let rspan = receiver.span();
+                if self.iter_borrowed.contains(&root) {
+                    self.diags.push(collection_changed_in_loop(&root, rspan));
                 }
-                if let Some(info) = self.lookup(n) {
+                if let Some(info) = self.lookup(&root) {
                     if !info.mutable {
+                        let (what, fix) = if root == syntax::KW_SELF {
+                            (
+                                format!(
+                                    "`.{}()` changes `{}`, but this method only reads it",
+                                    method,
+                                    syntax::KW_SELF
+                                ),
+                                format!(
+                                    "declare the enclosing method with `{} {}`",
+                                    syntax::KW_MUTATE,
+                                    syntax::KW_SELF
+                                ),
+                            )
+                        } else {
+                            (
+                                format!(
+                                    "`{}` must be declared with `{}` before calling `.{}()`",
+                                    root, syntax::KW_VAR, method
+                                ),
+                                format!("declare `var {}: ...`", root),
+                            )
+                        };
                         self.diags.push(Diagnostic::error(
                             "E0202",
-                            format!(
-                                "`{}` must be declared with `{}` before calling `.{}()`",
-                                n, syntax::KW_VAR, method
-                            ),
+                            what,
                             "this method changes the collection".to_string(),
-                            format!("declare `var {}: ...`", n),
-                            Some(*nspan),
+                            fix,
+                            Some(rspan),
                         ));
                     }
                 }
@@ -2480,6 +2803,7 @@ impl<'a> Checker<'a> {
         span: &Span,
         kind: &mut IndexKind,
     ) -> Option<Type> {
+        self.borrow_ctx = true;
         let base_ty = self.infer(base)?;
         let idx_ty = self.infer(index)?;
         match &base_ty {
@@ -2556,6 +2880,7 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        self.borrow_ctx = true;
         let base_ty = self.infer(base)?;
         for e in [start.as_mut(), end.as_mut()] {
             let t = self.infer(e)?;
@@ -2595,6 +2920,7 @@ impl<'a> Checker<'a> {
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
         }
+        self.borrow_ctx = true;
         let t = self.infer(inner)?;
         if let Type::Named(type_name) = &t {
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
@@ -2646,8 +2972,10 @@ impl<'a> Checker<'a> {
         method: &str,
         span: Span,
         args: &mut [crate::ast::CallArg],
+        recv_type_out: &mut Option<String>,
     ) -> Option<Type> {
         if method == "clone" {
+            self.borrow_ctx = true;
             return self.infer(receiver);
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
@@ -2688,6 +3016,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        self.borrow_ctx = true;
         let recv_ty = self.infer(receiver)?;
         if let Some(ret) = collections::builtin_method_return(&recv_ty, method, args.len(), false) {
             return self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
@@ -2749,8 +3078,87 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        *recv_type_out = Some(type_name.clone());
+        // `mut self` methods change the receiver: it must be changeable,
+        // free of an active `for` borrow, and not aliased by an argument.
+        if msig.self_conv == Some(AccessConvention::Mutate) {
+            if let Some(root) = expr_root_ident(receiver) {
+                let root = root.to_string();
+                if self.iter_borrowed.contains(&root) {
+                    self.diags.push(collection_changed_in_loop(&root, span));
+                }
+                if let Some(info) = self.lookup(&root) {
+                    if !info.mutable {
+                        let (what, fix) = if root == syntax::KW_SELF {
+                            (
+                                format!(
+                                    "`.{}()` changes `{}`, but this method only reads it",
+                                    method,
+                                    syntax::KW_SELF
+                                ),
+                                format!(
+                                    "declare the enclosing method with `{} {}`",
+                                    syntax::KW_MUTATE,
+                                    syntax::KW_SELF
+                                ),
+                            )
+                        } else {
+                            (
+                                format!(
+                                    "`{}` must be declared with `{}` before calling `.{}()`",
+                                    root,
+                                    syntax::KW_VAR,
+                                    method
+                                ),
+                                format!("declare `var {} = ...`", root),
+                            )
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E0202",
+                            what,
+                            "this method changes the value it's called on".to_string(),
+                            fix,
+                            Some(span),
+                        ));
+                    }
+                }
+                for arg in args.iter() {
+                    if matches!(&arg.expr, Expr::Ident(n, _) if *n == root) {
+                        self.diags.push(aliasing_while_mut(&root, arg.expr.span()));
+                    }
+                }
+            }
+        }
         if msig.self_conv == Some(AccessConvention::Move) {
             if let Expr::Ident(n, nspan) = &**receiver {
+                // A borrowed parameter can't be consumed (the generated Rust
+                // would move out of a `&T`/`&mut T`).
+                if let Some(info) = self.lookup(n) {
+                    if !type_is_copy(&info.ty)
+                        && matches!(
+                            info.param_conv,
+                            Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                        )
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0120",
+                            format!(
+                                "`{}` is only borrowed here, so `.{}()` can't consume it",
+                                n, method
+                            ),
+                            "this function reads the value but doesn't own it".to_string(),
+                            format!(
+                                "call it on a copy: `{}.clone().{}(...)` — or take ownership with `{} {}: {}`",
+                                n,
+                                method,
+                                syntax::KW_MOVE,
+                                n,
+                                info.ty.name()
+                            ),
+                            Some(*nspan),
+                        ));
+                    }
+                }
                 self.mark_moved(n.clone(), *nspan);
             }
         }
@@ -2795,9 +3203,56 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
-            for (arg, (_, pty)) in args.iter_mut().zip(sig.params.iter()) {
+            for (arg, (pconv, pty)) in args.iter_mut().zip(sig.params.iter()) {
+                if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
+                    self.borrow_ctx = true;
+                }
                 if let Some(aty) = self.infer(&mut arg.expr) {
-                    self.check_type_assignable(pty, &aty, arg.expr.span());
+                    let span = arg.expr.span();
+                    let reported = self.check_type_assignable(pty, &aty, span);
+                    if !reported && aty != *pty {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`{}` wants {} here, but this is {}",
+                                name,
+                                pty.show(),
+                                aty.show()
+                            ),
+                            "every argument must match its parameter's type".to_string(),
+                            type_fix_hint(pty, &aty),
+                            Some(span),
+                        ));
+                    }
+                }
+                // Cross-file calls follow the same ownership rules.
+                if let Expr::Ident(n, nspan) = &arg.expr {
+                    match (pconv, arg.convention) {
+                        (AccessConvention::Move, AccessConvention::Move) => {
+                            if !pty.is_scalar() {
+                                self.mark_moved(n.clone(), *nspan);
+                            }
+                        }
+                        (AccessConvention::Move, AccessConvention::Read) => {
+                            if !pty.is_scalar() {
+                                arg.flags.implicit_clone = true;
+                            }
+                        }
+                        (AccessConvention::Mutate, AccessConvention::Read) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0202",
+                                format!(
+                                    "parameter `{}` requires `{}` at the call site",
+                                    n,
+                                    syntax::KW_MUTATE
+                                ),
+                                format!("`{}` needs to change this value while it borrows it", name),
+                                format!("write `{} {}` when calling `{}`", syntax::KW_MUTATE, n, name),
+                                Some(*nspan),
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
             }
             return sig.return_type.clone();
@@ -2902,13 +3357,14 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if let Some(arg) = args.get_mut(arg_idx) {
+                if matches!(param_conv, AccessConvention::Read) && !param_ty.is_scalar() {
+                    self.borrow_ctx = true;
+                }
                 let arg_ty = self.infer(&mut arg.expr);
                 if let Some(arg_ty) = arg_ty {
-                    self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
-                    if arg_ty != *param_ty
-                        && !matches!(param_ty, Type::Named(_))
-                        && !option_used_where_plain_expected(param_ty, &arg_ty)
-                    {
+                    let reported =
+                        self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
+                    if !reported && arg_ty != *param_ty {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(
@@ -2924,7 +3380,78 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
+                if arg.convention == AccessConvention::Mutate
+                    && !matches!(arg.expr, Expr::Ident(_, _))
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0202",
+                        format!("`{}` needs a plain `var` name after it", syntax::KW_MUTATE),
+                        "only a named binding can be handed out for changing".to_string(),
+                        format!(
+                            "bind the value first: `{} x = ...;` then pass `{} x`",
+                            syntax::KW_VAR,
+                            syntax::KW_MUTATE
+                        ),
+                        Some(arg.span),
+                    ));
+                }
+                // Same ownership rules as plain calls (E0201/E0202/E0203).
                 match (param_conv, arg.convention) {
+                    (AccessConvention::Move, AccessConvention::Read) => {
+                        if let Expr::Ident(name, span) = &arg.expr {
+                            if is_cloneable(param_ty, self.registry, self.structs) {
+                                arg.flags.implicit_clone = true;
+                                self.diags.push(Diagnostic::lint(
+                                    "L0201",
+                                    format!(
+                                        "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                        name,
+                                        syntax::KW_MOVE,
+                                        name
+                                    ),
+                                    format!(
+                                        "`{}` expects to take ownership of this value",
+                                        method
+                                    ),
+                                    format!(
+                                        "write `{} {}` to move, or `{} .clone()` to copy explicitly",
+                                        syntax::KW_MOVE,
+                                        name,
+                                        name
+                                    ),
+                                    Some(*span),
+                                ));
+                            } else {
+                                self.diags.push(Diagnostic::error(
+                                    "E0201",
+                                    format!(
+                                        "`{}` needs `{}` here — this value can't be copied",
+                                        method,
+                                        syntax::KW_MOVE
+                                    ),
+                                    format!(
+                                        "parameter `{}` takes ownership; passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                        arg_idx + 1,
+                                        name,
+                                        syntax::KW_MOVE
+                                    ),
+                                    format!(
+                                        "write `{} {}` to transfer ownership",
+                                        syntax::KW_MOVE,
+                                        name
+                                    ),
+                                    Some(*span),
+                                ));
+                            }
+                        }
+                    }
+                    (AccessConvention::Move, AccessConvention::Move) => {
+                        if let Expr::Ident(name, span) = &arg.expr {
+                            if !param_ty.is_scalar() {
+                                self.mark_moved(name.clone(), *span);
+                            }
+                        }
+                    }
                     (AccessConvention::Mutate, AccessConvention::Read) => {
                         if let Expr::Ident(name, nspan) = &arg.expr {
                             self.diags.push(Diagnostic::error(
@@ -2935,6 +3462,48 @@ impl<'a> Checker<'a> {
                                 Some(*nspan),
                             ));
                         }
+                    }
+                    (AccessConvention::Mutate, AccessConvention::Mutate) => {
+                        if let Expr::Ident(name, span) = &arg.expr {
+                            if let Some(info) = self.lookup(name) {
+                                if !info.mutable {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0111",
+                                        format!(
+                                            "`{}` was made with `{}`, so it can't be changed",
+                                            name,
+                                            syntax::KW_VAL
+                                        ),
+                                        format!(
+                                            "`{}` will change this value, so it must be a `{}`",
+                                            method,
+                                            syntax::KW_VAR
+                                        ),
+                                        format!("declare it with `{} {} = ...`", syntax::KW_VAR, name),
+                                        Some(*span),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    (
+                        AccessConvention::Read | AccessConvention::Mutate,
+                        AccessConvention::Move,
+                    ) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0203",
+                            format!(
+                                "`{}` passed to a parameter that does not consume",
+                                syntax::KW_MOVE
+                            ),
+                            "only `take` parameters accept a moved value at the call site"
+                                .to_string(),
+                            format!(
+                                "remove `{}` or change the parameter to `take`",
+                                syntax::KW_MOVE
+                            ),
+                            Some(arg.span),
+                        ));
                     }
                     _ => {}
                 }
@@ -3060,7 +3629,13 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(private_item(name, *name_span));
             }
+            let field_def = def_fields.iter().find(|(n, ..)| n == name);
+            let saved_expected = self.expected_type.clone();
+            if let Some((_, _, fty, _, _)) = field_def {
+                self.expected_type = Some(fty.clone());
+            }
             let et = self.infer(expr);
+            self.expected_type = saved_expected;
             if let Some((_, _, fty, _, _)) = def_fields.iter().find(|(n, ..)| n == name) {
                 if let Some(et) = et {
                     self.check_type_assignable(fty, &et, expr.span());
@@ -3306,7 +3881,27 @@ impl<'a> Checker<'a> {
         let Some(st) = subj_ty else {
             return HashMap::new();
         };
-        self.validate_pattern(&st, pattern, span)
+        let bindings = self.validate_pattern(&st, pattern, span);
+        self.mark_pattern_subject_moved(subject, &bindings);
+        bindings
+    }
+
+    /// Binding a non-copy payload out of a pattern gives the subject away in
+    /// the generated Rust (`if let` / `matches!` move the place), so the old
+    /// name must stop being usable — otherwise rustc rejects the output (I2).
+    fn mark_pattern_subject_moved(
+        &mut self,
+        subject: &Expr,
+        bindings: &HashMap<String, Type>,
+    ) {
+        if bindings.values().all(type_is_copy) {
+            return;
+        }
+        if let Expr::Ident(n, nspan) = subject {
+            if n != syntax::KW_IT && self.lookup(n).is_some() {
+                self.mark_moved(n.clone(), *nspan);
+            }
+        }
     }
 
     fn validate_pattern(
@@ -3448,6 +4043,7 @@ impl<'a> Checker<'a> {
             ));
         }
         for arg in call.args.iter_mut() {
+            self.borrow_ctx = true; // panic shows the message via `.jet_show()`
             let t = self.infer(&mut arg.expr);
             if let Some(t) = t {
                 if t != Type::String {
@@ -3543,12 +4139,11 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        let mut left = call.args[0].expr.clone();
-        let mut right = call.args[1].expr.clone();
-        let lt = self.infer(&mut left);
-        let rt = self.infer(&mut right);
-        call.args[0].expr = left;
-        call.args[1].expr = right;
+        // require_eq compares and shows by reference in the generated Rust.
+        self.borrow_ctx = true;
+        let lt = self.infer(&mut call.args[0].expr);
+        self.borrow_ctx = true;
+        let rt = self.infer(&mut call.args[1].expr);
         match (lt, rt) {
             (Some(lt), Some(rt)) => {
                 if lt != rt {
@@ -3867,6 +4462,7 @@ impl<'a> Checker<'a> {
                 return None;
             }
             let arg = &mut call.args[0];
+            self.borrow_ctx = true; // print borrows via `.jet_show()`
             if let Some(t) = self.infer(&mut arg.expr) {
                 if !is_printable(&t, self.registry) {
                     self.diags.push(Diagnostic::error(
@@ -3962,17 +4558,43 @@ impl<'a> Checker<'a> {
                     self.diags.push(aliasing_mut_after_read(name, *span));
                 }
             }
+            // A shared-read parameter borrows in the generated Rust, so the
+            // argument expression is a borrow position (no field clones,
+            // view results allowed). Extern calls pass owned copies instead.
+            if !sig.is_extern {
+                if let Some((AccessConvention::Read, pty)) = sig.params.get(i) {
+                    if !pty.is_scalar() {
+                        self.borrow_ctx = true;
+                    }
+                }
+            } else if let Some((_, pty)) = sig.params.get(i) {
+                if !pty.is_scalar() {
+                    arg.flags.implicit_clone = true;
+                }
+            }
             let arg_ty = self.infer(&mut arg.expr);
             let Some((param_conv, param_ty)) = sig.params.get(i) else {
                 continue;
             };
+            if arg.convention == AccessConvention::Mutate
+                && !matches!(arg.expr, Expr::Ident(_, _))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0202",
+                    format!("`{}` needs a plain `var` name after it", syntax::KW_MUTATE),
+                    "only a named binding can be handed out for changing".to_string(),
+                    format!(
+                        "bind the value first: `{} x = ...;` then pass `{} x`",
+                        syntax::KW_VAR,
+                        syntax::KW_MUTATE
+                    ),
+                    Some(arg.span),
+                ));
+            }
 
             if let Some(arg_ty) = &arg_ty {
-                self.check_type_assignable(param_ty, arg_ty, arg.expr.span());
-                if arg_ty != param_ty
-                    && !matches!(param_ty, Type::Named(_))
-                    && !option_used_where_plain_expected(param_ty, arg_ty)
-                {
+                let reported = self.check_type_assignable(param_ty, arg_ty, arg.expr.span());
+                if !reported && arg_ty != param_ty {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
@@ -4296,9 +4918,6 @@ fn is_cloneable(
         }
         Type::Result { ok, err } => is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs),
         Type::Named(name) => {
-            if name == "NoClone" {
-                return false;
-            }
             registry.contains(name)
                 && match registry.types.get(name) {
                     Some(TypeDef::Struct { fields, .. }) => fields
@@ -4638,6 +5257,44 @@ fn collection_root_name(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Walk `a.b[i].c` down to the root name (`a`, possibly `self`).
+fn expr_root_ident(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(n, _) => Some(n),
+        Expr::Field(inner, _, _) => expr_root_ident(inner),
+        Expr::Index { base, .. } | Expr::Slice { base, .. } => expr_root_ident(base),
+        _ => None,
+    }
+}
+
+/// Types the generated Rust copies implicitly (no move on read).
+fn type_is_copy(ty: &Type) -> bool {
+    ty.is_scalar() || matches!(ty, Type::Char)
+}
+
+/// True when `e` is a struct-field *value* read (not enum-literal sugar like
+/// `Color.Red`, not `.clone`, not an import-alias path).
+fn field_read_to_clone(
+    e: &Expr,
+    registry: &TypeRegistry,
+    imports: &HashMap<String, usize>,
+) -> bool {
+    match e {
+        Expr::Field(inner, member, _) => {
+            if member == "clone" {
+                return false;
+            }
+            match inner.as_ref() {
+                Expr::Ident(n, _) => {
+                    registry.enum_variants(n).is_none() && !imports.contains_key(n)
+                }
+                _ => true,
+            }
+        }
+        _ => false,
+    }
+}
+
 fn builtin_type_from_ident(name: &str) -> Option<Type> {
     match name {
         syntax::TYPE_INT => Some(Type::Int),
@@ -4746,6 +5403,19 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                         st.tests.insert(t.name.clone(), t.name_span);
                     }
                 }
+                Item::ExternRust(block) => {
+                    if check_extern_block(block, &st.registry, &mut diags) {
+                        for ef in &block.functions {
+                            register_extern_fn(
+                                ef,
+                                &mut st.funcs,
+                                &st.registry,
+                                &st.consts,
+                                &mut diags,
+                            );
+                        }
+                    }
+                }
             }
         }
         register_type_methods(&module.items, &mut st.registry, &mut diags);
@@ -4772,6 +5442,76 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 }
                 Err(d) => diags.push(d),
             }
+        }
+    }
+
+    // Parity with the single-file path: `@static` and address-taken consts
+    // must lower to Rust `static` in bundle mode too.
+    for module in bundle.modules.iter_mut() {
+        let const_names: Vec<String> = module
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Const(c) => Some(c.name.clone()),
+                _ => None,
+            })
+            .collect();
+        let mut address_taken: HashSet<String> = HashSet::new();
+        for item in &module.items {
+            match item {
+                Item::Func(f) => {
+                    walk_stmts_for_const_refs(&f.body, &const_names, &mut address_taken)
+                }
+                Item::Struct(s) => {
+                    for m in &s.methods {
+                        walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
+                    }
+                }
+                Item::Enum(e) => {
+                    for m in &e.methods {
+                        walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
+                    }
+                }
+                Item::Impl(i) => {
+                    for m in &i.methods {
+                        walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
+                    }
+                }
+            Item::Test(t) => {
+                walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
+            }
+            Item::Const(_) | Item::ExternRust(_) => {}
+        }
+    }
+        for item in &mut module.items {
+            if let Item::Const(c) = item {
+                let force_static = c.attrs.contains(&ConstAttr::ForceStatic);
+                c.rust_kind = if force_static || address_taken.contains(&c.name) {
+                    RustConstKind::Static
+                } else {
+                    RustConstKind::Const
+                };
+            }
+        }
+    }
+
+    // Each non-entry module becomes a Rust `mod user_<alias>`; a type in the
+    // entry file with the same name would collide in the type namespace.
+    for (idx, m) in bundle.modules.iter().enumerate() {
+        if idx == bundle.entry {
+            continue;
+        }
+        if states[bundle.entry].registry.contains(&m.alias) {
+            diags.push(Diagnostic::error(
+                "E0105",
+                format!(
+                    "the type `{}` clashes with the imported file `{}`",
+                    m.alias, m.display
+                ),
+                "a type and an imported module can't share a name".to_string(),
+                format!("rename the type, or import with `{} other_name`", syntax::KW_AS),
+                None,
+            ));
         }
     }
 
@@ -4942,59 +5682,8 @@ fn check_func_body_bundle(
         expected_type: None,
         owner_type: owner_type.map(str::to_string),
         iter_borrowed: HashSet::new(),
+        borrow_ctx: false,
     };
-    for p in &f.params {
-        let skip_type_check = p.name == syntax::KW_SELF
-            && matches!(&p.ty, Type::Named(n) if n.is_empty());
-        if !skip_type_check {
-            ck.check_declared_type(&p.ty, p.ty_span);
-        }
-        if p.name == syntax::KW_SELF {
-            if let Some(owner) = owner_type {
-                let self_ty = Type::Named(owner.to_string());
-                ck.scopes.last_mut().unwrap().insert(
-                    p.name.clone(),
-                    LocalInfo {
-                        ty: self_ty,
-                        mutable: matches!(p.convention, AccessConvention::Mutate),
-                        param_conv: Some(p.convention),
-                        decl_loop_depth: 0,
-                    },
-                );
-            }
-            continue;
-        }
-        if ck.lookup(&p.name).is_some() {
-            ck.diags.push(already_defined(&p.name, p.name_span));
-        } else {
-            ck.scopes.last_mut().unwrap().insert(
-                p.name.clone(),
-                LocalInfo {
-                    ty: p.ty.clone(),
-                    mutable: matches!(p.convention, AccessConvention::Mutate),
-                    param_conv: Some(p.convention),
-                    decl_loop_depth: 0,
-                },
-            );
-        }
-    }
-    ck.check_block(&mut f.body, false);
-    if f.return_type.is_some() && !block_definitely_returns(&f.body) {
-        let rt = f.return_type.clone().unwrap();
-        ck.diags.push(Diagnostic::error(
-            "E0114",
-            format!(
-                "`{}` promises to return {}, but a path can reach the end without `return`",
-                f.name,
-                rt.show()
-            ),
-            "every way through the function must hand back a value".to_string(),
-            format!(
-                "add a final `return ...;`, or an `{}` branch that returns",
-                syntax::KW_ELSE
-            ),
-            Some(f.name_span),
-        ));
-    }
+    ck.check_params_and_body(f, owner_type);
     ck.diags
 }

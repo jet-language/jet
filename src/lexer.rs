@@ -51,6 +51,7 @@ pub enum TokKind {
     KwLoop,
     KwUnsafe,
     KwImport,
+    KwExtern,
     KwTest,
     Ident(String),
     Str(Vec<StrTokPart>),
@@ -173,6 +174,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwLoop => format!("the keyword `{}`", syntax::KW_LOOP),
         TokKind::KwUnsafe => format!("the keyword `{}`", syntax::KW_UNSAFE),
         TokKind::KwImport => format!("the keyword `{}`", syntax::KW_IMPORT),
+        TokKind::KwExtern => format!("the keyword `{}`", syntax::KW_EXTERN),
         TokKind::KwTest => format!("the keyword `{}`", syntax::KW_TEST),
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
@@ -284,6 +286,7 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == syntax::KW_LOOP => Some(TokKind::KwLoop),
         s if s == syntax::KW_UNSAFE => Some(TokKind::KwUnsafe),
         s if s == syntax::KW_IMPORT => Some(TokKind::KwImport),
+        s if s == syntax::KW_EXTERN => Some(TokKind::KwExtern),
         s if s == syntax::KW_TEST => Some(TokKind::KwTest),
         _ => None,
     }
@@ -357,7 +360,7 @@ impl<'a> Lexer<'a> {
             }
 
             let start = self.pos(self.i);
-            let mut simple = |lx: &mut Self, kind: TokKind, len: usize| {
+            let simple = |lx: &mut Self, kind: TokKind, len: usize| {
                 let tok = Token {
                     kind,
                     span: Span::new(start, lx.pos(lx.i + len)),

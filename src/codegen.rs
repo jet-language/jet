@@ -16,6 +16,7 @@ use crate::ast::{
     IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, ProgramBundle, RustConstKind,
     Stmt, StrPart, StructDef, TestDef, Type, UnOp, VariantPayload,
 };
+use crate::ffi::FfiLink;
 use crate::loader;
 use crate::sema::CompileMode;
 use crate::diag::{span_line_col, Span};
@@ -79,7 +80,7 @@ const TEST_PRELUDE: &str = r#"fn jet_test_require(cond: bool, msg: String) {
         panic!("{}", msg);
     }
 }
-fn jet_test_require_eq<T: JetShow + PartialEq>(left: T, right: T) {
+fn jet_test_require_eq<T: JetShow + PartialEq>(left: &T, right: &T) {
     if left != right {
         panic!("left: {}, right: {}", left.jet_show(), right.jet_show());
     }
@@ -91,21 +92,6 @@ fn mangle(name: &str) -> String {
         "main".to_string()
     } else {
         format!("user_{}", name)
-    }
-}
-
-fn mangle_module(module: &str, name: &str) -> String {
-    if name == "main" {
-        "main".to_string()
-    } else {
-        format!("user_{}_{}", module, name)
-    }
-}
-
-fn mangle_in(module: Option<&str>, name: &str) -> String {
-    match module {
-        Some(m) => mangle_module(m, name),
-        None => mangle(name),
     }
 }
 
@@ -129,12 +115,14 @@ struct Cx {
     file: String,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
     test_mode: bool,
-    /// Current module namespace when emitting inside `mod user_<alias>`.
-    module_ns: Option<String>,
     /// Import alias -> Rust module name (`user_scoring`).
     import_mods: HashMap<String, String>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
+    ffi_crate: Option<String>,
+    /// M7: Jet function name -> wrapper symbol in the FFI crate.
+    extern_funcs: HashMap<String, String>,
 }
 
 const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice};\n\n";
@@ -169,26 +157,18 @@ impl Cx {
                 self.rust_type(ok),
                 self.rust_type(err)
             ),
-            Type::Named(name) => {
-                if let Some(m) = &self.module_ns {
-                    format!("user_{}_{}", m, name)
-                } else {
-                    format!("user_{}", name)
-                }
-            }
+            // Items inside an imported file live in `mod user_<alias>`; the
+            // module provides the namespace, so item names stay plain.
+            Type::Named(name) => format!("user_{}", name),
         }
     }
 
     fn mangle_name(&self, name: &str) -> String {
-        mangle_in(self.module_ns.as_deref(), name)
+        mangle(name)
     }
 
     fn type_prefix(&self, type_name: &str) -> String {
-        if let Some(m) = &self.module_ns {
-            format!("user_{}_{}", m, type_name)
-        } else {
-            format!("user_{}", type_name)
-        }
+        format!("user_{}", type_name)
     }
 }
 
@@ -235,14 +215,14 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(PRELUDE);
     out.push('\n');
 
-    let mut cx = build_cx(prog, src, file);
+    let cx = build_cx(prog, src, file);
 
     for item in &prog.items {
         match item {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) => {}
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_) => {}
         }
     }
 
@@ -294,7 +274,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) => {}
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_) => {}
         }
     }
 
@@ -355,10 +335,37 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 }
 
 fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
-    build_cx_items(&prog.items, src, file)
+    let extern_funcs = extern_func_map(&prog.items);
+    build_cx_items(&prog.items, src, file, None, &extern_funcs)
 }
 
-fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
+fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for item in items {
+        if let Item::ExternRust(block) = item {
+            for ef in &block.functions {
+                map.insert(ef.name.clone(), format!("jet_ffi_{}", ef.name));
+            }
+        }
+    }
+    map
+}
+
+fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for module in &bundle.modules {
+        map.extend(extern_func_map(&module.items));
+    }
+    map
+}
+
+fn build_cx_items(
+    items: &[Item],
+    src: &str,
+    file: &str,
+    link: Option<&FfiLink>,
+    extern_funcs: &HashMap<String, String>,
+) -> Cx {
     let mut cx = Cx {
         sigs: HashMap::new(),
         method_sigs: HashMap::new(),
@@ -373,9 +380,10 @@ fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
         src: src.to_string(),
         file: file.to_string(),
         test_mode: false,
-        module_ns: None,
         import_mods: HashMap::new(),
         import_sigs: HashMap::new(),
+        ffi_crate: link.map(|l| l.crate_name.clone()),
+        extern_funcs: extern_funcs.clone(),
     };
 
     for item in items {
@@ -418,6 +426,17 @@ fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
                 cx.consts
                     .insert(c.name.clone(), mangle(&c.name).to_uppercase());
             }
+            Item::ExternRust(block) => {
+                for ef in &block.functions {
+                    cx.sigs.insert(
+                        ef.name.clone(),
+                        ef.params
+                            .iter()
+                            .map(|p| (p.convention, p.ty.clone()))
+                            .collect(),
+                    );
+                }
+            }
             Item::Impl(_) | Item::Test(_) => {}
         }
     }
@@ -433,13 +452,8 @@ fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
                     cx.comparable.insert(s.name.clone());
                 }
                 for m in &s.methods {
-                    cx.method_sigs.insert(
-                        (s.name.clone(), m.name.clone()),
-                        m.params
-                            .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
-                            .collect(),
-                    );
+                    cx.method_sigs
+                        .insert((s.name.clone(), m.name.clone()), method_sig_params(m));
                 }
             }
             Item::Enum(e) => {
@@ -451,24 +465,14 @@ fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
                     cx.comparable.insert(e.name.clone());
                 }
                 for m in &e.methods {
-                    cx.method_sigs.insert(
-                        (e.name.clone(), m.name.clone()),
-                        m.params
-                            .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
-                            .collect(),
-                    );
+                    cx.method_sigs
+                        .insert((e.name.clone(), m.name.clone()), method_sig_params(m));
                 }
             }
             Item::Impl(i) => {
                 for m in &i.methods {
-                    cx.method_sigs.insert(
-                        (i.type_name.clone(), m.name.clone()),
-                        m.params
-                            .iter()
-                            .map(|p| (p.convention, p.ty.clone()))
-                            .collect(),
-                    );
+                    cx.method_sigs
+                        .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
                 }
             }
             _ => {}
@@ -476,6 +480,16 @@ fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
     }
 
     cx
+}
+
+/// Parameter conventions for a method, excluding `self` — call-site args
+/// align positionally with this list (the receiver is emitted separately).
+fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
+    f.params
+        .iter()
+        .filter(|p| p.name != syntax::KW_SELF)
+        .map(|p| (p.convention, p.ty.clone()))
+        .collect()
 }
 
 fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
@@ -672,8 +686,10 @@ fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     if cx.comparable.contains(&s.name) {
         derives.push("PartialEq");
     }
+    // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
+    // keeps cross-module references compiling (R2: sema is the gatekeeper).
     out.push_str(&format!(
-        "#[derive({})]\nstruct user_{}{} {{\n",
+        "#[derive({})]\npub struct user_{}{} {{\n",
         derives.join(", "),
         s.name,
         lt_params
@@ -688,7 +704,7 @@ fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         } else {
             cx.field_rust_type(&s.name, &f.name, &f.ty)
         };
-        out.push_str(&format!("    {}: {},\n", mangle(&f.name), field_ty));
+        out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
     if lifetimes.is_empty() {
@@ -717,7 +733,7 @@ fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if cx.comparable.contains(&e.name) {
         derives.push("PartialEq");
     }
-    out.push_str(&format!("#[derive({})]\nenum user_{} {{\n", derives.join(", "), e.name));
+    out.push_str(&format!("#[derive({})]\npub enum user_{} {{\n", derives.join(", "), e.name));
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
@@ -789,9 +805,8 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
         .collect::<Vec<_>>()
         .join(", ");
     out.push_str(&format!(
-        "{}{}fn {}({}){} {{\n",
+        "{}pub fn {}({}){} {{\n",
         pad,
-        if f.is_pub { "pub " } else { "" },
         mangle(&f.name),
         params,
         ret_clause
@@ -877,7 +892,7 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let vis = if f.is_pub { "pub " } else { "" };
+    let vis = if f.name == "main" { "" } else { "pub " };
     out.push_str(&format!(
         "{vis}fn {}({}){} {{\n",
         cx.mangle_name(&f.name),
@@ -968,8 +983,12 @@ fn emit_stmt(
                         None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
                     }
                 }
-                LValue::Index { base, index, .. } => {
-                    let is_map = matches!(expr_jet_ty(base, env), Some(Type::Map { .. }));
+                LValue::Index { base, index, kind, .. } => {
+                    // Sema resolved the collection kind (R2); fall back to
+                    // the env type only for un-checked trees (tests).
+                    let is_map = matches!(kind, IndexKind::Map)
+                        || (matches!(kind, IndexKind::Unknown)
+                            && matches!(expr_jet_ty(base, env), Some(Type::Map { .. })));
                     let b = emit_expr(cx, base, env);
                     let i = emit_expr(cx, index, env);
                     if is_map {
@@ -1242,11 +1261,6 @@ fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
                     mangle(&bindings[0])
                 )
             } else {
-                let b = bindings
-                    .iter()
-                    .map(|n| mangle(n))
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 format!(
                     "matches!({}, {}::{} {{ {} }})",
                     subject,
@@ -1411,7 +1425,7 @@ fn emit_require_eq(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>
     let left = emit_expr(cx, &call.args[0].expr, env);
     let right = emit_expr(cx, &call.args[1].expr, env);
     if cx.test_mode {
-        return format!("{{ jet_test_require_eq({}, {}); }}", left, right);
+        return format!("{{ jet_test_require_eq(&({}), &({})); }}", left, right);
     }
     let (line, _) = span_line_col(&cx.src, call.name_span.start);
     format!(
@@ -1792,8 +1806,9 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             receiver,
             method,
             args,
+            recv_type,
             ..
-        } => emit_method_call(cx, receiver, method, args, env),
+        } => emit_method_call(cx, receiver, method, args, recv_type.as_deref(), env),
         Expr::StructLit {
             type_name,
             import_ns,
@@ -1807,29 +1822,15 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                     .get(ns)
                     .map(|s| s.as_str())
                     .unwrap_or("user_unknown");
-                let stem = mod_name.strip_prefix("user_").unwrap_or(mod_name);
-                let rust_type = format!("{}::{}", mod_name, mangle_module(stem, type_name));
+                let rust_type = format!("{}::{}", mod_name, mangle(type_name));
                 for (n, _, e) in fields {
-                    parts.push(format!(
-                        "{}: {}",
-                        mangle_module(stem, n),
-                        emit_expr(cx, e, env)
-                    ));
+                    parts.push(format!("{}: {}", mangle(n), emit_expr(cx, e, env)));
                 }
                 return format!("{} {{ {} }}", rust_type, parts.join(", "));
             }
-            let rust_type = if cx.module_ns.is_some() {
-                cx.type_prefix(type_name)
-            } else {
-                format!("user_{}", type_name)
-            };
+            let rust_type = format!("user_{}", type_name);
             for (n, _, e) in fields {
-                let fname = if let Some(m) = &cx.module_ns {
-                    mangle_in(Some(m), n)
-                } else {
-                    mangle(n).to_string()
-                };
-                parts.push(format!("{}: {}", fname, emit_expr(cx, e, env)));
+                parts.push(format!("{}: {}", mangle(n), emit_expr(cx, e, env)));
             }
             format!("{} {{ {} }}", rust_type, parts.join(", "))
         }
@@ -2052,28 +2053,27 @@ fn emit_method_call(
     receiver: &Expr,
     method: &str,
     args: &[crate::ast::CallArg],
+    recv_type: Option<&str>,
     env: &HashMap<String, Slot>,
 ) -> String {
     if method == "clone" {
         return format!("({}).clone()", emit_expr(cx, receiver, env));
     }
-    if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
-        return s;
+    // When sema resolved a user-defined method, never fall into the
+    // built-in table (a user method may share a name like `len`).
+    if recv_type.is_none() {
+        if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
+            return s;
+        }
     }
     if let Expr::Ident(alias, _) = receiver {
         if let Some(mod_name) = cx.import_mods.get(alias) {
-            let stem = mod_name.strip_prefix("user_").unwrap_or(mod_name.as_str());
             let sig = cx
                 .import_sigs
                 .get(&(alias.clone(), method.to_string()))
                 .map(|s| s.as_slice());
             let arg_str = emit_call_args(cx, sig, args, env);
-            return format!(
-                "{}::{}({})",
-                mod_name,
-                mangle_module(stem, method),
-                arg_str
-            );
+            return format!("{}::{}({})", mod_name, mangle(method), arg_str);
         }
     }
     if let Expr::Ident(type_name, _) = receiver {
@@ -2087,7 +2087,10 @@ fn emit_method_call(
             }
         }
         if cx.type_names.contains(type_name) {
-            let arg_str = emit_call_args(cx, None, args, env);
+            let sig = cx
+                .method_sigs
+                .get(&(type_name.clone(), method.to_string()));
+            let arg_str = emit_call_args(cx, sig.map(|s| s.as_slice()), args, env);
             return format!(
                 "{}::{}({})",
                 cx.type_prefix(type_name),
@@ -2097,17 +2100,10 @@ fn emit_method_call(
         }
     }
     let recv = emit_expr(cx, receiver, env);
-    let sig = receiver_type_name(receiver, cx)
-        .and_then(|t| cx.method_sigs.get(&(t, method.to_string())));
+    let sig = recv_type
+        .and_then(|t| cx.method_sigs.get(&(t.to_string(), method.to_string())));
     let arg_str = emit_call_args(cx, sig.map(|s| s.as_slice()), args, env);
     format!("({}).{}({})", recv, mangle(method), arg_str)
-}
-
-fn receiver_type_name(receiver: &Expr, cx: &Cx) -> Option<String> {
-    match receiver {
-        Expr::Ident(n, _) if cx.type_names.contains(n) => Some(n.clone()),
-        _ => None,
-    }
 }
 
 fn emit_call_args(
@@ -2177,8 +2173,42 @@ fn emit_call(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -> S
         return emit_require_eq(cx, call, env);
     }
     let sig = cx.sigs.get(&call.name);
-    let args = emit_call_args(cx, sig.map(|s| s.as_slice()), &call.args, env);
+    let args = if cx.extern_funcs.contains_key(&call.name) {
+        emit_extern_call_args(cx, sig.map(|s| s.as_slice()), &call.args, env)
+    } else {
+        emit_call_args(cx, sig.map(|s| s.as_slice()), &call.args, env)
+    };
+    if let Some(wrapper) = cx.extern_funcs.get(&call.name) {
+        let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+        return format!("{}::{}({})", crate_name, wrapper, args);
+    }
     format!("{}({})", cx.mangle_name(&call.name), args)
+}
+
+fn emit_extern_call_args(
+    cx: &Cx,
+    sig: Option<&[(AccessConvention, Type)]>,
+    args: &[crate::ast::CallArg],
+    env: &HashMap<String, Slot>,
+) -> String {
+    args.iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let mut s = emit_expr(cx, &a.expr, env);
+            if a.flags.implicit_clone {
+                s = format!("({}).clone()", s);
+            } else if a.flags.shared_auto_clone {
+                s = format!("std::sync::Arc::clone(&{})", s);
+            }
+            if let Some((_, ty)) = sig.and_then(|ps| ps.get(i)) {
+                if !ty.is_scalar() && !a.flags.implicit_clone {
+                    s = format!("({}).clone()", s);
+                }
+            }
+            s
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
@@ -2225,7 +2255,7 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) => {}
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_) => {}
         }
     }
     for item in items {
@@ -2246,7 +2276,7 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
     }
 }
 
-pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode) -> String {
+pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
     let mut out = String::new();
     out.push_str(&format!(
@@ -2255,10 +2285,14 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode) -> String {
         syntax::FILE_EXT
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    if let Some(ffi) = link {
+        out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
+    }
     out.push_str(PRELUDE);
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
+    let extern_funcs = bundle_extern_funcs(bundle);
 
     for (i, module) in bundle.modules.iter().enumerate() {
         if i == bundle.entry {
@@ -2267,22 +2301,33 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode) -> String {
         let ns = module.alias.clone();
         out.push_str(&format!("mod user_{ns} {{\n"));
         out.push_str(MOD_USE);
-        let mut cx = build_cx_items(&module.items, &module.source, &module.display);
-        cx.module_ns = Some(ns.clone());
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            link,
+            &extern_funcs,
+        );
         cx.import_mods = import_mod_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
         emit_program_items(&cx, &module.items, &mut out, true);
         out.push_str("}\n\n");
     }
 
-    let mut cx = build_cx_items(&entry.items, &entry.source, &entry.display);
+    let mut cx = build_cx_items(
+        &entry.items,
+        &entry.source,
+        &entry.display,
+        link,
+        &extern_funcs,
+    );
     cx.import_mods = import_mods;
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     emit_program_items(&cx, &entry.items, &mut out, true);
     out
 }
 
-pub fn emit_bundle_tests(bundle: &ProgramBundle) -> String {
+pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
     let tests: Vec<&TestDef> = entry
         .items
@@ -2300,11 +2345,15 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle) -> String {
         syntax::BINARY_NAME
     ));
     out.push_str("#![allow(warnings)]\n\n");
+    if let Some(ffi) = link {
+        out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
+    }
     out.push_str(PRELUDE);
     out.push_str(TEST_PRELUDE);
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
+    let extern_funcs = bundle_extern_funcs(bundle);
 
     for (i, module) in bundle.modules.iter().enumerate() {
         if i == bundle.entry {
@@ -2313,8 +2362,13 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle) -> String {
         let ns = module.alias.clone();
         out.push_str(&format!("mod user_{ns} {{\n"));
         out.push_str(MOD_USE);
-        let mut cx = build_cx_items(&module.items, &module.source, &module.display);
-        cx.module_ns = Some(ns);
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            link,
+            &extern_funcs,
+        );
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
@@ -2322,7 +2376,13 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle) -> String {
         out.push_str("}\n\n");
     }
 
-    let mut cx = build_cx_items(&entry.items, &entry.source, &entry.display);
+    let mut cx = build_cx_items(
+        &entry.items,
+        &entry.source,
+        &entry.display,
+        link,
+        &extern_funcs,
+    );
     cx.test_mode = true;
     cx.import_mods = import_mods;
     cx.import_sigs = import_sig_map(bundle, bundle.entry);

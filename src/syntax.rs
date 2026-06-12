@@ -190,6 +190,10 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_IMPORT: &str = "import";
 pub const KW_AS: &str = "as";
 
+/// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
+pub const KW_EXTERN: &str = "extern"; // S50
+pub const KW_RUST: &str = "rust"; // S50
+
 /// S14: foreign forms recognized only for teaching errors.
 pub const FOREIGN_TRY: &str = "try";
 pub const FOREIGN_LET: &str = "let";
