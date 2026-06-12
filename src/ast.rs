@@ -101,6 +101,46 @@ impl Type {
 
 #[derive(Debug)]
 pub struct Program {
+    /// S16 (M6): `import` declarations at the top of this file.
+    pub imports: Vec<ImportDecl>,
+    pub items: Vec<Item>,
+}
+
+/// S16: `import "path" [as alias];` or `import name [as alias];`
+#[derive(Debug, Clone)]
+pub struct ImportDecl {
+    pub kind: ImportKind,
+    pub alias: String,
+    pub alias_span: Span,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImportKind {
+    /// Quoted path relative to this file's directory (no `.jet` suffix).
+    File(String, Span),
+    /// Bare module name — searched from the project root.
+    Module(String, Span),
+}
+
+#[derive(Debug)]
+pub struct ProgramBundle {
+    /// Index into `modules` for the entry file.
+    pub entry: usize,
+    /// Directory containing the entry file (project root until M12 `jet.toml`).
+    pub project_root: std::path::PathBuf,
+    pub modules: Vec<LoadedModule>,
+}
+
+#[derive(Debug)]
+pub struct LoadedModule {
+    pub path: std::path::PathBuf,
+    /// Stable path string for diagnostics/codegen (e.g. `examples/21_imports/main.jet`).
+    pub display: String,
+    pub source: String,
+    /// Namespace when this file is imported (`import … as alias`).
+    pub alias: String,
+    pub imports: Vec<ImportDecl>,
     pub items: Vec<Item>,
 }
 
@@ -193,6 +233,8 @@ pub struct ImplDef {
 
 #[derive(Debug)]
 pub struct Field {
+    /// S18: visible to other files via `import` when true.
+    pub is_pub: bool,
     pub is_stored_ref: bool,
     pub stored_ref_label: Option<String>,
     pub name: String,
@@ -518,9 +560,11 @@ pub enum Expr {
         method_span: Span,
         args: Vec<CallArg>,
     },
-    /// S29: `Type { field: expr, ... }`.
+    /// S29: `Type { field: expr, ... }` or `alias.Type { ... }` across imports (S16).
     StructLit {
         type_name: String,
+        /// When set, the struct type lives in the imported module `alias`.
+        import_ns: Option<String>,
         fields: Vec<(String, Span, Expr)>,
         span: Span,
     },

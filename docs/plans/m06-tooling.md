@@ -20,16 +20,16 @@ untouched. **Line width 100 deferred** (v1 does not wrap; future org
 config may add width + enforcement).
 
 - `jet fmt file.jet` rewrites in place; `--check` exits 1 on diff
-  (CI mode), printing a unified diff.
+(CI mode), printing a unified diff.
 - Implementation: pretty-print from the AST **with comments preserved**.
-  The lexer must start retaining comment tokens with spans; attach each
-  comment to the nearest following node (or trailing on same line).
-  This is the hardest part of the phase — write idempotence tests first.
+The lexer must start retaining comment tokens with spans; attach each
+comment to the nearest following node (or trailing on same line).
+This is the hardest part of the phase — write idempotence tests first.
 - fmt also canonicalizes S14 foreign spellings when the parser's
-  teaching-error recovery produced a valid AST (e.g. `let` → `val`):
-  the recovery path already knows the canonical form; fmt just prints it.
+teaching-error recovery produced a valid AST (e.g. `let` → `val`):
+the recovery path already knows the canonical form; fmt just prints it.
 - **Exit:** `jet fmt` is idempotent (fmt(fmt(x)) == fmt(x)) across every
-  file in examples/ and tests/ui/*.fixed.jet, enforced by a new test.
+file in examples/ and tests/ui/*.fixed.jet, enforced by a new test.
 
 ## Phase 2 — `jet test` + `jet new` ✓ 2026-06-12
 
@@ -43,23 +43,23 @@ test "parse_age accepts plain digits" {
 ```
 
 - `test "name" { … }` parses like a parameterless fn body; only allowed
-  at top level (E0601 elsewhere). Duplicate names → E0105.
+at top level (E0601 elsewhere). Duplicate names → E0105.
 - `require_eq(a, b)` joins `require` (M4/S36): on failure prints both values
-  ("left: …, right: …") then the runtime report.
+("left: …, right: …") then the runtime report.
 - `jet test file.jet` (or a directory) compiles ONE binary containing
-  all tests + a tiny generated harness (no cargo, R9): each test runs,
-  failures are caught per-test via `catch_unwind` **inside generated
-  code only** (the runtime helper may use it; user code still never
-  unwinds observably). Output: one line per test, `pass`/`FAIL`, summary
-  line, exit 1 on any failure. Normal `jet run`/`build` ignores test
-  blocks entirely.
+all tests + a tiny generated harness (no cargo, R9): each test runs,
+failures are caught per-test via `catch_unwind` **inside generated
+code only** (the runtime helper may use it; user code still never
+unwinds observably). Output: one line per test, `pass`/`FAIL`, summary
+line, exit 1 on any failure. Normal `jet run`/`build` ignores test
+blocks entirely.
 - `jet new name` creates `name/` with `main.jet` (hello world) and
-  `.gitignore` (`build/`). Nothing else — no manifest (R9; manifests are
-  M12 and opt-in).
+`.gitignore` (`build/`). Nothing else — no manifest (R9; manifests are
+M12 and opt-in).
 - **Exit:** a failing-then-fixed test example; goldens pin `jet test`
-  output shape.
+output shape.
 
-## Phase 3 — Multi-file programs (S16 + S18 enforcement)
+## Phase 3 — Multi-file programs (S16 + S18 enforcement) ✓ 2026-06-12
 
 ```jet
 import "grades/scoring";         // file: scoring.jet beside this file's tree
@@ -73,46 +73,47 @@ fn main() {
 ```
 
 - **File import** `import "<path>" [as alias];`: path relative to the
-  **importing file's directory**; `.jet` appended; subdirs ok
-  (`"util/text"`). Default namespace = last path segment. No `..` past
-  the entry file's directory tree (E0602). Missing file → E0603.
+**importing file's directory**; `.jet` appended; subdirs ok
+(`"util/text"`). Default namespace = last path segment. No `..` past
+the entry file's directory tree (E0602). Missing file → E0603.
 - **Module import** `import <name> [as alias];`: search recursively from
-  **project root** (entry file's directory, or `jet.toml` dir when M12)
-  for `name.jet` or `name/{name,main}.jet`; skip `build/`, `target/`,
-  dot-dirs. Ambiguous duplicates → E0606 (lists paths). Default
-  namespace = `name`.
+**project root** (entry file's directory, or `jet.toml` dir when M12)
+for `name.jet` or `name/{name,main}.jet`; skip `build/`, `target/`,
+dot-dirs. Ambiguous duplicates → E0606 (lists paths). Default
+namespace = `name`.
 - Import cycles → E0604 (prints the cycle). Reach items as
-  `namespace.item`; only `pub` items visible (E0605). `pub` on fields
-  gates cross-file field access/construction (finishes M3 rule 2).
+`namespace.item`; only `pub` items visible (E0605). `pub` on fields
+gates cross-file field access/construction (finishes M3 rule 2).
 - Compilation model: the driver parses the import graph, sema checks the
-  whole program (modules are namespaces, not separate crates), codegen
-  emits ONE Rust file with `mod` blocks. Name mangling becomes
-  `user_<module>_<name>` internally; `main` excepted.
+whole program (modules are namespaces, not separate crates), codegen
+emits ONE Rust file with `mod` blocks. Name mangling becomes
+`user_<module>_<name>` internally; `main` excepted.
 - `jet run entry.jet` keeps working unchanged for single files (R9).
-- **Exit:** a 3-file example program; ui fixtures for E0602–E0605.
+- **Exit:** a 3-file example program; ui fixtures for E0602–E0606 (including
+  private fields, E0605).
 
 ## Phase 4 — `--small` profile + LSP v0
 
 - `jet build --small`: `opt-level="z"`, full LTO, and the S15-ratified
-  panic stance. Exit criterion: measurably smaller binary than default
-  on examples/16_wordcount.jet (a test asserts the size relation, not
-  absolute numbers).
+panic stance. Exit criterion: measurably smaller binary than default
+on examples/16_wordcount.jet (a test asserts the size relation, not
+absolute numbers).
 - **LSP v0** (`jet lsp`, stdio JSON-RPC): scope is exactly
-  (a) publish full-document diagnostics on open/change — reusing the
-  real compiler front end in-process, (b) code actions that apply S14
-  autocorrects (the quick-fix payload comes from the teaching error's
-  known canonical form), (c) formatting via Phase 1.
-  Implementation: hand-rolled JSON (de)serializer for the ~6 message
-  types used (I6: no serde without owner approval — if this proves
-  miserable, STOP and ask the owner to approve serde_json for the
-  tooling binary only, never the compiler core).
-  Defer everything else (completion/hover/goto) to M13.
+(a) publish full-document diagnostics on open/change — reusing the
+real compiler front end in-process, (b) code actions that apply S14
+autocorrects (the quick-fix payload comes from the teaching error's
+known canonical form), (c) formatting via Phase 1.
+Implementation: hand-rolled JSON (de)serializer for the ~6 message
+types used (I6: no serde without owner approval — if this proves
+miserable, STOP and ask the owner to approve serde_json for the
+tooling binary only, never the compiler core).
+Defer everything else (completion/hover/goto) to M13.
 - A minimal VS Code extension lives in `editors/vscode/` (TextMate
-  grammar for highlighting + LSP client pointing at `jet lsp`). Plain
-  JSON/JS, no build step.
+grammar for highlighting + LSP client pointing at `jet lsp`). Plain
+JSON/JS, no build step.
 - **Exit:** scripted LSP test: send didOpen with `let x = 1;`, receive
-  the E0009 diagnostic + a quick-fix edit that turns it into `val x = 1;`;
-  autocorrect turns a pasted C-style snippet into canonical Jet.
+the E0009 diagnostic + a quick-fix edit that turns it into `val x = 1;`;
+autocorrect turns a pasted C-style snippet into canonical Jet.
 
 ## Diagnostics to register
 

@@ -544,7 +544,6 @@ implementation milestone is pending.
 
 | ID  | Milestone | Enforcement today                                                | Code  |
 | --- | --------- | ---------------------------------------------------------------- | ----- |
-| S16 | M6        | `import` statement parses until multi-file driver lands          | E0019 |
 | S15 | M6        | default unwind in `src/main.rs`; `--small` + `panic=abort` in M6 | —     |
 
 

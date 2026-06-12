@@ -88,7 +88,7 @@ expr     = precedence climbing over:
 ### Staged errors
 
 Features that exist in the roadmap but not the language yet fail with an
-error naming the milestone (E0019 `import` → M6).
+error naming the milestone (see staged table in docs/02).
 A future feature must never die as a generic syntax error. Teaching
 errors (S14, E0008–E0016) recognize foreign spellings — `def`, `let`,
 `set`, `println`, `and`/`or`/`not`, `Text`, `try`, `use`, `match` — and
@@ -226,6 +226,23 @@ Example: `examples/20_tests.jet`. Goldens: `examples/expected/20_tests.test.out`
 During development, run **`cargo build`** then **`./target/debug/jet`** — the
 nix-profile `jet` is only updated after **`nix build`** and reinstalling the
 package.
+
+## M6 phase 3 — multi-file imports (done)
+
+Two import forms (S16): **`import "path/to/file";`** (relative to the importing
+file's directory; default namespace = last path segment) and **`import name;`**
+(searches recursively from the project root for `name.jet` or `name/{name,main}.jet`;
+skips `build/`, `target/`, dot-dirs). Optional **`as alias`** in both forms.
+
+Cross-file access uses **`namespace.item`**; only **`pub`** items are visible from
+other files (S18), including **`pub`** struct fields. The driver loads the import
+graph, sema checks the whole program, codegen emits one Rust file with **`mod`**
+blocks and `user_<module>_<name>` mangling (`main` stays `main`).
+
+Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
+**E0604** import cycle · **E0605** private item · **E0606** ambiguous module.
+Example: `examples/21_imports/` (three files; file import + `as alias`). UI
+fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambiguous}/`.
 
 ## Deliberately absent
 

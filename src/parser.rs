@@ -47,12 +47,34 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
     }
 }
 
-/// S14 (+ staged S16 E0019): recovered in the AST; fmt may rewrite to canon.
+fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
+    if parts.len() != 1 {
+        return Err(Diagnostic::error(
+            "E0003",
+            "an import path must be one piece of quoted text".to_string(),
+            "file paths can't contain `{ }` interpolation".to_string(),
+            format!("write: {} \"path/to/file\";", syntax::KW_IMPORT),
+            None,
+        ));
+    }
+    match &parts[0] {
+        StrTokPart::Lit(s) => Ok(s.clone()),
+        StrTokPart::Interp(_) => Err(Diagnostic::error(
+            "E0003",
+            "an import path can't contain `{ }` interpolation".to_string(),
+            "file paths are fixed strings".to_string(),
+            format!("write: {} \"path/to/file\";", syntax::KW_IMPORT),
+            None,
+        )),
+    }
+}
+
+/// S14: recovered in the AST; fmt may rewrite to canon.
 fn is_teaching_parse_diag(code: &str) -> bool {
     matches!(
         code,
         "E0008" | "E0009" | "E0010" | "E0012" | "E0013" | "E0014" | "E0015" | "E0016"
-            | "E0017" | "E0018" | "E0019" | "E0020" | "E0021" | "E0023" | "E0024" | "E0025"
+            | "E0017" | "E0018" | "E0020" | "E0021" | "E0023" | "E0024" | "E0025"
             | "E0026" | "E0027" | "E0028" | "E0030" | "E0034"
     )
 }
@@ -139,36 +161,91 @@ impl<'a> Parser<'a> {
 
     // --- items ----------------------------------------------------------
 
-    /// S16 (ratified, staged M6): parse and reject `import` with E0019.
-    fn import_staged(&mut self) {
+    /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
+    fn import_decl(&mut self) -> Result<crate::ast::ImportDecl, Diagnostic> {
         let start = self.bump().span;
-        while !matches!(self.peek().kind, TokKind::Semi | TokKind::Eof) {
+        let (kind, alias_default) = match &self.peek().kind {
+            TokKind::Str(parts) => {
+                let path = string_literal_value(parts)?;
+                let span = self.bump().span;
+                (
+                    crate::ast::ImportKind::File(path.clone(), span),
+                    path.rsplit('/').next().unwrap_or("module").to_string(),
+                )
+            }
+            TokKind::Ident(name) => {
+                let module_name = name.clone();
+                let span = self.bump().span;
+                (
+                    crate::ast::ImportKind::Module(module_name.clone(), span),
+                    module_name,
+                )
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a file path in quotes or a module name after `{}`, found {}",
+                        syntax::KW_IMPORT,
+                        describe(other)
+                    ),
+                    format!(
+                        "write `{} \"path/to/file\";` or `{} module_name;`",
+                        syntax::KW_IMPORT,
+                        syntax::KW_IMPORT
+                    ),
+                    format!(
+                        "e.g. `{} \"util/helpers\";` or `{} scoring;`",
+                        syntax::KW_IMPORT,
+                        syntax::KW_IMPORT
+                    ),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let (alias, alias_span) = if matches!(
+            &self.peek().kind,
+            TokKind::Ident(n) if n == syntax::KW_AS
+        ) {
             self.bump();
-        }
-        if matches!(self.peek().kind, TokKind::Semi) {
-            self.bump();
-        }
-        self.diags.push(Diagnostic::error(
-            "E0019",
-            format!("`{}` doesn't work yet", syntax::KW_IMPORT),
-            "multi-file programs arrive in M6 — the import forms are already decided (S16)"
-                .to_string(),
-            format!(
-                "keep everything in one file for now; later: `{} \"path\";`, `{} name;`, or add `{} alias`",
-                syntax::KW_IMPORT,
-                syntax::KW_IMPORT,
-                syntax::KW_AS
-            ),
-            Some(start),
-        ));
+            let (name, span) = self.expect_ident("after `as`")?;
+            (name, span)
+        } else {
+            (alias_default, start)
+        };
+        self.expect(TokKind::Semi, "after an import")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::ast::ImportDecl {
+            kind,
+            alias,
+            alias_span,
+            span: Span::new(start.start, end),
+        })
     }
 
     fn program(&mut self) -> Program {
+        let mut imports = Vec::new();
         let mut items = Vec::new();
         loop {
             let r = match &self.peek().kind {
                 TokKind::Eof => break,
-                TokKind::KwFn | TokKind::KwPub => self.func().map(Item::Func),
+                TokKind::KwImport => match self.import_decl() {
+                    Ok(imp) => {
+                        imports.push(imp);
+                        continue;
+                    }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_stmt();
+                        continue;
+                    }
+                },
+                TokKind::KwFn => self.func().map(Item::Func),
+                TokKind::KwPub => match self.peek2().kind {
+                    TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                    TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                    _ => self.func().map(Item::Func),
+                },
                 TokKind::KwTest => self.test_def().map(Item::Test),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -265,10 +342,6 @@ impl<'a> Parser<'a> {
                     self.sync_stmt();
                     continue;
                 }
-                TokKind::KwImport => {
-                    self.import_staged();
-                    continue;
-                }
                 other => {
                     let d = Diagnostic::error(
                         "E0003",
@@ -302,7 +375,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Program { items }
+        Program { imports, items }
     }
 
     fn test_def(&mut self) -> Result<crate::ast::TestDef, Diagnostic> {
@@ -456,7 +529,10 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::KwFn | TokKind::KwPub) {
+            let is_method = matches!(self.peek().kind, TokKind::KwFn)
+                || (matches!(self.peek().kind, TokKind::KwPub)
+                    && matches!(self.peek2().kind, TokKind::KwFn));
+            if is_method {
                 methods.push(self.method_in_type()?);
             } else {
                 fields.push(self.field()?);
@@ -584,6 +660,10 @@ impl<'a> Parser<'a> {
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
         let mut is_stored_ref = false;
         let mut stored_ref_label = None;
         if matches!(self.peek().kind, TokKind::KwStored) {
@@ -600,6 +680,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Colon, "after a field name")?;
         let (ty, ty_span) = self.type_()?;
         Ok(Field {
+            is_pub,
             is_stored_ref,
             stored_ref_label,
             name,
@@ -1339,6 +1420,23 @@ impl<'a> Parser<'a> {
                     let full = Span::new(expr.span().start, qspan.end);
                     expr = Expr::Try(Box::new(expr), full);
                 }
+                TokKind::LBrace => {
+                    let import_lit = if let Expr::Field(inner, type_name, _) = &expr {
+                        if let Expr::Ident(alias, _) = inner.as_ref() {
+                            Some((alias.clone(), type_name.clone()))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some((alias, type_name)) = import_lit {
+                        let start = expr.span().start;
+                        expr = self.struct_lit_after_import(alias, type_name, start)?;
+                    } else {
+                        break;
+                    }
+                }
                 TokKind::LBracket => {
                     let open = self.bump().span;
                     let start = self.expr()?;
@@ -1765,8 +1863,36 @@ impl<'a> Parser<'a> {
         self.bump();
         Ok(Expr::StructLit {
             type_name,
+            import_ns: None,
             fields,
             span: Span::new(start_span.start, end),
+        })
+    }
+
+    fn struct_lit_after_import(
+        &mut self,
+        alias: String,
+        type_name: String,
+        start: usize,
+    ) -> Result<Expr, Diagnostic> {
+        self.expect(TokKind::LBrace, "to open a struct literal")?;
+        let mut fields = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            let (field, field_span) = self.expect_ident("for a field name")?;
+            self.expect(TokKind::Colon, "after a field name in a struct literal")?;
+            let value = self.expr()?;
+            fields.push((field, field_span, value));
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.bump();
+        Ok(Expr::StructLit {
+            type_name,
+            import_ns: Some(alias),
+            fields,
+            span: Span::new(start, end),
         })
     }
 

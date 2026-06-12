@@ -7,9 +7,9 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
-    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, OrFallback, Param,
-    Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, Type, UnOp, Variant,
-    VariantPayload,
+    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, ImportDecl, ImportKind, Item,
+    LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, Type, UnOp,
+    Variant, VariantPayload,
 };
 use crate::diag::Span;
 use crate::lexer::{line_comments, Token, TokKind};
@@ -39,10 +39,21 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         indent: 0,
         pending_blank: false,
     };
-    for (i, item) in prog.items.iter().enumerate() {
-        if i > 0 {
+    let mut first = true;
+    for imp in &prog.imports {
+        if !first {
             f.blank_line_between_items();
         }
+        first = false;
+        f.emit_leading(imp.span.start);
+        f.fmt_import(imp);
+        f.emit_trailing(imp.span.end);
+    }
+    for item in &prog.items {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
         f.emit_leading(item_span_start(item, src));
         f.fmt_item(item);
         f.emit_trailing(item_span_end(item));
@@ -496,7 +507,34 @@ impl<'a> Fmt<'a> {
         self.write(";");
     }
 
+    fn fmt_import(&mut self, imp: &ImportDecl) {
+        self.write(syntax::KW_IMPORT);
+        self.write(" ");
+        match &imp.kind {
+            ImportKind::File(path, _) => {
+                self.write("\"");
+                self.write(path);
+                self.write("\"");
+            }
+            ImportKind::Module(name, _) => self.write(name),
+        }
+        let default_alias = match &imp.kind {
+            ImportKind::File(path, _) => path.rsplit('/').next().unwrap_or("module"),
+            ImportKind::Module(name, _) => name.as_str(),
+        };
+        if imp.alias != default_alias {
+            self.write(" ");
+            self.write(syntax::KW_AS);
+            self.write(" ");
+            self.write(&imp.alias);
+        }
+        self.write(";");
+    }
+
     fn fmt_field(&mut self, field: &Field) {
+        if field.is_pub {
+            self.write("pub ");
+        }
         if field.is_stored_ref {
             self.write("ref");
             if let Some(label) = &field.stored_ref_label {
@@ -834,9 +872,14 @@ impl<'a> Fmt<'a> {
             }
             Expr::StructLit {
                 type_name,
+                import_ns,
                 fields,
                 ..
             } => {
+                if let Some(ns) = import_ns {
+                    self.write(ns.as_str());
+                    self.write(".");
+                }
                 self.write(type_name);
                 self.write(" {");
                 for (i, (name, _, expr)) in fields.iter().enumerate() {

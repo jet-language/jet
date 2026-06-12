@@ -9,9 +9,10 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr,
-    ForKind, Func, IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, RustConstKind,
-    Stmt, StrPart, StructDef, Type, UnOp, VariantPayload,
+    ForKind, Func, IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, ProgramBundle,
+    RustConstKind, Stmt, StrPart, StructDef, Type, UnOp, VariantPayload,
 };
+use crate::loader;
 use crate::collections::{self, is_map_key_type, is_reserved_type};
 use crate::diag::{Diagnostic, Span};
 use crate::syntax;
@@ -38,7 +39,7 @@ struct MethodSig {
 enum TypeDef {
     Struct {
         name_span: Span,
-        fields: Vec<(String, Span, Type, bool)>,
+        fields: Vec<(String, Span, Type, bool, bool)>,
         methods: HashMap<String, MethodSig>,
     },
     Enum {
@@ -58,7 +59,7 @@ impl TypeRegistry {
         self.types.contains_key(name)
     }
 
-    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool)]> {
+    fn struct_fields(&self, name: &str) -> Option<&[(String, Span, Type, bool, bool)]> {
         match self.types.get(name) {
             Some(TypeDef::Struct { fields, .. }) => Some(fields.as_slice()),
             _ => None,
@@ -219,8 +220,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         }
     }
 
-    register_type_methods(prog, &mut registry, &mut diags);
-    register_impl_methods(prog, &mut registry, &mut diags);
+    register_type_methods(&prog.items, &mut registry, &mut diags);
+    register_impl_methods(&prog.items, &mut registry, &mut diags);
 
     match mode {
         CompileMode::Run => match funcs.get("main") {
@@ -472,6 +473,7 @@ fn register_struct(
             f.name_span,
             f.ty.clone(),
             f.is_stored_ref,
+            f.is_pub,
         ));
     }
     registry.types.insert(
@@ -562,8 +564,8 @@ fn register_enum(
     );
 }
 
-fn register_type_methods(prog: &Program, registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
-    for item in &prog.items {
+fn register_type_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
+    for item in items {
         let (type_name, methods, field_names) = match item {
             Item::Struct(s) => (
                 s.name.as_str(),
@@ -604,8 +606,8 @@ fn register_type_methods(prog: &Program, registry: &mut TypeRegistry, diags: &mu
     }
 }
 
-fn register_impl_methods(prog: &Program, registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
-    for item in &prog.items {
+fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
+    for item in items {
         let Item::Impl(i) = item else { continue };
         if !registry.contains(&i.type_name) {
             continue;
@@ -653,11 +655,15 @@ fn check_func_body(
     consts: &HashMap<String, Type>,
     owner_type: Option<&str>,
 ) -> Vec<Diagnostic> {
+    let empty_imports = HashMap::new();
     let mut ck = Checker {
         funcs,
         registry,
         structs,
         consts,
+        modules: None,
+        module_idx: 0,
+        imports: &empty_imports,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -739,11 +745,27 @@ fn already_defined(name: &str, span: Span) -> Diagnostic {
     )
 }
 
+struct ModuleState {
+    funcs: HashMap<String, FuncSig>,
+    func_pub: HashMap<String, bool>,
+    type_pub: HashMap<String, bool>,
+    method_pub: HashMap<(String, String), bool>,
+    field_pub: HashMap<(String, String), bool>,
+    registry: TypeRegistry,
+    structs: HashMap<String, Vec<(Option<String>, Type)>>,
+    consts: HashMap<String, Type>,
+    imports: HashMap<String, usize>,
+    tests: HashMap<String, Span>,
+}
+
 struct Checker<'a> {
     funcs: &'a HashMap<String, FuncSig>,
     registry: &'a TypeRegistry,
     structs: &'a HashMap<String, Vec<(Option<String>, Type)>>,
     consts: &'a HashMap<String, Type>,
+    modules: Option<&'a [ModuleState]>,
+    module_idx: usize,
+    imports: &'a HashMap<String, usize>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
     /// name -> span of the use that gave the value away.
@@ -1935,9 +1957,15 @@ impl<'a> Checker<'a> {
             } => self.infer_method_call(receiver, method, *method_span, args),
             Expr::StructLit {
                 type_name,
+                import_ns,
                 fields,
                 span,
-            } => Some(self.check_struct_lit(type_name, fields, *span)),
+            } => Some(self.check_struct_lit(
+                type_name,
+                import_ns.as_deref(),
+                fields,
+                *span,
+            )),
             Expr::EnumLit {
                 type_name,
                 variant,
@@ -2569,18 +2597,26 @@ impl<'a> Checker<'a> {
         }
         let t = self.infer(inner)?;
         if let Type::Named(type_name) = &t {
-            if self.registry.contains(type_name) {
-                if let Some(fields) = self.registry.struct_fields(type_name) {
-                    for (fname, _, fty, is_ref) in fields {
+            if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
+                if let Some(fields) = self.struct_fields_of(owner_mod, type_name) {
+                    for (fname, _, fty, is_ref, _) in fields {
                         if fname == member {
                             if *is_ref {
+                                return None;
+                            }
+                            if owner_mod != self.module_idx
+                                && !self.field_is_pub_in(owner_mod, type_name, member)
+                            {
+                                self.diags.push(private_item(member, span));
                                 return None;
                             }
                             return Some(fty.clone());
                         }
                     }
+                    let field_names: Vec<String> =
+                        fields.iter().map(|(n, ..)| n.clone()).collect();
                     let mut fix = format!("check the field names on `{}`", type_name);
-                    if let Some(suggest) = suggest_field(member, &self.registry.field_names(type_name)) {
+                    if let Some(suggest) = suggest_field(member, &field_names) {
                         fix = format!("did you mean `{}`?", suggest);
                     }
                     self.diags.push(Diagnostic::error(
@@ -2613,6 +2649,11 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         if method == "clone" {
             return self.infer(receiver);
+        }
+        if let Expr::Ident(alias, alias_span) = &**receiver {
+            if let Some(&mod_idx) = self.imports.get(alias) {
+                return self.infer_import_call(mod_idx, method, *alias_span, span, args);
+            }
         }
         if let Expr::Ident(type_name, _) = &**receiver {
             if let Some(variants) = self.registry.enum_variants(type_name) {
@@ -2715,6 +2756,79 @@ impl<'a> Checker<'a> {
         }
         self.check_method_args(&type_name, method, &msig, args, span)?;
         msig.return_type.clone()
+    }
+
+    fn infer_import_call(
+        &mut self,
+        mod_idx: usize,
+        name: &str,
+        alias_span: Span,
+        span: Span,
+        args: &mut [crate::ast::CallArg],
+    ) -> Option<Type> {
+        let Some(mods) = self.modules else {
+            return None;
+        };
+        let target = &mods[mod_idx];
+        if target.funcs.contains_key(name) {
+            let is_pub = target.func_pub.get(name).copied().unwrap_or(false);
+            if !is_pub && mod_idx != self.module_idx {
+                self.diags.push(private_item(name, span));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return None;
+            }
+            let sig = target.funcs.get(name).unwrap().clone();
+            if args.len() != sig.params.len() {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!(
+                        "`{}` expects {} argument{}, got {}",
+                        name,
+                        sig.params.len(),
+                        if sig.params.len() == 1 { "" } else { "s" },
+                        args.len()
+                    ),
+                    "every argument must match a parameter".to_string(),
+                    format!("check the definition of `{}` in the imported file", name),
+                    Some(span),
+                ));
+            }
+            for (arg, (_, pty)) in args.iter_mut().zip(sig.params.iter()) {
+                if let Some(aty) = self.infer(&mut arg.expr) {
+                    self.check_type_assignable(pty, &aty, arg.expr.span());
+                }
+            }
+            return sig.return_type.clone();
+        }
+        if target.registry.contains(name) {
+            let is_pub = target.type_pub.get(name).copied().unwrap_or(false);
+            if !is_pub && mod_idx != self.module_idx {
+                self.diags.push(private_item(name, span));
+            } else {
+                self.diags.push(Diagnostic::error(
+                    "E0102",
+                    format!("nothing named `{}` exists in this import", name),
+                    "only `pub` functions and types from the other file are reachable here"
+                        .to_string(),
+                    "check the spelling, or mark the item `pub` in its file".to_string(),
+                    Some(span),
+                ));
+            }
+        } else {
+            self.diags.push(Diagnostic::error(
+                "E0102",
+                format!("nothing named `{}` exists in this import", name),
+                "only `pub` functions and types from the other file are reachable here".to_string(),
+                "check the spelling, or mark the item `pub` in its file".to_string(),
+                Some(alias_span),
+            ));
+        }
+        for a in args.iter_mut() {
+            self.infer(&mut a.expr);
+        }
+        None
     }
 
     fn check_static_method(
@@ -2830,13 +2944,73 @@ impl<'a> Checker<'a> {
         sig.return_type.clone()
     }
 
+    fn struct_owner_module(&self, type_name: &str, import_ns: Option<&str>) -> Option<usize> {
+        if let Some(alias) = import_ns {
+            let mod_idx = *self.imports.get(alias)?;
+            let mods = self.modules?;
+            if mods[mod_idx].registry.contains(type_name) {
+                return Some(mod_idx);
+            }
+            return None;
+        }
+        if self.registry.contains(type_name) {
+            return Some(self.module_idx);
+        }
+        let mods = self.modules?;
+        let mut found = None;
+        for (idx, st) in mods.iter().enumerate() {
+            if st.registry.contains(type_name)
+                && st.type_pub.get(type_name).copied().unwrap_or(false)
+            {
+                found = Some(idx);
+            }
+        }
+        found
+    }
+
+    fn struct_fields_of(
+        &self,
+        owner_mod: usize,
+        type_name: &str,
+    ) -> Option<&[(String, Span, Type, bool, bool)]> {
+        if owner_mod == self.module_idx {
+            self.registry.struct_fields(type_name)
+        } else {
+            self.modules?
+                .get(owner_mod)?
+                .registry
+                .struct_fields(type_name)
+        }
+    }
+
+    fn field_is_pub_in(&self, owner_mod: usize, type_name: &str, field: &str) -> bool {
+        if owner_mod == self.module_idx {
+            return true;
+        }
+        self.modules
+            .and_then(|mods| mods.get(owner_mod))
+            .and_then(|st| st.field_pub.get(&(type_name.to_string(), field.to_string())).copied())
+            .unwrap_or(false)
+    }
+
+    fn type_is_pub_in(&self, owner_mod: usize, type_name: &str) -> bool {
+        if owner_mod == self.module_idx {
+            return true;
+        }
+        self.modules
+            .and_then(|mods| mods.get(owner_mod))
+            .and_then(|st| st.type_pub.get(type_name).copied())
+            .unwrap_or(false)
+    }
+
     fn check_struct_lit(
         &mut self,
         type_name: &str,
+        import_ns: Option<&str>,
         fields: &mut [(String, Span, Expr)],
         span: Span,
     ) -> Type {
-        let Some(def_fields) = self.registry.struct_fields(type_name) else {
+        let Some(owner_mod) = self.struct_owner_module(type_name, import_ns) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
                 format!("there's no type called `{}`", type_name),
@@ -2849,6 +3023,27 @@ impl<'a> Checker<'a> {
             }
             return Type::Named(type_name.to_string());
         };
+        if owner_mod != self.module_idx && !self.type_is_pub_in(owner_mod, type_name) {
+            self.diags.push(private_item(type_name, span));
+        }
+        let def_fields: Vec<(String, Span, Type, bool, bool)> = self
+            .struct_fields_of(owner_mod, type_name)
+            .map(|fields| fields.to_vec())
+            .unwrap_or_default();
+        if def_fields.is_empty() {
+            self.diags.push(Diagnostic::error(
+                "E0119",
+                format!("there's no type called `{}`", type_name),
+                "struct literals need a struct type name".to_string(),
+                "define the struct first, or check the spelling".to_string(),
+                Some(span),
+            ));
+            for (_, _, e) in fields.iter_mut() {
+                self.infer(e);
+            }
+            return Type::Named(type_name.to_string());
+        };
+        let field_names: Vec<String> = def_fields.iter().map(|(n, ..)| n.clone()).collect();
         let mut provided = HashMap::new();
         for (name, name_span, expr) in fields.iter_mut() {
             if provided.insert(name.clone(), ()).is_some() {
@@ -2860,8 +3055,13 @@ impl<'a> Checker<'a> {
                     Some(*name_span),
                 ));
             }
+            if owner_mod != self.module_idx
+                && !self.field_is_pub_in(owner_mod, type_name, name)
+            {
+                self.diags.push(private_item(name, *name_span));
+            }
             let et = self.infer(expr);
-            if let Some((_, _, fty, _)) = def_fields.iter().find(|(n, ..)| n == name) {
+            if let Some((_, _, fty, _, _)) = def_fields.iter().find(|(n, ..)| n == name) {
                 if let Some(et) = et {
                     self.check_type_assignable(fty, &et, expr.span());
                 }
@@ -2870,7 +3070,7 @@ impl<'a> Checker<'a> {
                     "E0303",
                     format!("struct literal for `{}` has no field `{}`", type_name, name),
                     "struct literals may only set fields that exist on the type".to_string(),
-                    suggest_field(name, &self.registry.field_names(type_name))
+                    suggest_field(name, &field_names)
                         .map(|s| format!("did you mean `{}`?", s))
                         .unwrap_or_else(|| "remove this field".to_string()),
                     Some(*name_span),
@@ -2879,7 +3079,7 @@ impl<'a> Checker<'a> {
         }
         let missing: Vec<_> = def_fields
             .iter()
-            .filter(|(n, _, _, is_ref)| !*is_ref && !provided.contains_key(n))
+            .filter(|(n, _, _, is_ref, _)| !*is_ref && !provided.contains_key(n))
             .map(|(n, ..)| n.clone())
             .collect();
         if !missing.is_empty() {
@@ -4103,7 +4303,7 @@ fn is_cloneable(
                 && match registry.types.get(name) {
                     Some(TypeDef::Struct { fields, .. }) => fields
                         .iter()
-                        .all(|(_, _, fty, is_ref)| !*is_ref && is_cloneable(fty, registry, structs)),
+                        .all(|(_, _, fty, is_ref, _)| !*is_ref && is_cloneable(fty, registry, structs)),
                     Some(TypeDef::Enum { variants, .. }) => variants.values().all(|(_, p)| {
                         match p {
                             VariantPayload::Unit => true,
@@ -4384,7 +4584,7 @@ fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
 fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
     match ty {
         Type::Named(name) => match registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty, is_ref)| {
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty, is_ref, _)| {
                 if *is_ref || !types_comparable(fty, registry) {
                     Some(fname.clone())
                 } else {
@@ -4462,4 +4662,339 @@ fn edit_distance(a: &str, b: &str) -> usize {
         prev = cur;
     }
     prev[b.len()]
+}
+
+fn private_item(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0605",
+        format!("`{}` exists but is private to its file", name),
+        "only names marked `pub` can be used from another file (S18)".to_string(),
+        format!("add `pub` before `{}`, or don't reach across files here", name),
+        Some(span),
+    )
+}
+
+pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let mut states: Vec<ModuleState> = (0..bundle.modules.len())
+        .map(|_| ModuleState {
+            funcs: HashMap::new(),
+            func_pub: HashMap::new(),
+            type_pub: HashMap::new(),
+            method_pub: HashMap::new(),
+            field_pub: HashMap::new(),
+            registry: TypeRegistry {
+                types: HashMap::new(),
+            },
+            structs: HashMap::new(),
+            consts: HashMap::new(),
+            imports: HashMap::new(),
+            tests: HashMap::new(),
+        })
+        .collect();
+
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        let st = &mut states[idx];
+        for item in &module.items {
+            match item {
+                Item::Func(f) => register_func_item(f, st, &mut diags),
+                Item::Struct(s) => {
+                    register_struct(s, &mut st.registry, &mut st.structs, &mut diags, &st.funcs, &st.consts);
+                    st.type_pub.insert(s.name.clone(), s.is_pub);
+                    for fld in &s.fields {
+                        st.field_pub.insert((s.name.clone(), fld.name.clone()), fld.is_pub);
+                    }
+                    for m in &s.methods {
+                        st.method_pub.insert((s.name.clone(), m.name.clone()), m.is_pub);
+                    }
+                }
+                Item::Enum(e) => {
+                    register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                    st.type_pub.insert(e.name.clone(), e.is_pub);
+                    for m in &e.methods {
+                        st.method_pub.insert((e.name.clone(), m.name.clone()), m.is_pub);
+                    }
+                }
+                Item::Impl(i) => {
+                    if !st.registry.contains(&i.type_name) {
+                        diags.push(Diagnostic::error(
+                            "E0301",
+                            format!("`impl {}` names a type that doesn't exist", i.type_name),
+                            format!("`{}` hasn't been defined as a struct or enum", i.type_name),
+                            format!("define `struct {}` or `enum {}` first", i.type_name, i.type_name),
+                            Some(i.type_span),
+                        ));
+                    } else {
+                        for m in &i.methods {
+                            st.method_pub.insert((i.type_name.clone(), m.name.clone()), m.is_pub);
+                        }
+                    }
+                }
+                Item::Const(c) => register_const(c, &mut st.consts, &mut diags, &st.funcs, &st.registry),
+                Item::Test(t) => {
+                    if name_defined(&t.name, &st.funcs, &st.registry, &st.consts)
+                        || st.tests.contains_key(&t.name)
+                    {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("`{}` is defined twice", t.name),
+                            "every test needs a unique name so failures are easy to find".to_string(),
+                            "rename or remove one of the definitions".to_string(),
+                            Some(t.name_span),
+                        ));
+                    } else {
+                        st.tests.insert(t.name.clone(), t.name_span);
+                    }
+                }
+            }
+        }
+        register_type_methods(&module.items, &mut st.registry, &mut diags);
+        register_impl_methods(&module.items, &mut st.registry, &mut diags);
+    }
+
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        let st = &mut states[idx];
+        for imp in &module.imports {
+            let alias = loader::import_alias(imp);
+            if st.imports.contains_key(&alias) {
+                diags.push(Diagnostic::error(
+                    "E0105",
+                    format!("the import name `{}` is used twice", alias),
+                    "each import needs a unique namespace name in this file".to_string(),
+                    format!("rename one with `{} alias`", syntax::KW_AS),
+                    Some(imp.alias_span),
+                ));
+                continue;
+            }
+            match loader::resolve_import_target(bundle, idx, imp) {
+                Ok(target) => {
+                    st.imports.insert(alias, target);
+                }
+                Err(d) => diags.push(d),
+            }
+        }
+    }
+
+    let entry = &states[bundle.entry];
+    match mode {
+        CompileMode::Run => {
+            if !entry.funcs.contains_key("main") {
+                diags.push(Diagnostic::error(
+                    "E0101",
+                    "this program has no `main` function".to_string(),
+                    "running a program starts at `fn main`, and the entry file doesn't define one"
+                        .to_string(),
+                    "add `fn main() { ... }` to the entry file".to_string(),
+                    None,
+                ));
+            } else if let Some(sig) = entry.funcs.get("main") {
+                if !sig.params.is_empty() || sig.return_type.is_some() {
+                    diags.push(Diagnostic::error(
+                        "E0122",
+                        "`main` takes no parameters and returns nothing".to_string(),
+                        "`main` is where running starts; nothing calls it with values".to_string(),
+                        "write it as: fn main() { ... }".to_string(),
+                        None,
+                    ));
+                }
+            }
+        }
+        CompileMode::Test if entry.tests.is_empty() => {
+            diags.push(Diagnostic::error(
+                "E0601",
+                format!("no `{}` blocks found to run", syntax::KW_TEST),
+                format!(
+                    "add at least one top-level block: {} \"describes what this checks\" {{ ... }}",
+                    syntax::KW_TEST
+                ),
+                format!(
+                    "use `{}` and `{}` inside the block to check results",
+                    syntax::BUILTIN_REQUIRE,
+                    syntax::BUILTIN_REQUIRE_EQ
+                ),
+                None,
+            ));
+        }
+        CompileMode::Test => {}
+    }
+
+    for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        diags.extend(check_module_bodies(
+            module,
+            idx,
+            &states,
+            mode,
+        ));
+    }
+    diags
+}
+
+fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec<Diagnostic>) {
+    if f.name == syntax::BUILTIN_PRINT
+        || f.name == syntax::BUILTIN_PANIC
+        || f.name == syntax::BUILTIN_REQUIRE
+        || f.name == syntax::BUILTIN_REQUIRE_EQ
+    {
+        diags.push(Diagnostic::error(
+            "E0106",
+            format!("the name `{}` is built in and can't be redefined", f.name),
+            format!("`{}` is provided by the language itself", f.name),
+            "choose a different name for this function".to_string(),
+            Some(f.name_span),
+        ));
+        return;
+    }
+    if name_defined(&f.name, &st.funcs, &st.registry, &st.consts) {
+        diags.push(Diagnostic::error(
+            "E0105",
+            format!("`{}` is defined twice", f.name),
+            "every function needs a unique name so calls aren't ambiguous".to_string(),
+            "rename or remove one of the definitions".to_string(),
+            Some(f.name_span),
+        ));
+        return;
+    }
+    st.func_pub.insert(f.name.clone(), f.is_pub);
+    st.funcs.insert(f.name.clone(), func_to_sig(f));
+}
+
+fn check_module_bodies(
+    module: &mut crate::ast::LoadedModule,
+    module_idx: usize,
+    states: &[ModuleState],
+    mode: CompileMode,
+) -> Vec<Diagnostic> {
+    let st = &states[module_idx];
+    let mut diags = Vec::new();
+    for item in &mut module.items {
+        match item {
+            Item::Func(f) => {
+                diags.extend(check_func_body_bundle(
+                    f, module_idx, states, None,
+                ));
+            }
+            Item::Struct(s) => {
+                for m in &mut s.methods {
+                    diags.extend(check_func_body_bundle(
+                        m, module_idx, states, Some(&s.name),
+                    ));
+                }
+            }
+            Item::Enum(e) => {
+                for m in &mut e.methods {
+                    diags.extend(check_func_body_bundle(
+                        m, module_idx, states, Some(&e.name),
+                    ));
+                }
+            }
+            Item::Impl(i) => {
+                for m in &mut i.methods {
+                    diags.extend(check_func_body_bundle(
+                        m, module_idx, states, Some(&i.type_name),
+                    ));
+                }
+            }
+            Item::Test(t) if mode == CompileMode::Test => {
+                let mut synthetic = Func {
+                    is_pub: false,
+                    name: format!("__test_{}", t.name),
+                    name_span: t.name_span,
+                    params: Vec::new(),
+                    return_type: None,
+                    is_view_return: false,
+                    body: std::mem::take(&mut t.body),
+                };
+                diags.extend(check_func_body_bundle(
+                    &mut synthetic, module_idx, states, None,
+                ));
+                t.body = synthetic.body;
+            }
+            _ => {}
+        }
+    }
+    let _ = st;
+    diags
+}
+
+fn check_func_body_bundle(
+    f: &mut Func,
+    module_idx: usize,
+    states: &[ModuleState],
+    owner_type: Option<&str>,
+) -> Vec<Diagnostic> {
+    let st = &states[module_idx];
+    let mut ck = Checker {
+        funcs: &st.funcs,
+        registry: &st.registry,
+        structs: &st.structs,
+        consts: &st.consts,
+        modules: Some(states),
+        module_idx,
+        imports: &st.imports,
+        diags: Vec::new(),
+        scopes: vec![HashMap::new()],
+        moved: HashMap::new(),
+        loop_depth: 0,
+        in_unsafe: false,
+        ret: f.return_type.clone(),
+        view_return: f.is_view_return,
+        fn_name: f.name.clone(),
+        expected_type: None,
+        owner_type: owner_type.map(str::to_string),
+        iter_borrowed: HashSet::new(),
+    };
+    for p in &f.params {
+        let skip_type_check = p.name == syntax::KW_SELF
+            && matches!(&p.ty, Type::Named(n) if n.is_empty());
+        if !skip_type_check {
+            ck.check_declared_type(&p.ty, p.ty_span);
+        }
+        if p.name == syntax::KW_SELF {
+            if let Some(owner) = owner_type {
+                let self_ty = Type::Named(owner.to_string());
+                ck.scopes.last_mut().unwrap().insert(
+                    p.name.clone(),
+                    LocalInfo {
+                        ty: self_ty,
+                        mutable: matches!(p.convention, AccessConvention::Mutate),
+                        param_conv: Some(p.convention),
+                        decl_loop_depth: 0,
+                    },
+                );
+            }
+            continue;
+        }
+        if ck.lookup(&p.name).is_some() {
+            ck.diags.push(already_defined(&p.name, p.name_span));
+        } else {
+            ck.scopes.last_mut().unwrap().insert(
+                p.name.clone(),
+                LocalInfo {
+                    ty: p.ty.clone(),
+                    mutable: matches!(p.convention, AccessConvention::Mutate),
+                    param_conv: Some(p.convention),
+                    decl_loop_depth: 0,
+                },
+            );
+        }
+    }
+    ck.check_block(&mut f.body, false);
+    if f.return_type.is_some() && !block_definitely_returns(&f.body) {
+        let rt = f.return_type.clone().unwrap();
+        ck.diags.push(Diagnostic::error(
+            "E0114",
+            format!(
+                "`{}` promises to return {}, but a path can reach the end without `return`",
+                f.name,
+                rt.show()
+            ),
+            "every way through the function must hand back a value".to_string(),
+            format!(
+                "add a final `return ...;`, or an `{}` branch that returns",
+                syntax::KW_ELSE
+            ),
+            Some(f.name_span),
+        ));
+    }
+    ck.diags
 }

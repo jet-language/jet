@@ -21,19 +21,32 @@ fn examples_compile_and_run() {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
 
-    let mut entries: Vec<_> = fs::read_dir(&ex_dir)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
-    entries.sort();
+    let mut entries: Vec<(PathBuf, String, String)> = Vec::new();
+    for e in fs::read_dir(&ex_dir).unwrap().flatten() {
+        let path = e.path();
+        if path.extension().and_then(|x| x.to_str()) == Some(ext) {
+            let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+            entries.push((
+                path.clone(),
+                stem.clone(),
+                format!("examples/{}.{}", stem, ext),
+            ));
+        } else if path.is_dir() {
+            let main = path.join(format!("main.{}", ext));
+            if main.is_file() {
+                let stem = path.file_name().unwrap().to_string_lossy().into_owned();
+                entries.push((
+                    main.clone(),
+                    stem,
+                    format!("examples/{}/main.{}", path.file_name().unwrap().to_string_lossy(), ext),
+                ));
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.1.cmp(&b.1));
 
     let mut checked = 0;
-    for path in entries {
-        if path.extension().and_then(|e| e.to_str()) != Some(ext) {
-            continue;
-        }
-        let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let shown = format!("examples/{}.{}", stem, ext);
+    for (path, stem, shown) in entries {
         let src = fs::read_to_string(&path).unwrap();
 
         let rust_code = match jet::compile_with_path(&src, &shown) {

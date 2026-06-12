@@ -97,9 +97,11 @@ fn ratified_decisions_enforced() {
         );
     }
 
-    // S16 is the Group 1 staged surface decision (S7 landed in M4).
-    assert!(staged.contains_key("S16"), "S16 must be listed under Staged implementation");
-    assert_eq!(staged.get("S16").map(String::as_str), Some("E0019"));
+    // S16 landed in M6 phase 3 — no longer staged.
+    assert!(
+        !staged.contains_key("S16"),
+        "S16 must not remain staged after M6 phase 3"
+    );
     assert!(
         !staged.contains_key("S7"),
         "S7 must not remain staged after M4"

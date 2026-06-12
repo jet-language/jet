@@ -13,9 +13,11 @@
 
 use crate::ast::{
     AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
-    IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, RustConstKind, Stmt, StrPart,
-    StructDef, TestDef, Type, UnOp, VariantPayload,
+    IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, ProgramBundle, RustConstKind,
+    Stmt, StrPart, StructDef, TestDef, Type, UnOp, VariantPayload,
 };
+use crate::loader;
+use crate::sema::CompileMode;
 use crate::diag::{span_line_col, Span};
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
@@ -92,6 +94,21 @@ fn mangle(name: &str) -> String {
     }
 }
 
+fn mangle_module(module: &str, name: &str) -> String {
+    if name == "main" {
+        "main".to_string()
+    } else {
+        format!("user_{}_{}", module, name)
+    }
+}
+
+fn mangle_in(module: Option<&str>, name: &str) -> String {
+    match module {
+        Some(m) => mangle_module(m, name),
+        None => mangle(name),
+    }
+}
+
 /// Shared codegen context built once per program.
 struct Cx {
     /// Top-level function name -> parameter conventions+types.
@@ -112,7 +129,15 @@ struct Cx {
     file: String,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
     test_mode: bool,
+    /// Current module namespace when emitting inside `mod user_<alias>`.
+    module_ns: Option<String>,
+    /// Import alias -> Rust module name (`user_scoring`).
+    import_mods: HashMap<String, String>,
+    /// `(import alias, function)` -> parameter conventions for cross-module calls.
+    import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
 }
+
+const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice};\n\n";
 
 impl Cx {
     fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
@@ -144,7 +169,25 @@ impl Cx {
                 self.rust_type(ok),
                 self.rust_type(err)
             ),
-            Type::Named(name) => format!("user_{}", name),
+            Type::Named(name) => {
+                if let Some(m) = &self.module_ns {
+                    format!("user_{}_{}", m, name)
+                } else {
+                    format!("user_{}", name)
+                }
+            }
+        }
+    }
+
+    fn mangle_name(&self, name: &str) -> String {
+        mangle_in(self.module_ns.as_deref(), name)
+    }
+
+    fn type_prefix(&self, type_name: &str) -> String {
+        if let Some(m) = &self.module_ns {
+            format!("user_{}_{}", m, type_name)
+        } else {
+            format!("user_{}", type_name)
         }
     }
 }
@@ -312,6 +355,10 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 }
 
 fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
+    build_cx_items(&prog.items, src, file)
+}
+
+fn build_cx_items(items: &[Item], src: &str, file: &str) -> Cx {
     let mut cx = Cx {
         sigs: HashMap::new(),
         method_sigs: HashMap::new(),
@@ -326,9 +373,12 @@ fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
         src: src.to_string(),
         file: file.to_string(),
         test_mode: false,
+        module_ns: None,
+        import_mods: HashMap::new(),
+        import_sigs: HashMap::new(),
     };
 
-    for item in &prog.items {
+    for item in items {
         match item {
             Item::Func(f) => {
                 cx.sigs.insert(
@@ -372,7 +422,7 @@ fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
         }
     }
 
-    for item in &prog.items {
+    for item in items {
         match item {
             Item::Struct(s) => {
                 cx.boxed_edges.extend(find_struct_box_edges(s, &cx));
@@ -821,15 +871,16 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         .map(|p| {
             format!(
                 "{}: {}",
-                mangle(&p.name),
+                cx.mangle_name(&p.name),
                 rust_param_type(cx, p.convention, &p.ty)
             )
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let vis = if f.is_pub { "pub " } else { "" };
     out.push_str(&format!(
-        "fn {}({}){} {{\n",
-        mangle(&f.name),
+        "{vis}fn {}({}){} {{\n",
+        cx.mangle_name(&f.name),
         params,
         ret_clause
     ));
@@ -843,7 +894,7 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         env.insert(
             p.name.clone(),
             Slot {
-                rust_name: mangle(&p.name),
+                rust_name: cx.mangle_name(&p.name),
                 deref,
                 jet_ty: Some(p.ty.clone()),
             },
@@ -1745,15 +1796,42 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         } => emit_method_call(cx, receiver, method, args, env),
         Expr::StructLit {
             type_name,
+            import_ns,
             fields,
             ..
         } => {
-            let parts = fields
-                .iter()
-                .map(|(n, _, e)| format!("{}: {}", mangle(n), emit_expr(cx, e, env)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("user_{} {{ {} }}", type_name, parts)
+            let mut parts = Vec::new();
+            if let Some(ns) = import_ns {
+                let mod_name = cx
+                    .import_mods
+                    .get(ns)
+                    .map(|s| s.as_str())
+                    .unwrap_or("user_unknown");
+                let stem = mod_name.strip_prefix("user_").unwrap_or(mod_name);
+                let rust_type = format!("{}::{}", mod_name, mangle_module(stem, type_name));
+                for (n, _, e) in fields {
+                    parts.push(format!(
+                        "{}: {}",
+                        mangle_module(stem, n),
+                        emit_expr(cx, e, env)
+                    ));
+                }
+                return format!("{} {{ {} }}", rust_type, parts.join(", "));
+            }
+            let rust_type = if cx.module_ns.is_some() {
+                cx.type_prefix(type_name)
+            } else {
+                format!("user_{}", type_name)
+            };
+            for (n, _, e) in fields {
+                let fname = if let Some(m) = &cx.module_ns {
+                    mangle_in(Some(m), n)
+                } else {
+                    mangle(n).to_string()
+                };
+                parts.push(format!("{}: {}", fname, emit_expr(cx, e, env)));
+            }
+            format!("{} {{ {} }}", rust_type, parts.join(", "))
         }
         Expr::EnumLit {
             type_name,
@@ -1982,6 +2060,22 @@ fn emit_method_call(
     if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
         return s;
     }
+    if let Expr::Ident(alias, _) = receiver {
+        if let Some(mod_name) = cx.import_mods.get(alias) {
+            let stem = mod_name.strip_prefix("user_").unwrap_or(mod_name.as_str());
+            let sig = cx
+                .import_sigs
+                .get(&(alias.clone(), method.to_string()))
+                .map(|s| s.as_slice());
+            let arg_str = emit_call_args(cx, sig, args, env);
+            return format!(
+                "{}::{}({})",
+                mod_name,
+                mangle_module(stem, method),
+                arg_str
+            );
+        }
+    }
     if let Expr::Ident(type_name, _) = receiver {
         if let Some(variants) = cx.enum_variants.get(type_name) {
             if variants.iter().any(|(v, _)| v == method) {
@@ -1995,9 +2089,9 @@ fn emit_method_call(
         if cx.type_names.contains(type_name) {
             let arg_str = emit_call_args(cx, None, args, env);
             return format!(
-                "user_{}::{}({})",
-                type_name,
-                mangle(method),
+                "{}::{}({})",
+                cx.type_prefix(type_name),
+                cx.mangle_name(method),
                 arg_str
             );
         }
@@ -2084,5 +2178,191 @@ fn emit_call(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -> S
     }
     let sig = cx.sigs.get(&call.name);
     let args = emit_call_args(cx, sig.map(|s| s.as_slice()), &call.args, env);
-    format!("{}({})", mangle(&call.name), args)
+    format!("{}({})", cx.mangle_name(&call.name), args)
+}
+
+fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        let alias = loader::import_alias(imp);
+        if let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) {
+            let stem = &bundle.modules[target].alias;
+            map.insert(alias, format!("user_{}", stem));
+        }
+    }
+    map
+}
+
+fn import_sig_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
+    let mut map = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        let alias = loader::import_alias(imp);
+        let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) else {
+            continue;
+        };
+        for item in &bundle.modules[target].items {
+            if let Item::Func(f) = item {
+                if f.is_pub {
+                    map.insert(
+                        (alias.clone(), f.name.clone()),
+                        f.params
+                            .iter()
+                            .map(|p| (p.convention, p.ty.clone()))
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+    map
+}
+
+fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: bool) {
+    for item in items {
+        match item {
+            Item::Struct(s) => emit_struct(cx, s, out),
+            Item::Enum(e) => emit_enum(cx, e, out),
+            Item::Const(c) => emit_const(c, out),
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) => {}
+        }
+    }
+    for item in items {
+        match item {
+            Item::Struct(s) => emit_type_impl(cx, &s.name, &s.methods, out),
+            Item::Enum(e) => emit_type_impl(cx, &e.name, &e.methods, out),
+            Item::Impl(i) => emit_type_impl(cx, &i.type_name, &i.methods, out),
+            _ => {}
+        }
+    }
+    for item in items {
+        if let Item::Func(f) = item {
+            if f.name == "main" && !include_main {
+                continue;
+            }
+            emit_func(cx, f, out);
+        }
+    }
+}
+
+pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode) -> String {
+    let entry = &bundle.modules[bundle.entry];
+    let mut out = String::new();
+    out.push_str(&format!(
+        "// Generated by {} — do not edit. Edit the .{} source instead.\n",
+        syntax::BINARY_NAME,
+        syntax::FILE_EXT
+    ));
+    out.push_str("#![allow(warnings)]\n\n");
+    out.push_str(PRELUDE);
+    out.push('\n');
+
+    let import_mods = import_mod_map(bundle, bundle.entry);
+
+    for (i, module) in bundle.modules.iter().enumerate() {
+        if i == bundle.entry {
+            continue;
+        }
+        let ns = module.alias.clone();
+        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(MOD_USE);
+        let mut cx = build_cx_items(&module.items, &module.source, &module.display);
+        cx.module_ns = Some(ns.clone());
+        cx.import_mods = import_mod_map(bundle, i);
+        cx.import_sigs = import_sig_map(bundle, i);
+        emit_program_items(&cx, &module.items, &mut out, true);
+        out.push_str("}\n\n");
+    }
+
+    let mut cx = build_cx_items(&entry.items, &entry.source, &entry.display);
+    cx.import_mods = import_mods;
+    cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    emit_program_items(&cx, &entry.items, &mut out, true);
+    out
+}
+
+pub fn emit_bundle_tests(bundle: &ProgramBundle) -> String {
+    let entry = &bundle.modules[bundle.entry];
+    let tests: Vec<&TestDef> = entry
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Test(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert!(!tests.is_empty(), "emit_bundle_tests called with no test blocks");
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "// Generated by {} test harness — do not edit.\n",
+        syntax::BINARY_NAME
+    ));
+    out.push_str("#![allow(warnings)]\n\n");
+    out.push_str(PRELUDE);
+    out.push_str(TEST_PRELUDE);
+    out.push('\n');
+
+    let import_mods = import_mod_map(bundle, bundle.entry);
+
+    for (i, module) in bundle.modules.iter().enumerate() {
+        if i == bundle.entry {
+            continue;
+        }
+        let ns = module.alias.clone();
+        out.push_str(&format!("mod user_{ns} {{\n"));
+        out.push_str(MOD_USE);
+        let mut cx = build_cx_items(&module.items, &module.source, &module.display);
+        cx.module_ns = Some(ns);
+        cx.test_mode = true;
+        cx.import_mods = import_mod_map(bundle, i);
+        cx.import_sigs = import_sig_map(bundle, i);
+        emit_program_items(&cx, &module.items, &mut out, false);
+        out.push_str("}\n\n");
+    }
+
+    let mut cx = build_cx_items(&entry.items, &entry.source, &entry.display);
+    cx.test_mode = true;
+    cx.import_mods = import_mods;
+    cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    emit_program_items(&cx, &entry.items, &mut out, false);
+
+    for (i, test) in tests.iter().enumerate() {
+        out.push_str(&format!("fn jet_test_{}() {{\n", i));
+        let mut env: HashMap<String, Slot> = HashMap::new();
+        emit_stmts(&cx, &test.body, &mut env, &mut out, 1, false);
+        out.push_str("}\n\n");
+    }
+
+    out.push_str("fn main() {\n");
+    out.push_str("    std::panic::set_hook(Box::new(|_| {}));\n");
+    out.push_str("    let mut passed = 0usize;\n");
+    out.push_str("    let mut failed = 0usize;\n");
+    for (i, test) in tests.iter().enumerate() {
+        let name = escape_rust_str(&test.name);
+        out.push_str(&format!(
+            "    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_test_{}())) {{\n",
+            i
+        ));
+        out.push_str("        Ok(()) => {\n");
+        out.push_str(&format!("            println!(\"{{}}: pass\", {});\n", name));
+        out.push_str("            passed += 1;\n");
+        out.push_str("        }\n");
+        out.push_str("        Err(payload) => {\n");
+        out.push_str(&format!("            println!(\"{{}}: FAIL\", {});\n", name));
+        out.push_str(
+            "            if let Some(s) = payload.downcast_ref::<&str>() { eprintln!(\"  {}\", s); }\n",
+        );
+        out.push_str(
+            "            else if let Some(s) = payload.downcast_ref::<String>() { eprintln!(\"  {}\", s); }\n",
+        );
+        out.push_str("            failed += 1;\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+    }
+    out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
+    out.push_str("    if failed > 0 { std::process::exit(1); }\n");
+    out.push_str("}\n");
+    out
 }

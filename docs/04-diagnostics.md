@@ -49,7 +49,7 @@ before continuing.
 - Ownership errors (M2) use the human framing: *while something is being
   changed, nobody else may be looking at it.*
 - Staged features name their milestone and give today's workaround
-  (see E0019/E0117). A future feature must never die as a generic error.
+  (see E0117). A future feature must never die as a generic error.
 - Teaching errors (S14, E0008–E0016) recognize a familiar foreign
   spelling, name the one Jet form, and then keep going as if the canonical
   form had been written — one foreign word never hides the rest of the
@@ -80,7 +80,7 @@ before continuing.
 | E0016 | parse | teaching: `match` → `switch` (S24)        |
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
 | E0018 | parse | teaching: `write` → `mut` (S10)          |
-| E0019 | parse | staged: `import` (multi-file) arrives in M6 (S16) |
+| E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
 | E0024 | parse | teaching: `catch`/`except` → `or` / `== err` (M4) |
 | E0025 | parse | teaching: `unwrap`/`expect` → `or panic(…)` (M4) |
 | E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
@@ -148,6 +148,11 @@ before continuing.
 | E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
 | E0030 | parse | teaching: `as` → `.to_float()` etc.       |
 | E0601 | sema  | `test` block in wrong position / none found |
+| E0602 | jet   | import path escapes the project (`..` or outside entry tree) |
+| E0603 | jet   | imported file / module not found |
+| E0604 | jet   | import cycle (lists the loop) |
+| E0605 | sema  | item exists in another file but is private |
+| E0606 | jet   | ambiguous module name (lists every matching path) |
 
 ## Process for a new diagnostic
 
