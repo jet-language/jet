@@ -88,6 +88,21 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
         }
     };
 
+    if cmd == "check" {
+        let diags: Vec<_> = jet::check_with_path(file)
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::diag::Severity::Error))
+            .collect();
+        if !diags.is_empty() {
+            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+            let n = diags.len();
+            eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+            exit(1);
+        }
+        println!("ok: `{}` has no problems", file);
+        return;
+    }
+
     let (rust_code, ffi_link) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
@@ -114,9 +129,6 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
     }
 
     match cmd {
-        "check" => {
-            println!("ok: `{}` has no problems", file);
-        }
         "build" => {
             build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref());
             println!("built: {}", bin_path(file).display());

@@ -251,7 +251,17 @@ fn type_key(ty: &Type) -> String {
         Type::Shared(inner) => format!("Shared<{}>", type_key(inner)),
         Type::Option(inner) => format!("{}?", type_key(inner)),
         Type::Result { ok, err } => format!("Result<{},{}>", type_key(ok), type_key(err)),
+        Type::Fn { params, ret } => {
+            let ps = params.iter().map(type_key).collect::<Vec<_>>().join(",");
+            let r = ret.as_ref().map(|t| type_key(t)).unwrap_or_default();
+            format!("fn({ps})->{r}")
+        }
         Type::Named(n) => n.clone(),
+        Type::Apply { name, args } => format!(
+            "{name}<{}>",
+            args.iter().map(type_key).collect::<Vec<_>>().join(",")
+        ),
+        Type::TraitObject(t) => format!("dyn {t}"),
     }
 }
 
@@ -360,8 +370,17 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
             rust_type(ok, user_types),
             rust_type(err, user_types)
         ),
+        Type::Fn { .. } => "Box<dyn std::any::Any>".to_string(),
         Type::Named(name) if user_types.contains(name) => format!("user_{name}"),
         Type::Named(name) => name.clone(),
+        Type::Apply { name, args } if user_types.contains(name) => format!(
+            "user_{name}<{}>",
+            args.iter()
+                .map(|a| rust_type(a, user_types))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Apply { .. } | Type::TraitObject(_) => "Box<dyn std::any::Any>".to_string(),
     }
 }
 

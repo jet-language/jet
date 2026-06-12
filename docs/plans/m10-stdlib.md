@@ -1,7 +1,7 @@
 # M10 — Standard library
 
-**Blocked on decisions:** S51 (std import spelling), S54 (naming convention
-lint). Depends on M4 (errors),
+**Decisions:** S51 (std import spelling), S54 (no naming lint) ratified
+2026-06-12. Depends on M4 (errors),
 M5 (collections), M8 (closures), M9 (generics for signatures like
 `max[T: Comparable]`).
 **Error codes:** E1001+.
@@ -15,12 +15,12 @@ stdlib yet — that wants packages, M12). Every fallible operation returns
 `Result<T, E>` with a small set of well-named error enums; nothing panics
 except programmer errors.
 
-## Surface (uses ballot recommendations — substitute ratified choices)
+## Surface (ratified S51)
 
 ```jet
-import "std/fs" as fs;
-import "std/io" as io;
-import "std/json" as json;
+import std.fs as fs;
+import std.io as io;
+import std.json as json;
 
 fn main() {
     val args = io.args();                       // List<String>
@@ -34,9 +34,11 @@ fn main() {
 }
 ```
 
-`import "std/<module>" as <alias>;` reuses M6's import machinery with
-the reserved `std/` prefix (S51). Unknown std module → E1001 listing
-the real ones. Shadowing `std/` with a local file → E1002.
+`import std.<module> [as alias];` is a **module import** (S16 — no quotes).
+Std is compiler-exported as the `std` module; dot paths select submodules
+(S51). Contrast: `import "./lib"` is a **file import** (quoted path to a
+`.jet` file). Unknown std module → E1001 listing the real ones. A local
+module named `std` → E1002.
 
 ## Module inventory (exact v1 API — implement all, nothing more)
 
@@ -90,9 +92,8 @@ Utf8Error` land here.
 1. Std modules are namespaces in sema with fixed signatures (declared in
    a Rust table, like today's builtins) — calls typecheck exactly like
    user functions; did-you-mean works across a module's items (E1004).
-2. Naming lint (S54): identifiers should be snake_case; L1001 fires on
-   camelCase/PascalCase names with the rename — warning, not error, and
-   `jet fmt` does NOT auto-rename (behavior changes are never silent).
+2. No naming lint (S54): Jet does not prescribe snake_case or other
+   naming conventions in v1 — `jet fmt` handles layout only (S44).
 3. No global state: `std/random`'s default generator is a thread-local
    seeded from time; document determinism story honestly.
 4. All blocking calls (`input`, `sleep`, `run`) are fine in v1 (no async
@@ -111,20 +112,20 @@ Rust, not string soup in codegen.rs.
 
 E1001 unknown std module (lists all) · E1002 local file shadows `std/` ·
 E1003 U8 literal out of range · E1004 unknown item in module
-(suggestion) · L1001 non-snake_case name.
+(suggestion).
 Teaching: E0037 `println!`/`eprintln!` → `print`/`io.eprint` · E0038
 `open(`/`File::open` → `fs.read` · E0039 `os.environ`/`getenv` →
 `env.get`.
 
 ## Examples & tests
 
-- `examples/23_files.jet` — read/transform/write with error handling.
-- `examples/24_json.jet` — parse, walk, mutate, re-render JSON.
-- `examples/25_cli.jet` — args + env + exit codes (a real mini-tool).
+- `examples/29_files.jet` — read/transform/write with error handling.
+- `examples/30_json.jet` — parse, walk, mutate, re-render JSON.
+- `examples/31_cli.jet` — args + env + exit codes (a real mini-tool).
 - Golden tests use tempdirs; `std/time`/`std/random` examples pin output
   via `seed` and injected clock (the prelude reads `LEX_TEST_EPOCH` env
   var when set — test hook, documented as such).
-- ui fixtures for E10xx/L1001 + teaching errors.
+- ui fixtures for E10xx + teaching errors.
 
 ## Out of scope
 

@@ -1,4 +1,5 @@
 //! M5 built-in collection and string surface (List, Map, Char, String API).
+//! M8 adds closure-powered methods (`map`, `filter`, …).
 //! Sema calls into this module; codegen mirrors the same method names.
 
 use crate::ast::Type;
@@ -20,6 +21,14 @@ pub fn is_map_key_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Int | Type::Bool | Type::String | Type::Char | Type::Named(_)
+    )
+}
+
+/// M8: built-in methods that take a closure argument.
+pub fn is_closure_method(method: &str) -> bool {
+    matches!(
+        method,
+        "map" | "filter" | "each" | "find" | "any" | "all" | "sort_by" | "reduce"
     )
 }
 
@@ -73,6 +82,14 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         }
         ("contains", 1) => Some(Some(Type::Bool)),
         ("join", 1) => Some(Some(Type::String)),
+        // M8 closure methods — return type depends on callback; sema fills `map` element type.
+        ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // placeholder; sema refines
+        ("filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("each", 1) => Some(None),
+        ("find", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        ("any" | "all", 1) => Some(Some(Type::Bool)),
+        ("sort_by", 1) => Some(None),
+        ("reduce", 2) => Some(Some(Type::Int)), // placeholder; sema refines from init arg
         _ => None,
     }
 }
@@ -85,6 +102,7 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("contains_key", 1) => Some(Some(Type::Bool)),
         ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
         ("values", 0) => Some(Some(Type::List(Box::new(value.clone())))),
+        ("each", 1) => Some(None),
         _ => None,
     }
 }
@@ -107,7 +125,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
     match recv_ty {
         Type::List(_) => matches!(
             method,
-            "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "clear"
+            "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "sort_by" | "clear"
         ),
         Type::Map { .. } => matches!(method, "insert" | "remove" | "clear"),
         _ => false,
@@ -122,11 +140,38 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
             "get" | "index_of" | "remove" => Some(vec![Type::Int]),
             "join" => Some(vec![Type::String]),
+            "map" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: Some(Box::new(Type::Int)), // sema refines via expected_type
+            }]),
+            "filter" | "find" | "any" | "all" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: Some(Box::new(Type::Bool)),
+            }]),
+            "each" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: None,
+            }]),
+            "sort_by" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: Some(Box::new(Type::Int)), // sema refines key type
+            }]),
+            "reduce" => Some(vec![
+                Type::Int, // init — sema refines
+                Type::Fn {
+                    params: vec![Type::Int, (**inner).clone()],
+                    ret: Some(Box::new(Type::Int)),
+                },
+            ]),
             _ => Some(vec![]),
         },
         Type::Map { key, value } => match method {
             "insert" => Some(vec![(**key).clone(), (**value).clone()]),
             "get" | "remove" | "contains_key" => Some(vec![(**key).clone()]),
+            "each" => Some(vec![Type::Fn {
+                params: vec![(**key).clone(), (**value).clone()],
+                ret: None,
+            }]),
             _ => Some(vec![]),
         },
         Type::String => match method {

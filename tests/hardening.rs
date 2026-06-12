@@ -436,3 +436,17 @@ fn duplicate_file_stems_get_unique_module_names() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn value_is_identifier_not_keyword() {
+    let src = r#"
+fn show(label: String, value: Int) {
+    print("{label}: {value}");
+}
+
+fn main() {
+    show("score", 42);
+}
+"#;
+    jet::compile(src).expect("`value` may name a binding; only `val` is reserved");
+}

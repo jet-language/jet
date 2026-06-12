@@ -59,12 +59,37 @@ M3 (data) ─► M4 (errors) ─► M5 (collections) ─► M6 (tooling I) ─�
                                    │
                                    └─► M8 (closures) ─► M9 (generics/traits)
                                             │                  │
-                                            ▼                  ▼
-                                       M11 (concurrency)  M10 (stdlib)
-                                                                │
-                                            M12 (packages) ◄────┘
+                                            │                  ▼
+                                            │             M10 (stdlib)
+                                            │                  │
+                                            └────────► M12 (packages)
+                                                              │
+                                            M13 (LSP v2) ◄────┘
                                                   │
-                                            M13 (LSP v2) ─► M14 (v1.0)
+                                            M14 (v1.0)
+
+M11 (concurrency) deferred to v2 (S53) — not on the v1 path.
 ```
 
-Strict order M3→M4→M5→M6→M7 first; after M7, M8→M9→M10→M11→M12→M13→M14.
+Strict order M3→M4→M5→M6→M7 first; after M7, M8→M9→M9.5→M10→M12→M13→M14.
+
+## Example numbering (reserved)
+
+Sequential `examples/NN_*.jet` slots — do not reuse or skip when adding a
+milestone example. Multi-file demos use a directory (`examples/21_imports/`).
+
+| # | Milestone | File(s) |
+|---|-----------|---------|
+| 01–09 | M0–M2 | hello, functions, values, branches, fizzbuzz, compound, switch, ownership, ref_field |
+| 10–13 | M3–M4 | structs, enums, option, errors |
+| 14 | M4 | panic |
+| 15–18 | M5 | lists, wordcount, strings, list_bounds |
+| 19 | M5 | map_key (error demo) |
+| 20 | M6 | tests |
+| 21 | M6 | imports/ |
+| 22 | M7 | ffi |
+| 23–24 | M8 | closures, callbacks |
+| 25–26 | M9 | traits, generic_types |
+| 27–28 | M9.5 | comptime_table, embed |
+| 29–31 | M10 | files, json, cli |
+| 32–33 | M11 | tasks, pipeline |

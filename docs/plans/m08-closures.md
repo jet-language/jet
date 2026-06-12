@@ -107,8 +107,8 @@ E0033 `|x| …` Rust pipes → `(x) => …`.
 
 ## Examples & tests
 
-- `examples/19_closures.jet` — map/filter/reduce pipeline + sort_by.
-- `examples/20_callbacks.jet` — function-typed params, a stored callback
+- `examples/23_closures.jet` — map/filter/reduce pipeline + sort_by.
+- `examples/24_callbacks.jet` — function-typed params, a stored callback
   in a struct field (exercises boxing + capture cloning).
 - ui fixtures for all E08xx/L0801 + teaching errors with fixes.
 - Ownership torture fixtures: mut capture conflicting with outer use

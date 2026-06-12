@@ -10,13 +10,14 @@ tests, out-of-scope). Implementing agents follow docs/plans/README.md.
 Plans are gated on the decision ballots in docs/06-decision-ballots.md —
 a milestone may not start until its ballot group is ratified in docs/02.
 
-**Owner direction (2026-06-11):** the v1.x horizon is a complete
-language — data types, errors, collections, closures, generics/traits,
-std library, concurrency, package manager, real LSP — good enough that
-experts rewriting small Rust/Go/C tools would *choose* Jet. Formerly
-"deferred indefinitely" items (generics, threads & channels, package
-manager) are hereby promoted onto the roadmap below. Philosophy ranks
-are unchanged; single-file `jet run` stays ceremony-free forever (R9).
+**Owner direction (2026-06-11, amended 2026-06-12):** the v1.x horizon is
+a complete language — data types, errors, collections, closures,
+generics/traits, std library, package manager, real LSP — good enough
+that experts rewriting small Rust/Go/C tools would *choose* Jet.
+Concurrency (M11) is deferred to v2 (S53). Formerly "deferred
+indefinitely" items (generics, package manager) are promoted onto the
+roadmap below. Philosophy ranks are unchanged; single-file `jet run`
+stays ceremony-free forever (R9).
 
 ## M0 — Walking skeleton  *(done; verified 2026-06-11)*
 
@@ -105,13 +106,13 @@ project. This is C2's resolution: interop without importing Rust's type
 system.
 **Exit:** an example calling a real Rust crate function. ✓
 
-## M8 — Functions as values  *(plan: docs/plans/m08-closures.md; S46/S47 ratified)*
+## M8 — Functions as values  *(plan: docs/plans/m08-closures.md; done 2026-06-12)* ✓
 
 Lambdas, function types, closures whose captures obey the M2 ownership
 rules (no Fn/FnMut/FnOnce surfaced), and the closure-powered collection
 methods: `map`/`filter`/`each`/`find`/`sort_by`/`reduce`.
 **Exit:** a pipeline example; capture-ownership fixtures both failing
-and fixed; rustc-as-verifier battery over Fn-inference cases.
+and fixed; rustc-as-verifier battery over Fn-inference cases. ✓
 
 ## M9 — Generics & traits  *(plan: docs/plans/m09-generics-traits.md)*
 
@@ -123,7 +124,7 @@ Monomorphized by rustc, proven by sema (R2). Comptime (S26, ratified) is
 deliberately separate: traits own all polymorphism; comptime computes
 values only and lands in M9.5.
 **Exit:** shapes-with-traits example; generic container example; an
-instantiation soundness matrix test.
+instantiation soundness matrix test. ✓
 
 ## M9.5 — Comptime v1 (CTFE)  *(plan: docs/plans/m095-comptime.md; resolves S26 layer 1, S57)*
 
@@ -139,24 +140,15 @@ snapshots; the **differential battery** green in CI (every
 comptime-evaluable fixture also runs at runtime and must agree
 bit-for-bit — divergence is a P0 miscompile).
 
-## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; ballots: Group 7)*
+## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; Group 7 ✅)*
 
-`import "std/…"`: fs, io, env, process, math, random, time, json —
+`import std.<module>`: fs, io, env, process, math, random, time, json —
 exact v1 APIs frozen in the plan; every fallible call returns `Result<T, E>`.
 `U8` byte buffers and byte/string conversions. Enough batteries for real
 CLI tools.
 **Exit:** file-transform, JSON, and mini-CLI examples with golden tests.
 
-## M11 — Concurrency  *(plan: docs/plans/m11-concurrency.md; ballots: Group 7)*
-
-Tasks + channels (`tasks.spawn`, `Task<T>.join`, `Channel<T>`), no
-shared mutable state — the ownership checker proves data-race freedom
-with no lifetime syntax. Panics in tasks fail loud at `join`.
-**Exit:** parallel-sum and producer/consumer examples with
-deterministic goldens; shared-capture fixtures failing with the human
-framing and fixed with channels.
-
-## M12 — Package manager  *(plan: docs/plans/m12-packages.md; ballots: Group 7; two phases)*
+## M12 — Package manager  *(plan: docs/plans/m12-packages.md; Group 7 ✅; two phases)*
 
 Opt-in `jet.toml` (path + git deps, exact pins), `jet add`/`jet fetch`,
 content-hashed `jet.lock`, FFI deps in the manifest, no install-time
@@ -177,8 +169,8 @@ under budget in CI.
 
 ## M14 — v1.0  *(plan: docs/plans/m14-v1.md)*
 
-The proof: three showcase tools (grep-lite, JSON formatter, parallel
-wordfreq) benchmarked at ≤1.5× their Rust references. Diagnostics,
+The proof: three showcase tools (grep-lite, JSON formatter, wordfreq)
+benchmarked at ≤1.5× their Rust references. Diagnostics,
 soundness-fuzz, and performance audits; Open Decisions emptied; language
 tour + generated error-code index; prebuilt binaries; tag `v1.0.0`.
 **Exit:** see the plan — ends with a stranger shipping a tool from the
@@ -186,11 +178,13 @@ README in an afternoon.
 
 ## Deferred past v1.0 (owner can promote)
 
-Async/await (tasks + channels are the v1 answer), user macros (rejected
-forever in token/AST form by S26 — the sanctioned path is S56), Mutex/
-shared-state concurrency, networking std modules, self-hosting, debugger
-source maps (DAP), comptime layer 3: typed reflection / user-defined
-derives (S56).
+**M11 — Concurrency** (S53 ratified deferred to v2): tasks + channels
+(`tasks.spawn`, `Task<T>.join`, `Channel<T>`), no shared mutable state.
+Plan retained in docs/plans/m11-concurrency.md for when v2 begins.
+Async/await, user macros (rejected forever in token/AST form by S26 —
+the sanctioned path is S56), Mutex/shared-state concurrency, networking
+std modules, self-hosting, debugger source maps (DAP), comptime layer 3:
+typed reflection / user-defined derives (S56).
 
 ## Committed future additions (owner direction 2026-06-12 — need plans)
 
@@ -214,13 +208,14 @@ before work starts. None of these may compromise the v1 milestones.
    tasks/channels (no async). This is the Go-territory stdlib buildout.
 6. **Expert low-level tier** (S58) — `std/mem`-style gated access to
    allocators, layout, volatile, raw memory; never in onboarding.
-7. **C FFI** (S59) — `extern c` import and a Jet-export story; the
-   gateway to the non-Rust ecosystem and to embedded toolchains.
+7. **C FFI** (S59 ratified deferred to v2) — `extern c` import and a
+   Jet-export story; the gateway to the non-Rust ecosystem and to
+   embedded toolchains.
 8. **Freestanding profile** — `no_std`-class output for embedded/
    kernels (long-horizon target per docs/00 owner direction).
-9. **Pure-function marking & evaluation** (S60) — `jet eval --pure`
-   over marked-pure functions; the Nix-replacement direction
-   (docs/jetpack.md, unratified).
+9. **Pure-function marking & evaluation** (S60 ratified) — `pure fn`
+   and `jet eval --pure` over marked-pure functions; the Nix-replacement
+   direction (docs/jetpack.md, unratified).
 10. **Rapid-prototype execution mode** (owner direction 2026-06-12) —
     compile speed is a product priority: instant iteration while
     prototyping, full compilation when the product is ready. Components

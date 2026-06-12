@@ -1,7 +1,7 @@
 # M12 — Package manager
 
-**Blocked on decisions:** S52 (manifest format & commands), S51 (import
-spelling interplay). Depends on M6 (multi-file), M7 (FFI deps belong in
+**Decisions:** S52 (`jet.toml`), S51 (std module imports) ratified
+2026-06-12. Depends on M6 (multi-file), M7 (FFI deps belong in
 the manifest), M10 (std as the precedent for namespaced imports).
 **Error codes:** E1201+.
 
@@ -14,7 +14,7 @@ trivially-hostable static index. Jet packages are Jet source compiled
 from scratch — no binary artifacts, no build scripts, no install hooks
 (supply-chain stance: a dependency can't run code at install time).
 
-## Surface (uses ballot recommendations — substitute ratified choices)
+## Surface (ratified S52)
 
 `jet.toml` (S52 — TOML, hand-parsed in the compiler, I6):
 

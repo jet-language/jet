@@ -159,6 +159,24 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E0032 | parse | teaching: `lambda` / `fn(x){…}` → `(x) => …` (S46) |
+| E0033 | parse | teaching: `\|x\| …` Rust pipes → `(x) => …` (S46) |
+| E0801 | sema  | lambda parameter type unknown |
+| E0802 | sema  | escaping lambda captures non-clonable value without `take` |
+| E0803 | sema  | calling a value that isn't a function |
+| E0804 | sema  | self-recursive lambda binding |
+| L0801 | sema  | escaping lambda silently cloned a capture (lint) |
+| E0901 | sema  | method needs a generic bound |
+| E0902 | sema  | orphan `impl` (neither type nor trait local) |
+| E0903 | sema  | hand-written built-in trait impl staged |
+| E0904 | sema  | can't infer a type argument |
+| E0905 | sema  | type doesn't implement required trait |
+| E0906 | sema  | trait impl missing methods |
+| E0907 | sema  | trait impl signature mismatch |
+| E0908 | sema  | duplicate trait impl |
+| E0909 | sema  | generic instantiation too deep |
+| E0035 | parse | teaching: `where` clauses → inline bounds |
+| E0036 | parse | teaching: `dyn`/`Box` → trait name in type position |
 
 ## Process for a new diagnostic
 

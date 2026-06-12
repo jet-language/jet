@@ -11,6 +11,8 @@ pub mod codegen;
 pub mod diag;
 pub mod ffi;
 pub mod fmt;
+pub mod m9;
+pub mod generics;
 pub mod lexer;
 pub mod loader;
 pub mod lsp;
@@ -38,6 +40,19 @@ pub fn compile(src: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     let _ = src;
     compile_bundle_path(file, sema::CompileMode::Run)
+}
+
+/// Front-end check for a file on disk (and its imports). Library modules
+/// need not define `main`; use `compile_with_path` when building or running.
+pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
+    match loader::load_entry_with_overlay(file, None, true) {
+        Ok(mut bundle) => {
+            let mut diags = std::mem::take(&mut bundle.parse_teaching);
+            diags.extend(sema::check_bundle(&mut bundle, sema::CompileMode::Check));
+            diags
+        }
+        Err(diags) => diags,
+    }
 }
 
 fn compile_bundle_path(file: &str, mode: sema::CompileMode) -> Result<CompileOutput, Vec<Diagnostic>> {

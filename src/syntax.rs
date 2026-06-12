@@ -231,6 +231,10 @@ pub const KW_COMPTIME: &str = "comptime";
 pub const FOREIGN_INTERFACE: &str = "interface";
 pub const FOREIGN_TRAIT: &str = "trait";
 
+/// S48 (M9): foreign dynamic-dispatch spellings for teaching error E0036.
+pub const FOREIGN_DYN: &str = "dyn";
+pub const FOREIGN_BOX: &str = "Box";
+
 /// S24 (ratified M3): foreign switch arm spellings for teaching error E0023.
 pub const FOREIGN_CASE: &str = "case";
 pub const FOREIGN_DEFAULT: &str = "default";
@@ -264,6 +268,12 @@ pub const KW_IT: &str = "it";
 
 /// S42 (ratified M5): `as` recognized only for teaching error E0030.
 pub const FOREIGN_AS: &str = "as";
+
+/// S46 (M8): foreign anonymous-fn spellings for teaching error E0032.
+pub const FOREIGN_LAMBDA: &str = "lambda";
+
+/// S46 (M8): Rust pipe closures for teaching error E0033.
+pub const FOREIGN_PIPE_CLOSURE: &str = "|";
 
 /// S14 (M5): foreign collection spellings for teaching errors.
 pub const FOREIGN_VEC: &str = "Vec";

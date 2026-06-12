@@ -12,12 +12,15 @@
 //!   - every operator result is fully parenthesized
 
 use crate::ast::{
-    AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
-    IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, ProgramBundle, RustConstKind,
-    Stmt, StrPart, StructDef, TestDef, Type, UnOp, VariantPayload,
+    AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind,
+    Func, IfStmt, ImplDef, IndexKind, Item, Lambda, LambdaBody, LValue, OrFallback, Pattern,
+    Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, TestDef,
+    TraitImplBlock, Type, UnOp, VariantPayload,
 };
 use crate::ffi::FfiLink;
+use crate::generics;
 use crate::loader;
+use crate::m9;
 use crate::sema::CompileMode;
 use crate::diag::{span_line_col, Span};
 use crate::syntax;
@@ -32,7 +35,19 @@ impl JetShow for f64 { fn jet_show(&self) -> String { format!("{:?}", self) } }
 impl JetShow for bool { fn jet_show(&self) -> String { self.to_string() } }
 impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }
 impl<T: JetShow> JetShow for &T { fn jet_show(&self) -> String { (**self).jet_show() } }
+impl<T: JetShow> JetShow for Vec<T> { fn jet_show(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+    format!("[{}]", parts.join(", "))
+} }
 impl JetShow for char { fn jet_show(&self) -> String { self.to_string() } }
+impl<T: JetShow> JetShow for Option<T> {
+    fn jet_show(&self) -> String {
+        match self {
+            Some(v) => v.jet_show(),
+            None => "null".to_string(),
+        }
+    }
+}
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("The program stopped: {}", msg);
     eprintln!("  --> {}:{}", file, line);
@@ -71,6 +86,43 @@ fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String
     }
     chars[a as usize..=b as usize].iter().collect()
 }
+fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> U {
+    xs.into_iter().map(f).collect()
+}
+fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U> where F: FnMut(T) -> U {
+    xs.into_iter().map(|x| f(x)).collect()
+}
+fn jet_list_filter<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
+    xs.into_iter().filter(|x| f(x.clone())).collect()
+}
+fn jet_list_each<T, F>(xs: Vec<T>, f: F) where F: Fn(T) {
+    for x in xs { f(x); }
+}
+fn jet_list_each_ref<T, F>(xs: &Vec<T>, f: F) where F: Fn(&T) {
+    for x in xs.iter() { f(x); }
+}
+fn jet_list_each_mut<T, F>(xs: Vec<T>, mut f: F) where F: FnMut(T) {
+    for x in xs { f(x); }
+}
+fn jet_list_find<T: Clone, F>(xs: Vec<T>, f: F) -> Option<T> where F: Fn(T) -> bool {
+    xs.into_iter().find(|x| f(x.clone()))
+}
+fn jet_list_any<T: Clone, F>(xs: Vec<T>, f: F) -> bool where F: Fn(T) -> bool {
+    xs.iter().any(|x| f(x.clone()))
+}
+fn jet_list_all<T: Clone, F>(xs: Vec<T>, f: F) -> bool where F: Fn(T) -> bool {
+    xs.iter().all(|x| f(x.clone()))
+}
+fn jet_list_sort_by<T: Clone, K: Ord, F>(xs: &mut Vec<T>, f: F) where F: Fn(T) -> K {
+    xs.sort_by_key(|x| f(x.clone()));
+}
+fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) -> U {
+    xs.into_iter().fold(init, f)
+}
+fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F) where F: Fn(K, V) {
+    for (k, v) in m { f(k, v); }
+}
+trait user_Serialize { fn to_json(&self) -> String; }
 "#;
 
 /// Extra helpers for `jet test` harnesses only (M6/S43). Uses unwind so
@@ -99,10 +151,13 @@ fn mangle(name: &str) -> String {
 struct Cx {
     /// Top-level function name -> parameter conventions+types.
     sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
+    /// Top-level function name -> function value type (M8).
+    fn_types: HashMap<String, Type>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
     consts: HashMap<String, String>,
     type_names: HashSet<String>,
+    trait_names: HashSet<String>,
     struct_fields: HashMap<String, Vec<(String, Type)>>,
     enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
     /// variant name -> owning enum type (for pattern lowering)
@@ -111,6 +166,8 @@ struct Cx {
     boxed_edges: HashSet<(String, String)>,
     cloneable: HashSet<String>,
     comparable: HashSet<String>,
+    /// S55: explicit `derive Comparable;` → PartialOrd in Rust.
+    partial_ord: HashSet<String>,
     src: String,
     file: String,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
@@ -125,13 +182,25 @@ struct Cx {
     extern_funcs: HashMap<String, String>,
 }
 
-const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice};\n\n";
+const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
 
 impl Cx {
     fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
         if self.boxed_edges.contains(&(owner.to_string(), edge.to_string())) {
             format!("Box<{}>", base)
+        } else {
+            base
+        }
+    }
+
+    fn struct_field_rust(&self, s: &StructDef, edge: &str, ty: &Type) -> String {
+        let base = match ty {
+            Type::Named(n) if s.type_params.iter().any(|p| p.name == *n) => n.clone(),
+            _ => self.rust_type(ty),
+        };
+        if self.boxed_edges.contains(&(s.name.clone(), edge.to_string())) {
+            format!("Box<{base}>")
         } else {
             base
         }
@@ -159,8 +228,43 @@ impl Cx {
             ),
             // Items inside an imported file live in `mod user_<alias>`; the
             // module provides the namespace, so item names stay plain.
-            Type::Named(name) => format!("user_{}", name),
+            Type::Named(name) if generics::is_type_var_name(name) && !self.type_names.contains(name) => {
+                name.clone()
+            }
+            Type::Named(name) if self.trait_names.contains(name) => {
+                format!("Box<dyn {}>", generics::user_trait_rust(name))
+            }
+            Type::Named(name) => format!("user_{name}"),
+            Type::Apply { name, args } => {
+                if args.is_empty() {
+                    format!("user_{name}")
+                } else {
+                    format!(
+                        "user_{name}<{args}>",
+                        args = args
+                            .iter()
+                            .map(|a| self.rust_type(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            }
+            Type::TraitObject(t) => format!("Box<dyn {}>", generics::user_trait_rust(t)),
+            Type::Fn { params, ret } => self.rust_fn_trait(params, ret.as_deref(), false),
         }
+    }
+
+    fn rust_fn_trait(&self, params: &[Type], ret: Option<&Type>, mut_capture: bool) -> String {
+        let ps = params
+            .iter()
+            .map(|p| self.rust_type(p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let r = ret
+            .map(|t| self.rust_type(t))
+            .unwrap_or_else(|| "()".to_string());
+        let trait_name = if mut_capture { "FnMut" } else { "Fn" };
+        format!("Box<dyn {}({}) -> {}>", trait_name, ps, r)
     }
 
     fn mangle_name(&self, name: &str) -> String {
@@ -174,6 +278,21 @@ impl Cx {
 
 fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) -> String {
     let base = cx.rust_type(ty);
+    if matches!(ty, Type::Named(n) if cx.trait_names.contains(n))
+        || matches!(ty, Type::TraitObject(_))
+    {
+        return match convention {
+            AccessConvention::Read => format!("&{base}"),
+            AccessConvention::Mutate => format!("&mut {base}"),
+            AccessConvention::Move => base,
+        };
+    }
+    if matches!(ty, Type::Named(n) if generics::is_type_var_name(n)) {
+        return base;
+    }
+    if matches!(ty, Type::Fn { .. }) {
+        return base;
+    }
     match convention {
         AccessConvention::Read if ty.is_scalar() => base,
         AccessConvention::Read => format!("&{}", base),
@@ -219,6 +338,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
+            Item::Trait(t) => m9::emit_trait_def(t, &mut out),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
@@ -228,9 +348,25 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
-            Item::Struct(s) => emit_type_impl(&cx, &s.name, &s.methods, &mut out),
-            Item::Enum(e) => emit_type_impl(&cx, &e.name, &e.methods, &mut out),
-            Item::Impl(i) => emit_type_impl(&cx, &i.type_name, &i.methods, &mut out),
+            Item::Struct(s) => {
+                emit_type_impl(&cx, &s.name, &s.type_params, &s.methods, &mut out);
+                for block in &s.trait_impls {
+                    emit_trait_impl(&cx, &s.name, &s.type_params, block, &mut out);
+                }
+            }
+            Item::Enum(e) => {
+                emit_type_impl(&cx, &e.name, &e.type_params, &e.methods, &mut out);
+                for block in &e.trait_impls {
+                    emit_trait_impl(&cx, &e.name, &e.type_params, block, &mut out);
+                }
+            }
+            Item::Impl(i) => {
+                if i.trait_name.is_some() {
+                    emit_external_trait_impl(&cx, i, &mut out);
+                } else {
+                    emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
+                }
+            }
             _ => {}
         }
     }
@@ -271,6 +407,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
+            Item::Trait(t) => m9::emit_trait_def(t, &mut out),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
@@ -280,9 +417,25 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
-            Item::Struct(s) => emit_type_impl(&cx, &s.name, &s.methods, &mut out),
-            Item::Enum(e) => emit_type_impl(&cx, &e.name, &e.methods, &mut out),
-            Item::Impl(i) => emit_type_impl(&cx, &i.type_name, &i.methods, &mut out),
+            Item::Struct(s) => {
+                emit_type_impl(&cx, &s.name, &s.type_params, &s.methods, &mut out);
+                for block in &s.trait_impls {
+                    emit_trait_impl(&cx, &s.name, &s.type_params, block, &mut out);
+                }
+            }
+            Item::Enum(e) => {
+                emit_type_impl(&cx, &e.name, &e.type_params, &e.methods, &mut out);
+                for block in &e.trait_impls {
+                    emit_trait_impl(&cx, &e.name, &e.type_params, block, &mut out);
+                }
+            }
+            Item::Impl(i) => {
+                if i.trait_name.is_some() {
+                    emit_external_trait_impl(&cx, i, &mut out);
+                } else {
+                    emit_type_impl(&cx, &i.type_name, &[], &i.methods, &mut out);
+                }
+            }
             _ => {}
         }
     }
@@ -368,15 +521,18 @@ fn build_cx_items(
 ) -> Cx {
     let mut cx = Cx {
         sigs: HashMap::new(),
+        fn_types: HashMap::new(),
         method_sigs: HashMap::new(),
         consts: HashMap::new(),
         type_names: HashSet::new(),
+        trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
         enum_variants: HashMap::new(),
         variant_owner: HashMap::new(),
         boxed_edges: HashSet::new(),
         cloneable: HashSet::new(),
         comparable: HashSet::new(),
+        partial_ord: HashSet::new(),
         src: src.to_string(),
         file: file.to_string(),
         test_mode: false,
@@ -389,12 +545,29 @@ fn build_cx_items(
     for item in items {
         match item {
             Item::Func(f) => {
+                let type_params: HashSet<String> =
+                    f.type_params.iter().map(|p| p.name.clone()).collect();
                 cx.sigs.insert(
                     f.name.clone(),
                     f.params
                         .iter()
-                        .map(|p| (p.convention, p.ty.clone()))
+                        .map(|p| {
+                            let conv = if matches!(&p.ty, Type::Named(n) if type_params.contains(n))
+                            {
+                                AccessConvention::Move
+                            } else {
+                                p.convention
+                            };
+                            (conv, p.ty.clone())
+                        })
                         .collect(),
+                );
+                cx.fn_types.insert(
+                    f.name.clone(),
+                    Type::Fn {
+                        params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                        ret: f.return_type.clone().map(Box::new),
+                    },
                 );
             }
             Item::Struct(s) => {
@@ -437,6 +610,9 @@ fn build_cx_items(
                     );
                 }
             }
+            Item::Trait(t) => {
+                cx.trait_names.insert(t.name.clone());
+            }
             Item::Impl(_) | Item::Test(_) => {}
         }
     }
@@ -450,6 +626,12 @@ fn build_cx_items(
                 }
                 if type_is_comparable_struct(s, &cx.type_names) {
                     cx.comparable.insert(s.name.clone());
+                }
+                for (t, _) in &s.derives {
+                    if t == generics::COMPARABLE {
+                        cx.partial_ord.insert(s.name.clone());
+                        cx.comparable.insert(s.name.clone());
+                    }
                 }
                 for m in &s.methods {
                     cx.method_sigs
@@ -518,7 +700,10 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>) -> bool {
         Type::Result { ok, err } => {
             field_type_cloneable(ok, types) && field_type_cloneable(err, types)
         }
+        Type::Named(n) if generics::is_type_var_name(n) => true,
         Type::Named(n) => types.contains(n),
+        Type::Apply { args, .. } => args.iter().all(|a| field_type_cloneable(a, types)),
+        Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }
 
@@ -544,8 +729,10 @@ fn field_type_comparable(ty: &Type, types: &HashSet<String>) -> bool {
             field_type_comparable(ok, types) && field_type_comparable(err, types)
         }
         Type::List(inner) => field_type_comparable(inner, types),
+        Type::Named(n) if generics::is_type_var_name(n) => true,
         Type::Named(n) => types.contains(n),
-        Type::Map { .. } | Type::Shared(_) => false,
+        Type::Apply { args, .. } => args.iter().all(|a| field_type_comparable(a, types)),
+        Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
     }
 }
 
@@ -667,6 +854,16 @@ fn struct_lifetimes(fields: &[Field]) -> Vec<String> {
 
 fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     let lifetimes = struct_lifetimes(&s.fields);
+    let clone_extra = if !s.type_params.is_empty() && cx.cloneable.contains(&s.name) {
+        generics::rust_extra_clone_bounds(&s.type_params)
+    } else {
+        HashMap::new()
+    };
+    let gen = if s.type_params.is_empty() {
+        String::new()
+    } else {
+        generics::rust_type_param_list(&s.type_params, &clone_extra)
+    };
     let lt_params = if lifetimes.is_empty() {
         String::new()
     } else {
@@ -679,21 +876,43 @@ fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .join(", ")
         )
     };
-    let mut derives = vec!["Debug"];
+    let type_params = if gen.is_empty() {
+        lt_params.clone()
+    } else if lt_params.is_empty() {
+        gen
+    } else {
+        format!(
+            "<{}, {}>",
+            &gen[1..gen.len() - 1],
+            &lt_params[1..lt_params.len() - 1]
+        )
+    };
+    let has_fn_field = s.fields.iter().any(|f| matches!(f.ty, Type::Fn { .. }));
+    let mut derives: Vec<&str> = Vec::new();
+    if !has_fn_field && s.type_params.is_empty() {
+        derives.push("Debug");
+    }
     if cx.cloneable.contains(&s.name) {
         derives.push("Clone");
     }
     if cx.comparable.contains(&s.name) {
         derives.push("PartialEq");
     }
+    if cx.partial_ord.contains(&s.name) {
+        derives.push("PartialOrd");
+    }
     // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
     // keeps cross-module references compiling (R2: sema is the gatekeeper).
-    out.push_str(&format!(
-        "#[derive({})]\npub struct user_{}{} {{\n",
-        derives.join(", "),
-        s.name,
-        lt_params
-    ));
+    if derives.is_empty() {
+        out.push_str(&format!("pub struct user_{}{} {{\n", s.name, type_params));
+    } else {
+        out.push_str(&format!(
+            "#[derive({})]\npub struct user_{}{} {{\n",
+            derives.join(", "),
+            s.name,
+            type_params
+        ));
+    }
     for f in &s.fields {
         let field_ty = if f.is_stored_ref {
             let label = f
@@ -702,15 +921,52 @@ fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .unwrap_or_else(|| "src".to_string());
             format!("&'{} {}", label, cx.rust_type(&f.ty))
         } else {
-            cx.field_rust_type(&s.name, &f.name, &f.ty)
+            cx.struct_field_rust(s, &f.name, &f.ty)
         };
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
-    if lifetimes.is_empty() {
+    if !s.type_params.is_empty() {
+        let jetshow_extra = generics::rust_extra_jetshow_bounds(&s.type_params);
+        let mut impl_bounds = jetshow_extra.clone();
+        for (k, v) in &clone_extra {
+            impl_bounds.entry(k.clone()).or_default().extend(v.iter().cloned());
+        }
+        let tp_bounds = generics::rust_type_param_list(&s.type_params, &impl_bounds);
+        let tp_plain = generics::type_param_rust_list(&s.type_params);
+        let show_body = if has_fn_field {
+            format!("\"{} {{ ... }}\".to_string()", s.name)
+        } else {
+            let fmt_fields: String = s
+                .fields
+                .iter()
+                .map(|f| format!("{}: {{}}", f.name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let show_fields: String = s
+                .fields
+                .iter()
+                .map(|f| format!("((self).{}).jet_show()", mangle(&f.name)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "format!(\"{}({})\", {})",
+                s.name, fmt_fields, show_fields
+            )
+        };
         out.push_str(&format!(
-            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
-            s.name
+            "impl{} JetShow for user_{}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            tp_bounds, s.name, tp_plain, show_body
+        ));
+    } else if lifetimes.is_empty() {
+        let show_body = if has_fn_field {
+            format!("\"{} {{ ... }}\".to_string()", s.name)
+        } else {
+            "format!(\"{:?}\", self)".to_string()
+        };
+        out.push_str(&format!(
+            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            s.name, show_body
         ));
     } else {
         let lt = lifetimes
@@ -761,15 +1017,121 @@ fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     ));
 }
 
-fn emit_type_impl(cx: &Cx, type_name: &str, methods: &[Func], out: &mut String) {
+fn emit_type_impl(
+    cx: &Cx,
+    type_name: &str,
+    type_params: &[crate::ast::TypeParam],
+    methods: &[Func],
+    out: &mut String,
+) {
     if methods.is_empty() {
         return;
     }
-    out.push_str(&format!("impl user_{} {{\n", type_name));
+    let tp = generics::type_param_rust_list(type_params);
+    out.push_str(&format!("impl{} user_{}{} {{\n", tp, type_name, tp));
     for m in methods {
         emit_method(cx, type_name, m, out, 1);
     }
     out.push_str("}\n\n");
+}
+
+fn emit_trait_impl(
+    cx: &Cx,
+    type_name: &str,
+    type_params: &[crate::ast::TypeParam],
+    block: &TraitImplBlock,
+    out: &mut String,
+) {
+    let tp = generics::type_param_rust_list(type_params);
+    out.push_str(&format!(
+        "impl{} {} for user_{}{} {{\n",
+        tp,
+        generics::user_trait_rust(&block.trait_name),
+        type_name,
+        tp
+    ));
+    for m in &block.methods {
+        emit_trait_method(cx, type_name, m, out, 1);
+    }
+    out.push_str("}\n\n");
+}
+
+fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
+    let trait_name = i.trait_name.as_deref().unwrap_or("");
+    out.push_str(&format!(
+        "impl {} for user_{} {{\n",
+        generics::user_trait_rust(trait_name),
+        i.type_name
+    ));
+    for m in &i.methods {
+        emit_trait_method(cx, &i.type_name, m, out, 1);
+    }
+    out.push_str("}\n\n");
+}
+
+fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
+    let pad = "    ".repeat(indent);
+    let ret = f
+        .return_type
+        .as_ref()
+        .map(|t| rust_return_type(cx, t, f.is_view_return))
+        .unwrap_or_default();
+    let ret_clause = if ret.is_empty() {
+        String::new()
+    } else {
+        format!(" -> {}", ret)
+    };
+    let params = f
+        .params
+        .iter()
+        .map(|p| {
+            if p.name == syntax::KW_SELF {
+                "&self".to_string()
+            } else {
+                format!(
+                    "_{}: {}",
+                    cx.mangle_name(&p.name),
+                    rust_param_type(cx, p.convention, &p.ty)
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!(
+        "{pad}fn {}({}){ret_clause} {{\n",
+        f.name,
+        params,
+        ret_clause = ret_clause
+    ));
+    let mut env: HashMap<String, Slot> = HashMap::new();
+    for p in &f.params {
+        if p.name == syntax::KW_SELF {
+            env.insert(
+                p.name.clone(),
+                Slot {
+                    rust_name: "self".to_string(),
+                    deref: false,
+                    jet_ty: Some(Type::Named(type_name.to_string())),
+                },
+            );
+            continue;
+        }
+        let deref = match p.convention {
+            AccessConvention::Read => !p.ty.is_scalar(),
+            AccessConvention::Mutate => true,
+            AccessConvention::Move => false,
+        };
+        env.insert(
+            p.name.clone(),
+            Slot {
+                rust_name: cx.mangle_name(&p.name),
+                deref,
+                jet_ty: Some(p.ty.clone()),
+            },
+        );
+    }
+    emit_stmts(cx, &f.body, &mut env, out, indent + 1, f.is_view_return);
+    out.push_str(&format!("{pad}}}\n"));
 }
 
 fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
@@ -870,6 +1232,12 @@ fn emit_const(c: &crate::ast::ConstDef, out: &mut String) {
 }
 
 fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
+    let extra = if f.type_params.is_empty() {
+        HashMap::new()
+    } else {
+        generics::rust_extra_clone_bounds(&f.type_params)
+    };
+    let gen = generics::rust_type_param_list(&f.type_params, &extra);
     let ret = f
         .return_type
         .as_ref()
@@ -894,15 +1262,26 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         .join(", ");
     let vis = if f.name == "main" { "" } else { "pub " };
     out.push_str(&format!(
-        "{vis}fn {}({}){} {{\n",
-        cx.mangle_name(&f.name),
-        params,
-        ret_clause
+        "{vis}fn {name}{gen}({params}){ret} {{\n",
+        name = cx.mangle_name(&f.name),
+        gen = gen,
+        params = params,
+        ret = ret_clause,
     ));
     let mut env: HashMap<String, Slot> = HashMap::new();
     for p in &f.params {
-        let deref = match p.convention {
-            AccessConvention::Read => !p.ty.is_scalar(),
+        let is_type_param = f
+            .type_params
+            .iter()
+            .any(|tp| matches!(&p.ty, Type::Named(n) if n == &tp.name));
+        let conv = if is_type_param {
+            AccessConvention::Move
+        } else {
+            p.convention
+        };
+        let deref = match conv {
+            AccessConvention::Read if p.ty.is_scalar() => false,
+            AccessConvention::Read => true,
             AccessConvention::Mutate => true,
             AccessConvention::Move => false,
         };
@@ -943,13 +1322,35 @@ fn emit_stmt(
     let pad = "    ".repeat(indent);
     match stmt {
         Stmt::Val(b) => {
-            let init = emit_expr(cx, &b.init, env);
-            let kw = if b.mutable { "let mut" } else { "let" };
-            let ty = b
-                .ty
-                .as_ref()
-                .map(|t| format!(": {}", cx.rust_type(t)))
-                .unwrap_or_default();
+            let mut_fn = matches!(
+                &b.init,
+                Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
+            );
+            let mut init = emit_expr(cx, &b.init, env);
+            if mut_fn {
+                if let Some(Type::Fn { params, ret }) = &b.ty {
+                    init = format!(
+                        "{} as {}",
+                        init,
+                        cx.rust_fn_trait(params, ret.as_deref(), true)
+                    );
+                }
+            }
+            let kw = if b.mutable || mut_fn {
+                "let mut"
+            } else {
+                "let"
+            };
+            let ty = b.ty.as_ref().map(|t| {
+                if let Type::Fn { params, ret } = t {
+                    format!(
+                        ": {}",
+                        cx.rust_fn_trait(params, ret.as_deref(), mut_fn)
+                    )
+                } else {
+                    format!(": {}", cx.rust_type(t))
+                }
+            }).unwrap_or_default();
             out.push_str(&format!(
                 "{}{} {}{} = {};\n",
                 pad,
@@ -1683,6 +2084,40 @@ fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
     }
 }
 
+fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
+    let rust_name = mangle(name);
+    let Type::Fn { params, ret } = ft else {
+        return rust_name;
+    };
+    let arg_decls: Vec<String> = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| format!("__jet_a{}: {}", i, cx.rust_type(p)))
+        .collect();
+    let arg_calls: Vec<String> = (0..params.len()).map(|i| format!("__jet_a{i}")).collect();
+    let _ = ret;
+    format!(
+        "Box::new(move |{}| {}({})) as {}",
+        arg_decls.join(", "),
+        rust_name,
+        arg_calls.join(", "),
+        cx.rust_type(ft)
+    )
+}
+
+fn receiver_struct_type(receiver: &Expr, env: &HashMap<String, Slot>) -> Option<String> {
+    match receiver {
+        Expr::Ident(name, _) => env.get(name).and_then(|s| s.jet_ty.as_ref()).and_then(|t| {
+            if let Type::Named(n) = t {
+                Some(n.clone())
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    }
+}
+
 fn place_of(env: &HashMap<String, Slot>, name: &str) -> String {
     match env.get(name) {
         Some(slot) if slot.deref => format!("(*{})", slot.rust_name),
@@ -1693,6 +2128,21 @@ fn place_of(env: &HashMap<String, Slot>, name: &str) -> String {
 
 fn emit_expr_stmt(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
     emit_expr(cx, e, env)
+}
+
+fn user_type_apply_rust(cx: &Cx, name: &str, type_args: &[Type]) -> String {
+    if type_args.is_empty() {
+        format!("user_{name}")
+    } else {
+        format!(
+            "user_{name}::<{}>",
+            type_args
+                .iter()
+                .map(|a| cx.rust_type(a))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
@@ -1765,6 +2215,11 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             if let Some(c) = cx.consts.get(name) {
                 return c.clone();
             }
+            if env.get(name).is_none() {
+                if let Some(ft) = cx.fn_types.get(name) {
+                    return emit_named_fn_value(cx, name, ft);
+                }
+            }
             place_of(env, name)
         }
         Expr::Unary(op, inner, _) => {
@@ -1811,7 +2266,9 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         } => emit_method_call(cx, receiver, method, args, recv_type.as_deref(), env),
         Expr::StructLit {
             type_name,
+            type_args,
             import_ns,
+            as_trait,
             fields,
             ..
         } => {
@@ -1822,17 +2279,45 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                     .get(ns)
                     .map(|s| s.as_str())
                     .unwrap_or("user_unknown");
-                let rust_type = format!("{}::{}", mod_name, mangle(type_name));
+                let rust_type = if type_args.is_empty() {
+                    format!("{}::{}", mod_name, mangle(type_name))
+                } else {
+                    format!(
+                        "{}::{}::<{}>",
+                        mod_name,
+                        mangle(type_name),
+                        type_args
+                            .iter()
+                            .map(|a| cx.rust_type(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
                 for (n, _, e) in fields {
                     parts.push(format!("{}: {}", mangle(n), emit_expr(cx, e, env)));
                 }
-                return format!("{} {{ {} }}", rust_type, parts.join(", "));
+                let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
+                if let Some(trait_name) = as_trait {
+                    return format!(
+                        "Box::new({lit}) as Box<dyn {}>",
+                        generics::user_trait_rust(trait_name)
+                    );
+                }
+                return lit;
             }
-            let rust_type = format!("user_{}", type_name);
+            let rust_type = user_type_apply_rust(cx, type_name, type_args);
             for (n, _, e) in fields {
                 parts.push(format!("{}: {}", mangle(n), emit_expr(cx, e, env)));
             }
-            format!("{} {{ {} }}", rust_type, parts.join(", "))
+            let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
+            if let Some(trait_name) = as_trait {
+                format!(
+                    "Box::new({lit}) as Box<dyn {}>",
+                    generics::user_trait_rust(trait_name)
+                )
+            } else {
+                lit
+            }
         }
         Expr::EnumLit {
             type_name,
@@ -1855,6 +2340,79 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             let subj = emit_expr(cx, subject, env);
             emit_pattern_matches(cx, &subj, pattern)
         }
+        Expr::Lambda(lam) => emit_lambda(cx, lam, env),
+        Expr::CallValue { callee, args, .. } => {
+            let f = emit_expr(cx, callee, env);
+            let arg_str = emit_call_args(cx, None, args, env);
+            format!("({})({})", f, arg_str)
+        }
+    }
+}
+
+fn emit_lambda(cx: &Cx, lam: &Lambda, env: &HashMap<String, Slot>) -> String {
+    let mut prep = String::new();
+    let mut lam_env = env.clone();
+    for name in &lam.meta.cloned_captures {
+        let cap = format!("_jet_cap_{}", mangle(name));
+        prep.push_str(&format!(
+            "let {} = ({}).clone();\n    ",
+            cap,
+            place_of(env, name)
+        ));
+        lam_env.insert(
+            name.clone(),
+            Slot {
+                rust_name: cap,
+                deref: false,
+                jet_ty: None,
+            },
+        );
+    }
+    for p in &lam.params {
+        lam_env.insert(
+            p.name.clone(),
+            Slot {
+                rust_name: mangle(&p.name),
+                deref: false,
+                jet_ty: p.ty.clone(),
+            },
+        );
+    }
+    let params: Vec<String> = lam
+        .params
+        .iter()
+        .map(|p| {
+            let ty = p
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", cx.rust_type(t)))
+                .unwrap_or_default();
+            format!("{}{}", mangle(&p.name), ty)
+        })
+        .collect();
+    let body = match &lam.body {
+        LambdaBody::Expr(e) => emit_expr(cx, e, &lam_env),
+        LambdaBody::Block(stmts) => {
+            let mut inner = String::new();
+            emit_stmts(cx, stmts, &mut lam_env, &mut inner, 1, false);
+            format!("{{ {} }}", inner)
+        }
+    };
+    let move_kw = if lam.meta.needs_fn_mut && !lam.meta.escapes {
+        ""
+    } else {
+        "move "
+    };
+    let closure = format!("{}|{}| {}", move_kw, params.join(", "), body);
+    let wrapped = if lam.meta.escapes {
+        format!("Box::new({})", closure)
+    } else {
+        closure
+    };
+    if prep.is_empty() {
+        wrapped
+    } else {
+        format!("{{ {} {} }}", prep, wrapped)
     }
 }
 
@@ -1957,6 +2515,11 @@ fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
     }
 }
 
+fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
+    matches!(inner, Type::TraitObject(_))
+        || matches!(inner, Type::Named(n) if cx.trait_names.contains(n))
+}
+
 fn emit_builtin_method(
     cx: &Cx,
     receiver: &Expr,
@@ -2044,6 +2607,48 @@ fn emit_builtin_method(
         "to_string" => Some(format!("({}).jet_show()", recv)),
         "to_float" => Some(format!("({}) as f64", recv)),
         "to_int" => Some(format!("({}) as i64", recv)),
+        "map" => {
+            if let Expr::Lambda(l) = &args[0].expr {
+                if l.meta.needs_fn_mut {
+                    Some(format!("jet_list_map_mut(({}).clone(), {})", recv, arg(0)))
+                } else {
+                    Some(format!("jet_list_map(({}).clone(), {})", recv, arg(0)))
+                }
+            } else {
+                Some(format!("jet_list_map(({}).clone(), {})", recv, arg(0)))
+            }
+        }
+        "filter" => Some(format!("jet_list_filter(({}).clone(), {})", recv, arg(0))),
+        "each" => {
+            let trait_obj_list = matches!(rty, Some(Type::List(ref inner)) if list_carries_trait(cx, inner));
+            let list_each = |a: &str| {
+                if trait_obj_list {
+                    format!("jet_list_each_ref(&({recv}), {a})")
+                } else if let Expr::Lambda(l) = &args[0].expr {
+                    if l.meta.needs_fn_mut {
+                        format!("jet_list_each_mut(({}).clone(), {})", recv, a)
+                    } else {
+                        format!("jet_list_each(({}).clone(), {})", recv, a)
+                    }
+                } else {
+                    format!("jet_list_each(({}).clone(), {})", recv, a)
+                }
+            };
+            match rty {
+                Some(Type::Map { .. }) => Some(format!("jet_map_each(({}).clone(), {})", recv, arg(0))),
+                _ => Some(list_each(&arg(0))),
+            }
+        }
+        "find" => Some(format!("jet_list_find(({}).clone(), {})", recv, arg(0))),
+        "any" => Some(format!("jet_list_any(({}).clone(), {})", recv, arg(0))),
+        "all" => Some(format!("jet_list_all(({}).clone(), {})", recv, arg(0))),
+        "sort_by" => Some(format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, arg(0))),
+        "reduce" => Some(format!(
+            "jet_list_reduce(({}).clone(), {}, {})",
+            recv,
+            arg(0),
+            arg(1)
+        )),
         _ => None,
     }
 }
@@ -2059,12 +2664,23 @@ fn emit_method_call(
     if method == "clone" {
         return format!("({}).clone()", emit_expr(cx, receiver, env));
     }
-    // When sema resolved a user-defined method, never fall into the
-    // built-in table (a user method may share a name like `len`).
-    if recv_type.is_none() {
-        if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
-            return s;
+    let struct_ty = recv_type
+        .map(|s| s.to_string())
+        .or_else(|| receiver_struct_type(receiver, env));
+    if let Some(type_name) = struct_ty {
+        if let Some(fields) = cx.struct_fields.get(&type_name) {
+            if let Some((_, field_ty)) = fields.iter().find(|(n, _)| n == method) {
+                if matches!(field_ty, Type::Fn { .. }) {
+                    let recv = emit_expr(cx, receiver, env);
+                    let arg_str = emit_call_args(cx, None, args, env);
+                    return format!("(({}).{})({})", recv, mangle(method), arg_str);
+                }
+            }
         }
+    }
+    // Built-in collection/string methods take precedence when they match.
+    if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
+        return s;
     }
     if let Expr::Ident(alias, _) = receiver {
         if let Some(mod_name) = cx.import_mods.get(alias) {
@@ -2100,6 +2716,12 @@ fn emit_method_call(
         }
     }
     let recv = emit_expr(cx, receiver, env);
+    if let Some(rt) = recv_type {
+        if cx.trait_names.contains(rt) {
+            let arg_str = emit_call_args(cx, None, args, env);
+            return format!("({}).{}({})", recv, method, arg_str);
+        }
+    }
     let sig = recv_type
         .and_then(|t| cx.method_sigs.get(&(t.to_string(), method.to_string())));
     let arg_str = emit_call_args(cx, sig.map(|s| s.as_slice()), args, env);
@@ -2122,8 +2744,29 @@ fn emit_call_args(
                 s = format!("std::sync::Arc::clone(&{})", s);
             }
             let conv = sig.and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
+            if let Some((_, Type::Fn { .. })) = &conv {
+                let already_boxed = s.starts_with("Box::new(")
+                    || matches!(
+                        &a.expr,
+                        Expr::Ident(name, _)
+                            if env
+                                .get(name)
+                                .and_then(|slot| slot.jet_ty.as_ref())
+                                .is_some_and(|t| matches!(t, Type::Fn { .. }))
+                    );
+                if !already_boxed {
+                    s = format!("Box::new({})", s);
+                }
+                if let Some((_, ty)) = &conv {
+                    s = format!("{} as {}", s, cx.rust_type(ty));
+                }
+            }
             match conv {
-                Some((AccessConvention::Read, t)) if !t.is_scalar() => format!("&({})", s),
+                Some((AccessConvention::Read, t))
+                    if !t.is_scalar() && !matches!(t, Type::Fn { .. }) =>
+                {
+                    format!("&({})", s)
+                }
                 Some((AccessConvention::Mutate, _)) => format!("&mut ({})", s),
                 _ => s,
             }
@@ -2171,6 +2814,11 @@ fn emit_call(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -> S
     }
     if call.name == syntax::BUILTIN_REQUIRE_EQ {
         return emit_require_eq(cx, call, env);
+    }
+    if env.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+        let callee = place_of(env, &call.name);
+        let arg_str = emit_call_args(cx, None, &call.args, env);
+        return format!("({})({})", callee, arg_str);
     }
     let sig = cx.sigs.get(&call.name);
     let args = if cx.extern_funcs.contains_key(&call.name) {
@@ -2252,6 +2900,7 @@ fn import_sig_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<(String,
 fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: bool) {
     for item in items {
         match item {
+            Item::Trait(t) => m9::emit_trait_def(t, out),
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
@@ -2260,9 +2909,25 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
     }
     for item in items {
         match item {
-            Item::Struct(s) => emit_type_impl(cx, &s.name, &s.methods, out),
-            Item::Enum(e) => emit_type_impl(cx, &e.name, &e.methods, out),
-            Item::Impl(i) => emit_type_impl(cx, &i.type_name, &i.methods, out),
+            Item::Struct(s) => {
+                emit_type_impl(cx, &s.name, &s.type_params, &s.methods, out);
+                for block in &s.trait_impls {
+                    emit_trait_impl(cx, &s.name, &s.type_params, block, out);
+                }
+            }
+            Item::Enum(e) => {
+                emit_type_impl(cx, &e.name, &e.type_params, &e.methods, out);
+                for block in &e.trait_impls {
+                    emit_trait_impl(cx, &e.name, &e.type_params, block, out);
+                }
+            }
+            Item::Impl(i) => {
+                if i.trait_name.is_some() {
+                    emit_external_trait_impl(cx, i, out);
+                } else {
+                    emit_type_impl(cx, &i.type_name, &[], &i.methods, out);
+                }
+            }
             _ => {}
         }
     }

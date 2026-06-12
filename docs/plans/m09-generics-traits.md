@@ -137,9 +137,9 @@ inline bounds; E0036 `dyn`/`Box` → just write the trait name.
 
 ## Examples & tests
 
-- `examples/21_traits.jet` — shapes (the canonical demo), mixed
+- `examples/25_traits.jet` — shapes (the canonical demo), mixed
   `List<Shape>`, plus a generic `largest` over `Comparable`.
-- `examples/22_generic_types.jet` — `Pair<T>`, a generic `Stack<T>`
+- `examples/26_generic_types.jet` — `Pair<T>`, a generic `Stack<T>`
   struct wrapping `List<T>`.
 - ui fixtures for every E09xx; inference-failure fixtures with the
   annotation fix shown; golden tests including dyn-dispatch output and

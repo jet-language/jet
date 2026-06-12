@@ -36,7 +36,20 @@ pub enum Type {
         ok: Box<Type>,
         err: Box<Type>,
     },
+    /// S47 (M8): function type `fn(T1, T2) -> R` (`ret` omitted = no return value).
+    Fn {
+        params: Vec<Type>,
+        ret: Option<Box<Type>>,
+    },
+    /// User-defined monomorphic type name.
     Named(String),
+    /// S45 (M9): generic application — `Pair<Int>`, `Stack<T>`.
+    Apply {
+        name: String,
+        args: Vec<Type>,
+    },
+    /// S48 (M9): trait object — dynamic dispatch with invisible boxing.
+    TraitObject(String),
 }
 
 impl Type {
@@ -55,7 +68,27 @@ impl Type {
             Type::Result { ok, err } => {
                 format!("Result<{}, {}>", ok.name(), err.name())
             }
+            Type::Fn { params, ret } => {
+                let ps = params
+                    .iter()
+                    .map(|p| p.name())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match ret {
+                    Some(r) => format!("fn({}) -> {}", ps, r.name()),
+                    None => format!("fn({})", ps),
+                }
+            }
             Type::Named(n) => format!("`{}`", n),
+            Type::Apply { name, args } => {
+                let a = args
+                    .iter()
+                    .map(|x| x.name())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("`{}`<{}>", name, a)
+            }
+            Type::TraitObject(t) => format!("`{}` (a trait value)", t),
         }
     }
 
@@ -72,7 +105,37 @@ impl Type {
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("Result<{}, {}>", ok.name(), err.name()),
+            Type::Fn { params, ret } => {
+                let ps = params
+                    .iter()
+                    .map(|p| p.name())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match ret {
+                    Some(r) => format!("fn({}) -> {}", ps, r.name()),
+                    None => format!("fn({})", ps),
+                }
+            }
             Type::Named(n) => n.clone(),
+            Type::Apply { name, args } => {
+                let a = args
+                    .iter()
+                    .map(|x| x.name())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", name, a)
+            }
+            Type::TraitObject(t) => t.clone(),
+        }
+    }
+
+    /// Base name for struct/enum/trait references (without generic args).
+    pub fn base_name(&self) -> Option<&str> {
+        match self {
+            Type::Named(n) => Some(n.as_str()),
+            Type::Apply { name, .. } => Some(name.as_str()),
+            Type::TraitObject(t) => Some(t.as_str()),
+            _ => None,
         }
     }
 
@@ -151,12 +214,50 @@ pub enum Item {
     Func(Func),
     Struct(StructDef),
     Enum(EnumDef),
+    /// S28 (M9): `trait Name { fn sig(self) -> T; … }`.
+    Trait(TraitDef),
     Impl(ImplDef),
     Const(ConstDef),
     /// S43 (M6): `test "name" { … }` — only at file top level.
     Test(TestDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
     ExternRust(ExternRustBlock),
+}
+
+/// S45 (M9): type parameter with optional trait bounds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeParam {
+    pub name: String,
+    pub name_span: Span,
+    pub bounds: Vec<String>,
+}
+
+/// S28 (M9): trait declaration — signatures only in v1.
+#[derive(Debug)]
+pub struct TraitDef {
+    pub is_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub methods: Vec<TraitMethodSig>,
+}
+
+/// S28: method signature inside a trait block (no body).
+#[derive(Debug, Clone)]
+pub struct TraitMethodSig {
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<Param>,
+    pub return_type: Option<Type>,
+    pub is_view_return: bool,
+    pub span: Span,
+}
+
+/// S28: `impl Trait { … }` inside a struct or enum body.
+#[derive(Debug)]
+pub struct TraitImplBlock {
+    pub trait_name: String,
+    pub trait_span: Span,
+    pub methods: Vec<Func>,
 }
 
 /// S50: one `extern rust` block declaring foreign functions.
@@ -194,6 +295,8 @@ pub struct Func {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// S45 (M9): `<T: Bound>` after the function name.
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub is_view_return: bool,
@@ -214,8 +317,14 @@ pub struct StructDef {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// S45: `<T>` after the struct name.
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<Field>,
     pub methods: Vec<Func>,
+    /// S28: in-type `impl Trait { … }` blocks.
+    pub trait_impls: Vec<TraitImplBlock>,
+    /// S55: `derive Comparable;` / `derive Serialize;` lines.
+    pub derives: Vec<(String, Span)>,
 }
 
 #[derive(Debug)]
@@ -223,8 +332,11 @@ pub struct EnumDef {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    pub type_params: Vec<TypeParam>,
     pub variants: Vec<Variant>,
     pub methods: Vec<Func>,
+    pub trait_impls: Vec<TraitImplBlock>,
+    pub derives: Vec<(String, Span)>,
 }
 
 #[derive(Debug)]
@@ -255,6 +367,9 @@ pub struct VariantField {
 pub struct ImplDef {
     pub type_name: String,
     pub type_span: Span,
+    /// S28: `impl Type: Trait` — `None` means plain `impl Type { fn … }`.
+    pub trait_name: Option<String>,
+    pub trait_span: Option<Span>,
     pub methods: Vec<Func>,
 }
 
@@ -348,7 +463,7 @@ pub enum RustConstKind {
 }
 
 /// One `if`/`else if`/`else` chain.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IfStmt {
     pub cond: Expr,
     pub then_body: Vec<Stmt>,
@@ -356,21 +471,21 @@ pub struct IfStmt {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ElseBranch {
     ElseIf(Box<IfStmt>),
     Else(Vec<Stmt>),
 }
 
 /// One `switch` arm: a condition and a body (S24).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SwitchArm {
     pub cond: Expr,
     pub body: Vec<Stmt>,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     /// A call used for its effect, e.g. `print(x);`.
     Expr(Expr),
@@ -437,7 +552,7 @@ pub enum IndexKind {
 }
 
 /// `for i in 1..10` vs `for x in xs` (M5).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ForKind {
     Range {
         start: Expr,
@@ -448,7 +563,7 @@ pub enum ForKind {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Binding {
     pub mutable: bool,
     pub name: String,
@@ -548,6 +663,41 @@ pub enum StrPart {
     Interp(Expr),
 }
 
+/// S46 (M8): one parameter in `(x: Int) => …`.
+#[derive(Debug, Clone)]
+pub struct LambdaParam {
+    pub name: String,
+    pub name_span: Span,
+    pub ty: Option<Type>,
+    pub ty_span: Option<Span>,
+}
+
+/// S46: expression or block body after `=>`.
+#[derive(Debug, Clone)]
+pub enum LambdaBody {
+    Expr(Box<Expr>),
+    Block(Vec<Stmt>),
+}
+
+/// S47: filled by sema — capture/escape lowering hints for codegen.
+#[derive(Debug, Clone, Default)]
+pub struct LambdaMeta {
+    pub escapes: bool,
+    pub needs_fn_mut: bool,
+    pub mut_captures: Vec<String>,
+    pub cloned_captures: Vec<String>,
+}
+
+/// S46/S47 (M8): `(take names) (params) => body`.
+#[derive(Debug, Clone)]
+pub struct Lambda {
+    pub take_names: Vec<(String, Span)>,
+    pub params: Vec<LambdaParam>,
+    pub body: LambdaBody,
+    pub span: Span,
+    pub meta: LambdaMeta,
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// String literal, possibly with interpolation parts.
@@ -593,11 +743,15 @@ pub enum Expr {
         /// so codegen can apply the parameter conventions (`&`/`&mut`).
         recv_type: Option<String>,
     },
-    /// S29: `Type { field: expr, ... }` or `alias.Type { ... }` across imports (S16).
+    /// S29: `Type { field: expr, ... }` or `Type<Args> { ... }` or `alias.Type { ... }`.
     StructLit {
         type_name: String,
+        /// S45: generic args in `Pair<Int> { … }`.
+        type_args: Vec<Type>,
         /// When set, the struct type lives in the imported module `alias`.
         import_ns: Option<String>,
+        /// S48: box as `Box<dyn Trait>` when coerced into a trait-object list.
+        as_trait: Option<String>,
         fields: Vec<(String, Span, Expr)>,
         span: Span,
     },
@@ -632,6 +786,14 @@ pub enum Expr {
         is_option: bool,
         span: Span,
     },
+    /// S46 (M8): `(params) => expr` or block body.
+    Lambda(Lambda),
+    /// S47: call any function-valued expression: `f(args)`.
+    CallValue {
+        callee: Box<Expr>,
+        args: Vec<CallArg>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -659,7 +821,9 @@ impl Expr {
             | Expr::Err(_, s)
             | Expr::Try(_, s)
             | Expr::OrFallback { span: s, .. }
-            | Expr::PatternTest { span: s, .. } => *s,
+            | Expr::PatternTest { span: s, .. }
+            | Expr::CallValue { span: s, .. } => *s,
+            Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,
             Expr::MethodCall { method_span, .. } => *method_span,
         }

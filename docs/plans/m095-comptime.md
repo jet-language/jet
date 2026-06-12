@@ -109,9 +109,9 @@ shown relative to the importing file).
 
 ## Examples & tests
 
-- `examples/25_comptime_table.jet` — baked lookup table; golden output
+- `examples/27_comptime_table.jet` — baked lookup table; golden output
   proves identical results to a runtime-computed copy.
-- `examples/26_embed.jet` — `embed_file` + a comptime `require`
+- `examples/28_embed.jet` — `embed_file` + a comptime `require`
   validating the embedded content (with a `.fixed.jet` companion for
   the failing variant).
 - ui fixtures for every E095x, including the E0951 call-path rendering

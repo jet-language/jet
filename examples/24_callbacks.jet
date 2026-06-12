@@ -1,0 +1,17 @@
+// M8: function-typed parameters and a stored callback.
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(f(x));
+}
+fn double(x: Int) -> Int {
+    return (x * 2);
+}
+struct Worker {
+    step: fn(Int) -> Int;
+}
+fn main() {
+    val double_fn = double;
+    print(apply_twice(double_fn, 3));
+    print(apply_twice((x: Int) => (x + 1), 5));
+    val w = Worker {step: (n: Int) => (n * n)};
+    print(w.step(4));
+}

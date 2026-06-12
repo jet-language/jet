@@ -16,7 +16,7 @@ fn ratified_decisions_enforced() {
 
     let ratified = extract_section_ids(&docs, "## Ratified", "## Provisional");
     let open = extract_open_registry_ids(&docs);
-    let deferred = BTreeSet::from(["S56"]);
+    let deferred = BTreeSet::from(["S53", "S56", "S59"]);
     let staged = extract_staged_manifest(&docs);
 
     let syntax_entries = parse_syntax_rs_status(&syntax);

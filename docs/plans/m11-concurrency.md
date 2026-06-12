@@ -1,6 +1,7 @@
 # M11 — Concurrency: tasks & channels
 
-**Blocked on decisions:** S53 (spawn/channel surface). Depends on M8
+**Status:** deferred past v1.0 (S53 ratified 2026-06-12 — owner: delay to
+v2). Do not implement during the v1 milestone path. Depends on M8
 (closure capture machinery does the heavy lifting) and M9 (generic
 `Task<T>`/`Channel<T>` signatures).
 **Error codes:** E1101+.
@@ -15,7 +16,7 @@ mutable state in v1 — the compiler *proves* it, which is the whole pitch
 ## Surface (uses ballot recommendations — substitute ratified choices)
 
 ```jet
-import "std/tasks" as tasks;
+import std.tasks as tasks;
 
 fn main() {
     // 1. Tasks: spawn a closure, join for the value.
@@ -93,8 +94,8 @@ Teaching: E0040 `async`/`await` → not in Jet; tasks block · E0041
 
 ## Examples & tests
 
-- `examples/26_tasks.jet` — parallel sum split across 4 tasks.
-- `examples/27_pipeline.jet` — producer/consumer over a channel.
+- `examples/32_tasks.jet` — parallel sum split across 4 tasks.
+- `examples/33_pipeline.jet` — producer/consumer over a channel.
 - ui fixtures: shared-var capture (E1101 + fixed-with-channel
   companion), unsendable struct (E1102), unjoined task lint.
 - Golden tests with deterministic outputs (sorted collection of

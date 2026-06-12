@@ -9,7 +9,7 @@ use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
     EnumLitArg, Expr, ExternFn, ExternRustBlock, Field, ForKind, Func, IfStmt, ImplDef, ImportDecl,
     ImportKind, Item, LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
-    SwitchArm, Type, UnOp, Variant, VariantPayload,
+    SwitchArm, TraitImplBlock, Type, TypeParam, UnOp, Variant, VariantPayload,
 };
 use crate::diag::Span;
 use crate::lexer::{line_comments, Token, TokKind};
@@ -142,6 +142,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::ExternRust(b) => src[..b.crate_span.start]
             .rfind(syntax::KW_EXTERN)
             .unwrap_or(b.span.start),
+        Item::Trait(t) => type_decl_start(t.is_pub, t.name_span.start, "trait", src),
     }
 }
 
@@ -181,6 +182,7 @@ fn item_span_end(item: &Item) -> usize {
         Item::Const(c) => c.value.span().end,
         Item::Test(t) => t.body.last().map(stmt_end).unwrap_or(t.name_span.end),
         Item::ExternRust(b) => b.span.end,
+        Item::Trait(t) => t.methods.last().map(|m| m.span.end).unwrap_or(t.name_span.end),
     }
 }
 
@@ -329,7 +331,42 @@ impl<'a> Fmt<'a> {
             Item::Const(c) => self.fmt_const(c),
             Item::Test(t) => self.fmt_test(t),
             Item::ExternRust(b) => self.fmt_extern_rust(b),
+            Item::Trait(t) => self.fmt_trait(t),
         }
+    }
+
+    fn fmt_trait(&mut self, t: &crate::ast::TraitDef) {
+        if t.is_pub {
+            self.write("pub ");
+        }
+        self.write("trait ");
+        self.write(&t.name);
+        self.write(" ");
+        self.write(syntax::BLOCK_OPEN);
+        self.newline();
+        self.with_indent(|f| {
+            for m in &t.methods {
+                f.write("fn ");
+                f.write(&m.name);
+                f.write("(");
+                for (i, p) in m.params.iter().enumerate() {
+                    if i > 0 {
+                        f.write(", ");
+                    }
+                    f.fmt_param(p);
+                }
+                f.write(")");
+                if let Some(ret) = &m.return_type {
+                    f.write(" -> ");
+                    f.fmt_type(ret);
+                }
+                f.write(";");
+                f.newline();
+            }
+        });
+        self.write(syntax::BLOCK_CLOSE);
+        self.newline();
+        self.newline();
     }
 
     fn fmt_extern_rust(&mut self, block: &ExternRustBlock) {
@@ -397,6 +434,33 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    fn fmt_type_params(&mut self, params: &[TypeParam]) {
+        self.write(&crate::generics::format_type_params(params));
+    }
+
+    fn fmt_derive_line(&mut self, trait_name: &str) {
+        self.write("derive ");
+        self.write(trait_name);
+        self.write(";");
+    }
+
+    fn fmt_trait_impl_block(&mut self, block: &TraitImplBlock) {
+        self.write("impl ");
+        self.write(&block.trait_name);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            for (i, m) in block.methods.iter().enumerate() {
+                if i > 0 {
+                    f.newline();
+                    f.newline();
+                }
+                f.fmt_func(m, false);
+            }
+        });
+        self.end_block();
+    }
+
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
         if top_level {
             self.fmt_pub(f.is_pub);
@@ -405,6 +469,7 @@ impl<'a> Fmt<'a> {
         }
         self.write("fn ");
         self.write(&f.name);
+        self.fmt_type_params(&f.type_params);
         self.write("(");
         for (i, p) in f.params.iter().enumerate() {
             if i > 0 {
@@ -451,6 +516,7 @@ impl<'a> Fmt<'a> {
         }
         self.write("struct ");
         self.write(&s.name);
+        self.fmt_type_params(&s.type_params);
         self.write(" {");
         self.newline();
         self.with_indent(|f| {
@@ -461,8 +527,22 @@ impl<'a> Fmt<'a> {
                 f.fmt_field(field);
                 f.write(";");
             }
-            for (i, m) in s.methods.iter().enumerate() {
+            for (i, (trait_name, _)) in s.derives.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() {
+                    f.newline();
+                }
+                f.fmt_derive_line(trait_name);
+            }
+            for (i, block) in s.trait_impls.iter().enumerate() {
+                if i > 0 || !s.fields.is_empty() || !s.derives.is_empty() {
+                    f.newline();
+                    f.newline();
+                }
+                f.fmt_trait_impl_block(block);
+            }
+            for (i, m) in s.methods.iter().enumerate() {
+                if i > 0 || !s.fields.is_empty() || !s.derives.is_empty() || !s.trait_impls.is_empty()
+                {
                     f.newline();
                     f.newline();
                 }
@@ -478,6 +558,7 @@ impl<'a> Fmt<'a> {
         }
         self.write("enum ");
         self.write(&e.name);
+        self.fmt_type_params(&e.type_params);
         self.write(" {");
         self.newline();
         self.with_indent(|f| {
@@ -488,8 +569,25 @@ impl<'a> Fmt<'a> {
                 f.fmt_variant(v);
                 f.write(";");
             }
-            for (i, m) in e.methods.iter().enumerate() {
+            for (i, (trait_name, _)) in e.derives.iter().enumerate() {
                 if i > 0 || !e.variants.is_empty() {
+                    f.newline();
+                }
+                f.fmt_derive_line(trait_name);
+            }
+            for (i, block) in e.trait_impls.iter().enumerate() {
+                if i > 0 || !e.variants.is_empty() || !e.derives.is_empty() {
+                    f.newline();
+                    f.newline();
+                }
+                f.fmt_trait_impl_block(block);
+            }
+            for (i, m) in e.methods.iter().enumerate() {
+                if i > 0
+                    || !e.variants.is_empty()
+                    || !e.derives.is_empty()
+                    || !e.trait_impls.is_empty()
+                {
                     f.newline();
                     f.newline();
                 }
@@ -526,6 +624,10 @@ impl<'a> Fmt<'a> {
     fn fmt_impl(&mut self, i: &ImplDef) {
         self.write("impl ");
         self.write(&i.type_name);
+        if let Some(tr) = &i.trait_name {
+            self.write(": ");
+            self.write(tr);
+        }
         self.write(" {");
         self.newline();
         self.with_indent(|f| {
@@ -814,7 +916,35 @@ impl<'a> Fmt<'a> {
                 self.fmt_type(err);
                 self.write(">");
             }
+            Type::Fn { params, ret } => {
+                self.write("fn(");
+                for (i, p) in params.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_type(p);
+                }
+                self.write(")");
+                if let Some(r) = ret {
+                    self.write(" -> ");
+                    self.fmt_type(r);
+                }
+            }
             Type::Named(n) => self.write(n),
+            Type::Apply { name, args } => {
+                self.write(name);
+                self.write("<");
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_type(a);
+                }
+                self.write(">");
+            }
+            Type::TraitObject(t) => {
+                self.write(t);
+            }
         }
     }
 
@@ -919,6 +1049,7 @@ impl<'a> Fmt<'a> {
             }
             Expr::StructLit {
                 type_name,
+                type_args,
                 import_ns,
                 fields,
                 ..
@@ -928,6 +1059,16 @@ impl<'a> Fmt<'a> {
                     self.write(".");
                 }
                 self.write(type_name);
+                if !type_args.is_empty() {
+                    self.write("<");
+                    for (i, a) in type_args.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.fmt_type(a);
+                    }
+                    self.write(">");
+                }
                 self.write(" {");
                 for (i, (name, _, expr)) in fields.iter().enumerate() {
                     if i > 0 {
@@ -1005,6 +1146,53 @@ impl<'a> Fmt<'a> {
                 if prec > Prec::OrFallback {
                     self.write(")");
                 }
+            }
+            Expr::Lambda(lam) => self.fmt_lambda(lam),
+            Expr::CallValue { callee, args, .. } => {
+                if prec > Prec::Postfix {
+                    self.write("(");
+                }
+                self.fmt_expr(callee, Prec::Postfix);
+                self.write("(");
+                self.fmt_call_args(args);
+                self.write(")");
+                if prec > Prec::Postfix {
+                    self.write(")");
+                }
+            }
+        }
+    }
+
+    fn fmt_lambda(&mut self, lam: &crate::ast::Lambda) {
+        if !lam.take_names.is_empty() {
+            self.write("take(");
+            for (i, (n, _)) in lam.take_names.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.write(n);
+            }
+            self.write(") ");
+        }
+        self.write("(");
+        for (i, p) in lam.params.iter().enumerate() {
+            if i > 0 {
+                self.write(", ");
+            }
+            self.write(&p.name);
+            if let Some(ty) = &p.ty {
+                self.write(": ");
+                self.fmt_type(ty);
+            }
+        }
+        self.write(") => ");
+        match &lam.body {
+            crate::ast::LambdaBody::Expr(e) => self.fmt_expr(e, Prec::OrFallback.add_rhs()),
+            crate::ast::LambdaBody::Block(stmts) => {
+                self.write("{");
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(stmts));
+                self.end_block();
             }
         }
     }

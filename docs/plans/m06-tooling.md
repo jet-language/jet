@@ -62,8 +62,9 @@ output shape.
 ## Phase 3 — Multi-file programs (S16 + S18 enforcement) ✓ 2026-06-12
 
 ```jet
-import "grades/scoring";         // file: scoring.jet beside this file's tree
-import scoring;                   // module: find scoring.jet under project root
+import "./lib";                   // file path (quoted) → lib.jet beside this file
+import "grades/scoring";         // file path → scoring.jet in grades/
+import scoring;                   // module (no quotes) → find scoring.jet under root
 import scoring as gradebook;      // same module, different namespace
 
 fn main() {
@@ -72,11 +73,13 @@ fn main() {
 }
 ```
 
-- **File import** `import "<path>" [as alias];`: path relative to the
-**importing file's directory**; `.jet` appended; subdirs ok
-(`"util/text"`). Default namespace = last path segment. No `..` past
-the entry file's directory tree (E0602). Missing file → E0603.
-- **Module import** `import <name> [as alias];`: search recursively from
+- **File import** `import "<path>" [as alias];`: **quotes required** — a
+path to a `.jet` file, relative to the importing file's directory; `.jet`
+appended; same-dir uses `"./name"`; subdirs ok (`"util/text"`). Default
+namespace = last path segment. No `..` past the entry file's directory
+tree (E0602). Missing file → E0603.
+- **Module import** `import <module-path> [as alias];`: **no quotes** —
+search recursively from
 **project root** (entry file's directory, or `jet.toml` dir when M12)
 for `name.jet` or `name/{name,main}.jet`; skip `build/`, `target/`,
 dot-dirs. Ambiguous duplicates → E0606 (lists paths). Default

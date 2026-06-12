@@ -9,11 +9,13 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
-    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, OrFallback, Param,
-    Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, Type, UnOp, Variant, VariantField,
-    VariantPayload,
+    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, Lambda, LambdaBody,
+    LambdaMeta, LambdaParam, LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart,
+    StructDef, SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam, UnOp,
+    Variant, VariantField, VariantPayload,
 };
 use crate::diag::{Diagnostic, Span};
+use crate::generics;
 use crate::lexer::{describe, StrTokPart, TokKind, Token};
 use crate::syntax;
 
@@ -39,6 +41,8 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         diags: Vec::new(),
         pending_type_gt: false,
         depth: 0,
+        type_generic_depth: 0,
+        type_generic_chain: Vec::new(),
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -59,6 +63,8 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         diags: Vec::new(),
         pending_type_gt: false,
         depth: 0,
+        type_generic_depth: 0,
+        type_generic_chain: Vec::new(),
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -118,6 +124,9 @@ struct Parser<'a> {
     pending_type_gt: bool,
     /// Current recursive parser nesting depth.
     depth: usize,
+    /// Nesting depth inside generic type arguments (M9 E0909).
+    type_generic_depth: usize,
+    type_generic_chain: Vec<String>,
 }
 
 fn too_deep(span: Span) -> Diagnostic {
@@ -153,6 +162,59 @@ fn check_token_nesting(toks: &[Token]) -> Result<(), Vec<Diagnostic>> {
 }
 
 impl<'a> Parser<'a> {
+    fn enter_generic_type_layer(&mut self, label: &str, span: Span) -> bool {
+        self.type_generic_depth += 1;
+        self.type_generic_chain.push(label.to_string());
+        if self.type_generic_depth > generics::MAX_GENERIC_DEPTH {
+            self.diags.push(generics::e0909(
+                &self.type_generic_chain.join(" → "),
+                span,
+            ));
+            return false;
+        }
+        true
+    }
+
+    fn leave_generic_type_layer(&mut self) {
+        self.type_generic_depth = self.type_generic_depth.saturating_sub(1);
+        self.type_generic_chain.pop();
+    }
+
+    fn type_generic_arg(&mut self, label: &str) -> Result<Type, Diagnostic> {
+        let span = self.peek().span;
+        if !self.enter_generic_type_layer(label, span) {
+            self.sync_type_arg();
+            return Ok(Type::Int);
+        }
+        let (inner, _) = self.type_()?;
+        self.leave_generic_type_layer();
+        Ok(inner)
+    }
+
+    /// Skip tokens until the enclosing `Type<…>` argument ends.
+    fn sync_type_arg(&mut self) {
+        let mut depth = 0usize;
+        while self.pos < self.toks.len() {
+            match &self.peek().kind {
+                TokKind::Lt => {
+                    depth += 1;
+                    self.bump();
+                }
+                TokKind::Gt => {
+                    self.bump();
+                    if depth == 0 {
+                        break;
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                TokKind::Comma if depth == 0 => break,
+                _ => {
+                    self.bump();
+                }
+            }
+        }
+    }
+
     fn peek(&self) -> &Token {
         &self.toks[self.pos.min(self.toks.len() - 1)]
     }
@@ -348,13 +410,15 @@ impl<'a> Parser<'a> {
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
                 TokKind::KwPub => match self.peek2().kind {
-                    TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                    TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-                    _ => self.func().map(Item::Func),
+                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                _ => self.func().map(Item::Func),
                 },
                 TokKind::KwTest => self.test_def().map(Item::Test),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwImpl => self.impl_def().map(Item::Impl),
                 TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
                 TokKind::Ident(name) if name == syntax::FOREIGN_CLASS => {
@@ -380,22 +444,25 @@ impl<'a> Parser<'a> {
                     self.struct_def(false).map(Item::Struct)
                 }
                 TokKind::Ident(name)
-                    if name == syntax::FOREIGN_INTERFACE || name == syntax::FOREIGN_TRAIT =>
+                    if name == syntax::FOREIGN_INTERFACE =>
                 {
                     let t = self.bump();
-                    let foreign = if let TokKind::Ident(n) = &t.kind {
-                        n.clone()
-                    } else {
-                        unreachable!()
-                    };
                     self.diags.push(Diagnostic::error(
                         "E0022",
-                        format!("`{}` doesn't work yet", foreign),
-                        "traits and interfaces arrive in M9 — for now, use structs and enums"
-                            .to_string(),
                         format!(
-                            "remove `{}` for now, or define a `struct` / `enum` instead",
-                            foreign
+                            "`{}` is spelled `{}` in {}",
+                            syntax::FOREIGN_INTERFACE,
+                            syntax::KW_TRAIT,
+                            syntax::LANG_NAME
+                        ),
+                        format!(
+                            "traits are written with `{}` — see docs for `trait Name {{ … }}`",
+                            syntax::KW_TRAIT
+                        ),
+                        format!(
+                            "replace `{}` with `{}`",
+                            syntax::FOREIGN_INTERFACE,
+                            syntax::KW_TRAIT
                         ),
                         Some(t.span),
                     ));
@@ -686,6 +753,7 @@ impl<'a> Parser<'a> {
 
     fn func_after_fn(&mut self, is_pub: bool) -> Result<Func, Diagnostic> {
         let (name, name_span) = self.expect_ident("after `fn`")?;
+        let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LParen, "after the function name")?;
         let mut params = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
@@ -717,6 +785,7 @@ impl<'a> Parser<'a> {
             is_pub,
             name,
             name_span,
+            type_params,
             params,
             return_type,
             is_view_return,
@@ -767,19 +836,28 @@ impl<'a> Parser<'a> {
         }
         self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
         let (name, name_span) = self.expect_ident("after `struct`")?;
+        let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the struct body")?;
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut trait_impls = Vec::new();
+        let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            let is_method = matches!(self.peek().kind, TokKind::KwFn)
-                || (matches!(self.peek().kind, TokKind::KwPub)
-                    && matches!(self.peek2().kind, TokKind::KwFn));
-            if is_method {
-                methods.push(self.method_in_type()?);
+            if matches!(self.peek().kind, TokKind::KwDerive) {
+                derives.push(self.derive_line()?);
+            } else if matches!(self.peek().kind, TokKind::KwImpl) {
+                trait_impls.push(self.trait_impl_block()?);
             } else {
-                fields.push(self.field()?);
-                if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-                    self.bump();
+                let is_method = matches!(self.peek().kind, TokKind::KwFn)
+                    || (matches!(self.peek().kind, TokKind::KwPub)
+                        && matches!(self.peek2().kind, TokKind::KwFn));
+                if is_method {
+                    methods.push(self.method_in_type()?);
+                } else {
+                    fields.push(self.field()?);
+                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                        self.bump();
+                    }
                 }
             }
         }
@@ -788,8 +866,11 @@ impl<'a> Parser<'a> {
             is_pub,
             name,
             name_span,
+            type_params,
             fields,
             methods,
+            trait_impls,
+            derives,
         })
     }
 
@@ -804,11 +885,18 @@ impl<'a> Parser<'a> {
         }
         self.expect_kw(TokKind::KwEnum, "to start an enum definition")?;
         let (name, name_span) = self.expect_ident("after `enum`")?;
+        let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the enum body")?;
         let mut variants = Vec::new();
         let mut methods = Vec::new();
+        let mut trait_impls = Vec::new();
+        let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::KwFn | TokKind::KwPub) {
+            if matches!(self.peek().kind, TokKind::KwDerive) {
+                derives.push(self.derive_line()?);
+            } else if matches!(self.peek().kind, TokKind::KwImpl) {
+                trait_impls.push(self.trait_impl_block()?);
+            } else if matches!(self.peek().kind, TokKind::KwFn | TokKind::KwPub) {
                 methods.push(self.method_in_type()?);
             } else {
                 variants.push(self.variant()?);
@@ -822,8 +910,11 @@ impl<'a> Parser<'a> {
             is_pub,
             name,
             name_span,
+            type_params,
             variants,
             methods,
+            trait_impls,
+            derives,
         })
     }
 
@@ -877,7 +968,14 @@ impl<'a> Parser<'a> {
 
     fn impl_def(&mut self) -> Result<ImplDef, Diagnostic> {
         self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
-        let (type_name, type_span) = self.expect_ident("after `impl`")?;
+        let (type_name, type_span) = self.parse_type_path("after `impl`")?;
+        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
+            (Some(t), Some(ts))
+        } else {
+            (None, None)
+        };
         self.expect(TokKind::LBrace, "to open the `impl` body")?;
         let mut methods = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -887,8 +985,157 @@ impl<'a> Parser<'a> {
         Ok(ImplDef {
             type_name,
             type_span,
+            trait_name,
+            trait_span,
             methods,
         })
+    }
+
+    /// S28: `impl Trait { … }` inside a struct/enum body.
+    fn trait_impl_block(&mut self) -> Result<TraitImplBlock, Diagnostic> {
+        self.expect_kw(TokKind::KwImpl, "to start a trait impl block")?;
+        let (trait_name, trait_span) = self.expect_ident("after `impl`")?;
+        self.expect(TokKind::LBrace, "to open the trait impl body")?;
+        let mut methods = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            methods.push(self.method_in_type()?);
+        }
+        self.bump();
+        Ok(TraitImplBlock {
+            trait_name,
+            trait_span,
+            methods,
+        })
+    }
+
+    /// S55: `derive Comparable;` inside a type body.
+    fn derive_line(&mut self) -> Result<(String, Span), Diagnostic> {
+        let start = self.bump().span;
+        let (trait_name, _) = self.expect_ident("after `derive`")?;
+        self.finish_stmt()?;
+        Ok((trait_name, start))
+    }
+
+    /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
+    fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
+        let is_pub = if nested {
+            false
+        } else {
+            matches!(self.peek().kind, TokKind::KwPub)
+        };
+        if is_pub {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwTrait, "to start a trait definition")?;
+        let (name, name_span) = self.expect_ident("after `trait`")?;
+        self.expect(TokKind::LBrace, "to open the trait body")?;
+        let mut methods = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            methods.push(self.trait_method_sig()?);
+        }
+        self.bump();
+        Ok(TraitDef {
+            is_pub,
+            name,
+            name_span,
+            methods,
+        })
+    }
+
+    fn trait_method_sig(&mut self) -> Result<TraitMethodSig, Diagnostic> {
+        let start = self.peek().span;
+        self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
+        let (name, name_span) = self.expect_ident("after `fn`")?;
+        self.expect(TokKind::LParen, "after the method name")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                params.push(self.param()?);
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between parameters")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the parameter list")?;
+        let mut return_type = None;
+        let mut is_view_return = false;
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::KwView) {
+                is_view_return = true;
+                self.bump();
+            }
+            let (ty, _) = self.type_()?;
+            return_type = Some(ty);
+        }
+        let end = self.peek().span.end;
+        self.finish_stmt()?;
+        Ok(TraitMethodSig {
+            name,
+            name_span,
+            params,
+            return_type,
+            is_view_return,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    fn parse_opt_type_params(&mut self) -> Result<Vec<TypeParam>, Diagnostic> {
+        if !matches!(self.peek().kind, TokKind::Lt) {
+            return Ok(Vec::new());
+        }
+        self.parse_type_params()
+    }
+
+    fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, Diagnostic> {
+        self.expect_type_args_open("type")?;
+        let mut params = Vec::new();
+        loop {
+            let (name, name_span) = self.expect_ident("for a type parameter name")?;
+            let mut bounds = Vec::new();
+            if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                bounds = self.parse_trait_bounds()?;
+            }
+            params.push(TypeParam {
+                name,
+                name_span,
+                bounds,
+            });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect_type_args_close("after type parameters")?;
+        Ok(params)
+    }
+
+    fn parse_trait_bounds(&mut self) -> Result<Vec<String>, Diagnostic> {
+        let mut bounds = Vec::new();
+        loop {
+            let (name, _) = self.expect_ident("for a trait bound")?;
+            bounds.push(name);
+            if matches!(self.peek().kind, TokKind::Plus) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        Ok(bounds)
+    }
+
+    fn parse_type_path(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
+        let (first, span) = self.expect_ident(where_)?;
+        let mut name = first;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (part, _) = self.expect_ident("after `.` in a type path")?;
+            name = format!("{name}.{part}");
+        }
+        Ok((name, span))
     }
 
     /// S27: method inside a type body or `impl` block.
@@ -1673,6 +1920,27 @@ impl<'a> Parser<'a> {
                     let full = Span::new(expr.span().start, qspan.end);
                     expr = Expr::Try(Box::new(expr), full);
                 }
+                TokKind::LParen => {
+                    let open = self.bump().span;
+                    let mut args = Vec::new();
+                    if !matches!(self.peek().kind, TokKind::RParen) {
+                        loop {
+                            args.push(self.call_arg()?);
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
+                            self.expect(TokKind::Comma, "between arguments")?;
+                        }
+                    }
+                    self.expect(TokKind::RParen, "to finish the call")?;
+                    let close = self.toks[self.pos - 1].span;
+                    let span = Span::new(open.start, close.end);
+                    expr = Expr::CallValue {
+                        callee: Box::new(expr),
+                        args,
+                        span,
+                    };
+                }
                 TokKind::LBrace => {
                     let import_lit = if let Expr::Field(inner, type_name, _) = &expr {
                         if let Expr::Ident(alias, _) = inner.as_ref() {
@@ -1770,7 +2038,13 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 Ok(Expr::Ident(syntax::KW_IT.to_string(), span))
             }
-            TokKind::KwValue => {
+            TokKind::Ident(name)
+                if name == syntax::LIT_VALUE
+                    && matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.kind),
+                        Some(TokKind::LParen)
+                    ) =>
+            {
                 let span = self.bump().span;
                 self.expect(TokKind::LParen, "after `value`")?;
                 let inner = self.expr()?;
@@ -1896,6 +2170,8 @@ impl<'a> Parser<'a> {
                                 diags: Vec::new(),
                                 pending_type_gt: false,
                                 depth: self.depth,
+                                type_generic_depth: 0,
+                                type_generic_chain: Vec::new(),
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {
@@ -1947,11 +2223,58 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 Ok(Expr::Ident(syntax::KW_SELF.to_string(), span))
             }
+            TokKind::KwMove
+                if matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokKind::LParen)
+                ) =>
+            {
+                let takes = self.parse_lambda_takes()?;
+                Ok(Expr::Lambda(self.parse_lambda(takes)?))
+            }
+            TokKind::LParen if self.after_lparen_is_lambda() => {
+                Ok(Expr::Lambda(self.parse_lambda(vec![])?))
+            }
             TokKind::LParen => {
                 self.bump();
                 let inner = self.expr()?;
                 self.expect(TokKind::RParen, "to close this `(`")?;
                 Ok(inner)
+            }
+            TokKind::Pipe => {
+                let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
+                    "E0033",
+                    format!(
+                        "{} doesn't use `|` pipes for lambdas",
+                        syntax::LANG_NAME
+                    ),
+                    "a short function is written with parentheses and `=>`".to_string(),
+                    "write `(x) => x + 1` instead of `|x| x + 1`".to_string(),
+                    Some(span),
+                ));
+                while !matches!(self.peek().kind, TokKind::Pipe | TokKind::Eof) {
+                    self.bump();
+                }
+                if matches!(self.peek().kind, TokKind::Pipe) {
+                    self.bump();
+                }
+                return self.expr_primary(allow_struct_lit);
+            }
+            TokKind::Ident(name) if name == syntax::FOREIGN_LAMBDA => {
+                let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
+                    "E0032",
+                    format!(
+                        "{} doesn't use the `{}` keyword for short functions",
+                        syntax::LANG_NAME,
+                        syntax::FOREIGN_LAMBDA
+                    ),
+                    "write a lambda with parentheses and `=>` instead".to_string(),
+                    "e.g. `(x) => x + 1` instead of `lambda x { ... }`".to_string(),
+                    Some(span),
+                ));
+                return self.expr_primary(allow_struct_lit);
             }
             TokKind::Ident(name)
                 if matches!(
@@ -2008,8 +2331,29 @@ impl<'a> Parser<'a> {
             }
             TokKind::Ident(name) => {
                 let span = self.bump().span;
+                let mut type_name = name.clone();
+                let mut type_args = Vec::new();
+                if allow_struct_lit
+                    && matches!(self.peek().kind, TokKind::Lt)
+                    && type_name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_uppercase())
+                {
+                    self.expect_type_args_open(&type_name)?;
+                    loop {
+                        let (arg, _) = self.type_()?;
+                        type_args.push(arg);
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
+                    self.expect_type_args_close(&format!("after `{type_name}<…>`"))?;
+                }
                 if allow_struct_lit && matches!(self.peek().kind, TokKind::LBrace) {
-                    return self.struct_lit_after_name(name, span);
+                    return self.struct_lit_after_name(type_name, type_args, span);
                 }
                 if matches!(self.peek().kind, TokKind::Dot) {
                     self.bump();
@@ -2028,7 +2372,7 @@ impl<'a> Parser<'a> {
                         }
                         self.expect(TokKind::RParen, "to finish the call")?;
                         return Ok(Expr::MethodCall {
-                            receiver: Box::new(Expr::Ident(name, span)),
+                            receiver: Box::new(Expr::Ident(type_name, span)),
                             method: member,
                             method_span: member_span,
                             args,
@@ -2036,16 +2380,16 @@ impl<'a> Parser<'a> {
                         });
                     }
                     return Ok(Expr::Field(
-                        Box::new(Expr::Ident(name, span)),
+                        Box::new(Expr::Ident(type_name, span)),
                         member,
                         member_span,
                     ));
                 }
                 if matches!(self.peek().kind, TokKind::LParen) {
-                    let call = self.call_after_name(name, span)?;
+                    let call = self.call_after_name(type_name, span)?;
                     return Ok(Expr::Call(call));
                 }
-                Ok(Expr::Ident(name, span))
+                Ok(Expr::Ident(type_name, span))
             }
             other => Err(Diagnostic::error(
                 "E0003",
@@ -2106,6 +2450,7 @@ impl<'a> Parser<'a> {
     fn struct_lit_after_name(
         &mut self,
         type_name: String,
+        type_args: Vec<Type>,
         start_span: Span,
     ) -> Result<Expr, Diagnostic> {
         self.expect(TokKind::LBrace, "to open a struct literal")?;
@@ -2123,7 +2468,9 @@ impl<'a> Parser<'a> {
         self.bump();
         Ok(Expr::StructLit {
             type_name,
+            type_args,
             import_ns: None,
+            as_trait: None,
             fields,
             span: Span::new(start_span.start, end),
         })
@@ -2150,7 +2497,9 @@ impl<'a> Parser<'a> {
         self.bump();
         Ok(Expr::StructLit {
             type_name,
+            type_args: Vec::new(),
             import_ns: Some(alias),
+            as_trait: None,
             fields,
             span: Span::new(start, end),
         })
@@ -2219,7 +2568,7 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, binding_span.end),
                 }));
             }
-            TokKind::KwValue => {
+            TokKind::Ident(name) if name == syntax::LIT_VALUE => {
                 let start = self.bump().span;
                 self.expect(TokKind::LParen, "after `value`")?;
                 let (binding, binding_span) = self.expect_ident("inside `value(...)`")?;
@@ -2255,6 +2604,113 @@ impl<'a> Parser<'a> {
             }
             _ => Ok(None),
         }
+    }
+
+    /// S46: `(` … `) =>` without scanning nested `(` for the `=>` probe.
+    fn after_lparen_is_lambda(&self) -> bool {
+        let mut i = self.pos + 1;
+        let mut depth = 1usize;
+        while i < self.toks.len() {
+            match &self.toks[i].kind {
+                TokKind::LParen => depth += 1,
+                TokKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return matches!(
+                            self.toks.get(i + 1).map(|t| &t.kind),
+                            Some(TokKind::LambdaArrow)
+                        );
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// S47: `take(a, b)` prefix on a lambda.
+    fn parse_lambda_takes(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
+        self.expect(TokKind::KwMove, "before the capture list")?;
+        self.expect(TokKind::LParen, "after `take` in a capture list")?;
+        let mut names = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, span) = self.expect_ident("in the capture list")?;
+                names.push((name, span));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between captured names")?;
+            }
+        }
+        self.expect(TokKind::RParen, "after the capture list")?;
+        Ok(names)
+    }
+
+    fn parse_lambda(&mut self, take_names: Vec<(String, Span)>) -> Result<Lambda, Diagnostic> {
+        let open = self.peek().span;
+        self.expect(TokKind::LParen, "before lambda parameters")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, name_span) = self.expect_ident("as a lambda parameter")?;
+                let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
+                    self.bump();
+                    let (t, ts) = self.type_()?;
+                    (Some(t), Some(ts))
+                } else {
+                    (None, None)
+                };
+                params.push(LambdaParam {
+                    name,
+                    name_span,
+                    ty,
+                    ty_span,
+                });
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between lambda parameters")?;
+            }
+        }
+        let close_paren = self.peek().span;
+        self.expect(TokKind::RParen, "after lambda parameters")?;
+        self.expect(TokKind::LambdaArrow, "after `)` in a lambda")?;
+        let body = if matches!(self.peek().kind, TokKind::LBrace) {
+            self.expect(TokKind::LBrace, "to open the lambda body")?;
+            LambdaBody::Block(self.block_stmts())
+        } else {
+            LambdaBody::Expr(Box::new(self.expr()?))
+        };
+        let end = match &body {
+            LambdaBody::Expr(e) => e.span().end,
+            LambdaBody::Block(stmts) => {
+                if let Some(last) = stmts.last() {
+                    match last {
+                        Stmt::Expr(e) => e.span().end,
+                        Stmt::Return(_, s) => s.end,
+                        Stmt::Break(s) | Stmt::Continue(s) => s.end,
+                        Stmt::If(i) => i.span.end,
+                        Stmt::While { span, .. }
+                        | Stmt::For { span, .. }
+                        | Stmt::Switch { span, .. } => span.end,
+                        Stmt::Val(b) => b.init.span().end,
+                        Stmt::Assign { value, .. } => value.span().end,
+                        Stmt::Loop(_, s) | Stmt::Unsafe(_, s) => s.end,
+                    }
+                } else {
+                    close_paren.end
+                }
+            }
+        };
+        Ok(Lambda {
+            take_names,
+            params,
+            body,
+            span: Span::new(open.start, end),
+            meta: LambdaMeta::default(),
+        })
     }
 
     fn call_after_name(&mut self, name: String, name_span: Span) -> Result<Call, Diagnostic> {
@@ -2357,7 +2813,6 @@ impl<'a> Parser<'a> {
                 | TokKind::Str(_)
                 | TokKind::KwTrue
                 | TokKind::KwFalse
-                | TokKind::KwValue
                 | TokKind::KwNull
                 | TokKind::KwOk
                 | TokKind::KwErr
@@ -2442,6 +2897,30 @@ impl<'a> Parser<'a> {
     fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
+            TokKind::KwFn => {
+                self.bump();
+                self.expect(TokKind::LParen, "after `fn` in a function type")?;
+                let mut params = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RParen) {
+                    loop {
+                        let (pty, _) = self.type_()?;
+                        params.push(pty);
+                        if matches!(self.peek().kind, TokKind::RParen) {
+                            break;
+                        }
+                        self.expect(TokKind::Comma, "between parameter types in `fn(...)`")?;
+                    }
+                }
+                self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
+                let ret = if matches!(self.peek().kind, TokKind::Arrow) {
+                    self.bump();
+                    let (r, _) = self.type_()?;
+                    Some(Box::new(r))
+                } else {
+                    None
+                };
+                Type::Fn { params, ret }
+            }
             TokKind::Ident(name) => {
                 self.bump();
                 match name.as_str() {
@@ -2470,15 +2949,15 @@ impl<'a> Parser<'a> {
                     }
                     syntax::TYPE_LIST => {
                         self.expect_type_args_open("List")?;
-                        let (inner, _) = self.type_()?;
+                        let inner = self.type_generic_arg("List")?;
                         self.expect_type_args_close("after a list element type")?;
                         Type::List(Box::new(inner))
                     }
                     syntax::TYPE_MAP => {
                         self.expect_type_args_open("Map")?;
-                        let (key, _) = self.type_()?;
+                        let key = self.type_generic_arg("Map key")?;
                         self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
-                        let (value, _) = self.type_()?;
+                        let value = self.type_generic_arg("Map value")?;
                         self.expect_type_args_close("after the value type in `Map<K, V>`")?;
                         Type::Map {
                             key: Box::new(key),
@@ -2486,6 +2965,29 @@ impl<'a> Parser<'a> {
                         }
                     }
                     syntax::TYPE_CHAR => Type::Char,
+                    syntax::FOREIGN_DYN => {
+                        self.diags.push(generics::e0036(syntax::FOREIGN_DYN, start));
+                        let (trait_name, _) = self.expect_ident("after `dyn`")?;
+                        Type::TraitObject(trait_name)
+                    }
+                    syntax::FOREIGN_BOX => {
+                        self.diags.push(generics::e0036(syntax::FOREIGN_BOX, start));
+                        if matches!(self.peek().kind, TokKind::Lt) {
+                            self.expect_type_args_open("Box")?;
+                            if matches!(self.peek().kind, TokKind::Ident(ref n) if n == syntax::FOREIGN_DYN) {
+                                self.bump();
+                                let (trait_name, _) = self.expect_ident("after `dyn` in `Box<dyn …>`")?;
+                                self.expect_type_args_close("after `Box<dyn …>`")?;
+                                Type::TraitObject(trait_name)
+                            } else {
+                                let (inner, _) = self.type_()?;
+                                self.expect_type_args_close("after `Box<…>`")?;
+                                inner
+                            }
+                        } else {
+                            Type::Named("Box".to_string())
+                        }
+                    }
                     syntax::FOREIGN_VEC => {
                         self.diags.push(Diagnostic::error(
                             "E0028",
@@ -2504,7 +3006,7 @@ impl<'a> Parser<'a> {
                             Some(start),
                         ));
                         self.expect_type_args_open("List")?;
-                        let (inner, _) = self.type_()?;
+                        let inner = self.type_generic_arg("List")?;
                         self.expect_type_args_close("after a list element type")?;
                         Type::List(Box::new(inner))
                     }
@@ -2527,9 +3029,9 @@ impl<'a> Parser<'a> {
                             Some(start),
                         ));
                         self.expect_type_args_open("Map")?;
-                        let (key, _) = self.type_()?;
+                        let key = self.type_generic_arg("Map key")?;
                         self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
-                        let (value, _) = self.type_()?;
+                        let value = self.type_generic_arg("Map value")?;
                         self.expect_type_args_close("after the value type in `Map<K, V>`")?;
                         Type::Map {
                             key: Box::new(key),
@@ -2538,25 +3040,43 @@ impl<'a> Parser<'a> {
                     }
                     syntax::TYPE_SHARED => {
                         self.expect_type_args_open("Shared")?;
-                        let (inner, _) = self.type_()?;
+                        let inner = self.type_generic_arg("Shared")?;
                         self.expect_type_args_close("after a shared element type")?;
                         Type::Shared(Box::new(inner))
                     }
                     syntax::TYPE_RESULT => {
                         self.expect_type_args_open("Result")?;
-                        let (ok_ty, _) = self.type_()?;
+                        let ok_ty = self.type_generic_arg("Result ok")?;
                         self.expect(
                             TokKind::Comma,
                             "between the two types in `Result<T, E>`",
                         )?;
-                        let (err_ty, _) = self.type_()?;
+                        let err_ty = self.type_generic_arg("Result err")?;
                         self.expect_type_args_close("after the error type in `Result<T, E>`")?;
                         Type::Result {
                             ok: Box::new(ok_ty),
                             err: Box::new(err_ty),
                         }
                     }
-                    other => Type::Named(other.to_string()),
+                    other => {
+                        let name = other.to_string();
+                        if matches!(self.peek().kind, TokKind::Lt) {
+                            self.expect_type_args_open(&name)?;
+                            let mut args = Vec::new();
+                            loop {
+                                args.push(self.type_generic_arg(&name)?);
+                                if matches!(self.peek().kind, TokKind::Comma) {
+                                    self.bump();
+                                    continue;
+                                }
+                                break;
+                            }
+                            self.expect_type_args_close(&format!("after `{name}<…>`"))?;
+                            Type::Apply { name, args }
+                        } else {
+                            Type::Named(name)
+                        }
+                    }
                 }
             }
             other => {

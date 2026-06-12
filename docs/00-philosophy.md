@@ -99,12 +99,12 @@ stop inheriting the older, smaller vision:
   Gating ratified as S58 (`std/mem` import + `unsafe` blocks,
   Zig-style allocators). Onboarding materials never mention it until
   needed.
-- **C FFI is a needed future addition** (S59 registered). Rust FFI
-  (M7) ships first; the C ABI story follows post-v1.
-- **Purity is a product feature, not just a comptime detail.** A way
-  to mark functions as pure and evaluate them (S60) so Jet can
-  eventually replace the Nix language for declarative configuration
-  (see docs/jetpack.md, unratified).
+- **C FFI is a needed future addition** (S59 ratified deferred to v2).
+  Rust FFI (M7) ships first; the C ABI story follows in v2.
+- **Purity is a product feature, not just a comptime detail.** `pure fn`
+  (S60 ratified) marks functions the compiler verifies as pure so Jet
+  can eventually replace the Nix language for declarative configuration
+  via `jet eval --pure` (see docs/jetpack.md, unratified).
 - **Go's territory (networking etc.) is standard-library scope**, built
   out post-v1 — never core-language scope.
 - Invariant **I1 will need a measured amendment** when the expert tier

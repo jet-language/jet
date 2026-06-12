@@ -173,34 +173,40 @@ test harnesses and task `join`). `**jet build --small`** (M6) uses
 `opt-level="z"`, full LTO, and `**panic=abort**`. Rejected: abort as the
 only mode.
 
-**S16 — Imports (M6+)** *(ratified 2026-06-11)*: two forms; `**as alias`
+**S16 — Imports (M6+)** *(ratified 2026-06-11; amended 2026-06-12)*:
+**quotes mean a file path; no quotes mean a module.** Two forms; `**as alias`
 is optional** in both. When omitted, the default namespace is the module
 name (see below).
 
 ```
-import "grades/scoring";              // file path → namespace scoring
-import "grades/scoring" as g;         // same file, namespace g
+import "./lib";                       // file path → namespace lib
+import "grades/scoring" as g;         // file path, namespace g
 import scoring;                       // module by name → namespace scoring
 import scoring as gradebook;          // same module, namespace gradebook
 ```
 
 1. **File import** — `import "<path>" [as alias];`
-  `<path>` is a quoted string, relative to the **importing file's
+  The quotes are required — they mark a **path to a `.jet` file**, not a
+  logical module name. `<path>` is relative to the **importing file's
    directory**, using `/` (no `.jet` suffix; the compiler appends it).
-   Subdirectories allowed (`"util/text"`). Default namespace: the **last
+   Same-directory files use an explicit `./` prefix (`"./lib"`). Subdirs
+   use relative paths (`"util/text"`). Default namespace: the **last
    path segment** (`"grades/scoring"` → `scoring.letter(…)`).
-2. **Module import** — `import <name> [as alias];`
-  `<name>` is a bare identifier. The compiler searches **recursively from
-   the project root** for a module named `<name>`: either a file `name.jet`
-   anywhere under the root, or a directory `name/` containing `name.jet`
-   or `main.jet`. Skips `build/`, `target/`, and dot-directories.
-   **Project root** = the directory containing `jet.toml` when a manifest
-   exists (M12); otherwise the directory of the **entry** `.jet` file.
-   Ambiguous duplicate matches → **E0606** (lists every path found).
+2. **Module import** — `import <module-path> [as alias];`
+  No quotes — the compiler resolves a **logical module**, not a filesystem
+  path. `<module-path>` is a dot-separated name (`scoring`, `std.fs`; see
+  S51 for `std`). The compiler searches **recursively from the project root**
+  for a module named after the **first** segment: either `name.jet` anywhere
+  under the root, or a directory `name/` containing `name.jet` or `main.jet`.
+  Skips `build/`, `target/`, and dot-directories. **Project root** = the
+  directory containing `jet.toml` when a manifest exists (M12); otherwise
+  the directory of the **entry** `.jet` file. Ambiguous duplicate matches →
+  **E0606** (lists every path found).
 
 Cross-file access uses `namespace.item` for every `pub` item (S18).
-Rejected: Rust `use a::b`, bare `import;` with no path or name (teaching
-error only per S14), required `as`.
+Rejected: Rust `use a::b`, unquoted file paths (`import lib` when you mean
+`"./lib.jet"`), quoted module names (`import "std/fs"`), bare `import;`
+with no path or name (teaching error only per S14), required `as`.
 
 **S29 — Struct construction (M3)** *(ratified 2026-06-11)*:
 `**Type { field: expr, … }`** — Rust-style struct literals. Every field
@@ -298,8 +304,8 @@ bounds (`<T: Comparable>`): `impl other.Point: Serialize { … }` extends a
 dependency's type. `::` is reserved for foreign Rust paths in `extern rust`
 (S50), not user-facing Jet paths. Orphan rule: at least one of trait/type
 defined in this program. Rejected: `impl Trait for Type`, `impl Type.Trait`,
-Go implicit interfaces, `::` in Jet paths. Naming style (snake_case /
-PascalCase) is a lint preference (S54), not grammar. v1: signatures only —
+Go implicit interfaces, `::` in Jet paths. Naming style is not prescribed
+(S54). v1: signatures only —
 no default bodies, associated types, or trait inheritance.
 
 **S48 — Dynamic dispatch (M9)** *(ratified 2026-06-12)*: writing a trait
@@ -476,7 +482,7 @@ and kills the comptime-panic feature).
 
 **S58 — Expert low-level tier** *(ratified 2026-06-12; post-1.0
 milestone pending)*: **two gates, one keyword.**
-`**import "std/mem"**` is the discovery gate — unlocks the low-level
+`**import std.mem**` is the discovery gate — unlocks the low-level
 vocabulary: explicit **Zig-style allocators** (allocating APIs take an
 allocator parameter; a fixed arena works on embedded), `**Ptr<T>**`,
 layout/repr control, volatile wrappers. The keyword `**unsafe**` is the
@@ -529,6 +535,58 @@ actions (timers, logging) — owner-gated, and never required for
 correctness. Rejected: `defer`-as-primary (leak-by-omission, Go's
 perennial bug class), `with`-blocks (nesting pyramids).
 
+**S51 — Std library import (M10)** *(ratified 2026-06-12)*: the std
+library is **exported as the `std` module** — a module import (S16 form 2,
+no quotes), not a file path. Dot paths select submodules:
+
+```
+import std;                    // whole std → namespace std
+import std.fs as fs;           // submodule, optional alias
+import std.io;                  // default namespace io
+```
+
+`std` is a compiler-reserved module root; `std.<module>` selects a
+compiler-known submodule (`fs`, `io`, `json`, …). Optional `as alias`
+works like S16. Std is never imported via a quoted path — `import "std/fs"`
+is wrong because `"std/fs"` is file-path syntax; use `import std.fs`.
+Rejected: quoted std paths, separate `use std::` syntax.
+
+**S54 — Naming convention** *(ratified 2026-06-12)*: **no prescribed naming
+convention** in v1 — Jet does not lint or enforce snake_case vs
+camelCase/PascalCase. `jet fmt` handles layout only (S44). Rejected:
+mandatory snake_case lint.
+
+**S52 — Package manifest (M12)** *(ratified 2026-06-12)*: `**jet.toml`** —
+tiny TOML subset, hand-parsed in the compiler (I6). Sections:
+`[package]` (`name`, `version`), `[dependencies]` (git/path, exact pins),
+`[rust-dependencies]` (M7 FFI pins migrate here). Lockfile `**jet.lock**`;
+commands `jet add` / `jet fetch`; registry later as a static git index.
+Single-file `jet run file.jet` stays manifest-free forever (R9). Rejected:
+JSON manifest, manifest written in Jet (build.zig style).
+
+**S53 — Concurrency surface** *(ratified 2026-06-12; deferred past v1.0)*:
+**deferred to v2** — no tasks, channels, or `std/tasks` in v1. When
+implemented, the planned surface is ballot option A: `tasks.spawn(closure)
+-> Task<T>`, `t.join() -> T`, `tasks.channel<T>()` with
+`Sender`/`receive() -> T or Closed`; no shared mutable state (ownership
+rejects it). Rejected for v1: `go`-style `spawn { }` fire-and-forget,
+shipping concurrency in v1.
+
+**S59 — C FFI** *(ratified 2026-06-12; deferred past v1.0)*: **deferred to
+v2**. Rust FFI (S50/M7) is v1's interop story. When implemented, the
+planned surface is ballot option A: `extern c "header-or-lib" { … }` blocks
+mirroring S50's `extern rust` shape — one FFI idiom, two backends;
+by-value boundary first, pointers only inside the S58 tier. Rejected for
+v1: bindgen-style auto-generation as the primary surface, Rust-crate
+detour only.
+
+**S60 — Pure-function marking** *(ratified 2026-06-12; post-1.0 milestone
+pending)*: `**pure fn name(…)**` — a checked modifier; purity is part of
+the signature; violations are compile errors naming the impure call path.
+Enables `jet eval --pure` (jetpack JP0 direction) and makes comptime
+callability visible at API boundaries. Rejected: inference-only purity with
+no marking, full effects system.
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -572,20 +630,15 @@ implementation milestone is pending.
 ### Registered for M3–M14 (see docs/06-decision-ballots.md for options)
 
 
-| ID  | Question                                        | Needed by |
-| --- | ----------------------------------------------- | --------- |
-| S51 | std library import spelling (`import "std/fs"`) | M10       |
-| S54 | naming convention lint (snake_case)             | M10       |
-| S53 | concurrency surface (tasks + channels)          | M11       |
-| S52 | package manifest format & commands (`jet.toml`) | M12       |
-| S56 | typed reflection / user derives (deferred)      | post-1.0  |
-| S59 | C FFI surface (`extern c`; Jet-export story)    | post-1.0  |
-| S60 | pure-function marking & evaluation (`pure` fns) | post-1.0  |
+| ID  | Question                                   | Needed by |
+| --- | ------------------------------------------ | --------- |
+| S56 | typed reflection / user derives (deferred) | post-1.0  |
 
 
-Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) is fully ratified above.
-S56 (user derives via typed reflection) is deferred past v1.0 by S26's
-ratified layering.
+Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) and Group 7 (S51–S54, S52)
+are fully ratified above. S53 (concurrency) and S59 (C FFI) are ratified
+as deferred past v1.0. S60 is ratified post-1.0. S56 (user derives via
+typed reflection) is deferred past v1.0 by S26's ratified layering.
 
 ## Decision log
 
@@ -621,6 +674,7 @@ ratified layering.
 | 2026-06-11 | S17 | full compound-assignment set                | owner |
 | 2026-06-11 | S15 | unwind default; abort in `--small`          | owner |
 | 2026-06-11 | S16 | file + module imports; optional `as`        | owner |
+| 2026-06-12 | S16 | amended: quotes = file path; no quotes = module | owner |
 | 2026-06-11 | S29 | struct literals `Type { f: v }`             | owner |
 | 2026-06-11 | S30 | enums; 1-field positional, 2+ named         | owner |
 | 2026-06-11 | S31 | `==` pattern tests on enums and `T?`        | owner |
@@ -653,5 +707,11 @@ ratified layering.
 | 2026-06-12 | S61 | optional arg labels; positional order fixed | owner |
 | 2026-06-12 | S62 | trait delegation `impl Trait using field;`  | owner |
 | 2026-06-12 | S63 | RAII scope-end cleanup; `defer` maybe later | owner |
+| 2026-06-12 | S51 | std imports: `import std.fs as fs` module form | owner |
+| 2026-06-12 | S54 | no prescribed naming convention in v1        | owner |
+| 2026-06-12 | S52 | `jet.toml` manifest; `jet.lock`; jet add/fetch | owner |
+| 2026-06-12 | S53 | concurrency deferred to v2; option A when built | owner |
+| 2026-06-12 | S59 | C FFI deferred to v2; `extern c` when built  | owner |
+| 2026-06-12 | S60 | `pure fn` checked purity modifier            | owner |
 
 

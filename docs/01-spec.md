@@ -150,9 +150,13 @@ impl Circle {
 - Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
 - Static methods omit `self` (e.g. `Circle.unit()`).
 - Enum `switch` arms must be exhaustive; missing cases are a compile error.
-- **Traits (S28)** arrive in M9: `trait` declarations, `impl` inside a
-  type or as `impl Type: Trait { }` (e.g. `impl other.Point: Serialize`).
-  `.` for modules and methods; `:` separates type from trait in `impl`.
+- **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
+  only. Implement inside a type (`impl Trait { … }`) or outside as
+  `impl Type: Trait { … }` (qualify foreign types: `impl other.Point: Shape`).
+  A trait name in type position (`List<Shape>`, `fn f(s: Shape)`) means
+  dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
+  and `struct Pair<T> { … }`. Built-in traits follow S55: auto
+  `Printable`/`Equatable`; explicit `derive Comparable;` / `derive Serialize;`.
 
 ## M4 — errors as values (done)
 
@@ -254,10 +258,13 @@ Integration: `tests/ffi.rs` (gated on `cargo`).
 
 ## M6 phase 3 — multi-file imports (done)
 
-Two import forms (S16): **`import "path/to/file";`** (relative to the importing
-file's directory; default namespace = last path segment) and **`import name;`**
-(searches recursively from the project root for `name.jet` or `name/{name,main}.jet`;
-skips `build/`, `target/`, dot-dirs). Optional **`as alias`** in both forms.
+Two import forms (S16): **quotes = file path, no quotes = module.**
+**`import "path/to/file";`** — quoted path to a `.jet` file, relative to
+the importing file's directory (`import "./lib";` for a sibling file;
+default namespace = last path segment). **`import name;`** or
+**`import std.fs;`** — unquoted module name (searches recursively from
+the project root for `name.jet` or `name/{name,main}.jet`; `std` is a
+compiler-exported module per S51). Optional **`as alias`** in both forms.
 
 Cross-file access uses **`namespace.item`**; only **`pub`** items are visible from
 other files (S18), including **`pub`** struct fields. The driver loads the import
@@ -286,6 +293,35 @@ JS, no compile step; `install.sh` packs and installs the vsix). The client
 auto-discovers the server: `jet.languageServerPath` setting, then
 `<workspaceFolder>/target/debug/jet`, then `jet` on PATH. `jet lsp` never
 invokes rustc, so the cargo debug binary is sufficient.
+
+## M8 — Functions as values (closures, done)
+
+**Lambdas (S46):** `(params) => expr` or `(params) => { … }`. Parameter types
+may be omitted when the expected function type is known (**E0801** when not).
+The lambda arrow is **`=>`**; **`->`** stays for return types and `switch` arms.
+
+**Function types (S47):** `fn(T1, T2) -> R` (no parameter names; `-> R` may be
+omitted for no-return callbacks). Named `fn`s coerce to function values when
+referenced without a call.
+
+**Capture rules (S47):** shared read for names only read; mutable borrow for
+names written (`var` required, else **E0111**). Escaping lambdas (stored in a
+binding, returned, in a struct field, or passed to a `take` parameter) must own
+captures: clonable values are copied (**L0801**); non-clonable values need an
+explicit prefix **`take(name)`** on the lambda (**E0802**). Self-recursion through
+the binding is rejected (**E0804**). Calling a non-function → **E0803**.
+
+**Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
+`sort_by`, `reduce` on `List<T>`; `each` on `Map<K, V>` (two parameters).
+
+Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
+**`|x|`** pipes → `(x) => …` (**E0033**).
+
+Examples: `examples/23_closures.jet`, `examples/24_callbacks.jet`. Ui:
+`tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
+E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
+`tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`
+(L0801). Integration: `tests/closures.rs`.
 
 ## Deliberately absent
 

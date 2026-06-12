@@ -609,7 +609,7 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     match crate::loader::load_entry_with_overlay(path, Some((&abs, text)), true) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            diags.extend(crate::sema::check_bundle(&mut bundle, CompileMode::Run));
+            diags.extend(crate::sema::check_bundle(&mut bundle, CompileMode::Check));
             diags
         }
         Err(diags) => diags,
