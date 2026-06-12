@@ -9,8 +9,9 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
-    EnumLitArg, Expr, Field, Func, IfStmt, ImplDef, Item, OrFallback, Param, Pattern, Program,
-    Stmt, StrPart, StructDef, SwitchArm, Type, UnOp, Variant, VariantField, VariantPayload,
+    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, OrFallback, Param,
+    Pattern, Program, Stmt, StrPart, StructDef, SwitchArm, Type, UnOp, Variant, VariantField,
+    VariantPayload,
 };
 use crate::diag::{Diagnostic, Span};
 use crate::lexer::{describe, StrTokPart, TokKind, Token};
@@ -21,6 +22,7 @@ pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
         toks,
         pos: 0,
         diags: Vec::new(),
+        pending_type_gt: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -34,6 +36,8 @@ struct Parser<'a> {
     toks: &'a [Token],
     pos: usize,
     diags: Vec<Diagnostic>,
+    /// S33: when `>>` is split while closing nested `Type<…>`.
+    pending_type_gt: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -673,31 +677,33 @@ impl<'a> Parser<'a> {
             TokKind::KwFor => {
                 let span = self.bump().span;
                 let (var, var_span) = self.expect_ident("after `for`")?;
-                self.expect_kw(TokKind::KwIn, "after the loop name")?;
-                let start = self.expr_no_struct_lit()?;
-                if !matches!(self.peek().kind, TokKind::DotDot) {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!(
-                            "expected `{}` in this `for` range, found {}",
-                            syntax::OP_RANGE,
-                            describe(&self.peek().kind)
-                        ),
-                        "`for` counts over a range with two ends, like `1..10` (both ends included)"
-                            .to_string(),
-                        format!("write `{} {} {} 1..10 {{ ... }}`", syntax::KW_FOR, var, syntax::KW_IN),
-                        Some(self.peek().span),
-                    ));
+                let mut var2 = None;
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    let (v2, s2) = self.expect_ident("after `,` in `for key, value`")?;
+                    var2 = Some((v2, s2));
                 }
-                self.bump(); // ..
-                let end = self.expr_no_struct_lit()?;
+                self.expect_kw(TokKind::KwIn, "after the loop name")?;
+                let first = self.expr_no_struct_lit()?;
+                let kind = if matches!(self.peek().kind, TokKind::DotDot) {
+                    self.bump();
+                    let end = self.expr_no_struct_lit()?;
+                    ForKind::Range {
+                        start: first,
+                        end,
+                    }
+                } else {
+                    ForKind::In {
+                        collection: first,
+                    }
+                };
                 self.expect(TokKind::LBrace, "to open the `for` body")?;
                 let body = self.block_stmts();
                 Ok(Stmt::For {
                     var,
                     var_span,
-                    start,
-                    end,
+                    var2,
+                    kind,
                     body,
                     span,
                 })
@@ -729,25 +735,21 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Unsafe(inner, span))
             }
             TokKind::Ident(_) => {
-                // Assignment (`x = e;`, `x += e;`) or a call statement.
-                if let TokKind::Ident(name) = self.peek().kind.clone() {
-                    let next = &self.peek2().kind;
-                    if matches!(next, TokKind::Eq) || next.compound_op().is_some() {
-                        let name_span = self.bump().span;
-                        let op_tok = self.bump();
-                        let op = op_tok.kind.compound_op();
-                        let value = self.expr()?;
-                        self.finish_stmt()?;
-                        return Ok(Stmt::Assign {
-                            name,
-                            name_span,
-                            op,
-                            op_span: op_tok.span,
-                            value,
-                        });
-                    }
-                }
                 let expr = self.expr()?;
+                let next = &self.peek().kind;
+                if matches!(next, TokKind::Eq) || next.compound_op().is_some() {
+                    let op_tok = self.bump();
+                    let op = op_tok.kind.compound_op();
+                    let value = self.expr()?;
+                    self.finish_stmt()?;
+                    let target = self.expr_to_lvalue(expr)?;
+                    return Ok(Stmt::Assign {
+                        target,
+                        op,
+                        op_span: op_tok.span,
+                        value,
+                    });
+                }
                 match &expr {
                     Expr::Call(_)
                     | Expr::Field(_, _, _)
@@ -1230,10 +1232,57 @@ impl<'a> Parser<'a> {
                     let full = Span::new(expr.span().start, qspan.end);
                     expr = Expr::Try(Box::new(expr), full);
                 }
+                TokKind::LBracket => {
+                    let open = self.bump().span;
+                    let start = self.expr()?;
+                    if matches!(self.peek().kind, TokKind::DotDot) {
+                        self.bump();
+                        let end = self.expr()?;
+                        self.expect(TokKind::RBracket, "after a slice range")?;
+                        let close = self.toks[self.pos - 1].span;
+                        let span = Span::new(open.start, close.end);
+                        expr = Expr::Slice {
+                            base: Box::new(expr),
+                            start: Box::new(start),
+                            end: Box::new(end),
+                            span,
+                        };
+                    } else {
+                        self.expect(TokKind::RBracket, "after an index")?;
+                        let close = self.toks[self.pos - 1].span;
+                        let span = Span::new(open.start, close.end);
+                        expr = Expr::Index {
+                            base: Box::new(expr),
+                            index: Box::new(start),
+                            span,
+                            kind: crate::ast::IndexKind::Unknown,
+                        };
+                    }
+                }
                 _ => break,
             }
         }
         Ok(expr)
+    }
+
+    fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
+        match expr {
+            Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),
+            Expr::Index {
+                base,
+                index,
+                span,
+                ..
+            } => Ok(LValue::Index { base, index, span }),
+            other => Err(Diagnostic::error(
+                "E0003",
+                "this value can't be assigned to".to_string(),
+                "only a name or an indexed slot like `items[0]` can appear on the left of `=`"
+                    .to_string(),
+                format!("use `{} name = ...` or `map[key] = ...`", syntax::KW_VAR),
+                Some(other.span()),
+            )),
+        }
     }
 
     fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -1281,7 +1330,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0026",
                     format!("{} doesn't use `{}`", syntax::LANG_NAME, foreign),
-                    "a function that can fail returns `Result[T, E]` and signals failure with `err(...)`"
+                    "a function that can fail returns `Result<T, E>` and signals failure with `err(...)`"
                         .to_string(),
                     format!("return `err(...)` instead of `{}`", foreign),
                     Some(t.span),
@@ -1382,6 +1431,7 @@ impl<'a> Parser<'a> {
                                 toks: &toks,
                                 pos: 0,
                                 diags: Vec::new(),
+                                pending_type_gt: false,
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {
@@ -1416,6 +1466,11 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 Ok(Expr::Float(v, span))
             }
+            TokKind::Char(ch) => {
+                let span = self.bump().span;
+                Ok(Expr::Char(ch, span))
+            }
+            TokKind::LBracket => self.list_or_map_lit(),
             TokKind::KwTrue => {
                 let span = self.bump().span;
                 Ok(Expr::Bool(true, span))
@@ -1433,6 +1488,59 @@ impl<'a> Parser<'a> {
                 let inner = self.expr()?;
                 self.expect(TokKind::RParen, "to close this `(`")?;
                 Ok(inner)
+            }
+            TokKind::Ident(name)
+                if matches!(
+                    name.as_str(),
+                    syntax::FOREIGN_VEC | syntax::FOREIGN_HASHMAP | syntax::FOREIGN_DICT
+                ) =>
+            {
+                let t = self.bump();
+                let foreign = name.clone();
+                let canonical = if foreign == syntax::FOREIGN_VEC {
+                    syntax::TYPE_LIST
+                } else {
+                    syntax::TYPE_MAP
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0028",
+                    format!("{} uses `{}`, not `{}`", syntax::LANG_NAME, canonical, foreign),
+                    format!("`{}` is the built-in collection type", canonical),
+                    format!("replace `{}` with `{}`", foreign, canonical),
+                    Some(t.span),
+                ));
+                return self.expr_primary(allow_struct_lit);
+            }
+            TokKind::Ident(name) if name == syntax::FOREIGN_AS => {
+                let t = self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0030",
+                    format!(
+                        "{} doesn't use `{}` for conversions",
+                        syntax::LANG_NAME,
+                        syntax::FOREIGN_AS
+                    ),
+                    "convert with methods like `.to_float()` or `.to_string()`".to_string(),
+                    "e.g. `x.to_float()` instead of `x as Float`".to_string(),
+                    Some(t.span),
+                ));
+                return self.expr_primary(allow_struct_lit);
+            }
+            TokKind::Ident(name) if name == syntax::FOREIGN_APPEND => {
+                let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
+                    "E0027",
+                    format!("lists use `{}`, not `{}`", "push", syntax::FOREIGN_APPEND),
+                    "add an item to the end of a list with `.push(value)`".to_string(),
+                    "e.g. `items.push(x)`".to_string(),
+                    Some(span),
+                ));
+                if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump();
+                    let _ = self.expr();
+                    let _ = self.expect(TokKind::RParen, "after append args");
+                }
+                return self.expr_primary(allow_struct_lit);
             }
             TokKind::Ident(name) => {
                 let span = self.bump().span;
@@ -1483,6 +1591,51 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             )),
         }
+    }
+
+    /// S37/S38: `[a, b]` or `["k": v]` or `[]` / `[:]`.
+    fn list_or_map_lit(&mut self) -> Result<Expr, Diagnostic> {
+        let open = self.bump().span;
+        if matches!(self.peek().kind, TokKind::RBracket) {
+            let close = self.bump().span;
+            return Ok(Expr::ListLit(Vec::new(), Span::new(open.start, close.end)));
+        }
+        if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            self.expect(TokKind::RBracket, "after `[:]`")?;
+            let close = self.toks[self.pos - 1].span;
+            return Ok(Expr::MapLit(Vec::new(), Span::new(open.start, close.end)));
+        }
+        let first = self.expr()?;
+        if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            let value = self.expr()?;
+            let mut entries = vec![(first, value)];
+            while matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    break;
+                }
+                let key = self.expr()?;
+                self.expect(TokKind::Colon, "between a map key and its value")?;
+                let val = self.expr()?;
+                entries.push((key, val));
+            }
+            self.expect(TokKind::RBracket, "to close the map literal")?;
+            let close = self.toks[self.pos - 1].span;
+            return Ok(Expr::MapLit(entries, Span::new(open.start, close.end)));
+        }
+        let mut elems = vec![first];
+        while matches!(self.peek().kind, TokKind::Comma) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::RBracket) {
+                break;
+            }
+            elems.push(self.expr()?);
+        }
+        self.expect(TokKind::RBracket, "to close the list literal")?;
+        let close = self.toks[self.pos - 1].span;
+        Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
     }
 
     fn struct_lit_after_name(
@@ -1737,6 +1890,57 @@ impl<'a> Parser<'a> {
         ));
     }
 
+    /// S33: open `Type<…>` — teach square brackets used for value lists.
+    fn expect_type_args_open(&mut self, type_name: &str) -> Result<(), Diagnostic> {
+        match &self.peek().kind {
+            TokKind::Lt => {
+                self.bump();
+                Ok(())
+            }
+            TokKind::LBracket => Err(Diagnostic::error(
+                "E0034",
+                format!("`{type_name}[...]` isn't how Jet writes generic types"),
+                "square brackets `[]` are for list and map values — like `[1, 2]` and `[\"k\": v]`"
+                    .to_string(),
+                format!("write `{type_name}<...>` instead, e.g. `{type_name}<Int>`"),
+                Some(self.peek().span),
+            )),
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!("expected `<` after `{type_name}`, found {}", describe(other)),
+                format!("generic types use angle brackets, like `{type_name}<Int>`"),
+                format!("write `{type_name}<` here"),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
+    /// S33: close `Type<…>`; splits `>>` when nested generics end with `>`.
+    fn expect_type_args_close(&mut self, context: &str) -> Result<(), Diagnostic> {
+        if self.pending_type_gt {
+            self.pending_type_gt = false;
+            return Ok(());
+        }
+        match &self.peek().kind {
+            TokKind::Gt => {
+                self.bump();
+                Ok(())
+            }
+            TokKind::Shr => {
+                self.bump();
+                self.pending_type_gt = true;
+                Ok(())
+            }
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!("expected `>` {context}, found {}", describe(other)),
+                "close a generic type with `>` — nested types may end with `>>`".to_string(),
+                "add `>` here".to_string(),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
     fn type_(&mut self) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
@@ -1767,23 +1971,88 @@ impl<'a> Parser<'a> {
                         Type::String
                     }
                     syntax::TYPE_LIST => {
-                        self.expect(TokKind::LBracket, "after `List`")?;
+                        self.expect_type_args_open("List")?;
                         let (inner, _) = self.type_()?;
-                        self.expect(TokKind::RBracket, "after a list element type")?;
+                        self.expect_type_args_close("after a list element type")?;
                         Type::List(Box::new(inner))
                     }
-                    syntax::TYPE_SHARED => {
-                        self.expect(TokKind::LBracket, "after `Shared`")?;
+                    syntax::TYPE_MAP => {
+                        self.expect_type_args_open("Map")?;
+                        let (key, _) = self.type_()?;
+                        self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
+                        let (value, _) = self.type_()?;
+                        self.expect_type_args_close("after the value type in `Map<K, V>`")?;
+                        Type::Map {
+                            key: Box::new(key),
+                            value: Box::new(value),
+                        }
+                    }
+                    syntax::TYPE_CHAR => Type::Char,
+                    syntax::FOREIGN_VEC => {
+                        self.diags.push(Diagnostic::error(
+                            "E0028",
+                            format!(
+                                "{} uses `{}`, not `{}`",
+                                syntax::LANG_NAME,
+                                syntax::TYPE_LIST,
+                                syntax::FOREIGN_VEC
+                            ),
+                            format!("`{}` is the list type", syntax::TYPE_LIST),
+                            format!(
+                                "replace `{}` with `{}<...>`",
+                                syntax::FOREIGN_VEC,
+                                syntax::TYPE_LIST
+                            ),
+                            Some(start),
+                        ));
+                        self.expect_type_args_open("List")?;
                         let (inner, _) = self.type_()?;
-                        self.expect(TokKind::RBracket, "after a shared element type")?;
+                        self.expect_type_args_close("after a list element type")?;
+                        Type::List(Box::new(inner))
+                    }
+                    syntax::FOREIGN_HASHMAP | syntax::FOREIGN_DICT => {
+                        let foreign = name.clone();
+                        self.diags.push(Diagnostic::error(
+                            "E0028",
+                            format!(
+                                "{} uses `{}`, not `{}`",
+                                syntax::LANG_NAME,
+                                syntax::TYPE_MAP,
+                                foreign
+                            ),
+                            format!("`{}` is the map type", syntax::TYPE_MAP),
+                            format!(
+                                "replace `{}` with `{}<K, V>`",
+                                foreign,
+                                syntax::TYPE_MAP
+                            ),
+                            Some(start),
+                        ));
+                        self.expect_type_args_open("Map")?;
+                        let (key, _) = self.type_()?;
+                        self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
+                        let (value, _) = self.type_()?;
+                        self.expect_type_args_close("after the value type in `Map<K, V>`")?;
+                        Type::Map {
+                            key: Box::new(key),
+                            value: Box::new(value),
+                        }
+                    }
+                    syntax::TYPE_SHARED => {
+                        self.expect_type_args_open("Shared")?;
+                        let (inner, _) = self.type_()?;
+                        self.expect_type_args_close("after a shared element type")?;
                         Type::Shared(Box::new(inner))
                     }
                     syntax::TYPE_RESULT => {
-                        self.expect(TokKind::LBracket, "after `Result`")?;
+                        self.expect_type_args_open("Result")?;
                         let (ok_ty, _) = self.type_()?;
-                        self.expect(TokKind::Comma, "between the two types in `Result[T, E]`")?;
+                        self.expect(
+                            TokKind::Comma,
+                            "between the two types in `Result<T, E>`",
+                        )?;
                         let (err_ty, _) = self.type_()?;
-                        self.expect(TokKind::RBracket, "after the error type in `Result[T, E]`")?;
+                        self.expect_type_args_close("after the error type in `Result<T, E>`")?;
                         Type::Result {
                             ok: Box::new(ok_ty),
                             err: Box::new(err_ty),
@@ -1796,8 +2065,8 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!("expected a type name, found {}", describe(&other)),
-                    "types look like `Int`, `String`, or `List[Int]`".to_string(),
-                    "e.g. `x: Int` or `items: List[String]`".to_string(),
+                    "types look like `Int`, `String`, or `List<Int>`".to_string(),
+                    "e.g. `x: Int` or `items: List<String>`".to_string(),
                     Some(self.peek().span),
                 ));
             }

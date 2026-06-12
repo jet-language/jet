@@ -2,7 +2,7 @@
 
 **Blocked on decisions:** S53 (spawn/channel surface). Depends on M8
 (closure capture machinery does the heavy lifting) and M9 (generic
-`Task[T]`/`Channel[T]` signatures).
+`Task<T>`/`Channel<T>` signatures).
 **Error codes:** E1101+.
 
 ## Goal
@@ -19,12 +19,12 @@ import "std/tasks" as tasks;
 
 fn main() {
     // 1. Tasks: spawn a closure, join for the value.
-    val t = tasks.spawn(() => slow_sum(1, 1000000));   // Task[Int]
+    val t = tasks.spawn(() => slow_sum(1, 1000000));   // Task<Int>
     val other = quick_work();
     print(t.join() + other);
 
     // 2. Channels: typed pipes between tasks.
-    val ch = tasks.channel[Int]();        // Channel[Int]
+    val ch = tasks.channel<Int>();        // Channel<Int>
     for i in 1..4 {
         val sender = ch.sender();          // clonable send half
         tasks.spawn(take(sender) () => { sender.send(i * 10); });
@@ -35,7 +35,7 @@ fn main() {
 }
 ```
 
-- `tasks.spawn(f) -> Task[T]` takes a zero-parameter closure. The
+- `tasks.spawn(f) -> Task<T>` takes a zero-parameter closure. The
   closure **must own everything it captures** (M8 escape rules apply
   with no clone-fallback for `var`s: shared reads of clonable values
   clone with L0801; anything mutable or non-clonable needs `take`,
@@ -47,8 +47,8 @@ fn main() {
   report, exit 70) — fail loud, not half-dead programs.
 - Dropping a `Task` without `join` → L1101 lint ("the program may end
   before this task finishes; call `.join()`").
-- `tasks.channel[T]()` → `Channel[T]` (the receive half) with
-  `.sender() -> Sender[T]` (clonable). `sender.send(v)` moves `v` in
+- `tasks.channel<T>()` → `Channel<T>` (the receive half) with
+  `.sender() -> Sender<T>` (clonable). `sender.send(v)` moves `v` in
   (take parameter). `ch.receive() -> T or Closed` blocks; returns
   `err(Closed)` when all senders are gone (`enum Closed { Closed; }` —
   fits the M4 story; `or break` in a loop reads beautifully).
@@ -78,7 +78,7 @@ fn main() {
 |---------------------------|----------------------------------------------|
 | `tasks.spawn(f)`          | `std::thread::spawn(move || …)` wrapped in a `JetTask<T>` prelude struct holding the `JoinHandle` |
 | `t.join()`                | `handle.join()` — `Err` (panic) re-raises the runtime report |
-| `Channel[T]`/`Sender[T]`  | `std::sync::mpsc::{Receiver, Sender}` in prelude wrappers |
+| `Channel<T>`/`Sender<T>`  | `std::sync::mpsc::{Receiver, Sender}` in prelude wrappers |
 | `receive()`               | `recv()` mapping `RecvError` → `err(Closed)` |
 
 Sendability maps to Rust `Send` but sema proves it independently (R2);

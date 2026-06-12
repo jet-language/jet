@@ -69,20 +69,20 @@ cases verbatim. ✓
 
 ## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; done 2026-06-11)*
 
-`Result[T, E]` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
+`Result<T, E>` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
 fallback, `panic`/`require` for bugs with a friendly runtime report.
 No exceptions, no null, no silently ignored failures.
 **Exit:** a file-parsing example showing the happy path staying clean;
 the runtime report format pinned by a golden stderr test. ✓
 
-## M5 — Collections & one string story  *(plan: docs/plans/m05-collections.md; ballots: Group 4)*
+## M5 — Collections & one string story  *(plan: docs/plans/m05-collections.md; ballots: Group 4)* ✓ 2026-06-12
 
-`List[T]`, `Map[K, V]` (bridging Rust's Vec/BTreeMap internally),
+`List<T>`, `Map<K, V>` (bridging Rust's Vec/BTreeMap internally),
 literals, iteration, indexing with friendly runtime reports, copy-based
 slicing without exposing references, `Char`, a real String API. Exactly
 one string type.
 **Exit:** wordcount example; out-of-bounds and iterator-invalidation
-mistakes produce great errors, not Rust concepts.
+mistakes produce great errors, not Rust concepts. ✓
 
 ## M6 — Tooling I  *(plan: docs/plans/m06-tooling.md; ballots: Group 5; four phases)*
 
@@ -105,7 +105,7 @@ project. This is C2's resolution: interop without importing Rust's type
 system.
 **Exit:** an example calling a real Rust crate function.
 
-## M8 — Functions as values  *(plan: docs/plans/m08-closures.md; ballots: Group 6)*
+## M8 — Functions as values  *(plan: docs/plans/m08-closures.md; S46/S47 ratified)*
 
 Lambdas, function types, closures whose captures obey the M2 ownership
 rules (no Fn/FnMut/FnOnce surfaced), and the closure-powered collection
@@ -113,25 +113,43 @@ methods: `map`/`filter`/`each`/`find`/`sort_by`/`reduce`.
 **Exit:** a pipeline example; capture-ownership fixtures both failing
 and fixed; rustc-as-verifier battery over Fn-inference cases.
 
-## M9 — Generics & traits  *(plan: docs/plans/m09-generics-traits.md; ballots: Group 6; resolves S26/S28)*
+## M9 — Generics & traits  *(plan: docs/plans/m09-generics-traits.md)*
 
-`fn f[T: Trait]`, generic structs/enums, `trait` + `impl Trait for
-Type`, trait-as-type with invisible boxing/dynamic dispatch, built-in
-`Printable`/`Comparable`/`Equatable`. Monomorphized by rustc, proven by
-sema (R2). Comptime (S26) closes as rejected for v1.
+`fn f<T: Trait>`, generic structs/enums, `trait` + in-type `impl` or
+`impl Type: Trait`, trait-as-type with invisible boxing/dynamic dispatch,
+built-in traits with S55 hybrid derive (auto `Printable`/`Equatable`;
+explicit `derive Comparable;` / `derive Serialize;`).
+Monomorphized by rustc, proven by sema (R2). Comptime (S26, ratified) is
+deliberately separate: traits own all polymorphism; comptime computes
+values only and lands in M9.5.
 **Exit:** shapes-with-traits example; generic container example; an
 instantiation soundness matrix test.
+
+## M9.5 — Comptime v1 (CTFE)  *(plan: docs/plans/m095-comptime.md; resolves S26 layer 1, S57)*
+
+`comptime x = expr;` — evaluate a pure, deterministic Jet subset at
+compile time (sema tree-walking interpreter; no FFI/IO/time/random),
+fuel-limited with call-trace diagnostics; `panic` at comptime is a
+user-authored compile error; `embed_file("path")` bakes a file into the
+binary; results lower to plain Rust constant data (codegen stays dumb).
+One law (S26): comptime never creates, parameterizes, or selects a type,
+and never affects dispatch.
+**Exit:** lookup-table and embed_file examples; comptime-panic ui
+snapshots; the **differential battery** green in CI (every
+comptime-evaluable fixture also runs at runtime and must agree
+bit-for-bit — divergence is a P0 miscompile).
 
 ## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; ballots: Group 7)*
 
 `import "std/…"`: fs, io, env, process, math, random, time, json —
-exact v1 APIs frozen in the plan; every fallible call returns `Result[T, E]`.
-`Byte` and byte/string conversions. Enough batteries for real CLI tools.
+exact v1 APIs frozen in the plan; every fallible call returns `Result<T, E>`.
+`U8` byte buffers and byte/string conversions. Enough batteries for real
+CLI tools.
 **Exit:** file-transform, JSON, and mini-CLI examples with golden tests.
 
 ## M11 — Concurrency  *(plan: docs/plans/m11-concurrency.md; ballots: Group 7)*
 
-Tasks + channels (`tasks.spawn`, `Task[T].join`, `Channel[T]`), no
+Tasks + channels (`tasks.spawn`, `Task<T>.join`, `Channel<T>`), no
 shared mutable state — the ownership checker proves data-race freedom
 with no lifetime syntax. Panics in tasks fail loud at `join`.
 **Exit:** parallel-sum and producer/consumer examples with
@@ -168,7 +186,8 @@ README in an afternoon.
 
 ## Deferred past v1.0 (owner can promote)
 
-Async/await (tasks + channels are the v1 answer), user macros, Mutex/
+Async/await (tasks + channels are the v1 answer), user macros (rejected
+forever in token/AST form by S26 — the sanctioned path is S56), Mutex/
 shared-state concurrency, networking std modules, self-hosting, debugger
-source maps (DAP), comptime (closed by S26 unless reopened), sized
-integer menu beyond `Int`/`Byte` (revisit if M7 FFI demands it).
+source maps (DAP), comptime layer 3: typed reflection / user-defined
+derives (S56).

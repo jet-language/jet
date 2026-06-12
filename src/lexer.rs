@@ -55,6 +55,8 @@ pub enum TokKind {
     Str(Vec<StrTokPart>),
     Int(i64),
     Float(f64),
+    /// S41: `'a'` character literal.
+    Char(char),
     LParen,
     RParen,
     LBrace,
@@ -172,6 +174,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Str(_) => "a piece of quoted text".to_string(),
         TokKind::Int(_) => "a number".to_string(),
         TokKind::Float(_) => "a decimal number".to_string(),
+        TokKind::Char(_) => "a character".to_string(),
         TokKind::LParen => "`(`".to_string(),
         TokKind::RParen => "`)`".to_string(),
         TokKind::LBrace => "`{`".to_string(),
@@ -379,6 +382,11 @@ impl<'a> Lexer<'a> {
                 '>' => toks.push(simple(self, TokKind::Gt, 1)),
                 '"' => {
                     if let Some(tok) = self.string(start) {
+                        toks.push(tok);
+                    }
+                }
+                '\'' => {
+                    if let Some(tok) = self.char_lit(start) {
                         toks.push(tok);
                     }
                 }
@@ -615,6 +623,54 @@ impl<'a> Lexer<'a> {
         }
         Some(Token {
             kind: TokKind::Str(parts),
+            span: Span::new(start, self.pos(self.i)),
+        })
+    }
+
+    /// S41: `'a'` or `'\n'` — exactly one Unicode scalar.
+    fn char_lit(&mut self, start: usize) -> Option<Token> {
+        self.i += 1; // opening quote
+        if self.i >= self.chars.len() {
+            return None;
+        }
+        let mut ch = self.at(self.i);
+        if ch == '\\' {
+            let esc = self.at(self.i + 1);
+            if let Some(&(_, decoded)) = syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+                ch = decoded;
+                self.i += 2;
+            } else {
+                self.diags.push(Diagnostic::error(
+                    "E0001",
+                    format!("`\\{}` isn't an escape Jet knows", esc),
+                    "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
+                        .to_string(),
+                    "use a supported escape or a plain character".to_string(),
+                    Some(Span::new(self.pos(self.i), self.pos(self.i + 2))),
+                ));
+                self.i += 2;
+                ch = '?';
+            }
+        } else {
+            self.i += 1;
+        }
+        if self.at(self.i) != '\'' {
+            self.diags.push(Diagnostic::error(
+                "E0002",
+                "a character literal must be exactly one character".to_string(),
+                "write `'x'` with a single character between the quotes".to_string(),
+                "use a String for longer text".to_string(),
+                Some(Span::new(start, self.pos(self.i))),
+            ));
+            while self.i < self.chars.len() && self.at(self.i) != '\'' {
+                self.i += 1;
+            }
+        }
+        if self.at(self.i) == '\'' {
+            self.i += 1;
+        }
+        Some(Token {
+            kind: TokKind::Char(ch),
             span: Span::new(start, self.pos(self.i)),
         })
     }

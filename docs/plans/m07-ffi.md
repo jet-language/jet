@@ -1,6 +1,6 @@
 # M7 — Rust FFI (interop tier)
 
-**Blocked on decisions:** S50 (extern syntax). Depends on M5 (types worth
+**Blocked on decisions:** none (S50 ratified). Depends on M5 (types worth
 passing) and M6 (multi-file driver work).
 **Error codes:** E0701+.
 
@@ -10,7 +10,7 @@ Call vetted Rust functions across an **owned/copied boundary** — interop
 without importing Rust's type system (philosophy C2). Jet stays small;
 the escape hatch is explicit, visible, and safe.
 
-## Surface (uses ballot recommendation — substitute ratified choice)
+## Surface (S50)
 
 ```jet
 extern rust "rand@0.8" {
@@ -29,7 +29,7 @@ fn main() {
   (E0701) — reproducibility without a manifest.
 - `extern rust "std" { … }` works for std items with no dependency.
 - Allowed boundary types (both directions): `Int`, `Float`, `Bool`,
-  `String`, `Char`, `List[…]`/`Map[…]`/`T?`/`Result[…]` **of allowed
+  `String`, `Char`, `List<…>`/`Map<…>`/`T?`/`Result<…>` **of allowed
   types**, and user structs/enums whose fields are allowed. Everything
   passes **by value** (move/copy/clone at the boundary; M2 call rules
   apply — default params still read, so codegen clones into the call).

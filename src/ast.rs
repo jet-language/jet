@@ -20,11 +20,18 @@ pub enum Type {
     Float,
     Bool,
     String,
+    /// S41 (M5): Unicode scalar value.
+    Char,
     List(Box<Type>),
+    /// S38 (M5): keyed collection `Map<K, V>`.
+    Map {
+        key: Box<Type>,
+        value: Box<Type>,
+    },
     Shared(Box<Type>),
     /// S32: `T?` optional value.
     Option(Box<Type>),
-    /// S34: `Result[T, E]` fallible return.
+    /// S34: `Result<T, E>` fallible return.
     Result {
         ok: Box<Type>,
         err: Box<Type>,
@@ -40,11 +47,13 @@ impl Type {
             Type::Float => "Float (a decimal number)".to_string(),
             Type::Bool => "Bool (true or false)".to_string(),
             Type::String => "String (text)".to_string(),
-            Type::List(inner) => format!("List[{}]", inner.name()),
-            Type::Shared(inner) => format!("Shared[{}]", inner.name()),
+            Type::Char => "Char (one character)".to_string(),
+            Type::List(inner) => format!("List<{}>", inner.name()),
+            Type::Map { key, value } => format!("Map<{}, {}>", key.name(), value.name()),
+            Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => {
-                format!("Result[{}, {}]", ok.name(), err.name())
+                format!("Result<{}, {}>", ok.name(), err.name())
             }
             Type::Named(n) => format!("`{}`", n),
         }
@@ -57,10 +66,12 @@ impl Type {
             Type::Float => "Float".to_string(),
             Type::Bool => "Bool".to_string(),
             Type::String => "String".to_string(),
-            Type::List(inner) => format!("List[{}]", inner.name()),
-            Type::Shared(inner) => format!("Shared[{}]", inner.name()),
+            Type::Char => "Char".to_string(),
+            Type::List(inner) => format!("List<{}>", inner.name()),
+            Type::Map { key, value } => format!("Map<{}, {}>", key.name(), value.name()),
+            Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => format!("Result[{}, {}]", ok.name(), err.name()),
+            Type::Result { ok, err } => format!("Result<{}, {}>", ok.name(), err.name()),
             Type::Named(n) => n.clone(),
         }
     }
@@ -193,12 +204,12 @@ pub enum Pattern {
         span: Span,
     },
     Absent(Span),
-    /// S34: `ok(binding)` pattern on `Result[T, E]`.
+    /// S34: `ok(binding)` pattern on `Result<T, E>`.
     Ok {
         binding: String,
         span: Span,
     },
-    /// S34: `err(binding)` pattern on `Result[T, E]`.
+    /// S34: `err(binding)` pattern on `Result<T, E>`.
     Err {
         binding: String,
         span: Span,
@@ -286,10 +297,9 @@ pub enum Stmt {
     /// A call used for its effect, e.g. `print(x);`.
     Expr(Expr),
     Val(Binding),
-    /// `name = e;` (op None) or `name += e;` etc. (op Some, S17).
+    /// `target = e;` (op None) or `target += e;` etc. (op Some, S17).
     Assign {
-        name: String,
-        name_span: Span,
+        target: LValue,
         op: Option<BinOp>,
         op_span: Span,
         value: Expr,
@@ -301,12 +311,13 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// `for i in a..b` — inclusive on both ends (S22).
+    /// `for i in a..b` (S22) or `for x in collection` / `for k, v in map` (M5).
     For {
         var: String,
         var_span: Span,
-        start: Expr,
-        end: Expr,
+        /// Second binding for `for key, value in map`.
+        var2: Option<(String, Span)>,
+        kind: ForKind,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -320,6 +331,40 @@ pub enum Stmt {
     Continue(Span),
     Loop(Vec<Stmt>, Span),
     Unsafe(Vec<Stmt>, Span),
+}
+
+/// Assignment target: local name or indexed collection slot (M5).
+#[derive(Debug, Clone)]
+pub enum LValue {
+    Local {
+        name: String,
+        name_span: Span,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IndexKind {
+    #[default]
+    Unknown,
+    List,
+    Map,
+}
+
+/// `for i in 1..10` vs `for x in xs` (M5).
+#[derive(Debug)]
+pub enum ForKind {
+    Range {
+        start: Expr,
+        end: Expr,
+    },
+    In {
+        collection: Expr,
+    },
 }
 
 #[derive(Debug)]
@@ -429,6 +474,27 @@ pub enum Expr {
     Int(i64, Span),
     Float(f64, Span),
     Bool(bool, Span),
+    /// S41: single-quoted `'a'`.
+    Char(char, Span),
+    /// S37: `[a, b, c]` or `[]`.
+    ListLit(Vec<Expr>, Span),
+    /// S38: `["k": v]` or `[:]`.
+    MapLit(Vec<(Expr, Expr)>, Span),
+    /// S39: `xs[i]` or `m[k]`.
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+        /// Filled by sema so codegen picks the right runtime helper.
+        kind: IndexKind,
+    },
+    /// S40: inclusive copy slice `xs[a..b]`.
+    Slice {
+        base: Box<Expr>,
+        start: Box<Expr>,
+        end: Box<Expr>,
+        span: Span,
+    },
     Ident(String, Span),
     Call(Call),
     Unary(UnOp, Box<Expr>, Span),
@@ -466,9 +532,9 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
-    /// S34: `ok(expr)` — success value for `Result[T, E]`.
+    /// S34: `ok(expr)` — success value for `Result<T, E>`.
     Ok(Box<Expr>, Span),
-    /// S34: `err(expr)` — failure value for `Result[T, E]`.
+    /// S34: `err(expr)` — failure value for `Result<T, E>`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
     Try(Box<Expr>, Span),
@@ -489,6 +555,11 @@ impl Expr {
             | Expr::Int(_, s)
             | Expr::Float(_, s)
             | Expr::Bool(_, s)
+            | Expr::Char(_, s)
+            | Expr::ListLit(_, s)
+            | Expr::MapLit(_, s)
+            | Expr::Index { span: s, .. }
+            | Expr::Slice { span: s, .. }
             | Expr::Ident(_, s)
             | Expr::Unary(_, _, s)
             | Expr::Binary(_, _, _, s)

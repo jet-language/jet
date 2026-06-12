@@ -12,11 +12,11 @@
 //!   - every operator result is fully parenthesized
 
 use crate::ast::{
-    AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, Func, IfStmt,
-    Item, OrFallback, Pattern, Program, RustConstKind, Stmt, StrPart, StructDef, Type, UnOp,
-    VariantPayload,
+    AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
+    IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, RustConstKind, Stmt, StrPart,
+    StructDef, Type, UnOp, VariantPayload,
 };
-use crate::diag::span_line_col;
+use crate::diag::{span_line_col, Span};
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
 
@@ -29,10 +29,44 @@ impl JetShow for f64 { fn jet_show(&self) -> String { format!("{:?}", self) } }
 impl JetShow for bool { fn jet_show(&self) -> String { self.to_string() } }
 impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }
 impl<T: JetShow> JetShow for &T { fn jet_show(&self) -> String { (**self).jet_show() } }
+impl JetShow for char { fn jet_show(&self) -> String { self.to_string() } }
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("The program stopped: {}", msg);
     eprintln!("  --> {}:{}", file, line);
     std::process::exit(70);
+}
+fn jet_index_vec<T: Clone>(xs: &Vec<T>, i: i64, file: &str, line: u32) -> T {
+    let len = xs.len() as i64;
+    if i < 0 || i >= len {
+        jet_panic(file, line, &format!("the list has {} items, so position {} doesn't exist", len, i));
+    }
+    xs[i as usize].clone()
+}
+fn jet_slice_vec<T: Clone>(xs: &Vec<T>, a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
+    let len = xs.len() as i64;
+    if a < 0 || b < 0 || a > b || b >= len {
+        jet_panic(file, line, &format!("can't slice {} items from {} to {} (inclusive)", len, a, b));
+    }
+    xs[a as usize..=b as usize].to_vec()
+}
+fn jet_index_map<K: Ord + Clone, V: Clone>(m: &std::collections::BTreeMap<K, V>, k: &K, file: &str, line: u32) -> V {
+    match m.get(k) {
+        Some(v) => v.clone(),
+        None => jet_panic(file, line, &format!("the map has no entry for this key")),
+    }
+}
+fn jet_map_insert<K: Ord, V>(m: &mut std::collections::BTreeMap<K, V>, k: K, v: V) {
+    m.insert(k, v);
+}
+fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
+fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
+fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len() as i64;
+    if a < 0 || b < 0 || a > b || b >= len {
+        jet_panic(file, line, &format!("can't slice {} characters from {} to {} (inclusive)", len, a, b));
+    }
+    chars[a as usize..=b as usize].iter().collect()
 }
 "#;
 
@@ -80,7 +114,13 @@ impl Cx {
             Type::Float => "f64".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
+            Type::Char => "char".to_string(),
             Type::List(inner) => format!("Vec<{}>", self.rust_type(inner)),
+            Type::Map { key, value } => format!(
+                "std::collections::BTreeMap<{}, {}>",
+                self.rust_type(key),
+                self.rust_type(value)
+            ),
             Type::Shared(inner) => format!("std::sync::Arc<{}>", self.rust_type(inner)),
             Type::Option(inner) => format!("Option<{}>", self.rust_type(inner)),
             Type::Result { ok, err } => format!(
@@ -118,6 +158,7 @@ struct Slot {
     rust_name: String,
     /// The Rust binding is a reference; emit `(*name)` to get the value.
     deref: bool,
+    jet_ty: Option<Type>,
 }
 
 pub fn emit(prog: &Program, src: &str, file: &str) -> String {
@@ -295,9 +336,12 @@ fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
 
 fn field_type_cloneable(ty: &Type, types: &HashSet<String>) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::Float | Type::String => true,
+        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             field_type_cloneable(inner, types)
+        }
+        Type::Map { key, value } => {
+            field_type_cloneable(key, types) && field_type_cloneable(value, types)
         }
         Type::Result { ok, err } => {
             field_type_cloneable(ok, types) && field_type_cloneable(err, types)
@@ -322,13 +366,14 @@ fn type_is_comparable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
 
 fn field_type_comparable(ty: &Type, types: &HashSet<String>) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::Float | Type::String => true,
+        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::Option(inner) => field_type_comparable(inner, types),
         Type::Result { ok, err } => {
             field_type_comparable(ok, types) && field_type_comparable(err, types)
         }
+        Type::List(inner) => field_type_comparable(inner, types),
         Type::Named(n) => types.contains(n),
-        Type::List(_) | Type::Shared(_) => false,
+        Type::Map { .. } | Type::Shared(_) => false,
     }
 }
 
@@ -422,6 +467,11 @@ fn walk_type_edge(
         Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => {
             walk_type_edge(owner, edge, inner, stack, cx, boxed);
         }
+        Type::Map { key, value } => {
+            walk_type_edge(owner, edge, key, stack, cx, boxed);
+            walk_type_edge(owner, edge, value, stack, cx, boxed);
+        }
+        Type::Char => {}
         _ => {}
     }
 }
@@ -596,6 +646,7 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
                 Slot {
                     rust_name: "self".to_string(),
                     deref: false,
+                    jet_ty: None,
                 },
             );
             continue;
@@ -610,6 +661,7 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
             Slot {
                 rust_name: mangle(&p.name),
                 deref,
+                jet_ty: Some(p.ty.clone()),
             },
         );
     }
@@ -685,6 +737,7 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
             Slot {
                 rust_name: mangle(&p.name),
                 deref,
+                jet_ty: Some(p.ty.clone()),
             },
         );
     }
@@ -736,23 +789,40 @@ fn emit_stmt(
                 Slot {
                     rust_name: mangle(&b.name),
                     deref: false,
+                    jet_ty: b.ty.clone(),
                 },
             );
         }
-        Stmt::Assign {
-            name, op, value, ..
-        } => {
-            let place = place_of(env, name);
+        Stmt::Assign { target, op, value, .. } => {
             let v = emit_expr(cx, value, env);
-            match op {
-                Some(op) => out.push_str(&format!(
-                    "{}{} {}= {};\n",
-                    pad,
-                    place,
-                    op.spell(),
-                    v
-                )),
-                None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
+            match target {
+                LValue::Local { name, .. } => {
+                    let place = place_of(env, name);
+                    match op {
+                        Some(op) => out.push_str(&format!(
+                            "{}{} {}= {};\n",
+                            pad,
+                            place,
+                            op.spell(),
+                            v
+                        )),
+                        None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
+                    }
+                }
+                LValue::Index { base, index, .. } => {
+                    let is_map = matches!(expr_jet_ty(base, env), Some(Type::Map { .. }));
+                    let b = emit_expr(cx, base, env);
+                    let i = emit_expr(cx, index, env);
+                    if is_map {
+                        out.push_str(&format!(
+                            "{pad}{{ let __jet_v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), __jet_v); }}\n",
+                        ));
+                    } else {
+                        out.push_str(&format!(
+                            "{pad}{{ let __jet_v = {v}; ({b})[{i} as usize] = __jet_v; }}\n",
+                        ));
+                    }
+                }
             }
         }
         Stmt::Expr(e) => {
@@ -777,38 +847,54 @@ fn emit_stmt(
         }
         Stmt::For {
             var,
-            start,
-            end,
+            var2,
+            kind,
             body,
             ..
-        } => {
-            let s = emit_expr(cx, start, env);
-            let e = emit_expr(cx, end, env);
-            out.push_str(&format!(
-                "{}for {} in ({})..=({}) {{\n",
-                pad,
-                mangle(var),
-                s,
-                e
-            ));
-            let prev = env.insert(
-                var.clone(),
-                Slot {
-                    rust_name: mangle(var),
-                    deref: false,
-                },
-            );
-            emit_stmts(cx, body, env, out, indent + 1, view_return);
-            match prev {
-                Some(p) => {
-                    env.insert(var.clone(), p);
+        } => match kind {
+            ForKind::Range { start, end } => {
+                let s = emit_expr(cx, start, env);
+                let e = emit_expr(cx, end, env);
+                out.push_str(&format!(
+                    "{}for {} in ({})..=({}) {{\n",
+                    pad,
+                    mangle(var),
+                    s,
+                    e
+                ));
+                let prev = env.insert(
+                    var.clone(),
+                    Slot {
+                        rust_name: mangle(var),
+                        deref: false,
+                        jet_ty: Some(Type::Int),
+                    },
+                );
+                emit_stmts(cx, body, env, out, indent + 1, view_return);
+                match prev {
+                    Some(p) => {
+                        env.insert(var.clone(), p);
+                    }
+                    None => {
+                        env.remove(var);
+                    }
                 }
-                None => {
-                    env.remove(var);
-                }
+                out.push_str(&format!("{}}}\n", pad));
             }
-            out.push_str(&format!("{}}}\n", pad));
-        }
+            ForKind::In { collection } => {
+                emit_for_in(
+                    cx,
+                    var,
+                    var2.as_ref(),
+                    collection,
+                    body,
+                    env,
+                    out,
+                    indent,
+                    view_return,
+                );
+            }
+        },
         Stmt::Switch {
             subject,
             arms,
@@ -1254,6 +1340,7 @@ fn add_pattern_bindings(pattern: &Pattern, env: &mut HashMap<String, Slot>) {
                 Slot {
                     rust_name: mangle(binding),
                     deref: false,
+                    jet_ty: None,
                 },
             );
         }
@@ -1264,6 +1351,7 @@ fn add_pattern_bindings(pattern: &Pattern, env: &mut HashMap<String, Slot>) {
                     Slot {
                         rust_name: mangle(b),
                         deref: false,
+                        jet_ty: None,
                     },
                 );
             }
@@ -1275,10 +1363,90 @@ fn add_pattern_bindings(pattern: &Pattern, env: &mut HashMap<String, Slot>) {
                 Slot {
                     rust_name: mangle(binding),
                     deref: false,
+                    jet_ty: None,
                 },
             );
         }
     }
+}
+
+fn emit_for_in(
+    cx: &Cx,
+    var: &str,
+    var2: Option<&(String, Span)>,
+    collection: &Expr,
+    body: &[Stmt],
+    env: &mut HashMap<String, Slot>,
+    out: &mut String,
+    indent: usize,
+    view_return: bool,
+) {
+    let pad = "    ".repeat(indent);
+    let coll = emit_expr(cx, collection, env);
+    if let Some((v2, _)) = var2 {
+        out.push_str(&format!(
+            "{}for (_jet_k, _jet_v) in ({coll}).iter() {{\n",
+            pad
+        ));
+        out.push_str(&format!(
+            "{}    let {} = _jet_k.clone();\n",
+            pad,
+            mangle(var)
+        ));
+        out.push_str(&format!(
+            "{}    let {} = _jet_v.clone();\n",
+            pad,
+            mangle(v2)
+        ));
+    } else if let Expr::MethodCall { receiver, method, .. } = collection {
+        if method == "chars" {
+            let recv = emit_expr(cx, receiver, env);
+            out.push_str(&format!(
+                "{}for _jet_c in ({recv}).chars() {{\n    {}let {} = _jet_c;\n",
+                pad,
+                pad,
+                mangle(var)
+            ));
+        } else {
+            out.push_str(&format!(
+                "{}for _jet_item in ({coll}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+                pad,
+                pad,
+                mangle(var)
+            ));
+        }
+    } else {
+        out.push_str(&format!(
+            "{}for _jet_item in ({coll}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+            pad,
+            pad,
+            mangle(var)
+        ));
+    }
+    env.insert(
+        var.to_string(),
+        Slot {
+            rust_name: mangle(var),
+            deref: false,
+            jet_ty: None,
+        },
+    );
+    if let Some((v2, _)) = var2 {
+        env.insert(
+            v2.clone(),
+            Slot {
+                rust_name: mangle(v2),
+                deref: false,
+                jet_ty: None,
+            },
+        );
+    }
+    emit_stmts(cx, body, env, out, indent + 1, view_return);
+    env.remove(var);
+    if let Some((v2, _)) = var2 {
+        env.remove(v2);
+    }
+    out.push_str(&format!("{}}}\n", pad));
 }
 
 fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
@@ -1331,6 +1499,66 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         Expr::Int(n, _) => format!("{}i64", n),
         Expr::Float(v, _) => format!("{:?}f64", v),
         Expr::Bool(b, _) => b.to_string(),
+        Expr::Char(ch, _) => format!("{:?}", ch),
+        Expr::ListLit(elems, _) => {
+            let parts = elems
+                .iter()
+                .map(|e| emit_expr(cx, e, env))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("vec![{}]", parts)
+        }
+        Expr::MapLit(entries, _) => {
+            if entries.is_empty() {
+                "std::collections::BTreeMap::new()".to_string()
+            } else {
+                let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                for (k, v) in entries {
+                    s.push_str(&format!(
+                        "_m.insert(({}).clone(), {}); ",
+                        emit_expr(cx, k, env),
+                        emit_expr(cx, v, env)
+                    ));
+                }
+                s.push_str("_m }");
+                s
+            }
+        }
+        Expr::Index {
+            base,
+            index,
+            span,
+            kind,
+        } => {
+            let (line, _) = span_line_col(&cx.src, span.start);
+            let b = emit_expr(cx, base, env);
+            let i = emit_expr(cx, index, env);
+            match kind {
+                IndexKind::Map => format!(
+                    "jet_index_map(&({}), &({}), {:?}, {})",
+                    b, i, cx.file, line
+                ),
+                _ => format!(
+                    "jet_index_vec(&({}), {}, {:?}, {})",
+                    b, i, cx.file, line
+                ),
+            }
+        }
+        Expr::Slice {
+            base,
+            start,
+            end,
+            span,
+        } => {
+            let (line, _) = span_line_col(&cx.src, span.start);
+            let b = emit_expr(cx, base, env);
+            let a = emit_expr(cx, start, env);
+            let e = emit_expr(cx, end, env);
+            format!(
+                "jet_slice_vec(&({}), {}, {}, {:?}, {})",
+                b, a, e, cx.file, line
+            )
+        }
         Expr::Str(parts, _) => emit_str(cx, parts, env),
         Expr::Ident(name, _) => {
             if let Some(c) = cx.consts.get(name) {
@@ -1496,6 +1724,115 @@ fn emit_enum_lit(
     format!("{} {{ {} }}", prefix, fields)
 }
 
+fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
+    match expr {
+        Expr::Ident(name, _) => env.get(name).and_then(|s| s.jet_ty.clone()),
+        Expr::Str(_, _) => Some(Type::String),
+        Expr::Char(_, _) => Some(Type::Char),
+        Expr::MethodCall { receiver, method, .. } => {
+            if method == "chars" {
+                return Some(Type::List(Box::new(Type::Char)));
+            }
+            if method == "split" {
+                return Some(Type::List(Box::new(Type::String)));
+            }
+            expr_jet_ty(receiver, env)
+        }
+        _ => None,
+    }
+}
+
+fn emit_builtin_method(
+    cx: &Cx,
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::ast::CallArg],
+    env: &HashMap<String, Slot>,
+) -> Option<String> {
+    let recv = emit_expr(cx, receiver, env);
+    let arg = |i: usize| {
+        args.get(i)
+            .map(|a| emit_expr(cx, &a.expr, env))
+            .unwrap_or_default()
+    };
+    if let Expr::Ident(name, _) = receiver {
+        match (name.as_str(), method) {
+            (syntax::TYPE_INT, "parse") => {
+                return Some(format!("({}).trim().parse::<i64>()", arg(0)));
+            }
+            (syntax::TYPE_FLOAT, "parse") => {
+                return Some(format!("({}).trim().parse::<f64>()", arg(0)));
+            }
+            _ => {}
+        }
+    }
+    let rty = expr_jet_ty(receiver, env);
+    match method {
+        "len" => Some(match rty {
+            Some(Type::String) => format!("jet_char_len(&({}))", recv),
+            _ => format!("({}).len() as i64", recv),
+        }),
+        "is_empty" => Some(format!("({}).is_empty()", recv)),
+        "push" => Some(format!("({}).push({})", recv, arg(0))),
+        "pop" => Some(format!("({}).pop()", recv)),
+        "insert" => Some(match rty {
+            Some(Type::Map { .. }) => format!("({}).insert(({}).clone(), {})", recv, arg(0), arg(1)),
+            _ => format!("({}).insert({} as usize, {})", recv, arg(0), arg(1)),
+        }),
+        "remove" => Some(match rty {
+            Some(Type::Map { .. }) => format!("({}).remove(&({}).clone())", recv, arg(0)),
+            _ => format!("({}).remove({} as usize).unwrap()", recv, arg(0)),
+        }),
+        "get" => Some(match rty {
+            Some(Type::Map { .. }) => format!("({}).get(&({}).clone()).cloned()", recv, arg(0)),
+            _ => format!("({}).get({} as usize).cloned()", recv, arg(0)),
+        }),
+        "first" => Some(format!("({}).first().cloned()", recv)),
+        "last" => Some(format!("({}).last().cloned()", recv)),
+        "contains" => Some(format!("({}).contains(&{})", recv, arg(0))),
+        "index_of" => Some(format!(
+            "({}).iter().position(|x| *x == {}).map(|i| i as i64)",
+            recv,
+            arg(0)
+        )),
+        "reverse" => Some(format!("({}).reverse()", recv)),
+        "sort" => Some(format!("({}).sort()", recv)),
+        "join" => Some(format!(
+            "({}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+            recv,
+            arg(0)
+        )),
+        "clear" => Some(format!("({}).clear()", recv)),
+        "chars" => Some(format!("({}).chars().collect::<Vec<char>>()", recv)),
+        "trim" => Some(format!("({}).trim().to_string()", recv)),
+        "split" => Some(format!("jet_string_split(&({}), &{})", recv, arg(0))),
+        "starts_with" => Some(format!("({}).starts_with(&{})", recv, arg(0))),
+        "ends_with" => Some(format!("({}).ends_with(&{})", recv, arg(0))),
+        "replace" => Some(format!("({}).replace(&{}, &{})", recv, arg(0), arg(1))),
+        "to_upper" => Some(format!("({}).to_uppercase()", recv)),
+        "to_lower" => Some(format!("({}).to_lowercase()", recv)),
+        "repeat" => Some(format!("({}).repeat({} as usize)", recv, arg(0))),
+        "slice" => {
+            let (line, _) = span_line_col(&cx.src, receiver.span().start);
+            Some(format!(
+                "jet_string_slice(&({}), {}, {}, {:?}, {})",
+                recv,
+                arg(0),
+                arg(1),
+                cx.file,
+                line
+            ))
+        }
+        "keys" => Some(format!("({}).keys().cloned().collect::<Vec<_>>()", recv)),
+        "values" => Some(format!("({}).values().cloned().collect::<Vec<_>>()", recv)),
+        "contains_key" => Some(format!("({}).contains_key(&{})", recv, arg(0))),
+        "to_string" => Some(format!("({}).jet_show()", recv)),
+        "to_float" => Some(format!("({}) as f64", recv)),
+        "to_int" => Some(format!("({}) as i64", recv)),
+        _ => None,
+    }
+}
+
 fn emit_method_call(
     cx: &Cx,
     receiver: &Expr,
@@ -1505,6 +1842,9 @@ fn emit_method_call(
 ) -> String {
     if method == "clone" {
         return format!("({}).clone()", emit_expr(cx, receiver, env));
+    }
+    if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
+        return s;
     }
     if let Expr::Ident(type_name, _) = receiver {
         if let Some(variants) = cx.enum_variants.get(type_name) {

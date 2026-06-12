@@ -9,9 +9,10 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr,
-    Func, IfStmt, Item, OrFallback, Pattern, Program, RustConstKind, Stmt, StrPart, StructDef, Type,
-    UnOp, VariantPayload,
+    ForKind, Func, IfStmt, IndexKind, Item, LValue, OrFallback, Pattern, Program, RustConstKind,
+    Stmt, StrPart, StructDef, Type, UnOp, VariantPayload,
 };
+use crate::collections::{self, is_map_key_type, is_reserved_type};
 use crate::diag::{Diagnostic, Span};
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
@@ -366,6 +367,16 @@ fn register_struct(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
+    if is_reserved_type(&s.name) {
+        diags.push(Diagnostic::error(
+            "E0106",
+            format!("the name `{}` is built in and can't be redefined", s.name),
+            format!("`{}` is provided by the language itself", s.name),
+            "choose a different name for this struct".to_string(),
+            Some(s.name_span),
+        ));
+        return;
+    }
     if name_defined(&s.name, funcs, registry, consts) {
         diags.push(Diagnostic::error(
             "E0105",
@@ -435,6 +446,16 @@ fn register_enum(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
+    if is_reserved_type(&e.name) {
+        diags.push(Diagnostic::error(
+            "E0106",
+            format!("the name `{}` is built in and can't be redefined", e.name),
+            format!("`{}` is provided by the language itself", e.name),
+            "choose a different name for this enum".to_string(),
+            Some(e.name_span),
+        ));
+        return;
+    }
     if name_defined(&e.name, funcs, registry, consts) {
         diags.push(Diagnostic::error(
             "E0105",
@@ -579,6 +600,7 @@ fn check_func_body(
         fn_name: f.name.clone(),
         expected_type: None,
         owner_type: owner_type.map(str::to_string),
+        iter_borrowed: HashSet::new(),
     };
     for p in &f.params {
         let skip_type_check = p.name == syntax::KW_SELF
@@ -668,6 +690,8 @@ struct Checker<'a> {
     expected_type: Option<Type>,
     /// Enclosing type when checking a method body.
     owner_type: Option<String>,
+    /// Collections currently read by an active `for x in xs` loop (E0507).
+    iter_borrowed: HashSet<String>,
 }
 
 impl<'a> Checker<'a> {
@@ -684,6 +708,22 @@ impl<'a> Checker<'a> {
             .last_mut()
             .unwrap()
             .insert(name.to_string(), info);
+    }
+
+    fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
+        if self.lookup(&name).is_some() || self.consts.contains_key(&name) {
+            self.diags.push(already_defined(&name, name_span));
+        } else {
+            self.scopes.last_mut().unwrap().insert(
+                name,
+                LocalInfo {
+                    ty: ty.clone(),
+                    mutable: false,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                },
+            );
+        }
     }
 
     fn check_declared_type(&mut self, ty: &Type, span: Span) {
@@ -716,6 +756,20 @@ impl<'a> Checker<'a> {
                 self.check_declared_type(inner, span);
             }
             Type::List(inner) | Type::Shared(inner) => self.check_declared_type(inner, span),
+            Type::Map { key, value } => {
+                self.check_declared_type(key, span);
+                self.check_declared_type(value, span);
+                if !is_map_key_type(key) {
+                    self.diags.push(Diagnostic::error(
+                        "E0502",
+                        format!("`{}` can't be a map key type yet", key.name()),
+                        "map keys must be Int, String, Bool, Char, or a payload-free enum".to_string(),
+                        "pick a simpler key type, or store a struct as the value".to_string(),
+                        Some(span),
+                    ));
+                }
+            }
+            Type::Char => {}
             Type::Result { ok, err } => {
                 self.check_declared_type(ok, span);
                 self.check_declared_type(err, span);
@@ -728,6 +782,8 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Named(n) => self.registry.contains(n),
             Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => self.type_known(inner),
+            Type::Map { key, value } => self.type_known(key) && self.type_known(value),
+            Type::Char => true,
             Type::Result { ok, err } => self.type_known(ok) && self.type_known(err),
             _ => true,
         }
@@ -838,96 +894,181 @@ impl<'a> Checker<'a> {
         match stmt {
             Stmt::Val(b) => self.check_binding(b),
             Stmt::Assign {
-                name,
-                name_span,
+                target,
                 op,
                 op_span,
                 value,
             } => {
+                if let (Some(op), LValue::Index { span, .. }) = (op, &*target) {
+                    self.diags.push(Diagnostic::error(
+                        "E0003",
+                        "compound assignment can't target an indexed slot".to_string(),
+                        "write the full new value: `map[key] = map[key] + 1`".to_string(),
+                        format!("use `=` with the whole right-hand side"),
+                        Some(*span),
+                    ));
+                    let _ = op;
+                    self.infer(value);
+                    return;
+                }
                 let vt = self.infer(value);
                 self.note_move_if_direct_ident(value);
-                let Some(info) = self.lookup(name).cloned() else {
-                    if self.consts.contains_key(name.as_str()) {
-                        self.diags.push(Diagnostic::error(
-                            "E0111",
-                            format!("`{}` is a const and can never change", name),
-                            "a const is fixed for the whole program".to_string(),
-                            format!("use a `{}` binding if it needs to change", syntax::KW_VAR),
-                            Some(*name_span),
-                        ));
-                    } else {
-                        self.unknown_name(name, *name_span);
-                    }
-                    return;
-                };
-                let assignable = info.mutable;
-                if !assignable {
-                    let what = if info.param_conv.is_some() {
-                        format!("the parameter `{}` can't be changed here", name)
-                    } else {
-                        format!("`{}` was made with `{}`, so it can't change", name, syntax::KW_VAL)
-                    };
-                    let fix = if info.param_conv.is_some() {
-                        format!(
-                            "mark the parameter `{} {}: {}` if the function should change it",
-                            syntax::KW_MUTATE,
-                            name,
-                            info.ty.name()
-                        )
-                    } else {
-                        format!("declare it with `{} {} = ...` instead", syntax::KW_VAR, name)
-                    };
-                    self.diags.push(Diagnostic::error(
-                        "E0111",
-                        what,
-                        format!(
-                            "only `{}` bindings (and `{}` parameters) can be changed",
-                            syntax::KW_VAR,
-                            syntax::KW_MUTATE
-                        ),
-                        fix,
-                        Some(*name_span),
-                    ));
-                }
-                self.moved.remove(name);
-                if let Some(op) = op {
-                    // S17: compound assignment.
-                    let ok = match op {
-                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                            matches!(info.ty, Type::Int | Type::Float)
+                match target {
+                    LValue::Local { name, name_span } => {
+                        let name_span = *name_span;
+                        let Some(info) = self.lookup(name).cloned() else {
+                            if self.consts.contains_key(name.as_str()) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0111",
+                                    format!("`{}` is a const and can never change", name),
+                                    "a const is fixed for the whole program".to_string(),
+                                    format!(
+                                        "use a `{}` binding if it needs to change",
+                                        syntax::KW_VAR
+                                    ),
+                                    Some(name_span),
+                                ));
+                            } else {
+                                self.unknown_name(name, name_span);
+                            }
+                            return;
+                        };
+                        if !info.mutable {
+                            let what = if info.param_conv.is_some() {
+                                format!("the parameter `{}` can't be changed here", name)
+                            } else {
+                                format!(
+                                    "`{}` was made with `{}`, so it can't change",
+                                    name,
+                                    syntax::KW_VAL
+                                )
+                            };
+                            let fix = if info.param_conv.is_some() {
+                                format!(
+                                    "mark the parameter `{} {}: {}` if the function should change it",
+                                    syntax::KW_MUTATE,
+                                    name,
+                                    info.ty.name()
+                                )
+                            } else {
+                                format!(
+                                    "declare it with `{} {} = ...` instead",
+                                    syntax::KW_VAR, name
+                                )
+                            };
+                            self.diags.push(Diagnostic::error(
+                                "E0111",
+                                what,
+                                format!(
+                                    "only `{}` bindings (and `{}` parameters) can be changed",
+                                    syntax::KW_VAR,
+                                    syntax::KW_MUTATE
+                                ),
+                                fix,
+                                Some(name_span),
+                            ));
                         }
-                        _ => matches!(info.ty, Type::Int),
-                    };
-                    if !ok {
-                        self.diags.push(Diagnostic::error(
-                            "E0109",
-                            format!(
-                                "`{}{}` doesn't work on {}",
-                                op.spell(),
-                                "=",
-                                info.ty.show()
-                            ),
-                            compound_why(*op),
-                            "use a value of the right type, or a different operation".to_string(),
-                            Some(*op_span),
-                        ));
-                        return;
+                        self.moved.remove(name);
+                        if let (Some(vt), false) =
+                            (vt.clone(), info.ty == Type::Named(String::new()))
+                        {
+                            if vt != info.ty {
+                                self.diags.push(Diagnostic::error(
+                                    "E0108",
+                                    format!(
+                                        "`{}` holds {}, but this value is {}",
+                                        name,
+                                        info.ty.show(),
+                                        vt.show()
+                                    ),
+                                    "a binding keeps one type for its whole life".to_string(),
+                                    type_fix_hint(&info.ty, &vt),
+                                    Some(value.span()),
+                                ));
+                            }
+                        }
                     }
-                }
-                if let (Some(vt), false) = (vt.clone(), info.ty == Type::Named(String::new())) {
-                    if vt != info.ty {
-                        self.diags.push(Diagnostic::error(
-                            "E0108",
-                            format!(
-                                "`{}` holds {}, but this value is {}",
-                                name,
-                                info.ty.show(),
-                                vt.show()
-                            ),
-                            "a binding keeps one type for its whole life".to_string(),
-                            type_fix_hint(&info.ty, &vt),
-                            Some(value.span()),
-                        ));
+                    LValue::Index { base, index, span } => {
+                        let base_ty = self.infer(base);
+                        let idx_ty = self.infer(index);
+                        if idx_ty.as_ref() != Some(&Type::Int)
+                            && !matches!(base_ty, Some(Type::Map { .. }))
+                        {
+                            if let Some(ref it) = idx_ty {
+                                self.diags.push(Diagnostic::error(
+                                    "E0505",
+                                    format!(
+                                        "list indexes must be {}, not {}",
+                                        Type::Int.show(),
+                                        it.show()
+                                    ),
+                                    "count positions with a whole number starting at 0".to_string(),
+                                    "use an Int index, like `items[0]`".to_string(),
+                                    Some(index.span()),
+                                ));
+                            }
+                        }
+                        if let Some(Type::Map { key, value: map_val_ty }) = base_ty {
+                            if let Some(kt) = idx_ty {
+                                if kt != *key {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0505",
+                                        format!(
+                                            "this map holds keys of type {}, not {}",
+                                            key.show(),
+                                            kt.show()
+                                        ),
+                                        "the key in `map[key]` must match the map's key type"
+                                            .to_string(),
+                                        format!("use a {} key here", key.name()),
+                                        Some(index.span()),
+                                    ));
+                                }
+                            }
+                            if let Some(vt) = vt {
+                                if vt != *map_val_ty {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0108",
+                                        format!(
+                                            "this map holds values of type {}, not {}",
+                                            map_val_ty.show(),
+                                            vt.show()
+                                        ),
+                                        "every value stored in a map must have the same type"
+                                            .to_string(),
+                                        type_fix_hint(&map_val_ty, &vt),
+                                        Some(value.span()),
+                                    ));
+                                }
+                            }
+                            if let Expr::Ident(n, _) = base.as_ref() {
+                                if self.iter_borrowed.contains(n) {
+                                    self.diags.push(collection_changed_in_loop(n, *span));
+                                }
+                                if let Some(info) = self.lookup(n) {
+                                    if !info.mutable {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0202",
+                                            format!(
+                                                "`{}` must be declared with `{}` to change it",
+                                                n, syntax::KW_VAR
+                                            ),
+                                            "inserting into a map changes the map".to_string(),
+                                            format!("declare `var {}: ...`", n),
+                                            Some(*span),
+                                        ));
+                                    }
+                                }
+                            }
+                        } else if let Some(Type::String) = base_ty {
+                            self.diags.push(Diagnostic::error(
+                                "E0503",
+                                "strings aren't indexed with `[ ]`".to_string(),
+                                "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
+                                "e.g. `for c in s.chars()` or `s.slice(0..2)`".to_string(),
+                                Some(*span),
+                            ));
+                        }
                     }
                 }
             }
@@ -1057,52 +1198,113 @@ impl<'a> Checker<'a> {
             Stmt::For {
                 var,
                 var_span,
-                start,
-                end,
+                var2,
+                kind,
                 body,
                 span: _,
             } => {
-                for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
-                    let t = self.infer(e);
-                    if let Some(t) = t {
-                        if t != Type::Int {
-                            self.diags.push(Diagnostic::error(
-                                "E0109",
-                                format!(
-                                    "the {} of a `for` range must be {}, not {}",
-                                    which,
-                                    Type::Int.show(),
-                                    t.show()
-                                ),
-                                "`for` counts whole numbers between two ends (both included, S22)"
-                                    .to_string(),
-                                "use Int values for both ends, like `1..10`".to_string(),
-                                Some(e.span()),
-                            ));
+                match kind {
+                    ForKind::Range { start, end } => {
+                        for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
+                            let t = self.infer(e);
+                            if let Some(t) = t {
+                                if t != Type::Int {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0109",
+                                        format!(
+                                            "the {} of a `for` range must be {}, not {}",
+                                            which,
+                                            Type::Int.show(),
+                                            t.show()
+                                        ),
+                                        "`for` counts whole numbers between two ends (both included, S22)"
+                                            .to_string(),
+                                        "use Int values for both ends, like `1..10`".to_string(),
+                                        Some(e.span()),
+                                    ));
+                                }
+                            }
                         }
+                        self.loop_depth += 1;
+                        self.scopes.push(HashMap::new());
+                        let vs = *var_span;
+                        let v = var.clone();
+                        if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+                            self.diags.push(already_defined(&v, vs));
+                        }
+                        self.scopes.last_mut().unwrap().insert(
+                            v,
+                            LocalInfo {
+                                ty: Type::Int,
+                                mutable: false,
+                                param_conv: None,
+                                decl_loop_depth: self.loop_depth,
+                            },
+                        );
+                        for s in body.iter_mut() {
+                            self.check_stmt(s);
+                        }
+                        self.scopes.pop();
+                        self.loop_depth -= 1;
+                    }
+                    ForKind::In { collection } => {
+                        let coll_ty = self.infer(collection);
+                        let borrowed = collection_root_name(collection);
+                        self.loop_depth += 1;
+                        if let Some(n) = borrowed.clone() {
+                            self.iter_borrowed.insert(n);
+                        }
+                        self.scopes.push(HashMap::new());
+                        match &coll_ty {
+                            Some(Type::List(inner)) => {
+                                self.declare_loop_var(var.clone(), *var_span, inner);
+                            }
+                            Some(Type::Map { key, value }) => {
+                                if var2.is_none() {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0003",
+                                        "a map needs two loop names: `for key, value in map`"
+                                            .to_string(),
+                                        "maps carry a key and a value on each step".to_string(),
+                                        format!(
+                                            "write `for key, value in {}`",
+                                            if let Expr::Ident(n, _) = &*collection {
+                                                n.clone()
+                                            } else {
+                                                "the_map".to_string()
+                                            }
+                                        ),
+                                        Some(collection.span()),
+                                    ));
+                                } else if let Some((v2, v2s)) = var2.as_ref() {
+                                    self.declare_loop_var(var.clone(), *var_span, key);
+                                    self.declare_loop_var(v2.clone(), *v2s, value);
+                                }
+                            }
+                            Some(other) => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0109",
+                                    format!(
+                                        "`for x in` needs a list or map, not {}",
+                                        other.show()
+                                    ),
+                                    "walk items with `for item in items` or characters with `for c in s.chars()`".to_string(),
+                                    "use a `List`, `Map`, or `s.chars()`".to_string(),
+                                    Some(collection.span()),
+                                ));
+                            }
+                            None => {}
+                        }
+                        for s in body.iter_mut() {
+                            self.check_stmt(s);
+                        }
+                        self.scopes.pop();
+                        if let Some(n) = borrowed {
+                            self.iter_borrowed.remove(&n);
+                        }
+                        self.loop_depth -= 1;
                     }
                 }
-                self.loop_depth += 1;
-                self.scopes.push(HashMap::new());
-                let vs = *var_span;
-                let v = var.clone();
-                if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
-                    self.diags.push(already_defined(&v, vs));
-                }
-                self.scopes.last_mut().unwrap().insert(
-                    v,
-                    LocalInfo {
-                        ty: Type::Int,
-                        mutable: false,
-                        param_conv: None,
-                        decl_loop_depth: self.loop_depth,
-                    },
-                );
-                for s in body.iter_mut() {
-                    self.check_stmt(s);
-                }
-                self.scopes.pop();
-                self.loop_depth -= 1;
             }
             Stmt::Switch {
                 subject,
@@ -1579,6 +1781,11 @@ impl<'a> Checker<'a> {
                 self.unknown_name(name, *span);
                 None
             }
+            Expr::Char(_, _) => Some(Type::Char),
+            Expr::ListLit(elems, span) => self.infer_list_lit(elems, *span),
+            Expr::MapLit(entries, span) => self.infer_map_lit(entries, *span),
+            Expr::Index { base, index, span, kind } => self.infer_index(base, index, span, kind),
+            Expr::Slice { base, start, end, span } => self.infer_slice(base, start, end, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
                 match self.check_call(call, true) {
@@ -1746,10 +1953,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", syntax::LIT_OK),
             format!(
-                "`{}` builds the success side of `Result[T, E]`",
+                "`{}` builds the success side of `Result<T, E>`",
                 syntax::LIT_OK
             ),
-            "use it in a return type, a binding annotated with `Result[...]`, or a call that expects one"
+            "use it in a return type, a binding annotated with `Result<...>`, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -1784,10 +1991,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", syntax::LIT_ERR),
             format!(
-                "`{}` builds the failure side of `Result[T, E]`",
+                "`{}` builds the failure side of `Result<T, E>`",
                 syntax::LIT_ERR
             ),
-            "use it in a return type, a binding annotated with `Result[...]`, or a call that expects one"
+            "use it in a return type, a binding annotated with `Result<...>`, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -1832,7 +2039,7 @@ impl<'a> Checker<'a> {
                             ),
                             "propagation early-returns the failure to the caller".to_string(),
                             format!(
-                                "add `-> Result[..., {}]` to this function, or handle the result with `{}`",
+                                "add `-> Result<..., {}>` to this function, or handle the result with `{}`",
                                 err.name(),
                                 syntax::OP_OR_FALLBACK
                             ),
@@ -1876,7 +2083,7 @@ impl<'a> Checker<'a> {
                     ),
                     "postfix `?` unwraps success or returns early with the failure".to_string(),
                     format!(
-                        "call something that returns `Result[T, E]` or `T?`, or remove `{}`",
+                        "call something that returns `Result<T, E>` or `T?`, or remove `{}`",
                         syntax::OP_TRY_SUFFIX
                     ),
                     Some(span),
@@ -1988,6 +2195,300 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn finish_builtin_method(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        recv_ty: &Type,
+        args: &mut [crate::ast::CallArg],
+        span: Span,
+        ret: Option<Type>,
+    ) -> Option<Type> {
+        if collections::builtin_needs_mut_receiver(recv_ty, method) {
+            if let Expr::Ident(n, nspan) = receiver {
+                if self.iter_borrowed.contains(n) {
+                    self.diags.push(collection_changed_in_loop(n, *nspan));
+                }
+                if let Some(info) = self.lookup(n) {
+                    if !info.mutable {
+                        self.diags.push(Diagnostic::error(
+                            "E0202",
+                            format!(
+                                "`{}` must be declared with `{}` before calling `.{}()`",
+                                n, syntax::KW_VAR, method
+                            ),
+                            "this method changes the collection".to_string(),
+                            format!("declare `var {}: ...`", n),
+                            Some(*nspan),
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(expected) = collections::builtin_method_arg_types(recv_ty, method) {
+            for (i, arg) in args.iter_mut().enumerate() {
+                let got = self.infer(&mut arg.expr);
+                if let (Some(et), Some(gt)) = (expected.get(i), got) {
+                    if gt != *et {
+                        self.diags.push(Diagnostic::error(
+                            "E0108",
+                            format!(
+                                "argument {} to `.{}()` should be {}, not {}",
+                                i + 1,
+                                method,
+                                et.show(),
+                                gt.show()
+                            ),
+                            "built-in methods need arguments of the right type".to_string(),
+                            type_fix_hint(et, &gt),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                }
+            }
+        } else {
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+        }
+        let _ = span;
+        ret
+    }
+
+    fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
+        if elems.is_empty() {
+            if let Some(expected) = self.expected_type.clone() {
+                if let Type::List(inner) = expected {
+                    return Some(Type::List(inner));
+                }
+            }
+            self.diags.push(Diagnostic::error(
+                "E0501",
+                "an empty list needs a type".to_string(),
+                "write `[]` only where the list type is already known, like `val xs: List<Int> = []`"
+                    .to_string(),
+                "add a type annotation on the binding".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
+        let mut elem_types = Vec::new();
+        for e in elems.iter_mut() {
+            if let Some(t) = self.infer(e) {
+                elem_types.push(t);
+            }
+        }
+        let first = elem_types.first()?.clone();
+        for (i, t) in elem_types.iter().enumerate().skip(1) {
+            if *t != first {
+                self.diags.push(Diagnostic::error(
+                    "E0504",
+                    format!(
+                        "this list started as `{}` but item {} is `{}`",
+                        first.name(),
+                        i + 1,
+                        t.name()
+                    ),
+                    "every item in a list literal must have the same type".to_string(),
+                    "make every element the same type, or build the list in steps".to_string(),
+                    Some(elems[i].span()),
+                ));
+            }
+        }
+        Some(Type::List(Box::new(first)))
+    }
+
+    fn infer_map_lit(&mut self, entries: &mut [(Expr, Expr)], span: Span) -> Option<Type> {
+        if entries.is_empty() {
+            if let Some(expected) = self.expected_type.clone() {
+                if let Type::Map { key, value } = expected {
+                    return Some(Type::Map { key, value });
+                }
+            }
+            self.diags.push(Diagnostic::error(
+                "E0501",
+                "an empty map needs a type".to_string(),
+                "write `[:]` only where the map type is already known, like `var m: Map<String, Int> = [:]`"
+                    .to_string(),
+                "add a type annotation on the binding".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
+        let mut key_ty = None;
+        let mut val_ty = None;
+        for (k, v) in entries.iter_mut() {
+            let Some(kt) = self.infer(k) else {
+                continue;
+            };
+            let Some(vt) = self.infer(v) else {
+                continue;
+            };
+            if !is_map_key_type(&kt) {
+                self.diags.push(Diagnostic::error(
+                    "E0502",
+                    format!("`{}` can't be a map key", kt.name()),
+                    "map keys must be Int, String, Bool, Char, or a payload-free enum".to_string(),
+                    "use a simpler key type".to_string(),
+                    Some(k.span()),
+                ));
+            }
+            if let Some(ref fk) = key_ty {
+                if kt != *fk {
+                    self.diags.push(Diagnostic::error(
+                        "E0504",
+                        format!(
+                            "this map started with `{}` keys but another key is `{}`",
+                            fk.name(),
+                            kt.name()
+                        ),
+                        "every key in a map literal must have the same type".to_string(),
+                        "use the same key type throughout".to_string(),
+                        Some(k.span()),
+                    ));
+                }
+            } else {
+                key_ty = Some(kt);
+            }
+            if let Some(ref fv) = val_ty {
+                if vt != *fv {
+                    self.diags.push(Diagnostic::error(
+                        "E0504",
+                        format!(
+                            "this map started with `{}` values but another value is `{}`",
+                            fv.name(),
+                            vt.name()
+                        ),
+                        "every value in a map literal must have the same type".to_string(),
+                        "use the same value type throughout".to_string(),
+                        Some(v.span()),
+                    ));
+                }
+            } else {
+                val_ty = Some(vt);
+            }
+        }
+        match (key_ty, val_ty) {
+            (Some(k), Some(v)) => Some(Type::Map {
+                key: Box::new(k),
+                value: Box::new(v),
+            }),
+            _ => None,
+        }
+    }
+
+    fn infer_index(
+        &mut self,
+        base: &mut Box<Expr>,
+        index: &mut Box<Expr>,
+        span: &Span,
+        kind: &mut IndexKind,
+    ) -> Option<Type> {
+        let base_ty = self.infer(base)?;
+        let idx_ty = self.infer(index)?;
+        match &base_ty {
+            Type::List(inner) => {
+                *kind = IndexKind::List;
+                if idx_ty != Type::Int {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "list indexes must be {}, not {}",
+                            Type::Int.show(),
+                            idx_ty.show()
+                        ),
+                        "count positions with a whole number starting at 0".to_string(),
+                        "use an Int index, like `items[0]`".to_string(),
+                        Some(index.span()),
+                    ));
+                }
+                Some((**inner).clone())
+            }
+            Type::Map { key, value } => {
+                *kind = IndexKind::Map;
+                if idx_ty != **key {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "this map holds keys of type {}, not {}",
+                            key.show(),
+                            idx_ty.show()
+                        ),
+                        "the key in `map[key]` must match the map's key type".to_string(),
+                        format!("use a {} key here", key.name()),
+                        Some(index.span()),
+                    ));
+                }
+                Some((**value).clone())
+            }
+            Type::String => {
+                self.diags.push(Diagnostic::error(
+                    "E0503",
+                    "strings aren't indexed with `[ ]`".to_string(),
+                    "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
+                    "e.g. `for c in s.chars()` or `s.slice(0..2)`".to_string(),
+                    Some(*span),
+                ));
+                None
+            }
+            _ => {
+                self.diags.push(Diagnostic::error(
+                    "E0505",
+                    format!("only lists and maps can be indexed, not {}", base_ty.show()),
+                    "use `[ ]` on a `List` or `Map` value".to_string(),
+                    "check the value before `[`".to_string(),
+                    Some(*span),
+                ));
+                None
+            }
+        }
+    }
+
+    fn infer_slice(
+        &mut self,
+        base: &mut Box<Expr>,
+        start: &mut Box<Expr>,
+        end: &mut Box<Expr>,
+        span: Span,
+    ) -> Option<Type> {
+        if self.loop_depth > 0 {
+            self.diags.push(Diagnostic::lint(
+                "L0501",
+                "slicing inside a loop copies every time".to_string(),
+                "each slice makes a fresh copy of the range — that adds up in a loop".to_string(),
+                "build indices outside the loop, or collect into one list".to_string(),
+                Some(span),
+            ));
+        }
+        let base_ty = self.infer(base)?;
+        for e in [start.as_mut(), end.as_mut()] {
+            let t = self.infer(e)?;
+            if t != Type::Int {
+                self.diags.push(Diagnostic::error(
+                    "E0505",
+                    format!("slice bounds must be {}, not {}", Type::Int.show(), t.show()),
+                    "both ends of `a..b` must be whole numbers (S22, inclusive)".to_string(),
+                    "use Int positions".to_string(),
+                    Some(e.span()),
+                ));
+            }
+        }
+        match base_ty {
+            Type::List(inner) => Some(Type::List(inner)),
+            Type::String => Some(Type::String),
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0505",
+                    format!("only lists and strings can be sliced, not {}", other.show()),
+                    "slicing copies a range (S40)".to_string(),
+                    "use `xs[a..b]` on a list or `s.slice(a..b)` on text".to_string(),
+                    Some(span),
+                ));
+                None
+            }
+        }
+    }
+
     fn infer_field(&mut self, inner: &mut Box<Expr>, member: &str, span: Span) -> Option<Type> {
         if member == "clone" {
             return self.infer(inner);
@@ -2070,8 +2571,18 @@ impl<'a> Checker<'a> {
             if self.registry.method(type_name, method).is_some() {
                 return self.check_static_method(type_name, method, span, args);
             }
+            if let Some(ty) = builtin_type_from_ident(type_name) {
+                if let Some(ret) =
+                    collections::builtin_method_return(&ty, method, args.len(), true)
+                {
+                    return self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+                }
+            }
         }
         let recv_ty = self.infer(receiver)?;
+        if let Some(ret) = collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+            return self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+        }
         let type_name = match &recv_ty {
             Type::Named(n) => n.clone(),
             Type::Option(inner) => match inner.as_ref() {
@@ -2081,7 +2592,10 @@ impl<'a> Checker<'a> {
                         "E0311",
                         format!("`{}` isn't a method on this value", method),
                         "instance methods belong to struct or enum values".to_string(),
-                        format!("call it on the type: `{}.{method}(...)` if it's static", recv_ty.name()),
+                        format!(
+                            "call it on the type: `{}.{method}(...)` if it's static",
+                            recv_ty.name()
+                        ),
                         Some(span),
                     ));
                     for a in args.iter_mut() {
@@ -2642,7 +3156,7 @@ impl<'a> Checker<'a> {
                         subject_ty.name()
                     ),
                     format!(
-                        "use `== {}(...)` or `== {}(...)` on `Result[T, E]`",
+                        "use `== {}(...)` or `== {}(...)` on `Result<T, E>`",
                         syntax::LIT_OK,
                         syntax::LIT_ERR
                     ),
@@ -3426,9 +3940,12 @@ fn is_cloneable(
     structs: &HashMap<String, Vec<(Option<String>, Type)>>,
 ) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::Float | Type::String => true,
+        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             is_cloneable(inner, registry, structs)
+        }
+        Type::Map { key, value } => {
+            is_cloneable(key, registry, structs) && is_cloneable(value, registry, structs)
         }
         Type::Result { ok, err } => is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs),
         Type::Named(name) => {
@@ -3472,11 +3989,16 @@ fn walk_stmts_for_const_refs(
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(body, const_names, taken);
             }
-            Stmt::For {
-                start, end, body, ..
-            } => {
-                walk_expr_for_const_refs(start, const_names, taken);
-                walk_expr_for_const_refs(end, const_names, taken);
+            Stmt::For { kind, body, .. } => {
+                match kind {
+                    ForKind::Range { start, end } => {
+                        walk_expr_for_const_refs(start, const_names, taken);
+                        walk_expr_for_const_refs(end, const_names, taken);
+                    }
+                    ForKind::In { collection } => {
+                        walk_expr_for_const_refs(collection, const_names, taken);
+                    }
+                }
                 walk_stmts_for_const_refs(body, const_names, taken);
             }
             Stmt::Switch {
@@ -3571,7 +4093,30 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
             walk_expr_for_const_refs(l, const_names, taken);
             walk_expr_for_const_refs(r, const_names, taken);
         }
-        Expr::Int(_, _) | Expr::Float(_, _) | Expr::Bool(_, _) => {}
+        Expr::Char(_, _)
+        | Expr::Int(_, _)
+        | Expr::Float(_, _)
+        | Expr::Bool(_, _) => {}
+        Expr::ListLit(elems, _) => {
+            for e in elems {
+                walk_expr_for_const_refs(e, const_names, taken);
+            }
+        }
+        Expr::MapLit(entries, _) => {
+            for (k, v) in entries {
+                walk_expr_for_const_refs(k, const_names, taken);
+                walk_expr_for_const_refs(v, const_names, taken);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            walk_expr_for_const_refs(base, const_names, taken);
+            walk_expr_for_const_refs(index, const_names, taken);
+        }
+        Expr::Slice { base, start, end, .. } => {
+            walk_expr_for_const_refs(base, const_names, taken);
+            walk_expr_for_const_refs(start, const_names, taken);
+            walk_expr_for_const_refs(end, const_names, taken);
+        }
     }
 }
 
@@ -3640,7 +4185,7 @@ fn missing_pattern_coverage(
     }
 }
 
-/// `Result[T, E]` passed where plain `T` is expected (E0401).
+/// `Result<T, E>` passed where plain `T` is expected (E0401).
 fn result_used_where_plain_expected(want: &Type, got: &Type) -> bool {
     matches!(got, Type::Result { ok, .. } if want.unwrap_result().is_none() && **ok == *want)
 }
@@ -3666,23 +4211,26 @@ fn suggest_field(name: &str, candidates: &[String]) -> Option<String> {
 
 fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::String => true,
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
         Type::Option(inner) => is_printable(inner, registry),
         Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
+        Type::List(inner) => is_printable(inner, registry),
+        Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n),
-        Type::List(_) | Type::Shared(_) => false,
+        Type::Shared(_) => false,
     }
 }
 
 fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
-        Type::Int | Type::Bool | Type::Float | Type::String => true,
+        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::Option(inner) => types_comparable(inner, registry),
         Type::Result { ok, err } => {
             types_comparable(ok, registry) && types_comparable(err, registry)
         }
+        Type::List(inner) => types_comparable(inner, registry),
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
-        Type::List(_) | Type::Shared(_) => false,
+        Type::Map { .. } | Type::Shared(_) => false,
     }
 }
 
@@ -3719,6 +4267,38 @@ fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
             incomparable_field(ok, registry).or_else(|| incomparable_field(err, registry))
         }
         _ => Some("?".to_string()),
+    }
+}
+
+fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0507",
+        format!("while the loop is reading `{}`, nothing may change it", name),
+        "a `for` loop borrows the whole collection until the body finishes".to_string(),
+        format!(
+            "collect changes into a second list, or loop over indices: `for i in 0..{}.len()-1`",
+            name
+        ),
+        Some(span),
+    )
+}
+
+fn collection_root_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(n, _) => Some(n.clone()),
+        Expr::MethodCall { receiver, method, .. } if method == "chars" => collection_root_name(receiver),
+        _ => None,
+    }
+}
+
+fn builtin_type_from_ident(name: &str) -> Option<Type> {
+    match name {
+        syntax::TYPE_INT => Some(Type::Int),
+        syntax::TYPE_FLOAT => Some(Type::Float),
+        syntax::TYPE_BOOL => Some(Type::Bool),
+        syntax::TYPE_STRING => Some(Type::String),
+        syntax::TYPE_CHAR => Some(Type::Char),
+        _ => None,
     }
 }
 

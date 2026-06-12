@@ -144,7 +144,7 @@ after the binding or parameter name (e.g. `val x: Int = 1`). Rejected:
 `Type name` before (C/Java).
 
 **S5 — Comments** *(ratified 2026-06-11)*: `**//`** to end of line.
-Rejected: `#`. Doc comments are S49 (M6/M13).
+Rejected: `#`. Doc comments: `///` (S49).
 
 **S7 — Error propagation (M4)** *(ratified 2026-06-11)*: postfix `**?`**
 on a fallible call (e.g. `parse(raw)?`). Prefix `try` recognized only for
@@ -240,17 +240,110 @@ postfix `?` is error propagation (S7) — parser disambiguates by context.
 Rejected: `Option[T]`, `Some`/`None`, `some`/`none`, `T??`, pointer-style
 null on non-option types.
 
-**S33 — Generic type argument brackets (M3+)** *(ratified 2026-06-11)*:
-`**Type[Args]`** — square brackets for type arguments, e.g. `List[Int]`,
-`Map[String, Int]`, and `Result[T, E]` fallible returns (S34).
-Rejected: angle brackets `List<Int>` (comparison/`>` ambiguity; no
-turbofish).
+**S33 — Generic type argument brackets (M3+)** *(ratified 2026-06-11;
+amended 2026-06-12)*: `**Type<Args>**` — angle brackets for type
+arguments, e.g. `List<Int>`, `Map<String, Int>`, and `Result<T, E>`
+fallible returns (S34). Square brackets `**[]**` are reserved for **value**
+list/map literals (S37/S38) and indexing (S39) — never for generic types,
+so `List<Int>` is a typed container and `[1, 2, 3]` is a list value.
+Parser disambiguates `<` in type position from comparison; nested closings
+split `>>` like Rust. Rejected: square-bracket type args `Type[Args]`
+(E0034 teaches `Type<Args>`).
 
 **S34 — Fallible return type (M4)** *(ratified 2026-06-11)*:
-`**Result[T, E]**` — e.g. `fn parse(s: String) -> Result[Int, ParseError]`.
-`Result` is a prelude builtin (S33 square brackets); `E` is any enum,
+`**Result<T, E>**` — e.g. `fn parse(s: String) -> Result<Int, ParseError>`.
+`Result` is a prelude builtin (S33 angle brackets); `E` is any enum,
 struct, or `String`. Codegen lowers to Rust `Result<T, E>`. Rejected:
 `T or E` in type position (A), Zig `!T` with inferred error sets (C).
+
+**S45 — Generic function/type syntax (M9)** *(ratified 2026-06-12)*:
+angle brackets for type parameters — `fn largest<T: Comparable>(…)`,
+`struct Pair<T> { … }`, bounds `<T: A + B>`. Same brackets as S33
+(`List<T>`, `Result<T, E>`). Inline bounds, no `where`, no call-site type
+arguments (annotate the binding if inference fails:
+`val s: Stack<Int> = empty_stack()`). Rejected: square-bracket generics,
+turbofish, `where` clauses.
+
+**S28 — Traits (M9)** *(ratified 2026-06-12; amended 2026-06-12)*:
+explicit named capabilities, not Go-structural. Declare
+`trait Shape { fn area(self) -> Float; }`. Implement in **two equivalent
+spellings**:
+
+```jet
+struct Point {
+    x: Float;
+    y: Float;
+    impl Serialize {
+        fn to_json(self) -> String { … }
+    }
+}
+```
+
+```jet
+impl Point: Serialize {
+    fn to_json(self) -> String { … }
+}
+```
+
+**Sigils:** `**.**` walks namespaces and calls methods — modules (S16),
+enum variants (S30), `c.area()`. **`:`** attaches a trait to a type in
+`impl` blocks — same punctuation as type annotations (`x: Int`) and generic
+bounds (`<T: Comparable>`): `impl other.Point: Serialize { … }` extends a
+dependency's type. `::` is reserved for foreign Rust paths in `extern rust`
+(S50), not user-facing Jet paths. Orphan rule: at least one of trait/type
+defined in this program. Rejected: `impl Trait for Type`, `impl Type.Trait`,
+Go implicit interfaces, `::` in Jet paths. Naming style (snake_case /
+PascalCase) is a lint preference (S54), not grammar. v1: signatures only —
+no default bodies, associated types, or trait inheritance.
+
+**S48 — Dynamic dispatch (M9)** *(ratified 2026-06-12)*: writing a trait
+name in type position (`List<Shape>`, `fn f(s: Shape)`) means automatic
+boxing and dynamic dispatch; `<T: Shape>` means monomorphization. Same
+invisible-boxing policy as M3 recursion and M8 stored closures. Rejected:
+explicit `dyn`/`Box<dyn>` in v1. **Post-1.0:** reopen expert-facing
+low-level control (explicit `dyn`, stack vs heap, `Send` bounds) — default
+stays beginner-friendly; experts opt in.
+
+**S46 — Lambda syntax (M8)** *(ratified 2026-06-12)*:
+`**(params) => expr**` or `**(params) => { … }**` — e.g. `(x) => x * 2`,
+`(x: Int) => x * 2`, `(a, b) => { return a + b; }`. Parameter types
+optional when inferable from context. `**=>**` is the lambda arrow;
+`**->**` stays for return types and `switch` arms (S24) — distinct on
+purpose. Rejected: `|x| …` (Rust pipes), `fn(x) …` anonymous-fn keyword.
+
+**S47 — Function types & closure captures (M8)** *(ratified 2026-06-12)*:
+function type is `**fn(T1, T2) -> R**` (parameter names omitted; `-> ()`
+may be omitted like ordinary functions). Named `fn`s coerce to function
+values when referenced without a call. Captures follow M2 automatically —
+shared read for names only read, mutable borrow for names written (binding
+must be `var`). **Escaping** closures (returned, stored, or passed to a
+`take` parameter) must own captures: clonable captures are cloned (lint
+L0801); non-clonable captures require an explicit `**take(name)**` prefix
+on the lambda: `take(sender) () => …`. Rejected: surfacing Rust's
+Fn/FnMut/FnOnce, C++ capture lists on every lambda.
+
+**S55 — Built-in derive policy (M9)** *(ratified 2026-06-12)*: **hybrid**
+derive policy for the four built-in traits. **Auto-derive (silent):**
+`Printable`, `Equatable` — whenever every field qualifies,
+`print("{p}")` and `==` work on day one; a hand-written `impl` overrides
+the freebie. **Explicit opt-in:** `Comparable`, `Serialize` — require a
+`**derive Trait;**` line in the type body (S28's in-type scope):
+
+```jet
+struct Point {
+    x: Float;
+    y: Float;
+    derive Comparable;
+    derive Serialize;
+}
+```
+
+Comparable commits field order to sort/`largest`/`Map` ordering;
+Serialize commits a public wire format — both are semantic commitments no
+silent derive should make. Missing-trait errors teach `derive Trait;` or
+`sort_by` (M8) as alternatives. Rejected: auto-derive all four (owner lean
+B), Rust `#[derive(…)]` attributes, user-defined derive macros in v1
+(S56 post-1.0).
 
 **S35 — Error handling ergonomics (M4)** *(ratified 2026-06-11)*:
 `**or` fallback** on a fallible or optional value — e.g. `parse(x) or 0`,
@@ -263,11 +356,117 @@ methods only (B), patterns + `?` with no `or` sugar (C).
 stops the program with a friendly runtime report (file, line, exit 70);
 `**require(cond)**` and `**require(cond, "msg")**` panic when the
 condition is false — for programmer invariants and preconditions, not
-recoverable user errors (`Result[T, E]`). Both are prelude builtins like
+recoverable user errors (`Result<T, E>`). Both are prelude builtins like
 `print`. Prefix `assert` is recognized only for a teaching error (S14)
 pointing at `require`. Rejected: `assert` as the canonical builtin name,
 user-facing `abort`/`fatal` (S15 already uses *abort* as a build-mode
 name), panic-only without `require` sugar.
+
+**S37 — List literal (M5)** *(ratified 2026-06-12)*: `**[a, b, c]**`;
+empty `**[]**` needs a context type (same pattern as `null` / `none`).
+Rejected: `List(1, 2, 3)`, brace literals `{1, 2, 3}`.
+
+**S38 — Map literal (M5)** *(ratified 2026-06-12)*: `**["key": value, …]**`;
+empty `**[:]**`. Rejected: brace literals `{"k": v}` (JSON confusion with
+blocks), constructor-only maps with no literal.
+
+**S39 — Indexing & out-of-bounds (M5)** *(ratified 2026-06-12)*:
+`**xs[i]**` and map read `**m[k]**` stop the program with a friendly
+runtime report on out-of-bounds / missing key; `**xs.get(i) -> T?**` (and
+`m.get(k) -> V?`) for safe access. Write `m[k] = v` inserts. Rejected:
+indexing always returns `T?` (unwrap ceremony), split policy (Option for
+maps only).
+
+**S40 — Slicing (M5)** *(ratified 2026-06-12)*: `**xs[a..b]**` is
+**inclusive** (S22-consistent) and **copies** elements (tier 1: no exposed
+references). Same rule for `**s.slice(a..b) -> String**` on character
+positions. Lint L0501 on slice copies inside loops. Rejected: half-open
+slices (Rust/Python), mathematical `(`/`)` endpoint markers (conflicts
+with S22's single inclusive `..` meaning).
+
+**S41 — Strings & `Char` (M5)** *(ratified 2026-06-12)*: `**Char**` is a
+built-in type; single-quoted `**'a'**` literals; `**s.len()**` counts
+Unicode scalar values (characters, not bytes); `**for c in s.chars()**`.
+No `**s[i]**` string indexing — E0503 teaches `.chars()` / `.slice(…)`.
+Rejected: byte-length strings, UTF-32 O(1) indexing.
+
+**S42 — Numeric types & conversions (M5/M10)** *(ratified 2026-06-12)*:
+`**Int**` and `**Float**` are the **default** numeric types — untyped
+literals, inference, tutorials, and std APIs use them unless a binding or
+parameter is explicitly annotated otherwise (`Int` = i64, `Float` = f64).
+A full **sized-type menu** is available for experts and FFI/binary work:
+`**I8**` `**I16**` `**I32**` `**I64**` `**U8**` `**U16**` `**U32**`
+`**U64**` `**F32**` `**F64**`. `Int`/`Float` are the beginner-facing
+spellings for the 64-bit types; `I64`/`F64` exist for explicit-width and
+FFI code. Conversions are **named methods only** — e.g. `n.to_float()`,
+`f.to_int()`, `x.to_i32()`, `Int.parse(s) -> Result<Int, ParseError>`;
+no `**as**` keyword (E0026 teaches the named forms). Rejected:
+arbitrary-precision integers (C), implicit widening, lowercase Rust
+spellings (`i64`).
+
+**S43 — Test syntax (M6)** *(ratified 2026-06-12)*: first-class
+`**test "name" { … }**` blocks at top level only, using `**require**` and
+`**require_eq**` (M4/S36) for assertions. `jet run`/`build` ignore test
+blocks; `jet test` runs them. Rejected: `#[test]` attributes, `fn test_*`
+naming convention.
+
+**S44 — Formatter style (M6)** *(ratified 2026-06-12)*: one true style,
+zero config — **4-space indent**, **same-line `{`**, **line width 100**,
+spaces around binary operators, one statement per line, single blank line
+max between items, no space before `;`/`,`/`(` of a call; trailing `;` per
+S6. `jet fmt` is the only formatter; no style knobs. Rejected:
+configurable width/indent, significant-indent formatting.
+
+**S49 — Doc comments (M6/M13)** *(ratified 2026-06-12)*: `**///**`
+summary lines immediately above items; plain text in v1; shown by hover/docs
+tooling (M13). Degrades gracefully to an ordinary comment. Rejected:
+`##` headings, Python docstrings, block `/** … */`.
+
+**S50 — Rust FFI syntax (M7)** *(ratified 2026-06-12)*:
+
+```
+extern rust "crate@version" {
+    fn name(args) -> T = "rust::path";
+}
+```
+
+Explicit `**extern rust**` blocks; each entry is a Jet signature plus
+`**= "rust::path"**` naming the foreign item. Version pins are required for
+non-`std` crates (reproducibility); pins may migrate into `jet.toml` when
+a manifest exists (M12). Boundary types pass by value only — no borrows,
+callbacks, or trait objects across the edge. Rejected: per-function
+`@rust(…)` annotations, manifest-only mapping with no inline declaration.
+
+**S26 — Comptime, value-level (M9.5)** *(ratified 2026-06-12)*: layered,
+**value-only** compile-time execution. **One law: comptime never creates,
+parameterizes, or selects a type, and never affects dispatch** —
+polymorphism is traits-only (S28/S45/S48). Any pure Jet function is
+comptime-callable with no annotation. **Layer 1 (M9.5):** `comptime`
+bindings (S57) evaluate a pure, deterministic Jet subset (no
+FFI/IO/time/random; `embed_file("path")` builtin is the one exception) in
+a sema tree-walking interpreter — type-checked as ordinary Jet *first*,
+then evaluated; fuel-limited with a call-trace diagnostic; `panic` at
+comptime is a user-authored compile error (a feature); results lower to
+plain Rust constant data (codegen stays dumb, I3). Requires the permanent
+differential CI battery: the comptime interpreter and the compiled
+runtime must agree bit-for-bit on every evaluable expression. **Layer 2
+(M9):** built-in derives (S55 hybrid policy). **Layer 3
+(post-1.0):** typed reflection / user derives (S56, deferred). **Rejected
+forever:** token/AST macros, custom syntax, attribute macros, comptime
+types (types-as-values), const generics in v1. Rejected: closing comptime
+entirely (prior recommendation), full Zig-style comptime (imports
+instantiation-time diagnostics — the part of Zig we refuse).
+
+**S57 — Comptime binding spelling (M9.5)** *(ratified 2026-06-12)*:
+`**comptime x = f();**` — `comptime` is itself the binding keyword; the
+binding is always immutable (it is a compile-time constant), so no
+`val`/`var` follows it. `comptime val` / `comptime var` / `const` are
+recognized only for teaching errors (S14). v1 scope: comptime bindings
+only — no comptime blocks, parameters, or function annotations
+(smallness; revisit post-1.0). Rejected: `comptime val x` (two keywords
+where one suffices), `const` (a second binding keyword competing with
+`val`), silent const-folding with no keyword (invisible, unpredictable,
+and kills the comptime-panic feature).
 
 ## Enforcement
 
@@ -310,50 +509,21 @@ implementation milestone is pending.
 > the owner decides one milestone-sized batch at a time. The rows here
 > are the registry; the ballots are the briefing.
 
-**S26. Compile-time execution (comptime) — DEFERRED, not open for work.**
-Zig-style `comptime`: run a subset of Jet at compile time for constants,
-specialized functions, and unrolled loops — evaluated in sema, lowered to
-plain Rust by codegen (see architecture R1/R2). Postponed until M5+
-data exists to motivate generics; Tier 2 per philosophy C1. No syntax
-ratified; do not implement until owner promotes from deferred.
-
-**S28. Traits / interfaces — DEFERRED, owner intends to add.** Polymorphism
-via named capability types (`trait` / `interface` — spelling TBD) is
-**not in M3**. The owner has confirmed traits will be needed; syntax,
-milestone slot, and whether Jet exposes Rust-style trait objects or a
-simpler model are **open**. Do not implement until ratified. Rejected for
-now: importing Rust's trait system verbatim into user-facing syntax.
-When designing S28, prefer diagnostics beginners can read over maximal
-flexibility.
-
 ### Registered for M3–M14 (see docs/06-decision-ballots.md for options)
 
 
 | ID  | Question                                        | Needed by |
 | --- | ----------------------------------------------- | --------- |
-| S37 | list literal                                    | M5        |
-| S38 | map literal                                     | M5        |
-| S39 | indexing & out-of-bounds behavior               | M5        |
-| S40 | slicing semantics                               | M5        |
-| S41 | string model: `Char`, `len`, iteration          | M5        |
-| S42 | numeric types & conversions (no `as`)           | M5/M10    |
-| S43 | test syntax (`test "name" { }`)                 | M6        |
-| S44 | fmt style constants                             | M6        |
-| S49 | doc comments (`///`)                            | M6/M13    |
-| S50 | Rust FFI `extern` syntax                        | M7        |
-| S46 | lambda syntax (`(x) => …`)                      | M8        |
-| S47 | function types & closure capture rules          | M8        |
-| S45 | generic function/type syntax (`fn f[T: Bound]`) | M9        |
-| S48 | trait-as-type = auto dynamic dispatch           | M9        |
 | S51 | std library import spelling (`import "std/fs"`) | M10       |
 | S54 | naming convention lint (snake_case)             | M10       |
 | S53 | concurrency surface (tasks + channels)          | M11       |
 | S52 | package manifest format & commands (`jet.toml`) | M12       |
+| S56 | typed reflection / user derives (deferred)      | post-1.0  |
 
 
-S26 (comptime) and S28 (traits) keep their entries above; their ballots
-live in docs/06 Group 6 (S28 becomes the concrete trait-syntax ballot;
-S26's recommendation is close-as-rejected once S28/S45 are ratified).
+Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) is fully ratified above.
+S56 (user derives via typed reflection) is deferred past v1.0 by S26's
+ratified layering.
 
 ## Decision log
 
@@ -394,8 +564,28 @@ S26's recommendation is close-as-rejected once S28/S45 are ratified).
 | 2026-06-11 | S31 | `==` pattern tests on enums and `T?`        | owner |
 | 2026-06-11 | S32 | `T?`, `value` / `null`                      | owner |
 | 2026-06-11 | S33 | generic args `Type[T]` square brackets      | owner |
+| 2026-06-12 | S33 | amended: `Type<Args>`; `[]` for value lists | owner |
 | 2026-06-11 | S34 | fallible returns `Result[T, E]`             | owner |
+| 2026-06-12 | S45 | angle-bracket generics; inline bounds       | owner |
+| 2026-06-12 | S28 | traits; in-type or `impl Type.Trait`        | owner |
+| 2026-06-12 | S28 | amended: `impl Type: Trait`; `.` for paths  | owner |
+| 2026-06-12 | S48 | trait-as-type auto-dyn; expert reopen later | owner |
 | 2026-06-11 | S35 | `or` fallback + patterns + `?`              | owner |
 | 2026-06-11 | S36 | `panic` + `require` for bug stops           | owner |
+| 2026-06-12 | S37 | list literal `[a, b, c]`; empty `[]`          | owner |
+| 2026-06-12 | S38 | map literal `["k": v]`; empty `[:]`          | owner |
+| 2026-06-12 | S39 | `xs[i]` reports; `.get` -> `T?`             | owner |
+| 2026-06-12 | S40 | inclusive copy slices `xs[a..b]`            | owner |
+| 2026-06-12 | S41 | `Char`, char-length `String`, no `s[i]`     | owner |
+| 2026-06-12 | S42 | `Int`/`Float` default; sized menu; no `as`  | owner |
+| 2026-06-12 | S43 | `test "name" { }` with `require`/`require_eq` | owner |
+| 2026-06-12 | S44 | fmt: 4-space, same-line `{`, width 100      | owner |
+| 2026-06-12 | S49 | `///` doc comments, plain text v1           | owner |
+| 2026-06-12 | S50 | `extern rust` blocks with `= "rust::path"`  | owner |
+| 2026-06-12 | S26 | comptime rescoped: value-level, layered     | owner |
+| 2026-06-12 | S57 | `comptime x = f();` binding spelling        | owner |
+| 2026-06-12 | S46 | `(x) => …` lambda syntax                    | owner |
+| 2026-06-12 | S47 | `fn(T)->R`; M2 captures; `take` on escape  | owner |
+| 2026-06-12 | S55 | hybrid derive: auto Print/Eq; opt-in Cmp/Serialize | owner |
 
 

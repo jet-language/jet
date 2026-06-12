@@ -127,7 +127,7 @@ Structs and enums carry fields; methods attach behavior (S27). Ratified
 surface (Group 2): struct literals **`Type { f: v }`** (S29); enums with
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
 **`T?`** with **`value(v)`** / **`null`** (S32); generic args
-**`Type[T]`** (S33). `null` is only legal for `T?`, never plain `T`.
+**`Type<Args>`** (S33). `null` is only legal for `T?`, never plain `T`.
 
 ```
 struct Circle {
@@ -150,17 +150,19 @@ impl Circle {
 - Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
 - Static methods omit `self` (e.g. `Circle.unit()`).
 - Enum `switch` arms must be exhaustive; missing cases are a compile error.
-- **Traits/interfaces (S28)** are deferred; no `trait` / `implements` syntax yet.
+- **Traits (S28)** arrive in M9: `trait` declarations, `impl` inside a
+  type or as `impl Type: Trait { }` (e.g. `impl other.Point: Serialize`).
+  `.` for modules and methods; `:` separates type from trait in `impl`.
 
 ## M4 — errors as values (done)
 
-Fallible functions return **`Result[T, E]`** (S34): `T` is the success
+Fallible functions return **`Result<T, E>`** (S34): `T` is the success
 payload, `E` is any enum, struct, or `String`. Build outcomes with
 **`ok(v)`** and **`err(e)`**; test them with **`== ok(n)`** / **`== err(e)`**
 (same pattern machinery as M3 optionals).
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
-  enclosing function must return a compatible `Result[…, E]` (same error
+  enclosing function must return a compatible `Result<…, E>` (same error
   type in v1). On **`T?`**, `?` propagates `null` when the function returns
   an optional.
 - **`or <expr>`** (S35) is the fallback operator on a fallible value:

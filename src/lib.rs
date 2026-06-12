@@ -6,6 +6,7 @@
 //! optimizer, never a source of user-facing errors.
 
 pub mod ast;
+pub mod collections;
 pub mod codegen;
 pub mod diag;
 pub mod lexer;

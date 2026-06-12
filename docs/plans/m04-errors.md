@@ -1,6 +1,6 @@
 # M4 — Errors as values
 
-**Decisions:** S34 (`Result[T, E]`), S35 (`or` fallback), S36 (`panic`/`require`)
+**Decisions:** S34 (`Result<T, E>`), S35 (`or` fallback), S36 (`panic`/`require`)
 ratified. Depends on M3 (enums, `==` patterns).
 **Error codes:** E0401+. Teaching codes continue E0023+.
 **Retires:** E0006 (`?` staged).
@@ -20,7 +20,7 @@ enum ParseError {
     BadDigit(text: String);
 }
 
-fn parse_age(raw: String) -> Result[Int, ParseError] {
+fn parse_age(raw: String) -> Result<Int, ParseError> {
     if raw.len() == 0 { return err(ParseError.Empty); };
     // … on success:
     return ok(value);
@@ -35,13 +35,13 @@ fn main() {
     }
 }
 
-fn load() -> Result[Int, ParseError] {
+fn load() -> Result<Int, ParseError> {
     val n = parse_age("7")?;                 // propagate (S7)
     return ok(n * 2);
 }
 ```
 
-- **`Result[T, E]`** is the fallible return type (S34, S33 brackets):
+- **`Result<T, E>`** is the fallible return type (S34, S33 angle brackets):
   `Result` is a prelude builtin; `E` is any enum, struct, or `String`.
 - **`ok(v)` / `err(e)`** construct the two cases; **`== ok(v)` /
   `== err(e)`** destructure them (same machinery as M3 `==` patterns).
@@ -60,7 +60,7 @@ fn load() -> Result[Int, ParseError] {
 ### Grammar additions
 
 ```
-type    += "Result" "[" type "," type "]" ;   // S34, same brackets as S33
+type    += "Result" "<" type "," type ">" ;   // S34, same brackets as S33
 expr    += "ok" "(" expr ")" | "err" "(" expr ")"
          | expr "?"                    // postfix, binds like a call
          | expr "or" orfallback ;
@@ -75,11 +75,11 @@ document in docs/01.
 
 ## Sema rules
 
-1. A `Result[T, E]` value cannot be used as a `T`: every use must go through
+1. A `Result<T, E>` value cannot be used as a `T`: every use must go through
    `?`, `or`, or `== ok`/`== err` (E0401, fix lists all three). An *unused*
    fallible call as a statement → E0402 ("this can fail and nothing checks
    it"; fix: `… or panic(…)` if failure is impossible).
-2. `?` requires the enclosing function to return `Result[U, E2]` where the
+2. `?` requires the enclosing function to return `Result<U, E2>` where the
    propagated error type `E` equals `E2` (no conversions in v1 — E0403
    names both error types; fix: handle here with `== err`, or make the
    types match). `?` on `T?` propagates `null` iff the function returns
@@ -104,7 +104,7 @@ document in docs/01.
 
 | Jet                    | Rust                                              |
 |------------------------|---------------------------------------------------|
-| `Result[T, E]`         | `Result<T, E>`                                    |
+| `Result<T, E>`         | `Result<T, E>`                                    |
 | `ok(v)` / `err(e)`     | `Ok(v)` / `Err(e)`                                |
 | `e?`                   | `e?` (types align by construction)                |
 | `v or fallback`        | `match v { Ok(x) => x, Err(_) => fallback }` (and Option equivalent) |
@@ -155,7 +155,7 @@ anything. Stdout/stderr distinction beyond the panic report.
 
 1. syntax.rs: `Result` builtin, `or` (fallback), `ok`, `err`, `panic`,
    `require`; `?` un-stages.
-2. Parser: `Result[T, E]` types, postfix `?`, `or` precedence (fixtures first).
+2. Parser: `Result<T, E>` types, postfix `?`, `or` precedence (fixtures first).
 3. Sema rules 1–8 (the must-check analysis is the heart — write
    exhaustive negative fixtures before implementing).
 4. Codegen + runtime helper + exit-code golden test.

@@ -1,14 +1,12 @@
 # M5 — Collections & one string story
 
-**Blocked on decisions:** S33 (generic brackets), S37 (list literal),
-S38 (map literal), S39 (indexing & out-of-bounds), S40 (slicing),
-S41 (string model & `Char`), S42 (numeric types & conversions).
+**Blocked on decisions:** none (Group 4 ratified: S37–S42).
 Depends on M3 (Option) and M4 (`or`, runtime report).
 **Error codes:** E0501+ / L0501+.
 
 ## Goal
 
-`List[T]` and `Map[K, V]` as built-in generic types bridging `Vec` /
+`List<T>` and `Map<K, V>` as built-in generic types bridging `Vec` /
 `HashMap` (users never see those names), literals, iteration, indexing
 with great failure behavior, copy-based slicing (no exposed references —
 tier 1), and exactly one string type with a real API. After M5, programs
@@ -18,14 +16,14 @@ like wordcount, grep-lite, and CSV munging are pleasant.
 
 ```jet
 fn main() {
-    var nums: List[Int] = [3, 1, 2];
+    var nums: List<Int> = [3, 1, 2];
     nums.push(4);
     nums.sort();
     print(nums[0]);                  // 1 ; out of bounds = runtime report
     print(nums.get(99) or -1);       // safe access returns Int?
     val mid = nums[1..2];            // inclusive slice (S22), copies
 
-    var counts: Map[String, Int] = [:];
+    var counts: Map<String, Int> = [:];
     for word in "the quick the".split(" ") {
         counts[word] = (counts.get(word) or 0) + 1;
     };
@@ -39,7 +37,7 @@ fn main() {
 
 ### Type & literal rules
 
-- Built-in generic types: `List[T]`, `Map[K, V]` (S33 brackets). These
+- Built-in generic types: `List<T>`, `Map<K, V>` (S33 angle brackets). These
   are compiler-known; user generics arrive in M9.
 - List literal `[a, b, c]`; empty `[]` needs a context type (mirrors M3
   `none`, code E0501). Map literal `["k": v, …]`; empty map `[:]` (S38).
@@ -49,25 +47,27 @@ fn main() {
   literals denote. Printable, comparable, usable in switch conditions.
 - `String` API counts **characters** (Unicode scalar values), not bytes:
   `s.len()`, `s.chars()`, `s.contains(sub)`, `s.starts_with(p)`,
-  `s.ends_with(p)`, `s.trim()`, `s.split(sep) -> List[String]`,
+  `s.ends_with(p)`, `s.trim()`, `s.split(sep) -> List<String>`,
   `s.replace(a, b)`, `s.to_upper()`, `s.to_lower()`, `s.repeat(n)`,
   `s.slice(a..b) -> String` (char positions). No `s[i]` indexing
   (E0503 teaches `.chars()` / `.slice(…)` — strings aren't arrays).
-- Conversions (S42): `Int.parse(s) -> Result[Int, ParseError]`,
-  `Float.parse(s) -> Result[Float, ParseError]`, `x.to_string()`,
-  `n.to_float()`, `f.to_int()` (truncates — say so in docs). No `as`
+- Conversions (S42): `Int`/`Float` are defaults; sized types (`I8`…`U64`,
+  `F32`/`F64`) are explicit-only. `Int.parse(s) -> Result<Int, ParseError>`,
+  `Float.parse(s) -> Result<Float, ParseError>`, `x.to_string()`,
+  `n.to_float()`, `f.to_int()` (truncates — say so in docs), plus
+  `to_i8()` / `to_u8()` / … between sized types (checked). No `as`
   keyword (recognized only for a teaching error, E0026).
 
 ### Core methods (exact v1 set — implement all, nothing more)
 
-`List[T]`: `len`, `push`, `pop -> T?`, `insert(i, v)`, `remove(i) -> T`,
+`List<T>`: `len`, `push`, `pop -> T?`, `insert(i, v)`, `remove(i) -> T`,
 `get(i) -> T?`, `first -> T?`, `last -> T?`, `contains(v)`,
 `index_of(v) -> Int?`, `reverse`, `sort` (T comparable), `join(sep)`
 (T printable), `clear`, `is_empty`. Mutating methods require a `var`
 receiver (reuses M2 E0202 machinery via `mut self`).
 
-`Map[K, V]`: `len`, `insert(k, v)`, `get(k) -> V?`, `remove(k) -> V?`,
-`contains_key(k)`, `keys -> List[K]`, `values -> List[V]`, `clear`,
+`Map<K, V>`: `len`, `insert(k, v)`, `get(k) -> V?`, `remove(k) -> V?`,
+`contains_key(k)`, `keys -> List<K>`, `values -> List<V>`, `clear`,
 `is_empty`.
 
 ## Sema rules
@@ -76,9 +76,7 @@ receiver (reuses M2 E0202 machinery via `mut self`).
    element ("this list started as `Int` but item 3 is a `String`").
 2. Indexing: `xs[i]` needs `Int` index (E0505); `m[k]` key type must
    match (E0505). Read `m[k]` on a missing key is a **runtime** report;
-   write `m[k] = v` inserts. (S39 — if owner picks Option-returning
-   indexing instead, `xs[i]` typechecks as `T?` and E0506 ensures
-   handling; the plan's tests cover both shapes, pick one.)
+   write `m[k] = v` inserts (S39).
 3. Slicing `xs[a..b]` is **inclusive** (S22) and **copies** (no exposed
    references, C1). Cloning cost is real: lint L0501 fires on slices in
    loops (mirrors L0202's voice). Negative or reversed bounds are
@@ -105,8 +103,8 @@ receiver (reuses M2 E0202 machinery via `mut self`).
 
 | Jet                  | Rust                                            |
 |----------------------|--------------------------------------------------|
-| `List[T]` / `[a, b]` | `Vec<T>` / `vec![a, b]`                          |
-| `Map[K, V]` / `[:]`  | `std::collections::BTreeMap<K, V>` / `BTreeMap::new()` (BTree for deterministic iteration) |
+| `List<T>` / `[a, b]` | `Vec<T>` / `vec![a, b]`                          |
+| `Map<K, V>` / `[:]`  | `std::collections::BTreeMap<K, V>` / `BTreeMap::new()` (BTree for deterministic iteration) |
 | `xs[i]`              | runtime-checked helper `jet_index(&xs, i, file, line)` → friendly report, exit 70 |
 | `xs[a..b]` slice     | helper that bounds-checks then `xs[a..=b].to_vec()` |
 | `s.chars()`          | `s.chars()` adapter; `Char` → `char`             |

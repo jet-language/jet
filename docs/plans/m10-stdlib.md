@@ -1,7 +1,7 @@
 # M10 — Standard library
 
-**Blocked on decisions:** S51 (std import spelling), S42 (numeric types —
-the `Byte` half), S54 (naming convention lint). Depends on M4 (errors),
+**Blocked on decisions:** S51 (std import spelling), S54 (naming convention
+lint). Depends on M4 (errors),
 M5 (collections), M8 (closures), M9 (generics for signatures like
 `max[T: Comparable]`).
 **Error codes:** E1001+.
@@ -12,7 +12,7 @@ Enough batteries to rewrite real CLI tools: files, stdin/args/env,
 process control, math, time, random, JSON. Implemented as compiler-known
 modules backed by Rust std in the generated prelude (no Jet-source
 stdlib yet — that wants packages, M12). Every fallible operation returns
-`Result[T, E]` with a small set of well-named error enums; nothing panics
+`Result<T, E>` with a small set of well-named error enums; nothing panics
 except programmer errors.
 
 ## Surface (uses ballot recommendations — substitute ratified choices)
@@ -23,7 +23,7 @@ import "std/io" as io;
 import "std/json" as json;
 
 fn main() {
-    val args = io.args();                       // List[String]
+    val args = io.args();                       // List<String>
     val path = args.get(1) or panic("usage: tool <file>");
 
     val text = fs.read(path) or return;         // String or IoError
@@ -41,21 +41,21 @@ the real ones. Shadowing `std/` with a local file → E1002.
 ## Module inventory (exact v1 API — implement all, nothing more)
 
 **std/fs** — `read(path) -> String or IoError` ·
-`read_bytes(path) -> List[Byte] or IoError` · `write(path, text) -> ()
+`read_bytes(path) -> List<U8> or IoError` · `write(path, text) -> ()
 or IoError` · `append(path, text)` · `exists(path) -> Bool` ·
-`remove(path)` · `list_dir(path) -> List[String] or IoError` ·
+`remove(path)` · `list_dir(path) -> List<String> or IoError` ·
 `create_dir(path)` · `is_dir(path) -> Bool` · `copy(from, to)` ·
 `rename(from, to)`. `enum IoError { NotFound(path: String);
 PermissionDenied(path: String); Other(message: String); }`
 
-**std/io** — `args() -> List[String]` · `input([prompt]) -> String or
+**std/io** — `args() -> List<String>` · `input([prompt]) -> String or
 IoError` (reads a line, strips newline) · `read_all_input() -> String or
 IoError` (stdin to EOF) · `eprint(value)` (stderr twin of `print`).
 
 **std/env** — `get(name) -> String?` · `set(name, value)` ·
 `current_dir() -> String or IoError` · `home_dir() -> String?`.
 
-**std/process** — `exit(code)` (no return) · `run(cmd: List[String]) ->
+**std/process** — `exit(code)` (no return) · `run(cmd: List<String>) ->
 ProcessResult or IoError` where
 `struct ProcessResult { code: Int; output: String; errors: String; }`.
 
@@ -65,7 +65,7 @@ bound) · `min[T: Comparable](a, b)` · `max[T: Comparable]` · `floor`
 `ceil` `round -> Int` · constants `pi`, `e` · `clamp(x, lo, hi)`.
 
 **std/random** — `int(low, high) -> Int` (inclusive, S22) · `float() ->
-Float` (0..1) · `pick[T](xs: List[T]) -> T?` · `shuffle[T](mut xs)` ·
+Float` (0..1) · `pick<T>(xs: List<T>) -> T?` · `shuffle<T>(mut xs)` ·
 `seed(n)`. Backed by a tiny PRNG written in the prelude (xoshiro256++)
 — deterministic under `seed`, no external crate (I6).
 
@@ -73,16 +73,17 @@ Float` (0..1) · `pick[T](xs: List[T]) -> T?` · `shuffle[T](mut xs)` ·
 `Stopwatch` struct (`start()`, `elapsed_millis()`).
 
 **std/json** — `enum Json { Null; Boolean(b: Bool); Number(n: Float);
-Text(s: String); Array(items: List[Json]); Object(entries: Map[String,
+Text(s: String); Array(items: List<Json>); Object(entries: Map<String,
 Json]); }` · `parse(text) -> Json or JsonError` · `render(j) -> String`
 · `render_pretty(j) -> String`. Parser hand-written in the prelude
 (recursive descent, ~200 lines) — also the flagship proof that Jet's
 own data types model real-world data. `JsonError { line, message }`.
 
-**Byte** (S42): new scalar type = u8; arithmetic like Int with range
-checks at literals (E1003 "a Byte holds 0..255"); `b.to_int()`,
-`Int.to_byte()` checked at runtime; `String.bytes() -> List[Byte]` and
-`String.from_bytes(List[Byte]) -> String or Utf8Error` land here.
+**Binary data** (S42): `U8` is the 8-bit unsigned sized type; std binary
+APIs use `List<U8>` with range checks at literals (E1003 "a U8 holds
+0..255"); `b.to_int()`, `n.to_u8()` checked at runtime;
+`String.bytes() -> List<U8>` and `String.from_bytes(List<U8>) -> String or
+Utf8Error` land here.
 
 ## Rules & sema notes
 
@@ -109,7 +110,7 @@ Rust, not string soup in codegen.rs.
 ## Diagnostics to register
 
 E1001 unknown std module (lists all) · E1002 local file shadows `std/` ·
-E1003 Byte literal out of range · E1004 unknown item in module
+E1003 U8 literal out of range · E1004 unknown item in module
 (suggestion) · L1001 non-snake_case name.
 Teaching: E0037 `println!`/`eprintln!` → `print`/`io.eprint` · E0038
 `open(`/`File::open` → `fs.read` · E0039 `os.environ`/`getenv` →

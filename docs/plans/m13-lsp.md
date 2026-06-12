@@ -1,7 +1,7 @@
 # M13 — LSP v2: a real language server
 
-**Blocked on decisions:** S49 (doc comments — needed for hover docs).
-Depends on M6 phase 4 (LSP v0 skeleton), M12 (multi-package projects).
+**Blocked on decisions:** none (S49 ratified). Depends on M6 phase 4 (LSP
+v0 skeleton), M12 (multi-package projects).
 **Error codes:** none new (tooling); internal robustness instead.
 
 ## Goal
@@ -23,7 +23,7 @@ lexer/parser/sema as libraries — zero duplicated language knowledge.
    `fn`/`if`/`for`/`switch` (switch snippet pre-fills variant arms for
    enum subjects — the killer demo).
 3. **Hover** — type + ownership info in Jet terms ("`words`:
-   `List[String]` — `var`, may be changed here") and the item's doc
+   `List<String>` — `var`, may be changed here") and the item's doc
    comment (S49: `///` lines above an item, plain text v1, shown
    verbatim).
 4. **Go to definition / find references** — needs a name-resolution

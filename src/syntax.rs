@@ -98,8 +98,14 @@ pub const KW_LOOP: &str = "loop";
 /// M2 tier 2: unsafe block for expert code.
 pub const KW_UNSAFE: &str = "unsafe";
 
-/// M5 preview: list type constructor.
+/// S33 (ratified M5): list type constructor `List<T>`.
 pub const TYPE_LIST: &str = "List";
+
+/// S38 (ratified M5): map type constructor.
+pub const TYPE_MAP: &str = "Map";
+
+/// S41 (ratified M5): character type.
+pub const TYPE_CHAR: &str = "Char";
 
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
@@ -125,6 +131,9 @@ pub const KW_SWITCH: &str = "switch";
 
 /// S24 (ratified): arm arrow inside `switch` (same spelling as return types).
 pub const OP_ARM_ARROW: &str = "->";
+
+/// S46 (ratified M8): lambda arrow — distinct from `->` return/arm arrow.
+pub const OP_LAMBDA_ARROW: &str = "=>";
 
 /// S11 (ratified): the two `Bool` literals.
 pub const LIT_TRUE: &str = "true";
@@ -205,7 +214,16 @@ pub const FOREIGN_SOME_LOWER: &str = "some";
 /// S29 (ratified M3): `class` recognized only for teaching error E0021.
 pub const FOREIGN_CLASS: &str = "class";
 
-/// S28 (deferred M9): foreign trait spellings for teaching error E0022.
+/// S28 (ratified M9): trait declaration keyword.
+pub const KW_TRAIT: &str = "trait";
+
+/// S55 (ratified M9): opt-in built-in derive line in a type body.
+pub const KW_DERIVE: &str = "derive";
+
+/// S57 (ratified M9.5): compile-time constant binding keyword.
+pub const KW_COMPTIME: &str = "comptime";
+
+/// S28: foreign trait spellings for teaching error E0022.
 pub const FOREIGN_INTERFACE: &str = "interface";
 pub const FOREIGN_TRAIT: &str = "trait";
 
@@ -221,7 +239,7 @@ pub const FOREIGN_OWNED: &str = "owned";
 /// S34 (ratified M4): fallible return type constructor.
 pub const TYPE_RESULT: &str = "Result";
 
-/// S34 (ratified M4): success / failure constructors for `Result[T, E]`.
+/// S34 (ratified M4): success / failure constructors for `Result<T, E>`.
 pub const LIT_OK: &str = "ok";
 pub const LIT_ERR: &str = "err";
 
@@ -234,6 +252,15 @@ pub const BUILTIN_REQUIRE: &str = "require";
 
 /// M4: synthetic name for a `switch` subject that isn't a plain identifier.
 pub const KW_IT: &str = "it";
+
+/// S42 (ratified M5): `as` recognized only for teaching error E0030.
+pub const FOREIGN_AS: &str = "as";
+
+/// S14 (M5): foreign collection spellings for teaching errors.
+pub const FOREIGN_VEC: &str = "Vec";
+pub const FOREIGN_HASHMAP: &str = "HashMap";
+pub const FOREIGN_DICT: &str = "dict";
+pub const FOREIGN_APPEND: &str = "append";
 
 /// S14 (M4): foreign error spellings for teaching errors.
 pub const FOREIGN_THROW: &str = "throw";

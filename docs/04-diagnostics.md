@@ -104,6 +104,7 @@ before continuing.
 | E0021 | parse | teaching: `class` → `struct` (S29)              |
 | E0022 | parse | teaching: `trait`/`interface` staged → M9 (S28) |
 | E0023 | parse | teaching: `case`/`default` → switch arm syntax (S24) |
+| E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a borrowed parameter     |
@@ -136,6 +137,16 @@ before continuing.
 | E0403 | sema  | `?` error type / return context mismatch  |
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `or` fallback type mismatch               |
+| E0501 | sema  | empty `[]` / `[:]` needs a context type   |
+| E0502 | sema  | type can't be a map key                   |
+| E0503 | sema  | strings aren't indexable with `[ ]`       |
+| E0504 | sema  | mixed-type list/map literal               |
+| E0505 | sema  | wrong index/key type or bad slice target  |
+| E0507 | sema  | collection changed while `for` reads it   |
+| L0501 | sema  | slice copy inside a loop (lint)           |
+| E0027 | parse | teaching: `append` → `push`               |
+| E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
+| E0030 | parse | teaching: `as` → `.to_float()` etc.       |
 
 ## Process for a new diagnostic
 

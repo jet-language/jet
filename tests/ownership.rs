@@ -119,11 +119,11 @@ fn main() {
 #[test]
 fn shared_auto_clone_in_loop_is_lint() {
     let src = r#"
-fn noop(h: Shared[Int]) {
+fn noop(h: Shared<Int>) {
     print(0);
 }
 
-fn loop_user(h: Shared[Int]) {
+fn loop_user(h: Shared<Int>) {
     loop {
         noop(h);
     }

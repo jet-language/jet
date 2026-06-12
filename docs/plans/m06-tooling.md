@@ -1,7 +1,7 @@
 # M6 — Tooling I: fmt, test, new, multi-file, LSP v0
 
-**Blocked on decisions:** S43 (test syntax), S44 (fmt style constants),
-S49 (doc comments). S15 and S16 are **ratified** (see docs/02 Staged
+**Blocked on decisions:** none (Group 5 ratified: S43, S44, S49). S15 and
+S16 are **ratified** (see docs/02 Staged
 implementation); M6 implements them. Depends on M3–M5 (fmt must handle
 the whole surface).
 **Error codes:** E0601+ (imports/visibility), tool exit codes below.
@@ -13,7 +13,7 @@ needed (prompts: "Implement M6 phase N per docs/plans/m06-tooling.md").
 ## Phase 1 — `jet fmt`
 
 One true style, zero configuration (philosophy #4). Style constants
-(S44, recommended): 4-space indent; same-line `{`; one statement per
+(S44): 4-space indent; same-line `{`; one statement per
 line; single blank line max between items; spaces around binary
 operators; no space before `;`/`,`/`(` of a call; line width 100 with
 simple argument-per-line overflow; trailing `;` per S6 untouched.
@@ -32,7 +32,7 @@ simple argument-per-line overflow; trailing `;` per S6 untouched.
 
 ## Phase 2 — `jet test` + `jet new`
 
-Test syntax (S43, recommended — first-class blocks, only at top level):
+Test syntax (S43 — first-class blocks, only at top level):
 
 ```jet
 test "parse_age accepts plain digits" {

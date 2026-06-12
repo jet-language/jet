@@ -1,7 +1,7 @@
 # M8 — Functions as values (closures)
 
-**Blocked on decisions:** S46 (lambda syntax), S47 (function types &
-capture rules). Depends on M5 (the collection methods this unlocks).
+**Decisions:** S46 (lambda syntax), S47 (function types & capture rules)
+ratified. Depends on M5 (the collection methods this unlocks).
 **Error codes:** E0801+ / L0801+.
 
 ## Goal
@@ -11,7 +11,7 @@ collection methods everyone expects (`map`, `filter`, `each`, …).
 Capture follows tier-1 ownership — no new mental model, the M2 rules
 applied to a new construct.
 
-## Surface (uses ballot recommendations — substitute ratified choices)
+## Surface (ratified S46/S47)
 
 ```jet
 fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
@@ -47,8 +47,8 @@ fn main() {
   with lint L0801 (mirror of L0201), non-clonable ones require
   `take name` in a capture list prefix: `take(name) (x) => …` — exact
   spelling per S47 ballot; non-clonable + no take → E0802.
-- New `List[T]` methods (the v1 closure set, nothing more):
-  `map(f) -> List[U]`, `filter(f) -> List[T]`, `each(f)`,
+- New `List<T>` methods (the v1 closure set, nothing more):
+  `map(f) -> List<U>`, `filter(f) -> List<T>`, `each(f)`,
   `find(f) -> T?`, `any(f)`, `all(f)`, `sort_by(f)` (f returns the
   comparison key), `reduce(init, f)`. `Map`: `each(f)` over `(k, v)`.
 
