@@ -451,3 +451,17 @@ pub fn split_qualified(name: &str) -> (Option<&str>, &str) {
         None => (None, name),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_depth_limit_detects_long_chains() {
+        let mut ty = Type::Int;
+        for _ in 0..65 {
+            ty = Type::List(Box::new(ty));
+        }
+        assert!(generic_depth_exceeded(&ty).is_some());
+    }
+}

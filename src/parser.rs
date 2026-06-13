@@ -43,6 +43,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         depth: 0,
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
+        type_generic_truncated: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -65,6 +66,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         depth: 0,
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
+        type_generic_truncated: false,
     };
     let prog = p.program();
     if p.diags.is_empty() {
@@ -105,7 +107,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
         code,
         "E0008" | "E0009" | "E0010" | "E0012" | "E0013" | "E0014" | "E0015" | "E0016"
             | "E0017" | "E0018" | "E0020" | "E0021" | "E0023" | "E0024" | "E0025"
-            | "E0026" | "E0027" | "E0028" | "E0030" | "E0031" | "E0034"
+            | "E0026" | "E0027" | "E0028" | "E0030" | "E0031" | "E0034" | "E0036"
     )
 }
 
@@ -127,6 +129,8 @@ struct Parser<'a> {
     /// Nesting depth inside generic type arguments (M9 E0909).
     type_generic_depth: usize,
     type_generic_chain: Vec<String>,
+    /// Set when generic depth exceeds the limit mid-parse.
+    type_generic_truncated: bool,
 }
 
 fn too_deep(span: Span) -> Diagnostic {
@@ -166,10 +170,11 @@ impl<'a> Parser<'a> {
         self.type_generic_depth += 1;
         self.type_generic_chain.push(label.to_string());
         if self.type_generic_depth > generics::MAX_GENERIC_DEPTH {
-            self.diags.push(generics::e0909(
-                &self.type_generic_chain.join(" → "),
-                span,
-            ));
+            let chain = self.type_generic_chain.join(" → ");
+            self.type_generic_depth = self.type_generic_depth.saturating_sub(1);
+            self.type_generic_chain.pop();
+            self.diags.push(generics::e0909(&chain, span));
+            self.type_generic_truncated = true;
             return false;
         }
         true
@@ -193,21 +198,11 @@ impl<'a> Parser<'a> {
 
     /// Skip tokens until the enclosing `Type<…>` argument ends.
     fn sync_type_arg(&mut self) {
-        let mut depth = 0usize;
         while self.pos < self.toks.len() {
             match &self.peek().kind {
-                TokKind::Lt => {
-                    depth += 1;
-                    self.bump();
+                TokKind::Eq | TokKind::Semi | TokKind::Comma | TokKind::RParen | TokKind::RBrace => {
+                    break;
                 }
-                TokKind::Gt => {
-                    self.bump();
-                    if depth == 0 {
-                        break;
-                    }
-                    depth = depth.saturating_sub(1);
-                }
-                TokKind::Comma if depth == 0 => break,
                 _ => {
                     self.bump();
                 }
@@ -2172,6 +2167,7 @@ impl<'a> Parser<'a> {
                                 depth: self.depth,
                                 type_generic_depth: 0,
                                 type_generic_chain: Vec::new(),
+                                type_generic_truncated: false,
                             };
                             let e = sub.expr()?;
                             if !sub.diags.is_empty() {
@@ -2864,6 +2860,14 @@ impl<'a> Parser<'a> {
     }
 
     /// S33: close `Type<…>`; splits `>>` when nested generics end with `>`.
+    fn maybe_close_type_args(&mut self, context: &str) -> Result<(), Diagnostic> {
+        if self.type_generic_truncated {
+            Ok(())
+        } else {
+            self.expect_type_args_close(context)
+        }
+    }
+
     fn expect_type_args_close(&mut self, context: &str) -> Result<(), Diagnostic> {
         if self.pending_type_gt {
             self.pending_type_gt = false;
@@ -2950,7 +2954,9 @@ impl<'a> Parser<'a> {
                     syntax::TYPE_LIST => {
                         self.expect_type_args_open("List")?;
                         let inner = self.type_generic_arg("List")?;
-                        self.expect_type_args_close("after a list element type")?;
+                        if !self.type_generic_truncated {
+                            self.maybe_close_type_args("after a list element type")?;
+                        }
                         Type::List(Box::new(inner))
                     }
                     syntax::TYPE_MAP => {
@@ -2958,7 +2964,7 @@ impl<'a> Parser<'a> {
                         let key = self.type_generic_arg("Map key")?;
                         self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
                         let value = self.type_generic_arg("Map value")?;
-                        self.expect_type_args_close("after the value type in `Map<K, V>`")?;
+                        self.maybe_close_type_args("after the value type in `Map<K, V>`")?;
                         Type::Map {
                             key: Box::new(key),
                             value: Box::new(value),
@@ -2977,11 +2983,11 @@ impl<'a> Parser<'a> {
                             if matches!(self.peek().kind, TokKind::Ident(ref n) if n == syntax::FOREIGN_DYN) {
                                 self.bump();
                                 let (trait_name, _) = self.expect_ident("after `dyn` in `Box<dyn …>`")?;
-                                self.expect_type_args_close("after `Box<dyn …>`")?;
+                                self.maybe_close_type_args("after `Box<dyn …>`")?;
                                 Type::TraitObject(trait_name)
                             } else {
                                 let (inner, _) = self.type_()?;
-                                self.expect_type_args_close("after `Box<…>`")?;
+                                self.maybe_close_type_args("after `Box<…>`")?;
                                 inner
                             }
                         } else {
@@ -3007,7 +3013,7 @@ impl<'a> Parser<'a> {
                         ));
                         self.expect_type_args_open("List")?;
                         let inner = self.type_generic_arg("List")?;
-                        self.expect_type_args_close("after a list element type")?;
+                        self.maybe_close_type_args("after a list element type")?;
                         Type::List(Box::new(inner))
                     }
                     syntax::FOREIGN_HASHMAP | syntax::FOREIGN_DICT => {
@@ -3032,7 +3038,7 @@ impl<'a> Parser<'a> {
                         let key = self.type_generic_arg("Map key")?;
                         self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
                         let value = self.type_generic_arg("Map value")?;
-                        self.expect_type_args_close("after the value type in `Map<K, V>`")?;
+                        self.maybe_close_type_args("after the value type in `Map<K, V>`")?;
                         Type::Map {
                             key: Box::new(key),
                             value: Box::new(value),
@@ -3041,7 +3047,7 @@ impl<'a> Parser<'a> {
                     syntax::TYPE_SHARED => {
                         self.expect_type_args_open("Shared")?;
                         let inner = self.type_generic_arg("Shared")?;
-                        self.expect_type_args_close("after a shared element type")?;
+                        self.maybe_close_type_args("after a shared element type")?;
                         Type::Shared(Box::new(inner))
                     }
                     syntax::TYPE_RESULT => {
@@ -3052,7 +3058,7 @@ impl<'a> Parser<'a> {
                             "between the two types in `Result<T, E>`",
                         )?;
                         let err_ty = self.type_generic_arg("Result err")?;
-                        self.expect_type_args_close("after the error type in `Result<T, E>`")?;
+                        self.maybe_close_type_args("after the error type in `Result<T, E>`")?;
                         Type::Result {
                             ok: Box::new(ok_ty),
                             err: Box::new(err_ty),
@@ -3071,7 +3077,7 @@ impl<'a> Parser<'a> {
                                 }
                                 break;
                             }
-                            self.expect_type_args_close(&format!("after `{name}<…>`"))?;
+                            self.maybe_close_type_args(&format!("after `{name}<…>`"))?;
                             Type::Apply { name, args }
                         } else {
                             Type::Named(name)

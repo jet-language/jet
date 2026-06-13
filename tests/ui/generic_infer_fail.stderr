@@ -1,15 +1,7 @@
-Error [E0120]: `x` is only borrowed here, so it can't be given back as-is
-  --> tests/ui/generic_infer_fail.jet:2:12
+Error [E0904]: can't figure out what `T` should be here
+  --> tests/ui/generic_infer_fail.jet:6:5
     |
-  2 |     return x;
-    |            ^
- Why: this function reads the value but doesn't own it
- Fix: return a copy: `return x.clone();` — or take ownership with `take x: T`
-
-Error [E0112]: `print` doesn't know how to show fn(T) -> T
-  --> tests/ui/generic_infer_fail.jet:7:11
-    |
-  7 |     print(id);
-    |           ^^
- Why: print shows values that have a display
- Fix: print one of its parts instead
+  6 |     empty_list();
+    |     ^^^^^^^^^^
+ Why: generic calls need enough context to pick a concrete type
+ Fix: add a type annotation on a binding, like `val p: Pair<Int> = …`
