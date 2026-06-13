@@ -7,8 +7,7 @@ away ease of use or performance.
 
 ## Ranked priorities
 
-1. **Memory & type safety.** Never traded away, never configurable. No
-   `unsafe` exists in the language or in generated code (v1).
+1. **Memory & type safety.** Never traded away, never configurable. 
 2. **Beginner experience.** Learnability and diagnostics are the product.
    If a feature can't be explained in two sentences to someone writing
    their first compiled language, it needs a redesign or a tier (see C1).
@@ -30,7 +29,7 @@ number wins. When it trades effort against anything, effort loses.
 disclosure*, not by hiding the model. Tier 1 (the whole v1 language):
 everything is a value; assignment moves; copies are explicit (`clone`);
 functions declare access to their parameters with plain words
-(provisional: `read` / `write` / `take`, decision S10). References cannot
+(provisional: `mut` / `take`, decision S10). References cannot
 be stored in structs or returned from functions in v1 — which is exactly
 why **no lifetime syntax exists anywhere**. Tier 2 (post-v1, opt-in):
 stored/returned references, traits-or-comptime generics — added only if
