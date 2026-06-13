@@ -177,6 +177,12 @@ before continuing.
 | E0907 | sema  | trait impl signature mismatch |
 | E0908 | sema  | duplicate trait impl |
 | E0909 | sema  | generic instantiation too deep |
+| E0951 | sema  | comptime code reaches an impure operation (shows call path) |
+| E0952 | sema  | comptime budget exhausted (fuel) |
+| E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
+| E0954 | parse | teaching: `comptime val`/`comptime var`/`const` → `comptime x = …` |
+| E0955 | sema  | `embed_file`: missing / unreadable / not UTF-8 |
+| E0956 | sema  | construct not yet supported in comptime evaluation |
 
 ## Process for a new diagnostic
 

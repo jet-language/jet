@@ -596,8 +596,18 @@ fn build_cx_items(
                 }
             }
             Item::Const(c) => {
-                cx.consts
-                    .insert(c.name.clone(), mangle(&c.name).to_uppercase());
+                if c.is_comptime {
+                    // Inline the evaluated literal at every reference.
+                    let serialized = c
+                        .ct
+                        .as_ref()
+                        .map(|v| v.serialize())
+                        .unwrap_or_else(|| "Default::default()".to_string());
+                    cx.consts.insert(c.name.clone(), serialized);
+                } else {
+                    cx.consts
+                        .insert(c.name.clone(), mangle(&c.name).to_uppercase());
+                }
             }
             Item::ExternRust(block) => {
                 for ef in &block.functions {
@@ -1206,6 +1216,11 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
 }
 
 fn emit_const(c: &crate::ast::ConstDef, out: &mut String) {
+    // S57 (M9.5): comptime values are inlined at use sites (registered into
+    // `cx.consts`), so there is no top-level item to emit.
+    if c.is_comptime {
+        return;
+    }
     let (val, ty) = match &c.value {
         Expr::Int(n, _) => (format!("{}i64", n), "i64"),
         Expr::Float(v, _) => (format!("{:?}f64", v), "f64"),

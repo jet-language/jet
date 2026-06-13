@@ -256,7 +256,8 @@ impl<'a> Parser<'a> {
                 | TokKind::KwStruct
                 | TokKind::KwEnum
                 | TokKind::KwImpl
-                | TokKind::KwConst => return,
+                | TokKind::KwConst
+                | TokKind::KwComptime => return,
                 _ => {
                     self.bump();
                 }
@@ -416,6 +417,7 @@ impl<'a> Parser<'a> {
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwImpl => self.impl_def().map(Item::Impl),
                 TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
+                TokKind::KwComptime => self.comptime_def().map(Item::Const),
                 TokKind::Ident(name) if name == syntax::FOREIGN_CLASS => {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
@@ -1205,6 +1207,50 @@ impl<'a> Parser<'a> {
             value,
             attrs,
             rust_kind: crate::ast::RustConstKind::Const,
+            is_comptime: false,
+            ct: None,
+        })
+    }
+
+    /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
+    fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let kw = self.peek().span;
+        self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+        // E0954: `comptime val` / `comptime var` — one keyword suffices.
+        if matches!(self.peek().kind, TokKind::KwVal | TokKind::KwVar) {
+            let extra = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0954",
+                format!(
+                    "write `{} NAME = ...`, not `{} {} NAME = ...`",
+                    syntax::KW_COMPTIME,
+                    syntax::KW_COMPTIME,
+                    if matches!(self.peek().kind, TokKind::KwVal) {
+                        syntax::KW_VAL
+                    } else {
+                        syntax::KW_VAR
+                    }
+                ),
+                format!(
+                    "`{}` is already the binding keyword, and a comptime value is always a constant",
+                    syntax::KW_COMPTIME
+                ),
+                format!("remove the extra keyword: `{} NAME = ...`", syntax::KW_COMPTIME),
+                Some(Span::new(kw.start, extra.end)),
+            ));
+        }
+        let (name, name_span) = self.expect_ident("after `comptime`")?;
+        self.expect(TokKind::Eq, "after the comptime name")?;
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after a comptime value")?;
+        Ok(ConstDef {
+            name,
+            name_span,
+            value,
+            attrs: Vec::new(),
+            rust_kind: crate::ast::RustConstKind::Const,
+            is_comptime: true,
+            ct: None,
         })
     }
 

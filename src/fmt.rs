@@ -643,6 +643,15 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_const(&mut self, c: &ConstDef) {
+        if c.is_comptime {
+            self.write(syntax::KW_COMPTIME);
+            self.write(" ");
+            self.write(&c.name);
+            self.write(" = ");
+            self.fmt_expr(&c.value, Prec::OrFallback);
+            self.write(";");
+            return;
+        }
         for attr in &c.attrs {
             match attr {
                 ConstAttr::ForceStatic => self.write("@static "),

@@ -8,6 +8,7 @@
 pub mod ast;
 pub mod collections;
 pub mod codegen;
+pub mod comptime;
 pub mod diag;
 pub mod ffi;
 pub mod fmt;

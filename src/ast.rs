@@ -454,6 +454,11 @@ pub struct ConstDef {
     pub value: Expr,
     pub attrs: Vec<ConstAttr>,
     pub rust_kind: RustConstKind,
+    /// S57 (M9.5): `comptime NAME = expr;` — evaluated at compile time.
+    pub is_comptime: bool,
+    /// Filled by sema for comptime bindings: the evaluated constant value,
+    /// serialized to a Rust literal at use sites by codegen.
+    pub ct: Option<crate::comptime::CtValue>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

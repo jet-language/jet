@@ -467,6 +467,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         CompileMode::Test | CompileMode::Run | CompileMode::Check => {}
     }
 
+    // S57 (M9.5): evaluate comptime bindings before bodies are checked, so
+    // references to them resolve. Single-file mode has no path; embed_file
+    // resolves against the current directory.
+    eval_comptime_items(&mut prog.items, &mut consts, std::path::Path::new("."), &mut diags);
+
     let const_names: Vec<String> = consts.keys().cloned().collect();
     let mut address_taken: HashSet<String> = HashSet::new();
     for item in &prog.items {
@@ -605,6 +610,68 @@ fn name_defined(
     funcs.contains_key(name) || registry.contains(name) || consts.contains_key(name)
 }
 
+/// S57 (M9.5): evaluate every `comptime NAME = expr;` in `items`. Purity and
+/// fuel are enforced by the interpreter (E0951/E0952); panics surface as
+/// E0953. Each result's Jet type is registered in `consts` so references
+/// type-check, and the value is stashed on the item for codegen to inline.
+fn eval_comptime_items(
+    items: &mut [Item],
+    consts: &mut HashMap<String, Type>,
+    base_dir: &std::path::Path,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if !items
+        .iter()
+        .any(|i| matches!(i, Item::Const(c) if c.is_comptime))
+    {
+        return;
+    }
+    let mut results: Vec<(String, crate::comptime::CtValue)> = Vec::new();
+    {
+        let mut funcs: HashMap<String, &Func> = HashMap::new();
+        let mut externs: HashSet<String> = HashSet::new();
+        for item in items.iter() {
+            match item {
+                Item::Func(f) => {
+                    funcs.insert(f.name.clone(), f);
+                }
+                Item::ExternRust(b) => {
+                    for ef in &b.functions {
+                        externs.insert(ef.name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Earlier comptime bindings are in scope for later ones.
+        let mut globals: HashMap<String, crate::comptime::CtValue> = HashMap::new();
+        for item in items.iter() {
+            if let Item::Const(c) = item {
+                if c.is_comptime {
+                    match crate::comptime::evaluate(&c.value, &funcs, &externs, base_dir, &globals)
+                    {
+                        Ok(v) => {
+                            consts.insert(c.name.clone(), v.jet_type());
+                            globals.insert(c.name.clone(), v.clone());
+                            results.push((c.name.clone(), v));
+                        }
+                        Err(d) => diags.push(d),
+                    }
+                }
+            }
+        }
+    }
+    for item in items.iter_mut() {
+        if let Item::Const(c) = item {
+            if c.is_comptime {
+                if let Some(pos) = results.iter().position(|(n, _)| n == &c.name) {
+                    c.ct = Some(results.remove(pos).1);
+                }
+            }
+        }
+    }
+}
+
 fn register_const(
     c: &crate::ast::ConstDef,
     consts: &mut HashMap<String, Type>,
@@ -618,6 +685,11 @@ fn register_const(
             "every const needs a unique name",
             c.name_span,
         ));
+        return;
+    }
+    // S57 (M9.5): comptime bindings are evaluated by a dedicated pass
+    // (`eval_comptime_items`), which registers their type from the result.
+    if c.is_comptime {
         return;
     }
     let ty = match &c.value {
@@ -6304,6 +6376,17 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         st.m9.register_items(&module.items, &mut diags);
+    }
+
+    // S57 (M9.5): evaluate comptime bindings per module. `embed_file` paths
+    // resolve against each module file's own directory (S16 convention).
+    for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        let base = module
+            .path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        eval_comptime_items(&mut module.items, &mut states[idx].consts, &base, &mut diags);
     }
 
     for (idx, module) in bundle.modules.iter().enumerate() {
