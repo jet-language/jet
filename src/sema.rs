@@ -292,12 +292,10 @@ fn register_extern_fn(
         return;
     }
     if name_defined(&ef.name, funcs, registry, consts) {
-        diags.push(Diagnostic::error(
-            "E0105",
-            format!("`{}` is defined twice", ef.name),
-            "every function needs a unique name so calls aren't ambiguous".to_string(),
-            "rename or remove one of the definitions".to_string(),
-            Some(ef.name_span),
+        diags.push(defined_twice(
+            &ef.name,
+            "every function needs a unique name so calls aren't ambiguous",
+            ef.name_span,
         ));
         return;
     }
@@ -347,12 +345,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         match item {
             Item::Trait(t) => {
                 if name_defined(&t.name, &funcs, &registry, &consts) {
-                    diags.push(Diagnostic::error(
-                        "E0105",
-                        format!("`{}` is defined twice", t.name),
-                        "every trait needs a unique name".to_string(),
-                        "rename or remove one of the definitions".to_string(),
-                        Some(t.name_span),
+                    diags.push(defined_twice(
+                        &t.name,
+                        "every trait needs a unique name",
+                        t.name_span,
                     ));
                 }
             }
@@ -373,12 +369,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         Some(f.name_span),
                     ));
                 } else if name_defined(&f.name, &funcs, &registry, &consts) {
-                    diags.push(Diagnostic::error(
-                        "E0105",
-                        format!("`{}` is defined twice", f.name),
-                        "every function needs a unique name so calls aren't ambiguous".to_string(),
-                        "rename or remove one of the definitions".to_string(),
-                        Some(f.name_span),
+                    diags.push(defined_twice(
+                        &f.name,
+                        "every function needs a unique name so calls aren't ambiguous",
+                        f.name_span,
                     ));
                 } else {
                     funcs.insert(f.name.clone(), func_to_sig(f));
@@ -401,12 +395,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Test(t) => {
                 if name_defined(&t.name, &funcs, &registry, &consts) || tests.contains_key(&t.name)
                 {
-                    diags.push(Diagnostic::error(
-                        "E0105",
-                        format!("`{}` is defined twice", t.name),
-                        "every test needs a unique name so failures are easy to find".to_string(),
-                        "rename or remove one of the definitions".to_string(),
-                        Some(t.name_span),
+                    diags.push(defined_twice(
+                        &t.name,
+                        "every test needs a unique name so failures are easy to find",
+                        t.name_span,
                     ));
                 } else {
                     tests.insert(t.name.clone(), t.name_span);
@@ -621,12 +613,10 @@ fn register_const(
     registry: &TypeRegistry,
 ) {
     if name_defined(&c.name, funcs, registry, consts) {
-        diags.push(Diagnostic::error(
-            "E0105",
-            format!("`{}` is defined twice", c.name),
-            "every const needs a unique name".to_string(),
-            "rename or remove one of the definitions".to_string(),
-            Some(c.name_span),
+        diags.push(defined_twice(
+            &c.name,
+            "every const needs a unique name",
+            c.name_span,
         ));
         return;
     }
@@ -671,12 +661,10 @@ fn register_struct(
         return;
     }
     if name_defined(&s.name, funcs, registry, consts) {
-        diags.push(Diagnostic::error(
-            "E0105",
-            format!("`{}` is defined twice", s.name),
-            "every struct needs a unique name".to_string(),
-            "rename or remove one of the definitions".to_string(),
-            Some(s.name_span),
+        diags.push(defined_twice(
+            &s.name,
+            "every struct needs a unique name",
+            s.name_span,
         ));
         return;
     }
@@ -751,12 +739,10 @@ fn register_enum(
         return;
     }
     if name_defined(&e.name, funcs, registry, consts) {
-        diags.push(Diagnostic::error(
-            "E0105",
-            format!("`{}` is defined twice", e.name),
-            "every enum needs a unique name".to_string(),
-            "rename or remove one of the definitions".to_string(),
-            Some(e.name_span),
+        diags.push(defined_twice(
+            &e.name,
+            "every enum needs a unique name",
+            e.name_span,
         ));
         return;
     }
@@ -807,22 +793,10 @@ fn register_type_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mu
         };
         for m in methods {
             if field_names.iter().any(|f| f == &m.name) {
-                diags.push(Diagnostic::error(
-                    "E0105",
-                    format!("method `{}` can't share a name with a field on `{}`", m.name, type_name),
-                    "a type's methods and fields must have different names".to_string(),
-                    "rename the method or the field".to_string(),
-                    Some(m.name_span),
-                ));
+                diags.push(method_field_clash(&m.name, type_name, m.name_span));
             }
             if methods_map.contains_key(&m.name) {
-                diags.push(Diagnostic::error(
-                    "E0105",
-                    format!("method `{}` is defined twice on `{}`", m.name, type_name),
-                    "each method name may appear only once on a type".to_string(),
-                    "rename or remove one of the definitions".to_string(),
-                    Some(m.name_span),
-                ));
+                diags.push(method_defined_twice(&m.name, type_name, m.name_span));
             } else {
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
@@ -845,25 +819,10 @@ fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mu
         };
         for m in &i.methods {
             if field_names.iter().any(|f| f == &m.name) {
-                diags.push(Diagnostic::error(
-                    "E0105",
-                    format!(
-                        "method `{}` can't share a name with a field on `{}`",
-                        m.name, i.type_name
-                    ),
-                    "a type's methods and fields must have different names".to_string(),
-                    "rename the method or the field".to_string(),
-                    Some(m.name_span),
-                ));
+                diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
             }
             if methods_map.contains_key(&m.name) {
-                diags.push(Diagnostic::error(
-                    "E0105",
-                    format!("method `{}` is defined twice on `{}`", m.name, i.type_name),
-                    "each method name may appear only once on a type".to_string(),
-                    "rename or remove one of the definitions".to_string(),
-                    Some(m.name_span),
-                ));
+                diags.push(method_defined_twice(&m.name, &i.type_name, m.name_span));
             } else {
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
@@ -982,6 +941,41 @@ fn already_defined(name: &str, span: Span) -> Diagnostic {
             "pick a different name, or assign to the existing one with `{} = ...`",
             name
         ),
+        Some(span),
+    )
+}
+
+/// E0105: a top-level definition's name collides with another item. Every
+/// item kind shares the same `what` and `fix`; callers pass the kind-specific
+/// `why` (functions, structs, enums, consts, traits, tests, …).
+fn defined_twice(name: &str, why: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0105",
+        format!("`{}` is defined twice", name),
+        why.to_string(),
+        "rename or remove one of the definitions".to_string(),
+        Some(span),
+    )
+}
+
+/// E0105: a method's name collides with a field on the same type.
+fn method_field_clash(method: &str, type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0105",
+        format!("method `{}` can't share a name with a field on `{}`", method, type_name),
+        "a type's methods and fields must have different names".to_string(),
+        "rename the method or the field".to_string(),
+        Some(span),
+    )
+}
+
+/// E0105: a method name appears twice on the same type.
+fn method_defined_twice(method: &str, type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0105",
+        format!("method `{}` is defined twice on `{}`", method, type_name),
+        "each method name may appear only once on a type".to_string(),
+        "rename or remove one of the definitions".to_string(),
         Some(span),
     )
 }
@@ -6282,12 +6276,10 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                     if name_defined(&t.name, &st.funcs, &st.registry, &st.consts)
                         || st.tests.contains_key(&t.name)
                     {
-                        diags.push(Diagnostic::error(
-                            "E0105",
-                            format!("`{}` is defined twice", t.name),
-                            "every test needs a unique name so failures are easy to find".to_string(),
-                            "rename or remove one of the definitions".to_string(),
-                            Some(t.name_span),
+                        diags.push(defined_twice(
+                            &t.name,
+                            "every test needs a unique name so failures are easy to find",
+                            t.name_span,
                         ));
                     } else {
                         st.tests.insert(t.name.clone(), t.name_span);

@@ -81,9 +81,22 @@ before continuing.
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
 | E0018 | parse | teaching: `write` → `mut` (S10)          |
 | E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
+| E0020 | parse | teaching: `None`/`Some`/… → `null`/`value` (S32) |
+| E0021 | parse | teaching: `class` → `struct` (S29)              |
+| E0022 | parse | teaching: `trait`/`interface` staged → M9 (S28) |
+| E0023 | parse | teaching: `case`/`default` → switch arm syntax (S24) |
 | E0024 | parse | teaching: `catch`/`except` → `or` / `== err` (M4) |
 | E0025 | parse | teaching: `unwrap`/`expect` → `or panic(…)` (M4) |
 | E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
+| E0027 | parse | teaching: `append` → `push`               |
+| E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
+| E0030 | parse | teaching: `as` → `.to_float()` etc.       |
+| E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
+| E0032 | parse | teaching: `lambda` / `fn(x){…}` → `(x) => …` (S46) |
+| E0033 | parse | teaching: `\|x\| …` Rust pipes → `(x) => …` (S46) |
+| E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
+| E0035 | parse | teaching: `where` clauses → inline bounds |
+| E0036 | parse | teaching: `dyn`/`Box` → trait name in type position |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -100,11 +113,6 @@ before continuing.
 | E0114 | sema  | a path reaches the end without `return`   |
 | E0115 | sema  | `break`/`continue` outside a loop         |
 | E0116 | sema  | valueless call used as a value            |
-| E0020 | parse | teaching: `None`/`Some`/… → `null`/`value` (S32) |
-| E0021 | parse | teaching: `class` → `struct` (S29)              |
-| E0022 | parse | teaching: `trait`/`interface` staged → M9 (S28) |
-| E0023 | parse | teaching: `case`/`default` → switch arm syntax (S24) |
-| E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a borrowed parameter     |
@@ -144,10 +152,6 @@ before continuing.
 | E0505 | sema  | wrong index/key type or bad slice target  |
 | E0507 | sema  | collection changed while `for` reads it   |
 | L0501 | sema  | slice copy inside a loop (lint)           |
-| E0027 | parse | teaching: `append` → `push`               |
-| E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
-| E0030 | parse | teaching: `as` → `.to_float()` etc.       |
-| E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0601 | sema  | `test` block in wrong position / none found |
 | E0602 | jet   | import path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | imported file / module not found |
@@ -159,8 +163,6 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
-| E0032 | parse | teaching: `lambda` / `fn(x){…}` → `(x) => …` (S46) |
-| E0033 | parse | teaching: `\|x\| …` Rust pipes → `(x) => …` (S46) |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -175,8 +177,6 @@ before continuing.
 | E0907 | sema  | trait impl signature mismatch |
 | E0908 | sema  | duplicate trait impl |
 | E0909 | sema  | generic instantiation too deep |
-| E0035 | parse | teaching: `where` clauses → inline bounds |
-| E0036 | parse | teaching: `dyn`/`Box` → trait name in type position |
 
 ## Process for a new diagnostic
 

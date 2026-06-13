@@ -206,7 +206,8 @@ import scoring as gradebook;          // same module, namespace gradebook
 Cross-file access uses `namespace.item` for every `pub` item (S18).
 Rejected: Rust `use a::b`, unquoted file paths (`import lib` when you mean
 `"./lib.jet"`), quoted module names (`import "std/fs"`), bare `import;`
-with no path or name (teaching error only per S14), required `as`.
+with no path or name (teaching error only per S14), required `as`,
+selective imports (`import module { item }`, `from module import item`).
 
 **S29 — Struct construction (M3)** *(ratified 2026-06-11)*:
 `**Type { field: expr, … }`** — Rust-style struct literals. Every field
@@ -535,21 +536,25 @@ actions (timers, logging) — owner-gated, and never required for
 correctness. Rejected: `defer`-as-primary (leak-by-omission, Go's
 perennial bug class), `with`-blocks (nesting pyramids).
 
-**S51 — Std library import (M10)** *(ratified 2026-06-12)*: the std
-library is **exported as the `std` module** — a module import (S16 form 2,
-no quotes), not a file path. Dot paths select submodules:
+**S51 — Std library import (M10)** *(ratified 2026-06-12; amended
+2026-06-13)*: the std library is **exported as the `std` module** — a
+module import (S16 form 2, no quotes), not a file path. `std` is the
+reserved short spelling for canonical package `jet.std`; both spellings are
+valid. Dot paths select submodules:
 
 ```
 import std;                    // whole std → namespace std
+import jet.std as std;         // explicit canonical spelling
 import std.fs as fs;           // submodule, optional alias
 import std.io;                  // default namespace io
 ```
 
-`std` is a compiler-reserved module root; `std.<module>` selects a
-compiler-known submodule (`fs`, `io`, `json`, …). Optional `as alias`
-works like S16. Std is never imported via a quoted path — `import "std/fs"`
-is wrong because `"std/fs"` is file-path syntax; use `import std.fs`.
-Rejected: quoted std paths, separate `use std::` syntax.
+`std` and `jet.std` are compiler-reserved module roots; `std.<module>` and
+`jet.std.<module>` select compiler-known submodules (`fs`, `io`, `json`,
+…). Optional `as alias` works like S16. Std is never imported via a quoted
+path — `import "std/fs"` is wrong because `"std/fs"` is file-path syntax;
+use `import std.fs`. Rejected: quoted std paths, separate `use std::`
+syntax.
 
 **S54 — Naming convention** *(ratified 2026-06-12)*: **no prescribed naming
 convention** in v1 — Jet does not lint or enforce snake_case vs
@@ -713,5 +718,3 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-12 | S53 | concurrency deferred to v2; option A when built | owner |
 | 2026-06-12 | S59 | C FFI deferred to v2; `extern c` when built  | owner |
 | 2026-06-12 | S60 | `pure fn` checked purity modifier            | owner |
-
-

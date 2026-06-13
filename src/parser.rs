@@ -2327,7 +2327,7 @@ impl<'a> Parser<'a> {
             }
             TokKind::Ident(name) => {
                 let span = self.bump().span;
-                let mut type_name = name.clone();
+                let type_name = name.clone();
                 let mut type_args = Vec::new();
                 if allow_struct_lit
                     && matches!(self.peek().kind, TokKind::Lt)

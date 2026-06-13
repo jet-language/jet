@@ -11,9 +11,10 @@ milestone starts (plans in docs/plans/ are blocked on these IDs).
 
 ## Group 7 — Platform *(ratified 2026-06-12 — see docs/02)*
 
-*(S51 ratified 2026-06-12 — see docs/02: std is exported as the `std`
-module (no quotes); `import std`, `import std.fs as fs`, `import std.io`.
-S16: quotes = file path (`import "./lib"`), no quotes = module.)*
+*(S51 ratified 2026-06-12, amended 2026-06-13 — see docs/02: std is
+exported as the `std` module (no quotes), short for canonical `jet.std`;
+`import std`, `import jet.std as std`, `import std.fs as fs`, `import
+std.io`. S16: quotes = file path (`import "./lib"`), no quotes = module.)*
 
 *(S54 ratified 2026-06-12 — see docs/02: no prescribed naming convention in
 v1; `jet fmt` layout only.)*

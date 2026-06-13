@@ -1,8 +1,9 @@
 # Standard library & module system — decision document
 
-**Status:** research + ballots for owner decision. Nothing here is ratified.
-Accepted ballots get folded into docs/02 (syntax) / docs/06 (ballot log) and
-the M10 plan. Written 2026-06-12.
+**Status:** SL1-SL10 ratified 2026-06-13 by owner direction in planning
+discussion. Accepted decisions still need to be folded into docs/02
+(syntax), docs/03 (architecture), docs/06 (ballot log), the M10 plan, and
+the M12 package plan where applicable. Written 2026-06-12.
 
 **What this answers:**
 1. What do developers actually love and hate about other languages'
@@ -29,10 +30,24 @@ the M10 plan. Written 2026-06-12.
 - **The ring** — this doc's name for the layer *around* the core std:
   first-party libraries (http, regex, csv, dates) that ship with std-level
   quality but are versioned and installed like packages. Go calls theirs
-  `golang.org/x`. Section 7 proposes Jet's.
+  `golang.org/x`. Section 7 proposes Jet's. Their canonical package names
+  live under `jet.*` (`jet.std`, `jet.http`, `jet.regex`), but first-party
+  short import names are reserved so users can write `import http as http`
+  instead of `import jet.http as http`. Ring/package versions may be
+  requested at the import site (`import http#0.8.1 as http` or
+  `import jet.http#0.8.1 as http`); the package manager records the
+  resolved canonical package, version, and hash in the manifest and
+  lockfile.
 - **Frozen API** — a promise that published functions never change or
   disappear. Go froze its std at 1.0 ("the Go 1 promise"); 16 years of code
   still compiles. The cost: mistakes are permanent.
+- **Toolchain-selected std** — Jet's core `std` is part of the selected Jet
+  toolchain, not a normal package. Its canonical package identity is
+  `jet.std`, but `import std as std` and `import std.fs as fs` are reserved
+  short spellings. `import jet.std as std` is also valid when code wants the
+  canonical spelling. A package gets one `std` version: the one bundled with
+  its locked Jet compiler. Old code stays buildable by pinning the old
+  toolchain, not by importing two `std` versions in one file.
 - **Dead code elimination (DCE)** — the compiler/linker throwing away
   functions your program never calls, so they cost zero bytes in the binary.
   JavaScript bundlers call the same idea **tree-shaking**.
@@ -221,9 +236,8 @@ confusion (Python's `sys.path` mysteries, Node's `./` ambiguity). Qualified
 `E0606` listing ambiguous matches is exactly right.
 
 Three calls keep us honest (ballots below):
-- **SL3** — do we ever add selective imports? (Recommendation: no. Decide
-  it *now* so "no" is a recorded decision, not an accident someone
-  relitigates in a PR.)
+- **SL3** — do we ever add selective imports? Decision: no; qualified-only
+  is now a recorded decision, not an accident someone relitigates in a PR.
 - **Import cycles** — S16 doesn't state a policy. Recommend ratifying Go's
   rule: cycles between files/modules are an error with a diagnostic that
   prints the cycle (`a → b → a`) and suggests extracting shared code into a
@@ -281,7 +295,7 @@ protocol before code is written.
 
 ---
 
-### SL1 — Size philosophy: how big does std itself get?
+### SL1 — Size philosophy: how big does std itself get? *(ratified 2026-06-13: Option C)*
 
 The single most consequential call. Everything else hangs off it.
 
@@ -309,7 +323,7 @@ val page = http.get("https://example.com")?;
 living in a package and every tutorial opening with "don't use std.http."
 Python needed a formal PEP and years of fights to delete its dead batteries.
 
-**Option C — Small frozen core + first-party ring (Go model). (Recommended)**
+**Option C — Small frozen core + first-party ring (Go model). (Ratified)**
 Core std = M10's list (+ later: streaming io, path, net once *proven*).
 Frozen, compatibility-promised, curated by the owner. Around it, the
 **ring**: first-party, owner-curated libraries that ship with releases but
@@ -319,13 +333,15 @@ owner may promote it into frozen std (how Go's `x/context` and `x/slices`
 became `context` and `slices`).
 
 ```jet
-import std.fs as fs;        // core: frozen, always there
-import jet.http as http;    // ring: ships with jet, versioned (spelling = SL2)
+import std.fs as fs;     // core: short spelling for jet.std/fs
+import jet.std as std;   // core: explicit canonical package spelling
+import http as http;     // ring: short spelling for jet.http
+import http#0.8.1 as h;  // ring: exact version request (spelling = SL2)
 ```
 *Day-to-day:* beginners see no difference — both are "just there." Experts
 get evolvable APIs. Mistakes die in the ring instead of fossilizing in std.
 
-**Recommendation: C.** It's the only option whose failure mode (a ring
+**Decision: C.** It's the only option whose failure mode (a ring
 module gets redesigned) is survivable. A's failure mode is Rust's
 dependency sprawl; B's is Python's museum. C also matches our existing
 instincts — M10's "out of scope" list (networking, regex, TOML/CSV) is
@@ -333,25 +349,55 @@ already implicitly a ring waiting for a name.
 
 ---
 
-### SL2 — The ring's import spelling and delivery
+### SL2 — The ring's import spelling, versions, and delivery *(ratified 2026-06-13: Option A)*
 
 Only live if SL1 = C. How does ring code arrive and what does the import
 look like?
 
-**Option A — Bundled namespace: `import jet.http;` — ships with the
-toolchain, no install. (Recommended)**
+**Option A — Canonical `jet.*` packages + reserved short imports +
+import-site versions. (Ratified)**
 
 ```jet
-import std.fs as fs;     // frozen core
-import jet.http as http; // ring — also zero-install, but versioned with
-                         // the toolchain release, may evolve between minors
+import std as std;                // short spelling for jet.std
+import jet.std as std;            // equivalent explicit spelling; choose one
+import std.fs as fs;              // submodule of toolchain-selected jet.std
+import http as http;              // short spelling for jet.http
+import jet.http as http;          // equivalent explicit spelling; choose one
+import http#0.8.1 as http08;      // exact first-party ring version
+import jet.http#0.8.1 as http08;  // same request, canonical spelling
+import acme.auth#2.4.0 as auth;   // exact third-party package version
 ```
 ```
 $ jet run tool.jet       # just works; nothing was installed
 ```
-With a manifest (M12), a project may pin a ring module to a version, which
-turns it into a normal locked dependency. Without a manifest, you get the
-ring as shipped with your toolchain. Single files stay ceremony-free (R9).
+`jet.*` is the canonical first-party package namespace. Source files may use
+reserved short spellings for first-party packages: `std` means `jet.std`,
+`http` means `jet.http`, `regex` means `jet.regex`, and so on. Explicit
+canonical imports remain valid, including `import jet.std as std`; the short
+form is convenience, not the only spelling.
+
+Unversioned `import http as http` or `import jet.http as http` means
+"resolve the latest version compatible with this Jet toolchain." Versioned
+imports request an exact package/ring version. In both cases the package
+manager writes the resolved canonical package name, version, and content
+hash into the generated manifest/lockfile, so future builds are Nix-style
+reproducible.
+
+Multiple versions of an ordinary package may coexist only when explicitly
+aliased:
+
+```jet
+import http#0.8.1 as old_http;
+import jet.http#1.4.0 as new_http;
+```
+
+Core `std` is the exception: canonical package `jet.std` is selected once
+per package by the locked Jet toolchain. Do not support `import std#1.0 as
+old_std` or `import jet.std#1.0 as old_std` beside `import std#2.1 as
+new_std`; that splits foundational type identity (`Result`, `Option`,
+`String`, `Path`, I/O handles, errors) inside one compiled package. A
+workspace may still contain separate packages on different Jet majors, each
+with its own lockfile/toolchain.
 
 **Option B — Ring as auto-resolvable packages: `import jet.http;` works
 only after `jet add jet/http`.**
@@ -370,17 +416,21 @@ marked unstable in docs only.** *Tradeoff:* users cannot tell frozen from
 evolving at the import site; this is how Python's `asyncio` churn burned
 people — the import said "standard," the API said "experimental."
 
-**Recommendation: A.** The import site honestly tells you the stability
-tier (`std.` = frozen promise, `jet.` = curated but versioned), and nothing
-needs installing. Namespace spelling (`jet.` vs `ext.` vs `x.`) is an owner
-aesthetic call; `jet.` is proposed because it reads as "first-party" and
-can't collide with user modules (reserve it like `std`, extend E1002).
+**Decision: A.** The import site stays ergonomic (`import http as
+http`) while the resolver and lockfile keep a precise canonical identity
+(`jet.http`). The stability tier is still explicit after resolution:
+`jet.std` is the toolchain-selected frozen core; `jet.http` is curated but
+versioned. Reserve the first-party short names (`std`, `http`, `regex`,
+`csv`, `toml`, `crypto`, `archive`, etc.) and the canonical `jet`
+namespace, then reject ambiguous local/package imports with a diagnostic.
+Version syntax (`#0.8.1`) is proposed because it is visually attached to
+the imported package, not to the alias or call site.
 
 ---
 
-### SL3 — Selective imports: do we ever allow them?
+### SL3 — Selective imports: do we ever allow them? *(ratified 2026-06-13: Option A)*
 
-**Option A — Qualified-only, forever (status quo S16). (Recommended)**
+**Option A — Qualified-only, forever (status quo S16). (Ratified)**
 
 ```jet
 import std.math as math;
@@ -405,7 +455,7 @@ fn main() {
 collisions need rules; code review gets harder. Python/Rust experience says
 teams end up writing style guides *against* their own feature.
 
-**Recommendation: A — and record it as rejected, not merely absent.**
+**Decision: A — and record it as rejected, not merely absent.**
 Aliasing (`as m`) already handles long names. Go proved qualified-only at
 ecosystem scale, and it's the option that protects the beginner reading
 code, not just the expert writing it. One carve-out worth pre-deciding:
@@ -414,12 +464,12 @@ shorthand), so nobody needs `import` games for that.
 
 ---
 
-### SL4 — Prelude scope: what works with zero imports?
+### SL4 — Prelude scope: what works with zero imports? *(ratified 2026-06-13: Option A + method/function review rule)*
 
 The prelude is the first five minutes of Jet. Today: `print`, core types,
 their methods. M10 adds nothing to it (math/io/etc. all need imports).
 
-**Option A — Frozen tiny prelude (status quo). (Recommended)** A beginner's
+**Option A — Frozen tiny prelude (status quo). (Ratified)** A beginner's
 second program hits `import std.io as io;` the moment they want input —
 one line of ceremony, and it teaches the import system honestly.
 
@@ -451,17 +501,20 @@ but *methods*: `(-5).abs()`, `xs.max()` instead of `math.abs(-5)`,
 `math.max(...)`. This is how M5 strings/lists already work
 (`text.to_upper()`, not `strings.to_upper(text)`).
 
-**Recommendation: A for functions, plus a standing design rule from C:**
-*when an operation has one obvious receiver, ship it as a method on the
-type (no import needed); modules are for operations with no receiver*
-(`fs.read`, `random.int`) *or with two equal arguments* (`math.min(a, b)`).
-That rule keeps the lauded Python-strings feel (M5 already follows it)
-without growing a bare-name prelude. Worth writing into the M10 plan as the
-signature-review checklist.
+**Decision: A for the prelude, plus a standing method/function review
+rule.** Libraries may choose dot methods or module functions based on the
+operation. When an operation has one obvious receiver, a method is usually
+the most discoverable spelling (`text.to_upper()`, `xs.length()`). Modules
+fit operations with no single receiver (`fs.read`, `json.parse`,
+`random.int`), side effects, domain services, or two equal arguments
+(`math.min(a, b)`). M10 core std should avoid duplicate method+function
+pairs unless a specific API has a strong reason; this is not a permanent
+ban on future libraries offering both forms if Jet later designs that as an
+explicit capability.
 
 ---
 
-### SL5 — One voice: the std API style sheet
+### SL5 — One voice: the std API style sheet *(ratified 2026-06-13: Option A)*
 
 PHP's needle/haystack is what happens without one. Proposal: before M10
 implementation starts, ratify a one-page style sheet every std/ring
@@ -481,14 +534,17 @@ signature must pass. Draft rules (each from a section-3 lesson):
 6. One way per task: a new function must not duplicate an existing one
    "but slightly nicer" — it replaces it (ring) or doesn't land (core).
 
-**Options: A — adopt (recommended); B — adopt with edits (owner marks up);
-C — skip, rely on review taste.** C is how PHP happened — one designer
-having taste is not the same as a written rule, because agents and future
-contributors don't share the taste.
+**Decision: A — adopt for now.** This is the M10 core std review sheet, not
+a forever lock on every future library shape. In particular, rule 6 means
+M10 should choose one canonical spelling per task by default; a later
+library/ring decision may allow deliberate method+function pairs if the
+capability is designed explicitly instead of drifting in by accident. C is
+how PHP happened — one designer having taste is not the same as a written
+rule, because agents and future contributors don't share the taste.
 
 ---
 
-### SL6 — Std error taxonomy (decide before networking, not after)
+### SL6 — Std error taxonomy (decide before networking, not after) *(ratified 2026-06-13: Option B)*
 
 M10: each module gets one small error enum (`IoError`, `JsonError`). The
 roadmap already knows v1's "`?` only works within one error type" rule
@@ -511,7 +567,7 @@ string-matched. Loses type precision exactly where Jet's exhaustive
 `switch` shines.
 
 **Option B — Per-domain enums + declared conversion (a `From`-equivalent),
-beginner spelling TBD. (Recommended)** Each function keeps its precise
+beginner spelling TBD. (Ratified)** Each function keeps its precise
 error; a user-side error enum declares "an IoError becomes
 `Config.ReadFailed`," and `?` applies the conversion automatically.
 
@@ -535,20 +591,20 @@ designed out, and it keeps switch-exhaustiveness meaningful.
 becomes string archaeology — the thing Go users complain about most in
 their otherwise-loved std.
 
-**Recommendation: B**, ratified as a *direction* now (the roadmap item 3
+**Decision: B**, ratified as a *direction* now (the roadmap item 3
 already points here) so every std/ring error enum is designed to compose,
 with the surface spelling balloted separately before implementation.
 
 ---
 
-### SL7 — Paths: strings forever, or a Path type later?
+### SL7 — Paths: strings forever, or a Path type later? *(ratified 2026-06-13: Option A)*
 
 M10 v1: paths are `String` (ratified, stays). The ballot is the *post-v1
 direction*, because ring modules (http, archives, watchers) will take paths
 in their signatures and we shouldn't churn them later.
 
 **Option A — Strings forever + a `std.path` module of pure string helpers
-(Go's `filepath` model). (Recommended)**
+(Go's `filepath` model). (Ratified)**
 
 ```jet
 import std.path as path;
@@ -571,14 +627,14 @@ Nicer once learned, but it's a whole new type with operator behavior,
 conversion rules, and "String or Path?" signature questions across every
 std module — high churn for a marginal gain over A.
 
-**Recommendation: A.** Matches priorities (beginner experience over edge
+**Decision: A.** Matches priorities (beginner experience over edge
 correctness), and is forward-compatible: if real demand for B appears, a
 `Path` type can land in the ring without breaking anything that took
 strings.
 
 ---
 
-### SL8 — Date & time: how long do we hold the line?
+### SL8 — Date & time: how long do we hold the line? *(ratified 2026-06-13: Option A)*
 
 The single most-regretted API category across *every* language (Java
 needed three tries; JS needed 25 years and Temporal; Python's datetime
@@ -588,7 +644,7 @@ still traps everyone). M10 ships `time.now() -> Int` (unix millis),
 **Option A — Hold: millis-only through v1.x; a real calendar/timezone
 module is designed *once, whole* in the ring, copying Temporal/java.time
 concepts (instant vs civil time as different types, explicit timezone at
-every conversion). (Recommended)**
+every conversion). (Ratified)**
 
 ```jet
 // v1.x: honest and limited
@@ -605,19 +661,21 @@ than doing them wrong, which is the universal regret.
 "just a little" date support grew a haunted house around it (naive
 datetimes, local-time assumptions). This is the top of the slippery slope.
 
-**Recommendation: A.** Also ratify the *design constraints* for the
+**Decision: A.** M10 stays millis-only, and Jet should build an excellent
+calendar/timezone library post-v1 as a whole design rather than accreting
+"just a little" date support. Also ratify the design constraints for the
 eventual ring module now (instant/civil split, no implicit local timezone,
-no format mini-language without a ballot) so a future agent can't
-casually re-create `Date`.
+no format mini-language without a ballot) so a future agent can't casually
+re-create `Date`.
 
 ---
 
-### SL9 — Make "pay for what you call" a tested guarantee
+### SL9 — Make "pay for what you call" a tested guarantee *(ratified 2026-06-13: Option A)*
 
 Section 5 says the architecture gives us tiny binaries. This ballot makes
 it a *promise* instead of an accident.
 
-**Option A — Ratify as an architecture rule + CI test. (Recommended)**
+**Option A — Ratify as an architecture rule + CI test. (Ratified)**
 - Rule (new R10, docs/03): *codegen emits a std helper into the generated
   program only if sema proves the program can call it. Importing a module
   is free; only calls cost bytes.*
@@ -636,13 +694,13 @@ $ ls -l build/01_hello
 rot the first time someone emits the whole prelude unconditionally for
 convenience.
 
-**Recommendation: A.** Cheap, permanent, and it's a marketable property —
+**Decision: A.** Cheap, permanent, and it's a marketable property —
 "a Jet binary contains your program, not our library" is a sentence
 experts choosing between Go/Rust/Zig actually care about.
 
 ---
 
-### SL10 — JSON's two modes (confirm direction)
+### SL10 — JSON's two modes (confirm direction) *(ratified 2026-06-13: Option A)*
 
 M10 ships dynamic JSON (`Json` enum you walk by hand). S55 already ratified
 `derive Serialize;`. The confirm-it ballot: Jet's end state is **both**
@@ -665,17 +723,20 @@ With one Go-lesson fix worth pre-ratifying: **unknown fields are an error
 by default** (Go's silent-ignore is its most common production bug),
 with an explicit opt-out for tolerant parsing.
 
-**Options: A — confirm both-modes + strict-by-default (recommended);
-B — dynamic only forever; C — defer.** B leaves Jet without the single
-most-used serialization workflow in industry code.
+**Decision: A — confirm both modes + strict-by-default.** M10 ships dynamic
+JSON. Typed JSON lands later via the derive direction, and unknown fields
+are errors by default with an explicit tolerant-parsing opt-out. B leaves
+Jet without the single most-used serialization workflow in industry code.
 
 ---
 
 ## 7. The ring — proposed inventory and build order
 
 Assuming SL1=C and SL2=A. Core std stays the M10 eight (+ `path` per SL7,
-+ streaming `io` per roadmap). The ring, in adoption-priority order —
-each item maps to a "can't use Jet at work without it" scenario:
++ streaming `io` per roadmap). The ring's canonical package names are
+`jet.*`, but source files may use the reserved short names (`import http as
+http`, `import regex as regex`). In adoption-priority order, each item maps
+to a "can't use Jet at work without it" scenario:
 
 | Order | Module | Unlocks | Notes |
 |---|---|---|---|
@@ -695,23 +756,31 @@ SL5.
 
 ---
 
-## 8. If ratified, the course corrections (the "right the ship" list)
+## 8. Ratified course corrections (the "right the ship" list)
 
 The ship is largely on course; these are trims, not turns:
 
 1. **Name the ring and reserve its namespace** (SL1/SL2) before M10 ships,
-   so `std` never absorbs modules it can't evolve. Update E1002 to also
-   reserve `jet`.
+   so `std` never absorbs modules it can't evolve. Update E1002 to reserve
+   the canonical `jet` namespace and first-party short import names such as
+   `std`, `http`, `regex`, `csv`, `toml`, `crypto`, and `archive`.
 2. **Record "no selective imports" as a rejected decision** in S16's
    rejected list (SL3) + ratify an import-cycle policy with its own
    diagnostic.
-3. **Add the std style sheet** (SL5) to docs and the M10 plan checklist
+3. **Add import-site package versioning to the M12 package-manager plan**
+   (SL2): first-party short names are reserved aliases for canonical
+   `jet.*` packages, `import pkg#version as alias` requests a package/ring
+   version, unversioned imports resolve to the latest compatible version,
+   the generated manifest/lockfile pins canonical package identities and
+   exact hashes, `import jet.std as std` is valid, and `std#version` /
+   `jet.std#version` are not valid inside one package.
+4. **Add the std style sheet** (SL5) to docs and the M10 plan checklist
    before implementation starts — cheapest possible moment.
-4. **Re-sequence error conversion (SL6) ahead of any ring work** — it
+5. **Re-sequence error conversion (SL6) ahead of any ring work** — it
    currently sits as roadmap item 3 with no plan file; it gates http.
-5. **Add R10 + size-regression CI** (SL9) during M10, when the prelude
+6. **Add R10 + size-regression CI** (SL9) during M10, when the prelude
    becomes per-module — the natural moment to make emission usage-gated.
-6. **Write the SL8 date/time constraints down** so no future agent ships
+7. **Write the SL8 date/time constraints down** so no future agent ships
    "just a little" date formatting.
 
 Nothing in M10's frozen v1 API conflicts with any recommendation above —
