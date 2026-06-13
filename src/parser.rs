@@ -310,12 +310,16 @@ impl<'a> Parser<'a> {
                     path.rsplit('/').next().unwrap_or("module").to_string(),
                 )
             }
-            TokKind::Ident(name) => {
-                let module_name = name.clone();
-                let span = self.bump().span;
+            TokKind::Ident(_) => {
+                let (module_name, span) = self.module_path()?;
+                let alias_default = module_name
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(module_name.as_str())
+                    .to_string();
                 (
                     crate::ast::ImportKind::Module(module_name.clone(), span),
-                    module_name,
+                    alias_default,
                 )
             }
             other => {
@@ -340,6 +344,17 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            return Err(Diagnostic::error(
+                "E0003",
+                "selective imports aren't part of Jet".to_string(),
+                "modules keep their namespace so call sites show where a library function comes from"
+                    .to_string(),
+                "import the module with `as`, then call items through the alias: `import std.math as math; math.clamp(x, lo, hi);`"
+                    .to_string(),
+                Some(self.peek().span),
+            ));
+        }
         let (alias, alias_span) = if matches!(
             &self.peek().kind,
             TokKind::Ident(n) if n == syntax::KW_AS
@@ -358,6 +373,20 @@ impl<'a> Parser<'a> {
             alias_span,
             span: Span::new(start.start, end),
         })
+    }
+
+    fn module_path(&mut self) -> Result<(String, Span), Diagnostic> {
+        let (first, first_span) = self.expect_ident("after `import`")?;
+        let mut name = first;
+        let mut end = first_span.end;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (part, span) = self.expect_ident("after `.` in an import")?;
+            name.push('.');
+            name.push_str(&part);
+            end = span.end;
+        }
+        Ok((name, Span::new(first_span.start, end)))
     }
 
     fn program(&mut self) -> Program {
@@ -1319,6 +1348,11 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
+            TokKind::KwComptime => {
+                let binding = self.comptime_binding()?;
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
+            }
             TokKind::Ident(n) if n == syntax::FOREIGN_LET => {
                 // S14 teaching error E0009, then parse as a binding.
                 let t = self.bump();
@@ -1650,6 +1684,48 @@ impl<'a> Parser<'a> {
             ty,
             ty_span,
             init,
+            is_comptime: false,
+            ct: None,
+        })
+    }
+
+    fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
+        let kw = self.peek().span;
+        self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+        if matches!(self.peek().kind, TokKind::KwVal | TokKind::KwVar) {
+            let extra = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0954",
+                format!(
+                    "write `{} NAME = ...`, not `{} {} NAME = ...`",
+                    syntax::KW_COMPTIME,
+                    syntax::KW_COMPTIME,
+                    if matches!(self.peek().kind, TokKind::KwVal) {
+                        syntax::KW_VAL
+                    } else {
+                        syntax::KW_VAR
+                    }
+                ),
+                format!(
+                    "`{}` is already the binding keyword, and a comptime value is always a constant",
+                    syntax::KW_COMPTIME
+                ),
+                format!("remove the extra keyword: `{} NAME = ...`", syntax::KW_COMPTIME),
+                Some(Span::new(kw.start, extra.end)),
+            ));
+        }
+        let (name, name_span) = self.expect_ident("after `comptime`")?;
+        self.expect(TokKind::Eq, "in a comptime binding")?;
+        let init = self.expr()?;
+        Ok(Binding {
+            mutable: false,
+            name,
+            name_span,
+            ty: None,
+            ty_span: None,
+            init,
+            is_comptime: true,
+            ct: None,
         })
     }
 

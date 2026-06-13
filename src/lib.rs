@@ -139,6 +139,7 @@ fn compile_with_mode(
             source: src.to_string(),
         }],
         parse_teaching: Vec::new(),
+        used_std: std::collections::HashSet::new(),
     };
     let ffi = match ffi::prepare(&bundle) {
         Ok(link) => link,

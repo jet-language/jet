@@ -72,7 +72,7 @@ before continuing.
 | E0008 | parse | teaching: `def`/`func` → `fn` (S14)       |
 | E0009 | parse | teaching: `let`/`let mut` → `val`/`var`   |
 | E0010 | parse | teaching: `set` → `val`                   |
-| E0011 | sema  | teaching: `println` → `print`             |
+| E0011 | sema  | *retired in M10* (was: `println` → `print`) |
 | E0012 | parse | teaching: `and`/`or`/`not` → `&&`/`\|\|`/`!` |
 | E0013 | parse | teaching: `Text` → `String`               |
 | E0014 | parse | teaching: `try` → `?` (M4 — real feature)   |
@@ -97,6 +97,9 @@ before continuing.
 | E0034 | parse | teaching: `Type[Args]` → `Type<Args>` (S33) |
 | E0035 | parse | teaching: `where` clauses → inline bounds |
 | E0036 | parse | teaching: `dyn`/`Box` → trait name in type position |
+| E0037 | sema  | teaching: `println!`/`eprintln!` → `print`/`io.eprint` |
+| E0038 | sema  | teaching: `open(`/`File.open` → `fs.read` / `fs.write` |
+| E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -183,6 +186,10 @@ before continuing.
 | E0954 | parse | teaching: `comptime val`/`comptime var`/`const` → `comptime x = …` |
 | E0955 | sema  | `embed_file`: missing / unreadable / not UTF-8 |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
+| E1001 | jet   | unknown std module |
+| E1002 | jet   | local module shadows reserved first-party root/name |
+| E1003 | sema  | U8 literal out of range |
+| E1004 | sema  | unknown item in std module |
 
 ## Process for a new diagnostic
 

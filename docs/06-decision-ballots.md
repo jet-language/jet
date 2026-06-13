@@ -22,8 +22,10 @@ v1; `jet fmt` layout only.)*
 *(S53 ratified 2026-06-12 — see docs/02: concurrency deferred to v2; when
 built, option A — `tasks.spawn`, channels, no shared mutable state.)*
 
-*(S52 ratified 2026-06-12 — see docs/02: `jet.toml` hand-parsed TOML,
-`jet.lock`, `jet add`/`jet fetch`; single files manifest-free forever.)*
+*(S52 ratified 2026-06-12, amended 2026-06-13 — see docs/02 and
+docs/manifest-design-research.md: `jet.toml`, graph `jet.lock`,
+`[dependencies:*]` colon tables, `@latest`, `.jet/` source root,
+`jet add`/`fetch`/`update`; single files manifest-free forever.)*
 
 ---
 

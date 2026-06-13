@@ -134,7 +134,7 @@ fn main() {
 "#;
     let diags = jet::check_document("snippet.jet", src);
     assert!(diags.iter().any(|d| d.code == "E0009"), "let → val");
-    assert!(diags.iter().any(|d| d.code == "E0011"), "println → print");
+    assert!(diags.iter().any(|d| d.code == "E0037"), "println → print");
     assert!(diags.iter().any(|d| d.code == "E0008"), "def → fn");
 
     let mut edits: Vec<_> = diags.iter().filter_map(|d| d.edit.clone()).collect();

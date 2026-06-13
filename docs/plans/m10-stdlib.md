@@ -187,6 +187,7 @@ Teaching: E0037 `println!`/`eprintln!` → `print`/`io.eprint` · E0038
 - Size-regression tests enforce SL9: `01_hello.jet --small` stays under a
   pinned byte budget, and a fixture importing all M10 std modules but
   calling nothing stays within noise of hello-world.
+- User-facing std reference: **docs/stdlib.md** (example-first tour of every module).
 
 ## Out of scope
 

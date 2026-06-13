@@ -140,22 +140,25 @@ snapshots; the **differential battery** green in CI (every
 comptime-evaluable fixture also runs at runtime and must agree
 bit-for-bit — divergence is a P0 miscompile).
 
-## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; Group 7 ✅)*
+## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; Group 7 ✅)* ✓ 2026-06-13
 
 `import std.<module>`: fs, io, env, process, math, random, time, json —
 exact v1 APIs frozen in the plan; every fallible call returns `Result<T, E>`.
 `U8` byte buffers and byte/string conversions. Enough batteries for real
-CLI tools.
-**Exit:** file-transform, JSON, and mini-CLI examples with golden tests.
+CLI tools. User-facing reference: **docs/stdlib.md**.
+**Exit:** file-transform, JSON, and mini-CLI examples with golden tests. ✓
 
-## M12 — Package manager  *(plan: docs/plans/m12-packages.md; Group 7 ✅; two phases)*
+## M12 — Package manager  *(plan: docs/plans/m12-packages.md; manifest ✅ 2026-06-13; two phases)*
 
-Opt-in `jet.toml` (path + git deps, exact pins), `jet add`/`jet fetch`,
-content-hashed `jet.lock`, FFI deps in the manifest, no install-time
-code execution. Phase 2: static-index registry. Single files never need
+Opt-in `jet.toml` + content-hashed graph `jet.lock` (ratified layout in
+docs/manifest-design-research.md). M12.1: path + git deps, moving
+branch/`@latest` selectors, `jet add`/`fetch`/`update`, Nix-style store
+(`~/.jet/store`), `[dependencies:rust]` FFI pins, optional `.jet/` source
+root, no install-time code execution. M12.2: git-index registry, semver
+ranges + resolver, `jet publish`/`vendor`/`audit`. Single files never need
 any of it (R9).
-**Exit:** fixture workspaces covering resolution, locking, conflicts,
-and tampering; an end-to-end new→add→run flow.
+**Exit:** M12.1 store+lock battery + new→add→run; M12.2 registry and
+resolver snapshots per plan.
 
 ## M13 — LSP v2  *(plan: docs/plans/m13-lsp.md)*
 
@@ -241,7 +244,9 @@ before work starts. None of these may compromise the v1 milestones.
       iteration, never benchmarks; `jet build` (rustc, full
       optimization) remains the only release path.
 
-**Unreconciled:** docs/jetpack.md and docs/jetos.md are separate,
-unratified explorations that conflict with M12 (manifest format, pin
-policy, resolver). The owner will reconcile them before M12 begins; no
-agent may treat either file as a spec.
+**Reconciled (manifest, 2026-06-13):** docs/manifest-design-research.md
+is the ratified manifest spec; docs/package-manager-decisions.md is the
+architecture source of truth (store, phasing, D-PM recommendations).
+docs/jetpack.md remains historical exploration for layer-3 recipes; agents
+implement M12 from docs/plans/m12-packages.md only. docs/jetos.md waits on
+layer 3.

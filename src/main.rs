@@ -25,6 +25,7 @@ usage:
   {bin} check <file.{ext}>     look for problems, build nothing
   {bin} build <file.{ext}>     compile to a native binary in ./build/
   {bin} run   <file.{ext}>     build, then run
+  {bin} run   <file.{ext}> a b  extra words become program arguments
   {bin} test  <file|dir>       compile and run top-level test blocks
   {bin} new   <name>           create a new project folder
   {bin} fmt   <file.{ext}>     rewrite file to canonical style (S44)
@@ -69,11 +70,14 @@ fn main() {
         "fmt" => run_fmt(target, fmt_check),
         "new" => run_new(target),
         "test" => run_test(target),
-        _ => run_compile_cmd(cmd, target, emit_rust, small),
+        _ => {
+            let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
+            run_compile_cmd(cmd, target, emit_rust, small, &program_args);
+        }
     }
 }
 
-fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
+fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_args: &[&String]) {
     let profile = if small { BuildProfile::Small } else { BuildProfile::Default };
 
     let src = match fs::read_to_string(file) {
@@ -136,7 +140,11 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool) {
         "run" => {
             let out = bin_path(file);
             build(file, &rust_code, out.clone(), profile, ffi_link.as_ref());
-            let status = Command::new(&out).status().unwrap_or_else(|e| {
+            let mut run_cmd = Command::new(&out);
+            for arg in program_args {
+                run_cmd.arg(arg.as_str());
+            }
+            let status = run_cmd.status().unwrap_or_else(|e| {
                 eprintln!("error: couldn't run the built program: {}", e);
                 exit(1);
             });

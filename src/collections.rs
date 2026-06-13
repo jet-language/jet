@@ -46,6 +46,8 @@ pub fn builtin_method_return(
         Type::List(inner) => list_method_return(inner, method, arg_count),
         Type::Map { key, value } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
+        Type::Named(n) if n == "U8" => u8_method_return(method, arg_count),
+        Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
         Type::Int | Type::Float | Type::Bool | Type::Char => {
             builtin_static_return(recv_ty, method, arg_count)
         }
@@ -65,6 +67,14 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         (Type::Int, "to_string", 0) => Some(Some(Type::String)),
         (Type::Int, "to_float", 0) => Some(Some(Type::Float)),
+        (Type::Int, "to_u8", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("U8".to_string())),
+            err: Box::new(Type::String),
+        })),
+        (Type::String, "from_bytes", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named("Utf8Error".to_string())),
+        })),
         (Type::Float, "to_string", 0) => Some(Some(Type::String)),
         (Type::Float, "to_int", 0) => Some(Some(Type::Int)),
         (Type::Bool, "to_string", 0) => Some(Some(Type::String)),
@@ -112,10 +122,25 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("len" | "is_empty", 0) => Some(Some(Type::Int)),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         ("trim" | "to_upper" | "to_lower" | "to_string", 0) => Some(Some(Type::String)),
+        ("bytes", 0) => Some(Some(Type::List(Box::new(Type::Named("U8".to_string()))))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
         ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
+        _ => None,
+    }
+}
+
+fn u8_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("to_int", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
+fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("elapsed_millis", 0) => Some(Some(Type::Int)),
         _ => None,
     }
 }
@@ -176,6 +201,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::String => match method {
             "contains" | "starts_with" | "ends_with" | "split" => Some(vec![Type::String]),
+            "from_bytes" => Some(vec![Type::List(Box::new(Type::Named("U8".to_string())))]),
             "replace" => Some(vec![Type::String, Type::String]),
             "slice" => Some(vec![Type::Int, Type::Int]),
             "repeat" => Some(vec![Type::Int]),

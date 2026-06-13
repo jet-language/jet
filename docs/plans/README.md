@@ -92,4 +92,5 @@ milestone example. Multi-file demos use a directory (`examples/21_imports/`).
 | 25–26 | M9 | traits, generic_types |
 | 27–28 | M9.5 | comptime_table, embed |
 | 29–31 | M10 | files, json, cli |
-| 32–33 | M11 | tasks, pipeline |
+| 32 | M12 | packages/ |
+| 33–34 | M11 | tasks, pipeline |

@@ -195,6 +195,9 @@ pub struct ProgramBundle {
     pub modules: Vec<LoadedModule>,
     /// S14 teaching diagnostics collected during a lenient parse (LSP check).
     pub parse_teaching: Vec<crate::diag::Diagnostic>,
+    /// M10: std helper names proven reachable by sema. Codegen emits only
+    /// these helpers (SL9).
+    pub used_std: std::collections::HashSet<String>,
 }
 
 #[derive(Debug)]
@@ -290,7 +293,7 @@ pub struct TestDef {
     pub body: Vec<Stmt>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Func {
     pub is_pub: bool,
     pub name: String,
@@ -576,6 +579,10 @@ pub struct Binding {
     pub ty: Option<Type>,
     pub ty_span: Option<Span>,
     pub init: Expr,
+    /// S57 (M9.5): local `comptime NAME = expr;` — immutable, evaluated
+    /// after ordinary type checking and emitted as literal data.
+    pub is_comptime: bool,
+    pub ct: Option<crate::comptime::CtValue>,
 }
 
 #[derive(Debug, Clone)]

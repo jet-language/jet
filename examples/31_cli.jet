@@ -1,0 +1,16 @@
+import std.io as io;
+import std.env as env;
+import std.process as process;
+
+fn main() {
+    val args = io.args();
+    val mode = env.get("JET_M10_MODE") or "default";
+    // `jet run tool.jet alice` forwards words after the file as argv (index 0 stays the program name).
+    if args.len() >= 2 {
+        print(args.get(1) or "");
+    } else {
+        print(args.len());
+    }
+    print(mode);
+    process.exit(0);
+}

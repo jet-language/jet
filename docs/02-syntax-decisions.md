@@ -561,13 +561,26 @@ convention** in v1 — Jet does not lint or enforce snake_case vs
 camelCase/PascalCase. `jet fmt` handles layout only (S44). Rejected:
 mandatory snake_case lint.
 
-**S52 — Package manifest (M12)** *(ratified 2026-06-12)*: `**jet.toml`** —
-tiny TOML subset, hand-parsed in the compiler (I6). Sections:
-`[package]` (`name`, `version`), `[dependencies]` (git/path, exact pins),
-`[rust-dependencies]` (M7 FFI pins migrate here). Lockfile `**jet.lock**`;
-commands `jet add` / `jet fetch`; registry later as a static git index.
-Single-file `jet run file.jet` stays manifest-free forever (R9). Rejected:
-JSON manifest, manifest written in Jet (build.zig style).
+**S52 — Package manifest (M12)** *(ratified 2026-06-12; amended
+2026-06-13)*: `**jet.toml`** — tiny TOML subset, hand-parsed in the
+compiler (I6). Full layout ratified in docs/manifest-design-research.md.
+
+`[package]`: `name`, `version`, `jet` (toolchain constraint), `description`,
+`license`, `repository`. `[dependencies]`: Jet deps, name-as-key, git/path/
+registry pins; moving selectors `branch = "main"` and `tag = "@latest"`
+allowed when `jet.lock` is authoritative (`jet update` refreshes;
+`--locked` freezes). Dependency kinds use colon suffixes:
+`[dependencies]`, `[dependencies:rust]` (M7 FFI pins migrate here),
+`[dependencies:c]` (reserved for S59). Reserved, not generated in v1:
+`[dev-dependencies]`, `[patch]`, `[workspace]`, `[tool.*]` (ignored except
+warn on `[tool.jet]`). Lockfile `**jet.lock**` — graph-shaped, schema
+versioned, original+locked per node, content-hash verified. Commands:
+`jet add` / `jet remove` / `jet fetch` / `jet update`; registry in M12.2.
+`jet new` writes a useful template; `jet new --annotated` adds commented
+examples. Optional `.jet/` directory is the source root when present;
+`jet.toml` stays at project root. Single-file `jet run file.jet` stays
+manifest-free forever (R9). Rejected: JSON manifest; v1 manifest written
+in Jet (build.zig style); `[rust-dependencies]` as a separate table name.
 
 **S53 — Concurrency surface** *(ratified 2026-06-12; deferred past v1.0)*:
 **deferred to v2** — no tasks, channels, or `std/tasks` in v1. When
@@ -715,6 +728,7 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-12 | S51 | std imports: `import std.fs as fs` module form | owner |
 | 2026-06-12 | S54 | no prescribed naming convention in v1        | owner |
 | 2026-06-12 | S52 | `jet.toml` manifest; `jet.lock`; jet add/fetch | owner |
+| 2026-06-13 | S52 | amended: `[dependencies:*]` colon tables, lock graph, `@latest`, `.jet/` folder, useful `jet new` template | owner |
 | 2026-06-12 | S53 | concurrency deferred to v2; option A when built | owner |
 | 2026-06-12 | S59 | C FFI deferred to v2; `extern c` when built  | owner |
 | 2026-06-12 | S60 | `pure fn` checked purity modifier            | owner |

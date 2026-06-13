@@ -132,9 +132,12 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                 .unwrap_or(i.type_span.start)
         }
         Item::Const(c) => {
-            src[..c.name_span.start]
-                .rfind("const")
-                .unwrap_or(c.name_span.start)
+            let kw = if c.is_comptime {
+                syntax::KW_COMPTIME
+            } else {
+                syntax::KW_CONST
+            };
+            src[..c.name_span.start].rfind(kw).unwrap_or(c.name_span.start)
         }
         Item::Test(t) => src[..t.name_span.start]
             .rfind(syntax::KW_TEST)
@@ -863,11 +866,15 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
-        self.write(if b.mutable {
-            syntax::KW_VAR
+        if b.is_comptime {
+            self.write(syntax::KW_COMPTIME);
         } else {
-            syntax::KW_VAL
-        });
+            self.write(if b.mutable {
+                syntax::KW_VAR
+            } else {
+                syntax::KW_VAL
+            });
+        }
         self.write(" ");
         self.write(&b.name);
         if let Some(ty) = &b.ty {

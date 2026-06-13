@@ -36,6 +36,15 @@ pub enum CtValue {
     Str(String),
     List(Vec<CtValue>),
     Map(BTreeMap<CtKey, CtValue>),
+    Struct {
+        type_name: String,
+        fields: Vec<(String, CtValue)>,
+    },
+    Enum {
+        type_name: String,
+        variant: String,
+        args: Vec<(Option<String>, CtValue)>,
+    },
     Some(Box<CtValue>),
     None(Type),
     Unit,
@@ -108,6 +117,9 @@ impl CtValue {
             }
             CtValue::Some(inner) => Type::Option(Box::new(inner.jet_type())),
             CtValue::None(t) => Type::Option(Box::new(t.clone())),
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+                Type::Named(type_name.clone())
+            }
             CtValue::Unit => Type::Named(String::new()),
         }
     }
@@ -134,6 +146,14 @@ impl CtValue {
             }
             CtValue::Some(v) => v.jet_show(),
             CtValue::None(_) => "null".to_string(),
+            CtValue::Struct { type_name, fields } => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("{}: {}", n, v.jet_show()))
+                    .collect();
+                format!("{}({})", type_name, parts.join(", "))
+            }
+            CtValue::Enum { variant, .. } => variant.clone(),
             CtValue::Unit => String::new(),
         }
     }
@@ -171,8 +191,46 @@ impl CtValue {
             }
             CtValue::Some(v) => format!("Some({})", v.serialize()),
             CtValue::None(_) => "None".to_string(),
+            CtValue::Struct { type_name, fields } => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("{}: {}", mangle(n), v.serialize()))
+                    .collect();
+                format!("user_{} {{ {} }}", type_name, parts.join(", "))
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
+                let prefix = format!("user_{}::{}", type_name, mangle(variant));
+                if args.is_empty() {
+                    prefix
+                } else if args.iter().all(|(label, _)| label.is_none()) {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.serialize()).collect();
+                    format!("{}({})", prefix, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .filter_map(|(label, v)| {
+                            label
+                                .as_ref()
+                                .map(|name| format!("{}: {}", mangle(name), v.serialize()))
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", prefix, parts.join(", "))
+                }
+            }
             CtValue::Unit => "()".to_string(),
         }
+    }
+}
+
+fn mangle(name: &str) -> String {
+    if name == "main" {
+        "main".to_string()
+    } else {
+        format!("user_{}", name)
     }
 }
 
@@ -566,6 +624,57 @@ impl<'a> Interp<'a> {
                     }
                     _ => Err(unsupported("indexing this value", *span)),
                 }
+            }
+            Expr::Field(inner, member, span) => {
+                if let Expr::Ident(type_name, _) = inner.as_ref() {
+                    return Ok(CtValue::Enum {
+                        type_name: type_name.clone(),
+                        variant: member.clone(),
+                        args: Vec::new(),
+                    });
+                }
+                let v = self.eval(inner, scope)?;
+                match v {
+                    CtValue::Struct { fields, .. } => fields
+                        .into_iter()
+                        .find(|(name, _)| name == member)
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported(&format!("the field `.{}`", member), *span)),
+                    _ => Err(unsupported("field access on this value", *span)),
+                }
+            }
+            Expr::StructLit {
+                type_name, fields, ..
+            } => {
+                let mut out = Vec::with_capacity(fields.len());
+                for (name, _, expr) in fields {
+                    out.push((name.clone(), self.eval(expr, scope)?));
+                }
+                Ok(CtValue::Struct {
+                    type_name: type_name.clone(),
+                    fields: out,
+                })
+            }
+            Expr::EnumLit {
+                type_name,
+                variant,
+                args,
+                ..
+            } => {
+                let mut out = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        EnumLitArg::Positional(expr) => out.push((None, self.eval(expr, scope)?)),
+                        EnumLitArg::Named { label, expr } => {
+                            out.push((Some(label.clone()), self.eval(expr, scope)?))
+                        }
+                    }
+                }
+                Ok(CtValue::Enum {
+                    type_name: type_name.clone(),
+                    variant: variant.clone(),
+                    args: out,
+                })
             }
             Expr::Slice { base, start, end, span } => {
                 let b = self.eval(base, scope)?;
@@ -1239,4 +1348,18 @@ pub fn evaluate(
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
+}
+
+/// Owned-function variant used while sema is mutating function bodies for
+/// local `comptime` bindings. The cloned function map is a snapshot of the
+/// already-parsed program; the interpreter still sees ordinary Jet AST.
+pub fn evaluate_owned(
+    init: &Expr,
+    funcs: &HashMap<String, Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+) -> Result<CtValue, Diagnostic> {
+    let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
+    evaluate(init, &refs, extern_names, base_dir, globals)
 }

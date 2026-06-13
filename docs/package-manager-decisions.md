@@ -1,13 +1,11 @@
 # Package manager — unified vision & decision file
 
-> **STATUS (2026-06-12): DRAFT for owner ratification.** This file
-> reconciles docs/plans/m12-packages.md (Cargo-style, ratified S52
-> surface) with docs/jetpack.md (Nix-style exploration, unratified) into
-> ONE plan, as required by docs/00-philosophy.md and docs/05-roadmap.md
-> ("must be reconciled with M12 before any package-manager work starts").
-> Once the D-PM decisions below are ratified, this file is the single
-> source of truth; docs/jetpack.md becomes historical and
-> docs/plans/m12-packages.md is rewritten to match.
+> **STATUS (2026-06-13): MANIFEST RATIFIED; architecture recommendations
+> active.** Manifest layout is ratified in docs/manifest-design-research.md
+> (S52 amended). Implementation plan: docs/plans/m12-packages.md. D-PM1…
+> D-PM8 below are **recommendations** — treat as ratified defaults for
+> implementation unless the owner overrides before M12.1 starts.
+> docs/jetpack.md is historical (layer 3 only).
 
 **How to read this file:** plain language first, spec second. §1 defines
 every term once. Each decision in §5 shows what you would actually type
@@ -753,15 +751,18 @@ $ jet fetch
 Open jetpack/jetos decision IDs (D-JP1–5, D-OS1–7) are superseded or
 deferred to layer 3's future plan; none remain open against M12.
 
-## 9. On ratification (agent checklist)
+## 9. Ratification status (2026-06-13)
 
-1. Owner answers D-PM1…D-PM8 → record in §5 with date.
-2. Rewrite docs/plans/m12-packages.md to match §6 phases 1–2 (it keeps
-   its E-codes, S52 surface, and supply-chain rules; it gains the
-   store).
-3. Update docs/05-roadmap.md's M12 entry; remove the "Unreconciled"
-   footnote; update the status banners in docs/jetpack.md,
-   docs/jetos.md, and docs/00-philosophy.md to point here.
-4. Any *syntax* implied by layer 3 (recipe files, `pure fn` surfaces
-   beyond S60) still requires its own ballot before code — this file
-   ratifies architecture, not syntax.
+| Item | Status |
+|---|---|
+| Manifest layout (D-MF1…5, lock graph, `@latest`) | **Ratified** — manifest-design-research.md, S52 |
+| docs/plans/m12-packages.md | **Updated** — M12.1/M12.2 phases, implementation order |
+| docs/05-roadmap.md M12 entry | **Updated** |
+| D-PM1…D-PM8 architecture | **Recommendations** — implement as written unless owner overrides |
+| Layer 3 recipe syntax | **Deferred** — separate ballot before code |
+
+**Agent checklist before M12.1:**
+
+1. Read manifest-design-research.md, this file §6–7, m12-packages.md.
+2. Claim E1201–E1209 in docs/04 as diagnostics land.
+3. Layer-3 Jet-code manifests / recipes still need ballots — do not implement.

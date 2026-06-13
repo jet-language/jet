@@ -323,6 +323,47 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 `tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`
 (L0801). Integration: `tests/closures.rs`.
 
+## M10 — Standard library (done)
+
+Full user-facing reference: **docs/stdlib.md**. Implementation plan and frozen
+API inventory: **docs/plans/m10-stdlib.md**.
+
+M10 standard library modules are compiler-known namespaces backed by Rust std
+helpers in the generated prelude. Import the short `std` spelling or the
+canonical `jet.std` spelling:
+
+```
+import std.fs as fs;
+import jet.std.json as json;
+```
+
+Implemented modules: `std.fs`, `std.io`, `std.env`, `std.process`,
+`std.math`, `std.random`, `std.time`, and `std.json`. Unknown std modules are
+**E1001**; local modules/import aliases may not shadow reserved first-party
+roots (`std`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
+**E1002**. Selective imports are rejected; keep qualified access through an
+alias.
+
+Fallible std functions return `Result<T, E>` and must be handled with `?`,
+`or`, or pattern tests like any M4 result. File APIs use whole-file helpers
+only; file handles and streaming are out of scope. Paths are `String` in M10.
+Binary APIs use `U8` and `List<U8>`; integer literals for `U8` must be in
+0..255 (**E1003**). Unknown items in a std module are **E1004** with a
+did-you-mean suggestion when possible.
+
+Receiver additions: `String.bytes() -> List<U8>`,
+`String.from_bytes(List<U8>) -> String or Utf8Error`, `n.to_u8()`, and
+`b.to_int()`. Time stays unix milliseconds (`time.now()`); random is
+deterministic after `random.seed(n)`. JSON is dynamic (`Json`) with
+`json.parse`, `json.render`, and `json.render_pretty`.
+
+Codegen invariant: importing std modules is free; sema records reachable std
+calls and codegen emits only those helpers (R10).
+
+Examples: `examples/29_files.jet`, `examples/30_json.jet`,
+`examples/31_cli.jet`. UI: `tests/ui/std_*`, `tests/ui/u8_out_of_range.jet`,
+and M10 teaching errors **E0037**–**E0039**.
+
 ## Deliberately absent
 
 See non-goals in docs/00-philosophy.md. The parser should produce staged

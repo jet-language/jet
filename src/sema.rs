@@ -506,6 +506,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         }
     }
 
+    let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&prog.items);
+    let ct_base_dir = std::path::Path::new(".");
+
     // --- per-item body checks ---------------------------------------------
     for item in &mut prog.items {
         match item {
@@ -518,6 +521,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &consts,
                     &m9,
                     None,
+                    &ct_funcs,
+                    &ct_externs,
+                    ct_base_dir,
+                    &ct_globals,
                 ));
             }
             Item::Impl(i) => {
@@ -530,6 +537,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &consts,
                         &m9,
                         Some(&i.type_name),
+                        &ct_funcs,
+                        &ct_externs,
+                        ct_base_dir,
+                        &ct_globals,
                     ));
                 }
             }
@@ -543,6 +554,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &consts,
                         &m9,
                         Some(&s.name),
+                        &ct_funcs,
+                        &ct_externs,
+                        ct_base_dir,
+                        &ct_globals,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -555,6 +570,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             &consts,
                             &m9,
                             Some(&s.name),
+                            &ct_funcs,
+                            &ct_externs,
+                            ct_base_dir,
+                            &ct_globals,
                         ));
                     }
                 }
@@ -566,9 +585,13 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &funcs,
                         &registry,
                         &struct_fields_legacy,
-                    &consts,
-                    &m9,
-                    Some(&e.name),
+                        &consts,
+                        &m9,
+                        Some(&e.name),
+                        &ct_funcs,
+                        &ct_externs,
+                        ct_base_dir,
+                        &ct_globals,
                     ));
                 }
             }
@@ -591,6 +614,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &consts,
                     &m9,
                     None,
+                    &ct_funcs,
+                    &ct_externs,
+                    ct_base_dir,
+                    &ct_globals,
                 ));
                 t.body = synthetic.body;
             }
@@ -670,6 +697,57 @@ fn eval_comptime_items(
             }
         }
     }
+}
+
+fn comptime_context_from_items(
+    items: &[Item],
+) -> (
+    HashMap<String, Func>,
+    HashSet<String>,
+    HashMap<String, crate::comptime::CtValue>,
+) {
+    let mut funcs = HashMap::new();
+    let mut externs = HashSet::new();
+    let mut globals = HashMap::new();
+    for item in items {
+        match item {
+            Item::Func(f) => {
+                funcs.insert(f.name.clone(), f.clone());
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    funcs.insert(m.name.clone(), m.clone());
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        funcs.insert(m.name.clone(), m.clone());
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    funcs.insert(m.name.clone(), m.clone());
+                }
+            }
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    funcs.insert(m.name.clone(), m.clone());
+                }
+            }
+            Item::Const(c) if c.is_comptime => {
+                if let Some(v) = &c.ct {
+                    globals.insert(c.name.clone(), v.clone());
+                }
+            }
+            Item::ExternRust(b) => {
+                for ef in &b.functions {
+                    externs.insert(ef.name.clone());
+                }
+            }
+            Item::Test(_) | Item::Const(_) | Item::Trait(_) => {}
+        }
+    }
+    (funcs, externs, globals)
 }
 
 fn register_const(
@@ -910,8 +988,13 @@ fn check_func_body(
     consts: &HashMap<String, Type>,
     m9: &M9Registry,
     owner_type: Option<&str>,
+    ct_funcs: &HashMap<String, Func>,
+    ct_externs: &HashSet<String>,
+    ct_base_dir: &std::path::Path,
+    ct_globals: &HashMap<String, crate::comptime::CtValue>,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
+    let empty_std_imports = HashMap::new();
     let mut ck = Checker {
         funcs,
         registry,
@@ -920,6 +1003,7 @@ fn check_func_body(
         modules: None,
         module_idx: 0,
         imports: &empty_imports,
+        std_imports: &empty_std_imports,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -936,6 +1020,11 @@ fn check_func_body(
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         m9,
+        ct_funcs,
+        ct_externs,
+        ct_base_dir,
+        ct_globals,
+        ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
     };
     ck.check_params_and_body(f, owner_type);
@@ -1062,6 +1151,7 @@ struct ModuleState {
     structs: HashMap<String, Vec<(Option<String>, Type)>>,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
+    std_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     m9: M9Registry,
 }
@@ -1092,6 +1182,7 @@ struct Checker<'a> {
     modules: Option<&'a [ModuleState]>,
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
+    std_imports: &'a HashMap<String, String>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
     /// name -> span of the use that gave the value away.
@@ -1120,6 +1211,12 @@ struct Checker<'a> {
     lambda_mut_borrow_stack: Vec<HashSet<String>>,
     /// M9: generic/trait metadata for this program.
     m9: &'a M9Registry,
+    /// M9.5: local comptime evaluation context.
+    ct_funcs: &'a HashMap<String, Func>,
+    ct_externs: &'a HashSet<String>,
+    ct_base_dir: &'a std::path::Path,
+    ct_globals: &'a HashMap<String, crate::comptime::CtValue>,
+    ct_scopes: Vec<HashMap<String, crate::comptime::CtValue>>,
     /// Active generic type parameters while checking a generic item.
     type_param_scope: Vec<crate::ast::TypeParam>,
 }
@@ -1128,17 +1225,29 @@ impl<'a> Checker<'a> {
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
         self.lambda_mut_borrow_stack.push(HashSet::new());
+        self.ct_scopes.push(HashMap::new());
     }
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
         self.lambda_mut_borrow_stack.pop();
+        self.ct_scopes.pop();
     }
 
     fn lambda_mut_borrow_active(&self, name: &str) -> bool {
         self.lambda_mut_borrow_stack
             .iter()
             .any(|s| s.contains(name))
+    }
+
+    fn current_ct_globals(&self) -> HashMap<String, crate::comptime::CtValue> {
+        let mut globals = self.ct_globals.clone();
+        for scope in &self.ct_scopes {
+            for (name, value) in scope {
+                globals.insert(name.clone(), value.clone());
+            }
+        }
+        globals
     }
 
     fn lookup(&self, name: &str) -> Option<&LocalInfo> {
@@ -1178,6 +1287,9 @@ impl<'a> Checker<'a> {
         }
         match ty {
             Type::Named(n) => {
+                if std_type_known(n) {
+                    return;
+                }
                 if self.type_param_scope.iter().any(|p| p.name == *n) {
                     return;
                 }
@@ -1301,7 +1413,7 @@ impl<'a> Checker<'a> {
 
     fn type_known(&self, ty: &Type) -> bool {
         match ty {
-            Type::Named(n) => self.registry.contains(n),
+            Type::Named(n) => self.registry.contains(n) || std_type_known(n),
             Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => self.type_known(inner),
             Type::Map { key, value } => self.type_known(key) && self.type_known(value),
             Type::Char => true,
@@ -1318,6 +1430,9 @@ impl<'a> Checker<'a> {
     /// reported); callers may add a context-specific error otherwise.
     fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
         if want == got {
+            return false;
+        }
+        if is_u8_ty(want) && *got == Type::Int {
             return false;
         }
         if result_used_where_plain_expected(want, got) {
@@ -2299,7 +2414,13 @@ impl<'a> Checker<'a> {
             (Some(annot), Some(actual)) => {
                 let annot = self.resolve_type(annot.clone());
                 let actual = self.resolve_type(actual.clone());
-                if annot != actual {
+                if is_u8_ty(&annot) && actual == Type::Int {
+                    if let Expr::Int(n, span) = b.init {
+                        if !(0..=255).contains(&n) {
+                            self.diags.push(u8_range_error(span));
+                        }
+                    }
+                } else if annot != actual {
                     self.diags.push(Diagnostic::error(
                         "E0108",
                         format!(
@@ -2322,12 +2443,31 @@ impl<'a> Checker<'a> {
         if b.ty.is_none() {
             b.ty = Some(final_ty.clone());
         }
+        if b.is_comptime {
+            let globals = self.current_ct_globals();
+            match crate::comptime::evaluate_owned(
+                &b.init,
+                self.ct_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                &globals,
+            ) {
+                Ok(v) => {
+                    b.ct = Some(v.clone());
+                    self.ct_scopes
+                        .last_mut()
+                        .unwrap()
+                        .insert(b.name.clone(), v);
+                }
+                Err(d) => self.diags.push(d),
+            }
+        }
         self.declare(
             &b.name,
             b.name_span,
             LocalInfo {
                 ty: final_ty,
-                mutable: b.mutable,
+                mutable: b.mutable && !b.is_comptime,
                 param_conv: None,
                 decl_loop_depth: self.loop_depth,
             },
@@ -3640,7 +3780,29 @@ impl<'a> Checker<'a> {
         if member == "clone" {
             return self.infer(inner);
         }
+        if let Expr::Ident(root, _) = &**inner {
+            if root == syntax::FOREIGN_OS && member == "environ" {
+                self.diags.push(Diagnostic::error(
+                    "E0039",
+                    "`os.environ` is written `env.get` in Jet".to_string(),
+                    "environment access lives in the `std.env` module".to_string(),
+                    "import `std.env as env` and call `env.get(name)`".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
+        if let Expr::Ident(alias, alias_span) = &**inner {
+            if let Some(module) = self.std_imports.get(alias).cloned() {
+                return self.infer_std_field(&module, member, *alias_span, span);
+            }
+        }
         if let Expr::Ident(type_name, _) = &**inner {
+            if type_name == "Json" {
+                if let Some(ret) = self.check_std_json_lit(member, &mut [], span) {
+                    return Some(ret);
+                }
+            }
             if self.registry.enum_variants(type_name).is_some() {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
@@ -3649,6 +3811,9 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = true;
         let t = self.infer(inner)?;
         if let Type::Named(type_name) = &t {
+            if let Some(fty) = std_struct_field(type_name, member) {
+                return Some(fty);
+            }
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, type_name) {
                     for (fname, _, fty, is_ref, _) in fields {
@@ -3739,12 +3904,37 @@ impl<'a> Checker<'a> {
             self.borrow_ctx = true;
             return self.infer(receiver);
         }
+        if let Expr::Ident(root, _) = &**receiver {
+            if root == "File" && method == syntax::FOREIGN_OPEN {
+                self.diags.push(Diagnostic::error(
+                    "E0038",
+                    "`File.open` is not the M10 file API".to_string(),
+                    "M10 uses whole-file helpers in `std.fs`; file handles are out of scope"
+                        .to_string(),
+                    "import `std.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                        .to_string(),
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return None;
+            }
+        }
         if let Expr::Ident(alias, alias_span) = &**receiver {
+            if let Some(module) = self.std_imports.get(alias).cloned() {
+                return self.infer_std_call(&module, method, *alias_span, span, args);
+            }
             if let Some(&mod_idx) = self.imports.get(alias) {
                 return self.infer_import_call(mod_idx, method, *alias_span, span, args);
             }
         }
         if let Expr::Ident(type_name, _) = &**receiver {
+            if type_name == "Json" {
+                if let Some(ret) = self.check_std_json_lit(method, args, span) {
+                    return Some(ret);
+                }
+            }
             if let Some(variants) = self.registry.enum_variants(type_name) {
                 if variants.contains_key(method) {
                     let saved: Vec<Expr> = args
@@ -4102,6 +4292,343 @@ impl<'a> Checker<'a> {
             self.infer(&mut a.expr);
         }
         None
+    }
+
+    fn infer_std_field(
+        &mut self,
+        module: &str,
+        name: &str,
+        alias_span: Span,
+        span: Span,
+    ) -> Option<Type> {
+        match (module, name) {
+            ("std.math", "pi" | "e") => Some(Type::Float),
+            _ => {
+                self.diags.push(unknown_std_item(module, name, span));
+                let _ = alias_span;
+                None
+            }
+        }
+    }
+
+    fn infer_std_call(
+        &mut self,
+        module: &str,
+        name: &str,
+        alias_span: Span,
+        span: Span,
+        args: &mut [crate::ast::CallArg],
+    ) -> Option<Type> {
+        let sig = std_fixed_sig(module, name);
+        match (module, name) {
+            ("std.io", "eprint") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    self.borrow_ctx = true;
+                    if let Some(ty) = self.infer(&mut arg.expr) {
+                        if !is_printable(&ty, self.registry) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("{} can't be printed yet", ty.show()),
+                                "`io.eprint` prints the same values as `print`, but writes to stderr"
+                                    .to_string(),
+                                "print one of its fields, or make it a printable type".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        }
+                    }
+                }
+                return None;
+            }
+            ("std.io", "input") => {
+                if args.len() > 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_std_arg(name, 0, &Type::String, arg);
+                }
+                return Some(result_ty(Type::String, Type::Named("IoError".to_string())));
+            }
+            ("std.math", "abs") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else { return Some(Type::Int) };
+                let ty = self.infer(&mut arg.expr)?;
+                if !matches!(ty, Type::Int | Type::Float) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`abs` needs Int or Float, not {}", ty.show()),
+                        "absolute value is only defined for numbers".to_string(),
+                        "pass an Int or Float".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                    return None;
+                }
+                return Some(ty);
+            }
+            ("std.math", "min" | "max") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_std_arity(name, 2, args.len(), span));
+                }
+                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    for a in args.iter_mut().skip(1) {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                };
+                if !types_comparable(&first, self.registry) {
+                    self.diags.push(Diagnostic::error(
+                        "E0905",
+                        format!("`{}` needs comparable values", name),
+                        "min/max compare their two arguments".to_string(),
+                        "use Int, Float, String, Char, Bool, or a comparable type".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+                if let Some(second) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    if second != first {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs two values of the same type", name),
+                            "min/max compare like with like".to_string(),
+                            type_fix_hint(&first, &second),
+                            Some(args[1].expr.span()),
+                        ));
+                    }
+                }
+                return Some(first);
+            }
+            ("std.math", "clamp") => {
+                if args.len() != 3 {
+                    self.diags.push(wrong_std_arity(name, 3, args.len(), span));
+                }
+                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    for a in args.iter_mut().skip(1) {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                };
+                if !types_comparable(&first, self.registry) {
+                    self.diags.push(Diagnostic::error(
+                        "E0905",
+                        "`clamp` needs comparable values".to_string(),
+                        "clamp compares the value with its lower and upper bounds".to_string(),
+                        "use Int, Float, String, Char, Bool, or a comparable type".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+                for i in 1..3 {
+                    if let Some(got) = args.get_mut(i).and_then(|a| self.infer(&mut a.expr)) {
+                        if got != first {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`clamp` needs all three values to have the same type"),
+                                "the value and both bounds are compared together".to_string(),
+                                type_fix_hint(&first, &got),
+                                Some(args[i].expr.span()),
+                            ));
+                        }
+                    }
+                }
+                return Some(first);
+            }
+            ("std.random", "pick") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Option(Box::new(Type::Int)));
+                };
+                let ty = self.infer(&mut arg.expr)?;
+                if let Type::List(inner) = ty {
+                    return Some(Type::Option(inner));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`pick` needs a list, not {}", ty.show()),
+                    "random.pick chooses one item from a List".to_string(),
+                    "pass a `List<T>` value".to_string(),
+                    Some(arg.expr.span()),
+                ));
+                return None;
+            }
+            ("std.random", "shuffle") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else { return None };
+                if arg.convention != AccessConvention::Mutate {
+                    self.diags.push(Diagnostic::error(
+                        "E0202",
+                        "`shuffle` changes its list".to_string(),
+                        "a changing argument must be passed with `mut`".to_string(),
+                        "write `random.shuffle(mut xs)`".to_string(),
+                        Some(arg.span),
+                    ));
+                }
+                let ty = self.infer(&mut arg.expr)?;
+                if !matches!(ty, Type::List(_)) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`shuffle` needs a list, not {}", ty.show()),
+                        "random.shuffle reorders a List in place".to_string(),
+                        "pass a `List<T>` value".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                }
+                return None;
+            }
+            _ => {}
+        }
+
+        let Some((params, ret)) = sig else {
+            self.diags.push(unknown_std_item(module, name, span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            let _ = alias_span;
+            return None;
+        };
+        if args.len() != params.len() {
+            self.diags
+                .push(wrong_std_arity(name, params.len(), args.len(), span));
+        }
+        for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+            if *conv == AccessConvention::Mutate && arg.convention != AccessConvention::Mutate {
+                self.diags.push(Diagnostic::error(
+                    "E0202",
+                    format!("argument {} to `{}` must be passed with `mut`", i + 1, name),
+                    "this standard library call changes that value".to_string(),
+                    format!("write `{} value` for this argument", syntax::KW_MUTATE),
+                    Some(arg.span),
+                ));
+            }
+            self.expect_std_arg(name, i, param_ty, arg);
+        }
+        for arg in args.iter_mut().skip(params.len()) {
+            self.infer(&mut arg.expr);
+        }
+        ret
+    }
+
+    fn check_std_json_lit(
+        &mut self,
+        variant: &str,
+        args: &mut [crate::ast::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let json = Type::Named("Json".to_string());
+        let expected = match variant {
+            "Null" => Vec::new(),
+            "Boolean" => vec![Type::Bool],
+            "Number" => vec![Type::Float],
+            "Text" => vec![Type::String],
+            "Array" => vec![Type::List(Box::new(json.clone()))],
+            "Object" => vec![Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(json.clone()),
+            }],
+            _ => {
+                let candidates = [
+                    "Null", "Boolean", "Number", "Text", "Array", "Object",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>();
+                let mut fix = "check the variant name".to_string();
+                if let Some(s) = suggest_field(variant, &candidates) {
+                    fix = format!("did you mean `{}`?", s);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0304",
+                    format!("`Json` has no variant `{}`", variant),
+                    "std.json exposes the dynamic JSON variants from the M10 API".to_string(),
+                    fix,
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(json);
+            }
+        };
+        if args.len() != expected.len() {
+            self.diags.push(Diagnostic::error(
+                "E0306",
+                format!(
+                    "`Json.{}` expects {} value{}, got {}",
+                    variant,
+                    expected.len(),
+                    if expected.len() == 1 { "" } else { "s" },
+                    args.len()
+                ),
+                "each JSON variant has the payload listed in the M10 std API".to_string(),
+                "check the variant payload".to_string(),
+                Some(span),
+            ));
+        }
+        for (i, arg) in args.iter_mut().enumerate() {
+            if let Some(want) = expected.get(i) {
+                self.expect_std_arg(variant, i, want, arg);
+            } else {
+                self.infer(&mut arg.expr);
+            }
+        }
+        Some(json)
+    }
+
+    fn expect_std_arg(
+        &mut self,
+        call_name: &str,
+        idx: usize,
+        param_ty: &Type,
+        arg: &mut crate::ast::CallArg,
+    ) {
+        if matches!(arg.convention, AccessConvention::Move)
+            && !matches!(param_ty, Type::Named(n) if n == "Unit")
+        {
+            self.diags.push(Diagnostic::error(
+                "E0203",
+                format!("`{}` passed to a parameter that does not consume", syntax::KW_MOVE),
+                "standard library functions in M10 read their ordinary arguments unless documented otherwise"
+                    .to_string(),
+                format!("remove `{}` here", syntax::KW_MOVE),
+                Some(arg.span),
+            ));
+        }
+        if matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. }) {
+            self.borrow_ctx = true;
+        }
+        let got = self.infer(&mut arg.expr);
+        if let Some(got) = got {
+            if is_u8_ty(param_ty) && got == Type::Int {
+                if let Expr::Int(n, span) = arg.expr {
+                    if !(0..=255).contains(&n) {
+                        self.diags.push(u8_range_error(span));
+                    }
+                }
+                return;
+            }
+            let reported = self.check_type_assignable(param_ty, &got, arg.expr.span());
+            if !reported && got != *param_ty {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`{}` wants {} for argument {}, but this is {}",
+                        call_name,
+                        param_ty.show(),
+                        idx + 1,
+                        got.show()
+                    ),
+                    "every argument must match its parameter's type".to_string(),
+                    type_fix_hint(param_ty, &got),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
     }
 
     fn check_static_method(
@@ -4796,6 +5323,46 @@ impl<'a> Checker<'a> {
                 HashMap::new()
             }
             (Type::Named(enum_name), Pattern::Variant { variant, bindings, .. }) => {
+                if enum_name == "Json" {
+                    let Some(expected) = std_json_pattern_types(variant) else {
+                        self.diags.push(Diagnostic::error(
+                            "E0305",
+                            format!("pattern `{}` doesn't belong to `Json`", variant),
+                            "pattern tests must name a variant on the value's enum type"
+                                .to_string(),
+                            "check the Json variant spelling".to_string(),
+                            Some(span),
+                        ));
+                        return HashMap::new();
+                    };
+                    if bindings.len() != expected.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0306",
+                            format!(
+                                "pattern `{}` expects {} binding{}, got {}",
+                                variant,
+                                expected.len(),
+                                if expected.len() == 1 { "" } else { "s" },
+                                bindings.len()
+                            ),
+                            "each payload field needs its own binding name".to_string(),
+                            format!(
+                                "write `{}({})",
+                                variant,
+                                (0..expected.len())
+                                    .map(|i| format!("v{i}"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            Some(span),
+                        ));
+                    }
+                    return bindings
+                        .iter()
+                        .zip(expected.iter())
+                        .map(|(b, t)| (b.clone(), t.clone()))
+                        .collect();
+                }
                 let Some(variants) = self.registry.enum_variants(enum_name) else {
                     self.diags.push(Diagnostic::error(
                         "E0305",
@@ -5279,24 +5846,54 @@ impl<'a> Checker<'a> {
     ///   Some(None)       — fine, no value handed back
     ///   Some(Some(ty))   — fine, hands back `ty`
     fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
-        if call.name == syntax::FOREIGN_PRINTLN {
+        if call.name == syntax::FOREIGN_PRINTLN || call.name == syntax::FOREIGN_EPRINTLN {
+            let target = if call.name == syntax::FOREIGN_EPRINTLN {
+                "io.eprint"
+            } else {
+                syntax::BUILTIN_PRINT
+            };
             self.diags.push(Diagnostic::error(
-                "E0011",
+                "E0037",
                 format!(
                     "{} calls it `{}`, not `{}`",
                     syntax::LANG_NAME,
-                    syntax::BUILTIN_PRINT,
-                    syntax::FOREIGN_PRINTLN
+                    target,
+                    call.name
                 ),
-                format!("`{}` already ends the line for you", syntax::BUILTIN_PRINT),
-                format!(
-                    "replace `{}` with `{}`",
-                    syntax::FOREIGN_PRINTLN,
-                    syntax::BUILTIN_PRINT
-                ),
+                "`print` writes to stdout; `io.eprint` is the stderr twin in `std.io`"
+                    .to_string(),
+                format!("replace `{}` with `{}`", call.name, target),
                 Some(call.name_span),
             ));
-            // Recover: treat it as print.
+            for arg in call.args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return None;
+        }
+
+        if call.name == syntax::FOREIGN_OPEN {
+            self.diags.push(Diagnostic::error(
+                "E0038",
+                "`open` is not the M10 file API".to_string(),
+                "M10 uses whole-file helpers in `std.fs`; file handles are out of scope".to_string(),
+                "import `std.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                    .to_string(),
+                Some(call.name_span),
+            ));
+            for arg in call.args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return None;
+        }
+
+        if call.name == syntax::FOREIGN_GETENV {
+            self.diags.push(Diagnostic::error(
+                "E0039",
+                "`getenv` is written `env.get` in Jet".to_string(),
+                "environment access lives in the `std.env` module".to_string(),
+                "import `std.env as env` and call `env.get(name)`".to_string(),
+                Some(call.name_span),
+            ));
             for arg in call.args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
@@ -5857,7 +6454,7 @@ fn is_cloneable(
         }
         Type::Result { ok, err } => is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs),
         Type::Fn { .. } => false,
-        Type::Named(name) if is_type_var_name(name) => true,
+        Type::Named(name) if is_type_var_name(name) || std_type_known(name) => true,
         Type::Named(name) => {
             registry.contains(name)
                 && match registry.types.get(name) {
@@ -6135,7 +6732,7 @@ fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
-        Type::Named(n) => registry.contains(n),
+        Type::Named(n) => registry.contains(n) || std_type_known(n),
         Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
     }
@@ -6149,6 +6746,7 @@ fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
             types_comparable(ok, registry) && types_comparable(err, registry)
         }
         Type::List(inner) => types_comparable(inner, registry),
+        Type::Named(name) if name == "U8" => true,
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
@@ -6224,7 +6822,7 @@ fn expr_root_ident(expr: &Expr) -> Option<&str> {
 
 /// Types the generated Rust copies implicitly (no move on read).
 fn type_is_copy(ty: &Type) -> bool {
-    ty.is_scalar() || matches!(ty, Type::Char)
+    ty.is_scalar() || matches!(ty, Type::Char) || is_u8_ty(ty)
 }
 
 /// True when `e` is a struct-field *value* read (not enum-literal sugar like
@@ -6286,6 +6884,212 @@ fn private_item(name: &str, span: Span) -> Diagnostic {
     )
 }
 
+fn unit_ty() -> Type {
+    Type::Named("Unit".to_string())
+}
+
+fn u8_ty() -> Type {
+    Type::Named("U8".to_string())
+}
+
+fn is_u8_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Named(n) if n == "U8")
+}
+
+fn std_type_known(name: &str) -> bool {
+    matches!(
+        name,
+        "Unit" | "U8" | "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch"
+            | "Json" | "JsonError"
+    )
+}
+
+fn std_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    match (type_name, field) {
+        ("ProcessResult", "code") => Some(Type::Int),
+        ("ProcessResult", "output" | "errors") => Some(Type::String),
+        ("JsonError", "line") => Some(Type::Int),
+        ("JsonError", "message") => Some(Type::String),
+        ("Utf8Error", "message") => Some(Type::String),
+        _ => None,
+    }
+}
+
+fn std_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
+    let json = Type::Named("Json".to_string());
+    match variant {
+        "Null" => Some(Vec::new()),
+        "Boolean" => Some(vec![Type::Bool]),
+        "Number" => Some(vec![Type::Float]),
+        "Text" => Some(vec![Type::String]),
+        "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
+        "Object" => Some(vec![Type::Map {
+            key: Box::new(Type::String),
+            value: Box::new(json),
+        }]),
+        _ => None,
+    }
+}
+
+fn io_error_ty() -> Type {
+    Type::Named("IoError".to_string())
+}
+
+fn json_error_ty() -> Type {
+    Type::Named("JsonError".to_string())
+}
+
+fn result_ty(ok: Type, err: Type) -> Type {
+    Type::Result {
+        ok: Box::new(ok),
+        err: Box::new(err),
+    }
+}
+
+fn std_fixed_sig(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let read = AccessConvention::Read;
+    let string = Type::String;
+    let int = Type::Int;
+    let float = Type::Float;
+    let bool_ = Type::Bool;
+    let unit = unit_ty();
+    let io = io_error_ty();
+    let json = Type::Named("Json".to_string());
+    let list_string = Type::List(Box::new(Type::String));
+    let list_u8 = Type::List(Box::new(u8_ty()));
+    let io_unit = result_ty(unit.clone(), io.clone());
+    match (module, name) {
+        ("std.fs", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
+        ("std.fs", "read_bytes") => {
+            Some((vec![(read, Type::String)], Some(result_ty(list_u8, io_error_ty()))))
+        }
+        ("std.fs", "write" | "append") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(io_unit),
+        )),
+        ("std.fs", "exists" | "is_dir") => {
+            Some((vec![(read, Type::String)], Some(bool_)))
+        }
+        ("std.fs", "remove" | "create_dir") => {
+            Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty()))))
+        }
+        ("std.fs", "list_dir") => {
+            Some((vec![(read, Type::String)], Some(result_ty(list_string, io_error_ty()))))
+        }
+        ("std.fs", "copy" | "rename") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("std.io", "args") => Some((vec![], Some(Type::List(Box::new(Type::String))))),
+        ("std.io", "read_all_input") => {
+            Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
+        }
+        ("std.env", "get") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("std.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
+        ("std.env", "current_dir") => {
+            Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
+        }
+        ("std.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        ("std.process", "exit") => Some((vec![(read, int)], None)),
+        ("std.process", "run") => Some((
+            vec![(read, Type::List(Box::new(Type::String)))],
+            Some(result_ty(Type::Named("ProcessResult".to_string()), io_error_ty())),
+        )),
+        ("std.math", "sqrt" | "floor" | "ceil") => {
+            Some((vec![(read, float.clone())], Some(float)))
+        }
+        ("std.math", "pow") => Some((vec![(read, Type::Float), (read, Type::Float)], Some(Type::Float))),
+        ("std.math", "round") => Some((vec![(read, Type::Float)], Some(Type::Int))),
+        ("std.random", "int") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int))),
+        ("std.random", "float") => Some((vec![], Some(Type::Float))),
+        ("std.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        ("std.time", "now") => Some((vec![], Some(Type::Int))),
+        ("std.time", "sleep") => Some((vec![(read, Type::Int)], None)),
+        ("std.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
+        ("std.json", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(json.clone(), json_error_ty())),
+        )),
+        ("std.json", "render" | "render_pretty") => Some((vec![(read, json)], Some(Type::String))),
+        _ => {
+            None
+        }
+    }
+}
+
+fn std_module_items(module: &str) -> Vec<String> {
+    let items: &[&str] = match module {
+        "std.fs" => &[
+            "read", "read_bytes", "write", "append", "exists", "remove", "list_dir",
+            "create_dir", "is_dir", "copy", "rename",
+        ],
+        "std.io" => &["args", "input", "read_all_input", "eprint"],
+        "std.env" => &["get", "set", "current_dir", "home_dir"],
+        "std.process" => &["exit", "run"],
+        "std.math" => &[
+            "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e",
+            "clamp",
+        ],
+        "std.random" => &["int", "float", "pick", "shuffle", "seed"],
+        "std.time" => &["now", "sleep", "start"],
+        "std.json" => &["parse", "render", "render_pretty"],
+        "std" => &[],
+        _ => &[],
+    };
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+fn unknown_std_item(module: &str, name: &str, span: Span) -> Diagnostic {
+    let items = std_module_items(module);
+    let mut fix = if items.is_empty() {
+        "import a specific std module, like `import std.fs as fs;`".to_string()
+    } else {
+        format!("use one of: {}", items.join(", "))
+    };
+    if let Some(s) = suggest_field(name, &items) {
+        fix = format!("did you mean `{}`?", s);
+    }
+    Diagnostic::error(
+        "E1004",
+        format!("`{}` has no item `{}`", module, name),
+        "standard library modules expose only their documented M10 items".to_string(),
+        fix,
+        Some(span),
+    )
+}
+
+fn wrong_std_arity(name: &str, want: usize, got: usize, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0104",
+        format!(
+            "`{}` expects {} argument{}, got {}",
+            name,
+            want,
+            if want == 1 { "" } else { "s" },
+            got
+        ),
+        "every argument must match a standard library function parameter".to_string(),
+        format!("check the call to `{}`", name),
+        Some(span),
+    )
+}
+
+fn u8_range_error(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1003",
+        "a U8 holds 0..255".to_string(),
+        "binary APIs use one byte per value".to_string(),
+        "use a number from 0 through 255".to_string(),
+        Some(span),
+    )
+}
+
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut states: Vec<ModuleState> = (0..bundle.modules.len())
@@ -6301,6 +7105,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
             structs: HashMap::new(),
             consts: HashMap::new(),
             imports: HashMap::new(),
+            std_imports: HashMap::new(),
             tests: HashMap::new(),
             m9: M9Registry::default(),
         })
@@ -6401,6 +7206,31 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                     format!("rename one with `{} alias`", syntax::KW_AS),
                     Some(imp.alias_span),
                 ));
+                continue;
+            }
+            if st.std_imports.contains_key(&alias) {
+                diags.push(Diagnostic::error(
+                    "E0105",
+                    format!("the import name `{}` is used twice", alias),
+                    "each import needs a unique namespace name in this file".to_string(),
+                    format!("rename one with `{} alias`", syntax::KW_AS),
+                    Some(imp.alias_span),
+                ));
+                continue;
+            }
+            if let Some(module) = loader::std_module_path(imp) {
+                if !loader::is_known_std_module(&module) {
+                    diags.push(Diagnostic::error(
+                        "E1001",
+                        format!("there is no standard module `{}`", module),
+                        "`std` is compiler-known in M10, and only the frozen core modules exist"
+                            .to_string(),
+                        format!("import one of: {}", loader::std_modules_list()),
+                        Some(imp.span),
+                    ));
+                    continue;
+                }
+                st.std_imports.insert(alias, module);
                 continue;
             }
             match loader::resolve_import_target(bundle, idx, imp) {
@@ -6562,6 +7392,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
             mode,
         ));
     }
+    bundle.used_std = collect_used_std(bundle, &states);
     diags
 }
 
@@ -6594,6 +7425,240 @@ fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec<Diagnostic
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
 
+fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -> HashSet<String> {
+    let mut used = HashSet::new();
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        let imports = &states[idx].std_imports;
+        for item in &module.items {
+            match item {
+                Item::Func(f) => collect_std_stmts(&f.body, imports, &mut used),
+                Item::Struct(s) => {
+                    for m in &s.methods {
+                        collect_std_stmts(&m.body, imports, &mut used);
+                    }
+                }
+                Item::Enum(e) => {
+                    for m in &e.methods {
+                        collect_std_stmts(&m.body, imports, &mut used);
+                    }
+                }
+                Item::Impl(i) => {
+                    for m in &i.methods {
+                        collect_std_stmts(&m.body, imports, &mut used);
+                    }
+                }
+                Item::Test(t) => collect_std_stmts(&t.body, imports, &mut used),
+                Item::Const(c) => collect_std_expr(&c.value, imports, &mut used),
+                Item::Trait(_) | Item::ExternRust(_) => {}
+            }
+        }
+    }
+    used
+}
+
+fn collect_std_stmts(
+    stmts: &[Stmt],
+    imports: &HashMap<String, String>,
+    used: &mut HashSet<String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(e) => collect_std_expr(e, imports, used),
+            Stmt::Val(b) => collect_std_expr(&b.init, imports, used),
+            Stmt::Assign { target, value, .. } => {
+                collect_std_lvalue(target, imports, used);
+                collect_std_expr(value, imports, used);
+            }
+            Stmt::Return(Some(e), _) => collect_std_expr(e, imports, used),
+            Stmt::Return(None, _) => {}
+            Stmt::If(ifs) => collect_std_if(ifs, imports, used),
+            Stmt::While { cond, body, .. } => {
+                collect_std_expr(cond, imports, used);
+                collect_std_stmts(body, imports, used);
+            }
+            Stmt::For { kind, body, .. } => {
+                match kind {
+                    ForKind::Range { start, end } => {
+                        collect_std_expr(start, imports, used);
+                        collect_std_expr(end, imports, used);
+                    }
+                    ForKind::In { collection } => collect_std_expr(collection, imports, used),
+                }
+                collect_std_stmts(body, imports, used);
+            }
+            Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                collect_std_expr(subject, imports, used);
+                for arm in arms {
+                    collect_std_expr(&arm.cond, imports, used);
+                    collect_std_stmts(&arm.body, imports, used);
+                }
+                if let Some(body) = else_body {
+                    collect_std_stmts(body, imports, used);
+                }
+            }
+            Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => collect_std_stmts(body, imports, used),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+}
+
+fn collect_std_if(ifs: &IfStmt, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+    collect_std_expr(&ifs.cond, imports, used);
+    collect_std_stmts(&ifs.then_body, imports, used);
+    match &ifs.else_branch {
+        Some(ElseBranch::Else(body)) => collect_std_stmts(body, imports, used),
+        Some(ElseBranch::ElseIf(next)) => collect_std_if(next, imports, used),
+        None => {}
+    }
+}
+
+fn collect_std_lvalue(
+    lv: &LValue,
+    imports: &HashMap<String, String>,
+    used: &mut HashSet<String>,
+) {
+    match lv {
+        LValue::Local { .. } => {}
+        LValue::Index { base, index, .. } => {
+            collect_std_expr(base, imports, used);
+            collect_std_expr(index, imports, used);
+        }
+    }
+}
+
+fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+    match expr {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == "Json") {
+                used.insert("core::json".to_string());
+            }
+            if matches!(
+                method.as_str(),
+                "bytes" | "from_bytes" | "to_u8" | "elapsed_millis"
+            ) {
+                used.insert(format!("core::{method}"));
+            }
+            if let Expr::Ident(alias, _) = receiver.as_ref() {
+                if let Some(module) = imports.get(alias) {
+                    used.insert(format!("{module}::{method}"));
+                }
+            }
+            collect_std_expr(receiver, imports, used);
+            for arg in args {
+                collect_std_expr(&arg.expr, imports, used);
+            }
+        }
+        Expr::Call(c) => {
+            for arg in &c.args {
+                collect_std_expr(&arg.expr, imports, used);
+            }
+        }
+        Expr::CallValue { callee, args, .. } => {
+            collect_std_expr(callee, imports, used);
+            for arg in args {
+                collect_std_expr(&arg.expr, imports, used);
+            }
+        }
+        Expr::Field(inner, member, _) => {
+            if matches!(inner.as_ref(), Expr::Ident(n, _) if n == "Json")
+                && member == "Null"
+            {
+                used.insert("core::json".to_string());
+            }
+            collect_std_expr(inner, imports, used);
+        }
+        Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _) => collect_std_expr(inner, imports, used),
+        Expr::Binary(_, lhs, rhs, _)
+        | Expr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            collect_std_expr(lhs, imports, used);
+            collect_std_expr(rhs, imports, used);
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            collect_std_expr(base, imports, used);
+            collect_std_expr(start, imports, used);
+            collect_std_expr(end, imports, used);
+        }
+        Expr::Str(parts, _) => {
+            for part in parts {
+                if let StrPart::Interp(e) = part {
+                    collect_std_expr(e, imports, used);
+                }
+            }
+        }
+        Expr::ListLit(items, _) => {
+            for e in items {
+                collect_std_expr(e, imports, used);
+            }
+        }
+        Expr::MapLit(items, _) => {
+            for (k, v) in items {
+                collect_std_expr(k, imports, used);
+                collect_std_expr(v, imports, used);
+            }
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, _, e) in fields {
+                collect_std_expr(e, imports, used);
+            }
+        }
+        Expr::EnumLit { args, .. } => {
+            for arg in args {
+                match arg {
+                    EnumLitArg::Positional(e) => collect_std_expr(e, imports, used),
+                    EnumLitArg::Named { expr, .. } => collect_std_expr(expr, imports, used),
+                }
+            }
+        }
+        Expr::PatternTest { subject, .. } => collect_std_expr(subject, imports, used),
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
+            collect_std_expr(value, imports, used);
+            match fallback {
+                OrFallback::Value(e) => collect_std_expr(e, imports, used),
+                OrFallback::Return(Some(e), _) => collect_std_expr(e, imports, used),
+                OrFallback::Return(None, _) => {}
+                OrFallback::Panic { args, .. } => {
+                    for arg in args {
+                        collect_std_expr(&arg.expr, imports, used);
+                    }
+                }
+            }
+        }
+        Expr::Lambda(lam) => match &lam.body {
+            LambdaBody::Expr(e) => collect_std_expr(e, imports, used),
+            LambdaBody::Block(stmts) => collect_std_stmts(stmts, imports, used),
+        },
+        Expr::Int(_, _)
+        | Expr::Float(_, _)
+        | Expr::Bool(_, _)
+        | Expr::Char(_, _)
+        | Expr::Ident(_, _)
+        | Expr::Absent(_) => {}
+    }
+}
+
 fn check_module_bodies(
     module: &mut crate::ast::LoadedModule,
     module_idx: usize,
@@ -6602,31 +7667,65 @@ fn check_module_bodies(
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
+    let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
+    let ct_base_dir = module
+        .path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
     for item in &mut module.items {
         match item {
             Item::Func(f) => {
                 diags.extend(check_func_body_bundle(
-                    f, module_idx, states, None,
+                    f,
+                    module_idx,
+                    states,
+                    None,
+                    &ct_funcs,
+                    &ct_externs,
+                    &ct_base_dir,
+                    &ct_globals,
                 ));
             }
             Item::Struct(s) => {
                 for m in &mut s.methods {
                     diags.extend(check_func_body_bundle(
-                        m, module_idx, states, Some(&s.name),
+                        m,
+                        module_idx,
+                        states,
+                        Some(&s.name),
+                        &ct_funcs,
+                        &ct_externs,
+                        &ct_base_dir,
+                        &ct_globals,
                     ));
                 }
             }
             Item::Enum(e) => {
                 for m in &mut e.methods {
                     diags.extend(check_func_body_bundle(
-                        m, module_idx, states, Some(&e.name),
+                        m,
+                        module_idx,
+                        states,
+                        Some(&e.name),
+                        &ct_funcs,
+                        &ct_externs,
+                        &ct_base_dir,
+                        &ct_globals,
                     ));
                 }
             }
             Item::Impl(i) => {
                 for m in &mut i.methods {
                     diags.extend(check_func_body_bundle(
-                        m, module_idx, states, Some(&i.type_name),
+                        m,
+                        module_idx,
+                        states,
+                        Some(&i.type_name),
+                        &ct_funcs,
+                        &ct_externs,
+                        &ct_base_dir,
+                        &ct_globals,
                     ));
                 }
             }
@@ -6642,7 +7741,14 @@ fn check_module_bodies(
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
-                    &mut synthetic, module_idx, states, None,
+                    &mut synthetic,
+                    module_idx,
+                    states,
+                    None,
+                    &ct_funcs,
+                    &ct_externs,
+                    &ct_base_dir,
+                    &ct_globals,
                 ));
                 t.body = synthetic.body;
             }
@@ -6658,6 +7764,10 @@ fn check_func_body_bundle(
     module_idx: usize,
     states: &[ModuleState],
     owner_type: Option<&str>,
+    ct_funcs: &HashMap<String, Func>,
+    ct_externs: &HashSet<String>,
+    ct_base_dir: &std::path::Path,
+    ct_globals: &HashMap<String, crate::comptime::CtValue>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -6668,6 +7778,7 @@ fn check_func_body_bundle(
         modules: Some(states),
         module_idx,
         imports: &st.imports,
+        std_imports: &st.std_imports,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -6684,6 +7795,11 @@ fn check_func_body_bundle(
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         m9: &st.m9,
+        ct_funcs,
+        ct_externs,
+        ct_base_dir,
+        ct_globals,
+        ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
     };
     ck.check_params_and_body(f, owner_type);

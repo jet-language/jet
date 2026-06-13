@@ -190,6 +190,16 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_IMPORT: &str = "import";
 pub const KW_AS: &str = "as";
 
+/// S51 (ratified M10): compiler-known standard library package roots.
+pub const STD_SHORT: &str = "std";
+pub const STD_CANONICAL_ROOT: &str = "jet";
+pub const STD_CANONICAL: &str = "jet.std";
+
+/// S51 (ratified M10): first-party short names reserved before packages land.
+pub const FIRST_PARTY_RESERVED: &[&str] = &[
+    "std", "jet", "http", "regex", "csv", "toml", "crypto", "archive",
+];
+
 /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
 pub const KW_EXTERN: &str = "extern"; // S50
 pub const KW_RUST: &str = "rust"; // S50
@@ -288,3 +298,9 @@ pub const FOREIGN_CATCH: &str = "catch";
 pub const FOREIGN_EXCEPT: &str = "except";
 pub const FOREIGN_UNWRAP: &str = "unwrap";
 pub const FOREIGN_EXPECT: &str = "expect";
+
+/// M10 teaching spellings for common std/library habits.
+pub const FOREIGN_EPRINTLN: &str = "eprintln";
+pub const FOREIGN_OPEN: &str = "open";
+pub const FOREIGN_GETENV: &str = "getenv";
+pub const FOREIGN_OS: &str = "os";

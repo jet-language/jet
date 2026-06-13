@@ -81,6 +81,7 @@ pub fn load_entry_with_overlay(
         project_root,
         modules,
         parse_teaching,
+        used_std: HashSet::new(),
     })
 }
 
@@ -167,6 +168,13 @@ fn load_file(
     });
 
     for imp in &imports {
+        if let Err(d) = check_reserved_import(imp) {
+            stack.pop();
+            return Err(vec![d]);
+        }
+        if std_module_path(imp).is_some() {
+            continue;
+        }
         let target = match resolve_import(imp, path, project_root) {
             Ok(p) => p,
             Err(d) => {
@@ -204,6 +212,87 @@ fn resolve_import(
         ImportKind::File(path_str, span) => resolve_file_import(importing, path_str, project_root, *span),
         ImportKind::Module(name, span) => resolve_module_import(name, project_root, *span),
     }
+}
+
+pub fn std_module_path(imp: &ImportDecl) -> Option<String> {
+    let ImportKind::Module(name, _) = &imp.kind else {
+        return None;
+    };
+    normalize_std_module(name)
+}
+
+pub fn normalize_std_module(name: &str) -> Option<String> {
+    if name == syntax::STD_SHORT {
+        return Some(syntax::STD_SHORT.to_string());
+    }
+    if let Some(rest) = name.strip_prefix("std.") {
+        return Some(format!("std.{rest}"));
+    }
+    if name == syntax::STD_CANONICAL {
+        return Some(syntax::STD_SHORT.to_string());
+    }
+    if let Some(rest) = name.strip_prefix("jet.std.") {
+        return Some(format!("std.{rest}"));
+    }
+    None
+}
+
+pub fn is_known_std_module(name: &str) -> bool {
+    matches!(
+        name,
+        "std" | "std.fs" | "std.io" | "std.env" | "std.process" | "std.math"
+            | "std.random" | "std.time" | "std.json"
+    )
+}
+
+pub fn std_modules_list() -> &'static str {
+    "std, std.fs, std.io, std.env, std.process, std.math, std.random, std.time, std.json"
+}
+
+fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
+    if let Some(module) = std_module_path(imp) {
+        if !is_known_std_module(&module) {
+            let span = match &imp.kind {
+                ImportKind::Module(_, span) => *span,
+                ImportKind::File(_, _) => imp.span,
+            };
+            return Err(Diagnostic::error(
+                "E1001",
+                format!("there is no standard module `{}`", module),
+                "`std` is compiler-known in M10, and only the frozen core modules exist"
+                    .to_string(),
+                format!("import one of: {}", std_modules_list()),
+                Some(span),
+            ));
+        }
+        return Ok(());
+    }
+
+    let alias = import_alias(imp);
+    if syntax::FIRST_PARTY_RESERVED.contains(&alias.as_str()) {
+        return Err(Diagnostic::error(
+            "E1002",
+            format!("`{}` is reserved for first-party packages", alias),
+            "`std`, `jet`, and the first-party ring names can't be used for local modules"
+                .to_string(),
+            format!("rename the module or import it with `{} other_name`", syntax::KW_AS),
+            Some(imp.alias_span),
+        ));
+    }
+    if let ImportKind::Module(name, span) = &imp.kind {
+        let root = name.split('.').next().unwrap_or(name);
+        if syntax::FIRST_PARTY_RESERVED.contains(&root) {
+            return Err(Diagnostic::error(
+                "E1002",
+                format!("`{}` is reserved for first-party packages", root),
+                "`std`, `jet`, and the first-party ring names can't be used for local modules"
+                    .to_string(),
+                "choose a different module name".to_string(),
+                Some(*span),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn resolve_file_import(
@@ -394,6 +483,15 @@ pub fn resolve_import_target(
     importing_idx: usize,
     imp: &ImportDecl,
 ) -> Result<usize, Diagnostic> {
+    if std_module_path(imp).is_some() {
+        return Err(Diagnostic::error(
+            "E1001",
+            "standard modules do not resolve to files".to_string(),
+            "`std` is provided by the compiler in M10".to_string(),
+            "handle this import as a compiler-known module".to_string(),
+            Some(imp.span),
+        ));
+    }
     let importing = &bundle.modules[importing_idx];
     let target_path = match resolve_import(imp, &importing.path, &bundle.project_root) {
         Ok(p) => normalize_path(&p),

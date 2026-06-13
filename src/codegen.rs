@@ -26,118 +26,12 @@ use crate::diag::{span_line_col, Span};
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
 
-/// Emitted at the top of every program: one tiny display trait so codegen
-/// never needs to know a value's type to print it. Monomorphized by rustc;
-/// zero runtime dispatch. Float printing keeps the decimal part (S21).
-const PRELUDE: &str = r#"trait JetShow { fn jet_show(&self) -> String; }
-impl JetShow for i64 { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for f64 { fn jet_show(&self) -> String { format!("{:?}", self) } }
-impl JetShow for bool { fn jet_show(&self) -> String { self.to_string() } }
-impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }
-impl<T: JetShow> JetShow for &T { fn jet_show(&self) -> String { (**self).jet_show() } }
-impl<T: JetShow> JetShow for Vec<T> { fn jet_show(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl JetShow for char { fn jet_show(&self) -> String { self.to_string() } }
-impl<T: JetShow> JetShow for Option<T> {
-    fn jet_show(&self) -> String {
-        match self {
-            Some(v) => v.jet_show(),
-            None => "null".to_string(),
-        }
-    }
-}
-fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
-    eprintln!("The program stopped: {}", msg);
-    eprintln!("  --> {}:{}", file, line);
-    std::process::exit(70);
-}
-fn jet_index_vec<T: Clone>(xs: &Vec<T>, i: i64, file: &str, line: u32) -> T {
-    let len = xs.len() as i64;
-    if i < 0 || i >= len {
-        jet_panic(file, line, &format!("the list has {} items, so position {} doesn't exist", len, i));
-    }
-    xs[i as usize].clone()
-}
-fn jet_slice_vec<T: Clone>(xs: &Vec<T>, a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
-    let len = xs.len() as i64;
-    if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(file, line, &format!("can't slice {} items from {} to {} (inclusive)", len, a, b));
-    }
-    xs[a as usize..=b as usize].to_vec()
-}
-fn jet_index_map<K: Ord + Clone, V: Clone>(m: &std::collections::BTreeMap<K, V>, k: &K, file: &str, line: u32) -> V {
-    match m.get(k) {
-        Some(v) => v.clone(),
-        None => jet_panic(file, line, &format!("the map has no entry for this key")),
-    }
-}
-fn jet_map_insert<K: Ord, V>(m: &mut std::collections::BTreeMap<K, V>, k: K, v: V) {
-    m.insert(k, v);
-}
-fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
-fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
-fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len() as i64;
-    if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(file, line, &format!("can't slice {} characters from {} to {} (inclusive)", len, a, b));
-    }
-    chars[a as usize..=b as usize].iter().collect()
-}
-fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> U {
-    xs.into_iter().map(f).collect()
-}
-fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U> where F: FnMut(T) -> U {
-    xs.into_iter().map(|x| f(x)).collect()
-}
-fn jet_list_filter<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
-    xs.into_iter().filter(|x| f(x.clone())).collect()
-}
-fn jet_list_each<T, F>(xs: Vec<T>, f: F) where F: Fn(T) {
-    for x in xs { f(x); }
-}
-fn jet_list_each_ref<T, F>(xs: &Vec<T>, f: F) where F: Fn(&T) {
-    for x in xs.iter() { f(x); }
-}
-fn jet_list_each_mut<T, F>(xs: Vec<T>, mut f: F) where F: FnMut(T) {
-    for x in xs { f(x); }
-}
-fn jet_list_find<T: Clone, F>(xs: Vec<T>, f: F) -> Option<T> where F: Fn(T) -> bool {
-    xs.into_iter().find(|x| f(x.clone()))
-}
-fn jet_list_any<T: Clone, F>(xs: Vec<T>, f: F) -> bool where F: Fn(T) -> bool {
-    xs.iter().any(|x| f(x.clone()))
-}
-fn jet_list_all<T: Clone, F>(xs: Vec<T>, f: F) -> bool where F: Fn(T) -> bool {
-    xs.iter().all(|x| f(x.clone()))
-}
-fn jet_list_sort_by<T: Clone, K: Ord, F>(xs: &mut Vec<T>, f: F) where F: Fn(T) -> K {
-    xs.sort_by_key(|x| f(x.clone()));
-}
-fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) -> U {
-    xs.into_iter().fold(init, f)
-}
-fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F) where F: Fn(K, V) {
-    for (k, v) in m { f(k, v); }
-}
-trait user_Serialize { fn to_json(&self) -> String; }
-"#;
+/// Emitted at the top of every program: core runtime helpers used by generated Rust.
+const PRELUDE: &str = include_str!("prelude/core.rs");
 
-/// Extra helpers for `jet test` harnesses only (M6/S43). Uses unwind so
-/// each test is isolated; user programs still exit via `jet_panic`.
-const TEST_PRELUDE: &str = r#"fn jet_test_require(cond: bool, msg: String) {
-    if !cond {
-        panic!("{}", msg);
-    }
-}
-fn jet_test_require_eq<T: JetShow + PartialEq>(left: &T, right: &T) {
-    if left != right {
-        panic!("left: {}, right: {}", left.jet_show(), right.jet_show());
-    }
-}
-"#;
+/// Extra helpers for `jet test` harnesses only (M6/S43).
+const TEST_PRELUDE: &str = "";
+const STD_PRELUDE: &str = include_str!("prelude/std.rs");
 
 fn mangle(name: &str) -> String {
     if name == "main" {
@@ -176,6 +70,12 @@ struct Cx {
     import_mods: HashMap<String, String>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// Import alias -> compiler-known std module (`std.fs`, `std.json`, ...).
+    std_imports: HashMap<String, String>,
+    /// M10 helpers proven reachable by sema.
+    used_std: HashSet<String>,
+    /// Empty at the entry module, `super::` inside generated import modules.
+    root_prefix: String,
     /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
     ffi_crate: Option<String>,
     /// M7: Jet function name -> wrapper symbol in the FFI crate.
@@ -230,6 +130,17 @@ impl Cx {
             // module provides the namespace, so item names stay plain.
             Type::Named(name) if generics::is_type_var_name(name) && !self.type_names.contains(name) => {
                 name.clone()
+            }
+            Type::Named(name) if name == "Unit" => "()".to_string(),
+            Type::Named(name) if name == "U8" => "u8".to_string(),
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch" | "Json"
+                        | "JsonError"
+                ) =>
+            {
+                format!("{}jet_std::{name}", self.root_prefix)
             }
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", generics::user_trait_rust(name))
@@ -449,34 +360,26 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     }
 
     for (i, test) in tests.iter().enumerate() {
-        out.push_str(&format!("fn jet_test_{}() {{\n", i));
+        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
         let mut env: HashMap<String, Slot> = HashMap::new();
         emit_stmts(&cx, &test.body, &mut env, &mut out, 1, false);
+        out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
     }
 
     out.push_str("fn main() {\n");
-    out.push_str("    std::panic::set_hook(Box::new(|_| {}));\n");
     out.push_str("    let mut passed = 0usize;\n");
     out.push_str("    let mut failed = 0usize;\n");
     for (i, test) in tests.iter().enumerate() {
         let name = escape_rust_str(&test.name);
-        out.push_str(&format!(
-            "    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_test_{}())) {{\n",
-            i
-        ));
+        out.push_str(&format!("    match jet_test_{}() {{\n", i));
         out.push_str("        Ok(()) => {\n");
         out.push_str(&format!("            println!(\"{{}}: pass\", {});\n", name));
         out.push_str("            passed += 1;\n");
         out.push_str("        }\n");
-        out.push_str("        Err(payload) => {\n");
+        out.push_str("        Err(msg) => {\n");
         out.push_str(&format!("            println!(\"{{}}: FAIL\", {});\n", name));
-        out.push_str(
-            "            if let Some(s) = payload.downcast_ref::<&str>() { eprintln!(\"  {}\", s); }\n",
-        );
-        out.push_str(
-            "            else if let Some(s) = payload.downcast_ref::<String>() { eprintln!(\"  {}\", s); }\n",
-        );
+        out.push_str("            eprintln!(\"  {}\", msg);\n");
         out.push_str("            failed += 1;\n");
         out.push_str("        }\n");
         out.push_str("    }\n");
@@ -538,6 +441,9 @@ fn build_cx_items(
         test_mode: false,
         import_mods: HashMap::new(),
         import_sigs: HashMap::new(),
+        std_imports: HashMap::new(),
+        used_std: HashSet::new(),
+        root_prefix: String::new(),
         ffi_crate: link.map(|l| l.crate_name.clone()),
         extern_funcs: extern_funcs.clone(),
     };
@@ -1341,7 +1247,19 @@ fn emit_stmt(
                 &b.init,
                 Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
             );
-            let mut init = emit_expr(cx, &b.init, env);
+            let mut init = if b.is_comptime {
+                b.ct
+                    .as_ref()
+                    .map(|v| v.serialize())
+                    .unwrap_or_else(|| "Default::default()".to_string())
+            } else {
+                emit_expr(cx, &b.init, env)
+            };
+            if matches!(b.ty, Some(Type::Named(ref n)) if n == "U8")
+                && matches!(b.init, Expr::Int(_, _))
+            {
+                init = format!("({}) as u8", init);
+            }
             if mut_fn {
                 if let Some(Type::Fn { params, ret }) = &b.ty {
                     init = format!(
@@ -1351,7 +1269,7 @@ fn emit_stmt(
                     );
                 }
             }
-            let kw = if b.mutable || mut_fn {
+            let kw = if (b.mutable && !b.is_comptime) || mut_fn {
                 "let mut"
             } else {
                 "let"
@@ -1655,7 +1573,28 @@ fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
     cx.variant_owner
         .get(variant)
         .map(|t| format!("user_{}", t))
-        .unwrap_or_else(|| "user_TYPE".to_string())
+        .unwrap_or_else(|| {
+            if is_json_variant(variant) {
+                format!("{}jet_std::Json", cx.root_prefix)
+            } else {
+                "user_TYPE".to_string()
+            }
+        })
+}
+
+fn is_json_variant(variant: &str) -> bool {
+    matches!(
+        variant,
+        "Null" | "Boolean" | "Number" | "Text" | "Array" | "Object"
+    )
+}
+
+fn variant_rust_name(variant: &str) -> String {
+    if is_json_variant(variant) {
+        variant.to_string()
+    } else {
+        mangle(variant)
+    }
 }
 
 fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
@@ -1667,13 +1606,13 @@ fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
         } => {
             let prefix = enum_type_prefix(cx, variant);
             if bindings.is_empty() {
-                format!("matches!({}, {}::{})", subject, prefix, mangle(variant))
+                format!("matches!({}, {}::{})", subject, prefix, variant_rust_name(variant))
             } else if bindings.len() == 1 {
                 format!(
                     "matches!({}, {}::{}({}))",
                     subject,
                     prefix,
-                    mangle(variant),
+                    variant_rust_name(variant),
                     mangle(&bindings[0])
                 )
             } else {
@@ -1681,7 +1620,7 @@ fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
                     "matches!({}, {}::{} {{ {} }})",
                     subject,
                     prefix,
-                    mangle(variant),
+                    variant_rust_name(variant),
                     bindings
                         .iter()
                         .map(|n| format!("{}: {}", mangle(n), mangle(n)))
@@ -1714,12 +1653,12 @@ fn emit_match_pattern(_cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> S
             ..
         } => {
             if bindings.is_empty() {
-                format!("{}::{}", prefix, mangle(variant))
+                format!("{}::{}", prefix, variant_rust_name(variant))
             } else if bindings.len() == 1 {
                 format!(
                     "{}::{}({})",
                     prefix,
-                    mangle(variant),
+                    variant_rust_name(variant),
                     mangle(&bindings[0])
                 )
             } else {
@@ -1728,7 +1667,7 @@ fn emit_match_pattern(_cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> S
                     .map(|b| format!("{}: {}", mangle(b), mangle(b)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}::{} {{ {} }}", prefix, mangle(variant), fields)
+                format!("{}::{} {{ {} }}", prefix, variant_rust_name(variant), fields)
             }
         }
         Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
@@ -1821,7 +1760,7 @@ fn emit_require(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -
         } else {
             "\"condition failed\".to_string()".to_string()
         };
-        return format!("{{ jet_test_require({}, {}); }}", cond, msg_expr);
+        return format!("{{ if !({}) {{ return Err({}); }} }}", cond, msg_expr);
     }
     let (line, _) = span_line_col(&cx.src, call.name_span.start);
     format!(
@@ -1841,7 +1780,10 @@ fn emit_require_eq(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>
     let left = emit_expr(cx, &call.args[0].expr, env);
     let right = emit_expr(cx, &call.args[1].expr, env);
     if cx.test_mode {
-        return format!("{{ jet_test_require_eq(&({}), &({})); }}", left, right);
+        return format!(
+            "{{ let _jet_left = ({}); let _jet_right = ({}); if !(_jet_left == _jet_right) {{ return Err(format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show())); }} }}",
+            left, right
+        );
     }
     let (line, _) = span_line_col(&cx.src, call.name_span.start);
     format!(
@@ -2075,12 +2017,12 @@ fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
         } => {
             let prefix = enum_type_prefix(cx, variant);
             if bindings.is_empty() {
-                format!("{}::{}", prefix, mangle(variant))
+                format!("{}::{}", prefix, variant_rust_name(variant))
             } else if bindings.len() == 1 {
                 format!(
                     "{}::{}({})",
                     prefix,
-                    mangle(variant),
+                    variant_rust_name(variant),
                     mangle(&bindings[0])
                 )
             } else {
@@ -2089,7 +2031,7 @@ fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .map(|b| format!("{}: {}", mangle(b), mangle(b)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}::{} {{ {} }}", prefix, mangle(variant), fields)
+                format!("{}::{} {{ {} }}", prefix, variant_rust_name(variant), fields)
             }
         }
         Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
@@ -2254,6 +2196,20 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         Expr::Field(inner, member, _) => {
             if member == "clone" {
                 format!("({}).clone()", emit_expr(cx, inner, env))
+            } else if let Expr::Ident(alias, _) = &**inner {
+                if let Some(module) = cx.std_imports.get(alias) {
+                    emit_std_field(module, member)
+                } else if alias == "Json" && member == "Null" {
+                    format!("{}jet_std::Json::Null", cx.root_prefix)
+                } else if cx.enum_variants.contains_key(alias) {
+                    format!("user_{}::{}", alias, mangle(member))
+                } else {
+                    format!(
+                        "({}).{}",
+                        emit_expr(cx, inner, env),
+                        mangle(member)
+                    )
+                }
             } else if let Expr::Ident(type_name, _) = &**inner {
                 if cx.enum_variants.contains_key(type_name) {
                     format!("user_{}::{}", type_name, mangle(member))
@@ -2556,6 +2512,9 @@ fn emit_builtin_method(
             (syntax::TYPE_FLOAT, "parse") => {
                 return Some(format!("({}).trim().parse::<f64>()", arg(0)));
             }
+            (syntax::TYPE_STRING, "from_bytes") => {
+                return Some(format!("{}jet_string_from_bytes(&({}))", cx.root_prefix, arg(0)));
+            }
             _ => {}
         }
     }
@@ -2597,6 +2556,7 @@ fn emit_builtin_method(
         )),
         "clear" => Some(format!("({}).clear()", recv)),
         "chars" => Some(format!("({}).chars().collect::<Vec<char>>()", recv)),
+        "bytes" => Some(format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)),
         "trim" => Some(format!("({}).trim().to_string()", recv)),
         "split" => Some(format!("jet_string_split(&({}), &{})", recv, arg(0))),
         "starts_with" => Some(format!("({}).starts_with(&{})", recv, arg(0))),
@@ -2622,6 +2582,8 @@ fn emit_builtin_method(
         "to_string" => Some(format!("({}).jet_show()", recv)),
         "to_float" => Some(format!("({}) as f64", recv)),
         "to_int" => Some(format!("({}) as i64", recv)),
+        "to_u8" => Some(format!("{}jet_int_to_u8({})", cx.root_prefix, recv)),
+        "elapsed_millis" => Some(format!("{}jet_stopwatch_elapsed_millis(&({}))", cx.root_prefix, recv)),
         "map" => {
             if let Expr::Lambda(l) = &args[0].expr {
                 if l.meta.needs_fn_mut {
@@ -2668,6 +2630,102 @@ fn emit_builtin_method(
     }
 }
 
+fn emit_std_field(module: &str, name: &str) -> String {
+    match (module, name) {
+        ("std.math", "pi") => "std::f64::consts::PI".to_string(),
+        ("std.math", "e") => "std::f64::consts::E".to_string(),
+        _ => "/* unknown std field */".to_string(),
+    }
+}
+
+fn emit_std_call(
+    cx: &Cx,
+    module: &str,
+    method: &str,
+    args: &[crate::ast::CallArg],
+    env: &HashMap<String, Slot>,
+) -> String {
+    let arg = |i: usize| {
+        args.get(i)
+            .map(|a| emit_expr(cx, &a.expr, env))
+            .unwrap_or_default()
+    };
+    let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
+    match (module, method) {
+        ("std.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
+        ("std.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
+        ("std.fs", "write") => format!("{}(&({}), &({}))", helper("jet_std_fs_write"), arg(0), arg(1)),
+        ("std.fs", "append") => format!("{}(&({}), &({}))", helper("jet_std_fs_append"), arg(0), arg(1)),
+        ("std.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
+        ("std.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
+        ("std.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
+        ("std.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
+        ("std.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
+        ("std.fs", "copy") => format!("{}(&({}), &({}))", helper("jet_std_fs_copy"), arg(0), arg(1)),
+        ("std.fs", "rename") => format!("{}(&({}), &({}))", helper("jet_std_fs_rename"), arg(0), arg(1)),
+        ("std.io", "args") => format!("{}()", helper("jet_std_io_args")),
+        ("std.io", "input") => {
+            if args.is_empty() {
+                format!("{}(None)", helper("jet_std_io_input"))
+            } else {
+                format!("{}(Some(&({})))", helper("jet_std_io_input"), arg(0))
+            }
+        }
+        ("std.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
+        ("std.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
+        ("std.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
+        ("std.env", "set") => format!("{}(&({}), &({}))", helper("jet_std_env_set"), arg(0), arg(1)),
+        ("std.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
+        ("std.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
+        ("std.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
+        ("std.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
+        ("std.math", "sqrt") => format!("{}({})", helper("jet_std_math_sqrt"), arg(0)),
+        ("std.math", "pow") => format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)),
+        ("std.math", "abs") => format!("({}).abs()", arg(0)),
+        ("std.math", "min") => format!("({}).min({})", arg(0), arg(1)),
+        ("std.math", "max") => format!("({}).max({})", arg(0), arg(1)),
+        ("std.math", "floor") => format!("{}({})", helper("jet_std_math_floor"), arg(0)),
+        ("std.math", "ceil") => format!("{}({})", helper("jet_std_math_ceil"), arg(0)),
+        ("std.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
+        ("std.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
+        ("std.random", "int") => format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1)),
+        ("std.random", "float") => format!("{}()", helper("jet_std_random_float")),
+        ("std.random", "pick") => format!("{}(&({}))", helper("jet_std_random_pick"), arg(0)),
+        ("std.random", "shuffle") => format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0)),
+        ("std.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
+        ("std.time", "now") => format!("{}()", helper("jet_std_time_now")),
+        ("std.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
+        ("std.time", "start") => format!("{}()", helper("jet_std_time_start")),
+        ("std.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        ("std.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
+        ("std.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
+        _ => "/* unknown std call */".to_string(),
+    }
+}
+
+fn emit_std_json_lit(
+    cx: &Cx,
+    variant: &str,
+    args: &[crate::ast::CallArg],
+    env: &HashMap<String, Slot>,
+) -> String {
+    let arg = |i: usize| {
+        args.get(i)
+            .map(|a| emit_expr(cx, &a.expr, env))
+            .unwrap_or_default()
+    };
+    let prefix = format!("{}jet_std::Json", cx.root_prefix);
+    match variant {
+        "Null" => format!("{prefix}::Null"),
+        "Boolean" => format!("{prefix}::Boolean({})", arg(0)),
+        "Number" => format!("{prefix}::Number({})", arg(0)),
+        "Text" => format!("{prefix}::Text({})", arg(0)),
+        "Array" => format!("{prefix}::Array({})", arg(0)),
+        "Object" => format!("{prefix}::Object({})", arg(0)),
+        _ => "/* unknown Json variant */".to_string(),
+    }
+}
+
 fn emit_method_call(
     cx: &Cx,
     receiver: &Expr,
@@ -2693,11 +2751,10 @@ fn emit_method_call(
             }
         }
     }
-    // Built-in collection/string methods take precedence when they match.
-    if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
-        return s;
-    }
     if let Expr::Ident(alias, _) = receiver {
+        if let Some(module) = cx.std_imports.get(alias) {
+            return emit_std_call(cx, module, method, args, env);
+        }
         if let Some(mod_name) = cx.import_mods.get(alias) {
             let sig = cx
                 .import_sigs
@@ -2707,7 +2764,14 @@ fn emit_method_call(
             return format!("{}::{}({})", mod_name, mangle(method), arg_str);
         }
     }
+    // Built-in collection/string methods take precedence when they match.
+    if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
+        return s;
+    }
     if let Expr::Ident(type_name, _) = receiver {
+        if type_name == "Json" {
+            return emit_std_json_lit(cx, method, args, env);
+        }
         if let Some(variants) = cx.enum_variants.get(type_name) {
             if variants.iter().any(|(v, _)| v == method) {
                 let enum_args: Vec<EnumLitArg> = args
@@ -2887,6 +2951,17 @@ fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, 
     map
 }
 
+fn std_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        if let Some(std_module) = loader::std_module_path(imp) {
+            map.insert(loader::import_alias(imp), std_module);
+        }
+    }
+    map
+}
+
 fn import_sig_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
@@ -2969,6 +3044,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    if !bundle.used_std.is_empty() {
+        out.push_str(STD_PRELUDE);
+    }
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
@@ -2990,6 +3068,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         );
         cx.import_mods = import_mod_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
+        cx.std_imports = std_import_map(bundle, i);
+        cx.used_std = bundle.used_std.clone();
+        cx.root_prefix = "super::".to_string();
         emit_program_items(&cx, &module.items, &mut out, true);
         out.push_str("}\n\n");
     }
@@ -3003,6 +3084,8 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     );
     cx.import_mods = import_mods;
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    cx.std_imports = std_import_map(bundle, bundle.entry);
+    cx.used_std = bundle.used_std.clone();
     emit_program_items(&cx, &entry.items, &mut out, true);
     out
 }
@@ -3030,6 +3113,9 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     }
     out.push_str(PRELUDE);
     out.push_str(TEST_PRELUDE);
+    if !bundle.used_std.is_empty() {
+        out.push_str(STD_PRELUDE);
+    }
     out.push('\n');
 
     let import_mods = import_mod_map(bundle, bundle.entry);
@@ -3052,6 +3138,9 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
+        cx.std_imports = std_import_map(bundle, i);
+        cx.used_std = bundle.used_std.clone();
+        cx.root_prefix = "super::".to_string();
         emit_program_items(&cx, &module.items, &mut out, false);
         out.push_str("}\n\n");
     }
@@ -3066,37 +3155,31 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     cx.test_mode = true;
     cx.import_mods = import_mods;
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    cx.std_imports = std_import_map(bundle, bundle.entry);
+    cx.used_std = bundle.used_std.clone();
     emit_program_items(&cx, &entry.items, &mut out, false);
 
     for (i, test) in tests.iter().enumerate() {
-        out.push_str(&format!("fn jet_test_{}() {{\n", i));
+        out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
         let mut env: HashMap<String, Slot> = HashMap::new();
         emit_stmts(&cx, &test.body, &mut env, &mut out, 1, false);
+        out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
     }
 
     out.push_str("fn main() {\n");
-    out.push_str("    std::panic::set_hook(Box::new(|_| {}));\n");
     out.push_str("    let mut passed = 0usize;\n");
     out.push_str("    let mut failed = 0usize;\n");
     for (i, test) in tests.iter().enumerate() {
         let name = escape_rust_str(&test.name);
-        out.push_str(&format!(
-            "    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_test_{}())) {{\n",
-            i
-        ));
+        out.push_str(&format!("    match jet_test_{}() {{\n", i));
         out.push_str("        Ok(()) => {\n");
         out.push_str(&format!("            println!(\"{{}}: pass\", {});\n", name));
         out.push_str("            passed += 1;\n");
         out.push_str("        }\n");
-        out.push_str("        Err(payload) => {\n");
+        out.push_str("        Err(msg) => {\n");
         out.push_str(&format!("            println!(\"{{}}: FAIL\", {});\n", name));
-        out.push_str(
-            "            if let Some(s) = payload.downcast_ref::<&str>() { eprintln!(\"  {}\", s); }\n",
-        );
-        out.push_str(
-            "            else if let Some(s) = payload.downcast_ref::<String>() { eprintln!(\"  {}\", s); }\n",
-        );
+        out.push_str("            eprintln!(\"  {}\", msg);\n");
         out.push_str("            failed += 1;\n");
         out.push_str("        }\n");
         out.push_str("    }\n");

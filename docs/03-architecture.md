@@ -70,6 +70,11 @@
   creates or requires a Cargo project for user code. Agents must not add
   a mandatory project structure, lockfile, or manifest for users; any
   future multi-file/package story is opt-in and post-v1 (see roadmap).
+- **R10 — Std is pay-for-what-you-call.** M10 standard-library modules are
+  compiler-known namespaces, but importing them is free. Sema records the
+  std helpers that a checked program can call, and codegen emits only those
+  helper templates. A program that imports every std module but calls none
+  should stay in hello-world size territory.
 
 ## Testing strategy
 

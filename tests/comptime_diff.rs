@@ -10,6 +10,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Expressions whose comptime and runtime evaluation must agree. Each is
 /// inlined verbatim on both sides, so it must be a self-contained
@@ -118,4 +119,97 @@ fn comptime_matches_runtime() {
         );
     }
     let _ = PathBuf::new();
+}
+
+#[test]
+fn local_comptime_is_literal_data() {
+    let stdout = compile_and_run(
+        r#"
+fn build() -> List<Int> {
+    var xs: List<Int> = [];
+    for i in 1..3 {
+        xs.push(i * 10);
+    }
+    return xs;
+}
+
+fn main() {
+    comptime xs = build();
+    print("{xs}");
+    print("{xs[1]}");
+}
+"#,
+    );
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), vec!["[10, 20, 30]", "20"]);
+}
+
+#[test]
+fn struct_and_enum_comptime_values_round_trip() {
+    let stdout = compile_and_run(
+        r#"
+struct Pair {
+    left: Int;
+    right: String;
+}
+
+enum Light {
+    Red;
+    Green;
+}
+
+comptime P = Pair {left: 7, right: "seven"};
+comptime L = Light.Green;
+
+fn main() {
+    val p = Pair {left: 7, right: "seven"};
+    val l = Light.Green;
+    print("{P.left}");
+    print("{p.left}");
+    print("{P.right}");
+    print("{p.right}");
+    print("{L == Light.Green}");
+    print("{l == Light.Green}");
+}
+"#,
+    );
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        vec!["7", "7", "seven", "seven", "true", "true"]
+    );
+}
+
+fn compile_and_run(src: &str) -> String {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: rustc not found; skipping comptime run fixture");
+        return String::new();
+    }
+    let compiled = match jet::compile(src) {
+        Ok(c) => c,
+        Err(diags) => panic!(
+            "fixture failed the front end:\n{}",
+            jet::render_diagnostics("comptime_fixture.jet", src, &diags)
+        ),
+    };
+    let dir = std::env::temp_dir();
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let rs = dir.join(format!("jet_ct_fixture_{}.rs", id));
+    let bin = dir.join(format!("jet_ct_fixture_{}", id));
+    fs::write(&rs, &compiled.rust).unwrap();
+    let out = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "rustc rejected generated code:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(run.status.success(), "fixture panicked at runtime");
+    String::from_utf8(run.stdout).unwrap()
 }
