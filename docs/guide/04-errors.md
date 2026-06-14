@@ -11,7 +11,7 @@ enum ParseError {
     BadDigit(String);
 }
 
-fn parse_age(raw: String) -> Result<Int, ParseError> {
+fn parse_age(raw: String) -> Int ? ParseError {
     if raw == "" {
         return err(ParseError.Empty);
     }
@@ -22,10 +22,21 @@ fn parse_age(raw: String) -> Result<Int, ParseError> {
 }
 ```
 
-A fallible function returns `Result<T, E>` — `T` on success, `E` on failure.
-You build the two outcomes with `ok(value)` and `err(reason)`. The error type
-is just a type you choose: an enum like `ParseError` when you want named cases,
-or a plain `String` when a message is enough.
+A fallible function returns `T ? E` — `T` on success, `E` on failure. You
+build the two outcomes with `ok(value)` and `err(reason)`. The error type is
+just a type you choose: an enum like `ParseError` when you want named cases, or
+a plain `String` when a message is enough.
+
+When a message is enough and you do not care about a custom error type, leave
+the error type off:
+
+```jet
+fn read_count(path: String) -> Int ? {
+    return err("could not read count");
+}
+```
+
+`Int ?` uses Jet's default `Error` type.
 
 Now the interesting part is how you *consume* one, because Jet gives you three
 ways and each is the right one somewhere.
@@ -49,7 +60,7 @@ so `or` covers "recover" and "give up" both.
 ## `?` — pass the failure up to my caller
 
 ```jet
-fn load() -> Result<Int, ParseError> {
+fn load() -> Int ? ParseError {
     val n = parse_age("7")?;
     return ok(n * 2);
 }
@@ -60,7 +71,7 @@ going; on failure it stops the function then and there and returns the error to
 *your* caller. Your code reads like the happy path — `val n =
 parse_age("7")?;` — with the error handling factored out into one character.
 The catch: `?` can only live in a function that itself returns a compatible
-`Result`, because that's where the early error goes.
+fallible type, because that's where the early error goes.
 
 ## `switch` — handle each outcome explicitly
 
@@ -96,17 +107,21 @@ it, return an `err`; if it means your own code is wrong, `require`/`panic`.
 
 ## main can't quietly fail
 
-`main` may not return a `Result`. At the top of your program you have to decide
+`main` may not return a fallible type. At the top of your program you have to decide
 what a failure *means* — print something and exit, fall back to a default, or
 panic — using the same `or` / `switch` / `panic` tools. Failures don't get to
 disappear off the top of the stack.
 
 ## What you actually have to remember
 
-- Fallible functions return `Result<T, E>`; build outcomes with `ok` / `err`.
+- Fallible functions return `T ? E`, or `T ?` for the default `Error`; build outcomes with `ok` / `err`.
 - `value or fallback` — recover or bail with a default.
-- `value?` — propagate the error to your caller (only inside a `Result` function).
+- `value?` — propagate the error to your caller (only inside a fallible function).
 - `switch` with `it == ok(n)` / `it == err(e)` — handle both sides yourself.
 - `require` / `panic` are for bugs, not for expected bad input.
+
+One syntax edge: in a function return type, `T?` is formatted as `T ?` and
+means a fallible return with the default `Error`. If a function really returns
+an optional value, parenthesize it: `fn find() -> (Int?)`.
 
 Next: [lists, maps, and the closures that work on them](05-collections.md).

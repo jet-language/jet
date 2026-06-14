@@ -160,15 +160,18 @@ impl Circle {
 
 ## M4 — errors as values (done)
 
-Fallible functions return **`Result<T, E>`** (S34): `T` is the success
-payload, `E` is any enum, struct, or `String`. Build outcomes with
-**`ok(v)`** and **`err(e)`**; test them with **`== ok(n)`** / **`== err(e)`**
-(same pattern machinery as M3 optionals).
+Fallible functions return **`T ? E`** (S34): `T` is the success payload,
+`E` is any enum, struct, `String`, or the default **`Error`** type. Omitting
+the error side in a function return — **`T ?`** — means **`T ? Error`**.
+Build outcomes with **`ok(v)`** and **`err(e)`**; test them with
+**`== ok(n)`** / **`== err(e)`** (same pattern machinery as M3 optionals).
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
-  enclosing function must return a compatible `Result<…, E>` (same error
-  type in v1). On **`T?`**, `?` propagates `null` when the function returns
-  an optional.
+  enclosing function must return a compatible fallible type. On **`T?`**,
+  `?` propagates `null` when the function returns an optional.
+- In a function return type, **`T?`** parses as **`T ?`** and the formatter
+  writes the space. A function that returns an optional writes
+  **`-> (T?)`**.
 - **`or <expr>`** (S35) is the fallback operator on a fallible value:
   yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? or b` and `x == 1 || y or 0`
@@ -240,7 +243,7 @@ item. **`extern rust "std" { … }`** works for standard-library items with no
 extra dependency. Non-`std` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `List`/`Map`/`T?`/`Result<…>` built from allowed types, and
+`Char`, `List`/`Map`/`T?`/`T ? E` built from allowed types, and
 structs/enums whose fields are allowed. No `mut`/`take`/`view` parameters, no
 borrowed returns, no callbacks (**E0702**).
 
@@ -344,7 +347,7 @@ roots (`std`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
 **E1002**. Selective imports are rejected; keep qualified access through an
 alias.
 
-Fallible std functions return `Result<T, E>` and must be handled with `?`,
+Fallible std functions return `T ? E` and must be handled with `?`,
 `or`, or pattern tests like any M4 result. File APIs use whole-file helpers
 only; file handles and streaming are out of scope. Paths are `String` in M10.
 Binary APIs use `U8` and `List<U8>`; integer literals for `U8` must be in
@@ -363,6 +366,37 @@ calls and codegen emits only those helpers (R10).
 Examples: `examples/29_files.jet`, `examples/30_json.jet`,
 `examples/31_cli.jet`. UI: `tests/ui/std_*`, `tests/ui/u8_out_of_range.jet`,
 and M10 teaching errors **E0037**–**E0039**.
+
+## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
+
+`std.tasks` provides blocking tasks and typed channels. Import it as a normal
+std module:
+
+```jet
+import std.tasks as tasks;
+```
+
+`tasks.spawn(() => work()) -> Task<T>` starts a task from a zero-parameter
+lambda. The lambda must own every captured value: shared mutable captures are
+**E1101**; use `take(name)` to hand a value to the task, or use a channel to
+send results back. Values crossing the task boundary must be sendable
+(**E1102**): no `view` borrows, no structs that contain `ref` fields, no trait
+values, and no closures unless handed over with `take`.
+
+`task.join() -> T` waits for the task and consumes the `Task<T>` handle. Calling
+`.join()` twice is ordinary use-after-move (**E0121**). Dropping a `Task`
+without joining emits **L1101** because the program may end before the task
+finishes. A panic inside a task is reported when joined and exits with the
+runtime panic code.
+
+`tasks.channel<T>() -> Channel<T>` creates a receive half. `ch.sender() ->
+Sender<T>` creates a clonable send half. `sender.send(value)` moves a `T` into
+the channel (`take` semantics for non-copy values), and `ch.receive() -> T or
+Closed` blocks until a value arrives or all senders are gone. Channel payloads
+must be sendable (**E1102**).
+
+Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
+**E0041** points `Mutex`/`lock` users at channels.
 
 ## Deliberately absent
 

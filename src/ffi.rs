@@ -423,6 +423,7 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
             rust_type(err, user_types)
         ),
         Type::Fn { .. } => "Box<dyn std::any::Any>".to_string(),
+        Type::Named(name) if name == "Error" => "String".to_string(),
         Type::Named(name) if user_types.contains(name) => format!("user_{name}"),
         Type::Named(name) => name.clone(),
         Type::Apply { name, args } if user_types.contains(name) => format!(
@@ -508,4 +509,3 @@ fn tool_error(msg: &str) -> Vec<Diagnostic> {
         None,
     )]
 }
-

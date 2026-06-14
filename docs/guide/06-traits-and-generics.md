@@ -102,7 +102,7 @@ behavior. "Find the largest element" only makes sense if elements can be
 compared, so you say so with a bound — `T: Comparable`:
 
 ```jet
-fn largest<T: Comparable>(xs: List<T>) -> T? {
+fn largest<T: Comparable>(xs: List<T>) -> (T?) {
     if xs.len() == 0 {
         return null;
     }

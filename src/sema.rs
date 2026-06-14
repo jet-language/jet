@@ -15,7 +15,7 @@ use crate::ast::{
 };
 use crate::loader;
 use crate::collections::{self, is_map_key_type, is_reserved_type};
-use crate::diag::{Diagnostic, Span};
+use crate::diag::{Diagnostic, Span, TextEdit};
 use crate::generics::{e0901, e0904, e0905, e0909, generic_depth_exceeded, is_type_var_name, COMPARABLE};
 use crate::m9::M9Registry;
 use crate::syntax;
@@ -257,6 +257,9 @@ fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
 }
 
 fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
+    if name == syntax::TYPE_ERROR {
+        return true;
+    }
     match registry.types.get(name) {
         Some(TypeDef::Struct { fields, .. }) => fields
             .iter()
@@ -310,6 +313,34 @@ struct LocalInfo {
     param_conv: Option<AccessConvention>,
     /// Loop nesting depth where the name was declared (for move-in-loop).
     decl_loop_depth: usize,
+    /// Whether this local can cross a task/channel boundary. For ordinary
+    /// values this follows the type; for lambdas it also includes captures.
+    sendable: bool,
+    /// Binding span for a Task value that must be consumed with `.join()`.
+    task_lint_span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+enum SendProblemKind {
+    RefField,
+    ClosureNeedsTake,
+    ClosureCaptures,
+    TraitValue(String),
+    ViewBorrow,
+}
+
+#[derive(Debug, Clone)]
+struct SendabilityProblem {
+    root: Option<String>,
+    path: Vec<String>,
+    kind: SendProblemKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SendCrossing {
+    TaskCapture,
+    TaskResult,
+    ChannelSend,
 }
 
 /// What the driver is compiling — affects `main` / test requirements (M6).
@@ -1017,6 +1048,7 @@ fn check_func_body(
         iter_borrowed: HashSet::new(),
         borrow_ctx: false,
         lambda_escapes: true,
+        is_task_spawn: false,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         m9,
@@ -1052,6 +1084,8 @@ impl<'a> Checker<'a> {
                             mutable: matches!(p.convention, AccessConvention::Mutate),
                             param_conv: Some(p.convention),
                             decl_loop_depth: 0,
+                            sendable: true,
+                            task_lint_span: None,
                         },
                     );
                 }
@@ -1068,11 +1102,14 @@ impl<'a> Checker<'a> {
                         mutable: matches!(p.convention, AccessConvention::Mutate),
                         param_conv: Some(p.convention),
                         decl_loop_depth: 0,
+                        sendable: true,
+                        task_lint_span: None,
                     },
                 );
             }
         }
         self.check_block(&mut f.body, false);
+        self.lint_unjoined_tasks_in_current_scope();
         if f.return_type.is_some() && !block_definitely_returns(&f.body) {
             let rt = f.return_type.clone().unwrap();
             self.diags.push(Diagnostic::error(
@@ -1205,6 +1242,8 @@ struct Checker<'a> {
     borrow_ctx: bool,
     /// M8: when false, a lambda is consumed inline (collection methods / borrow).
     lambda_escapes: bool,
+    /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
+    is_task_spawn: bool,
     /// M8: binding name when checking `val f = (…) => …` (E0804 self-call).
     lambda_binding: Option<String>,
     /// Names mutably captured by an escaping lambda still in scope (E0204).
@@ -1229,6 +1268,7 @@ impl<'a> Checker<'a> {
     }
 
     fn pop_scope(&mut self) {
+        self.lint_unjoined_tasks_in_current_scope();
         self.scopes.pop();
         self.lambda_mut_borrow_stack.pop();
         self.ct_scopes.pop();
@@ -1276,6 +1316,8 @@ impl<'a> Checker<'a> {
                     mutable: false,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    task_lint_span: None,
                 },
             );
         }
@@ -1314,7 +1356,8 @@ impl<'a> Checker<'a> {
                 ));
             }
             Type::Apply { name, args } => {
-                if !self.registry.contains(name) {
+                let is_std_generic = matches!(name.as_str(), "Task" | "Channel" | "Sender");
+                if !is_std_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0119",
                         format!("there's no type called `{}`", name),
@@ -1323,35 +1366,37 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                let expected = self
-                    .m9
-                    .struct_params
-                    .get(name)
-                    .or_else(|| self.m9.enum_params.get(name));
-                if let Some(params) = expected {
-                    if params.len() != args.len() {
+                if !is_std_generic {
+                    let expected = self
+                        .m9
+                        .struct_params
+                        .get(name)
+                        .or_else(|| self.m9.enum_params.get(name));
+                    if let Some(params) = expected {
+                        if params.len() != args.len() {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                format!(
+                                    "`{}` expects {} type argument{}, got {}",
+                                    name,
+                                    params.len(),
+                                    if params.len() == 1 { "" } else { "s" },
+                                    args.len()
+                                ),
+                                "every generic parameter needs a matching type argument".to_string(),
+                                format!("write `{}`<{}>", name, params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
+                                Some(span),
+                            ));
+                        }
+                    } else if !args.is_empty() {
                         self.diags.push(Diagnostic::error(
                             "E0119",
-                            format!(
-                                "`{}` expects {} type argument{}, got {}",
-                                name,
-                                params.len(),
-                                if params.len() == 1 { "" } else { "s" },
-                                args.len()
-                            ),
-                            "every generic parameter needs a matching type argument".to_string(),
-                            format!("write `{}`<{}>", name, params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
+                            format!("`{}` isn't generic", name),
+                            "only types declared with type parameters accept `<…>`".to_string(),
+                            format!("use `{}` without type arguments", name),
                             Some(span),
                         ));
                     }
-                } else if !args.is_empty() {
-                    self.diags.push(Diagnostic::error(
-                        "E0119",
-                        format!("`{}` isn't generic", name),
-                        "only types declared with type parameters accept `<…>`".to_string(),
-                        format!("use `{}` without type arguments", name),
-                        Some(span),
-                    ));
                 }
                 for arg in args {
                     self.check_declared_type(arg, span);
@@ -1785,6 +1830,15 @@ impl<'a> Checker<'a> {
                             Some(expr.span()),
                         ));
                     }
+                    if is_task_type(&ty) {
+                        self.diags.push(Diagnostic::lint(
+                            "L1101",
+                            "a spawned task is dropped without `.join()`".to_string(),
+                            "the program may end before this task finishes".to_string(),
+                            "store the task in a binding and call `.join()`".to_string(),
+                            Some(expr.span()),
+                        ));
+                    }
                 }
             }
             Stmt::Return(expr, span) => {
@@ -1794,7 +1848,9 @@ impl<'a> Checker<'a> {
                         self.expected_type = Some(rt.clone());
                         // In a `-> view` function the returned value stays a
                         // borrow, so a view call may flow straight through.
-                        self.borrow_ctx = self.view_return;
+                        // Spawned task returns are checked separately by
+                        // E1102, which avoids a generic E0206 cascade.
+                        self.borrow_ctx = self.view_return || self.is_task_spawn;
                         let et = self.infer(e);
                         self.expected_type = saved_expected;
                         // Returning a borrowed parameter would move out of a
@@ -1938,6 +1994,8 @@ impl<'a> Checker<'a> {
                                 mutable: false,
                                 param_conv: None,
                                 decl_loop_depth: self.loop_depth,
+                                sendable: true,
+                                task_lint_span: None,
                             },
                         );
                         for s in body.iter_mut() {
@@ -2050,6 +2108,8 @@ impl<'a> Checker<'a> {
                     mutable: false,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    task_lint_span: None,
                 },
             );
         }
@@ -2139,6 +2199,8 @@ impl<'a> Checker<'a> {
                         mutable: false,
                         param_conv: None,
                         decl_loop_depth: self.loop_depth,
+                        sendable: true,
+                        task_lint_span: None,
                     },
                 );
             }
@@ -2191,6 +2253,8 @@ impl<'a> Checker<'a> {
                                 mutable: false,
                                 param_conv: None,
                                 decl_loop_depth: self.loop_depth,
+                                sendable: true,
+                                task_lint_span: None,
                             },
                         );
                     }
@@ -2217,6 +2281,8 @@ impl<'a> Checker<'a> {
                             mutable: false,
                             param_conv: None,
                             decl_loop_depth: self.loop_depth,
+                            sendable: true,
+                            task_lint_span: None,
                         },
                     );
                 }
@@ -2234,13 +2300,22 @@ impl<'a> Checker<'a> {
             if let Some(st) = subj_ty {
                 if let Some(missing) = missing_pattern_coverage(&st, &covered, self.registry) {
                     if else_body.is_none() {
-                        self.diags.push(Diagnostic::error(
+                        let mut diag = Diagnostic::error(
                             "E0307",
                             format!("`switch` doesn't cover every case — missing: {}", missing.join(", ")),
                             "when every arm is a pattern test, each variant must appear once".to_string(),
                             format!("add an arm for: {}", missing.join(", ")),
                             Some(span),
-                        ));
+                        );
+                        // Attach a structured insert so LSP/CLI can add compilable arms.
+                        if let Some(last_arm) = arms.last() {
+                            let new_text = missing_arms_text(&st, &missing, subj_name.as_deref());
+                            diag.edit = Some(TextEdit {
+                                span: Span::new(last_arm.span.end, last_arm.span.end),
+                                new_text,
+                            });
+                        }
+                        self.diags.push(diag);
                     }
                 }
             }
@@ -2462,6 +2537,16 @@ impl<'a> Checker<'a> {
                 Err(d) => self.diags.push(d),
             }
         }
+        let binding_sendable = if let Expr::Lambda(lam) = &b.init {
+            self.lambda_value_sendable(lam, &final_ty)
+        } else {
+            self.sendability_problem(&final_ty, true).is_none()
+        };
+        let task_lint_span = if is_task_type(&final_ty) {
+            Some(b.name_span)
+        } else {
+            None
+        };
         self.declare(
             &b.name,
             b.name_span,
@@ -2470,6 +2555,8 @@ impl<'a> Checker<'a> {
                 mutable: b.mutable && !b.is_comptime,
                 param_conv: None,
                 decl_loop_depth: self.loop_depth,
+                sendable: binding_sendable,
+                task_lint_span,
             },
         );
     }
@@ -2564,6 +2651,257 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+    }
+
+    fn lint_unjoined_tasks_in_current_scope(&mut self) {
+        let Some(scope) = self.scopes.last() else {
+            return;
+        };
+        let pending: Vec<(String, Span)> = scope
+            .iter()
+            .filter_map(|(name, info)| {
+                let span = info.task_lint_span?;
+                if self.moved.contains_key(name) {
+                    None
+                } else {
+                    Some((name.clone(), span))
+                }
+            })
+            .collect();
+        for (name, span) in pending {
+            self.diags.push(Diagnostic::lint(
+                "L1101",
+                format!("task `{}` is dropped without `.join()`", name),
+                "the program may end before this task finishes".to_string(),
+                "call `.join()` on the task before it goes out of scope".to_string(),
+                Some(span),
+            ));
+        }
+    }
+
+    fn lambda_value_sendable(&self, lam: &Lambda, fn_ty: &Type) -> bool {
+        let param_names: HashSet<String> =
+            lam.params.iter().map(|p| p.name.clone()).collect();
+        let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
+        let mut read_caps = HashSet::new();
+        let mut mut_caps = HashSet::new();
+        lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
+        for name in read_caps.iter().chain(mut_caps.iter()) {
+            if param_names.contains(name) {
+                continue;
+            }
+            let taken = take_set.contains(name);
+            if mut_caps.contains(name) && !taken {
+                return false;
+            }
+            let cap = self
+                .lookup(name)
+                .map(|i| (i.ty.clone(), i.sendable))
+                .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
+            let Some((cap_ty, cap_sendable)) = cap else {
+                continue;
+            };
+            if !cap_sendable || self.sendability_problem(&cap_ty, taken).is_some() {
+                return false;
+            }
+        }
+        if let Type::Fn { ret: Some(ret), .. } = fn_ty {
+            self.sendability_problem(ret, false).is_none()
+        } else {
+            true
+        }
+    }
+
+    fn sendability_problem(&self, ty: &Type, closure_taken: bool) -> Option<SendabilityProblem> {
+        let mut seen = HashSet::new();
+        self.sendability_problem_inner(ty, closure_taken, &mut seen)
+    }
+
+    fn sendability_problem_inner(
+        &self,
+        ty: &Type,
+        closure_taken: bool,
+        seen: &mut HashSet<String>,
+    ) -> Option<SendabilityProblem> {
+        match ty {
+            Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => None,
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                self.sendability_problem_inner(inner, true, seen)
+            }
+            Type::Map { key, value } => self
+                .sendability_problem_inner(key, true, seen)
+                .or_else(|| self.sendability_problem_inner(value, true, seen)),
+            Type::Result { ok, err } => self
+                .sendability_problem_inner(ok, true, seen)
+                .or_else(|| self.sendability_problem_inner(err, true, seen)),
+            Type::Fn { .. } => {
+                if closure_taken {
+                    None
+                } else {
+                    Some(SendabilityProblem {
+                        root: None,
+                        path: Vec::new(),
+                        kind: SendProblemKind::ClosureNeedsTake,
+                    })
+                }
+            }
+            Type::Named(name) if is_type_var_name(name) || std_type_known(name) => None,
+            Type::Named(name) => self.named_sendability_problem(name, &[], seen),
+            Type::Apply { name, args } if matches!(name.as_str(), "Task" | "Channel" | "Sender") => {
+                args.iter()
+                    .find_map(|arg| self.sendability_problem_inner(arg, true, seen))
+            }
+            Type::Apply { name, args } => self.named_sendability_problem(name, args, seen),
+            Type::TraitObject(name) => Some(SendabilityProblem {
+                root: None,
+                path: Vec::new(),
+                kind: SendProblemKind::TraitValue(name.clone()),
+            }),
+        }
+    }
+
+    fn named_sendability_problem(
+        &self,
+        name: &str,
+        args: &[Type],
+        seen: &mut HashSet<String>,
+    ) -> Option<SendabilityProblem> {
+        if !seen.insert(name.to_string()) {
+            return None;
+        }
+        let subst = if args.is_empty() {
+            HashMap::new()
+        } else {
+            self.struct_subst(name, args)
+        };
+        let found = match self.registry.types.get(name) {
+            Some(TypeDef::Struct { fields, .. }) => {
+                for (field_name, _, field_ty, is_ref, _) in fields {
+                    if *is_ref {
+                        return Some(SendabilityProblem {
+                            root: Some(name.to_string()),
+                            path: vec![field_name.clone()],
+                            kind: SendProblemKind::RefField,
+                        });
+                    }
+                    let actual_ty = self.m9.instantiate_type(field_ty, &subst);
+                    if let Some(problem) =
+                        self.sendability_problem_inner(&actual_ty, true, seen)
+                    {
+                        return Some(prepend_send_path(name, field_name, problem));
+                    }
+                }
+                None
+            }
+            Some(TypeDef::Enum { variants, .. }) => {
+                for (_, payload) in variants.values() {
+                    let problem = match payload {
+                        VariantPayload::Unit => None,
+                        VariantPayload::Single(ty, _) => {
+                            let actual_ty = self.m9.instantiate_type(ty, &subst);
+                            self.sendability_problem_inner(&actual_ty, true, seen)
+                        }
+                        VariantPayload::Named(fields) => fields.iter().find_map(|field| {
+                            let actual_ty = self.m9.instantiate_type(&field.ty, &subst);
+                            self.sendability_problem_inner(&actual_ty, true, seen)
+                                .map(|p| prepend_send_path(name, &field.name, p))
+                        }),
+                    };
+                    if let Some(problem) = problem {
+                        return Some(problem);
+                    }
+                }
+                None
+            }
+            None => None,
+        };
+        seen.remove(name);
+        found
+    }
+
+    fn expr_sendability_problem(
+        &self,
+        expr: &Expr,
+        ty: &Type,
+        closure_taken: bool,
+        view_borrow: bool,
+    ) -> Option<SendabilityProblem> {
+        if view_borrow {
+            return Some(SendabilityProblem {
+                root: None,
+                path: Vec::new(),
+                kind: SendProblemKind::ViewBorrow,
+            });
+        }
+        if let Expr::Ident(name, _) = expr {
+            if let Some(info) = self.lookup(name) {
+                if !info.sendable {
+                    return self.sendability_problem(&info.ty, closure_taken).or_else(|| {
+                        Some(SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ClosureCaptures,
+                        })
+                    });
+                }
+            }
+        }
+        self.sendability_problem(ty, closure_taken)
+    }
+
+    fn report_unsendable(
+        &mut self,
+        value: &str,
+        ty: &Type,
+        problem: SendabilityProblem,
+        crossing: SendCrossing,
+        span: Span,
+    ) {
+        let type_name = ty.name();
+        let value_text = if value == "this value" {
+            "this value".to_string()
+        } else {
+            format!("`{}`", value)
+        };
+        let what = match (crossing, &problem.kind) {
+            (SendCrossing::TaskCapture, SendProblemKind::ViewBorrow) => {
+                format!("{} can't cross into a task because it is a borrowed view", value_text)
+            }
+            (SendCrossing::TaskResult, SendProblemKind::ViewBorrow) => {
+                "this task returns a borrowed view, which can't cross into a task".to_string()
+            }
+            (SendCrossing::ChannelSend, SendProblemKind::ViewBorrow) => {
+                format!("{} can't be sent because it is a borrowed view", value_text)
+            }
+            (SendCrossing::TaskCapture, _) => {
+                format!("{} can't cross into a task because `{}` isn't sendable", value_text, type_name)
+            }
+            (SendCrossing::TaskResult, _) => {
+                format!("this task returns `{}`, which isn't sendable", type_name)
+            }
+            (SendCrossing::ChannelSend, _) => {
+                format!("{} can't be sent because `{}` isn't sendable", value_text, type_name)
+            }
+        };
+        let why = format!(
+            "{}; tasks and channels move owned values between threads",
+            describe_sendability_problem(&problem)
+        );
+        let fix = match crossing {
+            SendCrossing::ChannelSend => {
+                "send plain data instead, or rebuild the value without borrowed fields before calling `.send()`"
+            }
+            SendCrossing::TaskCapture | SendCrossing::TaskResult => {
+                "give the task plain owned data, or remove the borrowed field before spawning"
+            }
+        };
+        self.diags.push(Diagnostic::error(
+            "E1102",
+            what,
+            why,
+            fix.to_string(),
+            Some(span),
+        ));
     }
 
     fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
@@ -2882,10 +3220,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", syntax::LIT_OK),
             format!(
-                "`{}` builds the success side of `Result<T, E>`",
+                "`{}` builds the success side of a `T ? E` result",
                 syntax::LIT_OK
             ),
-            "use it in a return type, a binding annotated with `Result<...>`, or a call that expects one"
+            "use it in a `T ? E` return type, a `T ? E` binding annotation, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -2896,7 +3234,7 @@ impl<'a> Checker<'a> {
         let payload = self.infer(inner)?;
         if let Some(expected) = self.expected_type.clone() {
             if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
-                if payload != *err_ty {
+                if payload != *err_ty && !(is_default_error(err_ty) && payload == Type::String) {
                     self.diags.push(Diagnostic::error(
                         "E0108",
                         format!(
@@ -2920,10 +3258,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", syntax::LIT_ERR),
             format!(
-                "`{}` builds the failure side of `Result<T, E>`",
+                "`{}` builds the failure side of a `T ? E` result",
                 syntax::LIT_ERR
             ),
-            "use it in a return type, a binding annotated with `Result<...>`, or a call that expects one"
+            "use it in a `T ? E` return type, a `T ? E` binding annotation, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -2939,7 +3277,12 @@ impl<'a> Checker<'a> {
                     Type::Result {
                         ok: ret_ok,
                         err: ret_err,
-                    } if *ret_ok == ok && *ret_err == err => Some((*ok).clone()),
+                    } if *ret_ok == ok
+                        && (*ret_err == err
+                            || (is_default_error(ret_err) && matches!(err.as_ref(), Type::String))) =>
+                    {
+                        Some((*ok).clone())
+                    }
                     Type::Result { err: ret_err, .. } => {
                         self.diags.push(Diagnostic::error(
                             "E0403",
@@ -2968,7 +3311,7 @@ impl<'a> Checker<'a> {
                             ),
                             "propagation early-returns the failure to the caller".to_string(),
                             format!(
-                                "add `-> Result<..., {}>` to this function, or handle the result with `{}`",
+                                "add `-> ... ? {}` to this function, or handle the result with `{}`",
                                 err.name(),
                                 syntax::OP_OR_FALLBACK
                             ),
@@ -3012,7 +3355,7 @@ impl<'a> Checker<'a> {
                     ),
                     "postfix `?` unwraps success or returns early with the failure".to_string(),
                     format!(
-                        "call something that returns `Result<T, E>` or `T?`, or remove `{}`",
+                        "call something that returns `T ? E` or an optional value, or remove `{}`",
                         syntax::OP_TRY_SUFFIX
                     ),
                     Some(span),
@@ -3295,37 +3638,99 @@ impl<'a> Checker<'a> {
             .collect();
 
         if escapes {
+            let mut seen_caps: HashSet<String> = HashSet::new();
             for name in read_caps.iter().chain(mut_caps.iter()) {
-                if param_names.contains(name) || take_set.contains(name) {
+                if !seen_caps.insert(name.clone()) {
+                    continue; // already processed this capture
+                }
+                if param_names.contains(name) {
                     continue;
                 }
-                let cap_ty = self
+                let cap = self
                     .lookup(name)
-                    .map(|i| i.ty.clone())
-                    .or_else(|| self.consts.get(name).cloned());
-                let Some(cap_ty) = cap_ty else {
+                    .map(|i| (i.ty.clone(), i.sendable))
+                    .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
+                let Some((cap_ty, cap_sendable)) = cap else {
                     continue;
                 };
-                if mut_caps.contains(name) {
-                    continue; // taken by move into closure via mut borrow path
+                let taken = take_set.contains(name);
+                if self.is_task_spawn {
+                    let problem = if !cap_sendable {
+                        self.sendability_problem(&cap_ty, taken).or_else(|| {
+                            Some(SendabilityProblem {
+                                root: None,
+                                path: Vec::new(),
+                                kind: SendProblemKind::ClosureCaptures,
+                            })
+                        })
+                    } else {
+                        self.sendability_problem(&cap_ty, taken)
+                    };
+                    if let Some(problem) = problem {
+                        self.report_unsendable(
+                            name,
+                            &cap_ty,
+                            problem,
+                            SendCrossing::TaskCapture,
+                            lam.span,
+                        );
+                        continue;
+                    }
                 }
-                if !is_cloneable(&cap_ty, self.registry, self.structs) {
-                    if !take_set.contains(name) {
+                if mut_caps.contains(name) && !taken {
+                    if self.is_task_spawn {
                         self.diags.push(Diagnostic::error(
-                            "E0802",
+                            "E1101",
                             format!(
-                                "`{}` can't be copied into a stored lambda",
+                                "`{}` is a mutable value — the new task might outlive this scope",
                                 name
                             ),
-                            "a lambda that outlives this line must own its captures".to_string(),
+                            "tasks run concurrently; a `var` binding can't be shared between tasks".to_string(),
                             format!(
-                                "prefix the lambda with `take({})` to move `{}` in",
+                                "give the task its own copy (`{}.clone()`) or hand it over with `take({})`",
                                 name, name
                             ),
                             Some(lam.span),
                         ));
                     }
-                } else if !take_set.contains(name) {
+                    continue; // taken by move into closure via mut borrow path
+                }
+                if mut_caps.contains(name) {
+                    continue;
+                }
+                if !is_cloneable(&cap_ty, self.registry, self.structs) {
+                    if !taken {
+                        if self.is_task_spawn {
+                            self.diags.push(Diagnostic::error(
+                                "E1101",
+                                format!(
+                                    "`{}` can't be copied into a task — the task might outlive this scope",
+                                    name
+                                ),
+                                "a spawned task must own everything it captures".to_string(),
+                                format!(
+                                    "use `take({})` on the lambda to move `{}` into the task",
+                                    name, name
+                                ),
+                                Some(lam.span),
+                            ));
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0802",
+                                format!(
+                                    "`{}` can't be copied into a stored lambda",
+                                    name
+                                ),
+                                "a lambda that outlives this line must own its captures".to_string(),
+                                format!(
+                                    "prefix the lambda with `take({})` to move `{}` in",
+                                    name, name
+                                ),
+                                Some(lam.span),
+                            ));
+                        }
+                    }
+                } else if !taken {
                     lam.meta.cloned_captures.push(name.clone());
                     self.diags.push(Diagnostic::lint(
                         "L0801",
@@ -3354,12 +3759,19 @@ impl<'a> Checker<'a> {
                     mutable: false,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    task_lint_span: None,
                 },
             );
         }
 
         let body_ret = match &mut lam.body {
-            LambdaBody::Expr(e) => self.infer(e),
+            LambdaBody::Expr(e) => {
+                if self.is_task_spawn {
+                    self.borrow_ctx = true;
+                }
+                self.infer(e)
+            }
             LambdaBody::Block(stmts) => {
                 self.check_block(stmts, false);
                 let mut last_ret = None;
@@ -3381,6 +3793,34 @@ impl<'a> Checker<'a> {
         };
 
         self.pop_scope();
+
+        if escapes {
+            for (name, span) in &lam.take_names {
+                if let Some(info) = self.lookup(name) {
+                    if !info.ty.is_scalar() {
+                        if matches!(
+                            info.param_conv,
+                            Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                        ) {
+                            self.diags.push(Diagnostic::error(
+                                "E0120",
+                                format!("`{}` is only borrowed here, so the lambda can't take it", name),
+                                "this function reads the value but doesn't own it".to_string(),
+                                format!(
+                                    "take ownership in this function with `{} {}: {}`",
+                                    syntax::KW_MOVE,
+                                    name,
+                                    info.ty.name()
+                                ),
+                                Some(*span),
+                            ));
+                        } else {
+                            self.mark_moved(name.clone(), *span);
+                        }
+                    }
+                }
+            }
+        }
 
         let ret_ty = if let Some(er) = exp_ret {
             if let Some(br) = &body_ret {
@@ -3407,6 +3847,170 @@ impl<'a> Checker<'a> {
             params: param_types,
             ret: ret_ty.map(Box::new),
         })
+    }
+
+    fn consume_builtin_receiver(&mut self, receiver: &Expr, method: &str) {
+        if let Expr::Ident(name, span) = receiver {
+            if let Some(info) = self.lookup(name) {
+                if !type_is_copy(&info.ty)
+                    && matches!(
+                        info.param_conv,
+                        Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                    )
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0120",
+                        format!("`{}` is only borrowed here, so `.{}()` can't consume it", name, method),
+                        "this function reads the value but doesn't own it".to_string(),
+                        format!(
+                            "call it on a copy, or take ownership with `{} {}: {}`",
+                            syntax::KW_MOVE,
+                            name,
+                            info.ty.name()
+                        ),
+                        Some(*span),
+                    ));
+                    return;
+                }
+                if !info.ty.is_scalar() {
+                    self.mark_moved(name.clone(), *span);
+                }
+            }
+        }
+    }
+
+    fn check_take_arg_ownership(
+        &mut self,
+        call_name: &str,
+        idx: usize,
+        param_ty: &Type,
+        arg: &mut crate::ast::CallArg,
+    ) {
+        match arg.convention {
+            AccessConvention::Read => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if is_cloneable(param_ty, self.registry, self.structs) {
+                        arg.flags.implicit_clone = true;
+                        self.diags.push(Diagnostic::lint(
+                            "L0201",
+                            format!(
+                                "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                name,
+                                syntax::KW_MOVE,
+                                name
+                            ),
+                            format!("`{}` expects to take ownership of this value", call_name),
+                            format!(
+                                "write `{} {}` to move, or `{} .clone()` to copy explicitly",
+                                syntax::KW_MOVE,
+                                name,
+                                name
+                            ),
+                            Some(*span),
+                        ));
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0201",
+                            format!(
+                                "`{}` needs `{}` here — this value can't be copied",
+                                call_name,
+                                syntax::KW_MOVE
+                            ),
+                            format!(
+                                "parameter `{}` takes ownership; passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                idx + 1,
+                                name,
+                                syntax::KW_MOVE
+                            ),
+                            format!("write `{} {}` to transfer ownership", syntax::KW_MOVE, name),
+                            Some(*span),
+                        ));
+                    }
+                }
+            }
+            AccessConvention::Move => {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    if !param_ty.is_scalar() {
+                        self.mark_moved(name.clone(), *span);
+                    }
+                }
+            }
+            AccessConvention::Mutate => {}
+        }
+    }
+
+    fn finish_sender_send(
+        &mut self,
+        recv_ty: &Type,
+        args: &mut [crate::ast::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let elem_ty = match recv_ty {
+            Type::Apply { name, args } if name == "Sender" => {
+                args.first().cloned().unwrap_or(Type::Int)
+            }
+            _ => Type::Int,
+        };
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`send` expects 1 argument, got {}", args.len()),
+                "sending needs exactly one value".to_string(),
+                "call `.send(value)` with the value to send".to_string(),
+                Some(span),
+            ));
+        }
+        let Some(arg) = args.get_mut(0) else {
+            return None;
+        };
+        let view_borrow = self.is_view_call(&arg.expr);
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(elem_ty.clone());
+        if view_borrow {
+            self.borrow_ctx = true;
+        }
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_exp;
+        let mut sendability_failed = false;
+        if let Some(got) = got {
+            let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
+            if !reported && got != elem_ty {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`send` wants {} for argument 1, but this is {}",
+                        elem_ty.show(),
+                        got.show()
+                    ),
+                    "a sender can only send values of its channel's element type".to_string(),
+                    type_fix_hint(&elem_ty, &got),
+                    Some(arg.expr.span()),
+                ));
+            }
+            if let Some(problem) = self.expr_sendability_problem(
+                &arg.expr,
+                &got,
+                matches!(arg.convention, AccessConvention::Move),
+                view_borrow,
+            ) {
+                let value_name = match &arg.expr {
+                    Expr::Ident(name, _) => name.as_str(),
+                    _ => "this value",
+                };
+                self.report_unsendable(
+                    value_name,
+                    &got,
+                    problem,
+                    SendCrossing::ChannelSend,
+                    arg.expr.span(),
+                );
+                sendability_failed = true;
+            }
+        }
+        if !sendability_failed {
+            self.check_take_arg_ownership("send", 0, &elem_ty, arg);
+        }
+        None
     }
 
     fn finish_builtin_method(
@@ -3458,6 +4062,19 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
+            }
+        }
+        if let Type::Apply { name, .. } = recv_ty {
+            match (name.as_str(), method) {
+                ("Task", "join") => {
+                    self.consume_builtin_receiver(receiver, method);
+                    let _ = span;
+                    return ret;
+                }
+                ("Sender", "send") => {
+                    return self.finish_sender_send(recv_ty, args, span);
+                }
+                _ => {}
             }
         }
         let mut refined_ret = ret.clone();
@@ -4481,6 +5098,109 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
+            ("std.tasks", "spawn") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity("spawn", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let saved_esc = self.lambda_escapes;
+                let saved_task = self.is_task_spawn;
+                self.lambda_escapes = true;
+                self.is_task_spawn = true;
+                let lam_ty = self.infer(&mut args[0].expr);
+                let view_return_span = match &args[0].expr {
+                    Expr::Lambda(lam) => lambda_body_view_return_span(self, &lam.body),
+                    expr if self.is_view_call(expr) => Some(expr.span()),
+                    _ => None,
+                };
+                self.lambda_escapes = saved_esc;
+                self.is_task_spawn = saved_task;
+                // Extract the return type from the closure's function type.
+                let t = match lam_ty {
+                    Some(Type::Fn { params, ret }) => {
+                        if !params.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "`spawn` needs a zero-parameter lambda, got {} parameter{}",
+                                    params.len(),
+                                    if params.len() == 1 { "" } else { "s" }
+                                ),
+                                "a task starts by calling the lambda with no arguments"
+                                    .to_string(),
+                                "move data into the task with `take(name)` instead of lambda parameters"
+                                    .to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                        ret.map(|r| *r).unwrap_or_else(|| Type::Named("Unit".to_string()))
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`spawn` needs a lambda, not {}", other.show()),
+                            "a task starts by running a zero-parameter lambda".to_string(),
+                            "write `tasks.spawn(() => work())`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                        Type::Named("Unit".to_string())
+                    }
+                    None => Type::Named("Unit".to_string()),
+                };
+                if let Some(span) = view_return_span {
+                    self.report_unsendable(
+                        "task result",
+                        &t,
+                        SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ViewBorrow,
+                        },
+                        SendCrossing::TaskResult,
+                        span,
+                    );
+                } else if let Some(problem) = self.sendability_problem(&t, false) {
+                    self.report_unsendable(
+                        "task result",
+                        &t,
+                        problem,
+                        SendCrossing::TaskResult,
+                        args[0].expr.span(),
+                    );
+                }
+                return Some(Type::Apply { name: "Task".to_string(), args: vec![t] });
+            }
+            ("std.tasks", "channel") => {
+                if !args.is_empty() {
+                    self.diags.push(wrong_std_arity("channel", 0, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let t = match &self.expected_type {
+                    Some(Type::Apply { name, args }) if name == "Channel" && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    _ => {
+                        self.diags.push(Diagnostic::error(
+                            "E0904",
+                            "`tasks.channel` needs a type annotation to infer the element type"
+                                .to_string(),
+                            "the element type `T` can't be guessed without a type annotation"
+                                .to_string(),
+                            "annotate the binding: `val ch: Channel<T> = tasks.channel();`"
+                                .to_string(),
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                };
+                return Some(Type::Apply { name: "Channel".to_string(), args: vec![t] });
+            }
             _ => {}
         }
 
@@ -5437,7 +6157,7 @@ impl<'a> Checker<'a> {
                         subject_ty.name()
                     ),
                     format!(
-                        "use `== {}(...)` or `== {}(...)` on `Result<T, E>`",
+                        "use `== {}(...)` or `== {}(...)` on `T ? E`",
                         syntax::LIT_OK,
                         syntax::LIT_ERR
                     ),
@@ -5900,6 +6620,49 @@ impl<'a> Checker<'a> {
             return None;
         }
 
+        if matches!(
+            call.name.as_str(),
+            syntax::FOREIGN_ASYNC | syntax::FOREIGN_AWAIT
+        ) {
+            self.diags.push(Diagnostic::error(
+                "E0040",
+                format!(
+                    "`{}` is not in Jet; use `tasks.spawn` instead",
+                    call.name
+                ),
+                "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
+                    .to_string(),
+                "import `std.tasks as tasks` and call `tasks.spawn(() => your_work())`".to_string(),
+                Some(call.name_span),
+            ));
+            for a in call.args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+
+        if matches!(
+            call.name.as_str(),
+            syntax::FOREIGN_MUTEX | syntax::FOREIGN_LOCK | "RwLock" | "mutex" | "lock"
+        ) {
+            self.diags.push(Diagnostic::error(
+                "E0041",
+                format!(
+                    "`{}` is not in Jet; share data through channels",
+                    call.name
+                ),
+                "Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory"
+                    .to_string(),
+                "import `std.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`"
+                    .to_string(),
+                Some(call.name_span),
+            ));
+            for a in call.args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+
         if call.name == syntax::BUILTIN_PRINT {
             if call.args.len() != 1 {
                 self.diags.push(Diagnostic::error(
@@ -6344,6 +7107,10 @@ fn option_used_where_plain_expected(want: &Type, got: &Type) -> bool {
     matches!(got, Type::Option(inner) if want.unwrap_option().is_none() && **inner == *want)
 }
 
+fn is_default_error(ty: &Type) -> bool {
+    matches!(ty, Type::Named(n) if n == syntax::TYPE_ERROR)
+}
+
 fn type_fix_hint(want: &Type, got: &Type) -> String {
     match (want, got) {
         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
@@ -6650,6 +7417,39 @@ fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
     }
 }
 
+/// Generate compilable switch arm source text for missing variants.
+/// `subj_name` is the variable being switched on (e.g. `"c"` or `"it"` for fallible types).
+fn missing_arms_text(subj_ty: &Type, missing: &[String], subj_name: Option<&str>) -> String {
+    let subj = subj_name.unwrap_or("it");
+    let arms: Vec<String> = missing
+        .iter()
+        .map(|v| match subj_ty {
+            // Named enum: `(subject == VariantName) -> {};`
+            Type::Named(_) => {
+                format!("    ({} == {}) {} {{}};", subj, v, crate::syntax::OP_ARM_ARROW)
+            }
+            // Option: `value(inner) -> {};`  or  `null -> {};`
+            Type::Option(_) => {
+                if v == crate::syntax::LIT_VALUE {
+                    format!("    ({} is {}(inner)) {} {{}};", subj, crate::syntax::LIT_VALUE, crate::syntax::OP_ARM_ARROW)
+                } else {
+                    format!("    ({} == {}) {} {{}};", subj, crate::syntax::LIT_NULL, crate::syntax::OP_ARM_ARROW)
+                }
+            }
+            // Result: `ok(v) -> {};` or `err(e) -> {};`
+            Type::Result { .. } => {
+                if v.starts_with(crate::syntax::LIT_OK) {
+                    format!("    ({} is {}(v)) {} {{}};", subj, crate::syntax::LIT_OK, crate::syntax::OP_ARM_ARROW)
+                } else {
+                    format!("    ({} is {}(e)) {} {{}};", subj, crate::syntax::LIT_ERR, crate::syntax::OP_ARM_ARROW)
+                }
+            }
+            _ => format!("    ({} == {}) {} {{}};", subj, v, crate::syntax::OP_ARM_ARROW),
+        })
+        .collect();
+    format!("\n{}", arms.join("\n"))
+}
+
 fn missing_pattern_coverage(
     subject_ty: &Type,
     covered: &HashSet<String>,
@@ -6701,7 +7501,7 @@ fn missing_pattern_coverage(
     }
 }
 
-/// `Result<T, E>` passed where plain `T` is expected (E0401).
+/// `T ? E` passed where plain `T` is expected (E0401).
 fn result_used_where_plain_expected(want: &Type, got: &Type) -> bool {
     matches!(got, Type::Result { ok, .. } if want.unwrap_result().is_none() && **ok == *want)
 }
@@ -6825,6 +7625,60 @@ fn type_is_copy(ty: &Type) -> bool {
     ty.is_scalar() || matches!(ty, Type::Char) || is_u8_ty(ty)
 }
 
+fn is_task_type(ty: &Type) -> bool {
+    matches!(ty, Type::Apply { name, .. } if name == "Task")
+}
+
+fn prepend_send_path(root: &str, field: &str, mut problem: SendabilityProblem) -> SendabilityProblem {
+    problem.root = Some(root.to_string());
+    problem.path.insert(0, field.to_string());
+    problem
+}
+
+fn describe_sendability_problem(problem: &SendabilityProblem) -> String {
+    match &problem.kind {
+        SendProblemKind::RefField => {
+            let root = problem.root.as_deref().unwrap_or("this value");
+            match problem.path.as_slice() {
+                [] => format!("`{}` holds a `ref` field", root),
+                [field] => format!(
+                    "`{}` contains `{}`, which is a `ref` field",
+                    root, field
+                ),
+                [first, ..] => format!(
+                    "`{}` contains `{}`, which holds a `ref` field at `{}`",
+                    root,
+                    first,
+                    problem.path.join(".")
+                ),
+            }
+        }
+        SendProblemKind::ClosureNeedsTake => {
+            if let (Some(root), false) = (problem.root.as_deref(), problem.path.is_empty()) {
+                format!(
+                    "`{}` contains `{}`, which is a closure that was not handed over with `take`",
+                    root,
+                    problem.path.join(".")
+                )
+            } else {
+                "a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary".to_string()
+            }
+        }
+        SendProblemKind::ClosureCaptures => {
+            "the closure holds captures that are not sendable".to_string()
+        }
+        SendProblemKind::TraitValue(name) => {
+            format!(
+                "`{}` is a trait value, so the compiler cannot prove which concrete value crosses this boundary",
+                name
+            )
+        }
+        SendProblemKind::ViewBorrow => {
+            "`view` results are borrowed, not owned".to_string()
+        }
+    }
+}
+
 /// True when `e` is a struct-field *value* read (not enum-literal sugar like
 /// `Color.Red`, not `.clone`, not an import-alias path).
 fn field_read_to_clone(
@@ -6899,8 +7753,8 @@ fn is_u8_ty(ty: &Type) -> bool {
 fn std_type_known(name: &str) -> bool {
     matches!(
         name,
-        "Unit" | "U8" | "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch"
-            | "Json" | "JsonError"
+        "Unit" | "U8" | "Error" | "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch"
+            | "Json" | "JsonError" | "Closed"
     )
 }
 
@@ -7039,6 +7893,7 @@ fn std_module_items(module: &str) -> Vec<String> {
         "std.random" => &["int", "float", "pick", "shuffle", "seed"],
         "std.time" => &["now", "sleep", "start"],
         "std.json" => &["parse", "render", "render_pretty"],
+        "std.tasks" => &["spawn", "channel"],
         "std" => &[],
         _ => &[],
     };
@@ -7792,6 +8647,7 @@ fn check_func_body_bundle(
         iter_borrowed: HashSet::new(),
         borrow_ctx: false,
         lambda_escapes: true,
+        is_task_spawn: false,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         m9: &st.m9,
@@ -7974,103 +8830,188 @@ fn lambda_collect_captures(
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
 ) {
+    let mut bound = params.clone();
     match body {
-        LambdaBody::Expr(e) => expr_collect_captures(e, params, read, mut_cap),
+        LambdaBody::Expr(e) => expr_collect_captures(e, &bound, read, mut_cap),
+        LambdaBody::Block(stmts) => block_collect_captures(stmts, &mut bound, read, mut_cap),
+    }
+}
+
+fn lambda_body_view_return_span(checker: &Checker<'_>, body: &LambdaBody) -> Option<Span> {
+    match body {
+        LambdaBody::Expr(e) => checker.is_view_call(e).then(|| e.span()),
         LambdaBody::Block(stmts) => {
-            for s in stmts {
-                stmt_collect_captures(s, params, read, mut_cap);
+            for stmt in stmts {
+                if let Some(span) = stmt_view_return_span(checker, stmt) {
+                    return Some(span);
+                }
             }
+            for stmt in stmts.iter().rev() {
+                if let Stmt::Expr(e) = stmt {
+                    return checker.is_view_call(e).then(|| e.span());
+                }
+            }
+            None
         }
+    }
+}
+
+fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Option<Span> {
+    match stmt {
+        Stmt::Return(Some(e), _) if checker.is_view_call(e) => Some(e.span()),
+        Stmt::If(i) => {
+            for stmt in &i.then_body {
+                if let Some(span) = stmt_view_return_span(checker, stmt) {
+                    return Some(span);
+                }
+            }
+            i.else_branch
+                .as_ref()
+                .and_then(|branch| else_view_return_span(checker, branch))
+        }
+        Stmt::While { body, .. } | Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => body
+            .iter()
+            .find_map(|stmt| stmt_view_return_span(checker, stmt)),
+        Stmt::For { body, .. } => body
+            .iter()
+            .find_map(|stmt| stmt_view_return_span(checker, stmt)),
+        Stmt::Switch {
+            arms, else_body, ..
+        } => arms
+            .iter()
+            .find_map(|arm| {
+                arm.body
+                    .iter()
+                    .find_map(|stmt| stmt_view_return_span(checker, stmt))
+            })
+            .or_else(|| {
+                else_body
+                    .as_ref()
+                    .and_then(|body| {
+                        body.iter()
+                            .find_map(|stmt| stmt_view_return_span(checker, stmt))
+                    })
+            }),
+        _ => None,
+    }
+}
+
+fn else_view_return_span(checker: &Checker<'_>, branch: &ElseBranch) -> Option<Span> {
+    match branch {
+        ElseBranch::Else(stmts) => stmts
+            .iter()
+            .find_map(|stmt| stmt_view_return_span(checker, stmt)),
+        ElseBranch::ElseIf(i) => {
+            for stmt in &i.then_body {
+                if let Some(span) = stmt_view_return_span(checker, stmt) {
+                    return Some(span);
+                }
+            }
+            i.else_branch
+                .as_ref()
+                .and_then(|branch| else_view_return_span(checker, branch))
+        }
+    }
+}
+
+fn block_collect_captures(
+    stmts: &[Stmt],
+    bound: &mut HashSet<String>,
+    read: &mut HashSet<String>,
+    mut_cap: &mut HashSet<String>,
+) {
+    for s in stmts {
+        stmt_collect_captures(s, bound, read, mut_cap);
     }
 }
 
 fn expr_collect_captures(
     e: &Expr,
-    params: &HashSet<String>,
+    bound: &HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
 ) {
     match e {
-        Expr::Ident(n, _) if !params.contains(n) => {
+        Expr::Ident(n, _) if !bound.contains(n) => {
             read.insert(n.clone());
         }
-        Expr::Unary(_, inner, _) => expr_collect_captures(inner, params, read, mut_cap),
+        Expr::Unary(_, inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
         Expr::Binary(_, l, r, _) => {
-            expr_collect_captures(l, params, read, mut_cap);
-            expr_collect_captures(r, params, read, mut_cap);
+            expr_collect_captures(l, bound, read, mut_cap);
+            expr_collect_captures(r, bound, read, mut_cap);
         }
         Expr::Call(c) => {
             for a in &c.args {
-                expr_collect_captures(&a.expr, params, read, mut_cap);
+                expr_collect_captures(&a.expr, bound, read, mut_cap);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            expr_collect_captures(callee, params, read, mut_cap);
+            expr_collect_captures(callee, bound, read, mut_cap);
             for a in args {
-                expr_collect_captures(&a.expr, params, read, mut_cap);
+                expr_collect_captures(&a.expr, bound, read, mut_cap);
             }
         }
         Expr::Field(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Try(inner, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _) => expr_collect_captures(inner, params, read, mut_cap),
+        | Expr::Err(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
         Expr::MethodCall { receiver, args, .. } => {
-            expr_collect_captures(receiver, params, read, mut_cap);
+            expr_collect_captures(receiver, bound, read, mut_cap);
             for a in args {
-                expr_collect_captures(&a.expr, params, read, mut_cap);
+                expr_collect_captures(&a.expr, bound, read, mut_cap);
             }
         }
         Expr::Index { base, index, .. } => {
-            expr_collect_captures(base, params, read, mut_cap);
-            expr_collect_captures(index, params, read, mut_cap);
+            expr_collect_captures(base, bound, read, mut_cap);
+            expr_collect_captures(index, bound, read, mut_cap);
         }
         Expr::Slice { base, start, end, .. } => {
-            expr_collect_captures(base, params, read, mut_cap);
-            expr_collect_captures(start, params, read, mut_cap);
-            expr_collect_captures(end, params, read, mut_cap);
+            expr_collect_captures(base, bound, read, mut_cap);
+            expr_collect_captures(start, bound, read, mut_cap);
+            expr_collect_captures(end, bound, read, mut_cap);
         }
         Expr::ListLit(elems, _) => {
             for el in elems {
-                expr_collect_captures(el, params, read, mut_cap);
+                expr_collect_captures(el, bound, read, mut_cap);
             }
         }
         Expr::MapLit(entries, _) => {
             for (k, v) in entries {
-                expr_collect_captures(k, params, read, mut_cap);
-                expr_collect_captures(v, params, read, mut_cap);
+                expr_collect_captures(k, bound, read, mut_cap);
+                expr_collect_captures(v, bound, read, mut_cap);
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, f) in fields {
-                expr_collect_captures(f, params, read, mut_cap);
+                expr_collect_captures(f, bound, read, mut_cap);
             }
         }
         Expr::EnumLit { args, .. } => {
             for a in args {
                 match a {
-                    EnumLitArg::Positional(ex) => expr_collect_captures(ex, params, read, mut_cap),
+                    EnumLitArg::Positional(ex) => expr_collect_captures(ex, bound, read, mut_cap),
                     EnumLitArg::Named { expr, .. } => {
-                        expr_collect_captures(expr, params, read, mut_cap);
+                        expr_collect_captures(expr, bound, read, mut_cap);
                     }
                 }
             }
         }
         Expr::OrFallback { value, fallback, .. } => {
-            expr_collect_captures(value, params, read, mut_cap);
+            expr_collect_captures(value, bound, read, mut_cap);
             match fallback {
-                OrFallback::Value(ex) => expr_collect_captures(ex, params, read, mut_cap),
+                OrFallback::Value(ex) => expr_collect_captures(ex, bound, read, mut_cap),
                 OrFallback::Return(Some(ex), _) => {
-                    expr_collect_captures(ex, params, read, mut_cap);
+                    expr_collect_captures(ex, bound, read, mut_cap);
                 }
                 _ => {}
             }
         }
-        Expr::PatternTest { subject, .. } => expr_collect_captures(subject, params, read, mut_cap),
+        Expr::PatternTest { subject, .. } => expr_collect_captures(subject, bound, read, mut_cap),
         Expr::Str(parts, _) => {
             for p in parts {
                 if let StrPart::Interp(ex) = p {
-                    expr_collect_captures(ex, params, read, mut_cap);
+                    expr_collect_captures(ex, bound, read, mut_cap);
                 }
             }
         }
@@ -8081,58 +9022,69 @@ fn expr_collect_captures(
 
 fn stmt_collect_captures(
     stmt: &Stmt,
-    params: &HashSet<String>,
+    bound: &mut HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
 ) {
     match stmt {
-        Stmt::Expr(e) => expr_collect_captures(e, params, read, mut_cap),
-        Stmt::Val(b) => expr_collect_captures(&b.init, params, read, mut_cap),
+        Stmt::Expr(e) => expr_collect_captures(e, bound, read, mut_cap),
+        Stmt::Val(b) => {
+            expr_collect_captures(&b.init, bound, read, mut_cap);
+            bound.insert(b.name.clone());
+        }
         Stmt::Assign { target, value, .. } => {
             if let LValue::Local { name, .. } = target {
-                if !params.contains(name) {
+                if !bound.contains(name) {
                     mut_cap.insert(name.clone());
                 }
             } else if let LValue::Index { base, index, .. } = target {
-                expr_collect_captures(base, params, read, mut_cap);
-                expr_collect_captures(index, params, read, mut_cap);
+                expr_collect_captures(base, bound, read, mut_cap);
+                expr_collect_captures(index, bound, read, mut_cap);
                 if let Expr::Ident(n, _) = base.as_ref() {
-                    if !params.contains(n) {
+                    if !bound.contains(n) {
                         mut_cap.insert(n.clone());
                     }
                 }
             }
-            expr_collect_captures(value, params, read, mut_cap);
+            expr_collect_captures(value, bound, read, mut_cap);
         }
-        Stmt::Return(Some(e), _) => expr_collect_captures(e, params, read, mut_cap),
+        Stmt::Return(Some(e), _) => expr_collect_captures(e, bound, read, mut_cap),
         Stmt::If(i) => {
-            expr_collect_captures(&i.cond, params, read, mut_cap);
-            for s in &i.then_body {
-                stmt_collect_captures(s, params, read, mut_cap);
-            }
+            expr_collect_captures(&i.cond, bound, read, mut_cap);
+            let mut then_bound = bound.clone();
+            block_collect_captures(&i.then_body, &mut then_bound, read, mut_cap);
             if let Some(e) = &i.else_branch {
-                else_collect_captures(e, params, read, mut_cap);
+                let mut else_bound = bound.clone();
+                else_collect_captures(e, &mut else_bound, read, mut_cap);
             }
         }
         Stmt::While { cond, body, .. } => {
-            expr_collect_captures(cond, params, read, mut_cap);
-            for s in body {
-                stmt_collect_captures(s, params, read, mut_cap);
-            }
+            expr_collect_captures(cond, bound, read, mut_cap);
+            let mut body_bound = bound.clone();
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
-        Stmt::For { kind, body, .. } => {
+        Stmt::For {
+            var,
+            var2,
+            kind,
+            body,
+            ..
+        } => {
             match kind {
                 ForKind::Range { start, end } => {
-                    expr_collect_captures(start, params, read, mut_cap);
-                    expr_collect_captures(end, params, read, mut_cap);
+                    expr_collect_captures(start, bound, read, mut_cap);
+                    expr_collect_captures(end, bound, read, mut_cap);
                 }
                 ForKind::In { collection } => {
-                    expr_collect_captures(collection, params, read, mut_cap);
+                    expr_collect_captures(collection, bound, read, mut_cap);
                 }
             }
-            for s in body {
-                stmt_collect_captures(s, params, read, mut_cap);
+            let mut body_bound = bound.clone();
+            body_bound.insert(var.clone());
+            if let Some((name, _)) = var2 {
+                body_bound.insert(name.clone());
             }
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
         Stmt::Switch {
             subject,
@@ -8140,23 +9092,20 @@ fn stmt_collect_captures(
             else_body,
             ..
         } => {
-            expr_collect_captures(subject, params, read, mut_cap);
+            expr_collect_captures(subject, bound, read, mut_cap);
             for a in arms {
-                expr_collect_captures(&a.cond, params, read, mut_cap);
-                for s in &a.body {
-                    stmt_collect_captures(s, params, read, mut_cap);
-                }
+                expr_collect_captures(&a.cond, bound, read, mut_cap);
+                let mut arm_bound = bound.clone();
+                block_collect_captures(&a.body, &mut arm_bound, read, mut_cap);
             }
             if let Some(b) = else_body {
-                for s in b {
-                    stmt_collect_captures(s, params, read, mut_cap);
-                }
+                let mut else_bound = bound.clone();
+                block_collect_captures(b, &mut else_bound, read, mut_cap);
             }
         }
         Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => {
-            for s in body {
-                stmt_collect_captures(s, params, read, mut_cap);
-            }
+            let mut body_bound = bound.clone();
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(None, _) => {}
     }
@@ -8164,23 +9113,21 @@ fn stmt_collect_captures(
 
 fn else_collect_captures(
     e: &ElseBranch,
-    params: &HashSet<String>,
+    bound: &mut HashSet<String>,
     read: &mut HashSet<String>,
     mut_cap: &mut HashSet<String>,
 ) {
     match e {
         ElseBranch::Else(stmts) => {
-            for s in stmts {
-                stmt_collect_captures(s, params, read, mut_cap);
-            }
+            block_collect_captures(stmts, bound, read, mut_cap);
         }
         ElseBranch::ElseIf(i) => {
-            expr_collect_captures(&i.cond, params, read, mut_cap);
-            for s in &i.then_body {
-                stmt_collect_captures(s, params, read, mut_cap);
-            }
+            expr_collect_captures(&i.cond, bound, read, mut_cap);
+            let mut then_bound = bound.clone();
+            block_collect_captures(&i.then_body, &mut then_bound, read, mut_cap);
             if let Some(e) = &i.else_branch {
-                else_collect_captures(e, params, read, mut_cap);
+                let mut nested_bound = bound.clone();
+                else_collect_captures(e, &mut nested_bound, read, mut_cap);
             }
         }
     }

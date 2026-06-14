@@ -20,7 +20,7 @@ archives, and sqlite belong to the first-party ring after packages exist.
 M10 std is implemented as compiler-known modules backed by Rust std in the
 generated prelude (no Jet-source stdlib yet — canonical package identity
 `jet.std` exists conceptually, but package delivery waits for M12). Every
-fallible operation returns `Result<T, E>` with a small per-domain error enum;
+fallible operation returns `T ? E` with a small per-domain error enum;
 nothing panics except programmer errors. Error enums are designed for the
 future SL6 declared-conversion story, but M10 does not implement that
 conversion surface yet.
@@ -84,8 +84,8 @@ PermissionDenied(path: String); Other(message: String); }`
 IoError` (reads a line, strips newline) · `read_all_input() -> String or
 IoError` (stdin to EOF) · `eprint(value)` (stderr twin of `print`).
 
-**std/env** — `get(name) -> String?` · `set(name, value)` ·
-`current_dir() -> String or IoError` · `home_dir() -> String?`.
+**std/env** — `get(name) -> (String?)` · `set(name, value)` ·
+`current_dir() -> String ? IoError` · `home_dir() -> (String?)`.
 
 **std/process** — `exit(code)` (no return) · `run(cmd: List<String>) ->
 ProcessResult or IoError` where
@@ -97,7 +97,7 @@ bound) · `min[T: Comparable](a, b)` · `max[T: Comparable]` · `floor`
 `ceil` `round -> Int` · constants `pi`, `e` · `clamp(x, lo, hi)`.
 
 **std/random** — `int(low, high) -> Int` (inclusive, S22) · `float() ->
-Float` (0..1) · `pick<T>(xs: List<T>) -> T?` · `shuffle<T>(mut xs)` ·
+Float` (0..1) · `pick<T>(xs: List<T>) -> (T?)` · `shuffle<T>(mut xs)` ·
 `seed(n)`. Backed by a tiny PRNG written in the prelude (xoshiro256++)
 — deterministic under `seed`, no external crate (I6).
 
@@ -138,7 +138,7 @@ Utf8Error` land here.
    - argument order is subject first, then what is done to it;
    - names are full words unless an already-ratified prelude/core name says
      otherwise;
-   - every fallible call returns `Result`; no panicking twins in core;
+   - every fallible call returns `T ? E`; no panicking twins in core;
    - no abbreviated module names (`random`, not `rand`);
    - verbs are actions, nouns are values, bool functions ask questions;
    - one canonical spelling per task in M10 core std by default.

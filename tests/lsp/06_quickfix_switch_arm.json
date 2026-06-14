@@ -1,6 +1,6 @@
 {
-  "description": "switch-arm quick fix: missing enum variant triggers E0309 with a code action",
-  "source": "enum Color { Red, Green, Blue }\nfn main() {\n    val c = Color.Red;\n    switch c {\n        Color.Red => {}\n    }\n}\n",
+  "description": "switch-arm quick fix: missing enum variants produce a structured code action that inserts compilable arms",
+  "source": "enum Color {\n    Red;\n    Green;\n    Blue;\n}\nfn main() {\n    val c = Color.Red;\n    switch c {\n        (c == Red) -> {};\n    }\n}\n",
   "steps": [
     {
       "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
@@ -13,6 +13,10 @@
     {
       "open": {"uri": "file:///tmp/lsp_switch_test.jet"},
       "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"file:///tmp/lsp_switch_test.jet"},"range":{"start":{"line":7,"character":4},"end":{"line":10,"character":1}},"context":{"diagnostics":[]}}},
+      "expect_contains": ["quickfix", "Green", "Blue"]
     },
     {
       "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},

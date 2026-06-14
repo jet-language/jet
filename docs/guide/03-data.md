@@ -93,7 +93,7 @@ absent is spelled `T?`, and you have to acknowledge the empty case to get at the
 value:
 
 ```jet
-fn find_even(limit: Int) -> Int? {
+fn find_even(limit: Int) -> (Int?) {
     for i in 1..limit {
         if i % 2 == 0 {
             return value(i);

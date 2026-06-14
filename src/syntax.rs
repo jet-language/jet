@@ -54,6 +54,7 @@ pub const TYPE_INT: &str = "Int";
 pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
+pub const TYPE_ERROR: &str = "Error";
 
 /// S10 (ratified M2): caller-site mutable borrow on a parameter or binding.
 pub const KW_MUTATE: &str = "mut";
@@ -254,10 +255,10 @@ pub const FOREIGN_READ: &str = "read";
 pub const FOREIGN_WRITE: &str = "write";
 pub const FOREIGN_OWNED: &str = "owned";
 
-/// S34 (ratified M4): fallible return type constructor.
+/// S34 (legacy M4): old fallible type constructor, kept only for diagnostics.
 pub const TYPE_RESULT: &str = "Result";
 
-/// S34 (ratified M4): success / failure constructors for `Result<T, E>`.
+/// S34 (ratified M4): success / failure constructors for fallible `T ? E`.
 pub const LIT_OK: &str = "ok";
 pub const LIT_ERR: &str = "err";
 
@@ -304,6 +305,12 @@ pub const FOREIGN_EPRINTLN: &str = "eprintln";
 pub const FOREIGN_OPEN: &str = "open";
 pub const FOREIGN_GETENV: &str = "getenv";
 pub const FOREIGN_OS: &str = "os";
+
+/// M11 teaching spellings: async/await and mutex/lock.
+pub const FOREIGN_ASYNC: &str = "async";
+pub const FOREIGN_AWAIT: &str = "await";
+pub const FOREIGN_MUTEX: &str = "Mutex";
+pub const FOREIGN_LOCK: &str = "lock";
 
 /// S52 (ratified M12): package manifest filename and lock filename.
 pub const MANIFEST_FILE: &str = "jet.toml";

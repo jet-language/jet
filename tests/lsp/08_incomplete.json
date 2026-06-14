@@ -1,0 +1,38 @@
+{
+  "description": "capabilities work on broken/incomplete source (LSP-I5: mid-keystroke programs)",
+  "source": "fn main() {\n    val x = \n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["completionProvider", "hoverProvider", "definitionProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_incomplete_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///tmp/lsp_incomplete_test.jet"},"position":{"line":1,"character":14}}},
+      "expect_contains": ["items"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///tmp/lsp_incomplete_test.jet"},"position":{"line":0,"character":3}}},
+      "expect_contains": ["result"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":4,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"file:///tmp/lsp_incomplete_test.jet"}}},
+      "expect_contains": ["data"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":5,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///tmp/lsp_incomplete_test.jet"},"range":{"start":{"line":0,"character":0},"end":{"line":5,"character":0}}}},
+      "expect_contains": ["result"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

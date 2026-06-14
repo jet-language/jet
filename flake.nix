@@ -90,6 +90,8 @@
             rustc
             gcc
             nodejs_22
+            nixfmt
+            ripgrep
             jetDev
           ];
 
@@ -99,13 +101,15 @@
             echo "Jet dev shell"
             echo "  build:    cargo build"
             echo "  run:      jet run examples/01_hello.jet"
+            echo "  search:   rg \"pattern\" docs src tests"
             echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
-            echo "  editor:   editors/vscode/install.sh   (then open the repo in Cursor)"
+            echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"
+            echo "            editors/zed/install.sh        (Zed dev extension)"
             echo "  release:  nix build .#jet"
           '';
         };
 
-        formatter = pkgs.nixfmt-rfc-style;
+        formatter = pkgs.nixfmt;
       }
     );
 }

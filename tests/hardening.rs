@@ -89,7 +89,7 @@ fn main() {
 #[test]
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
-fn maybe() -> Int? {
+fn maybe() -> (Int?) {
     return null;
 }
 
@@ -104,6 +104,29 @@ fn main() {
     assert!(
         out.rust.contains("jet_index_map"),
         "map index inside `or` fallback must use the map helper: {}",
+        out.rust
+    );
+}
+
+#[test]
+fn bare_question_return_uses_default_error() {
+    let src = r#"
+fn parse_count(raw: String) -> Int? {
+    if raw == "" {
+        return err("empty");
+    }
+    return ok(1);
+}
+
+fn main() {
+    val n = parse_count("") or 0;
+    print(n);
+}
+"#;
+    let out = jet::compile(src).expect("default Error fallible return should compile");
+    assert!(
+        out.rust.contains("Result<i64, String>"),
+        "default Error should lower to String: {}",
         out.rust
     );
 }

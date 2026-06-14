@@ -1,9 +1,8 @@
-# M11 — Concurrency: tasks & channels
+# E2-M1 — Concurrency: tasks & channels
 
-**Status:** deferred past v1.0 (S53 ratified 2026-06-12 — owner: delay to
-v2). Do not implement during the v1 milestone path. Depends on M8
-(closure capture machinery does the heavy lifting) and M9 (generic
-`Task<T>`/`Channel<T>` signatures).
+**Status:** verified 2026-06-14. Promoted from deferred M11 by the Epoch 2
+roadmap. Depends on M8 (closure capture machinery does the heavy lifting) and
+M9 (generic `Task<T>`/`Channel<T>` signatures).
 **Error codes:** E1101+.
 
 ## Goal
@@ -107,3 +106,9 @@ async/await (post-v1 decision, likely never — blocking tasks + channels
 cover the audience), Mutex/RwLock/atomics, scoped borrows into threads,
 thread pools / work stealing, select over channels, timeouts (compose
 with `std/time` later), parallelism in stdlib collection methods.
+
+## Verification
+
+E2-M1 verified 2026-06-14 with `nix develop --command cargo test` and the
+ignored 1000-message channel stress test. Examples `32_tasks.jet` and
+`33_pipeline.jet` are the executable spec for deterministic task/channel use.

@@ -1,0 +1,17 @@
+import std.tasks as tasks;
+
+struct Logger {
+    ref sink: String;
+}
+
+struct Config {
+    logger: Logger;
+    id: Int;
+}
+
+fn main() {
+    val ch: Channel<Config> = tasks.channel();
+    val sender = ch.sender();
+    val cfg = Config { logger: Logger { }, id: 1 };
+    sender.send(take cfg);
+}

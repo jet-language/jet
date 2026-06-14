@@ -1,0 +1,11 @@
+import std.tasks as tasks;
+
+fn main() {
+    val ch: Channel<Int> = tasks.channel();
+    val sender = ch.sender();
+    val t = tasks.spawn(take(sender) () => {
+        sender.send(1);
+    });
+    t.join();
+    print(ch.receive() or panic("task did not send a value"));
+}

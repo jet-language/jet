@@ -1,0 +1,20 @@
+import std.tasks as tasks;
+
+fn main() {
+    val ch: Channel<Int> = tasks.channel();
+    val s1 = ch.sender();
+    val t1 = tasks.spawn(take(s1) () => { s1.send(30); });
+    val s2 = ch.sender();
+    val t2 = tasks.spawn(take(s2) () => { s2.send(10); });
+    val s3 = ch.sender();
+    val t3 = tasks.spawn(take(s3) () => { s3.send(20); });
+    t1.join();
+    t2.join();
+    t3.join();
+    var results: List<Int> = [];
+    results.push(ch.receive() or panic("channel closed"));
+    results.push(ch.receive() or panic("channel closed"));
+    results.push(ch.receive() or panic("channel closed"));
+    results.sort();
+    for x in results { print(x); }
+}

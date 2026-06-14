@@ -1023,6 +1023,8 @@ struct CompletionItem {
     detail: Option<String>,
     insert_text: Option<String>,
     insert_text_format: u8, // 1=plain, 2=snippet
+    /// D-LSP5: import statement to insert at top of file (auto-import).
+    auto_import: Option<String>,
 }
 
 impl CompletionItem {
@@ -1039,12 +1041,20 @@ impl CompletionItem {
             ),
             None => String::new(),
         };
+        let additional = match &self.auto_import {
+            Some(stmt) => format!(
+                r#","additionalTextEdits":[{{"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"newText":"{}"}}]"#,
+                json_escape(stmt)
+            ),
+            None => String::new(),
+        };
         format!(
-            r#"{{"label":"{}","kind":{}{}{}}}"#,
+            r#"{{"label":"{}","kind":{}{}{}{}}}"#,
             json_escape(&self.label),
             self.kind,
             detail,
-            insert
+            insert,
+            additional
         )
     }
 }
@@ -1121,7 +1131,7 @@ fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Op
     None
 }
 
-fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<CompletionItem> {
+fn compute_completions(db: &SymbolDB, src: &str, offset: usize, current_path: &str) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -1140,6 +1150,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                                     detail: Some(fty.name()),
                                     insert_text: None,
                                     insert_text_format: 1,
+                                auto_import: None,
                                 });
                             }
                         }
@@ -1159,6 +1170,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                                                 detail: Some(fty.name()),
                                                 insert_text: None,
                                                 insert_text_format: 1,
+                                                auto_import: None,
                                             });
                                         }
                                     }
@@ -1191,6 +1203,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                                     detail: Some(detail),
                                     insert_text: None,
                                     insert_text_format: 1,
+                                auto_import: None,
                                 });
                             }
                         }
@@ -1216,6 +1229,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                                 detail: Some(format!("variant of {}", enum_type)),
                                 insert_text: Some(format!("{}.{} {{}}", enum_type, v)),
                                 insert_text_format: 2,
+                                auto_import: None,
                             });
                         }
                     }
@@ -1225,10 +1239,22 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
         }
     }
 
+    // D-LSP5: for symbols from other modules, generate an auto-import edit if
+    // that module isn't already imported in the current source.
+    let auto_import_for = |mp: &str| -> Option<String> {
+        if mp == current_path || mp.is_empty() {
+            return None;
+        }
+        if src.contains(&format!("\"{}\"", mp)) {
+            return None; // already imported
+        }
+        Some(format!("import \"{}\";\n", mp))
+    };
+
     // All top-level definitions
     for def in &db.defs {
         match &def.kind {
-            SymKind::Function { params, ret } => {
+            SymKind::Function { params, ret: _ } => {
                 if seen.insert(def.name.clone()) {
                     let detail = format!(
                         "fn {}({})",
@@ -1245,6 +1271,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail: Some(detail),
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: auto_import_for(&def.module_path),
                     });
                 }
             }
@@ -1256,6 +1283,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail: Some(format!("struct {}", def.name)),
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: auto_import_for(&def.module_path),
                     });
                 }
             }
@@ -1267,6 +1295,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail: Some(format!("enum {} — variants: {}", def.name, variants.join(", "))),
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: auto_import_for(&def.module_path),
                     });
                 }
             }
@@ -1278,6 +1307,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail: None,
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: auto_import_for(&def.module_path),
                     });
                 }
             }
@@ -1289,10 +1319,11 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail: Some(format!("trait {}", def.name)),
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: auto_import_for(&def.module_path),
                     });
                 }
             }
-            SymKind::Local { mutable, ty } => {
+            SymKind::Local { mutable: _, ty } => {
                 if seen.insert(def.name.clone()) {
                     let detail = ty.as_ref().map(|t| t.name());
                     items.push(CompletionItem {
@@ -1301,6 +1332,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail,
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: None,
                     });
                 }
             }
@@ -1312,6 +1344,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                         detail: Some(ty.name()),
                         insert_text: None,
                         insert_text_format: 1,
+                        auto_import: None,
                     });
                 }
             }
@@ -1328,6 +1361,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                 detail: None,
                 insert_text: None,
                 insert_text_format: 1,
+                auto_import: None,
             });
         }
     }
@@ -1341,6 +1375,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
                 detail: Some("built-in type".to_string()),
                 insert_text: None,
                 insert_text_format: 1,
+                auto_import: None,
             });
         }
     }
@@ -1350,49 +1385,88 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize) -> Vec<Completio
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 
-fn compute_hover(db: &SymbolDB, tokens: &[Token], src: &str, path: &str, offset: usize) -> Option<String> {
-    // First try hover map (most precise)
-    if let Some(text) = db.hover_at(path, offset) {
-        return Some(text.to_string());
+/// B7 (D-LSP6): Collect adjacent `///` doc-comment lines immediately preceding
+/// `def_start` in the raw token stream (which includes LineComment tokens).
+fn collect_doc_comment(tokens: &[Token], def_start: usize) -> Option<String> {
+    // Find the first token at or after def_start.
+    let idx = tokens.partition_point(|t| t.span.end <= def_start);
+    let mut lines: Vec<String> = Vec::new();
+    let mut j = idx;
+    loop {
+        if j == 0 {
+            break;
+        }
+        j -= 1;
+        match &tokens[j].kind {
+            TokKind::LineComment(text) if text.starts_with("///") => {
+                let doc = text.trim_start_matches('/').trim().to_string();
+                lines.push(doc);
+            }
+            // A regular `//` comment or any non-comment token stops the search.
+            _ => break,
+        }
     }
-    // Fall back: find the token at offset and look up the name
-    let name = find_ident_at(tokens, offset)?;
-    // Look in defs
-    if let Some(def) = db.defs.iter().find(|d| d.name == name) {
-        let text = match &def.kind {
-            SymKind::Function { params, ret } => {
-                let ps: Vec<String> = params
-                    .iter()
-                    .map(|(n, t)| format!("{}: {}", n, t.name()))
-                    .collect();
-                let r = match ret {
-                    Some(t) => format!(" -> {}", t.name()),
-                    None => String::new(),
-                };
-                format!("fn {}({}){}", name, ps.join(", "), r)
-            }
-            SymKind::Struct { fields } => {
-                format!("struct `{}`\n\nFields: {}", name, fields.iter().map(|(n, t)| format!("{}: {}", n, t.name())).collect::<Vec<_>>().join(", "))
-            }
-            SymKind::Enum { variants } => {
-                format!("enum `{}`\n\nVariants: {}", name, variants.join(", "))
-            }
-            SymKind::Trait => format!("trait `{}`", name),
-            SymKind::Const => format!("const `{}`", name),
-            SymKind::EnumVariant { parent } => format!("`{}` — variant of `{}`", name, parent),
-            SymKind::Field { ty, parent } => format!("`{}`: {} (field of `{}`)", name, ty.name(), parent),
-            SymKind::Local { mutable, ty } => {
-                let kw = if *mutable { "var" } else { "val" };
-                match ty {
-                    Some(t) => format!("`{}`: {} ({})", name, t.name(), kw),
-                    None => format!("`{}` ({})", name, kw),
+    if lines.is_empty() {
+        return None;
+    }
+    lines.reverse();
+    Some(lines.join("\n"))
+}
+
+fn compute_hover(db: &SymbolDB, tokens: &[Token], _src: &str, path: &str, offset: usize) -> Option<String> {
+    // Collect the base hover text (type signature / ownership annotation).
+    let base = if let Some(text) = db.hover_at(path, offset) {
+        text.to_string()
+    } else {
+        // Fall back: find the token at offset and look up the name.
+        let name = find_ident_at(tokens, offset)?;
+        if let Some(def) = db.defs.iter().find(|d| d.name == name) {
+            match &def.kind {
+                SymKind::Function { params, ret } => {
+                    let ps: Vec<String> = params
+                        .iter()
+                        .map(|(n, t)| format!("{}: {}", n, t.name()))
+                        .collect();
+                    let r = match ret {
+                        Some(t) => format!(" -> {}", t.name()),
+                        None => String::new(),
+                    };
+                    format!("fn {}({}){}", name, ps.join(", "), r)
                 }
+                SymKind::Struct { fields } => {
+                    format!("struct `{}`\n\nFields: {}", name, fields.iter().map(|(n, t)| format!("{}: {}", n, t.name())).collect::<Vec<_>>().join(", "))
+                }
+                SymKind::Enum { variants } => {
+                    format!("enum `{}`\n\nVariants: {}", name, variants.join(", "))
+                }
+                SymKind::Trait => format!("trait `{}`", name),
+                SymKind::Const => format!("const `{}`", name),
+                SymKind::EnumVariant { parent } => format!("`{}` — variant of `{}`", name, parent),
+                SymKind::Field { ty, parent } => format!("`{}`: {} (field of `{}`)", name, ty.name(), parent),
+                SymKind::Local { mutable, ty } => {
+                    let kw = if *mutable { "var" } else { "val" };
+                    match ty {
+                        Some(t) => format!("`{}`: {} ({})", name, t.name(), kw),
+                        None => format!("`{}` ({})", name, kw),
+                    }
+                }
+                SymKind::Param { ty } => format!("`{}`: {} (parameter)", name, ty.name()),
             }
-            SymKind::Param { ty } => format!("`{}`: {} (parameter)", name, ty.name()),
-        };
-        return Some(text);
+        } else {
+            return None;
+        }
+    };
+
+    // B7: prepend any `///` doc comment lines found before the definition.
+    let name = find_ident_at(tokens, offset);
+    if let Some(name) = name {
+        if let Some(def) = db.defs.iter().find(|d| d.name == name && d.module_path == path) {
+            if let Some(doc) = collect_doc_comment(tokens, def.def_span.start) {
+                return Some(format!("{}\n\n---\n\n{}", doc, base));
+            }
+        }
     }
-    None
+    Some(base)
 }
 
 fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
@@ -1682,16 +1756,48 @@ struct Document {
 
 struct Server {
     docs: HashMap<String, Document>,
+    /// URIs of documents that changed since last diagnostic publish (D-LSP3).
+    dirty: std::collections::HashSet<String>,
+    /// D-LSP4: diagnostic cache keyed by path → (source-hash, diagnostics).
+    /// RefCell allows mutation through &self so callers can hold &Document refs.
+    diag_cache: std::cell::RefCell<HashMap<String, (u64, Vec<Diagnostic>)>>,
     shutdown: bool,
+}
+
+/// FNV-1a 64-bit hash of a string — good enough for source-change detection.
+fn hash_str(s: &str) -> u64 {
+    let mut h: u64 = 14695981039346656037;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    h
 }
 
 impl Server {
     fn new() -> Self {
-        Server { docs: HashMap::new(), shutdown: false }
+        Server {
+            docs: HashMap::new(),
+            dirty: std::collections::HashSet::new(),
+            diag_cache: std::cell::RefCell::new(HashMap::new()),
+            shutdown: false,
+        }
     }
 
+    /// D-LSP4: return diagnostics, re-using cached results when source is unchanged.
     fn check(&self, doc: &Document) -> Vec<Diagnostic> {
-        check_document(&doc.path, &doc.text)
+        let h = hash_str(&doc.text);
+        {
+            let cache = self.diag_cache.borrow();
+            if let Some((cached_h, cached)) = cache.get(&doc.path) {
+                if *cached_h == h {
+                    return cached.clone();
+                }
+            }
+        }
+        let diags = check_document(&doc.path, &doc.text);
+        self.diag_cache.borrow_mut().insert(doc.path.clone(), (h, diags.clone()));
+        diags
     }
 
     fn check_with_bundle(&self, doc: &Document) -> (Vec<Diagnostic>, Option<ProgramBundle>) {
@@ -1726,6 +1832,8 @@ pub fn run_stdio() -> io::Result<()> {
 
         if let Some(method) = method {
             if id.is_some() {
+                // D-LSP3: flush any buffered dirty-document diagnostics before serving requests.
+                let _ = flush_dirty(&mut server, &mut stdout);
                 let resp = catch_handler(std::panic::AssertUnwindSafe(|| {
                     handle_request(&mut server, method, params, id.as_ref().unwrap())
                 }));
@@ -1829,6 +1937,7 @@ fn handle_request(
         }
         "textDocument/codeAction" => code_action_response(server, params, id),
         "textDocument/formatting" => format_response(server, params, id),
+        "textDocument/rangeFormatting" => format_response(server, params, id),
         "textDocument/completion" => completion_response(server, params, id),
         "textDocument/hover" => hover_response(server, params, id),
         "textDocument/definition" => definition_response(server, params, id),
@@ -1852,7 +1961,7 @@ fn handle_notification(
             server.shutdown = true;
             Ok(())
         }
-        "textDocument/didOpen" => publish_after_change(server, params, stdout),
+        "textDocument/didOpen" => publish_after_open(server, params, stdout),
         "textDocument/didChange" => publish_after_change(server, params, stdout),
         "textDocument/didClose" => {
             if let Some(uri) = params
@@ -1873,6 +1982,7 @@ fn initialize_response(id: &JsonValue) -> String {
   "capabilities": {
     "textDocumentSync": 1,
     "documentFormattingProvider": true,
+    "documentRangeFormattingProvider": true,
     "codeActionProvider": true,
     "completionProvider": {
       "triggerCharacters": ["."],
@@ -1928,6 +2038,26 @@ fn publish_after_change(
     params: Option<&JsonValue>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
+    publish_after_change_impl(server, params, stdout, false)
+}
+
+fn publish_after_open(
+    server: &mut Server,
+    params: Option<&JsonValue>,
+    stdout: &mut impl Write,
+) -> io::Result<()> {
+    publish_after_change_impl(server, params, stdout, true)
+}
+
+/// D-LSP3: on `didChange` (is_open=false), mark dirty but don't publish immediately.
+/// On `didOpen` (is_open=true), always publish so the editor gets initial diagnostics.
+/// Dirty documents are flushed before the next request that reads document state.
+fn publish_after_change_impl(
+    server: &mut Server,
+    params: Option<&JsonValue>,
+    stdout: &mut impl Write,
+    is_open: bool,
+) -> io::Result<()> {
     let params = match params {
         Some(p) => p,
         None => return Ok(()),
@@ -1954,10 +2084,31 @@ fn publish_after_change(
         }
     }
 
-    if let Some(doc) = server.docs.get(&uri) {
-        let diags = server.check(doc);
-        let notif = publish_diagnostics(&uri, &doc.text, &diags);
-        write_message(stdout, &notif)?;
+    if is_open {
+        // Always publish on open — client expects initial diagnostics.
+        if let Some(doc) = server.docs.get(&uri) {
+            let diags = server.check(doc);
+            let notif = publish_diagnostics(&uri, &doc.text, &diags);
+            write_message(stdout, &notif)?;
+        }
+        server.dirty.remove(&uri);
+    } else {
+        // Mark dirty; diagnostics will be flushed before the next request.
+        server.dirty.insert(uri);
+    }
+    Ok(())
+}
+
+/// Flush any pending dirty-document diagnostics before handling a request (D-LSP3).
+fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
+    let dirty: Vec<String> = server.dirty.drain().collect();
+    for uri in dirty {
+        if let Some(doc) = server.docs.get(&uri) {
+            let text = doc.text.clone();
+            let diags = server.check(doc);
+            let notif = publish_diagnostics(&uri, &text, &diags);
+            write_message(stdout, &notif)?;
+        }
     }
     Ok(())
 }
@@ -2066,7 +2217,7 @@ fn completion_response(server: &Server, params: Option<&JsonValue>, id: &JsonVal
         None => SymbolDB::new(),
     };
 
-    let items = compute_completions(&db, &doc.text, offset);
+    let items = compute_completions(&db, &doc.text, offset, &doc.path);
     let mut json_items = String::new();
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -2280,14 +2431,32 @@ fn inlay_hint_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
 
-    let (_, bundle) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b),
-        None => return Some(response(id, "[]")),
+    let (diags, bundle) = server.check_with_bundle(doc);
+
+    // Build type-annotation hints from the symbol DB.
+    let mut hints: Vec<InlayHint> = match bundle {
+        Some(b) => {
+            let db = build_symbol_db(&b);
+            db.inlay_hints_for(&doc.path).into_iter().cloned().collect()
+        }
+        None => Vec::new(),
     };
 
-    let hints = db.inlay_hints_for(&doc.path);
-    let json = format_inlay_hints(&hints, &doc.text);
+    // D-LSP8: add clone-site hints for L0201 diagnostics.
+    for d in &diags {
+        if d.code == "L0201" {
+            if let Some(span) = d.span {
+                hints.push(InlayHint {
+                    span,
+                    module_path: doc.path.clone(),
+                    label: ".clone()".to_string(),
+                });
+            }
+        }
+    }
+
+    let hint_refs: Vec<&InlayHint> = hints.iter().collect();
+    let json = format_inlay_hints(&hint_refs, &doc.text);
     Some(response(id, &json))
 }
 
@@ -2404,6 +2573,34 @@ pub fn run_doctor() {
         println!("  [FAIL] formatter");
     }
     println!("  [ok] JSON-RPC framing");
+
+    // C13: transcript runner smoke — verify tests/lsp/01_initialize.json exists.
+    let transcript_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lsp");
+    if transcript_dir.exists() {
+        let count = std::fs::read_dir(&transcript_dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json")).count())
+            .unwrap_or(0);
+        println!("  [ok] transcript runner: {} fixture(s) found in tests/lsp/", count);
+    } else {
+        println!("  [WARN] transcript runner: tests/lsp/ not found");
+    }
+
+    // C13: tree-sitter grammar presence.
+    let ts_grammar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-jet/grammar.js");
+    if ts_grammar.exists() {
+        println!("  [ok] tree-sitter-jet/grammar.js present");
+    } else {
+        println!("  [WARN] tree-sitter-jet/grammar.js not found — run `tree-sitter generate` to build");
+    }
+
+    // C13: TextMate grammar presence.
+    let tm_grammar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/jet.tmGrammar");
+    if tm_grammar.exists() {
+        println!("  [ok] editors/jet.tmGrammar present");
+    } else {
+        println!("  [WARN] editors/jet.tmGrammar not found");
+    }
+
     println!("all checks passed — the language server is healthy");
 }
 
@@ -2531,7 +2728,7 @@ mod tests {
         let (_, bundle) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle);
-        let items = compute_completions(&db, src, 14);
+        let items = compute_completions(&db, src, 14, "test.jet");
         assert!(items.iter().any(|i| i.label == "val"), "expected val in completions");
         assert!(items.iter().any(|i| i.label == "fn"), "expected fn in completions");
     }

@@ -245,3 +245,44 @@ fn main() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+#[ignore]
+fn channel_stress_1000_messages() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping channel stress test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_channel_stress_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "channel_stress",
+        r#"
+import std.tasks as tasks;
+
+fn main() {
+    val ch: Channel<Int> = tasks.channel();
+    val sender = ch.sender();
+    val producer = tasks.spawn(take(sender) () => {
+        for i in 1..1000 {
+            sender.send(i);
+        }
+    });
+    producer.join();
+    var total = 0;
+    for i in 1..1000 {
+        total = total + (ch.receive() or panic("channel closed"));
+    }
+    print(total);
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "channel stress failed: {stderr}");
+    assert_eq!(stdout, "500500\n");
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -52,21 +52,21 @@ fn main() {
   `s.slice(a..b) -> String` (char positions). No `s[i]` indexing
   (E0503 teaches `.chars()` / `.slice(…)` — strings aren't arrays).
 - Conversions (S42): `Int`/`Float` are defaults; sized types (`I8`…`U64`,
-  `F32`/`F64`) are explicit-only. `Int.parse(s) -> Result<Int, ParseError>`,
-  `Float.parse(s) -> Result<Float, ParseError>`, `x.to_string()`,
+  `F32`/`F64`) are explicit-only. `Int.parse(s) -> Int ? ParseError`,
+  `Float.parse(s) -> Float ? ParseError`, `x.to_string()`,
   `n.to_float()`, `f.to_int()` (truncates — say so in docs), plus
   `to_i8()` / `to_u8()` / … between sized types (checked). No `as`
   keyword (recognized only for a teaching error, E0026).
 
 ### Core methods (exact v1 set — implement all, nothing more)
 
-`List<T>`: `len`, `push`, `pop -> T?`, `insert(i, v)`, `remove(i) -> T`,
-`get(i) -> T?`, `first -> T?`, `last -> T?`, `contains(v)`,
-`index_of(v) -> Int?`, `reverse`, `sort` (T comparable), `join(sep)`
+`List<T>`: `len`, `push`, `pop -> (T?)`, `insert(i, v)`, `remove(i) -> T`,
+`get(i) -> (T?)`, `first -> (T?)`, `last -> (T?)`, `contains(v)`,
+`index_of(v) -> (Int?)`, `reverse`, `sort` (T comparable), `join(sep)`
 (T printable), `clear`, `is_empty`. Mutating methods require a `var`
 receiver (reuses M2 E0202 machinery via `mut self`).
 
-`Map<K, V>`: `len`, `insert(k, v)`, `get(k) -> V?`, `remove(k) -> V?`,
+`Map<K, V>`: `len`, `insert(k, v)`, `get(k) -> (V?)`, `remove(k) -> (V?)`,
 `contains_key(k)`, `keys -> List<K>`, `values -> List<V>`, `clear`,
 `is_empty`.
 

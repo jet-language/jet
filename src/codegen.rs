@@ -133,11 +133,12 @@ impl Cx {
             }
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "U8" => "u8".to_string(),
+            Type::Named(name) if name == "Error" => "String".to_string(),
             Type::Named(name)
                 if matches!(
                     name.as_str(),
                     "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch" | "Json"
-                        | "JsonError"
+                        | "JsonError" | "Closed"
                 ) =>
             {
                 format!("{}jet_std::{name}", self.root_prefix)
@@ -146,6 +147,15 @@ impl Cx {
                 format!("Box<dyn {}>", generics::user_trait_rust(name))
             }
             Type::Named(name) => format!("user_{name}"),
+            Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
+                format!("{}jet_std::JetTask<{}>", self.root_prefix, self.rust_type(&args[0]))
+            }
+            Type::Apply { name, args } if name == "Channel" && !args.is_empty() => {
+                format!("{}jet_std::JetChannel<{}>", self.root_prefix, self.rust_type(&args[0]))
+            }
+            Type::Apply { name, args } if name == "Sender" && !args.is_empty() => {
+                format!("{}jet_std::JetSender<{}>", self.root_prefix, self.rust_type(&args[0]))
+            }
             Type::Apply { name, args } => {
                 if args.is_empty() {
                     format!("user_{name}")
@@ -2387,6 +2397,59 @@ fn emit_lambda(cx: &Cx, lam: &Lambda, env: &HashMap<String, Slot>) -> String {
     }
 }
 
+fn emit_spawn_lambda(cx: &Cx, lam: &Lambda, env: &HashMap<String, Slot>) -> String {
+    let mut prep = String::new();
+    let mut lam_env = env.clone();
+    for name in &lam.meta.cloned_captures {
+        let cap = format!("_jet_cap_{}", mangle(name));
+        prep.push_str(&format!("let {} = ({}).clone();\n    ", cap, place_of(env, name)));
+        lam_env.insert(
+            name.clone(),
+            Slot {
+                rust_name: cap,
+                deref: false,
+                jet_ty: None,
+            },
+        );
+    }
+    for p in &lam.params {
+        lam_env.insert(
+            p.name.clone(),
+            Slot {
+                rust_name: mangle(&p.name),
+                deref: false,
+                jet_ty: p.ty.clone(),
+            },
+        );
+    }
+    let params: Vec<String> = lam
+        .params
+        .iter()
+        .map(|p| {
+            let ty = p
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", cx.rust_type(t)))
+                .unwrap_or_default();
+            format!("{}{}", mangle(&p.name), ty)
+        })
+        .collect();
+    let body = match &lam.body {
+        LambdaBody::Expr(e) => emit_expr(cx, e, &lam_env),
+        LambdaBody::Block(stmts) => {
+            let mut inner = String::new();
+            emit_stmts(cx, stmts, &mut lam_env, &mut inner, 1, false);
+            format!("{{ {} }}", inner)
+        }
+    };
+    let closure = format!("move |{}| {}", params.join(", "), body);
+    if prep.is_empty() {
+        closure
+    } else {
+        format!("{{ {} {} }}", prep, closure)
+    }
+}
+
 fn emit_boxed_enum_arg(
     cx: &Cx,
     type_name: &str,
@@ -2549,11 +2612,15 @@ fn emit_builtin_method(
         )),
         "reverse" => Some(format!("({}).reverse()", recv)),
         "sort" => Some(format!("({}).sort()", recv)),
+        "join" if args.is_empty() => Some(format!("({}).join()", recv)),
         "join" => Some(format!(
             "({}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
             recv,
             arg(0)
         )),
+        "receive" => Some(format!("({}).receive()", recv)),
+        "sender" => Some(format!("({}).sender()", recv)),
+        "send" => Some(format!("({}).send({})", recv, arg(0))),
         "clear" => Some(format!("({}).clear()", recv)),
         "chars" => Some(format!("({}).chars().collect::<Vec<char>>()", recv)),
         "bytes" => Some(format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)),
@@ -2699,6 +2766,16 @@ fn emit_std_call(
         ("std.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
         ("std.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
         ("std.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
+        ("std.tasks", "spawn") => {
+            if let Some(lam_arg) = args.first() {
+                if let crate::ast::Expr::Lambda(lam) = &lam_arg.expr {
+                    let closure = emit_spawn_lambda(cx, lam, env);
+                    return format!("{}jet_std::JetTask::spawn({})", cx.root_prefix, closure);
+                }
+            }
+            format!("{}jet_std::JetTask::spawn({})", cx.root_prefix, arg(0))
+        }
+        ("std.tasks", "channel") => format!("{}jet_std::JetChannel::new()", cx.root_prefix),
         _ => "/* unknown std call */".to_string(),
     }
 }

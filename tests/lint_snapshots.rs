@@ -21,7 +21,7 @@ fn lint_snapshots() {
         let src = fs::read_to_string(&path).unwrap();
         let shown_path = format!("tests/ui_lint/{}", name);
 
-        let out = jet::compile(&src).unwrap_or_else(|diags| {
+        let out = jet::compile_with_path(&src, &path.to_string_lossy()).unwrap_or_else(|diags| {
             panic!(
                 "lint fixture {} must compile:\n{}",
                 name,

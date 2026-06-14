@@ -60,11 +60,16 @@ only for manifest; exact pins M12.1, ranges+resolver M12.2; all M12.1 in
 
 ---
 
-## Group 10 — M13 LSP *(open — see docs/plans/m13-lsp.md)*
+## Group 10 — M13 LSP *(ratified 2026-06-14 — see docs/plans/epoch-1/m13-lsp.md)*
 
-| ID | Question | Rec |
-|---|---|---|
-| D-LSP1…13 | Full table | All **A** — see m13 plan |
+*(D-LSP1…13 ratified 2026-06-14 — all recommendations accepted as written:
+D-LSP1 `jet lsp` subcommand; D-LSP2 full error recovery; D-LSP3 debounced
+~200ms via dirty-flag flush; D-LSP4 file-granular re-parse; D-LSP5 type-aware
+completion + switch snippet + auto-import; D-LSP6 type + ownership + doc-comment
+hover; D-LSP7 structured edits shared with CLI `jet fix`; D-LSP8 inlay hints
+off by default except clone hint; D-LSP9 near-zero settings; D-LSP10 strict
+standard LSP; D-LSP11 crash-proof handlers + `jet lsp doctor`; D-LSP12 fixture
++ transcript + latency bench in CI; D-LSP13 code lens deferred to `jet dev`.)*
 
 ---
 
@@ -73,11 +78,11 @@ only for manifest; exact pins M12.1, ranges+resolver M12.2; all M12.1 in
 
 | Group              | IDs  | Needed by | Status |
 | ------------------ | ---- | --------- | ------ |
-| 10 — M13 LSP       | D-LSP1…13 | M13  | ☐      |
 | — (deferred)       | S56  | post-1.0  | ☐      |
 
 
 Ratified (see docs/02): Group 1 confirmations; Group 2 — S29–S33; Group 3 —
 S34–S36; Group 4 — S37–S42; Group 5 — S43 S44 S49 S50; Group 6 — S26 S28
 S45 S48 S46 S47 S55 S57; Group 7 — S51 S52 S53 S54; Group 8 — S58 S59 S60
-S61 S62 S63. Group 9 — D-PM1…8 (see docs/plans/m12-packages.md).
+S61 S62 S63; Group 9 — D-PM1…8 (see docs/plans/m12-packages.md); Group 10 —
+D-LSP1…13 (see docs/plans/epoch-1/m13-lsp.md).

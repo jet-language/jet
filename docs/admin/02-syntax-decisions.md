@@ -248,31 +248,36 @@ Rejected: `is` keyword, Rust `match`, accessor-only extraction.
 an optional value; `**value(expr)**` when present, bare `**null**` when
 absent (lowercase, like `true`/`false`). No nullable references — `null`
 is only legal where a `T?` is expected, never as a value of plain `T`.
-In **type** position, `?` suffix means Option; in **expression** position,
+In most **type** positions, `?` suffix means Option; in a **function return**
+position, `T?` means fallible `T ?` and `jet fmt` writes the space. A function
+that returns an optional writes `-> (T?)`. In **expression** position,
 postfix `?` is error propagation (S7) — parser disambiguates by context.
 Rejected: `Option[T]`, `Some`/`None`, `some`/`none`, `T??`, pointer-style
 null on non-option types.
 
 **S33 — Generic type argument brackets (M3+)** *(ratified 2026-06-11;
 amended 2026-06-12)*: `**Type<Args>**` — angle brackets for type
-arguments, e.g. `List<Int>`, `Map<String, Int>`, and `Result<T, E>`
-fallible returns (S34). Square brackets `**[]**` are reserved for **value**
+arguments, e.g. `List<Int>` and `Map<String, Int>`. Fallible returns use
+`T ? E` (S34), not a generic `Result` type. Square brackets `**[]**` are reserved for **value**
 list/map literals (S37/S38) and indexing (S39) — never for generic types,
 so `List<Int>` is a typed container and `[1, 2, 3]` is a list value.
 Parser disambiguates `<` in type position from comparison; nested closings
 split `>>` like Rust. Rejected: square-bracket type args `Type[Args]`
 (E0034 teaches `Type<Args>`).
 
-**S34 — Fallible return type (M4)** *(ratified 2026-06-11)*:
-`**Result<T, E>**` — e.g. `fn parse(s: String) -> Result<Int, ParseError>`.
-`Result` is a prelude builtin (S33 angle brackets); `E` is any enum,
-struct, or `String`. Codegen lowers to Rust `Result<T, E>`. Rejected:
+**S34 — Fallible return type (M4)** *(ratified 2026-06-11;
+amended 2026-06-14)*:
+`**T ? E**` — e.g. `fn parse(s: String) -> Int ? ParseError`. `E` is any
+enum, struct, `String`, or the default `Error` type. In a function return,
+`**T ?**` means `T ? Error`; users may write `T?` and `jet fmt` canonicalizes
+it to `T ?`. Codegen lowers to Rust `Result<T, E>`, but `Result<T, E>` is not
+Jet surface syntax. Rejected: `Result<T, E>` as canonical surface syntax,
 `T or E` in type position (A), Zig `!T` with inferred error sets (C).
 
 **S45 — Generic function/type syntax (M9)** *(ratified 2026-06-12)*:
 angle brackets for type parameters — `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { … }`, bounds `<T: A + B>`. Same brackets as S33
-(`List<T>`, `Result<T, E>`). Inline bounds, no `where`, no call-site type
+(`List<T>`, `Map<K, V>`). Inline bounds, no `where`, no call-site type
 arguments (annotate the binding if inference fails:
 `val s: Stack<Int> = empty_stack()`). Rejected: square-bracket generics,
 turbofish, `where` clauses.
@@ -369,7 +374,7 @@ methods only (B), patterns + `?` with no `or` sugar (C).
 stops the program with a friendly runtime report (file, line, exit 70);
 `**require(cond)**` and `**require(cond, "msg")**` panic when the
 condition is false — for programmer invariants and preconditions, not
-recoverable user errors (`Result<T, E>`). Both are prelude builtins like
+recoverable user errors (`T ? E`). Both are prelude builtins like
 `print`. Prefix `assert` is recognized only for a teaching error (S14)
 pointing at `require`. Rejected: `assert` as the canonical builtin name,
 user-facing `abort`/`fatal` (S15 already uses *abort* as a build-mode
@@ -385,8 +390,8 @@ blocks), constructor-only maps with no literal.
 
 **S39 — Indexing & out-of-bounds (M5)** *(ratified 2026-06-12)*:
 `**xs[i]**` and map read `**m[k]**` stop the program with a friendly
-runtime report on out-of-bounds / missing key; `**xs.get(i) -> T?**` (and
-`m.get(k) -> V?`) for safe access. Write `m[k] = v` inserts. Rejected:
+runtime report on out-of-bounds / missing key; `**xs.get(i) -> (T?)**` (and
+`m.get(k) -> (V?)`) for safe access. Write `m[k] = v` inserts. Rejected:
 indexing always returns `T?` (unwrap ceremony), split policy (Option for
 maps only).
 
@@ -412,7 +417,7 @@ A full **sized-type menu** is available for experts and FFI/binary work:
 `**U64**` `**F32**` `**F64**`. `Int`/`Float` are the beginner-facing
 spellings for the 64-bit types; `I64`/`F64` exist for explicit-width and
 FFI code. Conversions are **named methods only** — e.g. `n.to_float()`,
-`f.to_int()`, `x.to_i32()`, `Int.parse(s) -> Result<Int, ParseError>`;
+`f.to_int()`, `x.to_i32()`, `Int.parse(s) -> Int ? ParseError`;
 no `**as**` keyword (E0026 teaches the named forms). Rejected:
 arbitrary-precision integers (C), implicit widening, lowercase Rust
 spellings (`i64`).
@@ -699,7 +704,7 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-11 | S32 | `T?`, `value` / `null`                      | owner |
 | 2026-06-11 | S33 | generic args `Type[T]` square brackets      | owner |
 | 2026-06-12 | S33 | amended: `Type<Args>`; `[]` for value lists | owner |
-| 2026-06-11 | S34 | fallible returns `Result[T, E]`             | owner |
+| 2026-06-11 | S34 | fallible returns `T ? E`                   | owner |
 | 2026-06-12 | S45 | angle-bracket generics; inline bounds       | owner |
 | 2026-06-12 | S28 | traits; in-type or `impl Type.Trait`        | owner |
 | 2026-06-12 | S28 | amended: `impl Type: Trait`; `.` for paths  | owner |

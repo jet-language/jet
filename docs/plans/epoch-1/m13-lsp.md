@@ -1,7 +1,7 @@
 # M13 — LSP v2: a real language server
 
-**Status:** single source of truth (2026-06-13). D-LSP1…13 are
-**recommendations** — ratify before implementation starts.
+**Status:** implemented and verified 2026-06-14. D-LSP1…13 ratified
+2026-06-14 (all recommendations accepted — see docs/admin/06-decision-ballots.md Group 10).
 Depends on M6 phase 4 (LSP v0 skeleton), M12 (multi-package projects).
 **Error codes:** none new (tooling); internal robustness instead.
 
@@ -17,9 +17,9 @@ capability works mid-keystroke on incomplete programs.
 
 ---
 
-## Open decisions — ratify before M13
+## Decisions — ratified 2026-06-14
 
-Recommendations below. Implement as written unless the owner overrides.
+All recommendations accepted as written.
 
 | ID | Question | Rec |
 |---|---|---|
@@ -38,7 +38,7 @@ Recommendations below. Implement as written unless the owner overrides.
 | D-LSP13 | Code lens / eval | **A** — defer to `jet dev` (post-v1); design foundation now |
 
 Postfix completion (D-LSP5 alt C) and custom protocol extensions (D-LSP10
-alt B) need separate owner ballots if requested later.
+alt B) would need separate owner ballots if requested post-v1.
 
 ---
 

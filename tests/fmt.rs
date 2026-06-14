@@ -54,6 +54,19 @@ fn fmt_canonicalizes_s14_foreign_spellings() {
 }
 
 #[test]
+fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
+    let src = r#"fn parse_count(raw: String) -> Int? {
+    return err("empty");
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should parse default Error return");
+    assert!(
+        out.contains("fn parse_count(raw: String) -> Int ? {"),
+        "expected `Int?` return to format as `Int ?`, got:\n{out}"
+    );
+}
+
+#[test]
 fn fmt_still_errors_on_real_parse_problems() {
     let src = "fn main() { val x = ; }\n";
     assert!(

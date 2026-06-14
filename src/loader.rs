@@ -399,12 +399,12 @@ pub fn is_known_std_module(name: &str) -> bool {
     matches!(
         name,
         "std" | "std.fs" | "std.io" | "std.env" | "std.process" | "std.math"
-            | "std.random" | "std.time" | "std.json"
+            | "std.random" | "std.time" | "std.json" | "std.tasks"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "std, std.fs, std.io, std.env, std.process, std.math, std.random, std.time, std.json"
+    "std, std.fs, std.io, std.env, std.process, std.math, std.random, std.time, std.json, std.tasks"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

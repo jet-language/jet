@@ -31,7 +31,7 @@ pub enum Type {
     Shared(Box<Type>),
     /// S32: `T?` optional value.
     Option(Box<Type>),
-    /// S34: `Result<T, E>` fallible return.
+    /// S34: `T ? E` fallible return. Internally lowered through Rust `Result<T, E>`.
     Result {
         ok: Box<Type>,
         err: Box<Type>,
@@ -65,9 +65,7 @@ impl Type {
             Type::Map { key, value } => format!("Map<{}, {}>", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => {
-                format!("Result<{}, {}>", ok.name(), err.name())
-            }
+            Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
             Type::Fn { params, ret } => {
                 let ps = params
                     .iter()
@@ -104,7 +102,7 @@ impl Type {
             Type::Map { key, value } => format!("Map<{}, {}>", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
-            Type::Result { ok, err } => format!("Result<{}, {}>", ok.name(), err.name()),
+            Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
             Type::Fn { params, ret } => {
                 let ps = params
                     .iter()
@@ -400,12 +398,12 @@ pub enum Pattern {
         span: Span,
     },
     Absent(Span),
-    /// S34: `ok(binding)` pattern on `Result<T, E>`.
+    /// S34: `ok(binding)` pattern on `T ? E`.
     Ok {
         binding: String,
         span: Span,
     },
-    /// S34: `err(binding)` pattern on `Result<T, E>`.
+    /// S34: `err(binding)` pattern on `T ? E`.
     Err {
         binding: String,
         span: Span,
@@ -784,9 +782,9 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
-    /// S34: `ok(expr)` — success value for `Result<T, E>`.
+    /// S34: `ok(expr)` — success value for `T ? E`.
     Ok(Box<Expr>, Span),
-    /// S34: `err(expr)` — failure value for `Result<T, E>`.
+    /// S34: `err(expr)` — failure value for `T ? E`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
     Try(Box<Expr>, Span),

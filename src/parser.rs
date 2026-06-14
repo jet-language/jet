@@ -196,6 +196,43 @@ impl<'a> Parser<'a> {
         Ok(inner)
     }
 
+    fn type_starts_here(&self) -> bool {
+        matches!(self.peek().kind, TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen)
+    }
+
+    fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LParen) {
+            let start = self.bump().span;
+            let (ty, _) = self.type_()?;
+            self.expect(TokKind::RParen, "to close this parenthesized return type")?;
+            return Ok((ty, start));
+        }
+
+        let (ty, span) = self.type_()?;
+        if let Type::Option(ok_ty) = ty {
+            if self.type_starts_here() {
+                let (err_ty, _) = self.type_()?;
+                Ok((
+                    Type::Result {
+                        ok: ok_ty,
+                        err: Box::new(err_ty),
+                    },
+                    span,
+                ))
+            } else {
+                Ok((
+                    Type::Result {
+                        ok: ok_ty,
+                        err: Box::new(Type::Named(syntax::TYPE_ERROR.to_string())),
+                    },
+                    span,
+                ))
+            }
+        } else {
+            Ok((ty, span))
+        }
+    }
+
     /// Skip tokens until the enclosing `Type<…>` argument ends.
     fn sync_type_arg(&mut self) {
         while self.pos < self.toks.len() {
@@ -704,7 +741,7 @@ impl<'a> Parser<'a> {
                 is_view_return = true;
                 self.bump();
             }
-            let (ty, _) = self.type_()?;
+            let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
 
@@ -801,7 +838,7 @@ impl<'a> Parser<'a> {
                 is_view_return = true;
                 self.bump();
             }
-            let (ty, _) = self.type_()?;
+            let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
 
@@ -1092,7 +1129,7 @@ impl<'a> Parser<'a> {
                 is_view_return = true;
                 self.bump();
             }
-            let (ty, _) = self.type_()?;
+            let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
         let end = self.peek().span.end;
@@ -1634,11 +1671,13 @@ impl<'a> Parser<'a> {
                     self.expect(TokKind::Arrow, "after a `switch` arm's condition")?;
                     self.expect(TokKind::LBrace, "to open the arm's body")?;
                     let body = self.block_stmts();
+                    // Capture the `;` end so SwitchArm.span covers the full arm.
+                    let semi_end = self.peek().span.end;
                     self.expect(TokKind::Semi, "after a `switch` arm's closing `}`")?;
                     arms.push(SwitchArm {
                         cond,
                         body,
-                        span: arm_start,
+                        span: Span::new(arm_start.start, semi_end),
                     });
                 }
             }
@@ -2184,7 +2223,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0026",
                     format!("{} doesn't use `{}`", syntax::LANG_NAME, foreign),
-                    "a function that can fail returns `Result<T, E>` and signals failure with `err(...)`"
+                    "a function that can fail returns `T ? E` and signals failure with `err(...)`"
                         .to_string(),
                     format!("return `err(...)` instead of `{}`", foreign),
                     Some(t.span),
@@ -2915,8 +2954,18 @@ impl<'a> Parser<'a> {
                 AccessConvention::Mutate
             }
             TokKind::KwMove => {
-                self.bump();
-                AccessConvention::Move
+                // `take(names) () =>` is a lambda take-prefix, not an arg convention.
+                // Only consume `take` as an arg convention when NOT followed by `(`.
+                let is_lambda_take = matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokKind::LParen)
+                );
+                if is_lambda_take {
+                    AccessConvention::Read
+                } else {
+                    self.bump();
+                    AccessConvention::Move
+                }
             }
             _ => AccessConvention::Read,
         }
@@ -3173,14 +3222,22 @@ impl<'a> Parser<'a> {
                         Type::Shared(Box::new(inner))
                     }
                     syntax::TYPE_RESULT => {
+                        self.diags.push(Diagnostic::error(
+                            "E0406",
+                            "`Result<T, E>` is old Jet error syntax".to_string(),
+                            "fallible Jet types are written as `T ? E`".to_string(),
+                            "write the return type as `T ? E`, or `T ?` for the default Error type"
+                                .to_string(),
+                            Some(start),
+                        ));
                         self.expect_type_args_open("Result")?;
                         let ok_ty = self.type_generic_arg("Result ok")?;
                         self.expect(
                             TokKind::Comma,
-                            "between the two types in `Result<T, E>`",
+                            "between the two types in old `Result<T, E>` syntax",
                         )?;
                         let err_ty = self.type_generic_arg("Result err")?;
-                        self.maybe_close_type_args("after the error type in `Result<T, E>`")?;
+                        self.maybe_close_type_args("after the error type in old `Result<T, E>` syntax")?;
                         Type::Result {
                             ok: Box::new(ok_ty),
                             err: Box::new(err_ty),
@@ -3227,6 +3284,16 @@ impl<'a> Parser<'a> {
                         .to_string(),
                     "use a single `?`, like `Int?`".to_string(),
                     Some(qspan),
+                ));
+            }
+            if self.type_starts_here() {
+                let (err_ty, _) = self.type_()?;
+                return Ok((
+                    Type::Result {
+                        ok: Box::new(base),
+                        err: Box::new(err_ty),
+                    },
+                    start,
                 ));
             }
             return Ok((Type::Option(Box::new(base)), start));

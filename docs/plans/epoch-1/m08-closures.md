@@ -49,7 +49,7 @@ fn main() {
   spelling per S47 ballot; non-clonable + no take → E0802.
 - New `List<T>` methods (the v1 closure set, nothing more):
   `map(f) -> List<U>`, `filter(f) -> List<T>`, `each(f)`,
-  `find(f) -> T?`, `any(f)`, `all(f)`, `sort_by(f)` (f returns the
+  `find(f) -> (T?)`, `any(f)`, `all(f)`, `sort_by(f)` (f returns the
   comparison key), `reduce(init, f)`. `Map`: `each(f)` over `(k, v)`.
 
 ### Grammar additions

@@ -58,6 +58,58 @@ mod jet_std {
         fn jet_show(&self) -> String { render_json(self, false, 0) }
     }
 
+    pub struct JetTask<T: Send + 'static> {
+        handle: Option<std::thread::JoinHandle<T>>,
+    }
+    impl<T: Send + 'static> JetTask<T> {
+        pub fn spawn<F: FnOnce() -> T + Send + 'static>(f: F) -> JetTask<T> {
+            JetTask { handle: Some(std::thread::spawn(f)) }
+        }
+        pub fn join(mut self) -> T {
+            match self.handle.take().unwrap().join() {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!("The program stopped: a task panicked");
+                    std::process::exit(70);
+                }
+            }
+        }
+    }
+
+    pub struct JetChannel<T> {
+        recv: std::sync::mpsc::Receiver<T>,
+        tx_keeper: std::sync::mpsc::Sender<T>,
+    }
+    impl<T: Send> JetChannel<T> {
+        pub fn new() -> JetChannel<T> {
+            let (tx, rx) = std::sync::mpsc::channel();
+            JetChannel { recv: rx, tx_keeper: tx }
+        }
+        pub fn sender(&self) -> JetSender<T> {
+            JetSender { tx: self.tx_keeper.clone() }
+        }
+        pub fn receive(&self) -> Result<T, Closed> {
+            self.recv.recv().map_err(|_| Closed::Closed)
+        }
+    }
+
+    pub struct JetSender<T> {
+        tx: std::sync::mpsc::Sender<T>,
+    }
+    impl<T> JetSender<T> {
+        pub fn send(&self, value: T) { let _ = self.tx.send(value); }
+    }
+    impl<T> Clone for JetSender<T> {
+        fn clone(&self) -> Self { JetSender { tx: self.tx.clone() } }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum Closed { Closed }
+
+    impl super::JetShow for Closed {
+        fn jet_show(&self) -> String { "Closed".to_string() }
+    }
+
     pub fn io_error(path: &str, e: std::io::Error) -> IoError {
         match e.kind() {
             std::io::ErrorKind::NotFound => IoError::NotFound { path: path.to_string() },

@@ -1,0 +1,17 @@
+import std.tasks as tasks;
+
+fn sum_range(first: Int, last: Int) -> Int {
+    var total = 0;
+    for n in first..last {
+        total = total + n;
+    }
+    return total;
+}
+
+fn main() {
+    val a = tasks.spawn(() => sum_range(1, 25));
+    val b = tasks.spawn(() => sum_range(26, 50));
+    val c = tasks.spawn(() => sum_range(51, 75));
+    val d = tasks.spawn(() => sum_range(76, 100));
+    print(a.join() + b.join() + c.join() + d.join());
+}

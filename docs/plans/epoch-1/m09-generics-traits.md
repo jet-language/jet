@@ -38,7 +38,7 @@ impl Square: Shape {
     fn name(self) -> String { return "square"; }
 }
 
-fn largest<T: Comparable>(xs: List<T>) -> T? { … }
+fn largest<T: Comparable>(xs: List<T>) -> (T?) { … }
 
 fn print_area(s: Shape) { print("{s.name()}: {s.area()}"); }
 

@@ -13,16 +13,34 @@ user-facing syntax.
 4. docs/04-diagnostics.md — error voice + format; snapshot-pinned
 5. docs/05-roadmap.md — current milestone and exit criteria
 
+## Command environment
+
+Run project commands through the Nix dev shell every time so all agents use
+the same Rust, C toolchain, Node, Jet wrapper, and repo utilities:
+
+```
+nix develop -c cargo build
+nix develop -c cargo test
+nix develop -c jet run examples/01_hello.jet
+nix develop -c rg "pattern" docs src tests
+```
+
+Do not rely on host-installed `cargo`, `rustc`, `jet`, `node`, or search
+tools unless you are explicitly testing host-shell independence. Avoid
+parallel `nix develop` invocations; Nix serializes eval/cache work and the
+output becomes noisy. If several checks are needed, run them one at a time
+or enter a single shell with `nix develop`.
+
 ## Task zero (do this first, before any feature work)
 
 This scaffold was authored in a sandbox **without a Rust toolchain**.
-1. `cargo build` — fix any compile errors (keep fixes minimal/mechanical).
-2. `cargo test` — golden tests and `tests/decisions.rs` (ratification
+1. `nix develop -c cargo build` — fix any compile errors (keep fixes minimal/mechanical).
+2. `nix develop -c cargo test` — golden tests and `tests/decisions.rs` (ratification
    enforcement) must pass as-is. If a ui snapshot differs
    only because rendering drifted from the hand-computed fixtures, check
    the actual output against the format in docs/04-diagnostics.md, then
-   bless with `UPDATE_EXPECT=1 cargo test` and re-run.
-3. `./target/debug/jet run examples/01_hello.jet` prints `hello, world`.
+   bless with `nix develop -c env UPDATE_EXPECT=1 cargo test` and re-run.
+3. `nix develop -c jet run examples/01_hello.jet` prints `hello, world`.
 Commit that as "M0 verified" before anything else.
 
 ## Invariants (violating one = stop and fix)

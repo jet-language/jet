@@ -1,7 +1,8 @@
 # M4 — Errors as values
 
-**Decisions:** S34 (`Result<T, E>`), S35 (`or` fallback), S36 (`panic`/`require`)
-ratified. Depends on M3 (enums, `==` patterns).
+**Decisions:** S34 (`T ? E`, with `T ?` defaulting to `Error`), S35
+(`or` fallback), S36 (`panic`/`require`) ratified. Depends on M3
+(enums, `==` patterns).
 **Error codes:** E0401+. Teaching codes continue E0023+.
 **Retires:** E0006 (`?` staged).
 
@@ -20,7 +21,7 @@ enum ParseError {
     BadDigit(text: String);
 }
 
-fn parse_age(raw: String) -> Result<Int, ParseError> {
+fn parse_age(raw: String) -> Int ? ParseError {
     if raw.len() == 0 { return err(ParseError.Empty); };
     // … on success:
     return ok(value);
@@ -35,19 +36,22 @@ fn main() {
     }
 }
 
-fn load() -> Result<Int, ParseError> {
+fn load() -> Int ? ParseError {
     val n = parse_age("7")?;                 // propagate (S7)
     return ok(n * 2);
 }
 ```
 
-- **`Result<T, E>`** is the fallible return type (S34, S33 angle brackets):
-  `Result` is a prelude builtin; `E` is any enum, struct, or `String`.
+- **`T ? E`** is the fallible return type (S34): `T` is the success
+  payload; `E` is any enum, struct, `String`, or `Error`.
+- **`T ?`** in a function return means `T ? Error`. Users may write `T?`
+  in that position and `jet fmt` canonicalizes it to `T ?`. A function
+  returning an optional writes `-> (T?)`.
 - **`ok(v)` / `err(e)`** construct the two cases; **`== ok(v)` /
   `== err(e)`** destructure them (same machinery as M3 `==` patterns).
 - **`?`** (S7) propagates: unwraps `ok`, early-returns `err` — only
   inside a function whose return type carries a compatible error.
-- **`or <expr>`** (S35) is the fallback operator on a result/Option
+- **`or <expr>`** (S35) is the fallback operator on a fallible/Option
   value: yields the `ok`/`some` payload or evaluates the right side.
   The right side is either a value of the payload type, `return [expr]`,
   or a `panic(…)` call. (Also works on `T?` — retrofit note in sema.)
@@ -60,8 +64,9 @@ fn load() -> Result<Int, ParseError> {
 ### Grammar additions
 
 ```
-type    += "Result" "<" type "," type ">" ;   // S34, same brackets as S33
-expr    += "ok" "(" expr ")" | "err" "(" expr ")"
+return-type += type "?" [ type ] ;       // S34: `T ? E` or default `T ?`
+type        += type "?" type ;           // explicit fallible annotation
+expr        += "ok" "(" expr ")" | "err" "(" expr ")"
          | expr "?"                    // postfix, binds like a call
          | expr "or" orfallback ;
 orfallback = expr | "return" [ expr ] | panic-call ;
@@ -75,16 +80,16 @@ document in docs/01.
 
 ## Sema rules
 
-1. A `Result<T, E>` value cannot be used as a `T`: every use must go through
+1. A `T ? E` value cannot be used as a `T`: every use must go through
    `?`, `or`, or `== ok`/`== err` (E0401, fix lists all three). An *unused*
    fallible call as a statement → E0402 ("this can fail and nothing checks
    it"; fix: `… or panic(…)` if failure is impossible).
-2. `?` requires the enclosing function to return `Result<U, E2>` where the
+2. `?` requires the enclosing function to return `U ? E2` where the
    propagated error type `E` equals `E2` (no conversions in v1 — E0403
    names both error types; fix: handle here with `== err`, or make the
    types match). `?` on `T?` propagates `null` iff the function returns
    an Option (same rule, same code).
-3. `ok`/`err` only typecheck where a result type is expected (E0404,
+3. `ok`/`err` only typecheck where a fallible type is expected (E0404,
    mirror of M3's E0308 for `null`); `err(e)` requires `e`'s type to be
    the declared error type.
 4. `or` fallback: payload type and fallback expression type must match
@@ -104,7 +109,8 @@ document in docs/01.
 
 | Jet                    | Rust                                              |
 |------------------------|---------------------------------------------------|
-| `Result<T, E>`         | `Result<T, E>`                                    |
+| `T ? E`                | `Result<T, E>`                                    |
+| `T ?`                  | `Result<T, String>` initially (`Error` surface)   |
 | `ok(v)` / `err(e)`     | `Ok(v)` / `Err(e)`                                |
 | `e?`                   | `e?` (types align by construction)                |
 | `v or fallback`        | `match v { Ok(x) => x, Err(_) => fallback }` (and Option equivalent) |
@@ -147,15 +153,15 @@ now-real feature.
 
 ## Out of scope
 
-Error conversion/`From` chains, multi-error unions on the `E` side of
-`Result`, `defer`/cleanup syntax, backtraces, catching panics, async
+General error conversion/`IntoError` chains, multi-error unions on the `E`
+side of `T ? E`, `defer`/cleanup syntax, backtraces, catching panics, async
 anything. Stdout/stderr distinction beyond the panic report.
 
 ## Suggested implementation order
 
-1. syntax.rs: `Result` builtin, `or` (fallback), `ok`, `err`, `panic`,
+1. syntax.rs: `T ? E`, `or` (fallback), `ok`, `err`, `panic`,
    `require`; `?` un-stages.
-2. Parser: `Result<T, E>` types, postfix `?`, `or` precedence (fixtures first).
+2. Parser: `T ? E` return types, postfix `?`, `or` precedence (fixtures first).
 3. Sema rules 1–8 (the must-check analysis is the heart — write
    exhaustive negative fixtures before implementing).
 4. Codegen + runtime helper + exit-code golden test.

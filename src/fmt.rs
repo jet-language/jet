@@ -361,7 +361,7 @@ impl<'a> Fmt<'a> {
                 f.write(")");
                 if let Some(ret) = &m.return_type {
                     f.write(" -> ");
-                    f.fmt_type(ret);
+                    f.fmt_return_type(ret);
                 }
                 f.write(";");
                 f.newline();
@@ -405,7 +405,7 @@ impl<'a> Fmt<'a> {
             if ef.is_view_return {
                 self.write("view ");
             }
-            self.fmt_type(ret);
+            self.fmt_return_type(ret);
         }
         self.write(" = \"");
         self.write(&ef.rust_path);
@@ -486,7 +486,7 @@ impl<'a> Fmt<'a> {
             if f.is_view_return {
                 self.write("view ");
             }
-            self.fmt_type(ret);
+            self.fmt_return_type(ret);
         }
         self.write(" {");
         self.newline();
@@ -926,11 +926,9 @@ impl<'a> Fmt<'a> {
                 self.write("?");
             }
             Type::Result { ok, err } => {
-                self.write("Result<");
                 self.fmt_type(ok);
-                self.write(", ");
+                self.write(" ? ");
                 self.fmt_type(err);
-                self.write(">");
             }
             Type::Fn { params, ret } => {
                 self.write("fn(");
@@ -961,6 +959,23 @@ impl<'a> Fmt<'a> {
             Type::TraitObject(t) => {
                 self.write(t);
             }
+        }
+    }
+
+    fn fmt_return_type(&mut self, ty: &Type) {
+        if let Type::Result { ok, err } = ty {
+            self.fmt_type(ok);
+            self.write(" ?");
+            if !matches!(**err, Type::Named(ref n) if n == syntax::TYPE_ERROR) {
+                self.write(" ");
+                self.fmt_type(err);
+            }
+        } else if matches!(ty, Type::Option(_)) {
+            self.write("(");
+            self.fmt_type(ty);
+            self.write(")");
+        } else {
+            self.fmt_type(ty);
         }
     }
 

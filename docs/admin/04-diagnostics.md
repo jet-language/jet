@@ -100,6 +100,8 @@ before continuing.
 | E0037 | sema  | teaching: `println!`/`eprintln!` → `print`/`io.eprint` |
 | E0038 | sema  | teaching: `open(`/`File.open` → `fs.read` / `fs.write` |
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
+| E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
+| E0041 | sema  | teaching: `Mutex`/`lock` → channels |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -148,6 +150,7 @@ before continuing.
 | E0403 | sema  | `?` error type / return context mismatch  |
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `or` fallback type mismatch               |
+| E0406 | parse | old `Result<T, E>` fallible type syntax   |
 | E0501 | sema  | empty `[]` / `[:]` needs a context type   |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -190,6 +193,9 @@ before continuing.
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
 | E1004 | sema  | unknown item in std module |
+| E1101 | sema  | task capture needs ownership              |
+| E1102 | sema  | value crossing task/channel boundary is not sendable |
+| L1101 | sema  | Task value dropped without `.join()`       |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -199,6 +205,16 @@ before continuing.
 | E1207 | jet   | registry dependency not yet supported (M12.2) |
 | E1208 | jet   | toolchain `[package].jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
+
+## Concurrency diagnostics
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
+| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; `view` borrows, `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the borrowed field, or hand a closure over with `take`. |
+| L1101 | A `Task` is dropped without `.join()`. | The program may end before that task finishes. | Call `.join()` on the task before it goes out of scope. |
+| E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Import `std.tasks as tasks` and call `tasks.spawn(() => work())`. |
+| E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
 
 ## Process for a new diagnostic
 

@@ -14,10 +14,10 @@ a milestone may not start until its ballot group is ratified in docs/02.
 a complete language — data types, errors, collections, closures,
 generics/traits, std library, package manager, real LSP — good enough
 that experts rewriting small Rust/Go/C tools would *choose* Jet.
-Concurrency (M11) is deferred to v2 (S53). Formerly "deferred
-indefinitely" items (generics, package manager) are promoted onto the
-roadmap below. Philosophy ranks are unchanged; single-file `jet run`
-stays ceremony-free forever (R9).
+Concurrency was deferred past v1 by S53 and is now implemented as E2-M1
+(verified 2026-06-14). Formerly "deferred indefinitely" items (generics,
+package manager) are promoted onto the roadmap below. Philosophy ranks are
+unchanged; single-file `jet run` stays ceremony-free forever (R9).
 
 ## M0 — Walking skeleton  *(done; verified 2026-06-11)*
 
@@ -70,7 +70,7 @@ cases verbatim. ✓
 
 ## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; done 2026-06-11)*
 
-`Result<T, E>` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
+`T ? E` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
 fallback, `panic`/`require` for bugs with a friendly runtime report.
 No exceptions, no null, no silently ignored failures.
 **Exit:** a file-parsing example showing the happy path staying clean;
@@ -143,7 +143,7 @@ bit-for-bit — divergence is a P0 miscompile).
 ## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; Group 7 ✅)* ✓ 2026-06-13
 
 `import std.<module>`: fs, io, env, process, math, random, time, json —
-exact v1 APIs frozen in the plan; every fallible call returns `Result<T, E>`.
+exact v1 APIs frozen in the plan; every fallible call returns `T ? E`.
 `U8` byte buffers and byte/string conversions. Enough batteries for real
 CLI tools. User-facing reference: **docs/stdlib.md**.
 **Exit:** file-transform, JSON, and mini-CLI examples with golden tests. ✓
@@ -183,9 +183,9 @@ README in an afternoon.
 
 ## Deferred past v1.0 (owner can promote)
 
-**M11 — Concurrency** (S53 ratified deferred to v2): tasks + channels
-(`tasks.spawn`, `Task<T>.join`, `Channel<T>`), no shared mutable state.
-Plan retained in docs/plans/m11-concurrency.md for when v2 begins.
+**M11 / E2-M1 — Concurrency** (S53 ratified deferred to v2, then promoted):
+tasks + channels (`tasks.spawn`, `Task<T>.join`, `Channel<T>`), no shared
+mutable state. **E2-M1 verified 2026-06-14.**
 Async/await, user macros (rejected forever in token/AST form by S26 —
 the sanctioned path is S56), Mutex/shared-state concurrency, networking
 std modules, self-hosting, debugger source maps (DAP), comptime layer 3:

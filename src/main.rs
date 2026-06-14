@@ -31,6 +31,7 @@ usage:
   {bin} new   <name>                create a new project folder with jet.toml
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
+  {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} lsp                         language server (stdio JSON-RPC)
   {bin} lsp doctor                  health-check the language server
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
@@ -156,6 +157,7 @@ fn main() {
 
     match cmd {
         "fmt" => run_fmt(target, fmt_check),
+        "fix" => run_fix(target),
         "new" => run_new(target, annotated),
         "test" => run_test(target),
         "add" => run_add(&raw),
@@ -266,6 +268,40 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
             exit(2);
         }
     }
+}
+
+/// Apply all auto-fixable diagnostics in a source file in place (D-LSP7 / M13).
+/// Uses the same `edit` engine as LSP code actions.
+fn run_fix(file: &str) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            eprintln!(" fix: check the spelling");
+            exit(1);
+        }
+    };
+    let diags = jet::lsp::check_document(file, &src);
+    let mut edits: Vec<_> = diags.iter().filter_map(|d| d.edit.clone()).collect();
+    if edits.is_empty() {
+        println!("{}: no auto-fixable problems found", file);
+        return;
+    }
+    // Apply edits from highest offset to lowest to avoid span invalidation.
+    edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
+    let mut fixed = src.clone();
+    for edit in &edits {
+        fixed = jet::lsp::apply_edit(&fixed, edit);
+    }
+    if fixed == src {
+        println!("{}: no changes made", file);
+        return;
+    }
+    fs::write(file, &fixed).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", file, e);
+        exit(1);
+    });
+    println!("{}: applied {} fix{}", file, edits.len(), if edits.len() == 1 { "" } else { "es" });
 }
 
 fn run_new(name: &str, annotated: bool) {

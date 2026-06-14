@@ -1,9 +1,9 @@
 # Standard library (`jet.std`)
 
 The Jet standard library gives you files, terminal I/O, environment variables,
-process control, math, time, random numbers, and JSON — enough to write real
-command-line tools. Every fallible call returns a `Result`; nothing in core std
-panics on its own.
+process control, math, time, random numbers, JSON, tasks, and channels —
+enough to write real command-line tools. Every fallible call returns a
+`T ? E` value; nothing in core std panics on its own.
 
 **How it works today:** std modules are built into the compiler. Import them by
 name; the compiler type-checks your calls and generates only the helpers you
@@ -70,7 +70,7 @@ first-party packages.
 
 ## Errors and results
 
-Fallible std functions return `Result<T, E>`. Handle them like any other Jet
+Fallible std functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `or`, or a pattern test:
 
 ```jet
@@ -339,6 +339,63 @@ fn main() {
 
 ---
 
+### `std.tasks` — tasks and channels
+
+Blocking tasks and typed channels are Jet's concurrency model. There is no
+`async`/`await` and no mutex API; tasks communicate by sending owned values.
+
+```jet
+import std.tasks as tasks;
+
+fn sum_range(first: Int, last: Int) -> Int {
+    var total = 0;
+    for n in first..last {
+        total = total + n;
+    }
+    return total;
+}
+
+fn main() {
+    val a = tasks.spawn(() => sum_range(1, 25));
+    val b = tasks.spawn(() => sum_range(26, 50));
+    val c = tasks.spawn(() => sum_range(51, 75));
+    val d = tasks.spawn(() => sum_range(76, 100));
+    print(a.join() + b.join() + c.join() + d.join());
+}
+```
+
+Channels carry one type:
+
+```jet
+import std.tasks as tasks;
+
+fn main() {
+    val ch: Channel<Int> = tasks.channel();
+    val sender = ch.sender();
+    val task = tasks.spawn(take(sender) () => {
+        sender.send(42);
+    });
+    task.join();
+    print(ch.receive() or panic("channel closed"));
+}
+```
+
+| Function / type | Returns | What it does |
+|-----------------|---------|--------------|
+| `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
+| `task.join()` | `T` | Wait for the task and consume the task handle |
+| `tasks.channel<T>()` | `Channel<T>` | Create a typed channel receive half |
+| `ch.sender()` | `Sender<T>` | Create a clonable send half |
+| `sender.send(value)` | nothing | Move one value into the channel |
+| `ch.receive()` | `T or Closed` | Block for a value, or return `Closed` when senders are gone |
+
+Values crossing `spawn` or `send` must be sendable: no `view` borrows, no
+structs containing `ref` fields, no trait values, and no closure values unless
+they are handed over with `take`. A `Task` that goes out of scope without
+`.join()` emits warning **L1101**.
+
+---
+
 ## Binary data (`U8`)
 
 The `U8` type holds one byte (0–255). Literals outside that range are a compile
@@ -411,7 +468,7 @@ To ship a Jet-source standard library, these prerequisites are still open:
 
 **What Jet can already express:** JSON parsing logic, PRNG algorithms, math
 helpers, and data structures — the language has structs, enums, generics,
-traits, closures, and `Result`. **What still needs a native bridge:** syscalls
+traits, closures, and fallible `T ? E` values. **What still needs a native bridge:** syscalls
 (read/write files, spawn processes, sleep, environment).
 
 The likely migration path: M12 delivers `jet.std` as a bundled first-party

@@ -29,7 +29,7 @@ fn main() {
   (E0701) — reproducibility without a manifest.
 - `extern rust "std" { … }` works for std items with no dependency.
 - Allowed boundary types (both directions): `Int`, `Float`, `Bool`,
-  `String`, `Char`, `List<…>`/`Map<…>`/`T?`/`Result<…>` **of allowed
+  `String`, `Char`, `List<…>`/`Map<…>`/`T?`/`T ? E` **of allowed
   types**, and user structs/enums whose fields are allowed. Everything
   passes **by value** (move/copy/clone at the boundary; M2 call rules
   apply — default params still read, so codegen clones into the call).

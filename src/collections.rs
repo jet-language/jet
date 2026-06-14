@@ -48,6 +48,9 @@ pub fn builtin_method_return(
         Type::String => string_method_return(method, arg_count),
         Type::Named(n) if n == "U8" => u8_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
+        Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
+        Type::Apply { name, args } if name == "Channel" => channel_method_return(args, method, arg_count),
+        Type::Apply { name, args } if name == "Sender" => sender_method_return(args, method, arg_count),
         Type::Int | Type::Float | Type::Bool | Type::Char => {
             builtin_static_return(recv_ty, method, arg_count)
         }
@@ -145,6 +148,35 @@ fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
+fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("join", 0) => Some(args.first().cloned()),
+        _ => None,
+    }
+}
+
+fn channel_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let t = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        ("receive", 0) => Some(Some(Type::Result {
+            ok: Box::new(t),
+            err: Box::new(Type::Named("Closed".to_string())),
+        })),
+        ("sender", 0) => Some(Some(Type::Apply {
+            name: "Sender".to_string(),
+            args: vec![t],
+        })),
+        _ => None,
+    }
+}
+
+fn sender_method_return(_args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("send", 1) => Some(None),
+        _ => None,
+    }
+}
+
 /// Whether a built-in method mutates its receiver (needs `var` binding).
 pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
     match recv_ty {
@@ -211,6 +243,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "parse" => Some(vec![Type::String]),
             _ => None,
         },
+        Type::Apply { name, args } if name == "Sender" => match method {
+            "send" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            _ => Some(vec![]),
+        },
+        Type::Apply { name, .. } if name == "Task" || name == "Channel" => Some(vec![]),
         _ => None,
     }
 }
