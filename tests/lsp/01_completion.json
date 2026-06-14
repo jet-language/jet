@@ -1,0 +1,26 @@
+{
+  "description": "completion returns fn and keyword items",
+  "source": "fn greet(name: String) {\n    print(name);\n}\nfn main() {\n    \n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["textDocumentSync", "completionProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_completion_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///tmp/lsp_completion_test.jet"},"position":{"line":4,"character":4}}},
+      "expect_contains": ["greet", "fn", "val"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

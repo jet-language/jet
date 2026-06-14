@@ -3,13 +3,25 @@
   "scopeName": "source.jet",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#doc-comments" },
     { "include": "#strings" },
+    { "include": "#chars" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#constants" },
-    { "include": "#numbers" }
+    { "include": "#numbers" },
+    { "include": "#functions" },
+    { "include": "#operators" }
   ],
   "repository": {
+    "doc-comments": {
+      "patterns": [
+        {
+          "name": "comment.block.documentation.jet",
+          "match": "///.*$"
+        }
+      ]
+    },
     "comments": {
       "patterns": [
         {
@@ -27,15 +39,26 @@
           "patterns": [
             {
               "name": "constant.character.escape.jet",
-              "match": "\\\\."
+              "match": "\\\\[\"\\\\nrt0]|\\\\u\\{[0-9a-fA-F]+\\}"
             },
             {
               "name": "meta.interpolation.jet",
               "begin": "\\{",
               "end": "\\}",
+              "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.jet" } },
+              "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.jet" } },
               "patterns": [{ "include": "$self" }]
             }
           ]
+        }
+      ]
+    },
+    "chars": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.jet",
+          "match": "'[^'\\\\]'|'\\\\.'",
+          "captures": { "0": { "name": "constant.character.jet" } }
         }
       ]
     },
@@ -43,23 +66,40 @@
       "patterns": [
         {
           "name": "keyword.control.jet",
-          "match": "\\b(if|else|while|for|in|break|continue|switch|return|or|import|as|pub|struct|enum|impl|const|test|unsafe)\\b"
+          "match": "\\b(if|else|while|for|in|break|continue|switch|return|or|loop)\\b"
+        },
+        {
+          "name": "keyword.declaration.jet",
+          "match": "\\b(fn|pub|struct|enum|impl|trait|derive|extern|import|as|const|comptime|test|unsafe)\\b"
         },
         {
           "name": "keyword.other.jet",
-          "match": "\\b(fn|val|var|mut|take|view|ref|self)\\b"
+          "match": "\\b(val|var|mut|take|view|ref|self)\\b"
         },
         {
-          "name": "keyword.operator.jet",
-          "match": "\\?|\\->|&&|\\|\\||==|!=|<=|>=|[-+*/%]=|\\.{2}"
+          "name": "keyword.control.jet",
+          "match": "\\b(ok|err|value|null|it)\\b"
         }
       ]
     },
     "types": {
       "patterns": [
         {
-          "name": "storage.type.jet",
-          "match": "\\b(Int|Float|Bool|String|List|Map|Char|Shared|Result)\\b"
+          "name": "storage.type.builtin.jet",
+          "match": "\\b(Int|Float|Bool|String|Char|Shared)\\b"
+        },
+        {
+          "name": "storage.type.collection.jet",
+          "match": "\\b(List|Map)\\b(?=\\s*<)"
+        },
+        {
+          "name": "storage.type.result.jet",
+          "match": "\\b(Result|Option)\\b"
+        },
+        {
+          "comment": "User-defined types: PascalCase identifiers",
+          "name": "entity.name.type.jet",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
       ]
     },
@@ -67,15 +107,41 @@
       "patterns": [
         {
           "name": "constant.language.jet",
-          "match": "\\b(true|false|null|ok|err|it)\\b"
+          "match": "\\b(true|false)\\b"
         }
       ]
     },
     "numbers": {
       "patterns": [
         {
-          "name": "constant.numeric.jet",
-          "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+          "name": "constant.numeric.float.jet",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.jet",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "comment": "Function definition name",
+          "name": "entity.name.function.jet",
+          "match": "(?<=\\bfn\\s)([a-z_][A-Za-z0-9_]*)"
+        },
+        {
+          "comment": "Method call: ident followed by (",
+          "name": "entity.name.function.call.jet",
+          "match": "\\b([a-z_][A-Za-z0-9_]*)(?=\\s*\\()"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.jet",
+          "match": "\\?|->|=>|&&|\\|\\||==|!=|<=|>=|[-+*/%]=|\\.{2}|[+\\-*/%<>&|^!]"
         }
       ]
     }

@@ -1,0 +1,26 @@
+{
+  "description": "hover over a function name returns its signature",
+  "source": "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn main() {\n    val r = add(1, 2);\n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["hoverProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_hover_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///tmp/lsp_hover_test.jet"},"position":{"line":0,"character":3}}},
+      "expect_contains": ["add"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

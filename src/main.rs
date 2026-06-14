@@ -32,6 +32,8 @@ usage:
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} lsp                         language server (stdio JSON-RPC)
+  {bin} lsp doctor                  health-check the language server
+  {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
 
 package management (M12.1):
   {bin} add   <dep> --path <dir>    add a path dependency and fetch
@@ -66,7 +68,22 @@ fn main() {
     let annotated = raw.iter().any(|a| a == "--annotated");
     let args: Vec<&String> = raw.iter().filter(|a| !a.starts_with("--")).collect();
 
-    if args.len() == 1 && args[0].as_str() == "lsp" {
+    if args.first().map(|s| s.as_str()) == Some("lsp") {
+        let sub = args.get(1).map(|s| s.as_str());
+        let bench_flag = raw.iter().any(|a| a == "--bench");
+        match (sub, bench_flag) {
+            (Some("doctor"), _) => {
+                jet::lsp::run_doctor();
+                return;
+            }
+            (_, true) | (Some("--bench"), _) => {
+                // jet lsp --bench: run latency benchmark on a small program
+                let src = include_str!("../examples/16_wordcount.jet");
+                jet::lsp::run_bench(src, 10, 200);
+                return;
+            }
+            _ => {}
+        }
         if let Err(e) = jet::lsp::run_stdio() {
             eprintln!("error: language server failed: {}", e);
             exit(1);

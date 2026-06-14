@@ -1,0 +1,22 @@
+{
+  "description": "switch-arm quick fix: missing enum variant triggers E0309 with a code action",
+  "source": "enum Color { Red, Green, Blue }\nfn main() {\n    val c = Color.Red;\n    switch c {\n        Color.Red => {}\n    }\n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["codeActionProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_switch_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

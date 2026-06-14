@@ -1,0 +1,26 @@
+{
+  "description": "inlay hints returns type annotations for literal-initialized bindings",
+  "source": "fn main() {\n    val x = 42;\n    val s = \"hello\";\n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["inlayHintProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_inlay_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///tmp/lsp_inlay_test.jet"},"range":{"start":{"line":0,"character":0},"end":{"line":10,"character":0}}}},
+      "expect_contains": ["Int", "String"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

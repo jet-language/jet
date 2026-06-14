@@ -161,7 +161,7 @@ Single files never need any of it (R9).
 **Exit:** M12.1 store+lock battery + new→add→run ✓; M12.2 registry and
 resolver snapshots per plan.
 
-## M13 — LSP v2  *(plan: docs/plans/m13-lsp.md)*
+## M13 — LSP v2  *(plan: docs/plans/m13-lsp.md)* ✓ 2026-06-13
 
 The real language server: completion (incl. switch-arm snippets for
 enums), hover with types + ownership + doc comments, go-to-definition,
@@ -170,6 +170,7 @@ references, rename, structured quick-fixes (shared with a new CLI
 fed by unsaved buffers. Tree-sitter + TextMate grammars.
 **Exit:** scripted LSP transcript tests per capability; a bench harness
 under budget in CI.
+**M13 verified 2026-06-13.**
 
 ## M14 — v1.0  *(plan: docs/plans/m14-v1.md)*
 
