@@ -71,10 +71,62 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
 /// program has no `extern rust` declarations.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
-    let entries = collect_externs(bundle);
+    let mut entries = collect_externs(bundle);
     if entries.is_empty() {
         return Ok(None);
     }
+
+    // M12.1: when a jet.toml is present, validate and resolve crate versions
+    // against [dependencies:rust] (E1205).
+    if let Some(manifest_result) = crate::manifest::load(&bundle.project_root) {
+        let manifest = manifest_result.map_err(|d| vec![d])?;
+        let mut diags: Vec<Diagnostic> = Vec::new();
+
+        for entry in &mut entries {
+            if entry.crate_spec == "std" {
+                continue;
+            }
+            if entry.crate_spec.contains('@') {
+                // Inline version pin is not allowed when jet.toml is present.
+                let (crate_name, _ver) = entry.crate_spec.split_once('@').unwrap();
+                diags.push(Diagnostic::error(
+                    "E1205",
+                    format!("`{}` pin belongs in `[dependencies:rust]`", entry.crate_spec),
+                    "when `jet.toml` is present, Rust crate versions are declared in `[dependencies:rust]`, not inline in `extern rust`".to_string(),
+                    format!(
+                        "remove `@{}` from `extern rust \"{}\"`, and add `{} = \"<version>\"` to `[dependencies:rust]` in `jet.toml`",
+                        entry.crate_spec.split_once('@').map(|(_, v)| v).unwrap_or("version"),
+                        entry.crate_spec,
+                        crate_name
+                    ),
+                    None,
+                ));
+            } else {
+                // No inline version — look up in [dependencies:rust].
+                let crate_name = entry.crate_spec.as_str();
+                if let Some(version) = manifest.dependencies_rust.get(crate_name) {
+                    // Resolve: set the crate_spec to "name@version" for build_bridge.
+                    entry.crate_spec = format!("{}@{}", crate_name, version);
+                } else {
+                    diags.push(Diagnostic::error(
+                        "E1205",
+                        format!("`{}` used in `extern rust` is not in `[dependencies:rust]`", crate_name),
+                        "when `jet.toml` is present, all Rust crate deps must be declared in `[dependencies:rust]`".to_string(),
+                        format!(
+                            "add `{} = \"<version>\"` to `[dependencies:rust]` in `jet.toml`",
+                            crate_name
+                        ),
+                        None,
+                    ));
+                }
+            }
+        }
+
+        if !diags.is_empty() {
+            return Err(diags);
+        }
+    }
+
     build_bridge(&entries).map(Some)
 }
 

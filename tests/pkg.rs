@@ -657,6 +657,124 @@ fn git_dep_local_bare_repo_fetches_ok() {
 }
 
 // ─────────────────────────────────────────────
+// @latest / branch update rewrites lock
+// ─────────────────────────────────────────────
+
+#[test]
+fn git_dep_branch_update_rewrites_lock() {
+    if !have_git() {
+        eprintln!("note: skipping git_dep_branch_update_rewrites_lock (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("git_branch_upd");
+
+    // Create a source directory to commit.
+    let src = tmp.join("mylib_src");
+    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42; }\n");
+    write(&src, "jet.toml", &min_manifest("mylib", "0.1.0"));
+
+    // Init a non-bare repo, commit, then mirror to a bare repo (avoids HEAD ambiguity).
+    let init_repo = tmp.join("mylib_init");
+    Command::new("git").args(["init", "-b", "main", init_repo.to_str().unwrap()]).output().unwrap();
+    for e in fs::read_dir(&src).unwrap().flatten() {
+        fs::copy(e.path(), init_repo.join(e.file_name())).unwrap();
+    }
+    for (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
+        Command::new("git").args(["config", k, v]).current_dir(&init_repo).output().unwrap();
+    }
+    Command::new("git").args(["add", "."]).current_dir(&init_repo).output().unwrap();
+    Command::new("git").args(["commit", "-m", "init"]).current_dir(&init_repo).output().unwrap();
+
+    // Create the bare repo from this.
+    let bare = tmp.join("mylib.git");
+    Command::new("git")
+        .args(["clone", "--bare", init_repo.to_str().unwrap(), bare.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    // Clone from the bare repo for future pushes.
+    let clone = tmp.join("mylib_clone");
+    Command::new("git")
+        .args(["clone", bare.to_str().unwrap(), clone.to_str().unwrap()])
+        .output()
+        .unwrap();
+    for (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
+        Command::new("git").args(["config", k, v]).current_dir(&clone).output().unwrap();
+    }
+
+    let repo_url = format!("file://{}", bare.to_str().unwrap());
+    let raw = min_manifest("app", "0.1.0")
+        + &format!(
+            "\n[dependencies]\nmylib = {{ git = \"{}\", branch = \"main\" }}\n",
+            repo_url
+        );
+    write(&tmp, "jet.toml", &raw);
+
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let mf = jet::manifest::parse(&tmp.join("jet.toml"), &raw).unwrap();
+
+    // Initial fetch (no lock yet) — writes the lock file.
+    let opts = jet::fetch::FetchOptions { locked: false, update: false, update_dep: None };
+    let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
+    assert!(result.is_ok(), "initial git branch fetch should succeed: {:?}", result.err());
+
+    // Capture the initial rev from the lock file.
+    let lock_raw = fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist");
+    let initial_rev = extract_rev_from_lock(&lock_raw);
+    assert!(!initial_rev.is_empty(), "lock must contain a rev after initial fetch");
+
+    // Make a NEW commit to the branch.
+    write(&clone, "extra.jet", "pub fn extra() -> Int { return 99; }\n");
+    Command::new("git").args(["add", "."]).current_dir(&clone).output().unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "second commit"])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
+    Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&clone).output().unwrap();
+
+    // Re-fetch with update = true — should re-resolve the branch and update the lock.
+    let lock_str = fs::read_to_string(tmp.join("jet.lock")).unwrap();
+    let existing_lock = jet::lock::parse(&lock_str).expect("initial lock must parse");
+    let update_opts = jet::fetch::FetchOptions { locked: false, update: true, update_dep: None };
+    let result2 = with_store(&store, || {
+        jet::fetch::fetch(&tmp, &mf, Some(&existing_lock), &update_opts)
+    });
+    assert!(result2.is_ok(), "update fetch should succeed: {:?}", result2.err());
+
+    // Capture the new rev from the lock file.
+    let lock_raw2 = fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist after update");
+    let new_rev = extract_rev_from_lock(&lock_raw2);
+    assert!(!new_rev.is_empty(), "lock must contain a rev after update fetch");
+
+    assert_ne!(initial_rev, new_rev, "lock rev must change after a new commit was pushed");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+/// Extract the first `rev = "..."` value from a lock file string.
+/// The lock format stores it as: `locked = { rev = "...", tree-hash = "...", ... }`
+fn extract_rev_from_lock(lock_raw: &str) -> String {
+    for line in lock_raw.lines() {
+        // Look for the locked inline table line.
+        if !line.contains("rev = \"") {
+            continue;
+        }
+        // Find rev = "..."
+        if let Some(after) = line.find("rev = \"") {
+            let rest = &line[after + 7..]; // skip past 'rev = "'
+            if let Some(end) = rest.find('"') {
+                return rest[..end].to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+// ─────────────────────────────────────────────
 // CLI binary end-to-end (skip if binary not built)
 // ─────────────────────────────────────────────
 
