@@ -35,6 +35,9 @@ usage:
   {bin} lsp                         language server (stdio JSON-RPC)
   {bin} lsp doctor                  health-check the language server
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
+  {bin} version                     print compiler version
+  {bin} help                        print this help text
+  {bin} upgrade                     how to download a newer release
 
 package management (M12.1):
   {bin} add   <dep> --path <dir>    add a path dependency and fetch
@@ -62,6 +65,12 @@ flags:
 
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+
+    if raw.iter().any(|a| a == "--version") {
+        run_version();
+        return;
+    }
+
     let emit_rust = raw.iter().any(|a| a == "--emit-rust");
     let fmt_check = raw.iter().any(|a| a == "--check");
     let small = raw.iter().any(|a| a == "--small");
@@ -79,7 +88,7 @@ fn main() {
             }
             (_, true) | (Some("--bench"), _) => {
                 // jet lsp --bench: run latency benchmark on a small program
-                let src = include_str!("../examples/16_wordcount.jet");
+                let src = include_str!("../examples/features/16_wordcount.jet");
                 jet::lsp::run_bench(src, 10, 200);
                 return;
             }
@@ -102,6 +111,18 @@ fn main() {
 
     // Commands with no required positional target.
     match cmd {
+        "help" => {
+            eprint!("{}", usage());
+            exit(2);
+        }
+        "version" => {
+            run_version();
+            return;
+        }
+        "upgrade" => {
+            run_upgrade();
+            return;
+        }
         "fetch" => { run_fetch(locked); return; }
         "update" => {
             let dep = args.get(1).map(|s| s.as_str());
@@ -183,6 +204,18 @@ fn find_project_entry(root: &Path) -> PathBuf {
         return dot_jet;
     }
     root.join(format!("main.{}", jet::syntax::FILE_EXT))
+}
+
+fn run_version() {
+    println!("{}", env!("CARGO_PKG_VERSION"));
+}
+
+fn run_upgrade() {
+    println!(
+        "To upgrade {}, download the latest release from:",
+        jet::syntax::BINARY_NAME
+    );
+    println!("  https://github.com/jet-lang/jet/releases");
 }
 
 fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_args: &[&String]) {
@@ -683,6 +716,19 @@ fn build(
         exit(1);
     });
 
+    let small = matches!(profile, BuildProfile::Small);
+    let use_cache = ffi.is_none();
+    let cache_key = if use_cache {
+        Some(jet::build_cache::cache_key(rust_code, small))
+    } else {
+        None
+    };
+    if let Some(ref key) = cache_key {
+        if jet::build_cache::try_copy_cached(key, &bin) {
+            return;
+        }
+    }
+
     let mut cmd = Command::new("rustc");
     cmd.arg("--edition").arg("2021");
     match profile {
@@ -735,5 +781,9 @@ fn build(
         eprintln!("--- rustc said ---");
         eprintln!("{}", String::from_utf8_lossy(&out.stderr));
         exit(101);
+    }
+
+    if let Some(key) = cache_key {
+        jet::build_cache::store_cached(&key, &bin);
     }
 }

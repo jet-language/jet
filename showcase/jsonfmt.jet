@@ -1,0 +1,56 @@
+// jsonfmt — JSON pretty-printer / validator (M14 showcase).
+import std.fs as fs;
+import std.io as io;
+import std.json as json;
+import std.process as process;
+
+fn usage() -> String {
+    return "usage: jsonfmt [file.json]\n       jsonfmt   (reads stdin)";
+}
+
+fn main() {
+    val args = io.args();
+    var path = "";
+    if (args.len() >= 2) {
+        if args.get(1) == value(arg) {
+            if (arg == "-h" || arg == "--help") {
+                print(usage());
+                return;
+            }
+            path = arg;
+        }
+    }
+
+    var raw = "";
+    if (path == "") {
+        switch io.read_all_input() {
+            it == ok(text) -> {
+                raw = text;
+            };
+            it == err(_) -> {
+                io.eprint("couldn't read stdin");
+                process.exit(2);
+            };
+        }
+    } else {
+        switch fs.read(path) {
+            it == ok(text) -> {
+                raw = text;
+            };
+            it == err(_) -> {
+                io.eprint("couldn't read {path}");
+                process.exit(2);
+            };
+        }
+    }
+
+    switch json.parse(raw) {
+        it == ok(data) -> {
+            print(json.render_pretty(data));
+        };
+        it == err(e) -> {
+            io.eprint("{e}");
+            process.exit(1);
+        };
+    }
+}

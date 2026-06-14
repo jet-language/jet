@@ -1,0 +1,383 @@
+// nixbridge — materialize tool binaries through Nix and assemble a PATH.
+//
+// This is Forge's translation layer: Nix stays the package *provider*; Jet is
+// the friendly front end. We shell out to `nix build --json`, parse the store
+// path Nix prints, and turn it into a `bin` directory for PATH.
+//
+// Showcases: `std.process` (subprocess), `std.json` (parse Nix output),
+// `std.fs`, and **`std.tasks` — every tool is resolved on its own task and the
+// results stream back over a channel**. An offline fixture mode reads canned
+// `nix build --json` files so this all runs (and tests) without Nix installed.
+
+import std.json as json;
+import std.fs as fs;
+import std.process as process;
+import std.tasks as tasks;
+
+/// What can go wrong talking to Nix.
+pub enum NixError {
+    NixMissing;
+    BuildFailed(String);
+    BadOutput(String);
+}
+
+/// A request to provision one tool: a friendly name + a Nix package ref.
+pub struct Request {
+    pub name: String;
+    pub package: String;
+}
+
+/// The result of provisioning one tool. Carries its own status so it can ride
+/// a channel back from a worker task (channels hold one type).
+pub struct Resolved {
+    pub name: String;
+    pub bin_dir: String;
+    pub success: Bool;
+    pub error: String;
+}
+
+fn ok_resolved(take name: String, take bin_dir: String) -> Resolved {
+    return Resolved { name: name, bin_dir: bin_dir, success: true, error: "" };
+}
+
+fn failed(take name: String, take error: String) -> Resolved {
+    return Resolved { name: name, bin_dir: "", success: false, error: error };
+}
+
+/// A human-readable reason for a NixError.
+pub fn describe(take e: NixError) -> String {
+    switch e {
+        e == NixMissing -> {
+            return "couldn't run `nix` — is Nix installed and on your PATH?";
+        };
+        e == BuildFailed(reason) -> {
+            return "nix build failed: {reason}";
+        };
+        e == BadOutput(reason) -> {
+            return "couldn't understand nix's output: {reason}";
+        };
+    }
+}
+
+fn reason_for(take e: NixError) -> String {
+    switch e {
+        e == NixMissing -> { return "nix is not installed"; };
+        e == BuildFailed(reason) -> { return reason; };
+        e == BadOutput(reason) -> { return reason; };
+    }
+}
+
+// --- Json accessors (typed funnels, like the manifest package) -------------
+
+fn as_array(take j: Json) -> List<Json> ? NixError {
+    if j == Array(items) {
+        return ok(items);
+    }
+    return err(NixError.BadOutput("expected a JSON array"));
+}
+
+fn as_object(take j: Json) -> Map<String, Json> ? NixError {
+    if j == Object(entries) {
+        return ok(entries);
+    }
+    return err(NixError.BadOutput("expected a JSON object"));
+}
+
+fn as_text(take j: Json) -> String ? NixError {
+    if j == Text(s) {
+        return ok(s);
+    }
+    return err(NixError.BadOutput("expected a JSON string"));
+}
+
+/// Pull the output store path out of `nix build --json` output, which looks
+/// like `[{"outputs":{"out":"/nix/store/...-name-1.2.3"}}]`.
+pub fn parse_store_path(take j: Json) -> String ? NixError {
+    val arr: List<Json> = as_array(take j) or return err(NixError.BadOutput("nix did not return a list"));
+    val first: Json = arr.get(0) or return err(NixError.BadOutput("nix returned no outputs"));
+    val obj: Map<String, Json> = as_object(take first) or return err(NixError.BadOutput("output entry is not an object"));
+    val outputs_json: Json = obj.get("outputs") or return err(NixError.BadOutput("no `outputs` in nix output"));
+    val outputs: Map<String, Json> = as_object(take outputs_json) or return err(NixError.BadOutput("`outputs` is not an object"));
+    if outputs.get("out") == value(out_json) {
+        return as_text(take out_json);
+    }
+    if outputs.get("bin") == value(bin_json) {
+        return as_text(take bin_json);
+    }
+    return err(NixError.BadOutput("no `out` or `bin` output"));
+}
+
+// --- Provisioning a single tool -------------------------------------------
+
+/// Get the raw `nix build --json` text for a package — from a fixture file in
+/// offline mode, or by actually invoking Nix.
+///
+/// The online path asks Nix to redirect its JSON to a temp file and then reads
+/// that file, rather than reading the subprocess result struct directly.
+fn build_json(name: String, package: String, offline: Bool, fixture_dir: String) -> String ? NixError {
+    if (offline == true) {
+        val path = "{fixture_dir}/{name}.json";
+        val fixture = fs.read(path);
+        switch fixture {
+            fixture == ok(text) -> { return ok(text); };
+            fixture == err(_) -> { return err(NixError.BuildFailed("no offline fixture at {path}")); };
+        }
+    }
+    val out_file = "/tmp/forge-nix-{name}.json";
+    val script = "nix build --no-link --json {package} > {out_file} 2>/dev/null";
+    val spawned = process.run(["bash", "-c", script]);
+    switch spawned {
+        spawned == err(_) -> {
+            return err(NixError.NixMissing);
+        };
+        spawned == ok(_proc) -> {
+            val produced = fs.read(out_file);
+            switch produced {
+                produced == ok(text) -> {
+                    if (text.trim() == "") {
+                        return err(NixError.BuildFailed("nix produced no output for {package}"));
+                    }
+                    return ok(text);
+                };
+                produced == err(_) -> {
+                    return err(NixError.BuildFailed("nix build did not run for {package}"));
+                };
+            }
+        };
+    }
+}
+
+// The fallible core: fetch nix's JSON, parse it, pull out the store path.
+// (Switches over named locals, not `it`, so the nesting doesn't collide.)
+fn resolve_store(name: String, package: String, offline: Bool, fixture_dir: String) -> String ? NixError {
+    val built = build_json(name, package, offline, fixture_dir);
+    switch built {
+        built == err(e) -> {
+            return err(e);
+        };
+        built == ok(text) -> {
+            val parsed = json.parse(text);
+            switch parsed {
+                parsed == err(_) -> {
+                    return err(NixError.BadOutput("nix output was not valid JSON"));
+                };
+                parsed == ok(data) -> {
+                    return parse_store_path(take data);
+                };
+            }
+        };
+    }
+}
+
+/// Resolve one tool to a `Resolved`. Never throws — failures are recorded in
+/// the returned value so it can travel back over a channel.
+pub fn resolve_one(name: String, package: String, offline: Bool, fixture_dir: String) -> Resolved {
+    switch resolve_store(name.clone(), package.clone(), offline, fixture_dir.clone()) {
+        it == ok(store) -> {
+            return ok_resolved(name.clone(), "{store}/bin");
+        };
+        it == err(e) -> {
+            return failed(name.clone(), reason_for(take e));
+        };
+    }
+}
+
+// --- Provisioning every tool, in parallel ---------------------------------
+
+/// Resolve every request concurrently: one task per tool, results streamed
+/// back over a channel. This is where Forge earns its keep on a cold cache —
+/// ten tools build at once instead of one after another.
+pub fn resolve_all(requests: List<Request>, offline: Bool, fixture_dir: String) -> List<Resolved> {
+    val ch: Channel<Resolved> = tasks.channel();
+    var workers: List<Task<Unit>> = [];
+    for req in requests {
+        val sender = ch.sender();
+        val name = req.name.clone();
+        val package = req.package.clone();
+        val off = offline;
+        val dir = fixture_dir.clone();
+        workers.push(tasks.spawn(take(sender, name, package, off, dir) () => {
+            sender.send(resolve_one(name, package, off, dir));
+        }));
+    }
+    while (workers.len() > 0) {
+        val worker = workers.pop() or panic("missing worker");
+        worker.join();
+    }
+    var out: List<Resolved> = [];
+    var got = 0;
+    while (got < requests.len()) {
+        val r = ch.receive() or panic("channel closed early");
+        out.push(r);
+        got += 1;
+    }
+    sort_resolved(mut out);
+    return out;
+}
+
+/// Join resolved tool `bin` directories ahead of an existing PATH.
+pub fn assemble_path(resolved: List<Resolved>, base_path: String) -> String {
+    var parts: List<String> = [];
+    for r in resolved {
+        if (r.success == true) {
+            parts.push(r.bin_dir.clone());
+        }
+    }
+    parts.push(base_path.clone());
+    return parts.join(":");
+}
+
+// --- Primitive-facing API (other packages can't name our types) -----------
+
+fn requests_from_specs(specs: Map<String, String>) -> List<Request> {
+    var reqs: List<Request> = [];
+    for name, package in specs {
+        reqs.push(Request { name: name.clone(), package: package.clone() });
+    }
+    sort_requests(mut reqs);
+    return reqs;
+}
+
+fn sort_requests(mut reqs: List<Request>) {
+    var i = 1;
+    while (i < reqs.len()) {
+        var j = i;
+        while (j > 0) {
+            val left = reqs[j - 1].clone();
+            val right = reqs[j].clone();
+            if (left.name > right.name) {
+                reqs[j - 1] = right;
+                reqs[j] = left;
+                j -= 1;
+            } else {
+                break;
+            }
+        }
+        i += 1;
+    }
+}
+
+fn sort_resolved(mut resolved: List<Resolved>) {
+    var i = 1;
+    while (i < resolved.len()) {
+        var j = i;
+        while (j > 0) {
+            val left = resolved[j - 1].clone();
+            val right = resolved[j].clone();
+            if (left.name > right.name) {
+                resolved[j - 1] = right;
+                resolved[j] = left;
+                j -= 1;
+            } else {
+                break;
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Provision every tool in `specs` (name -> Nix package ref) and return a PATH
+/// string with their `bin` directories ahead of `base_path`.
+pub fn provision_path(specs: Map<String, String>, offline: Bool, fixture_dir: String, base_path: String) -> String {
+    val reqs = requests_from_specs(specs);
+    val resolved = resolve_all(reqs, offline, fixture_dir);
+    return assemble_path(resolved, base_path);
+}
+
+/// Provision one package and return PATH, or a human-readable failure.
+pub fn provision_one_path(name: String, package: String, offline: Bool, fixture_dir: String, base_path: String) -> String ? String {
+    val resolved = resolve_one(name.clone(), package.clone(), offline, fixture_dir);
+    if (resolved.success == false) {
+        return err(resolved.error.clone());
+    }
+    return ok("{resolved.bin_dir}:{base_path}");
+}
+
+/// Provision every tool and return one human-readable status line per tool.
+pub fn provision_report(specs: Map<String, String>, offline: Bool, fixture_dir: String) -> List<String> {
+    val reqs = requests_from_specs(specs);
+    val resolved = resolve_all(reqs, offline, fixture_dir);
+    var lines: List<String> = [];
+    for r in resolved {
+        if (r.success == true) {
+            lines.push("ok    {r.name} -> {r.bin_dir}");
+        } else {
+            lines.push("FAIL  {r.name}: {r.error}");
+        }
+    }
+    return lines;
+}
+
+/// Is `nix` actually runnable here? Used to fail early with a friendly message.
+pub fn nix_available() -> Bool {
+    switch process.run(["nix", "--version"]) {
+        it == ok(_spawned) -> { return true; };
+        it == err(_) -> { return false; };
+    }
+}
+
+// --- Tests (offline; no Nix, no network) ----------------------------------
+
+fn sample_output() -> String {
+    return "[{{\"drvPath\":\"/nix/store/aaa.drv\",\"outputs\":{{\"out\":\"/nix/store/abc123-ripgrep-14.1.0\"}}}}]";
+}
+
+test "the store path is pulled out of nix's JSON" {
+    val data = json.parse(sample_output()) or panic("bad fixture");
+    val store = parse_store_path(data) or panic("should parse");
+    require_eq(store, "/nix/store/abc123-ripgrep-14.1.0");
+}
+
+test "malformed nix output yields a friendly BadOutput" {
+    val data = json.parse("[]") or panic("bad fixture");
+    switch parse_store_path(data) {
+        it == ok(_) -> { require(false); };
+        it == err(e) -> { require(describe(e).contains("no outputs")); };
+    }
+}
+
+test "assemble_path puts tool bins ahead of the base PATH" {
+    val tools = [
+        ok_resolved("rg", "/nix/store/x-ripgrep/bin"),
+        failed("broken", "nope"),
+        ok_resolved("jq", "/nix/store/y-jq/bin"),
+    ];
+    val path = assemble_path(tools, "/usr/bin");
+    require_eq(path, "/nix/store/x-ripgrep/bin:/nix/store/y-jq/bin:/usr/bin");
+}
+
+test "resolve_all provisions every tool in parallel (offline fixtures)" {
+    val dir = "/tmp/forge_nixbridge_test";
+    if (fs.exists(dir) == false) {
+        val _mk = fs.create_dir(dir) or panic("could not create temp dir");
+    }
+    val _w1 = fs.write("{dir}/rg.json", sample_output()) or panic("write rg");
+    val _w2 = fs.write("{dir}/jq.json", sample_output()) or panic("write jq");
+
+    val reqs = [
+        Request { name: "rg", package: "nixpkgs#ripgrep" },
+        Request { name: "jq", package: "nixpkgs#jq" },
+    ];
+    val resolved = resolve_all(reqs, true, dir);
+    require_eq(resolved.len(), 2);
+    for r in resolved {
+        require(r.success);
+        require(r.bin_dir.ends_with("/bin"));
+    }
+}
+
+test "provision_path builds a PATH from a specs map (offline)" {
+    val dir = "/tmp/forge_nixbridge_test";
+    if (fs.exists(dir) == false) {
+        val _mk = fs.create_dir(dir) or panic("mkdir");
+    }
+    val _w = fs.write("{dir}/rg.json", sample_output()) or panic("write");
+    var specs: Map<String, String> = [:];
+    specs["rg"] = "nixpkgs#ripgrep";
+    val path = provision_path(specs, true, dir, "/usr/bin");
+    require(path.contains("/bin"));
+    require(path.ends_with("/usr/bin"));
+    val report = provision_report(specs, true, dir);
+    require_eq(report.len(), 1);
+    require(report[0].starts_with("ok"));
+}

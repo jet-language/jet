@@ -1,0 +1,265 @@
+// manifest — load and validate a `forge.json` project manifest.
+//
+// Showcases: structs + enums, errors-as-values (`T ? E`, `ok`/`err`, `?`),
+// Option, `Map`/`List`, closures, and walking the std `Json` enum by hand.
+// v1 std has no TOML parser (`toml` is reserved, not implemented), so the
+// manifest is JSON — honest and fully supported today.
+
+import std.json as json;
+import std.fs as fs;
+
+/// Everything that can go wrong reading a manifest. Each variant carries the
+/// detail needed for a friendly message (see `describe`).
+pub enum ManifestError {
+    NotFound(String);
+    BadJson(String);
+    Missing(String);
+    WrongType(String);
+}
+
+/// One external tool the project needs, named so tasks can refer to it.
+pub struct Tool {
+    pub name: String;
+    pub package: String;
+    pub bin: String;
+}
+
+/// One task: a shell command, the tools it needs on PATH, and the tasks that
+/// must run before it.
+pub struct Task {
+    pub name: String;
+    pub run: String;
+    pub tools: List<String>;
+    pub needs: List<String>;
+}
+
+/// A fully-parsed project manifest.
+pub struct Project {
+    pub name: String;
+    pub description: String;
+    pub tools: List<Tool>;
+    pub env: Map<String, String>;
+    pub tasks: List<Task>;
+}
+
+// --- Json accessors -------------------------------------------------------
+// Each funnels a Json value into a concretely-typed result, so callers get
+// real `Map`/`List`/`String` bindings (and good errors) instead of raw Json.
+
+fn as_object(take j: Json, field: String) -> Map<String, Json> ? ManifestError {
+    if j == Object(entries) {
+        return ok(entries);
+    }
+    return err(ManifestError.WrongType(field));
+}
+
+fn as_array(take j: Json, field: String) -> List<Json> ? ManifestError {
+    if j == Array(items) {
+        return ok(items);
+    }
+    return err(ManifestError.WrongType(field));
+}
+
+fn as_text(take j: Json, field: String) -> String ? ManifestError {
+    if j == Text(s) {
+        return ok(s);
+    }
+    return err(ManifestError.WrongType(field));
+}
+
+/// Pull a required field out of an object, as raw Json.
+fn get_field(obj: Map<String, Json>, key: String) -> Json ? ManifestError {
+    if obj.get(key) == value(found) {
+        return ok(found);
+    }
+    return err(ManifestError.Missing(key));
+}
+
+// NOTE: these use `value or return err(...)` instead of `?`. Both express the
+// same "stop on failure" intent, but `or return` also lets each step attach a
+// precise field name — and it sidesteps a `?` inference-fuel limit when one
+// `Map` binding is read many times (see capstone/PROGRESS.md).
+
+/// A required string field.
+fn text_field(obj: Map<String, Json>, key: String) -> String ? ManifestError {
+    val raw = get_field(obj, key) or return err(ManifestError.Missing(key));
+    return as_text(raw, key);
+}
+
+/// A list-of-strings field (e.g. a task's `tools` or `needs`).
+fn string_list_field(obj: Map<String, Json>, key: String) -> List<String> ? ManifestError {
+    val raw = get_field(obj, key) or return err(ManifestError.Missing(key));
+    val items = as_array(raw, key) or return err(ManifestError.WrongType(key));
+    var out: List<String> = [];
+    for item in items {
+        val text = as_text(item.clone(), key) or return err(ManifestError.WrongType(key));
+        out.push(text);
+    }
+    return ok(out);
+}
+
+// --- Section parsers ------------------------------------------------------
+
+fn parse_tool(take entry: Json) -> Tool ? ManifestError {
+    val obj = as_object(entry, "tools[]") or return err(ManifestError.WrongType("tools[]"));
+    val name = text_field(obj, "name") or return err(ManifestError.Missing("tool.name"));
+    val pkg = text_field(obj, "package") or return err(ManifestError.Missing("tool.package"));
+    val bin = text_field(obj, "bin") or return err(ManifestError.Missing("tool.bin"));
+    return ok(Tool { name: name, package: pkg, bin: bin });
+}
+
+fn parse_task(take entry: Json) -> Task ? ManifestError {
+    val obj = as_object(entry, "tasks[]") or return err(ManifestError.WrongType("tasks[]"));
+    val name = text_field(obj, "name") or return err(ManifestError.Missing("task.name"));
+    val run = text_field(obj, "run") or return err(ManifestError.Missing("task.run"));
+    val tools = string_list_field(obj, "tools") or return err(ManifestError.WrongType("task.tools"));
+    val needs = string_list_field(obj, "needs") or return err(ManifestError.WrongType("task.needs"));
+    return ok(Task { name: name, run: run, tools: tools, needs: needs });
+}
+
+fn parse_tools(take j: Json) -> List<Tool> ? ManifestError {
+    val items = as_array(j, "tools") or return err(ManifestError.WrongType("tools"));
+    var out: List<Tool> = [];
+    for item in items {
+        val tool = parse_tool(item.clone()) or return err(ManifestError.WrongType("tools[]"));
+        out.push(tool);
+    }
+    return ok(out);
+}
+
+fn parse_tasks(take j: Json) -> List<Task> ? ManifestError {
+    val items = as_array(j, "tasks") or return err(ManifestError.WrongType("tasks"));
+    var out: List<Task> = [];
+    for item in items {
+        val task = parse_task(item.clone()) or return err(ManifestError.WrongType("tasks[]"));
+        out.push(task);
+    }
+    return ok(out);
+}
+
+fn parse_env(obj: Map<String, Json>) -> Map<String, String> ? ManifestError {
+    var out: Map<String, String> = [:];
+    if obj.get("env") == value(raw) {
+        val entries = as_object(raw, "env") or return err(ManifestError.WrongType("env"));
+        for key, value_json in entries {
+            val v = as_text(value_json.clone(), key) or return err(ManifestError.WrongType("env.{key}"));
+            out[key] = v;
+        }
+    }
+    return ok(out);
+}
+
+// --- Public API -----------------------------------------------------------
+
+/// Build a Project from the already-parsed root object.
+fn build_project(root: Map<String, Json>) -> Project ? ManifestError {
+    val name: String = text_field(root, "name") or return err(ManifestError.Missing("name"));
+    val description: String = text_field(root, "description") or return err(ManifestError.Missing("description"));
+    val tools_json: Json = get_field(root, "tools") or return err(ManifestError.Missing("tools"));
+    val tools: List<Tool> = parse_tools(tools_json) or return err(ManifestError.WrongType("tools"));
+    val tasks_json: Json = get_field(root, "tasks") or return err(ManifestError.Missing("tasks"));
+    val tasks: List<Task> = parse_tasks(tasks_json) or return err(ManifestError.WrongType("tasks"));
+    val env: Map<String, String> = parse_env(root) or return err(ManifestError.WrongType("env"));
+    return ok(Project {
+        name: name,
+        description: description,
+        tools: tools,
+        env: env,
+        tasks: tasks,
+    });
+}
+
+/// Parse a manifest from JSON text.
+pub fn parse_project(text: String) -> Project ? ManifestError {
+    switch json.parse(text) {
+        it == err(e) -> {
+            return err(ManifestError.BadJson("{e}"));
+        };
+        it == ok(data) -> {
+            val root: Map<String, Json> = as_object(data, "root") or return err(ManifestError.WrongType("root"));
+            return build_project(root);
+        };
+    }
+}
+
+/// Load and parse a manifest from a file path.
+pub fn load(path: String) -> Project ? ManifestError {
+    switch fs.read(path) {
+        it == err(_) -> {
+            return err(ManifestError.NotFound(path));
+        };
+        it == ok(text) -> {
+            return parse_project(text);
+        };
+    }
+}
+
+/// Turn a manifest error into a friendly, Jet-voice message.
+pub fn describe(take e: ManifestError) -> String {
+    switch e {
+        e == NotFound(path) -> {
+            return "couldn't find a manifest at {path}";
+        };
+        e == BadJson(detail) -> {
+            return "forge.json isn't valid JSON: {detail}";
+        };
+        e == Missing(key) -> {
+            return "forge.json is missing the required field `{key}`";
+        };
+        e == WrongType(fieldname) -> {
+            return "forge.json field `{fieldname}` has the wrong type";
+        };
+    }
+}
+
+/// Find a task by name.
+pub fn find_task(project: Project, name: String) -> Task ? ManifestError {
+    val tasks = project.tasks.clone();
+    for task in tasks {
+        if (task.name == name) {
+            return ok(task.clone());
+        }
+    }
+    return err(ManifestError.Missing("task `{name}`"));
+}
+
+// --- Tests ----------------------------------------------------------------
+
+fn sample() -> String {
+    return "{{\"name\":\"demo\",\"description\":\"d\",\"tools\":[{{\"name\":\"jq\",\"package\":\"nixpkgs#jq\",\"bin\":\"jq\"}}],\"env\":{{\"K\":\"V\"}},\"tasks\":[{{\"name\":\"build\",\"run\":\"jq .\",\"tools\":[\"jq\"],\"needs\":[]}}]}}";
+}
+
+test "a valid manifest parses into a Project" {
+    val project = parse_project(sample()) or panic("should parse");
+    require_eq(project.name, "demo");
+    require_eq(project.tools.len(), 1);
+    require_eq(project.tasks.len(), 1);
+    require_eq(project.tools[0].bin, "jq");
+}
+
+test "env map is read" {
+    val project = parse_project(sample()) or panic("should parse");
+    val env: Map<String, String> = project.env.clone();
+    require_eq(env.get("K") or "?", "V");
+}
+
+test "a task records its tools and needs" {
+    val project = parse_project(sample()) or panic("should parse");
+    val build = find_task(project, "build") or panic("missing task");
+    require_eq(build.tools.len(), 1);
+    require_eq(build.needs.len(), 0);
+}
+
+test "invalid JSON becomes a BadJson error" {
+    switch parse_project("not json at all") {
+        it == ok(_) -> { require(false); };
+        it == err(e) -> { require(describe(e).contains("isn't valid JSON")); };
+    }
+}
+
+test "a missing required field is reported by name" {
+    switch parse_project("{{\"description\":\"d\"}}") {
+        it == ok(_) -> { require(false); };
+        it == err(e) -> { require(describe(e).contains("name")); };
+    }
+}

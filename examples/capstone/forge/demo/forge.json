@@ -1,0 +1,20 @@
+{
+  "name": "demo-app",
+  "description": "A sample project Forge manages",
+  "tools": [
+    { "name": "ripgrep", "package": "nixpkgs#ripgrep", "bin": "rg" },
+    { "name": "jq", "package": "nixpkgs#jq", "bin": "jq" },
+    { "name": "hello", "package": "nixpkgs#hello", "bin": "hello" }
+  ],
+  "env": {
+    "FORGE_DEMO": "1",
+    "GREETING": "hello from forge"
+  },
+  "tasks": [
+    { "name": "greet", "run": "hello", "tools": ["hello"], "needs": [] },
+    { "name": "search", "run": "rg TODO demo", "tools": ["ripgrep"], "needs": ["greet"] },
+    { "name": "report", "run": "jq . demo/forge.json", "tools": ["jq"], "needs": ["search"] },
+    { "name": "build", "run": "jq -r .name demo/forge.json", "tools": ["jq"], "needs": ["report"] },
+    { "name": "all", "run": "", "tools": [], "needs": ["build", "greet"] }
+  ]
+}

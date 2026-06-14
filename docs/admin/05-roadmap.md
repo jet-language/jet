@@ -172,7 +172,7 @@ fed by unsaved buffers. Tree-sitter + TextMate grammars.
 under budget in CI.
 **M13 verified 2026-06-13.**
 
-## M14 — v1.0  *(plan: docs/plans/m14-v1.md)*
+## M14 — v1.0  *(plan: docs/plans/m14-v1.md)* ✓ 2026-06-14
 
 The proof: three showcase tools (grep-lite, JSON formatter, wordfreq)
 benchmarked at ≤1.5× their Rust references. Diagnostics,

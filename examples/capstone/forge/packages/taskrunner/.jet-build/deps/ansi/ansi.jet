@@ -1,0 +1,129 @@
+// ansi — tiny terminal styling for Forge.
+//
+// Pure Jet, zero std. Showcases enums, a struct with methods (instance +
+// static), Option-free data modeling, and Jet's one string type with
+// interpolation. A `Theme` carries a single `enabled` flag so `--no-color`
+// flips every output through one value instead of global state.
+
+/// The colors Forge uses. `Plain` means "leave the color alone".
+pub enum Color {
+    Plain;
+    Red;
+    Green;
+    Yellow;
+    Blue;
+    Cyan;
+    Gray;
+}
+
+/// The SGR (Select Graphic Rendition) number for a color.
+fn sgr(color: Color) -> Int {
+    switch color {
+        (color == Plain) -> { return 39; };
+        (color == Red) -> { return 31; };
+        (color == Green) -> { return 32; };
+        (color == Yellow) -> { return 33; };
+        (color == Blue) -> { return 34; };
+        (color == Cyan) -> { return 36; };
+        (color == Gray) -> { return 90; };
+    }
+}
+
+/// The ESC control byte (0x1B) as a one-character string. v1 string escapes
+/// are `\n \t \" \\` only, so we build ESC from its byte value.
+fn esc() -> String {
+    val byte: U8 = 27;
+    val bytes: List<U8> = [byte];
+    return String.from_bytes(bytes) or "";
+}
+
+fn bold_prefix(bold: Bool) -> String {
+    if (bold == true) {
+        return "1;";
+    }
+    return "";
+}
+
+/// A reusable style: a color and whether to embolden. Styles are immutable
+/// data; `strong()` returns a new value.
+pub struct Style {
+    color: Color;
+    bold: Bool;
+
+    /// A style that changes only the weight.
+    fn plain() -> Style {
+        return Style { color: Color.Plain, bold: false };
+    }
+
+    /// A colored, non-bold style. `take` because the color is moved into the
+    /// new struct (enums are not implicitly copyable).
+    fn of(take color: Color) -> Style {
+        return Style { color: color, bold: false };
+    }
+
+    /// This style, but bold. `self` is a view, so its color is cloned.
+    fn strong(self) -> Style {
+        return Style { color: self.color.clone(), bold: true };
+    }
+
+    /// Wrap `text` in this style's escape codes and a reset.
+    fn paint(self, text: String) -> String {
+        val mark = esc();
+        return "{mark}[{bold_prefix(self.bold)}{sgr(self.color)}m{text}{mark}[0m";
+    }
+}
+
+/// A Theme decides whether color is shown at all. Construct `Theme.color()`
+/// for terminals, `Theme.mono()` for pipes/tests/`--no-color`. One value
+/// threads the choice through the whole program — no global mutable state.
+pub struct Theme {
+    enabled: Bool;
+
+    fn color() -> Theme {
+        return Theme { enabled: true };
+    }
+
+    fn mono() -> Theme {
+        return Theme { enabled: false };
+    }
+
+    /// Apply a style, or return the text untouched when color is off.
+    /// `take style` because `style.paint` consumes the style value.
+    fn paint(self, take style: Style, text: String) -> String {
+        if (self.enabled == false) {
+            return text.clone();
+        }
+        return style.paint(text);
+    }
+
+    fn red(self, text: String) -> String { return self.paint(Style.of(Color.Red), text); }
+    fn green(self, text: String) -> String { return self.paint(Style.of(Color.Green), text); }
+    fn yellow(self, text: String) -> String { return self.paint(Style.of(Color.Yellow), text); }
+    fn blue(self, text: String) -> String { return self.paint(Style.of(Color.Blue), text); }
+    fn cyan(self, text: String) -> String { return self.paint(Style.of(Color.Cyan), text); }
+    fn gray(self, text: String) -> String { return self.paint(Style.of(Color.Gray), text); }
+    fn bold(self, text: String) -> String { return self.paint(Style.plain().strong(), text); }
+}
+
+test "color theme wraps the right SGR code" {
+    val t = Theme.color();
+    require(t.green("ok").contains("32m"));
+    require(t.red("no").contains("31m"));
+}
+
+test "bold carries the 1; prefix" {
+    val t = Theme.color();
+    require(t.bold("x").contains("1;39m"));
+}
+
+test "mono theme leaves text untouched" {
+    val t = Theme.mono();
+    require_eq(t.red("hello"), "hello");
+    require_eq(t.bold("world"), "world");
+}
+
+test "a style is reusable across texts" {
+    val warn = Style.of(Color.Yellow).strong();
+    require(warn.paint("a").contains("1;33m"));
+    require(warn.paint("b").contains("1;33m"));
+}
