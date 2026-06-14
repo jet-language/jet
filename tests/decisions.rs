@@ -10,9 +10,9 @@ use std::fs;
 
 #[test]
 fn ratified_decisions_enforced() {
-    let docs = fs::read_to_string("docs/02-syntax-decisions.md").expect("docs/02");
+    let docs = fs::read_to_string("docs/admin/02-syntax-decisions.md").expect("docs/admin/02");
     let syntax = fs::read_to_string("src/syntax.rs").expect("src/syntax.rs");
-    let diag = fs::read_to_string("docs/04-diagnostics.md").expect("docs/04");
+    let diag = fs::read_to_string("docs/admin/04-diagnostics.md").expect("docs/admin/04");
 
     let ratified = extract_section_ids(&docs, "## Ratified", "## Provisional");
     let open = extract_open_registry_ids(&docs);

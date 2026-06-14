@@ -81,7 +81,11 @@ fn jet_new_creates_project() {
         .output()
         .unwrap();
     assert!(out.status.success(), "jet new failed");
-    assert!(dir.join("main.jet").exists());
+    // M12.1: jet new creates .jet/main.jet (source root is the .jet/ folder).
+    assert!(
+        dir.join(".jet/main.jet").exists() || dir.join("main.jet").exists(),
+        ".jet/main.jet or main.jet must be created by jet new"
+    );
     assert!(dir.join(".gitignore").exists());
     let _ = fs::remove_dir_all(&dir);
 }

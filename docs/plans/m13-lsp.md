@@ -1,95 +1,133 @@
 # M13 — LSP v2: a real language server
 
-**Blocked on decisions:** none (S49 ratified). Depends on M6 phase 4 (LSP
-v0 skeleton), M12 (multi-package projects).
+**Status:** single source of truth (2026-06-13). D-LSP1…13 are
+**recommendations** — ratify before implementation starts.
+Depends on M6 phase 4 (LSP v0 skeleton), M12 (multi-package projects).
 **Error codes:** none new (tooling); internal robustness instead.
 
 ## Goal
 
 Make Jet feel first-class in an editor. The compiler front end already
-owns every fact the server needs; this milestone is about exposing it
-with good latency and never crashing. Architecture rule: the LSP reuses
-lexer/parser/sema as libraries — zero duplicated language knowledge.
+owns every fact the server needs; this milestone exposes it with good
+latency and never crashes.
 
-## Capabilities (exact scope, in priority order — ship incrementally)
+**Vision:** The compiler is the server. Zero duplicated language knowledge
+(zls is the cautionary tale). Broken code is the normal case — every
+capability works mid-keystroke on incomplete programs.
 
-1. **Diagnostics** (from v0) — upgrade to per-keystroke with
-   debouncing; whole-project (import graph) re-check; lints included
-   with severity Hint→Warning mapping.
-2. **Completion** — names in scope (locals, params, functions, types,
-   modules), member completion after `.` (fields, methods, std module
-   items), keyword completion in statement position, `import` path
-   completion from the filesystem/package list. Snippet bodies for
-   `fn`/`if`/`for`/`switch` (switch snippet pre-fills variant arms for
-   enum subjects — the killer demo).
-3. **Hover** — type + ownership info in Jet terms ("`words`:
-   `List<String>` — `var`, may be changed here") and the item's doc
-   comment (S49: `///` lines above an item, plain text v1, shown
-   verbatim).
-4. **Go to definition / find references** — needs a name-resolution
-   table keyed by span; build it in sema once, reuse for both. Works
-   across files and into dependencies (read-only).
-5. **Rename** — span table again; refuses keywords/builtins; updates
-   all files in the package atomically.
-6. **Quick fixes** — every diagnostic with a mechanical fix carries a
-   structured suggestion from sema (extend `Diagnostic` with an optional
-   `fix: Vec<(Span, String)>`): S14 autocorrects, `did you mean`,
-   "add `take`", "add missing variants to switch" (inserts arm stubs),
-   "make this `pub`". The diagnostic *renderer* already prints these;
-   this structures them. (This refactor lands first — it's the
-   foundation, and CLI output gains `--fix` for free: `jet fmt --fix`
-   applies safe fixes.)
-7. **Formatting** — already wired to fmt; add range formatting.
-8. **Semantic tokens** — token classification for editors (keyword,
-   type, function, parameter-with-`mut`, …); makes ownership visible by
-   color (mut params get their own token modifier).
-9. **Inlay hints** — inferred types on bindings (`val x⟨: Int⟩ = …`)
-   and ownership hints at call sites (⟨clone⟩ where L0201 fired). Off
-   by default except the clone hint.
+---
+
+## Open decisions — ratify before M13
+
+Recommendations below. Implement as written unless the owner overrides.
+
+| ID | Question | Rec |
+|---|---|---|
+| D-LSP1 | Server location | **A** — `jet lsp` subcommand of the one binary |
+| D-LSP2 | Half-typed code | **A** — full error recovery; every feature works mid-keystroke |
+| D-LSP3 | Diagnostic cadence | **A** — live, debounced ~200ms, stale work cancelled |
+| D-LSP4 | Large projects | **A** — re-parse changed files only; measure before getting clever |
+| D-LSP5 | Completion | **A** — type-aware ranking + switch-arm snippet + auto-import |
+| D-LSP6 | Hover | **A** — type + ownership in Jet words + doc comment |
+| D-LSP7 | Quick fixes | **A** — structured edits from sema, shared with CLI `jet fix` |
+| D-LSP8 | Inlay hints | **A** — off by default, except hidden-clone hint |
+| D-LSP9 | Configuration | **A** — near-zero settings |
+| D-LSP10 | Protocol | **A** — strict standard LSP for v1 |
+| D-LSP11 | Server crashes | **A** — crash-proof handlers + `jet lsp doctor` |
+| D-LSP12 | Testing | **A** — fixture tests + transcript tests + latency bench in CI |
+| D-LSP13 | Code lens / eval | **A** — defer to `jet dev` (post-v1); design foundation now |
+
+Postfix completion (D-LSP5 alt C) and custom protocol extensions (D-LSP10
+alt B) need separate owner ballots if requested later.
+
+---
+
+## Invariants (LSP-I1…LSP-I6)
+
+- **LSP-I1** Server reuses lexer/parser/sema/fmt as libraries; new facts
+  get added to sema, never recomputed locally.
+- **LSP-I2** Panics in handlers are caught, logged, answered — process
+  death is P0 (ICE sibling).
+- **LSP-I3** Every request cancellable; no work for stale questions.
+- **LSP-I4** Results reflect overlay buffers; diagnostic text byte-identical
+  to terminal (same renderer, I4 snapshots bind both).
+- **LSP-I5** Every capability has fixture tests on *incomplete* programs.
+- **LSP-I6** Latency budgets enforced in CI; regression fails the build.
+
+---
+
+## Implementation order
+
+Each step independently shippable:
+
+1. **`SourceProvider` overlay** (prerequisite; `jet run` byte-identical) +
+   structured-fix refactor on `Diagnostic` (D-LSP7 — CLI `jet fix` falls out).
+2. **Error-recovering parser** (D-LSP2) — load-bearing; terminal cascades
+   improve as side effect.
+3. **Debounced live diagnostics + cancellation** (D-LSP3) + file-granular
+   incrementality (D-LSP4) + `jet lsp --bench` + fixture/transcript harness
+   (D-LSP12).
+4. **Completion** (D-LSP5), **hover** (D-LSP6), **go-to-definition /
+   references / rename** (span table in sema, built once, reused).
+5. **Semantic tokens**; inlay clone hint (D-LSP8); `jet lsp doctor`
+   (D-LSP11); tree-sitter + TextMate grammars from `src/syntax.rs`.
+
+**Already shipped (M6 v0):** diagnostics on open/change, formatting, S14
+autocorrect code actions, VS Code extension skeleton.
+
+---
+
+## Capabilities (exact scope)
+
+1. **Diagnostics** — per-keystroke debounced; whole-project import graph;
+   lints with Hint→Warning mapping.
+2. **Completion** — scope names, member after `.`, keywords, import paths;
+   switch snippet pre-fills variant arms; type-aware ranking; auto-import.
+3. **Hover** — type + ownership ("`words`: `List<String>` — `var`, may be
+   changed here") + `///` doc comment (S49, plain text v1).
+4. **Go to definition / find references** — span table in sema; cross-file
+   and into dependencies (read-only).
+5. **Rename** — span table; refuses keywords/builtins; atomic multi-file edit.
+6. **Quick fixes** — optional `fix: Vec<(Span, String)>` on `Diagnostic`:
+   S14 autocorrects, did-you-mean, "add `take`", missing switch arms,
+   "make this `pub`". CLI: `jet fmt --fix` / `jet fix`.
+7. **Formatting** — wired to fmt; add range formatting.
+8. **Semantic tokens** — keyword, type, function, parameter-with-`mut`, …
+9. **Inlay hints** — inferred types on bindings; clone hint at L0201 sites.
+
+---
 
 ## Engineering requirements
 
-- **Incrementality v1 = file-granular:** re-jet/parse only changed
-  files; sema re-runs whole-program (it's fast; measure before getting
-  clever). Budget: <100ms diagnostics for a 5k-line project on a
-  laptop; add a `jet lsp --bench` harness that replays a recorded
-  session and asserts the budget.
-- **Crash policy:** any panic in a request handler is caught, logged to
-  a file, the request answered with an error response — the server
-  never dies mid-session. ICE banner equivalent: tell the user once via
-  `window/showMessage`.
-- Unsaved-buffer compilation: all file access in the front end goes
-  through a `SourceProvider` trait (overlay of open buffers over disk).
-  This refactor is prerequisite work — do it first, keep `jet run`
-  byte-identical.
-- **Shared foundation (owner direction 2026-06-12):** the long-running
-  server, `SourceProvider`, incremental file-granular front end, and
-  crash policy are also the foundation for the future `jet dev` watch /
-  rapid-execution mode (docs/05 future addition #10). Design these as
-  reusable library pieces, not LSP-private internals — the same process
-  should later be able to host both. No dev-mode features are in M13
-  scope.
-- JSON-RPC layer: revisit the M6 hand-rolled JSON under load; if it's
-  the bottleneck or bug source, request owner approval for serde_json
-  in the tooling binary (I6 protocol) rather than gold-plating.
-- VS Code extension (editors/vscode) grows: configuration for binary
-  path, semantic token theme defaults. Also ship editors/jet.tmGrammar
-  and a tree-sitter grammar (tree-sitter-jet/) for everyone else —
-  generated from src/syntax.rs where possible so keywords never drift.
+- **Incrementality v1 = file-granular:** re-parse changed files only; sema
+  whole-program. Budget: <100ms diagnostics for 5k lines on a laptop;
+  `jet lsp --bench` replays a recorded session in CI.
+- **Crash policy:** catch panics, log to file, error response — never die
+  mid-session; one `window/showMessage` for ICE-class failures.
+- **Unsaved buffers:** all file access via `SourceProvider` trait.
+- **Shared foundation:** server process, overlay, incremental front end, and
+  crash policy also host future `jet dev` watch mode (roadmap #10). Design as
+  reusable library pieces — no dev-mode features in M13 scope.
+- **JSON-RPC:** revisit M6 hand-rolled JSON under load; if bottleneck,
+  request owner approval for serde_json in tooling binary (I6 protocol).
+- **VS Code extension:** binary path config, semantic token theme defaults.
+  Ship `editors/jet.tmGrammar` + tree-sitter-jet/ generated from syntax.rs.
+
+---
 
 ## Exit criteria
 
-- Scripted LSP integration tests (JSON transcripts in tests/lsp/)
-  covering each capability: completion lists contain expected items,
-  hover text pinned, rename produces the expected workspace edit,
+- Scripted LSP integration tests (JSON transcripts in `tests/lsp/`) per
+  capability: completion lists, hover text pinned, rename workspace edit,
   switch-arm quick fix inserts compilable code.
-- The bench harness passes its latency budget in CI.
-- Dogfood proof: a recorded demo task — write examples/16_wordcount.jet
-  from scratch in VS Code using only completions/quick-fixes — has no
-  server crash and no stale diagnostics (manual checklist in the PR).
+- Bench harness passes latency budget in CI.
+- Dogfood: write `examples/16_wordcount.jet` from scratch in VS Code using
+  only completions/quick-fixes — no crash, no stale diagnostics (PR checklist).
+
+---
 
 ## Out of scope
 
-Debugger/DAP (post-v1 with source maps), workspace symbols fuzzy search,
-call hierarchy, code lens, signature help (cheap later; not v1), other
-editors' plugins beyond grammars, watch-mode builds.
+Debugger/DAP, workspace symbols fuzzy search, call hierarchy, code lens,
+signature help, other editor plugins beyond grammars, watch-mode builds.
+Code lens / inline eval → post-v1 `jet dev` (D-LSP13).

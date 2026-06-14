@@ -389,8 +389,7 @@ first-party packages later:
 - Open file handles and streaming I/O (whole-file reads only)
 - Async / threads (concurrency is v2)
 
-See `docs/plans/m10-stdlib.md` for the exact frozen API and `docs/stdlib-decisions.md`
-for design rationale.
+See `docs/plans/m10-stdlib.md` for the exact frozen API and ring build order.
 
 ---
 

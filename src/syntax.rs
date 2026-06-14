@@ -304,3 +304,15 @@ pub const FOREIGN_EPRINTLN: &str = "eprintln";
 pub const FOREIGN_OPEN: &str = "open";
 pub const FOREIGN_GETENV: &str = "getenv";
 pub const FOREIGN_OS: &str = "os";
+
+/// S52 (ratified M12): package manifest filename and lock filename.
+pub const MANIFEST_FILE: &str = "jet.toml";
+pub const LOCK_FILE: &str = "jet.lock";
+
+/// S52 (ratified M12): package source root directory inside a project.
+pub const SOURCE_ROOT_DIR: &str = ".jet";
+
+/// S52 (ratified M12): dependency kind table suffixes.
+pub const DEP_TABLE_JET: &str = "dependencies";
+pub const DEP_TABLE_RUST: &str = "dependencies:rust";
+pub const DEP_TABLE_C: &str = "dependencies:c";

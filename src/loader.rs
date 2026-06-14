@@ -1,11 +1,14 @@
-//! Multi-file program loading (M6 phase 3, S16).
+//! Multi-file program loading (M6 phase 3, S16; M12 package support).
 //!
 //! Resolves the import graph from an entry `.jet` file, detects cycles and
 //! ambiguous module names, and returns a `ProgramBundle` for sema/codegen.
+//! When a `jet.toml` is found in the project root (walked upward from entry),
+//! validates the manifest and wires package dep paths into module search (M12.1).
 
 use crate::ast::{ImportDecl, ImportKind, LoadedModule, ProgramBundle};
 use crate::diag::{Diagnostic, Span};
 use crate::lexer;
+use crate::manifest;
 use crate::parser;
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
@@ -31,10 +34,59 @@ pub fn load_entry_with_overlay(
         cwd.join(&entry)
     };
     let entry_abs = normalize_path(&entry_abs);
-    let project_root = entry_abs
-        .parent()
-        .map(normalize_path)
-        .unwrap_or_else(|| cwd.clone());
+
+    // M12.1: walk upward from the entry file's directory to find jet.toml.
+    // If found, use that directory as project_root and validate the manifest.
+    // If none found, fall back to the entry file's directory (R9 — single-file mode).
+    let entry_dir = entry_abs.parent().map(normalize_path).unwrap_or_else(|| cwd.clone());
+    let (project_root, pkg_dep_dirs) = if let Some(manifest_dir) = find_manifest_root(&entry_dir) {
+        // Found a jet.toml — validate it and collect dep source paths.
+        let toml_path = manifest_dir.join("jet.toml");
+        let raw = fs::read_to_string(&toml_path).unwrap_or_default();
+        match manifest::parse(&toml_path, &raw) {
+            Err(d) => return Err(vec![d]),
+            Ok(mf) => {
+                // Check toolchain constraint (E1208).
+                if let Err(d) = manifest::check_toolchain(&mf, &toml_path.display().to_string()) {
+                    return Err(vec![d]);
+                }
+
+                // If there are deps, check lock staleness (E1202) and
+                // dry-resolve path dep graph to catch version conflicts (E1201).
+                if !mf.dependencies.is_empty() {
+                    // E1202: lock must exist and include all manifest deps.
+                    let lock_path = manifest_dir.join("jet.lock");
+                    if lock_path.is_file() {
+                        let lock_raw = fs::read_to_string(&lock_path).unwrap_or_default();
+                        if let Ok(lock) = crate::lock::parse(&lock_raw) {
+                            if let Err(d) = crate::lock::verify_lock_matches_manifest(
+                                &lock,
+                                &mf,
+                                &lock_path.display().to_string(),
+                            ) {
+                                return Err(vec![d]);
+                            }
+                        } else {
+                            return Err(vec![crate::lock::e1202(
+                                &lock_path.display().to_string(),
+                            )]);
+                        }
+                    }
+                    // E1201: dry-resolve path deps for package name conflicts.
+                    if let Err(d) = dry_resolve_path_deps(&mf, &manifest_dir) {
+                        return Err(vec![d]);
+                    }
+                }
+
+                // Collect package dep source directories for module search.
+                let dep_dirs = collect_dep_dirs(&mf, &manifest_dir);
+                (manifest_dir, dep_dirs)
+            }
+        }
+    } else {
+        // R9: no manifest — single-file mode, project root is the entry dir.
+        (entry_dir, HashMap::new())
+    };
 
     let mut modules = Vec::new();
     let mut path_to_idx: HashMap<PathBuf, usize> = HashMap::new();
@@ -45,6 +97,7 @@ pub fn load_entry_with_overlay(
         &entry_abs,
         entry_path,
         &project_root,
+        &pkg_dep_dirs,
         &mut modules,
         &mut path_to_idx,
         &mut stack,
@@ -85,10 +138,113 @@ pub fn load_entry_with_overlay(
     })
 }
 
+/// Walk upward from `start` to find the nearest directory containing `jet.toml`.
+pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if dir.join("jet.toml").is_file() {
+            return Some(dir);
+        }
+        match dir.parent() {
+            Some(p) => dir = p.to_path_buf(),
+            None => return None,
+        }
+    }
+}
+
+/// Dry-resolve path dependencies to catch version conflicts (E1201).
+/// Does not fetch, store, or link anything — only loads manifests.
+fn dry_resolve_path_deps(
+    mf: &manifest::Manifest,
+    project_root: &Path,
+) -> Result<(), Diagnostic> {
+    // pkg_name → (version, blame_chain)
+    let mut seen: std::collections::HashMap<String, (String, Vec<String>)> = std::collections::HashMap::new();
+    let root_name = mf.package.name.clone();
+    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen)
+}
+
+fn dry_resolve_recursive(
+    mf: &manifest::Manifest,
+    pkg_dir: &Path,
+    chain: &[String],
+    seen: &mut std::collections::HashMap<String, (String, Vec<String>)>,
+) -> Result<(), Diagnostic> {
+    for (dep_alias, spec) in &mf.dependencies {
+        let manifest::DepSpec::Path { path } = spec else {
+            continue; // only path deps are resolved dry; git deps need fetch
+        };
+        let dep_path = normalize_path(&pkg_dir.join(path));
+        // Load the dep's manifest to get its package name + version.
+        let Some(Ok(dep_mf)) = manifest::load(&dep_path) else {
+            continue; // missing manifest is caught later; not an E1201
+        };
+        let dep_pkg_name = dep_mf.package.name.clone();
+        let dep_version = dep_mf.package.version.clone();
+
+        let mut child_chain: Vec<String> = chain.to_vec();
+        child_chain.push(dep_alias.clone());
+
+        if let Some((prev_ver, prev_chain)) = seen.get(&dep_pkg_name).cloned() {
+            if prev_ver != dep_version {
+                return Err(crate::lock::e1201(
+                    &dep_pkg_name,
+                    &prev_ver,
+                    &prev_chain,
+                    &dep_version,
+                    &child_chain,
+                ));
+            }
+        } else {
+            seen.insert(dep_pkg_name.clone(), (dep_version, child_chain.clone()));
+            // Recurse into transitive deps.
+            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen)?;
+        }
+    }
+    Ok(())
+}
+
+/// Collect the source directories for each dependency from a manifest.
+/// Returns a map of dep alias → source root (path dep directory or `.jet-build/deps/<name>`).
+fn collect_dep_dirs(mf: &manifest::Manifest, project_root: &Path) -> HashMap<String, PathBuf> {
+    let mut dirs = HashMap::new();
+    for (dep_name, spec) in &mf.dependencies {
+        match spec {
+            manifest::DepSpec::Path { path } => {
+                let abs = normalize_path(&project_root.join(path));
+                // Source root for the dep: if .jet/ subdir exists use it, else the dep root.
+                let src_root = if abs.join(".jet").is_dir() {
+                    abs.join(".jet")
+                } else {
+                    abs
+                };
+                dirs.insert(dep_name.clone(), src_root);
+            }
+            manifest::DepSpec::Git { .. } => {
+                // Git deps are in .jet-build/deps/<name>/ after `jet fetch`.
+                let linked = project_root.join(".jet-build").join("deps").join(dep_name);
+                if linked.is_dir() {
+                    let src_root = if linked.join(".jet").is_dir() {
+                        linked.join(".jet")
+                    } else {
+                        linked
+                    };
+                    dirs.insert(dep_name.clone(), src_root);
+                }
+            }
+            manifest::DepSpec::Registry(_) => {
+                // Registry deps not available in M12.1.
+            }
+        }
+    }
+    dirs
+}
+
 fn load_file(
     path: &Path,
     display: &str,
     project_root: &Path,
+    pkg_dep_dirs: &HashMap<String, PathBuf>,
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
@@ -175,7 +331,7 @@ fn load_file(
         if std_module_path(imp).is_some() {
             continue;
         }
-        let target = match resolve_import(imp, path, project_root) {
+        let target = match resolve_import(imp, path, project_root, pkg_dep_dirs) {
             Ok(p) => p,
             Err(d) => {
                 stack.pop();
@@ -187,6 +343,7 @@ fn load_file(
             &target,
             &child_display,
             project_root,
+            pkg_dep_dirs,
             modules,
             path_to_idx,
             stack,
@@ -207,10 +364,11 @@ fn resolve_import(
     imp: &ImportDecl,
     importing: &Path,
     project_root: &Path,
+    pkg_dep_dirs: &HashMap<String, PathBuf>,
 ) -> Result<PathBuf, Diagnostic> {
     match &imp.kind {
         ImportKind::File(path_str, span) => resolve_file_import(importing, path_str, project_root, *span),
-        ImportKind::Module(name, span) => resolve_module_import(name, project_root, *span),
+        ImportKind::Module(name, span) => resolve_module_import(name, project_root, pkg_dep_dirs, *span),
     }
 }
 
@@ -339,8 +497,26 @@ fn resolve_file_import(
 fn resolve_module_import(
     name: &str,
     project_root: &Path,
+    pkg_dep_dirs: &HashMap<String, PathBuf>,
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
+    // M12.1: check package dep dirs first.
+    // `import words;` where "words" is a dep name → look in the dep's source root.
+    let first_segment = name.split('.').next().unwrap_or(name);
+    if let Some(dep_root) = pkg_dep_dirs.get(first_segment) {
+        // Search within the dep's source tree for the module.
+        let dep_matches = find_module_files(name, dep_root);
+        if !dep_matches.is_empty() {
+            return Ok(dep_matches[0].clone());
+        }
+        // If the dep root itself has the dep name as the top-level module,
+        // look for main.jet in the dep root.
+        let main_jet = dep_root.join(format!("main.{}", syntax::FILE_EXT));
+        if main_jet.is_file() && name == first_segment {
+            return Ok(normalize_path(&main_jet));
+        }
+    }
+
     let matches = find_module_files(name, project_root);
     match matches.len() {
         0 => Err(Diagnostic::error(
@@ -493,7 +669,7 @@ pub fn resolve_import_target(
         ));
     }
     let importing = &bundle.modules[importing_idx];
-    let target_path = match resolve_import(imp, &importing.path, &bundle.project_root) {
+    let target_path = match resolve_import(imp, &importing.path, &bundle.project_root, &HashMap::new()) {
         Ok(p) => normalize_path(&p),
         Err(d) => return Err(d),
     };

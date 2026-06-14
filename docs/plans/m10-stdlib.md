@@ -189,12 +189,33 @@ Teaching: E0037 `println!`/`eprintln!` → `print`/`io.eprint` · E0038
   calling nothing stays within noise of hello-world.
 - User-facing std reference: **docs/stdlib.md** (example-first tour of every module).
 
+## First-party ring (post-M10, SL1/SL2 ratified)
+
+Core std stays the M10 eight modules. The ring ships as versioned
+`jet.*` packages with reserved short import names. Build order
+(adoption priority):
+
+| Order | Package | Unlocks |
+|---|---|---|
+| 1 | `jet.http` (client) | API calls — blocking on streaming I/O + SL6 error conversion |
+| 2 | `jet.regex` | grep-class tools, validation |
+| 3 | `jet.csv` + `jet.toml` | data files, configs |
+| 4 | `jet.http` (server) | small services — after tasks (v2) |
+| 5 | `jet.time` (calendar) | dates/timezones (SL8 constraints) |
+| 6 | `jet.crypto` | hash/random/hmac — vetted primitives only |
+| 7 | `jet.archive` | zip/tar/gzip |
+| 8 | `jet.db` (sqlite) | FFI-tier (M7 machinery) |
+
+Package delivery and `import http#0.8.1 as http` resolution land in M12.2
+(see docs/plans/m12-packages.md, SL2). Everything below this line is
+community-package territory.
+
 ## Out of scope
 
 Networking, regex, CSV/TOML, calendar/timezone library, crypto, archives,
-sqlite, package version syntax (`import http#0.8.1 as http`), package
-overrides, custom std providers, and lockfile resolution are M12/ring or
-post-v1 work. Paths stay `String`; `std.path` string helpers are post-M10.
-Date formatting/timezones are post-v1 ring work; M10 stays unix millis
-only. File handles/streaming are out of scope (whole-file reads only —
-`read_bytes` covers big-ish files). Threads are M11.
+sqlite, package version syntax at import sites, package overrides, custom
+std providers, and lockfile resolution are M12/ring or post-v1 work. Paths
+stay `String`; `std.path` string helpers are post-M10. Date formatting/
+timezones are post-v1 ring work; M10 stays unix millis only. File handles/
+streaming are out of scope (whole-file reads only — `read_bytes` covers
+big-ish files). Threads are M11 (deferred v2 per S53).
