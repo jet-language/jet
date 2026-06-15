@@ -343,6 +343,15 @@ decidable at a glance (owner decision-doc style).
 | **D-JPK14** | Shell prompt support | **Ratified:** bash/fish/zsh; default visible prompt label is `jetpack`; prompt style/options supported. | **Ratified 2026-06-15** |
 | **D-JPK15** | Nix compatibility syntax | **Ratified:** support flakes and nixpkgs attrs through `<source>:<package/path>`; users should not type `#`. | **Ratified 2026-06-15** |
 | **D-JPK13** | Pack file and lockfile naming | **Ratified A:** `pack.jet` + `pack.lock` ("Jet packs"; avoids repeating `jet`). | **Ratified 2026-06-15** |
+| **D-JPK18** | Source ref spelling for the typed authoring surface | **Open** — `provider@target` (e.g. `github@NixOS/nixpkgs/nixos-24.05`) vs colon URI vs string-only. Revises D-JPK7/15 for the *next* surface; keep colon classifier for Phase 1. Examples + table: `pack-abi.md`. | **Rec: `provider@target`** |
+| **D-JPK19** | Package-ref sugar in typed `packages:` lists | **Open** — dot refs (`default.ripgrep`) + scoped lists (`default.[ripgrep, fd]`) + default-source bare names, Jetpack-context only. Extends D-JPK17. Examples + table: `pack-abi.md`. | **Rec: dot refs + scoped lists** |
+
+The **typed pack ABI** (module declarations, `Shell`/`Source`/`PackageRef`
+types, dispersed-file merge rules, and the three use-case categories) is the
+fluent surface D-JPK3 defers to; its design-of-record is
+[`pack-abi.md`](pack-abi.md). The **core-language** features it needs (field
+punning, `module` declarations, list-inference) are balloted as Group 16
+(D-FP1…6) in docs/spec/decision-ballots.md.
 
 Background decisions already recorded and still in force: jetos.md D-OS1..7,
 D-NX1..6; jetpack-config.md D-JP1..5. This file supersedes their *sequencing*

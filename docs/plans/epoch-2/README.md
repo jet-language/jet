@@ -1,8 +1,14 @@
 # Epoch 2 development plan
 
-**Status:** draft for owner concurrence, 2026-06-14.  
-**Purpose:** one consolidated plan before agents split Epoch 2 into detailed
-milestone files. Existing detailed plan: `m1-concurrency.md`.
+**Status:** draft for owner concurrence, 2026-06-14; detailed milestone plans
+drafted 2026-06-15.  
+**Purpose:** the consolidated overview for Epoch 2. Detailed per-milestone plans
+now exist for **E2-M2…E2-M18** (`m2-release-policy.md` … `m17-epoch2-ga.md`,
+plus `m1-concurrency.md` and `m18-repl.md`). Each detailed plan is **blocked on
+its ballot IDs** — the CEO-level calls (E2-V1…V12, E2-D1/D2) and per-milestone
+gates are consolidated as decisions, with worked examples, in
+docs/spec/decision-ballots.md (Parts 1–3). Ratify a group before its milestone
+starts.
 
 Epoch 1 proved the language core. Epoch 2 should prove that Jet can be the
 language a serious team chooses for production work: fast feedback, excellent

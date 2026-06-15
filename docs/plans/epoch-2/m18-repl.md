@@ -132,8 +132,9 @@ Likely in scope once D-REPL1=A and D-REPL21=A:
 - Meta-commands per D-REPL15.
 - Optional `--project <dir>` per D-REPL10.
 - Transcript test harness.
-- `examples/features/35_repl.jet` — not a REPL demo file (REPL is interactive);
-  instead a **documented transcript** checked into `tests/repl/basics.txt`.
+- No numbered `examples/features/NN_*.jet` file (the REPL is interactive, not a
+  runnable demo); the executable spec is a **documented transcript** checked into
+  `tests/repl/basics.txt`.
 - Guide chapter stub: "Try Jet in the terminal" (owner approves placement).
 
 ## Out of scope (unless owner promotes)
