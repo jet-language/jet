@@ -1,0 +1,22 @@
+// config.jet — your whole machine, in one small file.
+//
+// Everything feature-specific lives in modules/ (auto-wired by `jetos sync`).
+// This file only picks the package source and emits the merged system tree as
+// canonical JSON. `jetos` runs it for you — you rarely edit this file.
+//
+//   jetos check        # evaluate + typecheck, no side effects
+//   jetos diff         # what would change vs the live system
+//   jetos switch       # build it and make it live
+//
+// Add a program: drop it in a modules/ file, e.g.
+//   pkg.installed(["obsidian"]);
+// then `jetos switch`.
+
+import jetpack as pkg;
+import "generated/tree" as tree;
+
+fn main() {
+    val source = "github:NixOS/nixpkgs/nixos-unstable";
+    val host = pkg.target_host();
+    pkg.emit(source, host, tree.directives(host));
+}

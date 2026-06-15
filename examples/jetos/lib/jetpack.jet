@@ -1,0 +1,396 @@
+// jetpack — the configuration library behind a `config.jet` system.
+//
+// This is the Jet-native counterpart to a Nix flake's module system. A module
+// is a small, liftable `.jet` file that returns a list of *directives* — the
+// only thing that crosses a module boundary. jetpack collects every module's
+// directives, merges them with fixed rules (lists combine; scalars resolve by
+// priority and conflict loudly), and renders one canonical system tree as JSON.
+//
+// Why directives instead of a fluent `cfg.apps.installed.append(...)` builder:
+// in v1 Jet a module file cannot name another file's struct type or call its
+// methods, so a shared mutable `cfg` can't be passed between files. Directives
+// are plain `Json` values, which DO cross freely — and they keep modules
+// liftable (a module's whole interface is the directives it emits). The fluent
+// surface is the next milestone; see docs/research/jetpack-config.md.
+
+import std.json as json;
+import std.io as io;
+import std.env as env;
+import std.process as process;
+
+// --- Public errors --------------------------------------------------------
+
+/// Details of a scalar conflict: the option path and one "source = value"
+/// line for every module that disagreed at the winning priority.
+pub struct Conflict {
+    pub path: String;
+    pub lines: List<String>;
+}
+
+/// Everything the merge engine can refuse, each carrying what a friendly
+/// message needs (see `describe`).
+pub enum ConfigError {
+    /// Two modules set the same scalar option to different values at the same
+    /// priority.
+    Conflicted(Conflict);
+    /// A directive object was malformed (missing/!typed `op`).
+    BadDirective(String);
+}
+
+/// Render a config error in the Jet diagnostic voice: what, why, fix.
+pub fn describe(take e: ConfigError) -> String {
+    switch e {
+        e == Conflicted(c) -> {
+            val body = c.lines.join("\n");
+            return "conflict: option `{c.path}` is set to different values\n{body}\nwhy: a scalar option takes one value per priority level\nfix: mark one `default`, or `force` the one you want";
+        };
+        e == BadDirective(detail) -> {
+            return "internal: a module produced a malformed directive ({detail})";
+        };
+    }
+}
+
+// --- Directive constructors (the module-facing API) -----------------------
+// Each returns one `Json` directive. Modules build a `List<Json>` from these.
+
+/// System-wide programs the user wants available (the headline list).
+pub fn installed(items: List<String>) -> Json {
+    return pkgs_directive("apps", items.clone());
+}
+
+/// Per-user packages (the home-manager role).
+pub fn packages(items: List<String>) -> Json {
+    return pkgs_directive("user", items.clone());
+}
+
+/// System services to switch on (e.g. `pipewire`, `bluetooth`).
+pub fn services(names: List<String>) -> Json {
+    var m: Map<String, Json> = [:];
+    m["op"] = Json.Text("service");
+    m["names"] = Json.Array(to_json_array(names.clone()));
+    return Json.Object(m);
+}
+
+/// Set a scalar option at normal priority (hosts and users decide).
+pub fn option(path: String, value: String) -> Json {
+    return scalar("normal", path.clone(), value.clone());
+}
+
+/// Suggest a scalar option (`default`) — used unless anyone else cares.
+pub fn suggest(path: String, value: String) -> Json {
+    return scalar("default", path.clone(), value.clone());
+}
+
+/// Force a scalar option — end of discussion (two forces still conflict).
+pub fn force(path: String, value: String) -> Json {
+    return scalar("force", path.clone(), value.clone());
+}
+
+fn pkgs_directive(scope: String, take items: List<String>) -> Json {
+    var m: Map<String, Json> = [:];
+    m["op"] = Json.Text("pkgs");
+    m["scope"] = Json.Text(scope.clone());
+    m["items"] = Json.Array(to_json_array(take items));
+    return Json.Object(m);
+}
+
+fn scalar(prio: String, path: String, value: String) -> Json {
+    var m: Map<String, Json> = [:];
+    m["op"] = Json.Text("set");
+    m["path"] = Json.Text(path.clone());
+    m["value"] = Json.Text(value.clone());
+    m["prio"] = Json.Text(prio.clone());
+    m["src"] = Json.Text("");
+    return Json.Object(m);
+}
+
+/// Stamp a source label onto every `set` directive that lacks one. The tree
+/// generator wraps each module's contributions with `from(<path>, ...)` so a
+/// later conflict can name the exact files that disagree.
+pub fn from(src: String, take directives: List<Json>) -> List<Json> {
+    var out: List<Json> = [];
+    for d in directives {
+        out.push(stamp(src.clone(), take d));
+    }
+    return out;
+}
+
+fn stamp(src: String, take d: Json) -> Json {
+    val probe = d.clone();
+    if probe == Object(entries) {
+        var m = entries;
+        val op = field_text(m, "op");
+        val have = field_text(m, "src");
+        if (op == "set") {
+            if (have == "") {
+                m["src"] = Json.Text(src.clone());
+            }
+        }
+        return Json.Object(m);
+    }
+    return d;
+}
+
+// --- The merge engine -----------------------------------------------------
+
+/// One scalar assignment, kept until resolution so conflicts can be reported.
+struct Assign {
+    value: String;
+    prio: Int;
+    src: String;
+}
+
+/// Merge every directive into the canonical system tree, or fail with the
+/// first conflict. Pure: no IO, deterministic, safe to unit-test.
+pub fn build_tree(source: String, host: String, take directives: List<Json>) -> String ? ConfigError {
+    var apps: List<String> = [];
+    var user_pkgs: List<String> = [];
+    var svcs: List<String> = [];
+    var scalars: Map<String, List<Assign>> = [:];
+
+    for d in directives {
+        if d == Object(entries) {
+            val op = field_text(entries, "op");
+            if (op == "pkgs") {
+                val scope = field_text(entries, "scope");
+                val items = field_strings(entries, "items");
+                if (scope == "user") {
+                    for item in items { user_pkgs.push(item); }
+                } else {
+                    for item in items { apps.push(item); }
+                }
+            }
+            if (op == "service") {
+                val names = field_strings(entries, "names");
+                for n in names { svcs.push(n); }
+            }
+            if (op == "set") {
+                val path = field_text(entries, "path");
+                val value = field_text(entries, "value");
+                val src = field_text(entries, "src");
+                val prio = prio_rank(field_text(entries, "prio"));
+                var cur = scalars.get(path) or empty_assigns();
+                cur.push(Assign { value: value, prio: prio, src: src });
+                scalars[path] = cur;
+            }
+        }
+    }
+
+    // Resolve each scalar: the highest priority present wins; two distinct
+    // values at that priority is a conflict, reported with both sources.
+    var options: Map<String, String> = [:];
+    for path, assigns in scalars {
+        var top = 0;
+        for a in assigns {
+            if (a.prio > top) { top = a.prio; }
+        }
+        var distinct: List<String> = [];
+        var lines: List<String> = [];
+        for a in assigns {
+            if (a.prio == top) {
+                if (contains_str(distinct.clone(), a.value.clone()) == false) {
+                    distinct.push(a.value.clone());
+                }
+                lines.push("  {label(a.src.clone())} = {a.value}");
+            }
+        }
+        if (distinct.len() > 1) {
+            return err(ConfigError.Conflicted(Conflict { path: path.clone(), lines: lines }));
+        }
+        options[path.clone()] = distinct[0].clone();
+    }
+
+    return ok(render_tree(source.clone(), host.clone(), take apps, take user_pkgs, take svcs, options));
+}
+
+fn empty_assigns() -> List<Assign> {
+    var a: List<Assign> = [];
+    return a;
+}
+
+fn label(take src: String) -> String {
+    if (src == "") { return "(unknown)"; }
+    return src;
+}
+
+fn render_tree(source: String, host: String, take apps: List<String>, take user_pkgs: List<String>, take svcs: List<String>, options: Map<String, String>) -> String {
+    var meta: Map<String, Json> = [:];
+    meta["host"] = Json.Text(host.clone());
+    meta["source"] = Json.Text(source.clone());
+
+    var pkgs_obj: Map<String, Json> = [:];
+    pkgs_obj["apps"] = Json.Array(to_json_array(unique_sorted(take apps)));
+    pkgs_obj["user"] = Json.Array(to_json_array(unique_sorted(take user_pkgs)));
+
+    var opts_obj: Map<String, Json> = [:];
+    for k, v in options {
+        opts_obj[k.clone()] = Json.Text(v.clone());
+    }
+
+    var root: Map<String, Json> = [:];
+    root["meta"] = Json.Object(meta);
+    root["options"] = Json.Object(opts_obj);
+    root["packages"] = Json.Object(pkgs_obj);
+    root["services"] = Json.Array(to_json_array(unique_sorted(take svcs)));
+    return json.render_pretty(Json.Object(root));
+}
+
+// --- Evaluation entry points ----------------------------------------------
+
+/// Evaluate a config: print the canonical system tree, or print the conflict
+/// and exit 1. `config.jet`'s `main` calls this.
+pub fn emit(source: String, host: String, take directives: List<Json>) {
+    switch build_tree(source.clone(), host.clone(), take directives) {
+        it == ok(text) -> {
+            print(text);
+        };
+        it == err(e) -> {
+            io.eprint(describe(take e));
+            process.exit(1);
+        };
+    }
+}
+
+/// The machine to build for: `$JETOS_HOST`, else `default`. The CLI sets it.
+pub fn target_host() -> String {
+    return env.get("JETOS_HOST") or "default";
+}
+
+// --- Small helpers --------------------------------------------------------
+
+fn prio_rank(name: String) -> Int {
+    if (name == "force") { return 2; }
+    if (name == "default") { return 0; }
+    return 1;
+}
+
+fn field_text(entries: Map<String, Json>, key: String) -> String {
+    if entries.get(key) == value(found) {
+        return as_text(take found);
+    }
+    return "";
+}
+
+fn field_strings(entries: Map<String, Json>, key: String) -> List<String> {
+    if entries.get(key) == value(found) {
+        return as_strings(take found);
+    }
+    var empty: List<String> = [];
+    return empty;
+}
+
+fn as_text(take j: Json) -> String {
+    if j == Text(s) { return s; }
+    return "";
+}
+
+fn as_strings(take j: Json) -> List<String> {
+    var out: List<String> = [];
+    if j == Array(items) {
+        for item in items {
+            out.push(as_text(item.clone()));
+        }
+    }
+    return out;
+}
+
+fn to_json_array(take items: List<String>) -> List<Json> {
+    var out: List<Json> = [];
+    for item in items {
+        out.push(Json.Text(item));
+    }
+    return out;
+}
+
+fn unique_sorted(take items: List<String>) -> List<String> {
+    var set: Map<String, Bool> = [:];
+    for item in items {
+        set[item] = true;
+    }
+    var out: List<String> = [];
+    for k, v in set {
+        out.push(k.clone());
+    }
+    return out;
+}
+
+fn contains_str(haystack: List<String>, needle: String) -> Bool {
+    for h in haystack {
+        if (h == needle) { return true; }
+    }
+    return false;
+}
+
+// --- Tests ----------------------------------------------------------------
+
+test "package lists from two modules combine, dedup, and sort" {
+    var ds: List<Json> = [];
+    ds.push(installed(["firefox", "btop"]));
+    ds.push(installed(["btop", "fastfetch"]));
+    val tree = build_tree("src", "host", take ds) or panic("should merge");
+    require(tree.contains("\"btop\""));
+    require(tree.contains("\"fastfetch\""));
+    // dedup: btop appears once in the apps array
+    require_eq(occurrences(tree, "\"btop\""), 1);
+}
+
+test "a scalar option resolves to its single value" {
+    var ds: List<Json> = [];
+    ds.push(option("sys.desktop.environment", "cinnamon"));
+    val tree = build_tree("src", "host", take ds) or panic("should merge");
+    require(tree.contains("cinnamon"));
+}
+
+test "normal priority beats default" {
+    var ds: List<Json> = from("modules/a", single(suggest("sys.x", "plasma")));
+    for d in from("hosts/laptop", single(option("sys.x", "cinnamon"))) {
+        ds.push(d);
+    }
+    val tree = build_tree("src", "host", take ds) or panic("should merge");
+    require(tree.contains("cinnamon"));
+    require(tree.contains("plasma") == false);
+}
+
+test "force beats normal" {
+    var ds: List<Json> = [];
+    ds.push(option("sys.x", "cinnamon"));
+    ds.push(force("sys.x", "plasma"));
+    val tree = build_tree("src", "host", take ds) or panic("should merge");
+    require(tree.contains("plasma"));
+}
+
+test "two normal values for one scalar is a named conflict" {
+    var ds: List<Json> = from("modules/a", single(option("sys.x", "plasma")));
+    for d in from("hosts/laptop", single(option("sys.x", "cinnamon"))) {
+        ds.push(d);
+    }
+    switch build_tree("src", "host", take ds) {
+        it == ok(_) -> { require(false); };
+        it == err(e) -> {
+            val msg = describe(take e);
+            require(msg.contains("conflict"));
+            require(msg.contains("sys.x"));
+            require(msg.contains("modules/a"));
+            require(msg.contains("hosts/laptop"));
+        };
+    }
+}
+
+test "services combine and sort" {
+    var ds: List<Json> = [];
+    ds.push(services(["pipewire", "bluetooth"]));
+    ds.push(services(["pipewire", "tailscale"]));
+    val tree = build_tree("src", "host", take ds) or panic("should merge");
+    require_eq(occurrences(tree, "\"pipewire\""), 1);
+    require(tree.contains("tailscale"));
+}
+
+fn single(take d: Json) -> List<Json> {
+    var out: List<Json> = [];
+    out.push(d);
+    return out;
+}
+
+fn occurrences(haystack: String, needle: String) -> Int {
+    return haystack.split(needle).len() - 1;
+}

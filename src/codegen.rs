@@ -2261,10 +2261,11 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                     .map(|s| s.as_str())
                     .unwrap_or("user_unknown");
                 let rust_type = if type_args.is_empty() {
-                    format!("{}::{}", mod_name, mangle(type_name))
+                    format!("{}{}::{}", cx.root_prefix, mod_name, mangle(type_name))
                 } else {
                     format!(
-                        "{}::{}::<{}>",
+                        "{}{}::{}::<{}>",
+                        cx.root_prefix,
                         mod_name,
                         mangle(type_name),
                         type_args
@@ -2838,7 +2839,7 @@ fn emit_method_call(
                 .get(&(alias.clone(), method.to_string()))
                 .map(|s| s.as_slice());
             let arg_str = emit_call_args(cx, sig, args, env);
-            return format!("{}::{}({})", mod_name, mangle(method), arg_str);
+            return format!("{}{}::{}({})", cx.root_prefix, mod_name, mangle(method), arg_str);
         }
     }
     // Built-in collection/string methods take precedence when they match.

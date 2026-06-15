@@ -1,0 +1,16 @@
+// modules/apps/developer.jet — a developer's toolbox.
+//
+// `installed` puts tools on the system PATH for everyone; `packages` are
+// per-user (the home-manager role). Both are lists, so they *combine* with
+// every other module's lists — no module overwrites another.
+
+import jetpack as pkg;
+import std.json as json;
+
+pub fn contribute() -> List<Json> {
+    return [
+        pkg.installed(["git", "ripgrep", "fd"]),
+        pkg.packages(["jq", "fastfetch", "helix"]),
+        pkg.services(["docker"]),
+    ];
+}
