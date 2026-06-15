@@ -99,7 +99,7 @@ fn maybe() -> (Int?) {
 fn main() {
     var m: Map<String, Int> = [:];
     m["k"] = 7;
-    val x = maybe() or m["k"];
+    val x = maybe() ?? m["k"];
     print(x);
 }
 "#;
@@ -122,7 +122,7 @@ fn parse_count(raw: String) -> Int? {
 }
 
 fn main() {
-    val n = parse_count("") or 0;
+    val n = parse_count("") ?? 0;
     print(n);
 }
 "#;
@@ -244,7 +244,7 @@ fn main() {
     if o == value(n) {
         print(n);
     }
-    print(o or "none");
+    print(o ?? "none");
 }
 "#,
         "E0121",
@@ -262,7 +262,7 @@ enum Shape {
 
 fn main() {
     val s = Shape.Circle("big");
-    switch s {
+    when s {
         s == Circle(label) -> {
             print(label);
         };
@@ -270,7 +270,7 @@ fn main() {
             print("empty");
         };
     }
-    switch s {
+    when s {
         s == Circle(label2) -> {
             print(label2);
         };

@@ -73,37 +73,43 @@ statements without a main.
 `**for i in <range> { }**`. Rejected: recursion-only M1, `loop` + `break`
 as the primary construct.
 
-**S22 — Range bounds (M1)** *(ratified 2026-06-11)*: `**1..10` is
-inclusive** — it counts 1 through 10. Reads like English, kills the classic
-beginner off-by-one. M5 slicing may bring its own evidence; revisit there
-if needed. Rejected: half-open `..` (Rust/Python), dual `..`/`..=`, word
-form `1 to 10`.
+**S22 — Range bounds (M1)** *(ratified 2026-06-11; amended 2026-06-15)*:
+`**1..10` is inclusive** — it counts 1 through 10. Reads like English, kills the
+classic beginner off-by-one. M5 slicing may bring its own evidence; revisit
+there if needed. **Step (amended, D-SG8, implemented):** an optional
+`**step n**` modifier — `0..10 step 2` yields 0, 2, 4, 6, 8, 10 (Kotlin
+spelling). `step` is contextual (only meaningful in a range; an ordinary name
+elsewhere). Rejected: half-open `..` (Rust/Python), dual `..`/`..=`, word
+form `1 to 10`, and the `:` range spelling `0:2:10` (D-SG8 — collides with `:`
+in type annotations, map literals, and trait bounds).
 
 **S23 — Loop control (M1)** *(ratified 2026-06-11)*: `**break`** (leave
 the loop now) and `**continue**` (skip to the next turn). Rejected:
 plain-word `stop`/`skip`, omitting loop control from M1.
 
-**S24 — Many-way choice: `switch` (M1)** *(ratified 2026-06-11)*:
+**S24 — Many-way choice: `when` (M1)** *(ratified 2026-06-11; keyword amended
+to `when` 2026-06-15, D-SG1)*:
 
 ```
-switch x {
+when x {
     x == 1 -> { ... };
     x == 2 || x == 3 -> { ... };
     else -> { ... };
 }
 ```
 
-Keyword `**switch**`; the head expression names the subject being
-examined; each arm is a full `Bool` condition, then `->`, then a `{ }`
+Keyword `**when**` (reads "when x is …"); the head expression names the subject
+being examined; each arm is a full `Bool` condition, then `->`, then a `{ }`
 block, ended with `;` (S6). The first true arm runs; **an `else` arm is
 required**. Arms are ordinary conditions, so ranges and compound tests
 need no special pattern syntax (`x >= 400 && x <= 499 -> { … };`).
 The backend lowers subject-equals-literal chains to a native Rust `match`
 (jump tables where profitable) and everything else to an if/else chain —
-optimization is the compiler's job, never the user's. Rejected: C
+optimization is the compiler's job, never the user's. Rejected: `switch`
+(former keyword — now a teaching error pointing at `when`), C
 `switch`/`case`/`default` (fallthrough baggage), bare-value `match`
-(`match` is recognized only for an S14 teaching error). M3's enum
-exhaustiveness story extends `switch`.
+(`match` is recognized only for an S14 teaching error pointing at `when`).
+M3's enum exhaustiveness story extends `when`.
 
 **S20 — Escapes & literal braces (M1)** *(ratified 2026-06-11)*: minimal
 escape set `**\n` `\t` `\"` `\\`**; literal braces are written by doubling:
@@ -149,8 +155,13 @@ dual forms are rejected permanently.
 after the binding or parameter name (e.g. `val x: Int = 1`). Rejected:
 `Type name` before (C/Java).
 
-**S5 — Comments** *(ratified 2026-06-11)*: `**//`** to end of line.
-Rejected: `#`. Doc comments: `///` (S49).
+**S5 — Comments** *(ratified 2026-06-11; amended 2026-06-15)*: `**//`** to end
+of line, plus `**/* … */`** block comments (Rust/Go/C++ spelling). Block
+comments **nest** — a `/*` inside a block comment opens an inner one that must
+also close — so any region of code (including code that already contains
+comments) can be commented out without surprise; an unbalanced `/*` is E0002.
+Rejected: `#`. Doc comments: `///` (S49); doc-comment block form `/** … */`
+stays rejected (S49).
 
 **S7 — Error propagation (M4)** *(ratified 2026-06-11)*: postfix `**?`**
 on a fallible call (e.g. `parse(raw)?`). Prefix `try` recognized only for
@@ -313,6 +324,10 @@ defined in this program. Rejected: `impl Trait for Type`, `impl Type.Trait`,
 Go implicit interfaces, `::` in Jet paths. Naming style is not prescribed
 (S54). v1: signatures only —
 no default bodies, associated types, or trait inheritance.
+*Future relook (owner, 2026-06-15):* the owner may revisit trait-attach sugar
+post-v1 (e.g. a C++-ish `Type::Trait` feel). Constraint to carry into that
+discussion: `::` is already reserved for foreign Rust paths in `extern rust`
+(S50) and was rejected for Jet paths, so any new sugar must not collide with it.
 
 **S48 — Dynamic dispatch (M9)** *(ratified 2026-06-12)*: writing a trait
 name in type position (`List<Shape>`, `fn f(s: Shape)`) means automatic
@@ -363,12 +378,16 @@ silent derive should make. Missing-trait errors teach `derive Trait;` or
 B), Rust `#[derive(…)]` attributes, user-defined derive macros in v1
 (S56 post-1.0).
 
-**S35 — Error handling ergonomics (M4)** *(ratified 2026-06-11)*:
-`**or` fallback** on a fallible or optional value — e.g. `parse(x) or 0`,
-`parse(x) or return`, `parse(x) or panic("…")`, `m.get(k) or 0` on `T?`.
-Plus **`== ok(v)` / `== err(e)`** pattern tests (S31 machinery) and
-postfix **`?`** propagation (S7). Rejected: Rust `.unwrap_or` / `.expect`
-methods only (B), patterns + `?` with no `or` sugar (C).
+**S35 — Error handling ergonomics (M4)** *(ratified 2026-06-11; fallback
+operator changed to `??` 2026-06-15, D-SG6/S71)*: a **fallback** on a fallible
+or optional value, spelled **`??`** (the one fallback spelling, shared with
+optionals per S71) — e.g. `parse(x) ?? 0`, `parse(x) ?? return`,
+`parse(x) ?? panic("…")`, `m.get(k) ?? 0` on `T?`. Plus **`== ok(v)` /
+`== err(e)`** pattern tests (S31 machinery) and postfix **`?`** propagation (S7).
+The earlier `or` fallback is **retired** — `or` is now recognized only as a
+teaching error pointing at `??` (S14). Rejected: keeping `or` as the fallback
+(D-SG6 option B), a `??`/`or` split by type (D-SG6 option A), Rust
+`.unwrap_or` / `.expect` methods only.
 
 **S36 — Bug stops (M4)** *(ratified 2026-06-11)*: `**panic("msg")**`
 stops the program with a friendly runtime report (file, line, exit 70);
@@ -455,7 +474,9 @@ Unicode scalar values (characters, not bytes); `**for c in s.chars()**`.
 No `**s[i]**` string indexing — E0503 teaches `.chars()` / `.slice(…)`.
 Rejected: byte-length strings, UTF-32 O(1) indexing.
 
-**S42 — Numeric types & conversions (M5/M10)** *(ratified 2026-06-12)*:
+**S42 — Numeric types & conversions (M5/M10)** *(ratified 2026-06-12;
+named-method casts reconfirmed and C/Go cast syntax declined 2026-06-15,
+D-SG9)*:
 `**Int**` and `**Float**` are the **default** numeric types — untyped
 literals, inference, tutorials, and std APIs use them unless a binding or
 parameter is explicitly annotated otherwise (`Int` = i64, `Float` = f64).
@@ -465,9 +486,10 @@ A full **sized-type menu** is available for experts and FFI/binary work:
 spellings for the 64-bit types; `I64`/`F64` exist for explicit-width and
 FFI code. Conversions are **named methods only** — e.g. `n.to_float()`,
 `f.to_int()`, `x.to_i32()`, `Int.parse(s) -> Int ? ParseError`;
-no `**as**` keyword (E0026 teaches the named forms). Rejected:
+no `**as**` keyword (E0030 teaches the named forms), and no C-style
+`(Type)x` or Go-style `x.(Type)` cast syntax (D-SG9). Rejected:
 arbitrary-precision integers (C), implicit widening, lowercase Rust
-spellings (`i64`).
+spellings (`i64`), C/Go cast punctuation.
 
 **S43 — Test syntax (M6)** *(ratified 2026-06-12)*: first-class
 `**test "name" { … }**` blocks at top level only, using `**require**` and
@@ -640,7 +662,7 @@ in Jet (build.zig style); `[rust-dependencies]` as a separate table name.
 **deferred to v2** — no tasks, channels, or `std/tasks` in v1. When
 implemented, the planned surface is ballot option A: `tasks.spawn(closure)
 -> Task<T>`, `t.join() -> T`, `tasks.channel<T>()` with
-`Sender`/`receive() -> T or Closed`; no shared mutable state (ownership
+`Sender`/`receive() -> T ? Closed`; no shared mutable state (ownership
 rejects it). Rejected for v1: `go`-style `spawn { }` fire-and-forget,
 shipping concurrency in v1.
 
@@ -790,6 +812,85 @@ substitute packages, so R3 also needs store/substituter glue. Ship core-first
 (largest scope, blocks everything); keeping `nix`-binary orchestration as the
 permanent path (contradicts the no-installed-`nix` goal).
 
+**S67 — Numeric literals** *(ratified 2026-06-15)*: Rust/Swift/Kotlin-style
+numeric literals. **`_` digit separators** anywhere among the digits, stripped
+before parsing (`1_000_000`, `0xDEAD_BEEF`). **Base prefixes** `**0x`** (hex),
+`**0o`** (octal), `**0b`** (binary) producing an `Int`; a prefix with no digits
+is E0001. **Float exponent** `e`/`E` with an optional sign (`6.022e23`,
+`3.14e-2`), which makes the literal a `Float`. `1..10` still lexes as range, not
+a float, because a `.` only begins a decimal part when a digit follows it.
+Rejected: C-style leading-zero octal (`017` — a footgun), no separators.
+
+**S68 — `if` as an expression + optional condition parens** *(ratified
+2026-06-15, D-SG2; implemented)*: `if`/`else` may be used in
+**expression position** — `val m = if a > b { a } else { b };` — where each
+branch is a block whose final expression (no trailing `;`) is its value; an
+`else` is **required** in expression position and both branches must share a
+type. Mismatched branch types are E0124; a missing `else` in expression
+position is E0003. The statement form is unchanged. **Optional parens:**
+`if (cond) { … }` and `while (cond) { … }` are accepted as equivalent to the
+paren-free form; `jet fmt` strips the redundant outer parens to the no-paren
+house style. This subsumes a ternary, so `?:` stays rejected (see gallery §29).
+Rejected: C `?:`, statement-only `if`.
+
+**S69 — Newlines in dot-chains** *(ratified 2026-06-15, D-SG3; implemented)*: a
+method/field chain may break before a `.` (with an optional trailing line
+comment), so steps can be commented individually:
+`data\n    .filter(p)   // keep\n    .map(f)\n    .sum();`. Unambiguous because
+statements end at `;` (S6). Jet is not newline-sensitive, so breaks already
+parse; `jet fmt` preserves author-placed chain breaks (each step on its own line,
+one space then `// comment`) and the final step's trailing comment stays after
+the `;`. See `examples/features/38_method_chain.jet`. The pipe operator `|>`
+remains separately **undecided** (not disallowed).
+
+**S70 — Multi-line strings** *(ratified 2026-06-15, D-SG5; implemented)*:
+`**"""…"""`** triple-quoted strings span multiple lines; escapes (S20) and
+`{interp}` (S8) stay active. **Swift-style whitespace:** the newline immediately
+after the opening `"""` is dropped, the newline immediately before the closing
+`"""` is dropped, and the indentation set by the closing `"""`'s column is
+stripped from every line. An unterminated `"""` is E0002. `jet fmt` re-derives
+the triple-quoted shape from the source span, indents the body to the statement's
+column, and is idempotent. See `examples/features/39_multiline_string.jet`.
+Rejected: verbatim/Python (leading newline + source indent kept), Go backticks,
+Zig `\\` line prefix.
+
+**S71 — Optional chaining and `??` default** *(ratified 2026-06-15, D-SG6
+option C; `??` fallback + retired-`or` teaching error **implemented**; `?.`
+**field** chaining **implemented** (`a?.b?.c` → `T?`, flattening nested
+optionals; non-optional left side is E0047); `?.` through a **method** is E0046
+for now; supersedes S35's `or`)*: `**?.`** optional
+chaining — `user?.address?.city` yields a `T?` and short-circuits to `null` on
+the first absent link. `**??`** is the **single fallback spelling for both**
+optionals (`T?`) and fallible values (`T ? E`): `x ?? default`, `x ?? return`,
+`x ?? panic("…")` (same right-hand grammar the retired `or` had). `or` is
+retired to a teaching error pointing at `??`. Pattern tests (`== ok`/`== err`,
+S31) and `?` propagation (S7) are unchanged. Rejected: keeping `or` (option B),
+a type-split `??`/`or` (option A).
+
+**S72 — Range step** *(amends S22; ratified 2026-06-15, D-SG8; implemented)*:
+see S22 — `start..end step n`; `..` stays inclusive; the `:` range spelling is
+rejected (collisions). A non-positive literal step is E0123.
+
+**S73 — Tuples (named-only)** *(ratified 2026-06-15, D-SG7; implemented)*: lightweight aggregates with **named members only** —
+`val p = (x: 1, y: 2);`, member access `p.x`, and usable in type position
+`fn bounds() -> (min: Int, max: Int)`. Rejected: positional tuples and `.0`
+member access (collides with float-literal lexing; a one-field-per-purpose
+`struct` covers the rare positional case).
+
+**S74 — Standalone destructuring** *(extends S31; ratified 2026-06-15, D-SG4;
+implemented)*: a `val`/`var` binding may
+destructure a struct (`val Point { x, y } = p;`), a tuple (`val (x, y) = p;`,
+S73), or a list (`val [a, b] = xs;`), reusing the existing bracket
+conventions — no new sigils. `var` binds each name mutably; move/borrow follow
+the per-name M2 rules. Destructuring is no longer limited to `when` arms (S31).
+Rejected: a separate `let`-pattern keyword, JS object-rename syntax in v1.
+Struct destructuring is irrefutable — it binds any subset of the struct's fields
+and an unknown field is E0302; a non-struct value is E0313. List destructuring
+binds each element by position, guarded by a runtime length check; a list
+literal of the wrong length is the compile error E0315 and a non-list value is
+E0313. The tuple form `val (x, y) = p;` binds named tuple members in
+canonical order (S73).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -836,6 +937,30 @@ implementation milestone is pending.
 | ID  | Question                                   | Needed by |
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives (deferred) | post-1.0  |
+| S6-R | revisit statement terminators (see note below) | owner-paced |
+
+> **S6-R — Statement terminators, revisit (future).** S6 is ratified today
+> (semicolons required after every statement) and stays binding until the
+> owner decides otherwise. The owner has flagged this for a **future**
+> reconsideration narrowed to exactly **two finalists**:
+>
+> 1. **Keep 100% semicolons** — the current S6 rule, one terminator, no
+>    exceptions. Unambiguous parsing, hard error-recovery sync points, no
+>    silent-newline surprises; cost is visual noise and a "missing `;`"
+>    error class.
+> 2. **Go-style lexer insertion** — no semicolons in source; the *lexer*
+>    inserts terminators at line ends when the last token can end a
+>    statement. Clean source for beginners while the grammar and diagnostics
+>    stay terminator-based; cost is that line-break placement becomes
+>    style-constrained (e.g. `{` must sit on the opening line).
+>
+> Significant-indent and optional-`;` schemes are **out of scope** for this
+> revisit. **Decision gate:** the owner wants to compare **multiple bigger
+> `.jet` files** (not toy snippets) rendered under each finalist — real
+> programs showing multi-line expressions, nested blocks, `switch` arms,
+> struct/enum literals, and what a *mistake* looks like under each — before
+> choosing. Build the side-by-side example set first; do not re-litigate
+> S6's text until then.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
@@ -876,6 +1001,7 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-11 | S28 | traits deferred; owner plans to add later   | owner |
 | 2026-06-11 | S4  | `name: Type` annotations                    | owner |
 | 2026-06-11 | S5  | `//` comments                               | owner |
+| 2026-06-15 | S5  | amended: add nesting `/* … */` block comments | owner |
 | 2026-06-11 | S7  | `?` error propagation                       | owner |
 | 2026-06-11 | S13 | symbol logic/comparison operators           | owner |
 | 2026-06-11 | S17 | full compound-assignment set                | owner |
@@ -916,6 +1042,16 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-12 | S63 | RAII scope-end cleanup; `defer` maybe later | owner |
 | 2026-06-15 | S65 | list type shorthand `[T]`; `List<T>` compatibility | owner |
 | 2026-06-15 | S66 | standard acronyms fully capitalized (`JSON`, `IOError`) | owner |
+| 2026-06-15 | S67 | numeric literals: `_` separators, `0x`/`0o`/`0b`, float exponent | owner |
+| 2026-06-15 | S24 | keyword `switch` → `when` (D-SG1)            | owner |
+| 2026-06-15 | S68 | `if` as expression + optional condition parens (D-SG2) | owner |
+| 2026-06-15 | S69 | newlines allowed in dot-chains (D-SG3)      | owner |
+| 2026-06-15 | S70 | `"""…"""` multi-line strings, Swift trim (D-SG5) | owner |
+| 2026-06-15 | S71 | `?.` chaining + `??` default; `or` retired (D-SG6 opt C) | owner |
+| 2026-06-15 | S72 | range `step n`; `:` spelling rejected (D-SG8) | owner |
+| 2026-06-15 | S73 | named-only tuples `(x: 1, y: 2)` (D-SG7)    | owner |
+| 2026-06-15 | S74 | standalone destructuring (D-SG4)            | owner |
+| 2026-06-15 | S42 | confirmed: named-method casts; C/Go casts declined (D-SG9) | owner |
 | 2026-06-12 | S51 | std imports: `import std.fs as fs` module form | owner |
 | 2026-06-12 | S54 | no prescribed naming convention in v1        | owner |
 | 2026-06-12 | S52 | `jet.toml` manifest; `jet.lock`; jet add/fetch | owner |

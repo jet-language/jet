@@ -30,7 +30,7 @@ fn main() {
         tasks.spawn(take(sender) () => { sender.send(i * 10); });
     };
     for _ in 1..4 {
-        print(ch.receive() or break);      // T or Closed
+        print(ch.receive() ?? break);      // T ? Closed
     };
 }
 ```
@@ -49,9 +49,9 @@ fn main() {
   before this task finishes; call `.join()`").
 - `tasks.channel<T>()` → `Channel<T>` (the receive half) with
   `.sender() -> Sender<T>` (clonable). `sender.send(v)` moves `v` in
-  (take parameter). `ch.receive() -> T or Closed` blocks; returns
+  (take parameter). `ch.receive() -> T ? Closed` blocks; returns
   `err(Closed)` when all senders are gone (`enum Closed { Closed; }` —
-  fits the M4 story; `or break` in a loop reads beautifully).
+  fits the M4 story; `?? break` in a loop reads beautifully).
 - Boundary rule: values crossing `spawn`/`send` must be **sendable**:
   every built-in and user type is, EXCEPT `view`-returned borrows,
   tier-2 `ref`-holding structs, and non-`take`n closures (E1102 names

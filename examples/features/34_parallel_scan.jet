@@ -8,77 +8,64 @@
 //
 // Interactive prompts:
 //   INTERACTIVE=1 nix develop -c jet run examples/features/34_parallel_scan.jet
-
 import std.tasks as tasks;
 import std.fs as fs;
 import std.io as io;
 import std.env as env;
-
 fn count_lines(text: String) -> Int {
     var lines = 0;
     for _line in text.split("\n") {
-        lines += 1;
+        lines+= 1;
     }
     return lines;
 }
-
 fn scan_one(path: String) -> String {
-    val text = fs.read(path) or return "{path}: unreadable";
+    val text = fs.read(path) ?? return "{path}: unreadable";
     val lines = count_lines(text);
     return "{path}: {lines} lines, {text.len()} chars";
 }
-
-fn default_paths() -> List<String> {
-    return [
-        "examples/features/32_tasks.jet",
-        "examples/features/33_pipeline.jet",
-        "examples/features/16_wordcount.jet",
-        "examples/features/30_json.jet",
-    ];
+fn default_paths() -> [String] {
+    return ["examples/features/32_tasks.jet", "examples/features/33_pipeline.jet", "examples/features/16_wordcount.jet", "examples/features/30_json.jet"];
 }
-
-fn paths_from_args() -> List<String> {
+fn paths_from_args() -> [String] {
     val args = io.args();
-    var out: List<String> = [];
+    var out: [String] = [];
     var i = 1;
-    while (i < args.len()) {
+    while i < args.len() {
         if args.get(i) == value(path) {
             out.push(path);
         }
-        i += 1;
+        i+= 1;
     }
     return out;
 }
-
-fn paths_from_prompt() -> List<String> {
+fn paths_from_prompt() -> [String] {
     print("Enter file paths (blank line when done):");
-    var out: List<String> = [];
-    while (true) {
-        val raw = io.input("> ") or return out.clone();
-        if (raw == "") {
+    var out: [String] = [];
+    while true {
+        val raw = io.input("> ") ?? return out.clone();
+        if raw == "" {
             break;
         }
         out.push(raw);
     }
     return out;
 }
-
-fn gather_paths() -> List<String> {
+fn gather_paths() -> [String] {
     val from_args = paths_from_args();
-    if (from_args.len() > 0) {
+    if from_args.len() > 0 {
         return from_args;
     }
-    if ((env.get("INTERACTIVE") or "") == "1") {
+    if (env.get("INTERACTIVE") ?? "") == "1" {
         return paths_from_prompt();
     }
     return default_paths();
 }
-
-fn scan_parallel(paths: List<String>) -> List<String> {
+fn scan_parallel(paths: [String]) -> [String] {
     val ch: Channel<String> = tasks.channel();
-    var workers: List<Task<Unit>> = [];
+    var workers: [Task<Unit>] = [];
     var i = 0;
-    while (i < paths.len()) {
+    while i < paths.len() {
         if paths.get(i) == value(path) {
             val sender = ch.sender();
             val file = path.clone();
@@ -86,48 +73,41 @@ fn scan_parallel(paths: List<String>) -> List<String> {
                 sender.send(scan_one(file));
             }));
         }
-        i += 1;
+        i+= 1;
     }
-    while (workers.len() > 0) {
-        val worker = workers.pop() or panic("missing worker");
+    while workers.len() > 0 {
+        val worker = workers.pop() ?? panic("missing worker");
         worker.join();
     }
-    var results: List<String> = [];
+    var results: [String] = [];
     var got = 0;
-    while (got < paths.len()) {
-        results.push(ch.receive() or panic("channel closed early"));
-        got += 1;
+    while got < paths.len() {
+        results.push(ch.receive() ?? panic("channel closed early"));
+        got+= 1;
     }
     results.sort();
     return results;
 }
-
-fn copy_paths(paths: List<String>) -> List<String> {
-    var out: List<String> = [];
+fn copy_paths(paths: [String]) -> [String] {
+    var out: [String] = [];
     for path in paths {
         out.push(path);
     }
     return out;
 }
-
 fn main() {
     val paths = gather_paths();
-    if (paths.len() == 0) {
+    if paths.len() == 0 {
         print("no files to scan");
         return;
     }
-
     print("scanning {paths.len()} files...");
     print("");
-
     val parallel_paths = copy_paths(paths);
-
     val parallel = scan_parallel(parallel_paths);
-
     for line in parallel {
         print(line);
     }
-
     print("");
     print("done — {paths.len()} files scanned in parallel");
 }

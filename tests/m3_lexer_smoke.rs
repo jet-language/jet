@@ -8,3 +8,18 @@ fn enum_is_keyword() {
         toks[0].kind
     );
 }
+
+#[test]
+fn dot_zero_in_statement_lexes_as_dot_then_int() {
+    let (toks, diags) = jet::lexer::lex("fn main() { val x = p.0; }");
+    assert!(diags.is_empty(), "{diags:?}");
+    let dot = toks
+        .iter()
+        .position(|t| matches!(t.kind, jet::lexer::TokKind::Dot))
+        .expect("dot");
+    assert!(
+        matches!(toks[dot + 1].kind, jet::lexer::TokKind::Int(0)),
+        "{:?}",
+        toks[dot + 1].kind
+    );
+}

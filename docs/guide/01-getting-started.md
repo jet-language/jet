@@ -111,15 +111,15 @@ while fuel > 0 {
 print("liftoff");
 ```
 
-## switch
+## when
 
-When you're choosing between several conditions, `switch` reads better than a
+When you're choosing between several conditions, `when` reads better than a
 ladder of `else if`. Each arm is a condition; the first true one wins, and
 `else` is required so there's no forgotten case:
 
 ```jet
 fn label(n: Int) -> String {
-    switch n {
+    when n {
         n % 15 == 0 -> { return "FizzBuzz"; };
         n % 3 == 0  -> { return "Fizz"; };
         n % 5 == 0  -> { return "Buzz"; };
@@ -128,7 +128,7 @@ fn label(n: Int) -> String {
 }
 ```
 
-(Once you have your own enum types, `switch` gets sharper — it can check that
+(Once you have your own enum types, `when` gets sharper — it can check that
 you've covered every variant. That's in [the data chapter](03-data.md).)
 
 ## Functions
@@ -165,6 +165,6 @@ makes Jet Jet: [ownership](02-ownership.md).
 ### Conventions, briefly
 
 - Statements end in `;`. Block headers (`if`, `while`, `for`, `fn`) don't.
-- Comments are `//` to end of line.
+- Comments are `//` to end of line, or `/* … */` for a block (these nest).
 - `jet fmt` settles every formatting question for you — 4-space indent, one
   statement per line, no knobs. Don't argue with it; let it win.

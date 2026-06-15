@@ -63,7 +63,7 @@ before continuing.
 | Code  | Stage | Meaning                                  |
 |-------|-------|------------------------------------------|
 | E0001 | jet   | character/escape/lone brace means nothing here |
-| E0002 | jet   | unterminated text literal or interpolation |
+| E0002 | jet   | unterminated text literal, interpolation, or block comment |
 | E0003 | parse | expected X, found Y                       |
 | E0004 | parse | *retired in M1* (was: parameters staged)  |
 | E0005 | parse | *retired in M1* (was: variables staged)   |
@@ -73,18 +73,18 @@ before continuing.
 | E0009 | parse | teaching: `let`/`let mut` → `val`/`var`   |
 | E0010 | parse | teaching: `set` → `val`                   |
 | E0011 | sema  | *retired in M10* (was: `println` → `print`) |
-| E0012 | parse | teaching: `and`/`or`/`not` → `&&`/`\|\|`/`!` |
+| E0012 | parse | teaching: `and`/`not` → `&&`/`!` |
 | E0013 | parse | teaching: `Text` → `String`               |
 | E0014 | parse | teaching: `try` → `?` (M4 — real feature)   |
 | E0015 | parse | teaching: `use` → `import` (M6)           |
-| E0016 | parse | teaching: `match` → `switch` (S24)        |
+| E0016 | parse | teaching: `match` → `when` (S24)          |
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
 | E0018 | parse | teaching: `write` → `mut` (S10)          |
 | E0019 | parse | *retired in M6* (was: `import` staged; S16 shipped) |
 | E0020 | parse | teaching: `None`/`Some`/… → `null`/`value` (S32) |
 | E0021 | parse | teaching: `class` → `struct` (S29)              |
 | E0022 | parse | teaching: `trait`/`interface` staged → M9 (S28) |
-| E0023 | parse | teaching: `case`/`default` → switch arm syntax (S24) |
+| E0023 | parse | teaching: `case`/`default` → `when` arm syntax (S24) |
 | E0024 | parse | teaching: `catch`/`except` → `or` / `== err` (M4) |
 | E0025 | parse | teaching: `unwrap`/`expect` → `or panic(…)` (M4) |
 | E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
@@ -102,6 +102,12 @@ before continuing.
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
 | E0041 | sema  | teaching: `Mutex`/`lock` → channels |
+| E0044 | parse | teaching: `switch` → `when` (S24, D-SG1)  |
+| E0045 | parse | teaching: `or` fallback → `??` (S71, D-SG6) |
+| E0046 | parse | `?.` optional chaining reaches fields, not methods (S71) |
+| E0047 | type | `?.` left side must be optional `T?` (S71, D-SG6) |
+| E0048 | parse | teaching: positional tuples → named members (S73, D-SG7) |
+| E0049 | parse | teaching: `.0` field access → named members (S73, D-SG7) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |
@@ -123,6 +129,8 @@ before continuing.
 | E0120 | sema  | moving/returning a borrowed parameter     |
 | E0121 | sema  | value used after it was given away        |
 | E0122 | sema  | `main` with parameters or a return type   |
+| E0123 | sema  | `for` range `step` must be a positive Int (S22, D-SG8) |
+| E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0201 | sema  | `take` required; value can't be copied    |
 | E0202 | sema  | `mut` required at call site               |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -144,12 +152,14 @@ before continuing.
 | E0310 | sema  | `T?` used where plain `T` expected        |
 | E0311 | sema  | static/instance method confusion          |
 | E0312 | sema  | value `==` unsupported (field detail)     |
+| E0313 | sema  | destructuring target's shape doesn't match the value (S74) |
+| E0315 | sema  | list-pattern arity ≠ a known-length list literal (S74) |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
 | E0403 | sema  | `?` error type / return context mismatch  |
 | E0404 | sema  | `ok`/`err` need a fallible context        |
-| E0405 | sema  | `or` fallback type mismatch               |
+| E0405 | sema  | `??` fallback type mismatch               |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
 | E0501 | sema  | empty `[]` / `[:]` needs a context type   |
 | E0502 | sema  | type can't be a map key                   |

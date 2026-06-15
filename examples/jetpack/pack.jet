@@ -8,16 +8,8 @@
 //   jetpack add unstable:fd     # append fd from the unstable source
 //   jetpack build               # realize without entering
 import jetpack as pkg;
-
 pub fn shell() -> [JSON] {
-    return [
-        // Named sources: a stable nixpkgs pin and the unstable channel.
-        pkg.source("stable", "github:NixOS/nixpkgs/nixos-24.05");
-        pkg.source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable");
-        pkg.source("mine", "path:../jet-pkgs", "core");
-
-        // Use the names inline. `stable:ripgrep` resolves against the pin above.
-        pkg.packages(["stable:ripgrep", "unstable:neovim", "mine:hello"]);
-        pkg.prompt("jetpack");
-    ];
+    return [pkg.source("stable", "github:NixOS/nixpkgs/nixos-24.05"), pkg.source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable"), pkg.source("mine", "path:../jet-pkgs", "core"), pkg.packages(["stable:ripgrep", "unstable:neovim", "mine:hello"]), pkg.prompt("jetpack")];
 }
+// Named sources: a stable nixpkgs pin and the unstable channel.
+// Use the names inline. `stable:ripgrep` resolves against the pin above.

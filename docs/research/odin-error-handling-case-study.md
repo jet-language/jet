@@ -229,7 +229,7 @@ That means "use the customer's coupon if one exists; otherwise continue with
 no discount." Jet's `or` already covers the same ergonomic space:
 
 ```jet
-val discount = find_coupon(customer) or 0;
+val discount = find_coupon(customer) ?? 0;
 ```
 
 ### `or_continue`
@@ -281,7 +281,7 @@ Here are the common choices in real-world terms.
 The user did not provide a setting, so use a default:
 
 ```jet
-val retries = read_int("retries") or 3;
+val retries = read_int("retries") ?? 3;
 ```
 
 This is not exceptional. It is a normal business rule.

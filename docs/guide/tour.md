@@ -93,7 +93,7 @@ fn main() {
 
 ## Enums
 
-Enums name a fixed set of variants. `switch` over an enum must cover every case.
+Enums name a fixed set of variants. `when` over an enum must cover every case.
 
 ```jet
 enum Light {
@@ -103,7 +103,7 @@ enum Light {
 }
 
 fn label(light: Light) -> String {
-    switch light {
+    when light {
         light == Red -> { return "stop"; };
         light == Yellow -> { return "caution"; };
         light == Green -> { return "go"; };
@@ -115,10 +115,10 @@ fn main() {
 }
 ```
 
-## Errors: `?` and `or`
+## Errors: `?` and `??`
 
 Functions that can fail return `T ? E`. Build outcomes with `ok(value)` and
-`err(reason)`. `or` gives you a fallback; `?` passes failure up to your caller.
+`err(reason)`. `??` gives you a fallback; `?` passes failure up to your caller.
 
 ```jet
 fn parse_n(raw: String) -> Int ? String {
@@ -134,9 +134,9 @@ fn load() -> Int ? String {
 }
 
 fn main() {
-    val a = parse_n("42") or 0;
+    val a = parse_n("42") ?? 0;
     print(a);
-    val b = load() or 0;
+    val b = load() ?? 0;
     print(b);
 }
 ```
@@ -176,7 +176,7 @@ fn main() {
 ## `std.fs` and `std.io`
 
 The standard library is built in. Fallible calls return `T ? E` — handle them
-with `or`, `?`, or `switch`.
+with `??`, `?`, or `when`.
 
 ```jet
 import std.fs as fs;
@@ -184,11 +184,11 @@ import std.io as io;
 
 fn main() {
     val path = "/tmp/jet_tour.txt";
-    switch fs.write(path, "hello\njet") {
+    when fs.write(path, "hello\njet") {
         it == ok(_) -> {};
         it == err(_) -> { return; };
     }
-    switch fs.read(path) {
+    when fs.read(path) {
         it == ok(text) -> { print(text); };
         it == err(_) -> { return; };
     }

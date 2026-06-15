@@ -4,10 +4,10 @@ enum ParseError {
     BadDigit(String);
 }
 fn parse_age(raw: String) -> Int ? ParseError {
-    if (raw == "") {
+    if raw == "" {
         return err(ParseError.Empty);
     }
-    if (raw == "x") {
+    if raw == "x" {
         return err(ParseError.BadDigit(raw));
     }
     return ok(42);
@@ -17,17 +17,17 @@ fn load() -> Int ? ParseError {
     return ok((n * 2));
 }
 fn main() {
-    val a = parse_age("42") or 0;
+    val a = parse_age("42") ?? 0;
     print(a);
-    val doubled = load() or 0;
+    val doubled = load() ?? 0;
     print(doubled);
-    switch parse_age("x") {
-        it == ok(n) -> {
+    when parse_age("x") {
+        | it == ok(n) {
             print(n);
-        };
-        it == err(e) -> {
+        }
+        | it == err(e) {
             print(e);
-        };
+        }
 
     }
 }

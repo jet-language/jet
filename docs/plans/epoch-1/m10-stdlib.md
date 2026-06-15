@@ -35,13 +35,13 @@ import std.json as json;
 
 fn main() {
     val args = io.args();                       // [String]
-    val path = args.get(1) or panic("usage: tool <file>");
+    val path = args.get(1) ?? panic("usage: tool <file>");
 
-    val text = fs.read(path) or return;         // String or IOError
-    fs.write("out.txt", text.to_upper()) or panic("can't write");
+    val text = fs.read(path) ?? return;         // String ? IOError
+    fs.write("out.txt", text.to_upper()) ?? panic("can't write");
 
-    val name = io.input("your name? ");         // String or IOError
-    val data = json.parse(text) or return;      // JSON or JSONError
+    val name = io.input("your name? ");         // String ? IOError
+    val data = json.parse(text) ?? return;      // JSON ? JSONError
 }
 ```
 
@@ -72,23 +72,23 @@ Selective imports are rejected by SL3: no `import std.math { clamp }`, no
 All paths are `String` in M10 (SL7). There is no `Path` type and no
 `std.path` helper module in this milestone.
 
-**std/fs** — `read(path) -> String or IOError` ·
-`read_bytes(path) -> [U8] or IOError` · `write(path, text) -> ()
-or IOError` · `append(path, text)` · `exists(path) -> Bool` ·
-`remove(path)` · `list_dir(path) -> [String] or IOError` ·
+**std/fs** — `read(path) -> String ? IOError` ·
+`read_bytes(path) -> [U8] ? IOError` · `write(path, text) -> ()
+? IOError` · `append(path, text)` · `exists(path) -> Bool` ·
+`remove(path)` · `list_dir(path) -> [String] ? IOError` ·
 `create_dir(path)` · `is_dir(path) -> Bool` · `copy(from, to)` ·
 `rename(from, to)`. `enum IOError { NotFound(path: String);
 PermissionDenied(path: String); Other(message: String); }`
 
-**std/io** — `args() -> [String]` · `input([prompt]) -> String or
-IOError` (reads a line, strips newline) · `read_all_input() -> String or
+**std/io** — `args() -> [String]` · `input([prompt]) -> String ?
+IOError` (reads a line, strips newline) · `read_all_input() -> String ?
 IOError` (stdin to EOF) · `eprint(value)` (stderr twin of `print`).
 
 **std/env** — `get(name) -> (String?)` · `set(name, value)` ·
 `current_dir() -> String ? IOError` · `home_dir() -> (String?)`.
 
 **std/process** — `exit(code)` (no return) · `run(cmd: [String]) ->
-ProcessResult or IOError` where
+ProcessResult ? IOError` where
 `struct ProcessResult { code: Int; output: String; errors: String; }`.
 
 **std/math** — `sqrt` `pow` `abs` (Int+Float overloads via two names if
@@ -107,7 +107,7 @@ types, timezone conversion, or formatting in M10 (SL8).
 
 **std/json** — `enum JSON { Null; Boolean(b: Bool); Number(n: Float);
 Text(s: String); Array(items: [JSON]); Object(entries: [String, JSON]); }`
-· `parse(text) -> JSON or JSONError` · `render(j) -> String`
+· `parse(text) -> JSON ? JSONError` · `render(j) -> String`
 · `render_pretty(j) -> String`. Parser hand-written in the prelude
 (recursive descent, ~200 lines) — also the flagship proof that Jet's
 own data types model real-world data. `JSONError { line, message }`.

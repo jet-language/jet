@@ -1,94 +1,88 @@
 // wordfreq — word frequency across files (M14 showcase, sequential v1).
 import std.fs as fs;
 import std.io as io;
-
 fn join_path(dir: String, name: String) -> String {
     val base = dir.clone();
-    if (base.ends_with("/")) {
+    if base.ends_with("/") {
         return "{base}{name}";
     }
     return "{base}/{name}";
 }
-
 fn is_text_file(path: String) -> Bool {
     return path.ends_with(".txt");
 }
-
-fn collect_files(path: String) -> List<String> {
+fn collect_files(path: String) -> [String] {
     val root = path.clone();
-    var out: List<String> = [];
-    if (fs.is_dir(root)) {
+    var out: [String] = [];
+    if fs.is_dir(root) {
         val listed = fs.list_dir(root);
         if listed == ok(names) {
             for name in names {
-                if (name == "." || name == "..") {
+                if (name == ".") || (name == "..") {
                     continue;
                 }
                 val child = join_path(root, name);
-                if (fs.is_dir(child)) {
+                if fs.is_dir(child) {
                     val nested = collect_files(child);
                     for file in nested {
                         out.push(file);
                     }
-                } else if (fs.exists(child) && (is_text_file(child) == true)) {
+                } else if fs.exists(child) && (is_text_file(child) == true) {
                     out.push(child);
                 }
             }
         }
-    } else if (fs.exists(root) && (is_text_file(root) == true)) {
+    } else if fs.exists(root) && (is_text_file(root) == true) {
         out.push(root);
     }
     return out;
 }
-
-
 fn main() {
     val args = io.args();
-    var paths: List<String> = [];
+    var paths: [String] = [];
     var i = 1;
-    while (i < args.len()) {
+    while i < args.len() {
         if args.get(i) == value(path) {
             paths.push(path);
         }
-        i += 1;
+        i+= 1;
     }
-    if (paths.len() == 0) {
+    if paths.len() == 0 {
         paths.push(".");
     }
-
-    var counts: Map<String, Int> = [:];
+    var counts: [String, Int] = [:];
     for path in paths {
         val files = collect_files(path);
         for file in files {
-            switch fs.read(file) {
-                it == ok(text) -> {
+            when fs.read(file) {
+                | it == ok(text) {
                     val lower = text.to_lower();
                     for line in lower.split("\n") {
                         for word in line.split(" ") {
-                            if (word.len() > 0) {
-                                counts[word] = ((counts.get(word) or 0) + 1);
+                            if word.len() > 0 {
+                                counts[word] = ((counts.get(word) ?? 0) + 1);
                             }
                         }
                     }
-                };
-                it == err(_) -> {
+                }
+                | it == err(_) {
                     continue;
-                };
+                }
+
             }
         }
     }
-
-    var ranked: List<String> = [];
+    var ranked: [String] = [];
     for word, count in counts {
-        val inv = 1000000 - count;
+        val inv = (1000000 - count);
         ranked.push("{inv}\t{word}");
     }
     ranked.sort();
     for entry in ranked {
         val parts = entry.split("\t");
-        if (parts.len() >= 2) {
+        if parts.len() >= 2 {
             if parts.get(1) == value(word) {
-                val n = counts.get(word) or 0;
+                val n = counts.get(word) ?? 0;
                 print("{word}: {n}");
             }
         }

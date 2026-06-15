@@ -1,7 +1,7 @@
 # M5 — Collections & one string story
 
 **Blocked on decisions:** none (Group 4 ratified: S37–S42).
-Depends on M3 (Option) and M4 (`or`, runtime report).
+Depends on M3 (Option) and M4 (`??`, runtime report).
 **Error codes:** E0501+ / L0501+.
 
 ## Goal
@@ -20,12 +20,12 @@ fn main() {
     nums.push(4);
     nums.sort();
     print(nums[0]);                  // 1 ; out of bounds = runtime report
-    print(nums.get(99) or -1);       // safe access returns Int?
+    print(nums.get(99) ?? -1);       // safe access returns Int?
     val mid = nums[1..2];            // inclusive slice (S22), copies
 
     var counts: [String, Int] = [:];
     for word in "the quick the".split(" ") {
-        counts[word] = (counts.get(word) or 0) + 1;
+        counts[word] = (counts.get(word) ?? 0) + 1;
     };
     for entry in counts {
         print("{entry.key}: {entry.value}");
@@ -143,7 +143,7 @@ Teaching: E0026 `as` casts → `.to_float()` etc. · E0027 `append`/`add`
 - `examples/features/16_wordcount.jet` — THE exit-criteria example: split, count
   into a map, print sorted results.
 - `examples/features/17_strings.jet` — chars, unicode (`"héllo"`), trim/split/
-  replace, parse with `or` defaults.
+  replace, parse with `??` defaults.
 - Golden stderr tests for out-of-bounds and missing-key reports.
 - ui fixtures for all E05xx/L0501 + teaching errors, with `.fixed.jet`.
 - An ownership fixture: mutating a list inside its own `for` loop, plus

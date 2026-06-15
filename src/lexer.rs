@@ -46,7 +46,6 @@ pub enum TokKind {
     KwOk,
     KwErr,
     KwIt,
-    KwOrFallback,
     KwConst,
     KwComptime,
     KwReturn,
@@ -78,6 +77,10 @@ pub enum TokKind {
     DotDot,
     At,
     Question,
+    /// S71 (D-SG6): `??` fallback operator.
+    QuestionQuestion,
+    /// S71 (D-SG6): `?.` optional chaining.
+    QuestionDot,
     // Arithmetic (M1).
     Plus,
     Minus,
@@ -112,6 +115,8 @@ pub enum TokKind {
     ShrEq,
     /// S5: `//` through end of line (M6 fmt preserves these).
     LineComment(String),
+    /// S5: `/* … */` block comment, nesting allowed (M6 fmt preserves these).
+    BlockComment(String),
     Eof,
 }
 
@@ -173,7 +178,6 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwOk => format!("the keyword `{}`", syntax::LIT_OK),
         TokKind::KwErr => format!("the keyword `{}`", syntax::LIT_ERR),
         TokKind::KwIt => format!("the keyword `{}`", syntax::KW_IT),
-        TokKind::KwOrFallback => format!("`{}`", syntax::OP_OR_FALLBACK),
         TokKind::KwConst => format!("the keyword `{}`", syntax::KW_CONST),
         TokKind::KwComptime => format!("the keyword `{}`", syntax::KW_COMPTIME),
         TokKind::KwReturn => format!("the keyword `{}`", syntax::KW_RETURN),
@@ -203,6 +207,8 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::DotDot => "`..`".to_string(),
         TokKind::At => "`@`".to_string(),
         TokKind::Question => "`?`".to_string(),
+        TokKind::QuestionQuestion => "`??`".to_string(),
+        TokKind::QuestionDot => "`?.`".to_string(),
         TokKind::Plus => "`+`".to_string(),
         TokKind::Minus => "`-`".to_string(),
         TokKind::Star => "`*`".to_string(),
@@ -233,13 +239,14 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::ShlEq => "`<<=`".to_string(),
         TokKind::ShrEq => "`>>=`".to_string(),
         TokKind::LineComment(_) => "a comment".to_string(),
+        TokKind::BlockComment(_) => "a comment".to_string(),
         TokKind::Eof => "the end of the file".to_string(),
     }
 }
 
 /// True when this token is comment trivia (not code).
 pub fn is_comment(kind: &TokKind) -> bool {
-    matches!(kind, TokKind::LineComment(_))
+    matches!(kind, TokKind::LineComment(_) | TokKind::BlockComment(_))
 }
 
 /// Drop comment tokens; the parser and sema work on code tokens only.
@@ -250,10 +257,10 @@ pub fn without_comments(toks: &[Token]) -> Vec<Token> {
         .collect()
 }
 
-/// Collect `//` comments in source order (for fmt).
-pub fn line_comments(toks: &[Token]) -> Vec<Token> {
+/// Collect comments (`//` and `/* … */`) in source order (for fmt).
+pub fn comments(toks: &[Token]) -> Vec<Token> {
     toks.iter()
-        .filter(|t| matches!(t.kind, TokKind::LineComment(_)))
+        .filter(|t| is_comment(&t.kind))
         .cloned()
         .collect()
 }
@@ -288,7 +295,6 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == syntax::LIT_OK => Some(TokKind::KwOk),
         s if s == syntax::LIT_ERR => Some(TokKind::KwErr),
         s if s == syntax::KW_IT => Some(TokKind::KwIt),
-        s if s == syntax::OP_OR_FALLBACK => Some(TokKind::KwOrFallback),
         s if s == syntax::KW_CONST => Some(TokKind::KwConst),
         s if s == syntax::KW_COMPTIME => Some(TokKind::KwComptime),
         s if s == syntax::KW_RETURN => Some(TokKind::KwReturn),
@@ -368,6 +374,42 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            // Block comments (decision S5) — nest, so a region containing other
+            // comments can always be commented out. Retained for fmt (M6/S44).
+            if c == '/' && self.at(self.i + 1) == '*' {
+                let comment_start = self.pos(self.i);
+                self.i += 2;
+                let mut depth = 1usize;
+                while self.i < self.chars.len() && depth > 0 {
+                    if self.at(self.i) == '/' && self.at(self.i + 1) == '*' {
+                        depth += 1;
+                        self.i += 2;
+                    } else if self.at(self.i) == '*' && self.at(self.i + 1) == '/' {
+                        depth -= 1;
+                        self.i += 2;
+                    } else {
+                        self.i += 1;
+                    }
+                }
+                let end = self.pos(self.i);
+                if depth > 0 {
+                    self.diags.push(Diagnostic::error(
+                        "E0002",
+                        "this `/*` comment never gets a closing `*/`".to_string(),
+                        "a block comment starts with `/*` and runs until a matching `*/`"
+                            .to_string(),
+                        "add a `*/` to close the comment".to_string(),
+                        Some(Span::new(comment_start, end)),
+                    ));
+                }
+                let text = self.src[comment_start..end].to_string();
+                toks.push(Token {
+                    kind: TokKind::BlockComment(text),
+                    span: Span::new(comment_start, end),
+                });
+                continue;
+            }
+
             let start = self.pos(self.i);
             let simple = |lx: &mut Self, kind: TokKind, len: usize| {
                 let tok = Token {
@@ -391,6 +433,8 @@ impl<'a> Lexer<'a> {
                 ',' => toks.push(simple(self, TokKind::Comma, 1)),
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
                 '@' => toks.push(simple(self, TokKind::At, 1)),
+                '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
+                '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
                 '?' => toks.push(simple(self, TokKind::Question, 1)),
                 '.' if next == '.' => toks.push(simple(self, TokKind::DotDot, 2)),
                 '.' => toks.push(simple(self, TokKind::Dot, 1)),
@@ -427,7 +471,12 @@ impl<'a> Lexer<'a> {
                 '>' if next == '=' => toks.push(simple(self, TokKind::Ge, 2)),
                 '>' => toks.push(simple(self, TokKind::Gt, 1)),
                 '"' => {
-                    if let Some(tok) = self.string(start) {
+                    let tok = if next == '"' && next2 == '"' {
+                        self.triple_string(start)
+                    } else {
+                        self.string(start)
+                    };
+                    if let Some(tok) = tok {
                         toks.push(tok);
                     }
                 }
@@ -468,27 +517,91 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lex digits, with an optional decimal part (S11 Float).
-    /// `1..10` stays Int DotDot Int: a `.` only starts the decimal part
-    /// when a digit follows it.
+    /// S34: `_` digit separators (stripped), `0x`/`0o`/`0b` base prefixes, and
+    /// a `e`/`E` exponent on floats. `1..10` stays Int DotDot Int: a `.` only
+    /// starts the decimal part when a digit follows it.
     fn number(&mut self, start: usize) -> Token {
-        let mut text = String::new();
-        while self.i < self.chars.len() && self.at(self.i).is_ascii_digit() {
-            text.push(self.at(self.i));
-            self.i += 1;
+        // Base-prefixed integers: 0x / 0o / 0b (S34).
+        if self.at(self.i) == '0' {
+            let radix = match self.at(self.i + 1) {
+                'x' | 'X' => Some(16u32),
+                'o' | 'O' => Some(8),
+                'b' | 'B' => Some(2),
+                _ => None,
+            };
+            if let Some(radix) = radix {
+                self.i += 2; // consume `0x` / `0o` / `0b`
+                let mut digits = String::new();
+                while self.i < self.chars.len() {
+                    let ch = self.at(self.i);
+                    if ch == syntax::DIGIT_SEPARATOR {
+                        self.i += 1;
+                    } else if ch.to_digit(radix).is_some() {
+                        digits.push(ch);
+                        self.i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let span = Span::new(start, self.pos(self.i));
+                if digits.is_empty() {
+                    self.diags.push(Diagnostic::error(
+                        "E0001",
+                        "this number prefix has no digits after it".to_string(),
+                        "`0x`, `0o`, and `0b` must be followed by digits, e.g. `0xFF`, `0o17`, `0b1010`"
+                            .to_string(),
+                        "add digits after the base prefix".to_string(),
+                        Some(span),
+                    ));
+                    return Token {
+                        kind: TokKind::Int(0),
+                        span,
+                    };
+                }
+                return match i64::from_str_radix(&digits, radix) {
+                    Ok(n) => Token {
+                        kind: TokKind::Int(n),
+                        span,
+                    },
+                    Err(_) => {
+                        self.diags.push(self.too_big(span));
+                        Token {
+                            kind: TokKind::Int(0),
+                            span,
+                        }
+                    }
+                };
+            }
         }
+
+        let mut text = String::new();
+        self.lex_digits(&mut text);
         let mut is_float = false;
         if self.at(self.i) == '.' && self.at(self.i + 1).is_ascii_digit() {
             is_float = true;
             text.push('.');
             self.i += 1;
-            while self.i < self.chars.len() && self.at(self.i).is_ascii_digit() {
-                text.push(self.at(self.i));
+            self.lex_digits(&mut text);
+        }
+        // Exponent (S34): `e`/`E`, an optional sign, then digits — makes a Float.
+        if matches!(self.at(self.i), 'e' | 'E') {
+            let after = self.at(self.i + 1);
+            let exp_ok = after.is_ascii_digit()
+                || ((after == '+' || after == '-') && self.at(self.i + 2).is_ascii_digit());
+            if exp_ok {
+                is_float = true;
+                text.push('e');
                 self.i += 1;
+                if matches!(self.at(self.i), '+' | '-') {
+                    text.push(self.at(self.i));
+                    self.i += 1;
+                }
+                self.lex_digits(&mut text);
             }
         }
         let span = Span::new(start, self.pos(self.i));
         if is_float {
-            // digits '.' digits always parses as f64.
+            // digits '.' digits (with optional exponent) always parses as f64.
             let v: f64 = text.parse().unwrap_or(0.0);
             return Token {
                 kind: TokKind::Float(v),
@@ -501,20 +614,38 @@ impl<'a> Lexer<'a> {
                 span,
             },
             Err(_) => {
-                self.diags.push(Diagnostic::error(
-                    "E0007",
-                    "this number is too big".to_string(),
-                    "numbers currently top out at 9223372036854775807 (a 64-bit integer)"
-                        .to_string(),
-                    "use a smaller number".to_string(),
-                    Some(span),
-                ));
+                self.diags.push(self.too_big(span));
                 Token {
                     kind: TokKind::Int(0),
                     span,
                 }
             }
         }
+    }
+
+    /// Consume a run of decimal digits, skipping `_` separators (S34).
+    fn lex_digits(&mut self, text: &mut String) {
+        while self.i < self.chars.len() {
+            let ch = self.at(self.i);
+            if ch.is_ascii_digit() {
+                text.push(ch);
+                self.i += 1;
+            } else if ch == syntax::DIGIT_SEPARATOR {
+                self.i += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn too_big(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0007",
+            "this number is too big".to_string(),
+            "numbers currently top out at 9223372036854775807 (a 64-bit integer)".to_string(),
+            "use a smaller number".to_string(),
+            Some(span),
+        )
     }
 
     /// Lex a string literal: escapes (S20), `{{`/`}}` literal braces (S20),
@@ -666,6 +797,251 @@ impl<'a> Lexer<'a> {
             ));
             return None;
         }
+        if !lit.is_empty() || parts.is_empty() {
+            parts.push(StrTokPart::Lit(lit));
+        }
+        Some(Token {
+            kind: TokKind::Str(parts),
+            span: Span::new(start, self.pos(self.i)),
+        })
+    }
+
+    /// S70 (D-SG5): `"""…"""` multi-line string. The line break right after the
+    /// opening `"""` is dropped, the line break before the closing `"""` is
+    /// dropped, and the closing `"""`'s indentation is stripped from every line.
+    /// Escapes (S20) and `{interp}` (S8) stay active. The processed text is
+    /// stored as ordinary [`StrTokPart`]s; `jet fmt` re-derives the triple-quoted
+    /// shape from the span.
+    fn triple_string(&mut self, start: usize) -> Option<Token> {
+        let open_end = self.i + 3; // char index just past the opening `"""`
+
+        // Pass 1: locate the closing `"""`, skipping `\`-escapes and the
+        // contents of `{ … }` interpolations (so a `"""` inside an interpolated
+        // expression doesn't close the literal).
+        let mut j = open_end;
+        let mut close_at: Option<usize> = None;
+        let mut depth = 0usize;
+        while j < self.chars.len() {
+            let c = self.at(j);
+            if depth > 0 {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    '"' => {
+                        j += 1;
+                        while j < self.chars.len() && self.at(j) != '"' {
+                            if self.at(j) == '\\' {
+                                j += 1;
+                            }
+                            j += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+                continue;
+            }
+            match c {
+                '\\' => j += 2,
+                '{' if self.at(j + 1) != '{' => {
+                    depth += 1;
+                    j += 1;
+                }
+                '{' => j += 2, // `{{` literal brace
+                '"' if self.at(j + 1) == '"' && self.at(j + 2) == '"' => {
+                    close_at = Some(j);
+                    break;
+                }
+                _ => j += 1,
+            }
+        }
+
+        let close = match close_at {
+            Some(c) => c,
+            None => {
+                self.diags.push(Diagnostic::error(
+                    "E0002",
+                    "this multi-line text never gets a closing `\"\"\"`".to_string(),
+                    "a multi-line string starts and ends with `\"\"\"`".to_string(),
+                    "add a closing `\"\"\"` on its own line".to_string(),
+                    Some(Span::new(start, self.pos(self.chars.len()))),
+                ));
+                self.i = self.chars.len();
+                return None;
+            }
+        };
+
+        // The closing delimiter's indentation: the whitespace from the start of
+        // its line up to the `"""`. That exact prefix is stripped per line.
+        let mut close_line_start = close;
+        while close_line_start > open_end && self.at(close_line_start - 1) != '\n' {
+            close_line_start -= 1;
+        }
+        let indent = if (close_line_start..close).all(|k| matches!(self.at(k), ' ' | '\t')) {
+            close - close_line_start
+        } else {
+            0
+        };
+
+        // Drop the line break right after the opening `"""`.
+        let mut content_begin = open_end;
+        {
+            let mut k = open_end;
+            while k < close && self.at(k) != '\n' {
+                k += 1;
+            }
+            if k < close && self.at(k) == '\n' {
+                content_begin = k + 1;
+            }
+        }
+        // Drop the line break right before the closing delimiter's line.
+        let mut content_end = close_line_start;
+        if content_end > content_begin && self.at(content_end - 1) == '\n' {
+            content_end -= 1;
+        }
+        if content_end < content_begin {
+            content_end = content_begin;
+        }
+
+        // Pass 2: build the parts, stripping the closing indentation at the
+        // start of every line.
+        let mut parts: Vec<StrTokPart> = Vec::new();
+        let mut lit = String::new();
+        let mut k = content_begin;
+        let mut at_line_start = true;
+        while k < content_end {
+            if at_line_start {
+                let mut stripped = 0;
+                while stripped < indent && k < content_end && matches!(self.at(k), ' ' | '\t') {
+                    k += 1;
+                    stripped += 1;
+                }
+                at_line_start = false;
+            }
+            let ch = self.at(k);
+            match ch {
+                '\n' => {
+                    lit.push('\n');
+                    k += 1;
+                    at_line_start = true;
+                }
+                '\\' => {
+                    let esc = self.at(k + 1);
+                    if let Some(&(_, decoded)) =
+                        syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
+                    {
+                        lit.push(decoded);
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0001",
+                            format!("`\\{}` isn't an escape Jet knows", esc),
+                            "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)".to_string(),
+                            "write `\\\\` for a real backslash".to_string(),
+                            Some(Span::new(self.pos(k), self.pos(k + 2))),
+                        ));
+                    }
+                    k += 2;
+                }
+                '{' if self.at(k + 1) == '{' => {
+                    lit.push('{');
+                    k += 2;
+                }
+                '}' if self.at(k + 1) == '}' => {
+                    lit.push('}');
+                    k += 2;
+                }
+                '}' => {
+                    self.diags.push(Diagnostic::error(
+                        "E0001",
+                        "a lone `}` inside quoted text".to_string(),
+                        "inside quoted text, `{` and `}` mark an interpolated value, so a literal brace is doubled".to_string(),
+                        "write `}}` to print a `}`".to_string(),
+                        Some(Span::new(self.pos(k), self.pos(k + 1))),
+                    ));
+                    k += 1;
+                }
+                '{' => {
+                    let open_pos = self.pos(k);
+                    k += 1;
+                    let expr_start = k;
+                    let mut bdepth = 1usize;
+                    let mut in_quote = false;
+                    while k < content_end {
+                        let c2 = self.at(k);
+                        if in_quote {
+                            if c2 == '\\' {
+                                k += 1;
+                            } else if c2 == '"' {
+                                in_quote = false;
+                            }
+                        } else {
+                            match c2 {
+                                '"' => in_quote = true,
+                                '{' => bdepth += 1,
+                                '}' => {
+                                    bdepth -= 1;
+                                    if bdepth == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        k += 1;
+                    }
+                    if bdepth != 0 || k >= content_end || self.at(k) != '}' {
+                        self.diags.push(Diagnostic::error(
+                            "E0002",
+                            "this `{` never gets a matching `}`".to_string(),
+                            "`{` inside quoted text starts an interpolated value and needs a closing `}` before the text ends".to_string(),
+                            "add a `}` after the value, or write `{{` for a literal brace".to_string(),
+                            Some(Span::new(open_pos, self.pos(k))),
+                        ));
+                        self.i = close + 3;
+                        return None;
+                    }
+                    let inner_start_byte = self.pos(expr_start);
+                    let inner_end_byte = self.pos(k);
+                    k += 1; // closing `}`
+                    let inner = &self.src[inner_start_byte..inner_end_byte];
+                    if inner.trim().is_empty() {
+                        self.diags.push(Diagnostic::error(
+                            "E0003",
+                            "there's nothing inside this `{ }` to show".to_string(),
+                            "interpolation puts a value into the text, so the braces need a value"
+                                .to_string(),
+                            "put a value inside, like `{name}`, or write `{{}}` for literal braces"
+                                .to_string(),
+                            Some(Span::new(open_pos, self.pos(k))),
+                        ));
+                        continue;
+                    }
+                    if !lit.is_empty() {
+                        parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
+                    }
+                    let (mut inner_toks, inner_diags) = lex(inner);
+                    for t in &mut inner_toks {
+                        t.span = Span::new(
+                            t.span.start + inner_start_byte,
+                            t.span.end + inner_start_byte,
+                        );
+                    }
+                    for mut d in inner_diags {
+                        if let Some(s) = d.span.as_mut() {
+                            *s = Span::new(s.start + inner_start_byte, s.end + inner_start_byte);
+                        }
+                        self.diags.push(d);
+                    }
+                    parts.push(StrTokPart::Interp(inner_toks));
+                }
+                _ => {
+                    lit.push(ch);
+                    k += 1;
+                }
+            }
+        }
+
+        self.i = close + 3; // consume the closing `"""`
         if !lit.is_empty() || parts.is_empty() {
             parts.push(StrTokPart::Lit(lit));
         }

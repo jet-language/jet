@@ -133,7 +133,7 @@ All commands below were run through `nix develop` with
   repeated-borrow count low by splitting into helpers, (c) don't reuse one
   `Map` binding many times. Pure-`Int` `?` chains of 8 are fine — it's tied to
   heavier type constraints. (Arguably a P0 sema bug; out of scope to fix here.)
-  **Adopted rule for the whole capstone: use `value or return err(...)` for
+  **Adopted rule for the whole capstone: use `value ?? return err(...)` for
   multi-step fallible flows, not `?`.** It avoids the bug AND attaches a precise
   error per step.
 - **Cross-file/cross-package struct FIELD access needs `pub` on each field**
@@ -157,9 +157,9 @@ All commands below were run through `nix develop` with
   for `==`, use a concrete type. Showcase generics with comparison-free generics
   (e.g. `fn first_or<T>(xs: List<T>, fallback: T) -> T`).
 - A trailing comma is allowed in struct literals but NOT in `fn` parameter lists.
-- `list.pop()` returns `T?` and can't be ignored — `val _ = list.pop() or "";`.
-- A struct field can't be named `ok` (reserved). `expr or panic(...)` isn't a
-  valid statement on its own — bind it: `val _x = expr or panic(...);`.
+- `list.pop()` returns `T?` and can't be ignored — `val _ = list.pop() ?? "";`.
+- A struct field can't be named `ok` (reserved). `expr ?? panic(...)` isn't a
+  valid statement on its own — bind it: `val _x = expr ?? panic(...);`.
 - **Nested `switch`-on-expression collides on the implicit `it`.** Switch on
   named locals instead (`val r = f(); switch r { r == ok(v) -> ... }`), or split
   a level into its own function.

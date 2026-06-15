@@ -2,227 +2,173 @@
 import std.fs as fs;
 import std.io as io;
 import std.process as process;
-
 struct Config {
-    pattern: String,
-    recursive: Bool,
-    ignore_case: Bool,
-    line_numbers: Bool,
-    count_only: Bool,
-    paths: List<String>,
+    pattern: String;
+    recursive: Bool;
+    ignore_case: Bool;
+    line_numbers: Bool;
+    count_only: Bool;
+    paths: [String];
 }
-
 struct GrepResult {
-    matches: Int,
-    lines: List<String>,
+    matches: Int;
+    lines: [String];
 }
-
 struct ParseOutcome {
-    valid: Bool,
-    help: Bool,
-    message: String,
-    config: Config,
+    valid: Bool;
+    help: Bool;
+    message: String;
+    config: Config;
 }
-
 fn usage() -> String {
     return "usage: jetgrep [-r] [-i] [-n] [-c] pattern [path ...]";
 }
-
 fn empty_config() -> Config {
-    return Config {
-        pattern: "",
-        recursive: false,
-        ignore_case: false,
-        line_numbers: false,
-        count_only: false,
-        paths: [],
-    };
+    return Config {pattern: "", recursive: false, ignore_case: false, line_numbers: false, count_only: false, paths: []};
 }
-
-fn parse_flags(args: List<String>) -> ParseOutcome {
+fn parse_flags(args: [String]) -> ParseOutcome {
     var recursive = false;
     var ignore_case = false;
     var line_numbers = false;
     var count_only = false;
     var pattern = "";
-    var paths: List<String> = [];
+    var paths: [String] = [];
     var i = 1;
-    while (i < args.len()) {
+    while i < args.len() {
         if args.get(i) == value(flag) {
-            if (flag == "-r") {
+            if flag == "-r" {
                 recursive = true;
-            } else if (flag == "-i") {
+            } else if flag == "-i" {
                 ignore_case = true;
-            } else if (flag == "-n") {
+            } else if flag == "-n" {
                 line_numbers = true;
-            } else if (flag == "-c") {
+            } else if flag == "-c" {
                 count_only = true;
-            } else if (flag == "-h" || flag == "--help") {
-                return ParseOutcome {
-                    valid: false,
-                    help: true,
-                    message: usage(),
-                    config: empty_config(),
-                };
-            } else if (flag.starts_with("-")) {
-                return ParseOutcome {
-                    valid: false,
-                    help: false,
-                    message: "unknown flag: {flag}",
-                    config: empty_config(),
-                };
-            } else if (pattern == "") {
+            } else if (flag == "-h") || (flag == "--help") {
+                return ParseOutcome {valid: false, help: true, message: usage(), config: empty_config()};
+            } else if flag.starts_with("-") {
+                return ParseOutcome {valid: false, help: false, message: "unknown flag: {flag}", config: empty_config()};
+            } else if pattern == "" {
                 pattern = flag;
             } else {
                 paths.push(flag);
             }
         } else {
-            return ParseOutcome {
-                valid: false,
-                help: false,
-                message: "missing argument",
-                config: empty_config(),
-            };
+            return ParseOutcome {valid: false, help: false, message: "missing argument", config: empty_config()};
         }
-        i += 1;
+        i+= 1;
     }
-    if (pattern == "") {
-        return ParseOutcome {
-            valid: false,
-            help: true,
-            message: usage(),
-            config: empty_config(),
-        };
+    if pattern == "" {
+        return ParseOutcome {valid: false, help: true, message: usage(), config: empty_config()};
     }
-    return ParseOutcome {
-        valid: true,
-        help: false,
-        message: "",
-        config: Config {
-            pattern: pattern,
-            recursive: recursive,
-            ignore_case: ignore_case,
-            line_numbers: line_numbers,
-            count_only: count_only,
-            paths: paths,
-        },
-    };
+    return ParseOutcome {valid: true, help: false, message: "", config: Config {pattern: pattern, recursive: recursive, ignore_case: ignore_case, line_numbers: line_numbers, count_only: count_only, paths: paths}};
 }
-
 fn join_path(dir: String, name: String) -> String {
     val base = dir.clone();
-    if (base.ends_with("/")) {
+    if base.ends_with("/") {
         return "{base}{name}";
     }
     return "{base}/{name}";
 }
-
-fn collect_files(path: String, recursive: Bool) -> List<String> {
+fn collect_files(path: String, recursive: Bool) -> [String] {
     val root = path.clone();
-    var out: List<String> = [];
-    if (fs.is_dir(root)) {
-        if (recursive == true) {
+    var out: [String] = [];
+    if fs.is_dir(root) {
+        if recursive == true {
             val listed = fs.list_dir(root);
             if listed == ok(names) {
                 for name in names {
-                    if (name == "." || name == "..") {
+                    if (name == ".") || (name == "..") {
                         continue;
                     }
                     val child = join_path(root, name);
-                    if (fs.is_dir(child)) {
+                    if fs.is_dir(child) {
                         val nested = collect_files(child, true);
                         for file in nested {
                             out.push(file);
                         }
-                    } else if (fs.exists(child)) {
+                    } else if fs.exists(child) {
                         out.push(child);
                     }
                 }
             }
         }
-    } else if (fs.exists(root)) {
+    } else if fs.exists(root) {
         out.push(root);
     }
     return out;
 }
-
 fn needle_for(cfg: Config) -> String {
-    if (cfg.ignore_case == true) {
+    if cfg.ignore_case == true {
         return cfg.pattern.to_lower();
     }
     return cfg.pattern;
 }
-
 fn haystack_for(text: String, cfg: Config) -> String {
-    if (cfg.ignore_case == true) {
+    if cfg.ignore_case == true {
         return text.to_lower();
     }
     return text.clone();
 }
-
 fn line_matches(line: String, needle: String, cfg: Config) -> Bool {
     return haystack_for(line, cfg).contains(needle);
 }
-
 fn format_hit(path: String, line_no: Int, line: String, cfg: Config) -> String {
-    if (cfg.line_numbers == true) {
+    if cfg.line_numbers == true {
         return "{path}:{line_no} {line}";
     }
     return "{path} {line}";
 }
-
 fn grep_file(path: String, cfg: Config) -> GrepResult {
-    switch fs.read(path) {
-        it == err(_) -> {
-            return GrepResult { matches: 0, lines: [] };
-        };
-        it == ok(text) -> {
+    when fs.read(path) {
+        | it == err(_) {
+            return GrepResult {matches: 0, lines: []};
+        }
+        | it == ok(text) {
             val needle = needle_for(cfg);
             var hits = 0;
-            var lines_out: List<String> = [];
+            var lines_out: [String] = [];
             var line_no = 1;
             for line in text.split("\n") {
-                if (line_matches(line, needle, cfg)) {
-                    hits += 1;
-                    if (cfg.count_only == false) {
+                if line_matches(line, needle, cfg) {
+                    hits+= 1;
+                    if cfg.count_only == false {
                         lines_out.push(format_hit(path, line_no, line, cfg));
                     }
                 }
-                line_no += 1;
+                line_no+= 1;
             }
-            if (cfg.count_only == true && hits > 0) {
+            if (cfg.count_only == true) && (hits > 0) {
                 lines_out.push("{path} {hits}");
             }
-            return GrepResult { matches: hits, lines: lines_out };
-        };
+            return GrepResult {matches: hits, lines: lines_out};
+        }
+
     }
 }
-
-fn default_paths() -> List<String> {
+fn default_paths() -> [String] {
     return ["."];
 }
-
 fn main() {
     val args = io.args();
     val parsed = parse_flags(args);
-    if (parsed.help == true) {
+    if parsed.help == true {
         print(parsed.message);
         process.exit(0);
     }
-    if (parsed.valid == false) {
+    if parsed.valid == false {
         io.eprint(parsed.message);
         process.exit(2);
     }
     val cfg = parsed.config;
     var targets = cfg.paths;
-    if (targets.len() == 0) {
+    if targets.len() == 0 {
         targets = default_paths();
     }
-
-    var files: List<String> = [];
+    var files: [String] = [];
     for path in targets {
         val found = collect_files(path, cfg.recursive);
-        if (found.len() == 0 && fs.exists(path) && (fs.is_dir(path) == false)) {
+        if ((found.len() == 0) && fs.exists(path)) && (fs.is_dir(path) == false) {
             files.push(path);
         } else {
             for file in found {
@@ -230,23 +176,20 @@ fn main() {
             }
         }
     }
-
     var total = 0;
-    var output: List<String> = [];
+    var output: [String] = [];
     for file in files {
         val result = grep_file(file, cfg);
-        total += result.matches;
+        total+= result.matches;
         val hits = result.lines;
         for line in hits {
             output.push(line);
         }
     }
-
     for line in output {
         print(line);
     }
-
-    if (total > 0) {
+    if total > 0 {
         process.exit(0);
     }
     process.exit(1);

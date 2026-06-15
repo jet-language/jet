@@ -8,7 +8,8 @@
 //! sound without surfacing Rust concepts to users.
 
 use crate::ast::{
-    AccessConvention, BinOp, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr,
+    AccessConvention, BinOp, BindPattern, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg,
+    Expr,
     ExternFn, ExternRustBlock, ForKind, Func, IfStmt, IndexKind, Item, LValue, Lambda, LambdaBody,
     OrFallback, Pattern, Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, Type,
     UnOp, VariantPayload,
@@ -256,7 +257,7 @@ fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Map { key, value } => is_ffi_type(key, registry) && is_ffi_type(value, registry),
         Type::Result { ok, err } => is_ffi_type(ok, registry) && is_ffi_type(err, registry),
         Type::Named(name) => ffi_named_type_ok(name, registry),
-        Type::Apply { .. } | Type::TraitObject(_) | Type::Fn { .. } => false,
+        Type::Apply { .. } | Type::TraitObject(_) | Type::Fn { .. } | Type::Tuple(_) => false,
     }
 }
 
@@ -1482,6 +1483,11 @@ impl<'a> Checker<'a> {
                     self.check_declared_type(r, span);
                 }
             }
+            Type::Tuple(fields) => {
+                for (_, t) in fields {
+                    self.check_declared_type(t, span);
+                }
+            }
             _ => {}
         }
     }
@@ -1497,6 +1503,7 @@ impl<'a> Checker<'a> {
                 params.iter().all(|p| self.type_known(p))
                     && ret.as_ref().map_or(true, |r| self.type_known(r))
             }
+            Type::Tuple(fields) => fields.iter().all(|(_, t)| self.type_known(t)),
             _ => true,
         }
     }
@@ -1522,7 +1529,7 @@ impl<'a> Checker<'a> {
                 format!(
                     "use `{}`, `{}`, or test with `== {}(...)` / `== {}(...)`",
                     syntax::OP_TRY_SUFFIX,
-                    syntax::OP_OR_FALLBACK,
+                    syntax::OP_FALLBACK,
                     syntax::LIT_OK,
                     syntax::LIT_ERR
                 ),
@@ -1878,7 +1885,7 @@ impl<'a> Checker<'a> {
                             format!(
                                 "use `{}`, `{}`, or `{} ...` if failure can't happen here",
                                 syntax::OP_TRY_SUFFIX,
-                                syntax::OP_OR_FALLBACK,
+                                syntax::OP_FALLBACK,
                                 syntax::BUILTIN_PANIC
                             ),
                             Some(expr.span()),
@@ -2016,7 +2023,7 @@ impl<'a> Checker<'a> {
                 body,
                 span: _,
             } => match kind {
-                ForKind::Range { start, end } => {
+                ForKind::Range { start, end, step } => {
                     for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
                         let t = self.infer(e);
                         if let Some(t) = t {
@@ -2034,6 +2041,38 @@ impl<'a> Checker<'a> {
                                         "use Int values for both ends, like `1..10`".to_string(),
                                         Some(e.span()),
                                     ));
+                            }
+                        }
+                    }
+                    if let Some(step) = step {
+                        // S22 (D-SG8): the stride must be a positive Int.
+                        let t = self.infer(step);
+                        if let Some(t) = t {
+                            if t != Type::Int {
+                                self.diags.push(Diagnostic::error(
+                                    "E0123",
+                                    format!(
+                                        "a `for` range `step` must be {}, not {}",
+                                        Type::Int.show(),
+                                        t.show()
+                                    ),
+                                    "`step` is how far to count each turn, so it's a whole number (S22)"
+                                        .to_string(),
+                                    "use an Int step, like `0..10 step 2`".to_string(),
+                                    Some(step.span()),
+                                ));
+                            }
+                        }
+                        if let Expr::Int(n, sp) = step {
+                            if *n <= 0 {
+                                self.diags.push(Diagnostic::error(
+                                    "E0123",
+                                    format!("a `for` range `step` must be positive, not {}", n),
+                                    "a zero or negative step would never reach the end (S22)"
+                                        .to_string(),
+                                    "use a step of 1 or more, like `0..10 step 2`".to_string(),
+                                    Some(*sp),
+                                ));
                             }
                         }
                     }
@@ -2326,7 +2365,10 @@ impl<'a> Checker<'a> {
             }
             let bindings = self.check_condition_with_bindings(&mut arm.cond);
             if bindings.is_empty() {
-                self.require_bool(&mut arm.cond, "a `switch` arm's condition");
+                self.require_bool(
+                    &mut arm.cond,
+                    &format!("a `{}` arm's condition", syntax::KW_SWITCH),
+                );
                 self.check_block(&mut arm.body, true);
             } else {
                 self.push_scope();
@@ -2361,10 +2403,11 @@ impl<'a> Checker<'a> {
                         let mut diag = Diagnostic::error(
                             "E0307",
                             format!(
-                                "`switch` doesn't cover every case — missing: {}",
+                                "`{}` doesn't cover every case — missing: {}",
+                                syntax::KW_SWITCH,
                                 missing.join(", ")
                             ),
-                            "when every arm is a pattern test, each variant must appear once"
+                            "every arm here is a pattern test, so each variant must appear once"
                                 .to_string(),
                             format!("add an arm for: {}", missing.join(", ")),
                             Some(span),
@@ -2384,7 +2427,7 @@ impl<'a> Checker<'a> {
         } else if else_body.is_none() {
             self.diags.push(Diagnostic::error(
                 "E0003",
-                "this `switch` needs an `else` branch".to_string(),
+                format!("this `{}` needs an `else` branch", syntax::KW_SWITCH),
                 "mixed condition arms (or non-pattern arms) must always have a fallback (S24)"
                     .to_string(),
                 format!("add `{} {{ ... }};` after the last arm", syntax::KW_ELSE),
@@ -2420,6 +2463,12 @@ impl<'a> Checker<'a> {
                 ok: Box::new(self.resolve_type(*ok)),
                 err: Box::new(self.resolve_type(*err)),
             },
+            Type::Tuple(fields) => Type::Tuple(
+                fields
+                    .into_iter()
+                    .map(|(n, t)| (n, Box::new(self.resolve_type(*t))))
+                    .collect(),
+            ),
             other => other,
         }
     }
@@ -2460,6 +2509,10 @@ impl<'a> Checker<'a> {
     }
 
     fn check_binding(&mut self, b: &mut Binding) {
+        if b.pattern.is_some() {
+            self.check_destructuring_binding(b);
+            return;
+        }
         let mut annot_valid = true;
         let saved_expected = self.expected_type.clone();
         if let (Some(ty), Some(span)) = (&mut b.ty, b.ty_span) {
@@ -2614,6 +2667,222 @@ impl<'a> Checker<'a> {
                 param_conv: None,
                 decl_loop_depth: self.loop_depth,
                 sendable: binding_sendable,
+                task_lint_span,
+            },
+        );
+    }
+
+    /// S74: a `val`/`var` binding that destructures a struct (`Point { x, y }`)
+    /// or a list (`[a, b]`). Each bound name is declared separately; move and
+    /// mutability follow the per-name M2 rules. Struct destructuring is
+    /// irrefutable (you may bind any subset of fields); list destructuring is
+    /// guarded by a runtime length check in codegen, and a literal of the wrong
+    /// length is caught here (E0315).
+    fn check_destructuring_binding(&mut self, b: &mut Binding) {
+        let inferred = self.infer(&mut b.init);
+        let pattern = b.pattern.clone().expect("destructuring binding has a pattern");
+        let Some(it) = inferred else {
+            // The initializer itself didn't type-check; declare error
+            // placeholders so the bound names don't cascade into E0107.
+            for n in pattern.names() {
+                self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+            }
+            return;
+        };
+        let it = self.resolve_type(it);
+        match &pattern {
+            BindPattern::Struct {
+                type_name,
+                type_span,
+                fields,
+                ..
+            } => {
+                let actual = match &it {
+                    Type::Named(n) => Some(n.clone()),
+                    Type::Apply { name, .. } => Some(name.clone()),
+                    _ => None,
+                };
+                let is_struct = actual.as_deref().is_some_and(|n| {
+                    self.struct_owner_module(n, None)
+                        .and_then(|m| self.struct_fields_of(m, n))
+                        .is_some()
+                });
+                if !is_struct {
+                    self.diags.push(Diagnostic::error(
+                        "E0313",
+                        format!(
+                            "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
+                            type_name,
+                            type_name,
+                            it.show()
+                        ),
+                        "destructuring with `{ }` pulls fields out of a struct value"
+                            .to_string(),
+                        format!("destructure a `{}`, or bind the whole value with a name", type_name),
+                        Some(*type_span),
+                    ));
+                    for n in pattern.names() {
+                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                    }
+                    return;
+                }
+                let actual = actual.unwrap();
+                if actual != *type_name {
+                    self.diags.push(Diagnostic::error(
+                        "E0313",
+                        format!(
+                            "this value is a `{}`, not a `{}`",
+                            actual, type_name
+                        ),
+                        "the type named before `{ }` must match the value you destructure"
+                            .to_string(),
+                        format!("write `{} {{ … }}` to match the value", actual),
+                        Some(*type_span),
+                    ));
+                    for n in pattern.names() {
+                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                    }
+                    return;
+                }
+                for f in fields {
+                    // `field_type` resolves the field's type and reports E0302
+                    // with a suggestion if the field name is unknown.
+                    let fty = self.field_type(&it, &f.name, f.span).unwrap_or(Type::Int);
+                    self.declare_bound(&f.name, f.span, fty, b.mutable);
+                }
+            }
+            BindPattern::List { elems, span } => {
+                let Type::List(inner) = &it else {
+                    self.diags.push(Diagnostic::error(
+                        "E0313",
+                        format!(
+                            "`[ … ]` can only destructure a list, but this is {}",
+                            it.show()
+                        ),
+                        "destructuring with `[ ]` pulls elements out of a list value"
+                            .to_string(),
+                        "destructure a list, or bind the whole value with a name".to_string(),
+                        Some(*span),
+                    ));
+                    for n in pattern.names() {
+                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                    }
+                    return;
+                };
+                let elem_ty = (**inner).clone();
+                // A list literal has a known length: a mismatch is a compile
+                // error rather than a runtime length failure.
+                if let Expr::ListLit(items, _) = &b.init {
+                    if items.len() != elems.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0315",
+                            format!(
+                                "this pattern binds {} item{}, but the list has {}",
+                                elems.len(),
+                                if elems.len() == 1 { "" } else { "s" },
+                                items.len()
+                            ),
+                            "a list pattern must name exactly as many items as the list holds"
+                                .to_string(),
+                            format!(
+                                "name {} item{} to match the list",
+                                items.len(),
+                                if items.len() == 1 { "" } else { "s" }
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                }
+                for e in elems {
+                    self.declare_bound(&e.name, e.span, elem_ty.clone(), b.mutable);
+                }
+            }
+            BindPattern::Tuple { elems, span } => {
+                let Type::Tuple(fields) = &it else {
+                    self.diags.push(Diagnostic::error(
+                        "E0313",
+                        format!(
+                            "`( … )` can only destructure a tuple, but this is {}",
+                            it.show()
+                        ),
+                        "destructuring with `( )` pulls named members out of a tuple value"
+                            .to_string(),
+                        "destructure a tuple, or bind the whole value with a name".to_string(),
+                        Some(*span),
+                    ));
+                    for n in pattern.names() {
+                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                    }
+                    return;
+                };
+                if elems.len() != fields.len() {
+                    self.diags.push(Diagnostic::error(
+                        "E0315",
+                        format!(
+                            "this pattern binds {} member{}, but the tuple has {}",
+                            elems.len(),
+                            if elems.len() == 1 { "" } else { "s" },
+                            fields.len()
+                        ),
+                        "a tuple pattern must name exactly as many members as the tuple holds"
+                            .to_string(),
+                        format!(
+                            "name {} member{} to match the tuple",
+                            fields.len(),
+                            if fields.len() == 1 { "" } else { "s" }
+                        ),
+                        Some(*span),
+                    ));
+                } else if let Expr::TupleLit(items, _, _) = &b.init {
+                    if items.len() != elems.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0315",
+                            format!(
+                                "this pattern binds {} member{}, but the tuple literal has {}",
+                                elems.len(),
+                                if elems.len() == 1 { "" } else { "s" },
+                                items.len()
+                            ),
+                            "a tuple pattern must name exactly as many members as the literal holds"
+                                .to_string(),
+                            format!(
+                                "name {} member{} to match the tuple",
+                                items.len(),
+                                if items.len() == 1 { "" } else { "s" }
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                }
+                for (e, (_, fty)) in elems.iter().zip(fields.iter()) {
+                    self.declare_bound(&e.name, e.span, (**fty).clone(), b.mutable);
+                }
+            }
+        }
+        // Move the initializer when it's an owned, non-scalar local (M2): the
+        // whole value is consumed to produce the bound parts.
+        if let Expr::Ident(n, nspan) = &b.init {
+            if let Some(info) = self.lookup(n) {
+                if !info.ty.is_scalar() && info.param_conv.is_none() {
+                    self.mark_moved(n.clone(), *nspan);
+                }
+            }
+        }
+    }
+
+    /// Declare one name bound by a destructuring pattern (S74).
+    fn declare_bound(&mut self, name: &str, span: Span, ty: Type, mutable: bool) {
+        let sendable = self.sendability_problem(&ty, true).is_none();
+        let task_lint_span = if is_task_type(&ty) { Some(span) } else { None };
+        self.declare(
+            name,
+            span,
+            LocalInfo {
+                ty,
+                mutable,
+                param_conv: None,
+                decl_loop_depth: self.loop_depth,
+                sendable,
                 task_lint_span,
             },
         );
@@ -2815,6 +3084,9 @@ impl<'a> Checker<'a> {
                 root: None,
                 path: Vec::new(),
                 kind: SendProblemKind::TraitValue(name.clone()),
+            }),
+            Type::Tuple(fields) => fields.iter().find_map(|(_, t)| {
+                self.sendability_problem_inner(t, true, seen)
             }),
         }
     }
@@ -3051,6 +3323,64 @@ impl<'a> Checker<'a> {
 
     fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         match e {
+            // S68 (D-SG2): `if` in expression position. Condition is Bool; each
+            // branch's trailing expression is its value, and both must agree.
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                span,
+            } => {
+                let span = *span;
+                let before = self.moved.clone();
+                let mut after = before.clone();
+                self.require_bool(cond, "an `if` used as a value");
+                self.push_scope();
+                self.check_block(then_body, false);
+                let then_ty = self.infer(then_value);
+                self.pop_scope();
+                for (k, v) in self.moved.drain() {
+                    after.entry(k).or_insert(v);
+                }
+                self.moved = before.clone();
+                self.push_scope();
+                self.check_block(else_body, false);
+                let else_ty = self.infer(else_value);
+                self.pop_scope();
+                for (k, v) in self.moved.drain() {
+                    after.entry(k).or_insert(v);
+                }
+                self.moved = after;
+                match (then_ty, else_ty) {
+                    (Some(a), Some(b)) => {
+                        if a == b {
+                            Some(a)
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0124",
+                                format!(
+                                    "this `if`'s branches produce different types: {} and {}",
+                                    a.show(),
+                                    b.show()
+                                ),
+                                "an `if` used as a value must give the same type on every path (S68)"
+                                    .to_string(),
+                                format!(
+                                    "make both branches produce {} (or the same type)",
+                                    a.show()
+                                ),
+                                Some(span),
+                            ));
+                            Some(a)
+                        }
+                    }
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                }
+            }
             Expr::Int(_, _) => Some(Type::Int),
             Expr::Float(_, _) => Some(Type::Float),
             Expr::Bool(_, _) => Some(Type::Bool),
@@ -3110,6 +3440,11 @@ impl<'a> Checker<'a> {
             }
             Expr::Char(_, _) => Some(Type::Char),
             Expr::ListLit(elems, span) => self.infer_list_lit(elems, *span),
+            Expr::TupleLit(fields, span, ty_slot) => {
+                let t = self.infer_tuple_lit(fields, *span);
+                *ty_slot = t.clone();
+                t
+            }
             Expr::MapLit(entries, span) => self.infer_map_lit(entries, *span),
             Expr::Index {
                 base,
@@ -3198,6 +3533,37 @@ impl<'a> Checker<'a> {
                 self.infer(inner)
             }
             Expr::Field(inner, member, span) => self.infer_field(inner, member, *span),
+            Expr::OptField {
+                base,
+                member,
+                member_span,
+                flatten,
+                ..
+            } => {
+                let bt = self.infer(base)?;
+                let inner_t = match bt {
+                    Type::Option(inner) => *inner,
+                    other => {
+                        self.diags.push(Diagnostic::error(
+                            "E0047",
+                            format!("`?.` needs an optional on the left, but this is `{}`", other.show()),
+                            "optional chaining short-circuits a `T?` to absent on a missing link"
+                                .to_string(),
+                            "use plain `.` here, or make the value optional first".to_string(),
+                            Some(*member_span),
+                        ));
+                        return None;
+                    }
+                };
+                let fty = self.field_type(&inner_t, member, *member_span)?;
+                match fty {
+                    Type::Option(x) => {
+                        *flatten = true;
+                        Some(Type::Option(x))
+                    }
+                    t => Some(Type::Option(Box::new(t))),
+                }
+            }
             Expr::MethodCall {
                 receiver,
                 method,
@@ -3409,7 +3775,7 @@ impl<'a> Checker<'a> {
                             format!(
                                 "add `-> ... ? {}` to this function, or handle the result with `{}`",
                                 err.name(),
-                                syntax::OP_OR_FALLBACK
+                                syntax::OP_FALLBACK
                             ),
                             Some(span),
                         ));
@@ -3435,7 +3801,7 @@ impl<'a> Checker<'a> {
                     format!(
                         "add `-> {}` to this function, or handle it with `{}`",
                         inner_ty.name(),
-                        syntax::OP_OR_FALLBACK
+                        syntax::OP_FALLBACK
                     ),
                     Some(span),
                 ));
@@ -3478,13 +3844,13 @@ impl<'a> Checker<'a> {
                     "E0405",
                     format!(
                         "`{}` only works on a fallible value, not {}",
-                        syntax::OP_OR_FALLBACK,
+                        syntax::OP_FALLBACK,
                         other.show()
                     ),
                     "the left side must be a `Result` or optional value".to_string(),
                     format!(
                         "call something that can fail, then write `... {} fallback`",
-                        syntax::OP_OR_FALLBACK
+                        syntax::OP_FALLBACK
                     ),
                     Some(span),
                 ));
@@ -3506,7 +3872,7 @@ impl<'a> Checker<'a> {
                         ),
                         format!(
                             "both sides of `{}` must be the same type",
-                            syntax::OP_OR_FALLBACK
+                            syntax::OP_FALLBACK
                         ),
                         type_fix_hint(&payload, &ft),
                         Some(e.span()),
@@ -3533,7 +3899,7 @@ impl<'a> Checker<'a> {
                             "E0405",
                             format!(
                                 "`{} return` can't leave this function early",
-                                syntax::OP_OR_FALLBACK
+                                syntax::OP_FALLBACK
                             ),
                             "a bare return needs a function with a return type".to_string(),
                             "add `-> Type` to the function, or give a fallback value instead"
@@ -4306,6 +4672,32 @@ impl<'a> Checker<'a> {
         Some(Type::List(Box::new(first)))
     }
 
+    fn infer_tuple_lit(&mut self, fields: &mut [(String, Expr)], _span: Span) -> Option<Type> {
+        let mut seen = HashSet::new();
+        let mut typed = Vec::with_capacity(fields.len());
+        for (name, expr) in fields.iter_mut() {
+            if !seen.insert(name.clone()) {
+                self.diags.push(Diagnostic::error(
+                    "E0003",
+                    format!("tuple member `{}` appears more than once", name),
+                    "each named member in a tuple must have a unique name".to_string(),
+                    "rename or remove the duplicate member".to_string(),
+                    Some(expr.span()),
+                ));
+            }
+            let ty = self.infer(expr).unwrap_or(Type::Int);
+            typed.push((name.clone(), ty));
+        }
+        let canonical = crate::ast::canonicalize_tuple_fields(typed);
+        let tuple_ty = Type::Tuple(
+            canonical
+                .iter()
+                .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+                .collect(),
+        );
+        Some(tuple_ty)
+    }
+
     fn infer_map_lit(&mut self, entries: &mut [(Expr, Expr)], span: Span) -> Option<Type> {
         if entries.is_empty() {
             if let Some(expected) = self.expected_type.clone() {
@@ -4537,7 +4929,13 @@ impl<'a> Checker<'a> {
         }
         self.borrow_ctx = true;
         let t = self.infer(inner)?;
-        if let Type::Named(type_name) = &t {
+        self.field_type(&t, member, span)
+    }
+
+    /// Resolve the type of `member` on the struct type `t` (S71 reuses this for
+    /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
+    fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
+        if let Type::Named(type_name) = t {
             if let Some(fty) = std_struct_field(type_name, member) {
                 return Some(fty);
             }
@@ -4573,7 +4971,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if let Type::Apply { name, args } = &t {
+        if let Type::Apply { name, args } = t {
             if let Some(owner_mod) = self.struct_owner_module(name, None) {
                 if let Some(fields) = self.struct_fields_of(owner_mod, name) {
                     let subst = self.struct_subst(name, args);
@@ -4607,11 +5005,31 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        if let Type::Tuple(fields) = t {
+            for (fname, fty) in fields {
+                if fname == member {
+                    return Some((**fty).clone());
+                }
+            }
+            let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+            let mut fix = "check the member names in this tuple".to_string();
+            if let Some(suggest) = suggest_field(member, &field_names) {
+                fix = format!("did you mean `{}`?", suggest);
+            }
+            self.diags.push(Diagnostic::error(
+                "E0302",
+                format!("this tuple has no member `{}`", member),
+                "field access only works on names declared in the tuple".to_string(),
+                fix,
+                Some(span),
+            ));
+            return None;
+        }
         self.diags.push(Diagnostic::error(
             "E0302",
-            format!("`.{}` only works on struct values", member),
+            format!("`.{}` only works on struct and tuple values", member),
             "enums and other values use methods or pattern tests instead".to_string(),
-            format!("use a struct value before `.{}`", member),
+            format!("use a struct or tuple value before `.{}`", member),
             Some(span),
         ));
         None
@@ -7381,6 +7799,9 @@ fn is_cloneable(
                 }
         }
         Type::Apply { args, .. } => args.iter().all(|a| is_cloneable(a, registry, structs)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| is_cloneable(t, registry, structs)),
         Type::TraitObject(_) => false,
     }
 }
@@ -7400,9 +7821,12 @@ fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], taken: &mut
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end } => {
+                    ForKind::Range { start, end, step } => {
                         walk_expr_for_const_refs(start, const_names, taken);
                         walk_expr_for_const_refs(end, const_names, taken);
+                        if let Some(step) = step {
+                            walk_expr_for_const_refs(step, const_names, taken);
+                        }
                     }
                     ForKind::In { collection } => {
                         walk_expr_for_const_refs(collection, const_names, taken);
@@ -7463,6 +7887,7 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
         Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::Field(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken)
         }
+        Expr::OptField { base, .. } => walk_expr_for_const_refs(base, const_names, taken),
         Expr::MethodCall { receiver, args, .. } => {
             walk_expr_for_const_refs(receiver, const_names, taken);
             for a in args {
@@ -7513,6 +7938,11 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
                 walk_expr_for_const_refs(e, const_names, taken);
             }
         }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, e) in fields {
+                walk_expr_for_const_refs(e, const_names, taken);
+            }
+        }
         Expr::MapLit(entries, _) => {
             for (k, v) in entries {
                 walk_expr_for_const_refs(k, const_names, taken);
@@ -7540,6 +7970,20 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
             LambdaBody::Expr(e) => walk_expr_for_const_refs(e, const_names, taken),
             LambdaBody::Block(stmts) => walk_stmts_for_const_refs(stmts, const_names, taken),
         },
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            walk_expr_for_const_refs(cond, const_names, taken);
+            walk_stmts_for_const_refs(then_body, const_names, taken);
+            walk_expr_for_const_refs(then_value, const_names, taken);
+            walk_stmts_for_const_refs(else_body, const_names, taken);
+            walk_expr_for_const_refs(else_value, const_names, taken);
+        }
     }
 }
 
@@ -7704,6 +8148,7 @@ fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n) || std_type_known(n),
         Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
+        Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
     }
 }
@@ -7719,6 +8164,9 @@ fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Named(name) if name == "U8" => true,
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| types_comparable(t, registry)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
     }
 }
@@ -8577,9 +9025,12 @@ fn collect_std_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end } => {
+                    ForKind::Range { start, end, step } => {
                         collect_std_expr(start, imports, used);
                         collect_std_expr(end, imports, used);
+                        if let Some(step) = step {
+                            collect_std_expr(step, imports, used);
+                        }
                     }
                     ForKind::In { collection } => collect_std_expr(collection, imports, used),
                 }
@@ -8672,6 +9123,7 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
             }
             collect_std_expr(inner, imports, used);
         }
+        Expr::OptField { base, .. } => collect_std_expr(base, imports, used),
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
         | Expr::Present(inner, _)
@@ -8703,6 +9155,11 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
         }
         Expr::ListLit(items, _) => {
             for e in items {
+                collect_std_expr(e, imports, used);
+            }
+        }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, e) in fields {
                 collect_std_expr(e, imports, used);
             }
         }
@@ -8745,6 +9202,20 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
             LambdaBody::Expr(e) => collect_std_expr(e, imports, used),
             LambdaBody::Block(stmts) => collect_std_stmts(stmts, imports, used),
         },
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_std_expr(cond, imports, used);
+            collect_std_stmts(then_body, imports, used);
+            collect_std_expr(then_value, imports, used);
+            collect_std_stmts(else_body, imports, used);
+            collect_std_expr(else_value, imports, used);
+        }
         Expr::Int(_, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
@@ -8957,6 +9428,7 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::Field(inner, _, _) | Expr::Present(inner, _) | Expr::Try(inner, _) => {
             expr_refs_name(inner, name)
         }
+        Expr::OptField { base, .. } => expr_refs_name(base, name),
         Expr::MethodCall { receiver, args, .. } => {
             expr_refs_name(receiver, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }
@@ -8967,6 +9439,7 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
             base, start, end, ..
         } => expr_refs_name(base, name) || expr_refs_name(start, name) || expr_refs_name(end, name),
         Expr::ListLit(elems, _) => elems.iter().any(|el| expr_refs_name(el, name)),
+        Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, e)| expr_refs_name(e, name)),
         Expr::MapLit(entries, _) => entries
             .iter()
             .any(|(k, v)| expr_refs_name(k, name) || expr_refs_name(v, name)),
@@ -8995,6 +9468,20 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
                 false
             }
         }),
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            expr_refs_name(cond, name)
+                || expr_refs_name(then_value, name)
+                || expr_refs_name(else_value, name)
+                || then_body.iter().any(|s| stmt_refs_name(s, name))
+                || else_body.iter().any(|s| stmt_refs_name(s, name))
+        }
         Expr::Int(_, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
@@ -9024,8 +9511,10 @@ fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         }
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
-                ForKind::Range { start, end } => {
-                    expr_refs_name(start, name) || expr_refs_name(end, name)
+                ForKind::Range { start, end, step } => {
+                    expr_refs_name(start, name)
+                        || expr_refs_name(end, name)
+                        || step.as_ref().is_some_and(|s| expr_refs_name(s, name))
                 }
                 ForKind::In { collection } => expr_refs_name(collection, name),
             };
@@ -9224,6 +9713,11 @@ fn expr_collect_captures(
                 expr_collect_captures(el, bound, read, mut_cap);
             }
         }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, e) in fields {
+                expr_collect_captures(e, bound, read, mut_cap);
+            }
+        }
         Expr::MapLit(entries, _) => {
             for (k, v) in entries {
                 expr_collect_captures(k, bound, read, mut_cap);
@@ -9321,9 +9815,12 @@ fn stmt_collect_captures(
             ..
         } => {
             match kind {
-                ForKind::Range { start, end } => {
+                ForKind::Range { start, end, step } => {
                     expr_collect_captures(start, bound, read, mut_cap);
                     expr_collect_captures(end, bound, read, mut_cap);
+                    if let Some(step) = step {
+                        expr_collect_captures(step, bound, read, mut_cap);
+                    }
                 }
                 ForKind::In { collection } => {
                     expr_collect_captures(collection, bound, read, mut_cap);

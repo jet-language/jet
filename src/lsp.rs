@@ -798,9 +798,12 @@ fn collect_stmt(stmt: &ast::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
                 });
             }
             match kind {
-                ast::ForKind::Range { start, end } => {
+                ast::ForKind::Range { start, end, step } => {
                     collect_expr(start, mp, db);
                     collect_expr(end, mp, db);
+                    if let Some(step) = step {
+                        collect_expr(step, mp, db);
+                    }
                 }
                 ast::ForKind::In { collection } => {
                     collect_expr(collection, mp, db);
@@ -858,6 +861,22 @@ fn collect_lvalue(lv: &ast::LValue, mp: &str, db: &mut SymbolDB) {
 }
 
 fn collect_binding(b: &ast::Binding, mp: &str, db: &mut SymbolDB) {
+    // S74: a destructuring binding brings each named field/element into scope.
+    if let Some(pat) = &b.pattern {
+        for n in pat.names() {
+            db.defs.push(SymDef {
+                name: n.name.clone(),
+                def_span: n.span,
+                module_path: mp.to_string(),
+                kind: SymKind::Local {
+                    mutable: b.mutable,
+                    ty: None,
+                },
+            });
+        }
+        collect_expr(&b.init, mp, db);
+        return;
+    }
     let ty = b.ty.clone();
     // has_explicit_annotation: user wrote `: Type` — ty_span is Some iff the annotation is in source
     let has_explicit = b.ty_span.is_some();
@@ -933,6 +952,19 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
                 module_path: mp.to_string(),
             });
         }
+        ast::Expr::OptField {
+            base,
+            member,
+            member_span,
+            ..
+        } => {
+            collect_expr(base, mp, db);
+            db.refs.push(SymRef {
+                name: member.clone(),
+                span: *member_span,
+                module_path: mp.to_string(),
+            });
+        }
         ast::Expr::Binary(_, l, r, _) => {
             collect_expr(l, mp, db);
             collect_expr(r, mp, db);
@@ -966,6 +998,11 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
             for (k, v) in pairs {
                 collect_expr(k, mp, db);
                 collect_expr(v, mp, db);
+            }
+        }
+        ast::Expr::TupleLit(fields, _, _) => {
+            for (_, expr) in fields {
+                collect_expr(expr, mp, db);
             }
         }
         ast::Expr::StructLit { fields, .. } => {
@@ -1033,6 +1070,25 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
             for a in args {
                 collect_expr(&a.expr, mp, db);
             }
+        }
+        ast::Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_expr(cond, mp, db);
+            for s in then_body.iter().chain(else_body.iter()) {
+                if let ast::Stmt::Val(b) = s {
+                    collect_binding(b, mp, db);
+                } else {
+                    collect_expr_stmt(s, mp, db);
+                }
+            }
+            collect_expr(then_value, mp, db);
+            collect_expr(else_value, mp, db);
         }
         ast::Expr::Int(_, _)
         | ast::Expr::Float(_, _)
@@ -1124,7 +1180,7 @@ impl CompletionItem {
 
 /// Jet keywords for completion.
 const JET_KEYWORDS: &[&str] = &[
-    "fn", "pub", "val", "var", "if", "else", "while", "for", "in", "switch", "break", "continue",
+    "fn", "pub", "val", "var", "if", "else", "while", "for", "in", "when", "break", "continue",
     "return", "struct", "enum", "impl", "trait", "const", "comptime", "import", "extern", "test",
     "derive", "mut", "take", "view", "ref", "self", "loop", "unsafe", "or", "true", "false",
     "null", "ok", "err", "value", "it",
@@ -1165,10 +1221,10 @@ fn context_is_member_access(src: &str, offset: usize) -> Option<String> {
 
 /// Is the cursor inside a switch body for an enum type?
 fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Option<&'a str> {
-    // Look backward for `switch <ident> {` pattern
+    // Look backward for `when <ident> {` pattern
     let before = &src[..offset.min(src.len())];
-    if let Some(kw_pos) = before.rfind("switch ") {
-        let after_kw = before[kw_pos + 7..].trim_start();
+    if let Some(kw_pos) = before.rfind("when ") {
+        let after_kw = before[kw_pos + 5..].trim_start();
         let ident_end = after_kw
             .find(|c: char| !c.is_alphanumeric() && c != '_')
             .unwrap_or(after_kw.len());
@@ -1745,7 +1801,6 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwTest
         | TokKind::KwLoop
         | TokKind::KwUnsafe
-        | TokKind::KwOrFallback
         | TokKind::KwMutate
         | TokKind::KwMove
         | TokKind::KwView
@@ -1772,7 +1827,7 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
 
         TokKind::Int(_) | TokKind::Float(_) | TokKind::Char(_) => Some((st::NUMBER, 0)),
 
-        TokKind::LineComment(_) => Some((st::COMMENT, 0)),
+        TokKind::LineComment(_) | TokKind::BlockComment(_) => Some((st::COMMENT, 0)),
 
         TokKind::Plus
         | TokKind::Minus

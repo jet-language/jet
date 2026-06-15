@@ -141,7 +141,7 @@ fn io_input_reads_a_line_from_stdin() {
 import std.io as io;
 
 fn main() {
-    val name = io.input("name? ") or panic("read failed");
+    val name = io.input("name? ") ?? panic("read failed");
     print("hello, {name}");
 }
 "#,
@@ -280,7 +280,7 @@ fn main() {
     producer.join();
     var total = 0;
     for i in 1..1000 {
-        total = total + (ch.receive() or panic("channel closed"));
+        total = total + (ch.receive() ?? panic("channel closed"));
     }
     print(total);
 }

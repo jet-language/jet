@@ -8,7 +8,8 @@
 //! rest of the file's problems.
 
 use crate::ast::{
-    AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
+    AccessConvention, BinOp, Binding, BindName, BindPattern, Call, CallArg, ConstAttr, ConstDef,
+    ElseBranch, EnumDef,
     EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
     SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam, UnOp, Variant,
@@ -127,6 +128,10 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0031"
             | "E0034"
             | "E0036"
+            | "E0044"
+            | "E0045"
+            | "E0048"
+            | "E0049"
     )
 }
 
@@ -225,6 +230,10 @@ impl<'a> Parser<'a> {
     fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
         if matches!(self.peek().kind, TokKind::LParen) {
             let start = self.bump().span;
+            if self.looks_like_named_tuple(true) {
+                let ty = self.parse_tuple_type(start)?;
+                return Ok((ty, start));
+            }
             let (ty, _) = self.type_()?;
             self.expect(TokKind::RParen, "to close this parenthesized return type")?;
             return Ok((ty, start));
@@ -1517,6 +1526,29 @@ impl<'a> Parser<'a> {
                 ));
                 self.switch_after_kw(t.span)
             }
+            TokKind::Ident(n) if n == syntax::FOREIGN_SWITCH => {
+                let t = self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0044",
+                    format!(
+                        "{} renamed `{}` to `{}`",
+                        syntax::LANG_NAME,
+                        syntax::FOREIGN_SWITCH,
+                        syntax::KW_SWITCH
+                    ),
+                    format!(
+                        "choosing one branch from many is written with `{}` (S24)",
+                        syntax::KW_SWITCH
+                    ),
+                    format!(
+                        "replace `{}` with `{}`",
+                        syntax::FOREIGN_SWITCH,
+                        syntax::KW_SWITCH
+                    ),
+                    Some(t.span),
+                ));
+                self.switch_after_kw(t.span)
+            }
             TokKind::KwReturn => {
                 let span = self.bump().span;
                 let expr = if matches!(self.peek().kind, TokKind::Semi) {
@@ -1549,7 +1581,19 @@ impl<'a> Parser<'a> {
                 let kind = if matches!(self.peek().kind, TokKind::DotDot) {
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    ForKind::Range { start: first, end }
+                    // S22 (D-SG8): optional contextual `step n` stride.
+                    let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == syntax::KW_RANGE_STEP)
+                    {
+                        self.bump();
+                        Some(self.expr_no_struct_lit()?)
+                    } else {
+                        None
+                    };
+                    ForKind::Range {
+                        start: first,
+                        end,
+                        step,
+                    }
                 } else {
                     ForKind::In { collection: first }
                 };
@@ -1668,6 +1712,96 @@ impl<'a> Parser<'a> {
 
     /// `switch` body, after the keyword (S24): either legacy condition arms
     /// with `->`, or pipe arms where bare terms mean `subject == term`.
+    /// S68 (D-SG2): parse an `if` expression — `if cond { … value } else { … }`.
+    /// Each branch is a value block; `else` is required (an `if` with no value
+    /// is a statement, parsed elsewhere).
+    fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
+        let start = self.bump().span; // `if`
+        let cond = self.expr_no_struct_lit()?;
+        let (then_body, then_value) = self.parse_value_block()?;
+        if !matches!(self.peek().kind, TokKind::KwElse) {
+            return Err(Diagnostic::error(
+                "E0003",
+                "an `if` used as a value needs an `else` branch".to_string(),
+                "in expression position both outcomes must produce a value (S68)".to_string(),
+                "add `else { … }` so every path has a value".to_string(),
+                Some(self.peek().span),
+            ));
+        }
+        self.bump(); // `else`
+        // `else if …` nests as the else branch's value.
+        let (else_body, else_value) = if matches!(self.peek().kind, TokKind::KwIf) {
+            let e = self.parse_if_expr()?;
+            (Vec::new(), e)
+        } else {
+            self.parse_value_block()?
+        };
+        let span = Span::new(start.start, else_value.span().end);
+        Ok(Expr::If {
+            cond: Box::new(cond),
+            then_body,
+            then_value: Box::new(then_value),
+            else_body,
+            else_value: Box::new(else_value),
+            span,
+        })
+    }
+
+    /// S68 (D-SG2): parse `{ stmt* tail-expr }` where the trailing expression
+    /// (no `;`) is the block's value. Leading statements use the ordinary
+    /// statement grammar; the tail is detected by speculatively parsing an
+    /// expression and checking for the closing `}`.
+    fn parse_value_block(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
+        self.expect(TokKind::LBrace, "to open this `if` branch")?;
+        let mut stmts = Vec::new();
+        loop {
+            match &self.peek().kind {
+                TokKind::RBrace => {
+                    let span = self.peek().span;
+                    self.bump();
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "this `if` branch is empty but is used as a value".to_string(),
+                        "an `if` in expression position must end each branch with a value (S68)"
+                            .to_string(),
+                        "put a value as the last line, like `{ x }`".to_string(),
+                        Some(span),
+                    ));
+                }
+                TokKind::Eof => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected `}` to close this `if` branch, found the end of the file"
+                            .to_string(),
+                        "every `{` needs a matching `}`".to_string(),
+                        "add a closing `}`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                _ => {}
+            }
+            // Try the current position as the trailing value expression.
+            let save = self.pos;
+            let saved_diags = self.diags.len();
+            if let Ok(e) = self.expr() {
+                if matches!(self.peek().kind, TokKind::RBrace) {
+                    self.bump();
+                    return Ok((stmts, e));
+                }
+            }
+            // Not the tail value — rewind and parse an ordinary statement.
+            self.pos = save;
+            self.diags.truncate(saved_diags);
+            match self.stmt() {
+                Ok(s) => stmts.push(s),
+                Err(d) => {
+                    self.diags.push(d);
+                    self.sync_stmt();
+                }
+            }
+        }
+    }
+
     fn switch_after_kw(&mut self, span: Span) -> Result<Stmt, Diagnostic> {
         let subject = self.expr_no_struct_lit()?;
         self.expect(TokKind::LBrace, "to open the `switch` body")?;
@@ -1821,6 +1955,23 @@ impl<'a> Parser<'a> {
     }
 
     fn binding_after_kw(&mut self, mutable: bool) -> Result<Binding, Diagnostic> {
+        // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
+        // struct — instead of a plain `name`.
+        if let Some(pattern) = self.try_bind_pattern()? {
+            self.expect(TokKind::Eq, "in a binding")?;
+            let init = self.expr()?;
+            return Ok(Binding {
+                mutable,
+                name: String::new(),
+                name_span: pattern.span(),
+                pattern: Some(pattern),
+                ty: None,
+                ty_span: None,
+                init,
+                is_comptime: false,
+                ct: None,
+            });
+        }
         let (name, name_span) = self.expect_ident("after a binding keyword")?;
         let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
             self.bump();
@@ -1835,12 +1986,302 @@ impl<'a> Parser<'a> {
             mutable,
             name,
             name_span,
+            pattern: None,
             ty,
             ty_span,
             init,
             is_comptime: false,
             ct: None,
         })
+    }
+
+    /// S74: parse a `val`/`var` destructuring target if one starts here.
+    /// `[ a, b ]` is a list pattern; `Ident { x, y }` is a struct pattern.
+    /// A bare `name` (followed by `=` or `:`) is not a pattern.
+    fn try_bind_pattern(&mut self) -> Result<Option<BindPattern>, Diagnostic> {
+        match &self.peek().kind {
+            TokKind::LBracket => {
+                let start = self.bump().span;
+                let mut elems = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RBracket) {
+                    loop {
+                        let (name, span) = self.expect_ident("for a list-pattern binding")?;
+                        elems.push(BindName { name, span });
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                let end = self.peek().span;
+                self.expect(TokKind::RBracket, "to close the list pattern")?;
+                Ok(Some(BindPattern::List {
+                    elems,
+                    span: Span::new(start.start, end.end),
+                }))
+            }
+            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
+                let (type_name, type_span) = self.expect_ident("for a struct pattern")?;
+                self.expect(TokKind::LBrace, "to open the struct pattern")?;
+                let mut fields = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RBrace) {
+                    loop {
+                        let (name, span) = self.expect_ident("for a struct-pattern field")?;
+                        fields.push(BindName { name, span });
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                let end = self.peek().span;
+                self.expect(TokKind::RBrace, "to close the struct pattern")?;
+                Ok(Some(BindPattern::Struct {
+                    type_name,
+                    type_span,
+                    fields,
+                    span: Span::new(type_span.start, end.end),
+                }))
+            }
+            TokKind::LParen if !self.looks_like_named_tuple(false) => {
+                let start = self.bump().span;
+                let mut elems = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RParen) {
+                    loop {
+                        let (name, span) =
+                            self.expect_ident("for a tuple-pattern binding")?;
+                        elems.push(BindName { name, span });
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                let end = self.peek().span;
+                self.expect(TokKind::RParen, "to close the tuple pattern")?;
+                Ok(Some(BindPattern::Tuple {
+                    elems,
+                    span: Span::new(start.start, end.end),
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// S73: `( name : … )` — named tuple literal or type, not grouping.
+    /// When `lparen_consumed` is true, `self.pos` is already on the first member name.
+    fn looks_like_named_tuple(&self, lparen_consumed: bool) -> bool {
+        let i = if lparen_consumed {
+            self.pos
+        } else {
+            self.pos + 1
+        };
+        matches!(
+            self.toks.get(i).map(|t| &t.kind),
+            Some(TokKind::Ident(_))
+        ) && matches!(
+            self.toks.get(i + 1).map(|t| &t.kind),
+            Some(TokKind::Colon)
+        )
+    }
+
+    fn emit_positional_tuple_error(&mut self, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0048",
+            format!(
+                "{} tuples name every member — positional `(1, 2)` isn't allowed (S73)",
+                syntax::LANG_NAME
+            ),
+            "named members make field access obvious and avoid `.0`, which collides with decimal numbers"
+                .to_string(),
+            "write named members: `(x: 1, y: 2)` and use `p.x`, not `p.0`".to_string(),
+            Some(span),
+        ));
+    }
+
+    fn emit_numeric_field_error(&mut self, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0049",
+            format!(
+                "{} doesn't use numeric field access like `.0` (S73)",
+                syntax::LANG_NAME
+            ),
+            "`.0` looks like the start of a decimal number, so tuple members must have names"
+                .to_string(),
+            "name the members when you build the tuple: `(x: 1, y: 2)`, then read `p.x`"
+                .to_string(),
+            Some(span),
+        ));
+    }
+
+    /// S73: reject `.0` / `.1` field access before `expect_ident`.
+    fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
+        if matches!(
+            self.peek().kind,
+            TokKind::Int(_) | TokKind::Float(_)
+        ) {
+            let span = self.peek().span;
+            self.bump();
+            self.emit_numeric_field_error(span);
+            return Ok(("0".to_string(), span));
+        }
+        self.expect_ident("after `.`")
+    }
+
+    fn sync_to_rparen(&mut self) {
+        let mut depth = 0;
+        while self.pos < self.toks.len() {
+            match self.peek().kind {
+                TokKind::LParen => depth += 1,
+                TokKind::RParen if depth == 0 => {
+                    self.bump();
+                    return;
+                }
+                TokKind::RParen => depth -= 1,
+                TokKind::Semi | TokKind::RBrace if depth == 0 => return,
+                _ => {}
+            }
+            self.bump();
+        }
+    }
+
+    /// S73: `(x: expr, y: expr)` after the opening `(`.
+    fn parse_tuple_lit(&mut self, open: Span) -> Result<Expr, Diagnostic> {
+        let mut fields = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, _) = self.expect_ident("for a tuple member name")?;
+                self.expect(TokKind::Colon, "after each tuple member name")?;
+                let value = self.expr()?;
+                fields.push((name, value));
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        let close = self.peek().span;
+        self.expect(TokKind::RParen, "to close this tuple")?;
+        if fields.len() < 2 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a tuple needs at least two named members".to_string(),
+                "a single `(name: value)` would be ambiguous with grouping — use a one-field `struct` instead"
+                    .to_string(),
+                "add another member: `(x: 1, y: 2)`".to_string(),
+                Some(Span::new(open.start, close.end)),
+            ));
+        }
+        Ok(Expr::TupleLit(fields, Span::new(open.start, close.end), None))
+    }
+
+    /// S73: `(x: Type, y: Type)` in type position after the opening `(`.
+    fn parse_tuple_type(&mut self, open: Span) -> Result<Type, Diagnostic> {
+        let mut fields = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, _) = self.expect_ident("for a tuple member name")?;
+                self.expect(TokKind::Colon, "after each tuple member name")?;
+                let (ty, _) = self.type_()?;
+                fields.push((name, ty));
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        let close = self.peek().span;
+        self.expect(TokKind::RParen, "to close this tuple type")?;
+        if fields.len() < 2 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a tuple type needs at least two named members".to_string(),
+                "a single `(name: Type)` would be ambiguous with a grouped type — use a one-field `struct` instead"
+                    .to_string(),
+                "add another member: `(x: Int, y: Int)`".to_string(),
+                Some(Span::new(open.start, close.end)),
+            ));
+        }
+        Ok(Type::Tuple(
+            crate::ast::canonicalize_tuple_fields(fields)
+                .into_iter()
+                .map(|(n, t)| (n, Box::new(t)))
+                .collect(),
+        ))
+    }
+
+    fn parse_paren_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let open = self.bump().span;
+        if self.looks_like_named_tuple(true) {
+            return self.parse_tuple_lit(open);
+        }
+        if self.after_lparen_is_positional_tuple() {
+            self.emit_positional_tuple_error(open);
+            self.sync_to_rparen();
+            return Ok(Expr::Int(0, open));
+        }
+        let inner = self.expr()?;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            self.emit_positional_tuple_error(open);
+            self.sync_to_rparen();
+            return Ok(Expr::Int(0, open));
+        }
+        self.expect(TokKind::RParen, "to close this `(`")?;
+        Ok(inner)
+    }
+
+    /// True when `(` starts `( expr , … )` without member names — rejected (S73).
+    /// Call with `self.pos` on the first token inside `(`.
+    fn after_lparen_is_positional_tuple(&self) -> bool {
+        let mut i = self.pos;
+        if i >= self.toks.len() {
+            return false;
+        }
+        if matches!(self.toks[i].kind, TokKind::RParen) {
+            return false;
+        }
+        if matches!(self.toks[i].kind, TokKind::Ident(_))
+            && self
+                .toks
+                .get(i + 1)
+                .is_some_and(|t| matches!(t.kind, TokKind::Colon))
+        {
+            return false;
+        }
+        loop {
+            match &self.toks[i].kind {
+                TokKind::RParen => return false,
+                TokKind::Comma => return true,
+                TokKind::Colon => return false,
+                TokKind::LParen | TokKind::LBrace | TokKind::LBracket => {
+                    i += 1;
+                    let mut depth = 1;
+                    while i < self.toks.len() && depth > 0 {
+                        match self.toks[i].kind {
+                            TokKind::LParen | TokKind::LBrace | TokKind::LBracket => depth += 1,
+                            TokKind::RParen | TokKind::RBrace | TokKind::RBracket => depth -= 1,
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+                }
+                _ => i += 1,
+            }
+            if i >= self.toks.len() {
+                return false;
+            }
+        }
     }
 
     fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
@@ -1875,6 +2316,7 @@ impl<'a> Parser<'a> {
             mutable: false,
             name,
             name_span,
+            pattern: None,
             ty: None,
             ty_span: None,
             init,
@@ -1895,10 +2337,26 @@ impl<'a> Parser<'a> {
         self.with_nesting(span, |p| p.expr_or_fallback(false))
     }
 
-    /// S35: `or` fallback binds looser than `&&` / `||`.
+    /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
     fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let mut lhs = self.expr_or(allow_struct_lit)?;
-        while matches!(self.peek().kind, TokKind::KwOrFallback) {
+        loop {
+            match &self.peek().kind {
+                TokKind::QuestionQuestion => {}
+                // S71 (D-SG6): the retired word `or` — teach `??`, then recover.
+                TokKind::Ident(n) if n == syntax::FOREIGN_OR_FALLBACK => {
+                    let span = self.peek().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0045",
+                        "Jet writes the fallback as `??`, not `or`".to_string(),
+                        "`??` supplies a value when a `T?` is absent or a `T ? E` failed — `count ?? 0`, `read() ?? return`"
+                            .to_string(),
+                        "replace `or` with `??`".to_string(),
+                        Some(span),
+                    ));
+                }
+                _ => break,
+            }
             let op_span = self.bump().span;
             let fallback = self.parse_or_fallback(allow_struct_lit)?;
             let end = match &fallback {
@@ -2173,7 +2631,7 @@ impl<'a> Parser<'a> {
             match &self.peek().kind {
                 TokKind::Dot => {
                     self.bump();
-                    let (member, member_span) = self.expect_ident("after `.`")?;
+                    let (member, member_span) = self.expect_field_name()?;
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -2202,6 +2660,30 @@ impl<'a> Parser<'a> {
                     let qspan = self.bump().span;
                     let full = Span::new(expr.span().start, qspan.end);
                     expr = Expr::Try(Box::new(expr), full);
+                }
+                // S71 (D-SG6): `base?.field` optional chaining.
+                TokKind::QuestionDot => {
+                    self.bump();
+                    let (member, member_span) = self.expect_ident("after `?.`")?;
+                    if matches!(self.peek().kind, TokKind::LParen) {
+                        return Err(Diagnostic::error(
+                            "E0046",
+                            "optional chaining `?.` only reaches fields, not methods".to_string(),
+                            "`a?.b` short-circuits a `T?` to absent; calling through `?.` isn't in yet"
+                                .to_string(),
+                            "unwrap first, e.g. `(a ?? return).method()`, or test with `== present`"
+                                .to_string(),
+                            Some(member_span),
+                        ));
+                    }
+                    let span = Span::new(expr.span().start, member_span.end);
+                    expr = Expr::OptField {
+                        base: Box::new(expr),
+                        member,
+                        member_span,
+                        flatten: false,
+                        span,
+                    };
                 }
                 TokKind::LParen => {
                     let open = self.bump().span;
@@ -2506,6 +2988,9 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 Ok(Expr::Ident(syntax::KW_SELF.to_string(), span))
             }
+            // S68 (D-SG2): `if` used as a value. Statement-position `if` is
+            // handled earlier in `stmt`, so reaching here means expression use.
+            TokKind::KwIf => self.parse_if_expr(),
             TokKind::KwMove
                 if matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.kind),
@@ -2518,12 +3003,7 @@ impl<'a> Parser<'a> {
             TokKind::LParen if self.after_lparen_is_lambda() => {
                 Ok(Expr::Lambda(self.parse_lambda(vec![])?))
             }
-            TokKind::LParen => {
-                self.bump();
-                let inner = self.expr()?;
-                self.expect(TokKind::RParen, "to close this `(`")?;
-                Ok(inner)
-            }
+            TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
             TokKind::Pipe => {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
@@ -2639,7 +3119,7 @@ impl<'a> Parser<'a> {
                 }
                 if matches!(self.peek().kind, TokKind::Dot) {
                     self.bump();
-                    let (member, member_span) = self.expect_ident("after `.`")?;
+                    let (member, member_span) = self.expect_field_name()?;
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -3247,6 +3727,16 @@ impl<'a> Parser<'a> {
                     Type::List(Box::new(first))
                 }
             }
+            TokKind::LParen if self.looks_like_named_tuple(false) => {
+                self.bump();
+                self.parse_tuple_type(start)?
+            }
+            TokKind::LParen => {
+                self.bump();
+                let (inner, _) = self.type_()?;
+                self.expect(TokKind::RParen, "to close this parenthesized type")?;
+                inner
+            }
             TokKind::Ident(name) => {
                 self.bump();
                 match name.as_str() {
@@ -3425,18 +3915,19 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        if matches!(self.peek().kind, TokKind::QuestionQuestion) {
+            let qspan = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0309",
+                "`??` isn't allowed on a type".to_string(),
+                "an optional value is written `T?` once — there's no optional optional"
+                    .to_string(),
+                "use a single `?`, like `Int?`".to_string(),
+                Some(qspan),
+            ));
+        }
         if matches!(self.peek().kind, TokKind::Question) {
-            let qspan = self.bump().span;
-            if matches!(self.peek().kind, TokKind::Question) {
-                return Err(Diagnostic::error(
-                    "E0309",
-                    "`??` isn't allowed on a type".to_string(),
-                    "an optional value is written `T?` once — there's no optional optional"
-                        .to_string(),
-                    "use a single `?`, like `Int?`".to_string(),
-                    Some(qspan),
-                ));
-            }
+            self.bump();
             if self.type_starts_here() {
                 let (err_ty, _) = self.type_()?;
                 return Ok((

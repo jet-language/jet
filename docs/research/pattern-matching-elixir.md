@@ -32,7 +32,7 @@ if user == value(name) {     // Option: T? / value(x) / null  (S32)
 
 // Result-flavoured tests and fallbacks already exist (S35):
 if parse(raw) == ok(n) { print("got {n}"); }
-val port = parse(raw) or 8080;   // `or` fallback
+val port = parse(raw) ?? 8080;   // `??` fallback
 val n = parse(raw)?;             // `?` propagation
 ```
 
@@ -56,82 +56,6 @@ syntax today. Each section below is one such gap.
 
 §8 is the cross-cutting safety decision (what happens when a bind *can*
 fail). §9 is the recommendation.
-
----
-
-## 1. Destructuring bindings — the big one
-
-**What it is:** pull several values out of a structure in a single binding,
-instead of one field at a time.
-
-**Today in Jet** you must spell every field:
-
-```jet
-val x = p.x;
-val y = p.y;
-val w = rect.width;
-val h = rect.height;
-```
-
-**With destructuring bindings:**
-
-```jet
-val Point { x, y } = p;            // struct: bind x and y at once
-val Rect(w, h) = rect;             // single-payload enum / positional
-```
-
-### Real-world example: a 2D vector add
-
-```jet
-// Without (today):
-fn add(a: Point, b: Point) -> Point {
-    Point { x: a.x + b.x, y: a.y + b.y }
-}
-
-// With destructuring in parameters or body:
-fn add(a: Point, b: Point) -> Point {
-    val Point { x: ax, y: ay } = a;
-    val Point { x: bx, y: by } = b;
-    Point { x: ax + bx, y: ay + by }
-}
-```
-
-The win grows with nesting and with "unpack a result then use three of its
-fields" code — the daily texture of Elixir, Rust, and Swift programs.
-
-### Who ships it
-
-- **Elixir / Erlang:** the `=` "match operator" is the *whole language*.
-`%{name: n, age: a} = person` is idiomatic everywhere.
-- **Rust:** `let Point { x, y } = p;`, `let (a, b) = pair;` — extremely
-common, considered a core ergonomic.
-- **Swift:** `let (x, y) = point`, `case let .rect(w, h)`.
-- **JavaScript / TypeScript:** `const { x, y } = p;`,
-`const [a, b] = arr;` — destructuring is one of ES6's most-loved adds.
-- **Python:** `a, b = pair`, structural pattern matching (3.10+ `match`).
-
-### Community sentiment
-
-Near-universally positive. The JS destructuring add is routinely cited as a
-top quality-of-life ES6 feature. The standard *caution* is readability when
-people rename-and-nest aggressively (`const { a: { b: { c } } } = x`) — a
-style problem, not a feature problem. **No mainstream community regrets
-adding it.**
-
-### The catch (see §8)
-
-Struct and single-variant binds **cannot fail** — they're irrefutable and
-totally safe. But `val value(n) = someOption;` *can* fail (the option might
-be `null`). That refutable case is the one real design decision, deferred
-to §8.
-
-### How it fits Jet
-
-Very cleanly. It reuses the exact pattern grammar already in S31 (`Point { x, y }`, `Rect(w, h)`, `value(n)`, `ok(v)`), just in binding position
-instead of `==` position. The spelling stays `val <pattern> = expr;` — no
-new keyword, consistent with S2 (`val`/`var`).
-
----
 
 ## 2. List / sequence patterns
 
@@ -422,7 +346,7 @@ Three industry answers:
 | Option                        | Spelling                                  | Languages                                                            | Tradeoff                                                                                                                               |
 | ----------------------------- | ----------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **A. Reject; teach `switch*`* | `val value(n) = opt;` → **compile error** | (Jet-specific)                                                       | Safest, most Jet-like. No hidden runtime failure. Costs one extra line (`switch`/`if`) when you genuinely don't handle the other case. |
-| **B. Require `or` fallback**  | `val value(n) = opt or return;`           | (reuses Jet S35 `or`)                                                | Explicit failure path, reuses existing machinery, no new concept. Slightly more to type. Reads well.                                   |
+| **B. Require `??` fallback**  | `val value(n) = opt ?? return;`           | (reuses Jet S35/S71 `??`)                                            | Explicit failure path, reuses existing machinery, no new concept. Slightly more to type. Reads well.                                   |
 | **C. Runtime panic (Elixir)** | `val value(n) = opt;` panics if `null`    | Elixir `MatchError`, Rust `let-else` is the *opposite*, Swift `try!` | Most familiar to Elixir users; but a *hidden* runtime panic directly fights Jet priority #2 and the "no surprise panics" stance.       |
 
 
@@ -456,7 +380,7 @@ smallness lane," the high-value / low-conflict bundle is:
   makes §1 and `switch` far more useful.
 3. **§3 Guards** — yes, but by **ratifying the `&&` binding-scope rule**,
   not by adding a `when` keyword (smallness, S14).
-4. **§8 Refutable policy** — option **B** (`or` fallback), with option A's
+4. **§8 Refutable policy** — option **B** (`??` fallback), with option A's
   teaching error as the no-`or` path.
 
 Hold or decline:
@@ -486,4 +410,3 @@ implement parser → sema → codegen with snapshots, per the workflow loop.
 - If list patterns: spread sigil — `[h, ...t]` vs Elixir `[h | t]` vs Rust
 `[h, t @ ..]`.
 - Refutable: confirm option B (`or`) is the canonical path.
-

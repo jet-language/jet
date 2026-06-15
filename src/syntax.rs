@@ -39,6 +39,11 @@ pub const OP_TRY_SUFFIX: &str = "?";
 /// S5 (ratified): line comments run from this prefix to end of line.
 pub const COMMENT_PREFIX: &str = "//";
 
+/// S5 (ratified 2026-06-15): block comments `/* … */`, nesting allowed so a
+/// region containing other comments can always be commented out.
+pub const BLOCK_COMMENT_OPEN: &str = "/*";
+pub const BLOCK_COMMENT_CLOSE: &str = "*/";
+
 /// S6 (ratified): separates statements inside a block.
 pub const STMT_SEP: &str = ";";
 
@@ -130,14 +135,19 @@ pub const KW_IN: &str = "in";
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
 pub const OP_RANGE: &str = "..";
 
+/// S22 (amended 2026-06-15, D-SG8): contextual `step n` range stride —
+/// `0..10 step 2`. Only meaningful inside a range; an ordinary name elsewhere.
+pub const KW_RANGE_STEP: &str = "step";
+
 /// S23 (ratified): loop control.
 pub const KW_BREAK: &str = "break";
 pub const KW_CONTINUE: &str = "continue";
 
-/// S24 (ratified): many-way choice with condition arms.
-pub const KW_SWITCH: &str = "switch";
+/// S24 (ratified; keyword amended to `when` 2026-06-15, D-SG1): many-way
+/// choice with condition arms.
+pub const KW_SWITCH: &str = "when";
 
-/// S24 (ratified): arm arrow inside `switch` (same spelling as return types).
+/// S24 (ratified): arm arrow inside `when` (same spelling as return types).
 pub const OP_ARM_ARROW: &str = "->";
 
 /// S46 (ratified M8): lambda arrow — distinct from `->` return/arm arrow.
@@ -163,6 +173,13 @@ pub const OP_SHR: &str = ">>";
 /// S20 (ratified): escape sequences inside quoted text, and `{{` `}}` for
 /// literal braces.
 pub const ESCAPES: &[(char, char)] = &[('n', '\n'), ('t', '\t'), ('"', '"'), ('\\', '\\')];
+
+/// S67 (ratified 2026-06-15): numeric literal forms — `_` digit separators
+/// (stripped before parsing), base prefixes, and a `e`/`E` float exponent.
+pub const DIGIT_SEPARATOR: char = '_';
+pub const NUM_PREFIX_HEX: &str = "0x";
+pub const NUM_PREFIX_OCTAL: &str = "0o";
+pub const NUM_PREFIX_BINARY: &str = "0b";
 
 /// S13 (ratified): logical operators.
 pub const OP_AND: &str = "&&";
@@ -223,8 +240,12 @@ pub const FOREIGN_USE: &str = "use";
 pub const FOREIGN_PRINTLN: &str = "println";
 pub const FOREIGN_TEXT: &str = "Text";
 
-/// S24: `match` recognized only for a teaching error naming `switch`.
+/// S24: `match` recognized only for a teaching error naming `when`.
 pub const FOREIGN_MATCH: &str = "match";
+
+/// S24 (D-SG1): `switch` recognized only for a teaching error naming `when`
+/// (the keyword was `switch` before the 2026-06-15 rename).
+pub const FOREIGN_SWITCH: &str = "switch";
 
 /// S32 (ratified M3): foreign optional spellings for teaching error E0020.
 pub const FOREIGN_NONE: &str = "None";
@@ -269,8 +290,18 @@ pub const TYPE_RESULT: &str = "Result";
 pub const LIT_OK: &str = "ok";
 pub const LIT_ERR: &str = "err";
 
-/// S35 (ratified M4): fallback when a fallible value is absent.
-pub const OP_OR_FALLBACK: &str = "or";
+/// S35 (ratified M4; spelling updated by S71/D-SG6): the fallback operator,
+/// supplying a value, `return`, or `panic` when a `T?` is absent or a `T ? E`
+/// failed. Spelled `??` since the 2026-06-15 rename (was the word `or`).
+pub const OP_FALLBACK: &str = "??";
+
+/// S71 (ratified 2026-06-15, D-SG6): optional chaining — `a?.b` yields a `T?`
+/// and short-circuits to absent on the first missing link.
+pub const OP_OPTIONAL_CHAIN: &str = "?.";
+
+/// S71 (ratified 2026-06-15, D-SG6): the retired word fallback, kept only for
+/// the teaching error that points at `??`.
+pub const FOREIGN_OR_FALLBACK: &str = "or";
 
 /// S36 (ratified M4): bug-stop builtins (like `print`).
 pub const BUILTIN_PANIC: &str = "panic";

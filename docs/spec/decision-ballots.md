@@ -67,3 +67,7 @@ this queue:
 - **Group 10** — D-LSP1…13 — docs/plans/epoch-1/m13-lsp.md.
 - **Group 11** — D-JPK1…15 — docs/spec/syntax-decisions.md (plan:
   docs/plans/jetpack-jetos/README.md).
+- **Group 13** — D-SG1…9 (syntax gallery) — docs/spec/syntax-decisions.md
+  (S24/S22/S35/S42 amendments + S68–S74). Decided 2026-06-15; D-SG6 = option C
+  (`??`, retire `or`), rest per recommendations. Implementation tracked in the
+  syntax-gallery Resolved log.

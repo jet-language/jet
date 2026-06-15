@@ -41,10 +41,10 @@ fn read_count(path: String) -> Int ? {
 Now the interesting part is how you *consume* one, because Jet gives you three
 ways and each is the right one somewhere.
 
-## `or` — give me a fallback and move on
+## `??` — give me a fallback and move on
 
 ```jet
-val age = parse_age("42") or 0;
+val age = parse_age("42") ?? 0;
 print(age);
 ```
 
@@ -52,10 +52,10 @@ print(age);
 42
 ```
 
-`or` says "the success value, or this if it failed." It's the quickest path
+`??` says "the success value, or this if it failed." It's the quickest path
 when you have a sensible default. The right-hand side can also bail out instead
-of supplying a value — `parse_age(s) or return`, or `or panic("bad input")` —
-so `or` covers "recover" and "give up" both.
+of supplying a value — `parse_age(s) ?? return`, or `?? panic("bad input")` —
+so `??` covers "recover" and "give up" both.
 
 ## `?` — pass the failure up to my caller
 
@@ -73,13 +73,13 @@ parse_age("7")?;` — with the error handling factored out into one character.
 The catch: `?` can only live in a function that itself returns a compatible
 fallible type, because that's where the early error goes.
 
-## `switch` — handle each outcome explicitly
+## `when` — handle each outcome explicitly
 
-When you actually want to do different things for success and failure, switch
+When you actually want to do different things for success and failure, when
 over the result:
 
 ```jet
-switch parse_age("x") {
+when parse_age("x") {
     it == ok(n)  -> { print(n); };
     it == err(e) -> { print(e); };
 }
@@ -109,15 +109,15 @@ it, return an `err`; if it means your own code is wrong, `require`/`panic`.
 
 `main` may not return a fallible type. At the top of your program you have to decide
 what a failure *means* — print something and exit, fall back to a default, or
-panic — using the same `or` / `switch` / `panic` tools. Failures don't get to
+panic — using the same `??` / `when` / `panic` tools. Failures don't get to
 disappear off the top of the stack.
 
 ## What you actually have to remember
 
 - Fallible functions return `T ? E`, or `T ?` for the default `Error`; build outcomes with `ok` / `err`.
-- `value or fallback` — recover or bail with a default.
+- `value ?? fallback` — recover or bail with a default.
 - `value?` — propagate the error to your caller (only inside a fallible function).
-- `switch` with `it == ok(n)` / `it == err(e)` — handle both sides yourself.
+- `when` with `it == ok(n)` / `it == err(e)` — handle both sides yourself.
 - `require` / `panic` are for bugs, not for expected bad input.
 
 One syntax edge: in a function return type, `T?` is formatted as `T ?` and

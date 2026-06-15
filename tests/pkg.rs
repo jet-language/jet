@@ -345,9 +345,14 @@ fn store_path_format_name_version_fp() {
 
 #[test]
 fn store_path_strips_sha256_prefix() {
-    let with_pfx = jet::store::store_path("mylib", "1.0.0", "sha256-deadbeef");
-    let without = jet::store::store_path("mylib", "1.0.0", "deadbeef");
-    assert_eq!(with_pfx, without);
+    let tmp = tmp_dir("store_path_idem");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    with_store(&store, || {
+        let with_pfx = jet::store::store_path("mylib", "1.0.0", "sha256-deadbeef");
+        let without = jet::store::store_path("mylib", "1.0.0", "deadbeef");
+        assert_eq!(with_pfx, without);
+    });
 }
 
 // ─────────────────────────────────────────────

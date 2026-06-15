@@ -1,0 +1,110 @@
+// functional-pack.jet
+//
+// A runnable sketch of a future `pack.jet` that is deliberately functional:
+// data in, transformed data out. There are no builder objects, methods, or
+// mutable shared config; each function returns a new value.
+import std.json as json;
+struct Source {
+    name: String;
+    upstream: String;
+    via: String;
+}
+struct Package {
+    source: String;
+    name: String;
+}
+struct Overlay {
+    source: String;
+    packages: [String];
+}
+struct Pack {
+    sources: [Source];
+    overlays: [Overlay];
+    prompt: String;
+}
+fn nix_source(take name: String, take upstream: String) -> Source {
+    return Source {name: name, upstream: upstream, via: "nix"};
+}
+fn core_source(take name: String, take upstream: String) -> Source {
+    return Source {name: name, upstream: upstream, via: "core"};
+}
+fn overlay(take source: String, take packages: [String]) -> Overlay {
+    return Overlay {source: source, packages: packages};
+}
+fn pack_item(take source: String, take name: String) -> Package {
+    return Package {source: source, name: name};
+}
+fn flatten_overlay(take o: Overlay) -> [Package] {
+    var out: [Package] = [];
+    val names = o.packages;
+    val source = o.source;
+    for name in names {
+        out.push(pack_item(source.clone(), take name));
+    }
+    return out;
+}
+fn packages(take pack: Pack) -> [Package] {
+    var out: [Package] = [];
+    val overlays = pack.overlays;
+    for o in overlays {
+        val grouped = flatten_overlay(take o);
+        for p in grouped {
+            out.push(p);
+        }
+    }
+    return out;
+}
+fn source_ref(take p: Package) -> String {
+    return "{p.source}:{p.name}";
+}
+fn package_refs(take pack: Pack) -> [String] {
+    var out: [String] = [];
+    for p in packages(take pack) {
+        out.push(source_ref(take p));
+    }
+    return out;
+}
+fn source_directives(take sources: [Source]) -> [JSON] {
+    var out: [JSON] = [];
+    for s in sources {
+        out.push(source_json(take s));
+    }
+    return out;
+}
+fn text_array(take items: [String]) -> [JSON] {
+    var out: [JSON] = [];
+    for item in items {
+        out.push(JSON.Text(item));
+    }
+    return out;
+}
+fn source_json(take s: Source) -> JSON {
+    var m: [String, JSON] = [:];
+    m["kind"] = JSON.Text("source");
+    m["name"] = JSON.Text(s.name);
+    m["upstream"] = JSON.Text(s.upstream);
+    m["via"] = JSON.Text(s.via);
+    return JSON.Object(m);
+}
+fn packages_json(take pack: Pack) -> JSON {
+    var m: [String, JSON] = [:];
+    m["kind"] = JSON.Text("packages");
+    m["items"] = JSON.Array(text_array(package_refs(take pack)));
+    return JSON.Object(m);
+}
+fn prompt_json(take label: String) -> JSON {
+    var m: [String, JSON] = [:];
+    m["kind"] = JSON.Text("prompt");
+    m["label"] = JSON.Text(label);
+    return JSON.Object(m);
+}
+pub fn shell() -> [JSON] {
+    val pack = Pack {sources: [nix_source("stable", "github:NixOS/nixpkgs/nixos-24.05"), nix_source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable"), core_source("mine", "path:../jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"};
+    var directives = source_directives(pack.sources.clone());
+    directives.push(packages_json(pack.clone()));
+    directives.push(prompt_json(pack.prompt.clone()));
+    return directives;
+}
+fn main() {
+    print(json.render_pretty(JSON.Array(shell())));
+}

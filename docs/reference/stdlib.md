@@ -27,10 +27,10 @@ fn main() {
         io.eprint("usage: greet <name>");
         return;
     }
-    val name = args.get(1) or return;
-    val greeting = env.get("GREETING") or "hello";
-    fs.write("/tmp/greet.txt", "{greeting}, {name}!") or return;
-    print(fs.read("/tmp/greet.txt") or return);
+    val name = args.get(1) ?? return;
+    val greeting = env.get("GREETING") ?? "hello";
+    fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return;
+    print(fs.read("/tmp/greet.txt") ?? return);
 }
 ```
 
@@ -71,15 +71,15 @@ first-party packages.
 ## Errors and results
 
 Fallible std functions return `T ? E`. Handle them like any other Jet
-result — with `?`, `or`, or a pattern test:
+result — with `?`, `??`, or a pattern test:
 
 ```jet
 import std.fs as fs;
 
 fn main() {
-    val text = fs.read("data.txt") or return;   // stop on error
+    val text = fs.read("data.txt") ?? return;   // stop on error
     val upper = text.to_upper();
-    fs.write("out.txt", upper) or panic("couldn't save");  // bug if this fails
+    fs.write("out.txt", upper) ?? panic("couldn't save");  // bug if this fails
 }
 ```
 
@@ -109,29 +109,29 @@ import std.fs as fs;
 
 fn main() {
     val path = "/tmp/notes.txt";
-    fs.write(path, "hello\n") or return;
-    fs.append(path, "world\n") or return;
-    print(fs.read(path) or return);        // "hello\nworld\n"
+    fs.write(path, "hello\n") ?? return;
+    fs.append(path, "world\n") ?? return;
+    print(fs.read(path) ?? return);        // "hello\nworld\n"
     print(fs.exists(path));                // true
     print(fs.is_dir("/tmp"));              // true
-    val names = fs.list_dir("/tmp") or return;
+    val names = fs.list_dir("/tmp") ?? return;
     print(names.len());
 }
 ```
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `read(path)` | `String or IOError` | Read entire file as UTF-8 text |
-| `read_bytes(path)` | `[U8] or IOError` | Read entire file as bytes |
-| `write(path, text)` | `() or IOError` | Create or overwrite a text file |
-| `append(path, text)` | `() or IOError` | Append text to a file |
+| `read(path)` | `String ? IOError` | Read entire file as UTF-8 text |
+| `read_bytes(path)` | `[U8] ? IOError` | Read entire file as bytes |
+| `write(path, text)` | `() ? IOError` | Create or overwrite a text file |
+| `append(path, text)` | `() ? IOError` | Append text to a file |
 | `exists(path)` | `Bool` | Whether the path exists |
-| `remove(path)` | `() or IOError` | Delete a file |
-| `list_dir(path)` | `[String] or IOError` | Names in a directory |
-| `create_dir(path)` | `() or IOError` | Create a directory |
+| `remove(path)` | `() ? IOError` | Delete a file |
+| `list_dir(path)` | `[String] ? IOError` | Names in a directory |
+| `create_dir(path)` | `() ? IOError` | Create a directory |
 | `is_dir(path)` | `Bool` | Whether the path is a directory |
-| `copy(from, to)` | `() or IOError` | Copy a file |
-| `rename(from, to)` | `() or IOError` | Rename or move a file |
+| `copy(from, to)` | `() ? IOError` | Copy a file |
+| `rename(from, to)` | `() ? IOError` | Rename or move a file |
 
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
 
@@ -144,7 +144,7 @@ import std.io as io;
 
 fn main() {
     val args = io.args();                    // [String]; index 0 is the program name
-    val name = io.input("your name? ") or return;  // reads one line, strips newline
+    val name = io.input("your name? ") ?? return;  // reads one line, strips newline
     print("hi, {name}");
     io.eprint("(log) done");                 // like print, but to stderr
 }
@@ -159,8 +159,8 @@ printf "Ada\n" | jet run ask.jet
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `args()` | `[String]` | Command-line arguments |
-| `input([prompt])` | `String or IOError` | Read one line from stdin; optional prompt |
-| `read_all_input()` | `String or IOError` | Read all of stdin to end-of-file |
+| `input([prompt])` | `String ? IOError` | Read one line from stdin; optional prompt |
+| `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 
 `print` stays in the core prelude (no import). Use `io.eprint` for stderr.
@@ -174,10 +174,10 @@ import std.env as env;
 
 fn main() {
     val home = env.home_dir();               // String? — may be null
-    val mode = env.get("MODE") or "dev";     // String? from the environment
+    val mode = env.get("MODE") ?? "dev";     // String? from the environment
     env.set("MODE", "prod");                 // set for child processes
-    val here = env.current_dir() or return;  // current working directory
-    print(home or "(no home)");
+    val here = env.current_dir() ?? return;  // current working directory
+    print(home ?? "(no home)");
     print(mode);
     print(here);
 }
@@ -187,7 +187,7 @@ fn main() {
 |----------|---------|--------------|
 | `get(name)` | `String?` | Environment variable, or null if unset |
 | `set(name, value)` | nothing | Set an environment variable |
-| `current_dir()` | `String or IOError` | Current working directory |
+| `current_dir()` | `String ? IOError` | Current working directory |
 | `home_dir()` | `String?` | User home directory, if known |
 
 ---
@@ -198,7 +198,7 @@ fn main() {
 import std.process as process;
 
 fn main() {
-    val result = process.run(["echo", "hi"]) or return;
+    val result = process.run(["echo", "hi"]) ?? return;
     print(result.code);       // exit code as Int
     print(result.output);     // stdout as String
     print(result.errors);     // stderr as String
@@ -209,7 +209,7 @@ fn main() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessResult or IOError` | Run a command; `cmd` is `[String]` |
+| `run(cmd)` | `ProcessResult ? IOError` | Run a command; `cmd` is `[String]` |
 
 **`ProcessResult`** — `code: Int`, `output: String`, `errors: String`.
 
@@ -314,7 +314,7 @@ import std.json as json;
 
 fn main() {
     val raw = "{{\"name\":\"jet\",\"ok\":true,\"n\":1.5}}";
-    val data = json.parse(raw) or return;
+    val data = json.parse(raw) ?? return;
     print(json.render(data));                 // compact one line
     print(json.render_pretty(data));           // indented
 
@@ -331,7 +331,7 @@ fn main() {
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `parse(text)` | `JSON or JSONError` | Parse a JSON string |
+| `parse(text)` | `JSON ? JSONError` | Parse a JSON string |
 | `render(j)` | `String` | Compact JSON text |
 | `render_pretty(j)` | `String` | Indented JSON text |
 
@@ -376,7 +376,7 @@ fn main() {
         sender.send(42);
     });
     task.join();
-    print(ch.receive() or panic("channel closed"));
+    print(ch.receive() ?? panic("channel closed"));
 }
 ```
 
@@ -387,7 +387,7 @@ fn main() {
 | `tasks.channel<T>()` | `Channel<T>` | Create a typed channel receive half |
 | `ch.sender()` | `Sender<T>` | Create a clonable send half |
 | `sender.send(value)` | nothing | Move one value into the channel |
-| `ch.receive()` | `T or Closed` | Block for a value, or return `Closed` when senders are gone |
+| `ch.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 
 Values crossing `spawn` or `send` must be sendable: no `view` borrows, no
 structs containing `ref` fields, no trait values, and no closure values unless
@@ -405,9 +405,9 @@ error (**E1003**).
 fn main() {
     val b: U8 = 255;
     print(b.to_int());                       // 255 as Int
-    val n = 42.to_u8() or return;            // checked conversion
+    val n = 42.to_u8() ?? return;            // checked conversion
     val bytes = "hi".bytes();                // [U8]
-    val text = String.from_bytes(bytes) or return;
+    val text = String.from_bytes(bytes) ?? return;
     print(text);
 }
 ```
@@ -415,8 +415,8 @@ fn main() {
 | API | Returns | What it does |
 |-----|---------|--------------|
 | `String.bytes()` | `[U8]` | UTF-8 bytes of a string |
-| `String.from_bytes(bs)` | `String or UTF8Error` | Decode UTF-8 bytes |
-| `n.to_u8()` | `U8 or String` | Checked Int → U8 |
+| `String.from_bytes(bs)` | `String ? UTF8Error` | Decode UTF-8 bytes |
+| `n.to_u8()` | `U8 ? String` | Checked Int → U8 |
 | `b.to_int()` | `Int` | U8 → Int |
 
 Use `fs.read_bytes` / `fs.write` when you need raw file bytes.

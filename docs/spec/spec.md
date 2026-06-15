@@ -8,20 +8,28 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
 
 ## M1 — what exists today (values, expressions, control flow)
 
-### Jetical rules
+### Lexical rules
 
 - Source is UTF-8. Identifiers: a letter or `_`, then letters, digits, `_`.
 - Source files use the `.jet` extension (N2).
-- Line comments: `//` to end of line (S5).
+- Line comments: `//` to end of line (S5). Block comments: `/* … */`, which
+  nest (an unbalanced `/*` is E0002), so any region can be commented out (S5).
 - String literals: `"..."` on a single line. Escapes (S20): `\n` `\t` `\"`
   `\\` only; anything else after `\` is E0001. Interpolation (S8): `{expr}`
   embeds any printable expression; `{{` and `}}` write literal braces; a
   lone `{` or `}` is E0001.
-- Numbers: decimal `Int` (64-bit signed, E0007 if too large) and `Float`
-  (digits `.` digits). Unary minus is an operator, not part of the literal.
+- Multi-line strings (S70): `"""…"""` span multiple lines with the same escapes
+  and interpolation. The newline right after the opening `"""` and the one right
+  before the closing `"""` are dropped, and the closing `"""`'s indentation is
+  stripped from every line (Swift-style). An unterminated `"""` is E0002.
+- Numbers (S67): decimal `Int` (64-bit signed, E0007 if too large) and `Float`
+  (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
+  allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
+  give an `Int` (`0xFF`, `0o755`, `0b1010`), and a prefix with no digits is
+  E0001. Unary minus is an operator, not part of the literal.
 - `true` and `false` are `Bool` literals.
 - Statements end with `;` (S6 — required, including before `}`). Blocks
-  (`}` of `if`/`while`/`for`/`fn`) don't take one; `switch` arms do.
+  (`}` of `if`/`while`/`for`/`fn`) don't take one; `when` arms do.
 - The lexer recovers from bad characters and keeps going; one run reports
   every lexical error it can.
 
@@ -33,17 +41,22 @@ func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params   = param { "," param } ;
 param    = [ "mut" | "take" ] ident ":" type ;
 block    = "{" { stmt } "}" ;            // S3: curly braces
-stmt     = binding | assign | if | while | for | switch
+stmt     = binding | assign | if | while | for | when
          | "break" ";" | "continue" ";" | "return" [ expr ] ";"
          | expr ";" ;
-binding  = ( "val" | "var" ) ident [ ":" type ] "=" expr ";" ;
+binding  = ( "val" | "var" ) ( ident [ ":" type ] | destructure ) "=" expr ";" ;
+destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
+            | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr ";" ;
-if       = "if" expr block { "else" "if" expr block } [ "else" block ] ;
-while    = "while" expr block ;
-for      = "for" ident "in" expr ".." expr block ;   // S22: inclusive
-switch   = "switch" expr "{" { expr "->" block ";" }
-           "else" "->" block ";" "}" ;               // S24
+if       = "if" cond block { "else" "if" cond block } [ "else" block ] ;  // statement form
+while    = "while" cond block ;
+cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
+if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
+value-block = "{" { stmt } expr "}" ;                // trailing expr (no `;`) is the block's value
+for      = "for" ident "in" expr ".." expr [ "step" expr ] block ;  // S22 inclusive; D-SG8 step
+when     = "when" expr "{" { expr "->" block ";" }
+           "else" "->" block ";" "}" ;               // S24 (D-SG1: was `switch`)
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
            >  "|"  >  "^"  >  "&"  >  "<<" ">>"
@@ -73,7 +86,7 @@ expr     = precedence climbing over:
 - `if`/`else if`/`else` (conditions must be `Bool`); `while`; `for x in
   a..b` iterates a through b **inclusive** (S22); `break`/`continue`
   inside loops only (E0115, S23).
-- `switch subject { cond -> { ... }; else -> { ... }; }` (S24): arms are
+- `when subject { cond -> { ... }; else -> { ... }; }` (S24): arms are
   arbitrary `Bool` conditions tried top to bottom; `else` is mandatory.
   Lowered to an if/else chain; rustc optimizes it.
 - `print(x)` is built in (S9); takes exactly one printable argument
@@ -149,7 +162,7 @@ impl Circle {
 - Invoke with **`c.area()`** (not `area(c)`).
 - Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
 - Static methods omit `self` (e.g. `Circle.unit()`).
-- Enum `switch` arms must be exhaustive; missing cases are a compile error.
+- Enum `when` arms must be exhaustive; missing cases are a compile error.
 - **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
   `impl Type: Trait { … }` (qualify foreign types: `impl other.Point: Shape`).
@@ -172,22 +185,23 @@ Build outcomes with **`ok(v)`** and **`err(e)`**; test them with
 - In a function return type, **`T?`** parses as **`T ?`** and the formatter
   writes the space. A function that returns an optional writes
   **`-> (T?)`**.
-- **`or <expr>`** (S35) is the fallback operator on a fallible value:
-  yields the success payload or evaluates the right side. Precedence is
-  looser than **`&&`** / **`||`**, so `a? or b` and `x == 1 || y or 0`
+- **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
+  optional: yields the success payload or evaluates the right side. Precedence is
+  looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
   parse predictably. The right side may be a value, **`return`**, **`return expr`**,
-  or **`panic(…)`**.
+  or **`panic(…)`**. The retired word **`or`** is a teaching error pointing at
+  **`??`** (S71, D-SG6).
 - **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
   (S36) stop the program with a friendly report on stderr and exit code 70.
-- In **`switch <fallible-expr> { … }`**, when the subject is not a plain
+- In **`when <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == ok(n)`**.
-- **`main`** may not return a fallible type; handle errors with **`or`**, a
-  full **`switch`**, or **`panic`**.
+- **`main`** may not return a fallible type; handle errors with **`??`**, a
+  full **`when`**, or **`panic`**.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
 bad propagation (**E0403**), `ok`/`err` outside a result context (**E0404**),
 and fallback type mismatches (**E0405**) are compile errors with fixes that
-name **`?`**, **`or`**, and pattern tests.
+name **`?`**, **`??`**, and pattern tests.
 
 ## M6 phase 1 — `jet fmt` (done)
 
@@ -201,7 +215,7 @@ header, one statement per line, at most one blank line between top-level
 items, spaces around binary operators, no space before `;`/`,`/call `(`,
 trailing `;` on statements (S6). **Line width is not enforced in v1.**
 
-`//` comments are preserved and re-attached by source span. When S14
+`//` and `/* … */` comments are preserved and re-attached by source span. When S14
 teaching recovery has already lowered foreign spellings in the AST (`let` →
 `val`, `def` → `fn`, …), fmt prints the canonical form. Real parse errors
 still block fmt.
@@ -303,7 +317,7 @@ invokes rustc, so the cargo debug binary is sufficient.
 
 **Lambdas (S46):** `(params) => expr` or `(params) => { … }`. Parameter types
 may be omitted when the expected function type is known (**E0801** when not).
-The lambda arrow is **`=>`**; **`->`** stays for return types and `switch` arms.
+The lambda arrow is **`=>`**; **`->`** stays for return types and `when` arms.
 
 **Function types (S47):** `fn(T1, T2) -> R` (no parameter names; `-> R` may be
 omitted for no-return callbacks). Named `fn`s coerce to function values when
@@ -350,14 +364,14 @@ roots (`std`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
 alias.
 
 Fallible std functions return `T ? E` and must be handled with `?`,
-`or`, or pattern tests like any M4 result. File APIs use whole-file helpers
+`??`, or pattern tests like any M4 result. File APIs use whole-file helpers
 only; file handles and streaming are out of scope. Paths are `String` in M10.
 Binary APIs use `U8` and `[U8]`; integer literals for `U8` must be in
 0..255 (**E1003**). Unknown items in a std module are **E1004** with a
 did-you-mean suggestion when possible.
 
 Receiver additions: `String.bytes() -> [U8]`,
-`String.from_bytes([U8]) -> String or UTF8Error`, `n.to_u8()`, and
+`String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and
 `b.to_int()`. Time stays unix milliseconds (`time.now()`); random is
 deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
 `json.parse`, `json.render`, and `json.render_pretty`.

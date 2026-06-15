@@ -6,13 +6,14 @@
 //! preserved from the original source and re-attached by span.
 
 use crate::ast::{
-    AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
+    AccessConvention, BinOp, BindPattern, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch,
+    EnumDef,
     EnumLitArg, Expr, ExternFn, ExternRustBlock, Field, ForKind, Func, IfStmt, ImplDef, ImportDecl,
     ImportKind, Item, LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
     SwitchArm, TraitImplBlock, Type, TypeParam, UnOp, Variant, VariantPayload,
 };
 use crate::diag::Span;
-use crate::lexer::{line_comments, TokKind, Token};
+use crate::lexer::{comments, TokKind, Token};
 use crate::syntax;
 
 const INDENT: usize = 4;
@@ -23,7 +24,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         .iter()
         .map(|t| Comment {
             text: match &t.kind {
-                TokKind::LineComment(s) => s.clone(),
+                TokKind::LineComment(s) | TokKind::BlockComment(s) => s.clone(),
                 _ => unreachable!(),
             },
             span: t.span,
@@ -295,8 +296,9 @@ impl<'a> Fmt<'a> {
 
     fn emit_comment_line(&mut self, text: &str) {
         // Start the line without a spurious leading newline at BOF (S44 has no
-        // "blank line before first item" rule).
-        if !self.out.is_empty() {
+        // "blank line before first item" rule) and without doubling the break
+        // when a previous comment already left us at the line start.
+        if !self.out.is_empty() && !self.at_line_start {
             self.newline();
         }
         self.write_indent();
@@ -339,6 +341,17 @@ impl<'a> Fmt<'a> {
         let r = f(self);
         self.indent -= 1;
         r
+    }
+
+    /// S69 (D-SG3): did the author put a line break before this chain step's
+    /// `.`? `from` is the receiver's end offset, `to` is the method/field's
+    /// start offset; a `\n` in between means the chain was broken on purpose.
+    fn chain_break_between(&self, from: usize, to: usize) -> bool {
+        from <= to
+            && self
+                .src
+                .get(from..to)
+                .is_some_and(|s| s.contains('\n'))
     }
 
     fn fmt_item(&mut self, item: &Item) {
@@ -774,7 +787,7 @@ impl<'a> Fmt<'a> {
             Stmt::If(i) => self.fmt_if(i),
             Stmt::While { cond, body, .. } => {
                 self.write("while ");
-                self.fmt_expr(cond, Prec::OrFallback);
+                self.fmt_cond(cond);
                 self.write(" {");
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -795,10 +808,14 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(" in ");
                 match kind {
-                    ForKind::Range { start, end } => {
+                    ForKind::Range { start, end, step } => {
                         self.fmt_expr(start, Prec::OrFallback);
                         self.write("..");
                         self.fmt_expr(end, Prec::OrFallback);
+                        if let Some(step) = step {
+                            self.write(&format!(" {} ", syntax::KW_RANGE_STEP));
+                            self.fmt_expr(step, Prec::OrFallback);
+                        }
                     }
                     ForKind::In { collection } => {
                         self.fmt_expr(collection, Prec::OrFallback);
@@ -815,7 +832,8 @@ impl<'a> Fmt<'a> {
                 else_body,
                 ..
             } => {
-                self.write("switch ");
+                self.write(syntax::KW_SWITCH);
+                self.write(" ");
                 self.fmt_expr(subject, Prec::OrFallback);
                 self.write(" {");
                 self.newline();
@@ -850,9 +868,32 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// S68 (D-SG2): render an `if`/`while` condition without wrapping the
+    /// outermost expression in redundant parens. Precedence-required parens on
+    /// nested sub-expressions are preserved by the normal `fmt_expr` rules.
+    fn fmt_cond(&mut self, cond: &Expr) {
+        self.fmt_expr(cond, Prec::Primary);
+    }
+
+    /// S68 (D-SG2): render an `if`-expression branch `{ stmts… value }`.
+    fn fmt_value_block(&mut self, stmts: &[Stmt], value: &Expr) {
+        self.write("{");
+        self.newline();
+        self.with_indent(|f| {
+            f.fmt_block_stmts(stmts);
+            if !stmts.is_empty() {
+                f.newline();
+            }
+            f.fmt_expr(value, Prec::OrFallback);
+        });
+        self.end_block();
+    }
+
     fn fmt_if(&mut self, i: &IfStmt) {
         self.write("if ");
-        self.fmt_expr(&i.cond, Prec::OrFallback);
+        // S68 (D-SG2): conditions use the no-paren house style — the outer
+        // redundant parens of `if (cond)` are stripped.
+        self.fmt_cond(&i.cond);
         self.write(" {");
         self.newline();
         self.with_indent(|f| f.fmt_block_stmts(&i.then_body));
@@ -897,18 +938,42 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
-            Expr::Binary(BinOp::Eq, lhs, rhs, _) if expr_same_subject(lhs, subject) => {
+            Expr::Binary(BinOp::Eq, lhs, rhs, _) if self.same_subject(lhs, subject) => {
                 self.fmt_expr(rhs, Prec::Cmp);
             }
             Expr::PatternTest {
                 subject: lhs,
                 pattern,
                 ..
-            } if expr_same_subject(lhs, subject) => {
+            } => {
+                // A pattern arm keeps its `subject == pattern` shape: the bare
+                // pattern would re-parse as a value comparison and drop the
+                // binding names (e.g. `| ok(n)` wouldn't bind `n`). When the arm
+                // repeats the subject, collapse it to `it` so the subject is
+                // evaluated once and stays exhaustiveness-checkable (S24).
+                if self.same_subject(lhs, subject) {
+                    self.write(syntax::KW_IT);
+                } else {
+                    self.fmt_expr(lhs, Prec::Cmp);
+                }
+                self.write(" == ");
                 self.fmt_pattern(pattern);
             }
             _ => self.fmt_expr(cond, prec),
         }
+    }
+
+    /// True when `a` denotes the `when` subject: either the `it` placeholder or
+    /// an expression with byte-for-byte the same source text as `subject`.
+    fn same_subject(&self, a: &Expr, subject: &Expr) -> bool {
+        if let Expr::Ident(name, _) = a {
+            if name == syntax::KW_IT {
+                return true;
+            }
+        }
+        let a_src = self.src.get(a.span().start..a.span().end);
+        let subj_src = self.src.get(subject.span().start..subject.span().end);
+        matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
@@ -922,13 +987,56 @@ impl<'a> Fmt<'a> {
             });
         }
         self.write(" ");
-        self.write(&b.name);
-        if let Some(ty) = &b.ty {
-            self.write(": ");
-            self.fmt_type(ty);
+        if let Some(pat) = &b.pattern {
+            // S74: a destructuring target stands in for the name.
+            self.fmt_bind_pattern(pat);
+        } else {
+            self.write(&b.name);
+            if let Some(ty) = &b.ty {
+                self.write(": ");
+                self.fmt_type(ty);
+            }
         }
         self.write(" = ");
         self.fmt_expr(&b.init, Prec::OrFallback);
+    }
+
+    fn fmt_bind_pattern(&mut self, pat: &BindPattern) {
+        match pat {
+            BindPattern::Struct {
+                type_name, fields, ..
+            } => {
+                self.write(type_name);
+                self.write(" { ");
+                for (i, f) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(&f.name);
+                }
+                self.write(" }");
+            }
+            BindPattern::List { elems, .. } => {
+                self.write("[");
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(&e.name);
+                }
+                self.write("]");
+            }
+            BindPattern::Tuple { elems, .. } => {
+                self.write("(");
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(&e.name);
+                }
+                self.write(")");
+            }
+        }
     }
 
     fn fmt_lvalue(&mut self, lv: &LValue) {
@@ -1005,6 +1113,18 @@ impl<'a> Fmt<'a> {
             Type::TraitObject(t) => {
                 self.write(t);
             }
+            Type::Tuple(fields) => {
+                self.write("(");
+                for (i, (name, ty)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(name);
+                    self.write(": ");
+                    self.fmt_type(ty);
+                }
+                self.write(")");
+            }
         }
     }
 
@@ -1027,7 +1147,34 @@ impl<'a> Fmt<'a> {
 
     fn fmt_expr(&mut self, expr: &Expr, prec: Prec) {
         match expr {
-            Expr::Str(parts, _) => self.fmt_str(parts),
+            // S68 (D-SG2): `if` used as a value.
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
+                self.write("if ");
+                self.fmt_cond(cond);
+                self.write(" ");
+                self.fmt_value_block(then_body, then_value);
+                self.write(" else ");
+                if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
+                    self.fmt_expr(else_value, Prec::OrFallback);
+                } else {
+                    self.fmt_value_block(else_body, else_value);
+                }
+            }
+            Expr::Str(parts, span) => {
+                // S70 (D-SG5): re-derive the triple-quoted shape from the source.
+                if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
+                    self.fmt_str_multiline(parts);
+                } else {
+                    self.fmt_str(parts);
+                }
+            }
             Expr::Int(n, _) => self.write(&n.to_string()),
             Expr::Float(v, _) => self.write(&fmt_float(*v)),
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
@@ -1041,6 +1188,18 @@ impl<'a> Fmt<'a> {
                     self.fmt_expr(e, Prec::OrFallback);
                 }
                 self.write("]");
+            }
+            Expr::TupleLit(fields, _, _) => {
+                self.write("(");
+                for (i, (name, e)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(name);
+                    self.write(": ");
+                    self.fmt_expr(e, Prec::OrFallback);
+                }
+                self.write(")");
             }
             Expr::MapLit(pairs, _) => {
                 self.write("[");
@@ -1108,23 +1267,56 @@ impl<'a> Fmt<'a> {
                 self.write("*");
                 self.fmt_expr(inner, Prec::Unary);
             }
-            Expr::Field(base, field, _) => {
+            Expr::Field(base, field, span) => {
                 self.fmt_expr(base, Prec::Postfix);
-                self.write(".");
-                self.write(field);
+                // S69 (D-SG3): keep an author-placed break before `.field`.
+                if self.chain_break_between(base.span().end, span.end) {
+                    // The receiver's own trailing comment (e.g. `.step()  // note`)
+                    // stays on its line, before we break to this step.
+                    self.emit_trailing(base.span().end);
+                    self.with_indent(|f| {
+                        f.newline();
+                        f.write(".");
+                        f.write(field);
+                    });
+                } else {
+                    self.write(".");
+                    self.write(field);
+                }
+            }
+            Expr::OptField { base, member, .. } => {
+                self.fmt_expr(base, Prec::Postfix);
+                self.write("?.");
+                self.write(member);
             }
             Expr::MethodCall {
                 receiver,
                 method,
+                method_span,
                 args,
                 ..
             } => {
                 self.fmt_expr(receiver, Prec::Postfix);
-                self.write(".");
-                self.write(method);
-                self.write("(");
-                self.fmt_call_args(args);
-                self.write(")");
+                // S69 (D-SG3): keep an author-placed break before `.method(...)`.
+                if self.chain_break_between(receiver.span().end, method_span.start) {
+                    // The receiver's own trailing comment (e.g. `.step()  // note`)
+                    // stays on its line, before we break to this step.
+                    self.emit_trailing(receiver.span().end);
+                    self.with_indent(|f| {
+                        f.newline();
+                        f.write(".");
+                        f.write(method);
+                        f.write("(");
+                        f.fmt_call_args(args);
+                        f.write(")");
+                    });
+                } else {
+                    self.write(".");
+                    self.write(method);
+                    self.write("(");
+                    self.fmt_call_args(args);
+                    self.write(")");
+                }
             }
             Expr::StructLit {
                 type_name,
@@ -1220,7 +1412,7 @@ impl<'a> Fmt<'a> {
                     self.write("(");
                 }
                 self.fmt_expr(value, Prec::OrFallback.add_rhs());
-                self.write(" or ");
+                self.write(" ?? ");
                 self.fmt_or_fallback(fallback);
                 if prec > Prec::OrFallback {
                     self.write(")");
@@ -1369,6 +1561,35 @@ impl<'a> Fmt<'a> {
         }
         self.write("\"");
     }
+
+    /// S70 (D-SG5): re-emit a triple-quoted string. Content sits at the current
+    /// indent, so re-lexing strips exactly the same prefix the closing `"""`
+    /// sets — keeping `jet fmt` idempotent.
+    fn fmt_str_multiline(&mut self, parts: &[StrPart]) {
+        self.write("\"\"\"");
+        self.newline();
+        for part in parts {
+            match part {
+                StrPart::Lit(s) => {
+                    for (i, line) in s.split('\n').enumerate() {
+                        if i > 0 {
+                            self.newline();
+                        }
+                        if !line.is_empty() {
+                            self.write(&escape_str_multiline(line));
+                        }
+                    }
+                }
+                StrPart::Interp(e) => {
+                    self.write("{");
+                    self.fmt_expr(e, Prec::OrFallback);
+                    self.write("}");
+                }
+            }
+        }
+        self.newline();
+        self.write("\"\"\"");
+    }
 }
 
 impl Prec {
@@ -1443,12 +1664,24 @@ fn fmt_char(c: char) -> String {
     }
 }
 
-fn expr_same_subject(a: &Expr, b: &Expr) -> bool {
-    match (a, b) {
-        (Expr::Ident(la, _), Expr::Ident(lb, _)) => la == lb,
-        (Expr::Ident(name, _), _) if name == syntax::KW_IT => true,
-        _ => false,
+/// Escape a single content line of a triple-quoted string (S70). Newlines are
+/// real line breaks here, so only `\`, the interpolation braces, and other
+/// control characters need escaping; quotes and tabs stay literal.
+fn escape_str_multiline(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\t' => out.push('\t'),
+            c if c == '{' || c == '}' => {
+                out.push(c);
+                out.push(c);
+            }
+            c if c.is_control() => out.push_str(&format!("\\u{{{}}}", c as u32)),
+            c => out.push(c),
+        }
     }
+    out
 }
 
 fn escape_str_lit(s: &str) -> String {
@@ -1477,7 +1710,7 @@ pub fn format_source(src: &str) -> Result<String, Vec<crate::diag::Diagnostic>> 
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let comments = line_comments(&toks);
+    let comments = comments(&toks);
     let prog = crate::parser::parse_for_fmt(&toks)?;
     Ok(format_program(&prog, src, &comments))
 }

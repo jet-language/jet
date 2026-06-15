@@ -81,7 +81,7 @@ cases verbatim. ✓
 
 ## M4 — Errors as values  *(plan: docs/plans/epoch-1/m04-errors.md; done 2026-06-11)*
 
-`T ? E` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
+`T ? E` fallible returns, `ok`/`err`, propagation `?` (S7), `??`
 fallback, `panic`/`require` for bugs with a friendly runtime report.
 No exceptions, no null, no silently ignored failures.
 **Exit:** a file-parsing example showing the happy path staying clean;

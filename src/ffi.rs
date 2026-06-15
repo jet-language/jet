@@ -253,6 +253,14 @@ fn type_key(ty: &Type) -> String {
             args.iter().map(type_key).collect::<Vec<_>>().join(",")
         ),
         Type::TraitObject(t) => format!("dyn {t}"),
+        Type::Tuple(fields) => format!(
+            "({})",
+            fields
+                .iter()
+                .map(|(n, t)| format!("{n}:{}", type_key(t)))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
     }
 }
 
@@ -372,7 +380,9 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Type::Apply { .. } | Type::TraitObject(_) => "Box<dyn std::any::Any>".to_string(),
+        Type::Apply { .. } | Type::TraitObject(_) | Type::Tuple(_) => {
+            "Box<dyn std::any::Any>".to_string()
+        }
     }
 }
 

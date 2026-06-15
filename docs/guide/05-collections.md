@@ -27,10 +27,10 @@ Indexing out of bounds doesn't get to corrupt anything; it stops with a clear
 report. And when you only *might* have an element, ask for it the safe way:
 
 ```jet
-print(nums.get(99) or -1);
+print(nums.get(99) ?? -1);
 ```
 
-`get` hands back an optional, so `nums.get(99) or -1` reads "the element if it's
+`get` hands back an optional, so `nums.get(99) ?? -1` reads "the element if it's
 there, otherwise -1" — no crash, no forgotten check.
 
 ## Maps
@@ -39,7 +39,7 @@ there, otherwise -1" — no crash, no forgotten check.
 fn main() {
     var counts: [String, Int] = [:];
     for word in "the quick the brown".split(" ") {
-        counts[word] = (counts.get(word) or 0) + 1;
+        counts[word] = (counts.get(word) ?? 0) + 1;
     }
     for key, count in counts {
         print("{key}: {count}");
@@ -54,8 +54,8 @@ the: 2
 ```
 
 A `[K, V]` associates keys with values. The empty map literal is `[:]` (the
-colon is what tells it apart from an empty list). `counts.get(word) or 0` is the
-classic "current count, or zero if I haven't seen this key" — the same `or` from
+colon is what tells it apart from an empty list). `counts.get(word) ?? 0` is the
+classic "current count, or zero if I haven't seen this key" — the same `??` from
 the errors chapter, doing the same job. Looping over a map gives you the key and
 value together: `for key, count in counts`.
 

@@ -61,7 +61,7 @@ enum Light {
 }
 
 fn label(light: Light) -> String {
-    switch light {
+    when light {
         light == Red    -> { return "stop"; };
         light == Yellow -> { return "caution"; };
         light == Green  -> { return "go"; };
@@ -69,13 +69,13 @@ fn label(light: Light) -> String {
 }
 ```
 
-You write a case as `Light.Red` and test it with `==`. Notice this `switch` has
+You write a case as `Light.Red` and test it with `==`. Notice this `when` has
 no `else` — and doesn't need one. Because `Light` has exactly three cases, the
 compiler can see you've covered all of them. Add a fourth case to the enum and
 forget to handle it, and Jet tells you which one you missed:
 
 ```
-Error [E0307]: `switch` doesn't cover every case — missing: Green
+Error [E0307]: `when` doesn't cover every case — missing: Green
  Why: when every arm is a pattern test, each variant must appear once
  Fix: add an arm for: Green
 ```
@@ -127,7 +127,7 @@ expressible.
 
 - `Type { field: v }` builds a struct; `value.method()` calls a method.
 - `self` is the receiver and obeys the ownership keywords like any parameter.
-- A `switch` over an enum must cover every case — the compiler keeps you honest.
+- A `when` over an enum must cover every case — the compiler keeps you honest.
 - "Maybe missing" is `T?`; build it with `value(x)` / `null`, read it by testing.
 
 Next: [errors as values](04-errors.md) — the same "you can't forget the bad

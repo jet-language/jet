@@ -12,7 +12,8 @@
 //!   - every operator result is fully parenthesized
 
 use crate::ast::{
-    AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind,
+    AccessConvention, BinOp, BindPattern, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field,
+    ForKind,
     Func, IfStmt, ImplDef, IndexKind, Item, LValue, Lambda, LambdaBody, OrFallback, Pattern,
     Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, TestDef, TraitImplBlock, Type,
     UnOp, VariantPayload,
@@ -24,7 +25,8 @@ use crate::loader;
 use crate::m9;
 use crate::sema::CompileMode;
 use crate::syntax;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 /// Emitted at the top of every program: core runtime helpers used by generated Rust.
 const PRELUDE: &str = include_str!("prelude/core.rs");
@@ -38,6 +40,357 @@ fn mangle(name: &str) -> String {
         "main".to_string()
     } else {
         format!("user_{}", name)
+    }
+}
+
+/// S73: stable lowered struct name for a canonical tuple shape.
+fn tuple_struct_name(fields: &[(String, Type)]) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for (name, ty) in fields {
+        name.hash(&mut hasher);
+        ty.name().hash(&mut hasher);
+    }
+    format!("JetTup_{:x}", hasher.finish())
+}
+
+fn tuple_fields_plain(fields: &[(String, Box<Type>)]) -> Vec<(String, Type)> {
+    fields
+        .iter()
+        .map(|(n, t)| (n.clone(), (**t).clone()))
+        .collect()
+}
+
+fn collect_tuple_shapes_from_type(ty: &Type, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+    if let Type::Tuple(fields) = ty {
+        let plain = tuple_fields_plain(fields);
+        out.insert(tuple_struct_name(&plain), plain);
+        for (_, t) in fields {
+            collect_tuple_shapes_from_type(t, out);
+        }
+        return;
+    }
+    match ty {
+        Type::List(inner) | Type::Option(inner) | Type::Shared(inner) => {
+            collect_tuple_shapes_from_type(inner, out);
+        }
+        Type::Map { key, value } => {
+            collect_tuple_shapes_from_type(key, out);
+            collect_tuple_shapes_from_type(value, out);
+        }
+        Type::Result { ok, err } => {
+            collect_tuple_shapes_from_type(ok, out);
+            collect_tuple_shapes_from_type(err, out);
+        }
+        Type::Fn { params, ret } => {
+            for p in params {
+                collect_tuple_shapes_from_type(p, out);
+            }
+            if let Some(r) = ret {
+                collect_tuple_shapes_from_type(r, out);
+            }
+        }
+        Type::Apply { args, .. } => {
+            for a in args {
+                collect_tuple_shapes_from_type(a, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+    match expr {
+        Expr::TupleLit(_, _, Some(ty)) => collect_tuple_shapes_from_type(ty, out),
+        Expr::Str(parts, _) => {
+            for p in parts {
+                if let StrPart::Interp(e) = p {
+                    collect_tuple_shapes_from_expr(e, out);
+                }
+            }
+        }
+        Expr::ListLit(elems, _) => {
+            for e in elems {
+                collect_tuple_shapes_from_expr(e, out);
+            }
+        }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, e) in fields {
+                collect_tuple_shapes_from_expr(e, out);
+            }
+        }
+        Expr::MapLit(entries, _) => {
+            for (k, v) in entries {
+                collect_tuple_shapes_from_expr(k, out);
+                collect_tuple_shapes_from_expr(v, out);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_tuple_shapes_from_expr(base, out);
+            collect_tuple_shapes_from_expr(index, out);
+        }
+        Expr::Slice { base, start, end, .. } => {
+            collect_tuple_shapes_from_expr(base, out);
+            collect_tuple_shapes_from_expr(start, out);
+            collect_tuple_shapes_from_expr(end, out);
+        }
+        Expr::Ident(_, _)
+        | Expr::Int(_, _)
+        | Expr::Float(_, _)
+        | Expr::Bool(_, _)
+        | Expr::Char(_, _)
+        | Expr::Absent(_) => {}
+        Expr::Call(c) => {
+            for a in &c.args {
+                collect_tuple_shapes_from_expr(&a.expr, out);
+            }
+        }
+        Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _) => collect_tuple_shapes_from_expr(inner, out),
+        Expr::Binary(_, l, r, _) => {
+            collect_tuple_shapes_from_expr(l, out);
+            collect_tuple_shapes_from_expr(r, out);
+        }
+        Expr::Field(inner, _, _) | Expr::OptField { base: inner, .. } => {
+            collect_tuple_shapes_from_expr(inner, out);
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            collect_tuple_shapes_from_expr(receiver, out);
+            for a in args {
+                collect_tuple_shapes_from_expr(&a.expr, out);
+            }
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, _, e) in fields {
+                collect_tuple_shapes_from_expr(e, out);
+            }
+        }
+        Expr::EnumLit { args, .. } => {
+            for a in args {
+                match a {
+                    EnumLitArg::Positional(e) => collect_tuple_shapes_from_expr(e, out),
+                    EnumLitArg::Named { expr, .. } => collect_tuple_shapes_from_expr(expr, out),
+                }
+            }
+        }
+        Expr::PatternTest { subject, .. } => collect_tuple_shapes_from_expr(subject, out),
+        Expr::OrFallback { value, fallback, .. } => {
+            collect_tuple_shapes_from_expr(value, out);
+            match fallback {
+                OrFallback::Value(v) => collect_tuple_shapes_from_expr(v, out),
+                OrFallback::Return(Some(v), _) => collect_tuple_shapes_from_expr(v, out),
+                OrFallback::Return(None, _) => {}
+                OrFallback::Panic { args, .. } => {
+                    for a in args {
+                        collect_tuple_shapes_from_expr(&a.expr, out);
+                    }
+                }
+            }
+        }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_tuple_shapes_from_expr(cond, out);
+            for s in then_body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+            collect_tuple_shapes_from_expr(then_value, out);
+            for s in else_body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+            collect_tuple_shapes_from_expr(else_value, out);
+        }
+        Expr::Lambda(l) => match &l.body {
+            LambdaBody::Expr(e) => collect_tuple_shapes_from_expr(e, out),
+            LambdaBody::Block(stmts) => {
+                for s in stmts {
+                    collect_tuple_shapes_from_stmt(s, out);
+                }
+            }
+        },
+        Expr::CallValue { callee, args, .. } => {
+            collect_tuple_shapes_from_expr(callee, out);
+            for a in args {
+                collect_tuple_shapes_from_expr(&a.expr, out);
+            }
+        }
+    }
+}
+
+fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+    match stmt {
+        Stmt::Expr(e) => collect_tuple_shapes_from_expr(e, out),
+        Stmt::Val(b) => {
+            if let Some(ty) = &b.ty {
+                collect_tuple_shapes_from_type(ty, out);
+            }
+            collect_tuple_shapes_from_expr(&b.init, out);
+        }
+        Stmt::Assign { value, .. } => collect_tuple_shapes_from_expr(value, out),
+        Stmt::Return(Some(e), _) => collect_tuple_shapes_from_expr(e, out),
+        Stmt::Return(None, _) => {}
+        Stmt::If(i) => collect_tuple_shapes_from_if(i, out),
+        Stmt::While { cond, body, .. } => {
+            collect_tuple_shapes_from_expr(cond, out);
+            for s in body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+        }
+        Stmt::For { kind, body, .. } => {
+            match kind {
+                ForKind::Range { start, end, step } => {
+                    collect_tuple_shapes_from_expr(start, out);
+                    collect_tuple_shapes_from_expr(end, out);
+                    if let Some(s) = step {
+                        collect_tuple_shapes_from_expr(s, out);
+                    }
+                }
+                ForKind::In { collection } => collect_tuple_shapes_from_expr(collection, out),
+            }
+            for s in body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            collect_tuple_shapes_from_expr(subject, out);
+            for a in arms {
+                collect_tuple_shapes_from_expr(&a.cond, out);
+                for s in &a.body {
+                    collect_tuple_shapes_from_stmt(s, out);
+                }
+            }
+            if let Some(body) = else_body {
+                for s in body {
+                    collect_tuple_shapes_from_stmt(s, out);
+                }
+            }
+        }
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Loop(_, _) | Stmt::Unsafe(_, _) => {}
+    }
+}
+
+fn collect_tuple_shapes_from_if(i: &IfStmt, out: &mut BTreeMap<String, Vec<(String, Type)>>) {
+    collect_tuple_shapes_from_expr(&i.cond, out);
+    for s in &i.then_body {
+        collect_tuple_shapes_from_stmt(s, out);
+    }
+    match &i.else_branch {
+        Some(ElseBranch::ElseIf(nested)) => collect_tuple_shapes_from_if(nested, out),
+        Some(ElseBranch::Else(stmts)) => {
+            for s in stmts {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+        }
+        None => {}
+    }
+}
+
+fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>> {
+    let mut out = BTreeMap::new();
+    for item in items {
+        match item {
+            Item::Func(f) => {
+                for p in &f.params {
+                    collect_tuple_shapes_from_type(&p.ty, &mut out);
+                }
+                if let Some(ret) = &f.return_type {
+                    collect_tuple_shapes_from_type(ret, &mut out);
+                }
+                for s in &f.body {
+                    collect_tuple_shapes_from_stmt(s, &mut out);
+                }
+            }
+            Item::Struct(s) => {
+                for field in &s.fields {
+                    collect_tuple_shapes_from_type(&field.ty, &mut out);
+                }
+                for m in &s.methods {
+                    for p in &m.params {
+                        collect_tuple_shapes_from_type(&p.ty, &mut out);
+                    }
+                    if let Some(ret) = &m.return_type {
+                        collect_tuple_shapes_from_type(ret, &mut out);
+                    }
+                    for s in &m.body {
+                        collect_tuple_shapes_from_stmt(s, &mut out);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for v in &e.variants {
+                    match &v.payload {
+                        VariantPayload::Unit => {}
+                        VariantPayload::Single(t, _) => collect_tuple_shapes_from_type(t, &mut out),
+                        VariantPayload::Named(fs) => {
+                            for f in fs {
+                                collect_tuple_shapes_from_type(&f.ty, &mut out);
+                            }
+                        }
+                    }
+                }
+            }
+            Item::Const(c) => {
+                collect_tuple_shapes_from_expr(&c.value, &mut out);
+            }
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    for p in &m.params {
+                        collect_tuple_shapes_from_type(&p.ty, &mut out);
+                    }
+                    if let Some(ret) = &m.return_type {
+                        collect_tuple_shapes_from_type(ret, &mut out);
+                    }
+                    for s in &m.body {
+                        collect_tuple_shapes_from_stmt(s, &mut out);
+                    }
+                }
+            }
+            Item::Test(t) => {
+                for s in &t.body {
+                    collect_tuple_shapes_from_stmt(s, &mut out);
+                }
+            }
+            Item::Trait(_) | Item::ExternRust(_) => {}
+        }
+    }
+    out
+}
+
+fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
+    let mut derives = vec!["Clone"];
+    if fields
+        .iter()
+        .all(|(_, t)| field_type_comparable(t, &cx.type_names))
+    {
+        derives.push("PartialEq");
+    }
+    out.push_str(&format!("#[derive({})]\nstruct {} {{\n", derives.join(", "), name));
+    for (fname, fty) in fields {
+        out.push_str(&format!(
+            "    pub {}: {},\n",
+            mangle(fname),
+            cx.rust_type(fty)
+        ));
+    }
+    out.push_str("}\n\n");
+}
+
+fn emit_tuple_structs(cx: &Cx, shapes: &BTreeMap<String, Vec<(String, Type)>>, out: &mut String) {
+    for (name, fields) in shapes {
+        emit_tuple_struct(cx, name, fields, out);
     }
 }
 
@@ -82,7 +435,7 @@ struct Cx {
     extern_funcs: HashMap<String, String>,
 }
 
-const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
+const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
 
 fn is_json_type_name(name: &str) -> bool {
     name == syntax::TYPE_JSON || name == "Json"
@@ -205,6 +558,7 @@ impl Cx {
             }
             Type::TraitObject(t) => format!("Box<dyn {}>", generics::user_trait_rust(t)),
             Type::Fn { params, ret } => self.rust_fn_trait(params, ret.as_deref(), false),
+            Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
         }
     }
 
@@ -289,6 +643,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push('\n');
 
     let cx = build_cx(prog, src, file);
+    let tuple_shapes = collect_tuple_shapes(&prog.items);
+    emit_tuple_structs(&cx, &tuple_shapes, &mut out);
 
     for item in &prog.items {
         match item {
@@ -358,6 +714,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     let mut cx = build_cx(prog, src, file);
     cx.test_mode = true;
+    let tuple_shapes = collect_tuple_shapes(&prog.items);
+    emit_tuple_structs(&cx, &tuple_shapes, &mut out);
 
     for item in &prog.items {
         match item {
@@ -666,6 +1024,9 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>) -> bool {
         Type::Named(n) if generics::is_type_var_name(n) => true,
         Type::Named(n) => types.contains(n),
         Type::Apply { args, .. } => args.iter().all(|a| field_type_cloneable(a, types)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| field_type_cloneable(t, types)),
         Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }
@@ -695,6 +1056,9 @@ fn field_type_comparable(ty: &Type, types: &HashSet<String>) -> bool {
         Type::Named(n) if generics::is_type_var_name(n) => true,
         Type::Named(n) => types.contains(n),
         Type::Apply { args, .. } => args.iter().all(|a| field_type_comparable(a, types)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| field_type_comparable(t, types)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
     }
 }
@@ -1293,6 +1657,98 @@ fn emit_stmt(
 ) {
     let pad = "    ".repeat(indent);
     match stmt {
+        Stmt::Val(b) if b.pattern.is_some() => {
+            // S74: destructuring binding. Evaluate the initializer once into a
+            // temp, then bind each name from a field/element of it.
+            let pat = b.pattern.as_ref().unwrap();
+            let tmp = format!("__jet_d{}", pat.span().start);
+            let init = emit_expr(cx, &b.init, env);
+            // Borrow the initializer (we clone the parts we bind) so that
+            // destructuring a `view` parameter or any borrowed value never
+            // moves out of a shared reference (I2).
+            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, init));
+            let mut_kw = if b.mutable { "let mut" } else { "let" };
+            match pat {
+                BindPattern::Struct { fields, .. } => {
+                    let field_tys: HashMap<String, Type> = expr_jet_ty(&b.init, env)
+                        .as_ref()
+                        .and_then(|t| match t {
+                            Type::Named(n) | Type::Apply { name: n, .. } => {
+                                cx.struct_fields.get(n)
+                            }
+                            _ => None,
+                        })
+                        .map(|fs| fs.iter().cloned().collect())
+                        .unwrap_or_default();
+                    for f in fields {
+                        let m = mangle(&f.name);
+                        out.push_str(&format!(
+                            "{}{} {} = ({}).{}.clone();\n",
+                            pad, mut_kw, m, tmp, m
+                        ));
+                        env.insert(
+                            f.name.clone(),
+                            Slot {
+                                rust_name: m,
+                                deref: false,
+                                jet_ty: field_tys.get(&f.name).cloned(),
+                            },
+                        );
+                    }
+                }
+                BindPattern::List { elems, span } => {
+                    let elem_ty = match expr_jet_ty(&b.init, env) {
+                        Some(Type::List(inner)) => Some(*inner),
+                        _ => None,
+                    };
+                    let (line, _) = span_line_col(&cx.src, span.start);
+                    let want = elems.len();
+                    for (i, e) in elems.iter().enumerate() {
+                        let m = mangle(&e.name);
+                        out.push_str(&format!(
+                            "{}{} {} = jet_unpack_vec({}, {}, {}, {:?}, {});\n",
+                            pad, mut_kw, m, tmp, want, i, cx.file, line
+                        ));
+                        env.insert(
+                            e.name.clone(),
+                            Slot {
+                                rust_name: m,
+                                deref: false,
+                                jet_ty: elem_ty.clone(),
+                            },
+                        );
+                    }
+                }
+                BindPattern::Tuple { elems, .. } => {
+                    let field_names = expr_jet_ty(&b.init, env)
+                        .and_then(|t| match t {
+                            Type::Tuple(fs) => Some(
+                                fs.iter()
+                                    .map(|(n, ty)| (n.clone(), (**ty).clone()))
+                                    .collect::<Vec<_>>(),
+                            ),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    for (e, (fname, fty)) in elems.iter().zip(field_names.iter()) {
+                        let m = mangle(&e.name);
+                        let field = mangle(fname);
+                        out.push_str(&format!(
+                            "{}{} {} = ({}).{}.clone();\n",
+                            pad, mut_kw, m, tmp, field
+                        ));
+                        env.insert(
+                            e.name.clone(),
+                            Slot {
+                                rust_name: m,
+                                deref: false,
+                                jet_ty: Some(fty.clone()),
+                            },
+                        );
+                    }
+                }
+            }
+        }
         Stmt::Val(b) => {
             let mut_fn = matches!(
                 &b.init,
@@ -1414,16 +1870,33 @@ fn emit_stmt(
             body,
             ..
         } => match kind {
-            ForKind::Range { start, end } => {
+            ForKind::Range { start, end, step } => {
                 let s = emit_expr(cx, start, env);
                 let e = emit_expr(cx, end, env);
-                out.push_str(&format!(
-                    "{}for {} in ({})..=({}) {{\n",
-                    pad,
-                    mangle(var),
-                    s,
-                    e
-                ));
+                match step {
+                    // S22 (D-SG8): `.step_by` takes a usize; sema has already
+                    // checked the stride is a positive Int.
+                    Some(step) => {
+                        let st = emit_expr(cx, step, env);
+                        out.push_str(&format!(
+                            "{}for {} in (({})..=({})).step_by(({}) as usize) {{\n",
+                            pad,
+                            mangle(var),
+                            s,
+                            e,
+                            st
+                        ));
+                    }
+                    None => {
+                        out.push_str(&format!(
+                            "{}for {} in ({})..=({}) {{\n",
+                            pad,
+                            mangle(var),
+                            s,
+                            e
+                        ));
+                    }
+                }
                 let prev = env.insert(
                     var.clone(),
                     Slot {
@@ -2167,8 +2640,37 @@ fn user_type_apply_rust(cx: &Cx, name: &str, type_args: &[Type]) -> String {
     }
 }
 
+/// S68 (D-SG2): emit a value block `{ stmts…; value }` for an `if`-expression
+/// branch, mirroring how lambda block bodies are lowered.
+fn emit_value_block(
+    cx: &Cx,
+    stmts: &[crate::ast::Stmt],
+    value: &Expr,
+    env: &HashMap<String, Slot>,
+) -> String {
+    let mut local = env.clone();
+    let mut inner = String::new();
+    emit_stmts(cx, stmts, &mut local, &mut inner, 1, false);
+    let v = emit_expr(cx, value, &local);
+    format!("{{ {} {} }}", inner, v)
+}
+
 fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
     match e {
+        // S68 (D-SG2): `if` as a value lowers straight to a Rust if-expression.
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            let c = emit_expr(cx, cond, env);
+            let then_block = emit_value_block(cx, then_body, then_value, env);
+            let else_block = emit_value_block(cx, else_body, else_value, env);
+            format!("if {} {} else {}", c, then_block, else_block)
+        }
         Expr::Int(n, _) => format!("{}i64", n),
         Expr::Float(v, _) => format!("{:?}f64", v),
         Expr::Bool(b, _) => b.to_string(),
@@ -2180,6 +2682,30 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("vec![{}]", parts)
+        }
+        Expr::TupleLit(fields, _, ty) => {
+            let canonical = ty
+                .as_ref()
+                .and_then(|t| match t {
+                    Type::Tuple(fs) => Some(tuple_fields_plain(fs)),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let struct_name = tuple_struct_name(&canonical);
+            let field_map: HashMap<String, &Expr> =
+                fields.iter().map(|(n, e)| (n.clone(), e)).collect();
+            let parts = canonical
+                .iter()
+                .map(|(n, _)| {
+                    let val = field_map
+                        .get(n)
+                        .map(|e| emit_expr(cx, e, env))
+                        .unwrap_or_else(|| "0i64".to_string());
+                    format!("{}: {}", mangle(n), val)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{} {{ {} }}", struct_name, parts)
         }
         Expr::MapLit(entries, _) => {
             if entries.is_empty() {
@@ -2276,6 +2802,22 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             } else {
                 format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
             }
+        }
+        Expr::OptField {
+            base,
+            member,
+            flatten,
+            ..
+        } => {
+            // S71 (D-SG6): `base?.field` maps over the optional, flattening when
+            // the field is itself optional. `__optv` owns the unwrapped value.
+            let combinator = if *flatten { "and_then" } else { "map" };
+            format!(
+                "({}).clone().{}(|__optv| __optv.{})",
+                emit_expr(cx, base, env),
+                combinator,
+                mangle(member)
+            )
         }
         Expr::MethodCall {
             receiver,
@@ -2576,6 +3118,7 @@ fn emit_enum_lit(
 fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
     match expr {
         Expr::Ident(name, _) => env.get(name).and_then(|s| s.jet_ty.clone()),
+        Expr::TupleLit(_, _, Some(ty)) => Some(ty.clone()),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),
         Expr::MethodCall {
@@ -3162,6 +3705,8 @@ fn import_sig_map(
 }
 
 fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: bool) {
+    let tuple_shapes = collect_tuple_shapes(items);
+    emit_tuple_structs(cx, &tuple_shapes, out);
     for item in items {
         match item {
             Item::Trait(t) => m9::emit_trait_def(t, out),

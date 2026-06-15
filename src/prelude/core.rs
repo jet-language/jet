@@ -29,6 +29,12 @@ fn jet_index_vec<T: Clone>(xs: &Vec<T>, i: i64, file: &str, line: u32) -> T {
     }
     xs[i as usize].clone()
 }
+fn jet_unpack_vec<T: Clone>(xs: &Vec<T>, want: usize, i: usize, file: &str, line: u32) -> T {
+    if xs.len() != want {
+        jet_panic(file, line, &format!("this pattern needs exactly {} item{}, but the list has {}", want, if want == 1 { "" } else { "s" }, xs.len()));
+    }
+    xs[i].clone()
+}
 fn jet_slice_vec<T: Clone>(xs: &Vec<T>, a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
     let len = xs.len() as i64;
     if a < 0 || b < 0 || a > b || b >= len {

@@ -59,6 +59,12 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             params: params.iter().map(|p| substitute_type(p, subst)).collect(),
             ret: ret.as_ref().map(|r| Box::new(substitute_type(r, subst))),
         },
+        Type::Tuple(fields) => Type::Tuple(
+            fields
+                .iter()
+                .map(|(n, t)| (n.clone(), Box::new(substitute_type(t, subst))))
+                .collect(),
+        ),
         Type::TraitObject(t) => Type::TraitObject(t.clone()),
         other => other.clone(),
     }
@@ -133,6 +139,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         }
         Type::TraitObject(_) => {}
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => {}
+        Type::Tuple(fields) => fields.iter().for_each(|(_, t)| collect_free(t, out)),
     }
 }
 

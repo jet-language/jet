@@ -22,7 +22,7 @@ fn parse_pipe_switch_arms_as_subject_tests() {
 fn main() {
     val fruit = "orange";
     val frozen = false;
-    switch fruit {
+    when fruit {
         | apple { print("Apple Juice"); }
         | orange || frozen != true { print("Orange Juice"); }
         | tangerine || yuzu { print("Citrus Juice"); }
@@ -87,4 +87,15 @@ fn use_collections(items: [String], counts: [String, Int]) {}
         use_collections.params[1].ty,
         jet::ast::Type::Map { .. }
     ));
+}
+
+#[test]
+fn parse_numeric_field_emits_e0049() {
+    let src = "fn main() { val x = p.0; }";
+    let (toks, _) = jet::lexer::lex(src);
+    let (_prog, diags) = jet::parser::parse_for_check(&toks).expect("recoverable parse");
+    assert!(
+        diags.iter().any(|d| d.code == "E0049"),
+        "expected E0049 for `.0` access, got: {diags:?}"
+    );
 }

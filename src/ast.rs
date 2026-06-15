@@ -50,6 +50,14 @@ pub enum Type {
     },
     /// S48 (M9): trait object — dynamic dispatch with invisible boxing.
     TraitObject(String),
+    /// S73 (D-SG7): named tuple `(x: Int, y: Int)` — fields stored sorted by name.
+    Tuple(Vec<(String, Box<Type>)>),
+}
+
+/// S73: sort tuple fields by name so type identity ignores source order.
+pub fn canonicalize_tuple_fields<T>(mut fields: Vec<(String, T)>) -> Vec<(String, T)> {
+    fields.sort_by(|a, b| a.0.cmp(&b.0));
+    fields
 }
 
 impl Type {
@@ -83,6 +91,14 @@ impl Type {
                 format!("`{}`<{}>", name, a)
             }
             Type::TraitObject(t) => format!("`{}` (a trait value)", t),
+            Type::Tuple(fields) => {
+                let parts = fields
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, t.name()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({parts})")
+            }
         }
     }
 
@@ -116,6 +132,14 @@ impl Type {
                 format!("{}<{}>", name, a)
             }
             Type::TraitObject(t) => t.clone(),
+            Type::Tuple(fields) => {
+                let parts = fields
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, t.name()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({parts})")
+            }
         }
     }
 
@@ -402,6 +426,50 @@ pub enum Pattern {
     },
 }
 
+/// S74: a single name bound by a destructuring target.
+#[derive(Debug, Clone)]
+pub struct BindName {
+    pub name: String,
+    pub span: Span,
+}
+
+/// S74: the destructuring target on the left of a `val`/`var` binding.
+/// Reuses the existing bracket conventions — `Type { fields }` for structs,
+/// `[ elems ]` for lists, `( a, b )` for named tuples (S73/S74).
+#[derive(Debug, Clone)]
+pub enum BindPattern {
+    /// `val Point { x, y } = p;` — binds a subset of the struct's fields.
+    Struct {
+        type_name: String,
+        type_span: Span,
+        fields: Vec<BindName>,
+        span: Span,
+    },
+    /// `val [a, b] = xs;` — binds list elements by position.
+    List { elems: Vec<BindName>, span: Span },
+    /// `val (x, y) = p;` — binds named tuple fields in canonical (sorted) order.
+    Tuple { elems: Vec<BindName>, span: Span },
+}
+
+impl BindPattern {
+    pub fn span(&self) -> Span {
+        match self {
+            BindPattern::Struct { span, .. }
+            | BindPattern::List { span, .. }
+            | BindPattern::Tuple { span, .. } => *span,
+        }
+    }
+
+    /// Every name this pattern brings into scope, in source order.
+    pub fn names(&self) -> &[BindName] {
+        match self {
+            BindPattern::Struct { fields, .. } => fields,
+            BindPattern::List { elems, .. } => elems,
+            BindPattern::Tuple { elems, .. } => elems,
+        }
+    }
+}
+
 /// S35: right-hand side of `expr or …`.
 #[derive(Debug, Clone)]
 pub enum OrFallback {
@@ -546,7 +614,12 @@ pub enum IndexKind {
 /// `for i in 1..10` vs `for x in xs` (M5).
 #[derive(Debug, Clone)]
 pub enum ForKind {
-    Range { start: Expr, end: Expr },
+    /// S22 (D-SG8): `start..end` inclusive, with an optional `step n` stride.
+    Range {
+        start: Expr,
+        end: Expr,
+        step: Option<Expr>,
+    },
     In { collection: Expr },
 }
 
@@ -555,6 +628,9 @@ pub struct Binding {
     pub mutable: bool,
     pub name: String,
     pub name_span: Span,
+    /// S74: when present, this binding destructures `init` instead of binding
+    /// the single `name`. `name` is empty and `name_span` covers the pattern.
+    pub pattern: Option<BindPattern>,
     pub ty: Option<Type>,
     pub ty_span: Option<Span>,
     pub init: Expr,
@@ -724,6 +800,17 @@ pub enum Expr {
     Deref(Box<Expr>, Span),
     /// Field access: `v.field`.
     Field(Box<Expr>, String, Span),
+    /// S71 (D-SG6): `base?.field` optional chaining. Yields a `T?` and
+    /// short-circuits to absent when `base` is absent.
+    OptField {
+        base: Box<Expr>,
+        member: String,
+        member_span: Span,
+        /// Filled by sema: true when the field type is itself optional, so
+        /// codegen flattens (`and_then`) instead of wrapping (`map`).
+        flatten: bool,
+        span: Span,
+    },
     /// Method call: `v.method(args)`.
     MethodCall {
         receiver: Box<Expr>,
@@ -777,6 +864,20 @@ pub enum Expr {
         is_option: bool,
         span: Span,
     },
+    /// S68 (D-SG2): `if` in expression position. Each branch is a block whose
+    /// trailing expression (no `;`) is its value; the `else` is required and
+    /// both branches share a type. `else if` nests as the else value.
+    If {
+        cond: Box<Expr>,
+        then_body: Vec<Stmt>,
+        then_value: Box<Expr>,
+        else_body: Vec<Stmt>,
+        else_value: Box<Expr>,
+        span: Span,
+    },
+    /// S73 (D-SG7): `(x: 1, y: 2)` — named members only; source order preserved for fmt.
+    /// `ty` is filled by sema for codegen (canonical sorted shape).
+    TupleLit(Vec<(String, Expr)>, Span, Option<Type>),
     /// S46 (M8): `(params) => expr` or block body.
     Lambda(Lambda),
     /// S47: call any function-valued expression: `f(args)`.
@@ -796,6 +897,7 @@ impl Expr {
             | Expr::Bool(_, s)
             | Expr::Char(_, s)
             | Expr::ListLit(_, s)
+            | Expr::TupleLit(_, s, _)
             | Expr::MapLit(_, s)
             | Expr::Index { span: s, .. }
             | Expr::Slice { span: s, .. }
@@ -804,6 +906,7 @@ impl Expr {
             | Expr::Binary(_, _, _, s)
             | Expr::Deref(_, s)
             | Expr::Field(_, _, s)
+            | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }
             | Expr::EnumLit { span: s, .. }
             | Expr::Present(_, s)
@@ -813,6 +916,7 @@ impl Expr {
             | Expr::Try(_, s)
             | Expr::OrFallback { span: s, .. }
             | Expr::PatternTest { span: s, .. }
+            | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. } => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,

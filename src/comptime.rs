@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-use crate::ast::{BinOp, EnumLitArg, Expr, Func, Stmt, StrPart, Type, UnOp};
+use crate::ast::{BinOp, BindPattern, EnumLitArg, Expr, Func, Stmt, StrPart, Type, UnOp};
 use crate::diag::{Diagnostic, Span};
 
 /// Default step budget per binding (S26 rule 3). Compiler-internal, not a
@@ -280,6 +280,67 @@ impl<'a> Interp<'a> {
         Ok(Flow::Normal)
     }
 
+    /// S74: bind the names of a destructuring target from a comptime value.
+    fn bind_pattern(
+        &mut self,
+        pat: &BindPattern,
+        value: CtValue,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        match pat {
+            BindPattern::Struct { fields, .. } => {
+                let CtValue::Struct { fields: vals, .. } = value else {
+                    return Err(comptime_panic(
+                        "this value isn't a struct, so it can't be destructured with `{ }`",
+                        pat.span(),
+                    ));
+                };
+                for f in fields {
+                    let v = vals
+                        .iter()
+                        .find(|(n, _)| n == &f.name)
+                        .map(|(_, v)| v.clone())
+                        .ok_or_else(|| {
+                            comptime_panic(
+                                &format!("this value has no field `{}`", f.name),
+                                f.span,
+                            )
+                        })?;
+                    scope.insert(f.name.clone(), v);
+                }
+            }
+            BindPattern::List { elems, span } => {
+                let CtValue::List(xs) = value else {
+                    return Err(comptime_panic(
+                        "this value isn't a list, so it can't be destructured with `[ ]`",
+                        *span,
+                    ));
+                };
+                if xs.len() != elems.len() {
+                    return Err(comptime_panic(
+                        &format!(
+                            "this pattern needs exactly {} item{}, but the list has {}",
+                            elems.len(),
+                            if elems.len() == 1 { "" } else { "s" },
+                            xs.len()
+                        ),
+                        *span,
+                    ));
+                }
+                for (e, v) in elems.iter().zip(xs) {
+                    scope.insert(e.name.clone(), v);
+                }
+            }
+            BindPattern::Tuple { span, .. } => {
+                return Err(comptime_panic(
+                    "tuple destructuring isn't supported in comptime yet",
+                    *span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn exec_stmt(
         &mut self,
         stmt: &Stmt,
@@ -292,7 +353,12 @@ impl<'a> Interp<'a> {
             }
             Stmt::Val(b) => {
                 let v = self.eval(&b.init, scope)?;
-                scope.insert(b.name.clone(), v);
+                // S74: a destructuring target binds each field/element.
+                if let Some(pat) = &b.pattern {
+                    self.bind_pattern(pat, v, scope)?;
+                } else {
+                    scope.insert(b.name.clone(), v);
+                }
                 Ok(Flow::Normal)
             }
             Stmt::Assign {
@@ -398,10 +464,15 @@ impl<'a> Interp<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         match kind {
-            crate::ast::ForKind::Range { start, end } => {
+            crate::ast::ForKind::Range { start, end, step } => {
                 let a = as_int(&self.eval(start, scope)?, start.span())?;
                 let b = as_int(&self.eval(end, scope)?, end.span())?;
-                // S22: `a..b` is inclusive.
+                // S22 (D-SG8): `a..b` is inclusive; `step n` strides by n
+                // (sema guarantees a positive Int).
+                let stride = match step {
+                    Some(step) => as_int(&self.eval(step, scope)?, step.span())?.max(1),
+                    None => 1,
+                };
                 let mut i = a;
                 while i <= b {
                     self.burn(span)?;
@@ -411,7 +482,7 @@ impl<'a> Interp<'a> {
                         Flow::Continue | Flow::Normal => {}
                         ret @ Flow::Return(_) => return Ok(ret),
                     }
-                    i += 1;
+                    i += stride;
                 }
                 Ok(Flow::Normal)
             }
@@ -653,6 +724,7 @@ impl<'a> Interp<'a> {
                     fields: out,
                 })
             }
+            Expr::TupleLit(_, span, _) => Err(unsupported("tuple literals in comptime", *span)),
             Expr::EnumLit {
                 type_name,
                 variant,
@@ -1341,9 +1413,12 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                crate::ast::ForKind::Range { start, end } => {
+                crate::ast::ForKind::Range { start, end, step } => {
                     f(start);
                     f(end);
+                    if let Some(step) = step {
+                        f(step);
+                    }
                 }
                 crate::ast::ForKind::In { collection } => f(collection),
             }
