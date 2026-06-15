@@ -111,7 +111,10 @@ mod transcript_parser {
                         }
                     }
                 }
-                Some(other) => { out.push('\\'); out.push(other); }
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
                 None => break,
             }
         }
@@ -129,9 +132,16 @@ mod transcript_parser {
         let mut end = 0;
         let bytes = after.as_bytes();
         loop {
-            if end >= bytes.len() { return None; }
-            if bytes[end] == b'\\' { end += 2; continue; }
-            if bytes[end] == b'"' { break; }
+            if end >= bytes.len() {
+                return None;
+            }
+            if bytes[end] == b'\\' {
+                end += 2;
+                continue;
+            }
+            if bytes[end] == b'"' {
+                break;
+            }
             end += 1;
         }
         Some(unescape(&after[..end]))
@@ -151,15 +161,24 @@ mod transcript_parser {
         while i < bytes.len() {
             let b = bytes[i];
             if in_str {
-                if b == b'\\' { i += 2; continue; }
-                if b == b'"' { in_str = false; }
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if b == b'"' {
+                    in_str = false;
+                }
             } else {
                 let c = s[i..].chars().next().unwrap();
-                if c == '"' { in_str = true; }
-                else if c == open { depth += 1; }
-                else if c == close {
+                if c == '"' {
+                    in_str = true;
+                } else if c == open {
+                    depth += 1;
+                } else if c == close {
                     depth -= 1;
-                    if depth == 0 { return Some(i); }
+                    if depth == 0 {
+                        return Some(i);
+                    }
                 }
             }
             i += c_len(bytes, i);
@@ -169,16 +188,23 @@ mod transcript_parser {
 
     fn c_len(bytes: &[u8], i: usize) -> usize {
         let b = bytes[i];
-        if b < 0x80 { 1 }
-        else if b < 0xE0 { 2 }
-        else if b < 0xF0 { 3 }
-        else { 4 }
+        if b < 0x80 {
+            1
+        } else if b < 0xE0 {
+            2
+        } else if b < 0xF0 {
+            3
+        } else {
+            4
+        }
     }
 
     /// Extract a JSON array of strings.
     fn extract_string_array(s: &str) -> Vec<String> {
         let s = skip_ws(s);
-        if !s.starts_with('[') { return Vec::new(); }
+        if !s.starts_with('[') {
+            return Vec::new();
+        }
         let close = match find_matching_close(s, '[', ']') {
             Some(i) => i,
             None => return Vec::new(),
@@ -188,15 +214,24 @@ mod transcript_parser {
         let mut remaining = skip_ws(inner);
         while !remaining.is_empty() {
             remaining = skip_ws(remaining);
-            if remaining.starts_with(']') || remaining.is_empty() { break; }
+            if remaining.starts_with(']') || remaining.is_empty() {
+                break;
+            }
             if remaining.starts_with('"') {
                 let rest = &remaining[1..];
                 let mut end = 0;
                 let bytes = rest.as_bytes();
                 loop {
-                    if end >= bytes.len() { break; }
-                    if bytes[end] == b'\\' { end += 2; continue; }
-                    if bytes[end] == b'"' { break; }
+                    if end >= bytes.len() {
+                        break;
+                    }
+                    if bytes[end] == b'\\' {
+                        end += 2;
+                        continue;
+                    }
+                    if bytes[end] == b'"' {
+                        break;
+                    }
                     end += 1;
                 }
                 result.push(unescape(&rest[..end]));
@@ -212,32 +247,37 @@ mod transcript_parser {
     /// Extract a raw JSON object starting at the current position.
     fn extract_object(s: &str) -> Option<(String, &str)> {
         let s = skip_ws(s);
-        if !s.starts_with('{') { return None; }
+        if !s.starts_with('{') {
+            return None;
+        }
         let close = find_matching_close(s, '{', '}')?;
         Some((s[..=close].to_string(), &s[close + 1..]))
     }
 
     pub fn parse(content: &str) -> Transcript {
-        let description = extract_string_field(content, "description")
-            .unwrap_or_default();
-        let source = extract_string_field(content, "source")
-            .expect("transcript must have 'source'");
+        let description = extract_string_field(content, "description").unwrap_or_default();
+        let source =
+            extract_string_field(content, "source").expect("transcript must have 'source'");
 
         // Find the "steps" array.
         let steps_needle = "\"steps\"";
-        let steps_pos = content.find(steps_needle).expect("transcript must have 'steps'");
+        let steps_pos = content
+            .find(steps_needle)
+            .expect("transcript must have 'steps'");
         let after_steps = content[steps_pos + steps_needle.len()..].trim_start();
         let after_colon = after_steps.strip_prefix(':').unwrap().trim_start();
         // after_colon starts with '['
-        let close_bracket = find_matching_close(after_colon, '[', ']')
-            .expect("steps array must close");
+        let close_bracket =
+            find_matching_close(after_colon, '[', ']').expect("steps array must close");
         let steps_inner = &after_colon[1..close_bracket];
 
         let mut steps = Vec::new();
         let mut remaining = skip_ws(steps_inner);
         while !remaining.is_empty() {
             remaining = skip_ws(remaining);
-            if remaining.is_empty() { break; }
+            if remaining.is_empty() {
+                break;
+            }
             // Each step is a JSON object.
             let (step_obj, rest) = match extract_object(remaining) {
                 Some(r) => r,
@@ -250,7 +290,11 @@ mod transcript_parser {
             steps.push(step);
         }
 
-        Transcript { description, source, steps }
+        Transcript {
+            description,
+            source,
+            steps,
+        }
     }
 
     fn parse_step(obj: &str) -> Step {
@@ -301,14 +345,19 @@ mod transcript_parser {
             false
         };
 
-        Step { send_raw, open_uri, expect_contains, expect_notification }
+        Step {
+            send_raw,
+            open_uri,
+            expect_contains,
+            expect_notification,
+        }
     }
 }
 
 /// Execute one JSON transcript file against a live `jet lsp` process.
 fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
+    let content =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
     let transcript = transcript_parser::parse(&content);
 
     let mut child = Command::new(jet)
@@ -407,7 +456,10 @@ fn lsp_teaching_autocorrect_let_to_val() {
     let init = read_msg(&mut stdout);
     assert!(init.contains("textDocumentSync"), "init: {}", init);
 
-    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
 
     let uri = "file:///tmp/lsp_test_let.jet";
     let src = "fn main() {\n    let x = 1;\n}\n";
@@ -448,7 +500,10 @@ fn lsp_teaching_autocorrect_let_to_val() {
         r#"{"jsonrpc":"2.0","id":3,"method":"shutdown","params":{}}"#,
     );
     let _ = read_msg(&mut stdout);
-    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
     drop(stdin);
     let _ = child.wait();
 }
@@ -508,7 +563,10 @@ fn run_transcript(source: &str, steps: &[TranscriptStep]) {
 
     for step in steps {
         match step {
-            TranscriptStep::Send { msg, expect_contains } => {
+            TranscriptStep::Send {
+                msg,
+                expect_contains,
+            } => {
                 send_msg(&mut stdin, msg);
                 if let Some(expects) = expect_contains {
                     let resp = read_msg(&mut stdout);
@@ -522,7 +580,10 @@ fn run_transcript(source: &str, steps: &[TranscriptStep]) {
                     }
                 }
             }
-            TranscriptStep::Open { uri, expect_notification } => {
+            TranscriptStep::Open {
+                uri,
+                expect_notification,
+            } => {
                 let open = format!(
                     r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
                     uri,
@@ -570,7 +631,9 @@ fn lsp_completion_returns_items() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["completionProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -609,7 +672,9 @@ fn lsp_hover_returns_signature() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["hoverProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -648,7 +713,9 @@ fn lsp_rename_produces_workspace_edit() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["renameProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -687,7 +754,9 @@ fn lsp_definition_returns_location() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["definitionProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -726,7 +795,9 @@ fn lsp_semantic_tokens_returns_data() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["semanticTokensProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -765,7 +836,9 @@ fn lsp_inlay_hints_returns_type_labels() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["inlayHintProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -804,7 +877,9 @@ fn lsp_references_finds_all_uses() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["referencesProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -836,7 +911,7 @@ fn lsp_references_finds_all_uses() {
 fn lsp_bench_under_budget() {
     // Run the bench in-process: 10 rounds on the wordcount example, budget 200ms/round.
     // This mirrors what `jet lsp --bench` does in CI.
-    let src = include_str!("../examples/16_wordcount.jet");
+    let src = include_str!("../examples/features/16_wordcount.jet");
     let budget_ms = 200u128;
     let rounds = 10usize;
 

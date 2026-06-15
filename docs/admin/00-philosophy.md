@@ -103,8 +103,9 @@ stop inheriting the older, smaller vision:
 - **Purity is a product feature, not just a comptime detail.** `pure fn`
   (S60 ratified) marks functions the compiler verifies as pure so Jet
   can eventually replace the Nix language for declarative configuration
-  via `jet eval --pure` (layer 3 post-v1; docs/plans/m12-packages.md,
-  docs/research/jetos.md).
+  via `jet eval --pure` (layer 3 post-v1; see
+  docs/plans/epoch-1/m12-packages.md and
+  docs/plans/jetpack-jetos/README.md).
 - **Go's territory (networking etc.) is standard-library scope**, built
   out post-v1 — never core-language scope.
 - Invariant **I1 will need a measured amendment** when the expert tier
@@ -113,6 +114,7 @@ stop inheriting the older, smaller vision:
   cannot be expressed without Rust `unsafe` internally. The amendment
   is owner-gated and not yet drafted.
 
-**Status note (2026-06-13):** v1 package management is consolidated in
-docs/plans/m12-packages.md. Post-v1 OS exploration lives in
-docs/research/jetos.md (unratified; waits on layer 3).
+**Status note (amended 2026-06-15):** v1 Jet source-library package
+management is consolidated in docs/plans/epoch-1/m12-packages.md. Public
+binary/dev-shell package management is the owner-gated `jetpack` track in
+docs/plans/jetpack-jetos/README.md; jetos is Phase 2 on top of jetpack.

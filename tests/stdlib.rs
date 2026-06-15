@@ -40,7 +40,13 @@ fn build_and_run(
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(

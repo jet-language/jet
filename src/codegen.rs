@@ -13,16 +13,16 @@
 
 use crate::ast::{
     AccessConvention, BinOp, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind,
-    Func, IfStmt, ImplDef, IndexKind, Item, Lambda, LambdaBody, LValue, OrFallback, Pattern,
-    Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, TestDef,
-    TraitImplBlock, Type, UnOp, VariantPayload,
+    Func, IfStmt, ImplDef, IndexKind, Item, LValue, Lambda, LambdaBody, OrFallback, Pattern,
+    Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, TestDef, TraitImplBlock, Type,
+    UnOp, VariantPayload,
 };
+use crate::diag::{span_line_col, Span};
 use crate::ffi::FfiLink;
 use crate::generics;
 use crate::loader;
 use crate::m9;
 use crate::sema::CompileMode;
-use crate::diag::{span_line_col, Span};
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
 
@@ -84,10 +84,30 @@ struct Cx {
 
 const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
 
+fn is_json_type_name(name: &str) -> bool {
+    name == syntax::TYPE_JSON || name == "Json"
+}
+
+fn std_rust_type_name(name: &str) -> Option<&'static str> {
+    match name {
+        n if is_json_type_name(n) => Some("Json"),
+        n if n == syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
+        n if n == syntax::TYPE_IO_ERROR || n == "IoError" => Some("IoError"),
+        n if n == syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
+        "ProcessResult" => Some("ProcessResult"),
+        "Stopwatch" => Some("Stopwatch"),
+        "Closed" => Some("Closed"),
+        _ => None,
+    }
+}
+
 impl Cx {
     fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
-        if self.boxed_edges.contains(&(owner.to_string(), edge.to_string())) {
+        if self
+            .boxed_edges
+            .contains(&(owner.to_string(), edge.to_string()))
+        {
             format!("Box<{}>", base)
         } else {
             base
@@ -99,7 +119,10 @@ impl Cx {
             Type::Named(n) if s.type_params.iter().any(|p| p.name == *n) => n.clone(),
             _ => self.rust_type(ty),
         };
-        if self.boxed_edges.contains(&(s.name.clone(), edge.to_string())) {
+        if self
+            .boxed_edges
+            .contains(&(s.name.clone(), edge.to_string()))
+        {
             format!("Box<{base}>")
         } else {
             base
@@ -121,40 +144,50 @@ impl Cx {
             ),
             Type::Shared(inner) => format!("std::sync::Arc<{}>", self.rust_type(inner)),
             Type::Option(inner) => format!("Option<{}>", self.rust_type(inner)),
-            Type::Result { ok, err } => format!(
-                "Result<{}, {}>",
-                self.rust_type(ok),
-                self.rust_type(err)
-            ),
+            Type::Result { ok, err } => {
+                format!("Result<{}, {}>", self.rust_type(ok), self.rust_type(err))
+            }
             // Items inside an imported file live in `mod user_<alias>`; the
             // module provides the namespace, so item names stay plain.
-            Type::Named(name) if generics::is_type_var_name(name) && !self.type_names.contains(name) => {
+            Type::Named(name)
+                if generics::is_type_var_name(name) && !self.type_names.contains(name) =>
+            {
                 name.clone()
             }
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "U8" => "u8".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
-            Type::Named(name)
-                if matches!(
-                    name.as_str(),
-                    "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch" | "Json"
-                        | "JsonError" | "Closed"
-                ) =>
-            {
-                format!("{}jet_std::{name}", self.root_prefix)
+            Type::Named(name) if std_rust_type_name(name).is_some() => {
+                format!(
+                    "{}jet_std::{}",
+                    self.root_prefix,
+                    std_rust_type_name(name).unwrap()
+                )
             }
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", generics::user_trait_rust(name))
             }
             Type::Named(name) => format!("user_{name}"),
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
-                format!("{}jet_std::JetTask<{}>", self.root_prefix, self.rust_type(&args[0]))
+                format!(
+                    "{}jet_std::JetTask<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             Type::Apply { name, args } if name == "Channel" && !args.is_empty() => {
-                format!("{}jet_std::JetChannel<{}>", self.root_prefix, self.rust_type(&args[0]))
+                format!(
+                    "{}jet_std::JetChannel<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             Type::Apply { name, args } if name == "Sender" && !args.is_empty() => {
-                format!("{}jet_std::JetSender<{}>", self.root_prefix, self.rust_type(&args[0]))
+                format!(
+                    "{}jet_std::JetSender<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             Type::Apply { name, args } => {
                 if args.is_empty() {
@@ -384,11 +417,17 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
         let name = escape_rust_str(&test.name);
         out.push_str(&format!("    match jet_test_{}() {{\n", i));
         out.push_str("        Ok(()) => {\n");
-        out.push_str(&format!("            println!(\"{{}}: pass\", {});\n", name));
+        out.push_str(&format!(
+            "            println!(\"{{}}: pass\", {});\n",
+            name
+        ));
         out.push_str("            passed += 1;\n");
         out.push_str("        }\n");
         out.push_str("        Err(msg) => {\n");
-        out.push_str(&format!("            println!(\"{{}}: FAIL\", {});\n", name));
+        out.push_str(&format!(
+            "            println!(\"{{}}: FAIL\", {});\n",
+            name
+        ));
         out.push_str("            eprintln!(\"  {}\", msg);\n");
         out.push_str("            failed += 1;\n");
         out.push_str("        }\n");
@@ -507,18 +546,16 @@ fn build_cx_items(
                         .collect(),
                 );
                 for v in &e.variants {
-                    cx.variant_owner
-                        .insert(v.name.clone(), e.name.clone());
+                    cx.variant_owner.insert(v.name.clone(), e.name.clone());
                 }
             }
             Item::Const(c) => {
                 if c.is_comptime {
                     // Inline the evaluated literal at every reference.
-                    let serialized = c
-                        .ct
-                        .as_ref()
-                        .map(|v| v.serialize())
-                        .unwrap_or_else(|| "Default::default()".to_string());
+                    let serialized =
+                        c.ct.as_ref()
+                            .map(|v| v.serialize())
+                            .unwrap_or_else(|| "Default::default()".to_string());
                     cx.consts.insert(c.name.clone(), serialized);
                 } else {
                     cx.consts
@@ -856,7 +893,10 @@ fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         let jetshow_extra = generics::rust_extra_jetshow_bounds(&s.type_params);
         let mut impl_bounds = jetshow_extra.clone();
         for (k, v) in &clone_extra {
-            impl_bounds.entry(k.clone()).or_default().extend(v.iter().cloned());
+            impl_bounds
+                .entry(k.clone())
+                .or_default()
+                .extend(v.iter().cloned());
         }
         let tp_bounds = generics::rust_type_param_list(&s.type_params, &impl_bounds);
         let tp_plain = generics::type_param_rust_list(&s.type_params);
@@ -875,10 +915,7 @@ fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .map(|f| format!("((self).{}).jet_show()", mangle(&f.name)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!(
-                "format!(\"{}({})\", {})",
-                s.name, fmt_fields, show_fields
-            )
+            format!("format!(\"{}({})\", {})", s.name, fmt_fields, show_fields)
         };
         out.push_str(&format!(
             "impl{} JetShow for user_{}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
@@ -915,7 +952,11 @@ fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if cx.comparable.contains(&e.name) {
         derives.push("PartialEq");
     }
-    out.push_str(&format!("#[derive({})]\npub enum user_{} {{\n", derives.join(", "), e.name));
+    out.push_str(&format!(
+        "#[derive({})]\npub enum user_{} {{\n",
+        derives.join(", "),
+        e.name
+    ));
     for v in &e.variants {
         match &v.payload {
             VariantPayload::Unit => {
@@ -1258,8 +1299,7 @@ fn emit_stmt(
                 Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
             );
             let mut init = if b.is_comptime {
-                b.ct
-                    .as_ref()
+                b.ct.as_ref()
                     .map(|v| v.serialize())
                     .unwrap_or_else(|| "Default::default()".to_string())
             } else {
@@ -1284,16 +1324,16 @@ fn emit_stmt(
             } else {
                 "let"
             };
-            let ty = b.ty.as_ref().map(|t| {
-                if let Type::Fn { params, ret } = t {
-                    format!(
-                        ": {}",
-                        cx.rust_fn_trait(params, ret.as_deref(), mut_fn)
-                    )
-                } else {
-                    format!(": {}", cx.rust_type(t))
-                }
-            }).unwrap_or_default();
+            let ty =
+                b.ty.as_ref()
+                    .map(|t| {
+                        if let Type::Fn { params, ret } = t {
+                            format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), mut_fn))
+                        } else {
+                            format!(": {}", cx.rust_type(t))
+                        }
+                    })
+                    .unwrap_or_default();
             out.push_str(&format!(
                 "{}{} {}{} = {};\n",
                 pad,
@@ -1311,23 +1351,23 @@ fn emit_stmt(
                 },
             );
         }
-        Stmt::Assign { target, op, value, .. } => {
+        Stmt::Assign {
+            target, op, value, ..
+        } => {
             let v = emit_expr(cx, value, env);
             match target {
                 LValue::Local { name, .. } => {
                     let place = place_of(env, name);
                     match op {
-                        Some(op) => out.push_str(&format!(
-                            "{}{} {}= {};\n",
-                            pad,
-                            place,
-                            op.spell(),
-                            v
-                        )),
+                        Some(op) => {
+                            out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v))
+                        }
                         None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
                     }
                 }
-                LValue::Index { base, index, kind, .. } => {
+                LValue::Index {
+                    base, index, kind, ..
+                } => {
                     // Sema resolved the collection kind (R2); fall back to
                     // the env type only for un-checked trees (tests).
                     let is_map = matches!(kind, IndexKind::Map)
@@ -1610,13 +1650,16 @@ fn variant_rust_name(variant: &str) -> String {
 fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
     match pattern {
         Pattern::Variant {
-            variant,
-            bindings,
-            ..
+            variant, bindings, ..
         } => {
             let prefix = enum_type_prefix(cx, variant);
             if bindings.is_empty() {
-                format!("matches!({}, {}::{})", subject, prefix, variant_rust_name(variant))
+                format!(
+                    "matches!({}, {}::{})",
+                    subject,
+                    prefix,
+                    variant_rust_name(variant)
+                )
             } else if bindings.len() == 1 {
                 format!(
                     "matches!({}, {}::{}({}))",
@@ -1658,9 +1701,7 @@ fn emit_match_pattern(_cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> S
         .unwrap_or_else(|| "user_TYPE".to_string());
     match pattern {
         Pattern::Variant {
-            variant,
-            bindings,
-            ..
+            variant, bindings, ..
         } => {
             if bindings.is_empty() {
                 format!("{}::{}", prefix, variant_rust_name(variant))
@@ -1677,7 +1718,12 @@ fn emit_match_pattern(_cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> S
                     .map(|b| format!("{}: {}", mangle(b), mangle(b)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}::{} {{ {} }}", prefix, variant_rust_name(variant), fields)
+                format!(
+                    "{}::{} {{ {} }}",
+                    prefix,
+                    variant_rust_name(variant),
+                    fields
+                )
             }
         }
         Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
@@ -1719,11 +1765,7 @@ fn emit_or_fallback_option(
     )
 }
 
-fn emit_or_fallback_rhs(
-    cx: &Cx,
-    fallback: &OrFallback,
-    env: &HashMap<String, Slot>,
-) -> String {
+fn emit_or_fallback_rhs(cx: &Cx, fallback: &OrFallback, env: &HashMap<String, Slot>) -> String {
     match fallback {
         OrFallback::Value(e) => emit_expr(cx, e, env),
         OrFallback::Return(None, _) => "return".to_string(),
@@ -1843,7 +1885,14 @@ fn emit_if(
         out.push_str(&format!("{}if let {} = {} {{\n", pad, pat_str, subj_expr));
         let mut body_env = env.clone();
         add_pattern_bindings(pat, &mut body_env);
-        emit_stmts(cx, &ifs.then_body, &mut body_env, out, indent + 1, view_return);
+        emit_stmts(
+            cx,
+            &ifs.then_body,
+            &mut body_env,
+            out,
+            indent + 1,
+            view_return,
+        );
     } else if let Expr::PatternTest {
         subject,
         pattern: Pattern::Absent(_),
@@ -1876,15 +1925,15 @@ fn emit_if(
 
 fn if_pattern_test(cond: &Expr) -> Option<(&Pattern, &Expr)> {
     match cond {
-        Expr::PatternTest { subject, pattern, .. } => match pattern {
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => match pattern {
             Pattern::Absent(_) => None,
             _ => Some((pattern, subject.as_ref())),
         },
         Expr::Binary(BinOp::And, l, r, _) => {
             if let Expr::PatternTest {
-                subject,
-                pattern,
-                ..
+                subject, pattern, ..
             } = l.as_ref()
             {
                 if matches!(pattern, Pattern::Absent(_)) {
@@ -1967,7 +2016,10 @@ fn emit_for_in(
             pad,
             mangle(v2)
         ));
-    } else if let Expr::MethodCall { receiver, method, .. } = collection {
+    } else if let Expr::MethodCall {
+        receiver, method, ..
+    } = collection
+    {
         if method == "chars" {
             let recv = emit_expr(cx, receiver, env);
             out.push_str(&format!(
@@ -2021,9 +2073,7 @@ fn emit_for_in(
 fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
     match pattern {
         Pattern::Variant {
-            variant,
-            bindings,
-            ..
+            variant, bindings, ..
         } => {
             let prefix = enum_type_prefix(cx, variant);
             if bindings.is_empty() {
@@ -2041,7 +2091,12 @@ fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .map(|b| format!("{}: {}", mangle(b), mangle(b)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}::{} {{ {} }}", prefix, variant_rust_name(variant), fields)
+                format!(
+                    "{}::{} {{ {} }}",
+                    prefix,
+                    variant_rust_name(variant),
+                    fields
+                )
             }
         }
         Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
@@ -2152,14 +2207,10 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             let b = emit_expr(cx, base, env);
             let i = emit_expr(cx, index, env);
             match kind {
-                IndexKind::Map => format!(
-                    "jet_index_map(&({}), &({}), {:?}, {})",
-                    b, i, cx.file, line
-                ),
-                _ => format!(
-                    "jet_index_vec(&({}), {}, {:?}, {})",
-                    b, i, cx.file, line
-                ),
+                IndexKind::Map => {
+                    format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
+                }
+                _ => format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line),
             }
         }
         Expr::Slice {
@@ -2209,33 +2260,21 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             } else if let Expr::Ident(alias, _) = &**inner {
                 if let Some(module) = cx.std_imports.get(alias) {
                     emit_std_field(module, member)
-                } else if alias == "Json" && member == "Null" {
+                } else if is_json_type_name(alias) && member == "Null" {
                     format!("{}jet_std::Json::Null", cx.root_prefix)
                 } else if cx.enum_variants.contains_key(alias) {
                     format!("user_{}::{}", alias, mangle(member))
                 } else {
-                    format!(
-                        "({}).{}",
-                        emit_expr(cx, inner, env),
-                        mangle(member)
-                    )
+                    format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
                 }
             } else if let Expr::Ident(type_name, _) = &**inner {
                 if cx.enum_variants.contains_key(type_name) {
                     format!("user_{}::{}", type_name, mangle(member))
                 } else {
-                    format!(
-                        "({}).{}",
-                        emit_expr(cx, inner, env),
-                        mangle(member)
-                    )
+                    format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
                 }
             } else {
-                format!(
-                    "({}).{}",
-                    emit_expr(cx, inner, env),
-                    mangle(member)
-                )
+                format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
             }
         }
         Expr::MethodCall {
@@ -2318,7 +2357,9 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             is_option,
             ..
         } => emit_or_fallback(cx, value, fallback, *is_option, env),
-        Expr::PatternTest { subject, pattern, .. } => {
+        Expr::PatternTest {
+            subject, pattern, ..
+        } => {
             let subj = emit_expr(cx, subject, env);
             emit_pattern_matches(cx, &subj, pattern)
         }
@@ -2364,11 +2405,10 @@ fn emit_lambda(cx: &Cx, lam: &Lambda, env: &HashMap<String, Slot>) -> String {
         .params
         .iter()
         .map(|p| {
-            let ty = p
-                .ty
-                .as_ref()
-                .map(|t| format!(": {}", cx.rust_type(t)))
-                .unwrap_or_default();
+            let ty =
+                p.ty.as_ref()
+                    .map(|t| format!(": {}", cx.rust_type(t)))
+                    .unwrap_or_default();
             format!("{}{}", mangle(&p.name), ty)
         })
         .collect();
@@ -2403,7 +2443,11 @@ fn emit_spawn_lambda(cx: &Cx, lam: &Lambda, env: &HashMap<String, Slot>) -> Stri
     let mut lam_env = env.clone();
     for name in &lam.meta.cloned_captures {
         let cap = format!("_jet_cap_{}", mangle(name));
-        prep.push_str(&format!("let {} = ({}).clone();\n    ", cap, place_of(env, name)));
+        prep.push_str(&format!(
+            "let {} = ({}).clone();\n    ",
+            cap,
+            place_of(env, name)
+        ));
         lam_env.insert(
             name.clone(),
             Slot {
@@ -2427,11 +2471,10 @@ fn emit_spawn_lambda(cx: &Cx, lam: &Lambda, env: &HashMap<String, Slot>) -> Stri
         .params
         .iter()
         .map(|p| {
-            let ty = p
-                .ty
-                .as_ref()
-                .map(|t| format!(": {}", cx.rust_type(t)))
-                .unwrap_or_default();
+            let ty =
+                p.ty.as_ref()
+                    .map(|t| format!(": {}", cx.rust_type(t)))
+                    .unwrap_or_default();
             format!("{}{}", mangle(&p.name), ty)
         })
         .collect();
@@ -2505,9 +2548,7 @@ fn emit_enum_lit(
         let pos = args
             .iter()
             .map(|a| match a {
-                EnumLitArg::Positional(e) => {
-                    emit_boxed_enum_arg(cx, type_name, variant, e, env)
-                }
+                EnumLitArg::Positional(e) => emit_boxed_enum_arg(cx, type_name, variant, e, env),
                 _ => unreachable!(),
             })
             .collect::<Vec<_>>()
@@ -2537,7 +2578,9 @@ fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
         Expr::Ident(name, _) => env.get(name).and_then(|s| s.jet_ty.clone()),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),
-        Expr::MethodCall { receiver, method, .. } => {
+        Expr::MethodCall {
+            receiver, method, ..
+        } => {
             if method == "chars" {
                 return Some(Type::List(Box::new(Type::Char)));
             }
@@ -2577,7 +2620,11 @@ fn emit_builtin_method(
                 return Some(format!("({}).trim().parse::<f64>()", arg(0)));
             }
             (syntax::TYPE_STRING, "from_bytes") => {
-                return Some(format!("{}jet_string_from_bytes(&({}))", cx.root_prefix, arg(0)));
+                return Some(format!(
+                    "{}jet_string_from_bytes(&({}))",
+                    cx.root_prefix,
+                    arg(0)
+                ));
             }
             _ => {}
         }
@@ -2592,7 +2639,9 @@ fn emit_builtin_method(
         "push" => Some(format!("({}).push({})", recv, arg(0))),
         "pop" => Some(format!("({}).pop()", recv)),
         "insert" => Some(match rty {
-            Some(Type::Map { .. }) => format!("({}).insert(({}).clone(), {})", recv, arg(0), arg(1)),
+            Some(Type::Map { .. }) => {
+                format!("({}).insert(({}).clone(), {})", recv, arg(0), arg(1))
+            }
             _ => format!("({}).insert({} as usize, {})", recv, arg(0), arg(1)),
         }),
         "remove" => Some(match rty {
@@ -2651,7 +2700,10 @@ fn emit_builtin_method(
         "to_float" => Some(format!("({}) as f64", recv)),
         "to_int" => Some(format!("({}) as i64", recv)),
         "to_u8" => Some(format!("{}jet_int_to_u8({})", cx.root_prefix, recv)),
-        "elapsed_millis" => Some(format!("{}jet_stopwatch_elapsed_millis(&({}))", cx.root_prefix, recv)),
+        "elapsed_millis" => Some(format!(
+            "{}jet_stopwatch_elapsed_millis(&({}))",
+            cx.root_prefix, recv
+        )),
         "map" => {
             if let Expr::Lambda(l) = &args[0].expr {
                 if l.meta.needs_fn_mut {
@@ -2665,7 +2717,8 @@ fn emit_builtin_method(
         }
         "filter" => Some(format!("jet_list_filter(({}).clone(), {})", recv, arg(0))),
         "each" => {
-            let trait_obj_list = matches!(rty, Some(Type::List(ref inner)) if list_carries_trait(cx, inner));
+            let trait_obj_list =
+                matches!(rty, Some(Type::List(ref inner)) if list_carries_trait(cx, inner));
             let list_each = |a: &str| {
                 if trait_obj_list {
                     format!("jet_list_each_ref(&({recv}), {a})")
@@ -2680,14 +2733,20 @@ fn emit_builtin_method(
                 }
             };
             match rty {
-                Some(Type::Map { .. }) => Some(format!("jet_map_each(({}).clone(), {})", recv, arg(0))),
+                Some(Type::Map { .. }) => {
+                    Some(format!("jet_map_each(({}).clone(), {})", recv, arg(0)))
+                }
                 _ => Some(list_each(&arg(0))),
             }
         }
         "find" => Some(format!("jet_list_find(({}).clone(), {})", recv, arg(0))),
         "any" => Some(format!("jet_list_any(({}).clone(), {})", recv, arg(0))),
         "all" => Some(format!("jet_list_all(({}).clone(), {})", recv, arg(0))),
-        "sort_by" => Some(format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, arg(0))),
+        "sort_by" => Some(format!(
+            "{{ jet_list_sort_by(&mut {}, {}); }}",
+            recv,
+            arg(0)
+        )),
         "reduce" => Some(format!(
             "jet_list_reduce(({}).clone(), {}, {})",
             recv,
@@ -2722,15 +2781,35 @@ fn emit_std_call(
     match (module, method) {
         ("std.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
         ("std.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
-        ("std.fs", "write") => format!("{}(&({}), &({}))", helper("jet_std_fs_write"), arg(0), arg(1)),
-        ("std.fs", "append") => format!("{}(&({}), &({}))", helper("jet_std_fs_append"), arg(0), arg(1)),
+        ("std.fs", "write") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_write"),
+            arg(0),
+            arg(1)
+        ),
+        ("std.fs", "append") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_append"),
+            arg(0),
+            arg(1)
+        ),
         ("std.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
         ("std.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
         ("std.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
         ("std.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
         ("std.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
-        ("std.fs", "copy") => format!("{}(&({}), &({}))", helper("jet_std_fs_copy"), arg(0), arg(1)),
-        ("std.fs", "rename") => format!("{}(&({}), &({}))", helper("jet_std_fs_rename"), arg(0), arg(1)),
+        ("std.fs", "copy") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_copy"),
+            arg(0),
+            arg(1)
+        ),
+        ("std.fs", "rename") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_rename"),
+            arg(0),
+            arg(1)
+        ),
         ("std.io", "args") => format!("{}()", helper("jet_std_io_args")),
         ("std.io", "input") => {
             if args.is_empty() {
@@ -2742,7 +2821,12 @@ fn emit_std_call(
         ("std.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
         ("std.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
         ("std.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
-        ("std.env", "set") => format!("{}(&({}), &({}))", helper("jet_std_env_set"), arg(0), arg(1)),
+        ("std.env", "set") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_env_set"),
+            arg(0),
+            arg(1)
+        ),
         ("std.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
         ("std.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
         ("std.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
@@ -2756,17 +2840,23 @@ fn emit_std_call(
         ("std.math", "ceil") => format!("{}({})", helper("jet_std_math_ceil"), arg(0)),
         ("std.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
         ("std.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
-        ("std.random", "int") => format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1)),
+        ("std.random", "int") => {
+            format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1))
+        }
         ("std.random", "float") => format!("{}()", helper("jet_std_random_float")),
         ("std.random", "pick") => format!("{}(&({}))", helper("jet_std_random_pick"), arg(0)),
-        ("std.random", "shuffle") => format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0)),
+        ("std.random", "shuffle") => {
+            format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
+        }
         ("std.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
         ("std.time", "now") => format!("{}()", helper("jet_std_time_now")),
         ("std.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
         ("std.time", "start") => format!("{}()", helper("jet_std_time_start")),
         ("std.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
         ("std.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
-        ("std.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
+        ("std.json", "render_pretty") => {
+            format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0))
+        }
         ("std.tasks", "spawn") => {
             if let Some(lam_arg) = args.first() {
                 if let crate::ast::Expr::Lambda(lam) = &lam_arg.expr {
@@ -2800,7 +2890,7 @@ fn emit_std_json_lit(
         "Text" => format!("{prefix}::Text({})", arg(0)),
         "Array" => format!("{prefix}::Array({})", arg(0)),
         "Object" => format!("{prefix}::Object({})", arg(0)),
-        _ => "/* unknown Json variant */".to_string(),
+        _ => "/* unknown JSON variant */".to_string(),
     }
 }
 
@@ -2839,7 +2929,13 @@ fn emit_method_call(
                 .get(&(alias.clone(), method.to_string()))
                 .map(|s| s.as_slice());
             let arg_str = emit_call_args(cx, sig, args, env);
-            return format!("{}{}::{}({})", cx.root_prefix, mod_name, mangle(method), arg_str);
+            return format!(
+                "{}{}::{}({})",
+                cx.root_prefix,
+                mod_name,
+                mangle(method),
+                arg_str
+            );
         }
     }
     // Built-in collection/string methods take precedence when they match.
@@ -2847,7 +2943,7 @@ fn emit_method_call(
         return s;
     }
     if let Expr::Ident(type_name, _) = receiver {
-        if type_name == "Json" {
+        if is_json_type_name(type_name) {
             return emit_std_json_lit(cx, method, args, env);
         }
         if let Some(variants) = cx.enum_variants.get(type_name) {
@@ -2860,9 +2956,7 @@ fn emit_method_call(
             }
         }
         if cx.type_names.contains(type_name) {
-            let sig = cx
-                .method_sigs
-                .get(&(type_name.clone(), method.to_string()));
+            let sig = cx.method_sigs.get(&(type_name.clone(), method.to_string()));
             let arg_str = emit_call_args(cx, sig.map(|s| s.as_slice()), args, env);
             return format!(
                 "{}::{}({})",
@@ -2879,8 +2973,7 @@ fn emit_method_call(
             return format!("({}).{}({})", recv, method, arg_str);
         }
     }
-    let sig = recv_type
-        .and_then(|t| cx.method_sigs.get(&(t.to_string(), method.to_string())));
+    let sig = recv_type.and_then(|t| cx.method_sigs.get(&(t.to_string(), method.to_string())));
     let arg_str = emit_call_args(cx, sig.map(|s| s.as_slice()), args, env);
     format!("({}).{}({})", recv, mangle(method), arg_str)
 }
@@ -3040,7 +3133,10 @@ fn std_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, 
     map
 }
 
-fn import_sig_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
+fn import_sig_map(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
@@ -3178,7 +3274,10 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
             _ => None,
         })
         .collect();
-    assert!(!tests.is_empty(), "emit_bundle_tests called with no test blocks");
+    assert!(
+        !tests.is_empty(),
+        "emit_bundle_tests called with no test blocks"
+    );
 
     let mut out = String::new();
     out.push_str(&format!(
@@ -3252,11 +3351,17 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         let name = escape_rust_str(&test.name);
         out.push_str(&format!("    match jet_test_{}() {{\n", i));
         out.push_str("        Ok(()) => {\n");
-        out.push_str(&format!("            println!(\"{{}}: pass\", {});\n", name));
+        out.push_str(&format!(
+            "            println!(\"{{}}: pass\", {});\n",
+            name
+        ));
         out.push_str("            passed += 1;\n");
         out.push_str("        }\n");
         out.push_str("        Err(msg) => {\n");
-        out.push_str(&format!("            println!(\"{{}}: FAIL\", {});\n", name));
+        out.push_str(&format!(
+            "            println!(\"{{}}: FAIL\", {});\n",
+            name
+        ));
         out.push_str("            eprintln!(\"  {}\", msg);\n");
         out.push_str("            failed += 1;\n");
         out.push_str("        }\n");

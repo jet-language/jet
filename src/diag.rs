@@ -72,7 +72,10 @@ impl Diagnostic {
             None
         };
         if let Some(text) = new_text {
-            self.edit = Some(TextEdit { span, new_text: text });
+            self.edit = Some(TextEdit {
+                span,
+                new_text: text,
+            });
         }
     }
 }
@@ -144,8 +147,7 @@ impl Diagnostic {
             let prefix: String = line_text.chars().take(col - 1).collect();
             let pad_width = display_width(&prefix);
             let snippet = src.get(span.start..span.end.min(src.len())).unwrap_or("");
-            let snippet_first_line: String =
-                snippet.chars().take_while(|&c| c != '\n').collect();
+            let snippet_first_line: String = snippet.chars().take_while(|&c| c != '\n').collect();
             let avail = display_width(line_text).saturating_sub(pad_width);
             let mut caret_len = display_width(&snippet_first_line).max(1);
             if avail > 0 {

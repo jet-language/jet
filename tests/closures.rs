@@ -21,7 +21,10 @@ fn main() {
 "#;
     let out = jet::compile(src).expect("closures should compile");
     assert!(!out.rust.contains("unsafe"), "invariant I1");
-    assert!(out.rust.contains("jet_list_map"), "map should lower to prelude helper");
+    assert!(
+        out.rust.contains("jet_list_map"),
+        "map should lower to prelude helper"
+    );
     assert!(out.rust.contains("move |"), "lambdas should emit closures");
 }
 

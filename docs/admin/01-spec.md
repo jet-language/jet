@@ -153,7 +153,7 @@ impl Circle {
 - **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
   `impl Type: Trait { … }` (qualify foreign types: `impl other.Point: Shape`).
-  A trait name in type position (`List<Shape>`, `fn f(s: Shape)`) means
+  A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
   `Printable`/`Equatable`; explicit `derive Comparable;` / `derive Serialize;`.
@@ -239,8 +239,10 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 
 **`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
 entry is a normal Jet signature plus **`= "rust::path"`** naming the target
-item. **`extern rust "std" { … }`** works for standard-library items with no
-extra dependency. Non-`std` crates require an exact version pin (**E0701**).
+item. This source-level declaration is sufficient even inside a project with
+`jet.toml`; users do not need the package manager just to call a foreign
+function. **`extern rust "std" { … }`** works for standard-library items with
+no extra dependency. Non-`std` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
 `Char`, `List`/`Map`/`T?`/`T ? E` built from allowed types, and
@@ -283,7 +285,7 @@ fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambi
 
 **`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.
 Smaller binaries than the default speed-oriented profile (`tests/small.rs` on
-`examples/16_wordcount.jet`).
+`examples/features/16_wordcount.jet`).
 
 **`jet lsp`**: stdio JSON-RPC language server (hand-rolled JSON, invariant I6).
 Capabilities: full-document diagnostics on open/change (real front end, including
@@ -315,7 +317,7 @@ explicit prefix **`take(name)`** on the lambda (**E0802**). Self-recursion throu
 the binding is rejected (**E0804**). Calling a non-function → **E0803**.
 
 **Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
-`sort_by`, `reduce` on `List<T>`; `each` on `Map<K, V>` (two parameters).
+`sort_by`, `reduce` on `[T]`; `each` on `[K, V]` (two parameters).
 
 Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
 **`|x|`** pipes → `(x) => …` (**E0033**).
@@ -350,14 +352,14 @@ alias.
 Fallible std functions return `T ? E` and must be handled with `?`,
 `or`, or pattern tests like any M4 result. File APIs use whole-file helpers
 only; file handles and streaming are out of scope. Paths are `String` in M10.
-Binary APIs use `U8` and `List<U8>`; integer literals for `U8` must be in
+Binary APIs use `U8` and `[U8]`; integer literals for `U8` must be in
 0..255 (**E1003**). Unknown items in a std module are **E1004** with a
 did-you-mean suggestion when possible.
 
-Receiver additions: `String.bytes() -> List<U8>`,
-`String.from_bytes(List<U8>) -> String or Utf8Error`, `n.to_u8()`, and
+Receiver additions: `String.bytes() -> [U8]`,
+`String.from_bytes([U8]) -> String or UTF8Error`, `n.to_u8()`, and
 `b.to_int()`. Time stays unix milliseconds (`time.now()`); random is
-deterministic after `random.seed(n)`. JSON is dynamic (`Json`) with
+deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
 `json.parse`, `json.render`, and `json.render_pretty`.
 
 Codegen invariant: importing std modules is free; sema records reachable std

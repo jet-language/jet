@@ -6,7 +6,7 @@ Depends on M3 (Option) and M4 (`or`, runtime report).
 
 ## Goal
 
-`List<T>` and `Map<K, V>` as built-in generic types bridging `Vec` /
+`[T]` and `[K, V]` as built-in generic types bridging `Vec` /
 `HashMap` (users never see those names), literals, iteration, indexing
 with great failure behavior, copy-based slicing (no exposed references —
 tier 1), and exactly one string type with a real API. After M5, programs
@@ -16,16 +16,19 @@ like wordcount, grep-lite, and CSV munging are pleasant.
 
 ```jet
 fn main() {
-    var nums: List<Int> = [3, 1, 2];
+    var nums: [Int] = [3, 1, 2];
     nums.push(4);
     nums.sort();
     print(nums[0]);                  // 1 ; out of bounds = runtime report
     print(nums.get(99) or -1);       // safe access returns Int?
     val mid = nums[1..2];            // inclusive slice (S22), copies
 
-    var counts: Map<String, Int> = [:];
+    var counts: [String, Int] = [:];
     for word in "the quick the".split(" ") {
         counts[word] = (counts.get(word) or 0) + 1;
+    };
+    for entry in counts {
+        print("{entry.key}: {entry.value}");
     };
     for key, count in counts {
         print("{key}: {count}");
@@ -37,8 +40,10 @@ fn main() {
 
 ### Type & literal rules
 
-- Built-in generic types: `List<T>`, `Map<K, V>` (S33 angle brackets). These
-  are compiler-known; user generics arrive in M9.
+- Built-in generic types: `[T]`, `[K, V]` (S33 angle brackets). These
+  are compiler-known; user generics arrive in M9. S64 adds `[K, V]` as
+  ergonomic sugar for `[K, V]` in type position, e.g.
+  `val fruits: [String, Float] = ["limes": 420.0]`.
 - List literal `[a, b, c]`; empty `[]` needs a context type (mirrors M3
   `none`, code E0501). Map literal `["k": v, …]`; empty map `[:]` (S38).
 - Map keys: `Int`, `String`, `Bool`, `Char`, and payload-free enums in
@@ -47,7 +52,7 @@ fn main() {
   literals denote. Printable, comparable, usable in switch conditions.
 - `String` API counts **characters** (Unicode scalar values), not bytes:
   `s.len()`, `s.chars()`, `s.contains(sub)`, `s.starts_with(p)`,
-  `s.ends_with(p)`, `s.trim()`, `s.split(sep) -> List<String>`,
+  `s.ends_with(p)`, `s.trim()`, `s.split(sep) -> [String]`,
   `s.replace(a, b)`, `s.to_upper()`, `s.to_lower()`, `s.repeat(n)`,
   `s.slice(a..b) -> String` (char positions). No `s[i]` indexing
   (E0503 teaches `.chars()` / `.slice(…)` — strings aren't arrays).
@@ -60,14 +65,14 @@ fn main() {
 
 ### Core methods (exact v1 set — implement all, nothing more)
 
-`List<T>`: `len`, `push`, `pop -> (T?)`, `insert(i, v)`, `remove(i) -> T`,
+`[T]`: `len`, `push`, `pop -> (T?)`, `insert(i, v)`, `remove(i) -> T`,
 `get(i) -> (T?)`, `first -> (T?)`, `last -> (T?)`, `contains(v)`,
 `index_of(v) -> (Int?)`, `reverse`, `sort` (T comparable), `join(sep)`
 (T printable), `clear`, `is_empty`. Mutating methods require a `var`
 receiver (reuses M2 E0202 machinery via `mut self`).
 
-`Map<K, V>`: `len`, `insert(k, v)`, `get(k) -> (V?)`, `remove(k) -> (V?)`,
-`contains_key(k)`, `keys -> List<K>`, `values -> List<V>`, `clear`,
+`[K, V]`: `len`, `insert(k, v)`, `get(k) -> (V?)`, `remove(k) -> (V?)`,
+`contains_key(k)`, `keys -> [K]`, `values -> [V]`, `clear`,
 `is_empty`.
 
 ## Sema rules
@@ -87,9 +92,11 @@ receiver (reuses M2 E0202 machinery via `mut self`).
    reading `nums`, nothing may change it"; fix: collect changes into a
    second list, or loop over `0..xs.len()-1` indices). This is the
    milestone's crown diagnostic — invest in it.
-5. `for key, value in map` iterates entries (sorted by key for
-   determinism — document it; lowering uses a BTreeMap-backed iteration
-   or collected+sorted pairs so golden outputs are stable).
+5. `for entry in map` iterates map entries as a built-in named entry value
+   with `.key` and `.value` fields (S64). `for key, value in map` remains
+   the destructuring shorthand. Iteration is sorted by key for determinism
+   — document it; lowering uses a BTreeMap-backed iteration or
+   collected+sorted pairs so golden outputs are stable.
 6. Loop variables are immutable bindings; element type inference flows
    from the collection.
 7. `List`/`Map`/`Char` are built-in type names: redefining → E0106.
@@ -103,8 +110,9 @@ receiver (reuses M2 E0202 machinery via `mut self`).
 
 | Jet                  | Rust                                            |
 |----------------------|--------------------------------------------------|
-| `List<T>` / `[a, b]` | `Vec<T>` / `vec![a, b]`                          |
-| `Map<K, V>` / `[:]`  | `std::collections::BTreeMap<K, V>` / `BTreeMap::new()` (BTree for deterministic iteration) |
+| `[T]` / `[a, b]` | `Vec<T>` / `vec![a, b]`                          |
+| `[K, V]` or `[K, V]` / `[:]` | `std::collections::BTree[K, V]` / `BTreeMap::new()` (BTree for deterministic iteration) |
+| `for entry in map`   | BTreeMap iteration yielding compiler-known entry values with `.key` / `.value` |
 | `xs[i]`              | runtime-checked helper `jet_index(&xs, i, file, line)` → friendly report, exit 70 |
 | `xs[a..b]` slice     | helper that bounds-checks then `xs[a..=b].to_vec()` |
 | `s.chars()`          | `s.chars()` adapter; `Char` → `char`             |
@@ -132,7 +140,7 @@ Teaching: E0026 `as` casts → `.to_float()` etc. · E0027 `append`/`add`
 ## Examples & tests
 
 - `examples/15_lists.jet` — build/sort/slice/join.
-- `examples/16_wordcount.jet` — THE exit-criteria example: split, count
+- `examples/features/16_wordcount.jet` — THE exit-criteria example: split, count
   into a map, print sorted results.
 - `examples/17_strings.jet` — chars, unicode (`"héllo"`), trim/split/
   replace, parse with `or` defaults.

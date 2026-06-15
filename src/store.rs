@@ -68,10 +68,7 @@ pub fn ensure_git_dep(
 
 /// Link a store entry into a project's local deps dir via hardlinks (or copy).
 /// `link_root` is typically `<project>/.jet-build/deps/<name>/`.
-pub fn link_into_project(
-    store_entry: &Path,
-    link_root: &Path,
-) -> Result<(), Diagnostic> {
+pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Diagnostic> {
     if link_root.is_dir() {
         return Ok(());
     }
@@ -118,9 +115,7 @@ pub fn verify_entry(
 
 /// Re-verify all store entries against their expected tree hashes.
 /// The `entries` map is `(name, store_path, expected_tree_hash)`.
-pub fn verify_all(
-    entries: &[(&str, &Path, &str)],
-) -> Vec<Diagnostic> {
+pub fn verify_all(entries: &[(&str, &Path, &str)]) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for (name, path, expected) in entries {
         if let Err(d) = verify_entry(name, path, expected) {
@@ -137,7 +132,9 @@ pub fn verify_all(
 /// List all store entries.
 pub fn list_entries() -> Vec<PathBuf> {
     let dir = store_dir();
-    let Ok(rd) = fs::read_dir(&dir) else { return Vec::new() };
+    let Ok(rd) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
     let mut out: Vec<PathBuf> = rd
         .flatten()
         .map(|e| e.path())
@@ -189,16 +186,21 @@ fn copy_jet_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<(), Diagnostic> {
-    for entry in fs::read_dir(src).map_err(|e| io_error("reading store entry", src, e))?.flatten() {
+    for entry in fs::read_dir(src)
+        .map_err(|e| io_error("reading store entry", src, e))?
+        .flatten()
+    {
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         if src_path.is_dir() {
-            fs::create_dir_all(&dst_path).map_err(|e| io_error("creating link dir", &dst_path, e))?;
+            fs::create_dir_all(&dst_path)
+                .map_err(|e| io_error("creating link dir", &dst_path, e))?;
             link_or_copy_tree(&src_path, &dst_path)?;
         } else {
             // Try hardlink first, fall back to copy.
             if fs::hard_link(&src_path, &dst_path).is_err() {
-                fs::copy(&src_path, &dst_path).map_err(|e| io_error("copying dep file", &dst_path, e))?;
+                fs::copy(&src_path, &dst_path)
+                    .map_err(|e| io_error("copying dep file", &dst_path, e))?;
             }
         }
     }

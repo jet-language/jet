@@ -6,8 +6,8 @@ use crate::ast::{
 };
 use crate::diag::{Diagnostic, Span};
 use crate::generics::{
-    self, e0902, e0903, e0906, e0907, e0908, sig_matches_trait, substitute_type,
-    unify_types, BUILTIN_TRAITS, COMPARABLE, EQUATABLE, PRINTABLE, SERIALIZE,
+    self, e0902, e0903, e0906, e0907, e0908, sig_matches_trait, substitute_type, unify_types,
+    BUILTIN_TRAITS, COMPARABLE, EQUATABLE, PRINTABLE, SERIALIZE,
 };
 use crate::sema::FuncSig;
 use crate::syntax;
@@ -41,9 +41,13 @@ impl M9Registry {
                 Item::Struct(s) => self.register_struct_meta(s),
                 Item::Enum(e) => {
                     self.local_types.insert(e.name.clone());
-                    self.enum_params.insert(e.name.clone(), e.type_params.clone());
+                    self.enum_params
+                        .insert(e.name.clone(), e.type_params.clone());
                     for (t, _) in &e.derives {
-                        self.derives.entry(e.name.clone()).or_default().insert(t.clone());
+                        self.derives
+                            .entry(e.name.clone())
+                            .or_default()
+                            .insert(t.clone());
                     }
                 }
                 Item::Func(f) => {
@@ -89,7 +93,11 @@ impl M9Registry {
             ));
             return;
         }
-        let methods = t.methods.iter().map(|m| (m.name.clone(), m.clone())).collect();
+        let methods = t
+            .methods
+            .iter()
+            .map(|m| (m.name.clone(), m.clone()))
+            .collect();
         self.local_traits.insert(t.name.clone());
         self.traits.insert(
             t.name.clone(),
@@ -103,7 +111,8 @@ impl M9Registry {
     fn register_struct_meta(&mut self, s: &StructDef) {
         self.local_types.insert(s.name.clone());
         if !s.type_params.is_empty() {
-            self.struct_params.insert(s.name.clone(), s.type_params.clone());
+            self.struct_params
+                .insert(s.name.clone(), s.type_params.clone());
         }
         for (t, _) in &s.derives {
             self.derives
@@ -159,8 +168,7 @@ impl M9Registry {
             diags.push(e0908(type_name, trait_name, span));
             return;
         }
-        let local_type =
-            !type_name.contains('.') && self.local_types.contains(type_name);
+        let local_type = !type_name.contains('.') && self.local_types.contains(type_name);
         let local_trait = !trait_name.contains('.')
             && (self.local_traits.contains(trait_name) || generics::is_builtin_trait(trait_name));
         if !local_type && !local_trait {
@@ -242,7 +250,10 @@ impl M9Registry {
         ) {
             return true;
         }
-        if self.trait_impls.contains(&(type_name.to_string(), trait_name.to_string())) {
+        if self
+            .trait_impls
+            .contains(&(type_name.to_string(), trait_name.to_string()))
+        {
             return true;
         }
         match trait_name {
@@ -270,7 +281,10 @@ impl M9Registry {
         for (i, (_, pty)) in sig.params.iter().enumerate() {
             if let Some(arg_ty) = arg_types.get(i) {
                 if !unify_types(pty, arg_ty, &mut subst) {
-                    return Err(type_params.first().map(|p| p.name.clone()).unwrap_or_default());
+                    return Err(type_params
+                        .first()
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default());
                 }
             }
         }
@@ -342,7 +356,10 @@ pub fn rust_type_name(ty: &Type) -> String {
         Type::Named(n) => format!("user_{n}"),
         Type::Apply { name, args } => format!(
             "user_{name}<{}>",
-            args.iter().map(rust_type_name).collect::<Vec<_>>().join(", ")
+            args.iter()
+                .map(rust_type_name)
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         Type::TraitObject(t) => format!("Box<dyn user_{t}>"),
         Type::Option(inner) => format!("Option<{}>", rust_type_name(inner)),

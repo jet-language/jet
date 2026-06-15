@@ -61,8 +61,8 @@ impl Type {
             Type::Bool => "Bool (true or false)".to_string(),
             Type::String => "String (text)".to_string(),
             Type::Char => "Char (one character)".to_string(),
-            Type::List(inner) => format!("List<{}>", inner.name()),
-            Type::Map { key, value } => format!("Map<{}, {}>", key.name(), value.name()),
+            Type::List(inner) => format!("[{}]", inner.name()),
+            Type::Map { key, value } => format!("[{}, {}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -79,11 +79,7 @@ impl Type {
             }
             Type::Named(n) => format!("`{}`", n),
             Type::Apply { name, args } => {
-                let a = args
-                    .iter()
-                    .map(|x| x.name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("`{}`<{}>", name, a)
             }
             Type::TraitObject(t) => format!("`{}` (a trait value)", t),
@@ -98,8 +94,8 @@ impl Type {
             Type::Bool => "Bool".to_string(),
             Type::String => "String".to_string(),
             Type::Char => "Char".to_string(),
-            Type::List(inner) => format!("List<{}>", inner.name()),
-            Type::Map { key, value } => format!("Map<{}, {}>", key.name(), value.name()),
+            Type::List(inner) => format!("[{}]", inner.name()),
+            Type::Map { key, value } => format!("[{}, {}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -116,11 +112,7 @@ impl Type {
             }
             Type::Named(n) => n.clone(),
             Type::Apply { name, args } => {
-                let a = args
-                    .iter()
-                    .map(|x| x.name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, a)
             }
             Type::TraitObject(t) => t.clone(),
@@ -415,10 +407,7 @@ pub enum Pattern {
 pub enum OrFallback {
     Value(Box<Expr>),
     Return(Option<Box<Expr>>, Span),
-    Panic {
-        name_span: Span,
-        args: Vec<CallArg>,
-    },
+    Panic { name_span: Span, args: Vec<CallArg> },
 }
 
 impl Pattern {
@@ -436,10 +425,7 @@ impl Pattern {
 #[derive(Debug, Clone)]
 pub enum EnumLitArg {
     Positional(Expr),
-    Named {
-        label: String,
-        expr: Expr,
-    },
+    Named { label: String, expr: Expr },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -560,13 +546,8 @@ pub enum IndexKind {
 /// `for i in 1..10` vs `for x in xs` (M5).
 #[derive(Debug, Clone)]
 pub enum ForKind {
-    Range {
-        start: Expr,
-        end: Expr,
-    },
-    In {
-        collection: Expr,
-    },
+    Range { start: Expr, end: Expr },
+    In { collection: Expr },
 }
 
 #[derive(Debug, Clone)]

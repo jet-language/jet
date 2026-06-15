@@ -5,6 +5,19 @@ agent can implement the milestone with no design work of its own. The
 plans are the *how*; docs/00–05 remain the *what* and *why* and always
 win on conflict.
 
+Special product tracks may live under `docs/plans/<track>/` when they cut
+across milestones. The active example is
+[`jetpack-jetos`](jetpack-jetos/README.md): Phase 1 is the `jetpack`
+package/environment engine exposed directly as `jetpack
+run/build/list/clean/add/remove`, and Phase 2 is the `jetos` distro/ISO built
+on top of it. Its remaining open D-JPK decisions must be ratified before
+implementation.
+
+Post-v1 Epoch 2 plans live in [`epoch-2/`](epoch-2/README.md). Milestone
+**E2-M18** (`jet repl`) is draft-only until Group 12 ballots (D-REPL1…21) in
+docs/admin/06-decision-ballots.md are ratified — see
+[`epoch-2/m18-repl.md`](epoch-2/m18-repl.md).
+
 ## Protocol for the implementing agent (read this first, every time)
 
 1. Read, in order: docs/00-philosophy.md, docs/02-syntax-decisions.md,
@@ -48,7 +61,7 @@ win on conflict.
 - M9:  `Implement milestone M9 exactly per docs/plans/m09-generics-traits.md, following the protocol in docs/plans/README.md.`
 - M10: `Implement milestone M10 exactly per docs/plans/m10-stdlib.md, following the protocol in docs/plans/README.md.`
 - M11: `Implement milestone M11 exactly per docs/plans/m11-concurrency.md, following the protocol in docs/plans/README.md.`
-- M12: `Implement milestone M12 exactly per docs/plans/m12-packages.md, following the protocol in docs/plans/README.md.`
+- M12: `Implement milestone M12 exactly per docs/plans/epoch-1/m12-packages.md, following the protocol in docs/plans/README.md.`
 - M13: `Implement milestone M13 exactly per docs/plans/m13-lsp.md, following the protocol in docs/plans/README.md.`
 - M14: `Implement milestone M14 exactly per docs/plans/m14-v1.md, following the protocol in docs/plans/README.md.`
 

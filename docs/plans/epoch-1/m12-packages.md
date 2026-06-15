@@ -35,9 +35,16 @@ LAYER 3 — post-v1 (same store/lockfile; needs ballots + docs/research/jetos.md
 ```
 
 Layer 3 is **out of M12 scope**. It re-homes recipe/sandbox work onto this
-store. Ordinary projects always use `jet.toml` — never a Jet-code manifest.
-A user-facing second tool (e.g. typing `jetpack add`) is forbidden; layer 3
-may ship an internal helper binary invoked by `jet` subcommands (D-PM4).
+store. Ordinary Jet source-library projects always use `jet.toml` — never a
+Jet-code manifest.
+
+**Amendment, 2026-06-15:** the old D-PM4 assumption that `jetpack` could only
+be an internal helper is superseded by the owner naming canon in
+`docs/plans/jetpack-jetos/README.md`. M12 remains the current `jet` package
+workflow for Jet source libraries. `jetpack` is now the package/environment
+engine for binaries, dev shells, Nix interop, and later jetos system builds,
+exposed directly through `jetpack run/build/list/clean/add/remove` during
+Phase 1; later `jet` plumbing is deferred.
 
 ### Glossary
 
@@ -85,6 +92,7 @@ helpers = { path = "../helpers" }
 parsekit = { git = "https://github.com/acme/parsekit", tag = "v0.4.1" }
 
 [dependencies:rust]
+# optional metadata for tools; extern rust "base64@0.22" is still standalone
 base64 = "0.22"
 
 [dependencies:c]
@@ -100,7 +108,7 @@ base64 = "0.22"
 |---|---|---|
 | `[package]` | Identity + toolchain | required when manifest present |
 | `[dependencies]` | Jet package deps | optional |
-| `[dependencies:rust]` | M7 cargo bridge crates | optional |
+| `[dependencies:rust]` | Optional M7 FFI metadata for tools | optional |
 | `[dependencies:c]` | Future C libs (S59) | reserved; empty OK |
 | `[dev-dependencies]` | Test-only deps | reserved; error if non-empty |
 | `[patch]` | Root-only overrides | reserved; error if non-empty |
@@ -289,9 +297,15 @@ semver ranges, PubGrub resolver, E1207 — per Phase 2 section below.
 ### D-PM4 — One user-facing tool
 
 M12.1 implements fetch/store/lock entirely inside `jet` (git subprocess, no
-HTTP in compiler). Post-v1 layer 3 may ship an **internal** `jetpack` binary
-in the same install bundle; `jet add` execs it, users never install or
-version-match a second CLI.
+HTTP in compiler). For the M12 source-library workflow this still means
+`jet add`/`jet fetch`/`jet update`; users do not use a second tool for Jet
+libraries.
+
+**Superseded layer-3 note:** this section previously restricted post-v1
+`jetpack` to an internal helper. Owner direction on 2026-06-15 changes the
+layer-3/product split: jetpack owns binary packages and environments and is
+invoked directly during Phase 1; later `jet add/remove` and `jet run <remote>`
+may plumb to it. See `docs/plans/jetpack-jetos/README.md`.
 
 ---
 
@@ -359,8 +373,8 @@ in one package (toolchain-selected std).
 1. **One version per package name** in the graph (E1201 with both chains).
 2. **Lockfile authoritative** — mismatch → E1202 ("run `jet fetch`").
 3. **Git via subprocess** — no HTTP in compiler; missing git → E1203.
-4. **`[dependencies:rust]`** feeds M7 bridge; inline `@version` in
-   `extern rust` when manifest exists → E1205.
+4. **FFI is source-level.** `extern rust "crate@version"` is enough even when
+   `jet.toml` exists; `[dependencies:rust]` is optional metadata, not a gate.
 5. **Toolchain** — `[package].jet` checked before sema; mismatch → E1208.
 6. **Dependency diagnostics** — paths show package name
    (`textkit/words.jet:14:3`); lints suppressed outside root package.
@@ -386,7 +400,7 @@ E1201–E1206 + E1208–E1209.
 4. `src/fetch.rs` — git subprocess; path deps; integrate store.
 5. Wire loader: project root, source-root (`.jet/`), package dep paths into S16.
 6. CLI: `jet new` / `add` / `remove` / `fetch` / `update`.
-7. M7 bridge reads `[dependencies:rust]` when manifest present.
+7. M7 bridge remains driven by `extern rust` declarations.
 8. Tests + user guide (`docs/guide/` or dedicated packages doc).
 
 **Exit criteria:**
@@ -421,7 +435,6 @@ add without `--git`.
 | E1202 | Lock out of date |
 | E1203 | `git` not installed |
 | E1204 | Tree-hash mismatch / tamper |
-| E1205 | FFI pin belongs in `[dependencies:rust]` |
 | E1206 | Manifest syntax/shape |
 | E1207 | Resolver failure (phase 2) |
 | E1208 | Toolchain `[package].jet` incompatible |
@@ -444,10 +457,11 @@ Layer 3 (recipes, sandbox, cross-machine cache, generations). Jet-code
 content. Features/conditional compilation. Binary dep artifacts in phase 1.
 Yanking/mirrors implementation beyond spec.
 
-**Post-v1 OS direction** (old nix-replacement / jetpack docs): declarative
-OS on the same store lives in **docs/research/jetos.md** — D-NX1…6,
-imperative `jetos add` editing config files, bootstrap via read-only Nix
-cache tap. Not M12 work.
+**Post-v1 OS and environment direction:** declarative OS work lives in
+**docs/research/jetos.md**, but active sequencing and naming now live in
+**docs/plans/jetpack-jetos/README.md**. Phase 1 is `jetpack run` for
+temporary/dev environments plus `build/list/clean/add/remove`; Phase 2 is jetos
+and installable ISOs. Not M12 source-library work.
 
 **Dev environment:** repo Nix flake for building Jet itself — **docs/nix.md**
 (unchanged; not part of the user package manager).
@@ -460,12 +474,13 @@ cache tap. Not M12 work.
 |---|---|
 | Manifest layout (D-MF1…5, lock graph, `@latest`) | **Ratified** — S52 |
 | Architecture (D-PM1…8) | **Ratified** — owner 2026-06-13 |
-| Layer 3 / jetos / internal jetpack helper | **Deferred** — research/jetos.md |
+| Layer 3 / jetpack environments / jetos | **Deferred from M12** — see `docs/plans/jetpack-jetos/README.md` |
 
 **Agent checklist before M12.1:**
 
 1. Read this file end-to-end; implement per ratified D-PM1…8.
 2. Claim E1201–E1209 in docs/04 as diagnostics land.
 3. Store paths: `~/.jet/store/<name>-<version>-<full-fingerprint>/`.
-4. Do not implement layer-3 recipes, `package.jet` manifest, or a
-   user-facing `jetpack` CLI (internal helper deferred to layer 3).
+4. Do not implement layer-3 recipes, `package.jet` manifest, or `jetpack`
+   from the M12 plan. Public `jetpack` is a separate owner-gated track in
+   `docs/plans/jetpack-jetos/README.md`.

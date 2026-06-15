@@ -63,8 +63,11 @@ fn ownership_ui_fixes_compile() {
             let mut cmd = Command::new("rustc");
             cmd.args(["--edition", "2021", "-o"]).arg(&bin).arg(&rs);
             if let Some(link) = &out.ffi {
-                cmd.arg("--extern")
-                    .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+                cmd.arg("--extern").arg(format!(
+                    "{}={}",
+                    link.crate_name,
+                    link.rlib_path.display()
+                ));
                 if link.deps_dir.is_dir() {
                     cmd.arg("-L")
                         .arg(format!("dependency={}", link.deps_dir.display()));

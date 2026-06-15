@@ -129,6 +129,7 @@ Each detailed plan needs these owner calls in addition to any syntax ballots.
 | E2-M15 | First cross target triple; freestanding panic strategy; CI embedded smoke vs doc-only | One non-host CLI target; abort default; documented harness minimum |
 | E2-M16 | Package recipe scope; sandbox guarantees; signed cache generation/rollback depth | Pure eval + recipes; no ambient I/O; design signed cache, ship later |
 | E2-M17 | Showcase set (which 6 demos are mandatory); perf/size budgets; **launch versioning** (E2-D2); beta period | Four showcases + `jet dev` demo; record budgets; normal SemVer at GA |
+| E2-M18 | D-REPL1…21 ballots (see m18-repl.md); whether REPL ships before or after GA | Separate milestone after E2-M4; terminal REPL recommended; playground deferred |
 
 ## Milestone map
 
@@ -155,6 +156,7 @@ after concurrence.
 | E2-M15 | `m15-freestanding-cross.md` | Cross-compilation, `no_std`/freestanding profile, embedded smoke target |
 | E2-M16 | `m16-pure-eval-layer3.md` | `pure fn`, `jet eval --pure`, package recipes, sandbox/cache foundations |
 | E2-M17 | `m17-epoch2-ga.md` | Production showcase, audits, performance, docs, release checklist |
+| E2-M18 | `m18-repl.md` | `jet repl` — interpreter-backed interactive session (blocked on D-REPL1…21) |
 
 ## Dependency sketch
 
@@ -166,6 +168,7 @@ E2-M1 concurrency
 
 E2-M2 release policy -> all public-breaking milestones
 E2-M3 DX CLI --------> E2-M4 jet dev -----------> E2-M11 testing/docs/bench
+                                              `-> E2-M18 repl (after M4 interpreter)
 E2-M6 library authoring -> E2-M8 packages ------> E2-M9 first-party libraries
 E2-M8 packages ---------> E2-M16 pure eval/layer 3
 
@@ -535,8 +538,10 @@ Scope from S60 and M12 layer 3:
 - `jet eval --pure`.
 - Sandboxed package recipes on the existing store/lockfile.
 - Signed binary/source caches and generations/rollback design.
-- Integration path for `docs/research/jetos.md` without making JetOS an Epoch 2
-  product commitment.
+- Integration path for `docs/plans/jetpack-jetos/README.md`: Phase 1 builds an
+  independent `jetpack run/build/list/clean/add/remove` product track, while
+  pure-eval/layer-3 work unlocks Phase 2 jetos system builds and installable
+  ISOs.
 
 Exit criteria:
 
@@ -544,6 +549,28 @@ Exit criteria:
 - Impure calls fail with a path explaining why.
 - Package recipes cannot perform ambient I/O or network access.
 - A small declarative config example evaluates to stable JSON.
+
+## E2-M18 - Interactive REPL (`jet repl`)
+
+Goal: let users try Jet without creating a file — a teaching surface that
+reuses the E2-M4 interpreter and the same diagnostics as batch compilation.
+
+**Status:** plan only; **blocked on D-REPL1…D-REPL21** (Group 12). Full
+decision tables and recommendations: docs/plans/epoch-2/m18-repl.md.
+
+Scope (after ratification):
+
+- `jet repl` with accumulating session (default) and optional cell mode.
+- Interpreter-only execution with plain rejects for FFI, tasks, and native-only
+  features.
+- Meta-commands, multi-line input, transcript CI fixtures.
+- Optional `--project` for manifest-aware imports (if owner ratifies).
+
+Exit criteria:
+
+- `tests/repl/` transcript suite green.
+- Session bindings persist across inputs; ownership errors match batch E02xx.
+- Unsupported features name `jet run` / `jet build` as the workaround.
 
 ## E2-M17 - Epoch 2 GA
 
@@ -616,6 +643,30 @@ approve or edit:
   authoring.
 - [ ] Whether low-level tier and C FFI are both required inside Epoch 2.
 - [ ] Whether pure evaluation/layer 3 belongs in Epoch 2 or should start Epoch 3.
+
+### REPL (E2-M18 / D-REPL1…21)
+
+- [ ] D-REPL1 — ship terminal REPL in Epoch 2 (recommend A).
+- [ ] D-REPL2 — web playground scope for this milestone (recommend A: terminal only).
+- [ ] D-REPL3 — command entry (`jet repl` vs bare `jet` in TTY).
+- [ ] D-REPL4 — execution backend (interpreter vs compile vs hybrid).
+- [ ] D-REPL5 — input unit (expressions vs statements vs full decls).
+- [ ] D-REPL6 — hard rejects (FFI, tasks, packages).
+- [ ] D-REPL7 — session model (accumulating vs cells).
+- [ ] D-REPL8 — ownership across inputs (real moves vs auto-clone).
+- [ ] D-REPL9 — multi-line input strategy.
+- [ ] D-REPL10 — project/`jet.toml` context.
+- [ ] D-REPL11 — line editor tier (std vs rustyline vs completions).
+- [ ] D-REPL12 — relation to `jet eval --pure`.
+- [ ] D-REPL13 — relation to `jet dev`.
+- [ ] D-REPL14 — native-code fallback (reject vs temp compile).
+- [ ] D-REPL15 — meta-commands set.
+- [ ] D-REPL16 — result display (implicit echo vs explicit print).
+- [ ] D-REPL17 — diagnostic voice in REPL.
+- [ ] D-REPL18 — line-editing crate choice (if D-REPL11 ≠ A).
+- [ ] D-REPL19 — web playground architecture (if D-REPL2 ≠ A).
+- [ ] D-REPL20 — CI testing strategy.
+- [ ] D-REPL21 — milestone timing vs E2-M4.
 
 After concurrence, create one detailed plan file per milestone using
 `docs/plans/README.md` protocol, starting with E2-M2 unless E2-M1 concurrency is

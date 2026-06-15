@@ -4,6 +4,17 @@ Each milestone is done when its exit criteria pass as tests. Examples are
 the executable spec: a milestone ships with new examples/ programs and new
 tests/ui fixtures, all green.
 
+> **Naming canon (owner, 2026-06-15):** **jet** is the language + compiler;
+> **jetpack** is the package-manager engine/binary (binary packages +
+> environments); **jetos** is the operating system (working title), built on
+> jetpack. The near-term **jetpack & jetos** track — Phase 1 is a
+> Nix-`shell`/`devenv`-class `jetpack run github:...` temporary environment;
+> Phase 2 is the jetos distro/ISO — has its own consolidated plan and remaining
+> owner decision gates in
+> **docs/plans/jetpack-jetos/README.md**. JetOS parity baseline:
+> `/home/nate/nixos` / HalcyonOmega NixOS; anything that setup supports must be
+> expressible in JetOS unless the owner approves an explicit exception.
+
 **M3 onward each have a full implementation plan in docs/plans/** (one
 file per milestone: surface, grammar, sema rules, lowering, diagnostics,
 tests, out-of-scope). Implementing agents follow docs/plans/README.md.
@@ -78,7 +89,7 @@ the runtime report format pinned by a golden stderr test. ✓
 
 ## M5 — Collections & one string story  *(plan: docs/plans/m05-collections.md; ballots: Group 4)* ✓ 2026-06-12
 
-`List<T>`, `Map<K, V>` (bridging Rust's Vec/BTreeMap internally),
+`[T]`, `[K, V]` (bridging Rust's Vec/BTreeMap internally),
 literals, iteration, indexing with friendly runtime reports, copy-based
 slicing without exposing references, `Char`, a real String API. Exactly
 one string type.
@@ -148,13 +159,13 @@ exact v1 APIs frozen in the plan; every fallible call returns `T ? E`.
 CLI tools. User-facing reference: **docs/stdlib.md**.
 **Exit:** file-transform, JSON, and mini-CLI examples with golden tests. ✓
 
-## M12 — Package manager  *(plan: docs/plans/m12-packages.md; ✅ ratified 2026-06-13; two phases)*
+## M12 — Package manager  *(plan: docs/plans/epoch-1/m12-packages.md; ✅ ratified 2026-06-13; two phases)*
 
 Opt-in `jet.toml` + content-hashed graph `jet.lock` (spec in
-docs/plans/m12-packages.md). M12.1: path + git deps, moving
+docs/plans/epoch-1/m12-packages.md). M12.1: path + git deps, moving
 branch/`@latest` selectors, `jet add`/`fetch`/`update`, Nix-style store
-(`~/.jet/store/<name>-<version>-<fingerprint>/`), `[dependencies:rust]` FFI
-pins, optional `.jet/` source root, no install-time code execution. M12.2:
+(`~/.jet/store/<name>-<version>-<fingerprint>/`), optional FFI metadata,
+optional `.jet/` source root, no install-time code execution. M12.2:
 git-index registry, semver ranges + resolver, `jet publish`/`vendor`/`audit`.
 Single files never need any of it (R9).
 **M12.1 verified 2026-06-13.** M12.2 is next.
@@ -220,7 +231,8 @@ before work starts. None of these may compromise the v1 milestones.
    kernels (long-horizon target per docs/00 owner direction).
 9. **Pure-function marking & evaluation** (S60 ratified) — `pure fn`
    and `jet eval --pure` over marked-pure functions; layer 3 post-v1
-   (docs/plans/m12-packages.md § out of scope; docs/research/jetos.md).
+   (docs/plans/epoch-1/m12-packages.md § out of scope;
+   docs/plans/jetpack-jetos/README.md).
 10. **Rapid-prototype execution mode** (owner direction 2026-06-12) —
     compile speed is a product priority: instant iteration while
     prototyping, full compilation when the product is ready. Components
@@ -245,8 +257,17 @@ before work starts. None of these may compromise the v1 milestones.
       program needs a full build." Interpreted/JIT performance is for
       iteration, never benchmarks; `jet build` (rustc, full
       optimization) remains the only release path.
+11. **Interactive REPL** (`jet repl`, E2-M18) — line-based exploration
+    for beginners: persistent session bindings, interpreter-backed eval,
+    transcript-tested UX. Separate from `jet dev` (file watch). Blocked on
+    owner decisions D-REPL1…D-REPL21; plan:
+    docs/plans/epoch-2/m18-repl.md. Depends on E2-M4 interpreter. Web
+    playground remains a separate gate (D-REPL2/D-REPL19).
 
-**Reconciled (manifest + architecture, 2026-06-13):** docs/plans/m12-packages.md
-is the single source of truth for v1 package management (manifest, store,
-phasing, D-PM1…8 ratified). Post-v1 OS direction lives in
-docs/research/jetos.md (layer 3 on the same store).
+**Reconciled (manifest + architecture, amended 2026-06-15):**
+docs/plans/epoch-1/m12-packages.md is the single source of truth for v1
+Jet source-library package management (`jet add`, `jet.toml`, `jet.lock`).
+The binary/environment package-manager and OS track lives in
+docs/plans/jetpack-jetos/README.md: Phase 1 is independent
+`jetpack run/build/list/clean/add/remove`; Phase 2 is jetos on top of jetpack,
+including installable ISOs.

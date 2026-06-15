@@ -121,7 +121,7 @@ autocorrect code actions, VS Code extension skeleton.
   capability: completion lists, hover text pinned, rename workspace edit,
   switch-arm quick fix inserts compilable code.
 - Bench harness passes latency budget in CI.
-- Dogfood: write `examples/16_wordcount.jet` from scratch in VS Code using
+- Dogfood: write `examples/features/16_wordcount.jet` from scratch in VS Code using
   only completions/quick-fixes — no crash, no stale diagnostics (PR checklist).
 
 ---

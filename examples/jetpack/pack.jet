@@ -1,0 +1,23 @@
+// pack.jet — a Jetpack dev environment (Jet's flake equivalent).
+//
+// Phase 1 directive surface (D-JPK3) with named sources (D-JPK17): declare
+// sources as named values, then use the names inline with the same
+// `<source>:<package>` ref syntax used everywhere else.
+//
+//   jetpack run                 # enter the shell with both packages
+//   jetpack add unstable:fd     # append fd from the unstable source
+//   jetpack build               # realize without entering
+import jetpack as pkg;
+
+pub fn shell() -> [JSON] {
+    return [
+        // Named sources: a stable nixpkgs pin and the unstable channel.
+        pkg.source("stable", "github:NixOS/nixpkgs/nixos-24.05");
+        pkg.source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable");
+        pkg.source("mine", "path:../jet-pkgs", "core");
+
+        // Use the names inline. `stable:ripgrep` resolves against the pin above.
+        pkg.packages(["stable:ripgrep", "unstable:neovim", "mine:hello"]);
+        pkg.prompt("jetpack");
+    ];
+}

@@ -256,11 +256,11 @@ Rejected: `Option[T]`, `Some`/`None`, `some`/`none`, `T??`, pointer-style
 null on non-option types.
 
 **S33 — Generic type argument brackets (M3+)** *(ratified 2026-06-11;
-amended 2026-06-12)*: `**Type<Args>**` — angle brackets for type
-arguments, e.g. `List<Int>` and `Map<String, Int>`. Fallible returns use
-`T ? E` (S34), not a generic `Result` type. Square brackets `**[]**` are reserved for **value**
-list/map literals (S37/S38) and indexing (S39) — never for generic types,
-so `List<Int>` is a typed container and `[1, 2, 3]` is a list value.
+amended 2026-06-12; amended 2026-06-15)*: `**Type<Args>**` — angle brackets
+for generic type arguments, e.g. `Stack<Int>`. Fallible returns use `T ? E`
+(S34), not a generic `Result` type. Square brackets `**[]**` are reserved for
+collection values (S37/S38), indexing (S39), and collection type shorthands
+`[T]` (S65) / `[K, V]` (S64), not arbitrary generic type arguments.
 Parser disambiguates `<` in type position from comparison; nested closings
 split `>>` like Rust. Rejected: square-bracket type args `Type[Args]`
 (E0034 teaches `Type<Args>`).
@@ -385,7 +385,9 @@ empty `**[]**` needs a context type (same pattern as `null` / `none`).
 Rejected: `List(1, 2, 3)`, brace literals `{1, 2, 3}`.
 
 **S38 — Map literal (M5)** *(ratified 2026-06-12)*: `**["key": value, …]**`;
-empty `**[:]**`. Rejected: brace literals `{"k": v}` (JSON confusion with
+empty `**[:]**`. `Map<K, V>` remains the explicit type name, but S64 adds
+`[K, V]` as the ergonomic map-type shorthand: `val fruits: [String, Float] =
+["limes": 420.0]`. Rejected: brace literals `{"k": v}` (JSON confusion with
 blocks), constructor-only maps with no literal.
 
 **S39 — Indexing & out-of-bounds (M5)** *(ratified 2026-06-12)*:
@@ -394,6 +396,51 @@ runtime report on out-of-bounds / missing key; `**xs.get(i) -> (T?)**` (and
 `m.get(k) -> (V?)`) for safe access. Write `m[k] = v` inserts. Rejected:
 indexing always returns `T?` (unwrap ceremony), split policy (Option for
 maps only).
+
+**S64 — Map shorthand and entry iteration (M5/M8)** *(ratified 2026-06-15)*:
+`**[K, V]**` is accepted in type position as sugar for `Map<K, V>`.
+This is not a general tuple type and not a replacement for angle-bracket
+generic arguments; it is only the visual shorthand for map key/value pairs.
+
+**S65 — List type shorthand (M5)** *(ratified 2026-06-15)*:
+`**[T]**` is accepted in type position as sugar for `List<T>` and is the
+canonical formatter output for list types. This mirrors S64's map shorthand,
+so a Jetpack pack file can write `pub fn shell() -> [JSON]`. `List<T>` remains
+accepted for compatibility, but docs and examples prefer `[T]`.
+
+**S66 — Fully capitalized standard acronyms** *(ratified 2026-06-15)*:
+Standard Jet type names use fully capitalized acronyms: `JSON`, `JSONError`,
+`IOError`, `UTF8Error`, and `U8`. Legacy spellings (`Json`, `JsonError`,
+`IoError`, `Utf8Error`) remain accepted while examples and formatter output
+move to the capitalized forms.
+
+Iterating a map with one binding yields a built-in named entry value:
+
+```jet
+val fruits: [String, Float] = [
+    "strawberries": 69.0,
+    "limes": 420.0,
+    "tangerines": 1337.0,
+];
+
+for fruit in fruits {
+    print("{fruit.key}: {fruit.value}");
+}
+```
+
+The entry fields are `key` and `value`, so the feature works for every
+`Map<K, V>`, not only maps whose keys are names. The existing two-binding
+form remains supported:
+
+```jet
+for name, amount in fruits {
+    print("{name}: {amount}");
+}
+```
+
+Rejected: naming the first field `name` (too domain-specific), making
+`[K, V]` a general tuple syntax in v1, requiring users to call `.entries()`
+for the common case.
 
 **S40 — Slicing (M5)** *(ratified 2026-06-12)*: `**xs[a..b]**` is
 **inclusive** (S22-consistent) and **copies** elements (tier 1: no exposed
@@ -450,9 +497,10 @@ extern rust "crate@version" {
 
 Explicit `**extern rust**` blocks; each entry is a Jet signature plus
 `**= "rust::path"**` naming the foreign item. Version pins are required for
-non-`std` crates (reproducibility); pins may migrate into `jet.toml` when
-a manifest exists (M12). Boundary types pass by value only — no borrows,
-callbacks, or trait objects across the edge. Rejected: per-function
+non-`std` crates (reproducibility) and remain valid in source even when a
+manifest exists; FFI is not package-manager-gated. Boundary types pass by value
+only — no borrows, callbacks, or trait objects across the edge. Rejected:
+per-function
 `@rust(…)` annotations, manifest-only mapping with no inline declaration.
 
 **S26 — Comptime, value-level (M9.5)** *(ratified 2026-06-12)*: layered,
@@ -568,14 +616,15 @@ mandatory snake_case lint.
 
 **S52 — Package manifest (M12)** *(ratified 2026-06-12; amended
 2026-06-13)*: `**jet.toml`** — tiny TOML subset, hand-parsed in the
-compiler (I6). Full layout ratified in docs/plans/m12-packages.md.
+compiler (I6). Full layout ratified in docs/plans/epoch-1/m12-packages.md.
 
 `[package]`: `name`, `version`, `jet` (toolchain constraint), `description`,
 `license`, `repository`. `[dependencies]`: Jet deps, name-as-key, git/path/
 registry pins; moving selectors `branch = "main"` and `tag = "@latest"`
 allowed when `jet.lock` is authoritative (`jet update` refreshes;
 `--locked` freezes). Dependency kinds use colon suffixes:
-`[dependencies]`, `[dependencies:rust]` (M7 FFI pins migrate here),
+`[dependencies]`, `[dependencies:rust]` (optional FFI metadata; `extern rust`
+inline pins remain authoritative),
 `[dependencies:c]` (reserved for S59). Reserved, not generated in v1:
 `[dev-dependencies]`, `[patch]`, `[workspace]`, `[tool.*]` (ignored except
 warn on `[tool.jet]`). Lockfile `**jet.lock**` — graph-shaped, schema
@@ -599,9 +648,11 @@ shipping concurrency in v1.
 v2**. Rust FFI (S50/M7) is v1's interop story. When implemented, the
 planned surface is ballot option A: `extern c "header-or-lib" { … }` blocks
 mirroring S50's `extern rust` shape — one FFI idiom, two backends;
-by-value boundary first, pointers only inside the S58 tier. Rejected for
-v1: bindgen-style auto-generation as the primary surface, Rust-crate
-detour only.
+by-value boundary first, pointers only inside the S58 tier. Like Rust FFI,
+C FFI declarations are source-level declarations; a package manager may help
+install or locate native libraries, but it must not be required just to declare
+an external function. Rejected for v1: bindgen-style auto-generation as the
+primary surface, Rust-crate detour only.
 
 **S60 — Pure-function marking** *(ratified 2026-06-12; post-1.0 milestone
 pending)*: `**pure fn name(…)**` — a checked modifier; purity is part of
@@ -609,6 +660,132 @@ the signature; violations are compile errors naming the impure call path.
 Enables `jet eval --pure` (layer 3, post-v1) and makes comptime
 callability visible at API boundaries. Rejected: inference-only purity with
 no marking, full effects system.
+
+**D-JPK1 — Jetpack invocation boundary** *(ratified 2026-06-15; amended
+2026-06-15)*: `jetpack` is the real package-manager binary/engine for binary
+packages, environments, Nix interop, and later JetOS system builds. During
+Jetpack Phase 1, it is built and tested **independently** from the `jet` binary:
+users and agents invoke `jetpack ...` directly. Later, `jet run github:owner/repo`
+and related `jet` commands may delegate to `jetpack`, but that plumbing is not
+part of the initial implementation. `jet run main.jet` keeps the normal
+local-file Jet behavior. Rejected for Phase 1: hiding Jetpack behind `jet`
+before Jetpack itself is functional.
+
+**D-JPK2 — Jetpack command surface, Phase 1** *(ratified 2026-06-15; amended
+2026-06-15)*: implement `jetpack run`, `jetpack build`, `jetpack list`,
+`jetpack clean`, `jetpack add`, and `jetpack remove` as the Phase 1 command
+surface. `jetpack run <ref>` is the zero-config temporary environment/run path.
+`jetpack build <ref>` realizes the package/environment without entering it.
+`jetpack list` inspects realized environments/store entries. `jetpack clean`
+collects unused Jetpack-managed entries. `jetpack add/remove <ref>` edit the
+project `pack.jet`. Later `jet` commands can become wrappers around these.
+
+**D-JPK3 — Phase 1 config authoring surface** *(ratified 2026-06-15)*:
+Phase 1 ships the directive config surface that today's language can support,
+for example `pkg.packages(["ripgrep", "claude-code"])`. The intended evolution
+is a first-party fluent Jetpack module after the compiler can support it.
+Rejected for Phase 1: waiting for language-level `option`/`when` and pure eval.
+The root pack file is `pack.jet` with lockfile `pack.lock` (D-JPK13).
+
+**D-JPK4 — `jet add/remove` transition** *(ratified 2026-06-15)*:
+For Jetpack Phase 1, `jetpack add/remove` own package/environment edits. Existing
+`jet add/remove` from the pre-Jetpack package-manager work are treated as
+transitional commands that may later be replaced by plumbing to
+`jetpack add/remove` where the ref belongs to Jetpack's package/environment
+domain. Until that plumbing is implemented, agents should not make `jet` and
+`jetpack` share mutable state implicitly.
+
+**D-JPK8 — Jet pack file role** *(ratified 2026-06-15; amended 2026-06-15)*:
+Jet has a root pack file equivalent in role to Nix's `flake.nix`: the repo
+configuration for inputs, package outputs, apps, dev shells, and later JetOS
+system/ISO outputs. It is not an arbitrary second manifest for ordinary Jet
+source-library dependencies. The ratified filenames are `pack.jet` and
+`pack.lock` (D-JPK13). The earlier prototype name was `config.jet`.
+
+**D-JPK9 — Direct Jetpack commands** *(ratified 2026-06-15)*:
+Direct `jetpack ...` commands are the Phase 1 product surface, not merely expert
+aliases. Build and test `jetpack run/build/list/clean/add/remove` before adding
+any `jet` wrapper/delegation layer.
+
+**D-JPK5 — Provider translation layer** *(ratified 2026-06-15)*:
+Jetpack owns package management. Nix is not the manager of Jetpack packages; it
+is a compatibility provider that Jetpack can translate and tap to access the
+massive nixpkgs repository. Phase 1 may invoke Nix as a provider backend, but
+the user model, refs, lock/state, shell composition, and lifecycle are Jetpack's.
+Jetpack must be designed so a native Jetpack builder can replace or sit beside
+the Nix provider.
+
+**D-JPK6 — Forge removal** *(ratified 2026-06-15)*:
+Salvage useful Forge ideas into Jetpack planning, then remove
+`examples/capstone/forge/` so there is not a competing package-manager capstone.
+The salvage record lives in `docs/plans/jetpack-jetos/forge-salvage.md`.
+
+**D-JPK7 — Jetpack priority and ref syntax** *(ratified 2026-06-15)*:
+Jetpack Phase 1 is the next implementation track. Public package refs use
+`<source>:<package/path-to-package>`, for example `nixpkgs:fastfetch` and
+`github:halcyonomega/my-fastfetch-jet-config`. Users should not type Nix's
+`#` selector syntax in Jetpack commands.
+
+**D-JPK11 — Remote ref contract** *(ratified 2026-06-15)*:
+For `jetpack run <source>:<package/path-to-package>`, Jetpack first looks for
+`pack.jet` in the target repo. If absent,
+Jetpack may translate a `flake.nix` fallback into Jetpack's internal plan.
+Fallback translation still leaves Jetpack in charge of realization, lock/state,
+and shell composition.
+
+**D-JPK12 — System state and store roots** *(ratified 2026-06-15)*:
+Jetpack should function like Nix at the system level while using Jet-owned
+paths: `/etc/jet/` for system configuration/state and `/etc/jet/store/` for the
+system store. Project-local metadata may still exist for developer workflows,
+but the end-state package store is system-scoped, not hidden inside each
+project.
+
+**D-JPK14 — Shell prompt support** *(ratified 2026-06-15)*:
+Phase 1 supports bash, fish, and zsh prompt injection. The prompt must clearly
+show that the user is inside a Jetpack/Jet shell, and the default visible label
+should be `jetpack` rather than the app name. Prompt styling is configurable.
+
+**D-JPK15 — Nix compatibility syntax** *(ratified 2026-06-15)*:
+Support flake compatibility and nixpkgs attribute compatibility, but expose them
+through Jetpack's uniform `<source>:<package/path-to-package>` shape. Example:
+`jetpack run nixpkgs:fastfetch`, not `jetpack run nixpkgs#fastfetch`. Jet pack
+files take priority over flake fallback when both exist.
+
+**D-JPK13 — Jet pack file and lockfile naming** *(ratified 2026-06-15)*:
+The root Jet pack file is `pack.jet`; its lockfile is `pack.lock`. "Jet packs"
+are the product noun (analogous to Nix flakes). Rejected: B `config.jet` +
+`jetpack.lock` (generic config name; lock repeats the tool name beside
+`jet.lock`); C `config.jet` + `config.lock` (too generic; weak Jetpack
+identity); D `jetpack.jet` + `jetpack.lock` (noisy; repeats `jet`).
+
+**D-JPK17 — Named sources in the pack file** *(ratified 2026-06-15)*:
+A pack file may declare named sources as values and use them inline through the
+ratified `<source>:<package>` ref syntax (D-JPK7/15). Declaration:
+`pkg.source("<name>", "<upstream/pin>")`; use: `<name>:<package>` in
+`pkg.packages([...])`. The built-in source names `nixpkgs`, `github`, and `path`
+need no declaration. A single-argument `pkg.source("nixpkgs")` sets the default
+source for bare (unprefixed) package entries. The realizing provider is inferred
+from the upstream (R1 routes all named sources through the `nix` provider; the
+first-party `core` provider and explicit `via:` override arrive with R2). An
+unknown source name is a friendly error listing the built-ins plus any declared
+names. Design + worked examples: `docs/plans/jetpack-jetos/native-resolver.md`.
+Rejected: a separate `packages_from("name", [...])` grouping (introduces a second
+way to attach a source; the inline `<source>:<package>` form is preferred).
+
+**D-JPK16 — Native-resolver posture & Nix-eval engine** *(ratified 2026-06-15)*:
+Jetpack's first-party **core** resolver owns realization; backends are providers
+behind one trait (`core`, `nix`, later others). For the no-installed-`nix` goal
+(roadmap R3), the chosen interim engine is **tvix** (the Rust reimplementation of
+Nix), used as a support shim behind the `nix` provider until a first-party Jet
+translator replaces it — a natural fit since Jet itself transpiles to Rust. This
+requires an **I6 waiver scoped to Jetpack's `nix` provider only**: tvix and its
+dependency tree must be isolated (a separate crate or a non-default cargo
+feature) so the `jet` compiler proper stays std-only. tvix integration is its own
+milestone (R3): `tvix-eval` evaluates Nix but does not by itself realize/
+substitute packages, so R3 also needs store/substituter glue. Ship core-first
+(R0–R2) before R3. Rejected: B build a from-scratch Nix evaluator immediately
+(largest scope, blocks everything); keeping `nix`-binary orchestration as the
+permanent path (contradicts the no-installed-`nix` goal).
 
 ## Enforcement
 
@@ -656,6 +833,10 @@ implementation milestone is pending.
 | ID  | Question                                   | Needed by |
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives (deferred) | post-1.0  |
+
+> Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
+> **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
+> section above and `docs/plans/jetpack-jetos/native-resolver.md`.
 
 
 Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) and Group 7 (S51–S54, S52)
@@ -730,6 +911,8 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-12 | S61 | optional arg labels; positional order fixed | owner |
 | 2026-06-12 | S62 | trait delegation `impl Trait using field;`  | owner |
 | 2026-06-12 | S63 | RAII scope-end cleanup; `defer` maybe later | owner |
+| 2026-06-15 | S65 | list type shorthand `[T]`; `List<T>` compatibility | owner |
+| 2026-06-15 | S66 | standard acronyms fully capitalized (`JSON`, `IOError`) | owner |
 | 2026-06-12 | S51 | std imports: `import std.fs as fs` module form | owner |
 | 2026-06-12 | S54 | no prescribed naming convention in v1        | owner |
 | 2026-06-12 | S52 | `jet.toml` manifest; `jet.lock`; jet add/fetch | owner |
@@ -737,3 +920,19 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-12 | S53 | concurrency deferred to v2; option A when built | owner |
 | 2026-06-12 | S59 | C FFI deferred to v2; `extern c` when built  | owner |
 | 2026-06-12 | S60 | `pure fn` checked purity modifier            | owner |
+| 2026-06-15 | D-JPK1 | build `jetpack` independently first; `jet` plumbing later | owner |
+| 2026-06-15 | D-JPK2 | `jetpack run/build/list/clean/add/remove` Phase 1 | owner |
+| 2026-06-15 | D-JPK3 | Phase 1 directive `pack.jet` surface | owner |
+| 2026-06-15 | D-JPK4 | `jet add/remove` can later plumb to `jetpack add/remove` | owner |
+| 2026-06-15 | D-JPK8 | Jet pack file has `flake.nix` role; `pack.jet`/`pack.lock` | owner |
+| 2026-06-15 | D-JPK9 | direct `jetpack ...` commands are Phase 1 surface | owner |
+| 2026-06-15 | D-JPK5 | Jetpack owns packages; Nix is a compatibility provider | owner |
+| 2026-06-15 | D-JPK6 | salvage Forge notes, then remove Forge capstone | owner |
+| 2026-06-15 | D-JPK7 | Jetpack next; refs use `<source>:<package/path>` | owner |
+| 2026-06-15 | D-JPK11 | Jet pack file first; flake fallback translated | owner |
+| 2026-06-15 | D-JPK12 | system roots `/etc/jet/` and `/etc/jet/store/` | owner |
+| 2026-06-15 | D-JPK14 | bash/fish/zsh prompt support; default label `jetpack` | owner |
+| 2026-06-15 | D-JPK15 | nixpkgs attrs use `source:attr`, not `source#attr` | owner |
+| 2026-06-15 | D-JPK13 | `pack.jet` + `pack.lock` ("Jet packs") | owner |
+| 2026-06-15 | D-JPK17 | named sources declared in pack.jet, used inline `name:pkg` | owner |
+| 2026-06-15 | D-JPK16 | core resolver + providers; tvix shim for no-installed-nix (R3), I6 waiver scoped to jetpack | owner |

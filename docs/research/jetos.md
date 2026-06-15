@@ -2,11 +2,20 @@
 
 > **STATUS (2026-06-13): NOT RATIFIED — post-v1 exploration only.**
 > Depends on M12 layer 3 (`jet eval --pure`, sandboxed builds, signed
-> caches) on the same store as docs/plans/m12-packages.md. No decision
+> caches) on the same store as docs/plans/epoch-1/m12-packages.md. No decision
 > in this file (D-OS1…7, D-NX1…6) is ratified. Agents: do not implement.
+>
+> **SEQUENCING (2026-06-15): superseded by docs/plans/jetpack-jetos/README.md.**
+> Per the naming canon, **jetos is Phase 2**, built on the **jetpack** tool
+> (the package manager) whose Phase 1 — a Nix-`shell`/`devenv`-class
+> `jetpack run <remote-ref>` temporary environment — is the near-term,
+> buildable-now work. `jet` plumbing comes later.
+> The vision in this file is unchanged; read the consolidated plan first for the
+> current phase order and owner decision gates.
 
-Audience: the project owner and implementing agents. v1 package management
-is docs/plans/m12-packages.md; this doc is the OS layer direction after v1.
+Audience: the project owner and implementing agents. v1 Jet source-library
+package management is docs/plans/epoch-1/m12-packages.md; the active
+Jetpack/JetOS sequencing source is docs/plans/jetpack-jetos/README.md.
 
 ---
 
@@ -87,7 +96,7 @@ two plugins touch the same switch.
 
 ```
 my-jetos/
-  jetpack.lock          # pins std option tree version + all packages
+  pack.lock             # pins std option tree + packages
   modules/**/*.jet      # feature modules — ALL auto-imported
   hosts/<name>.jet      # one per machine — also auto-imported
 ```
@@ -301,7 +310,7 @@ Each shown with the live example from this doc so it's decidable at a glance.
 
 ## 10. Platform decisions (D-NX1…6 — from Nix-replacement review)
 
-Prerequisite: ratify D-PM1…8 in docs/plans/m12-packages.md and ship M12.
+Prerequisite: ratify D-PM1…8 in docs/plans/epoch-1/m12-packages.md and ship M12.
 
 | ID | Question | Rec |
 |---|---|---|
@@ -310,7 +319,7 @@ Prerequisite: ratify D-PM1…8 in docs/plans/m12-packages.md and ship M12.
 | D-NX3 | Ephemeral `jetos try` | **A** — shell-scoped only; nothing recorded |
 | D-NX4 | NixOS migration | **A** — reporter/checklist, not automatic converter |
 | D-NX5 | v0 product | **A** — one reference desktop image (x86_64 Cinnamon) |
-| D-NX6 | Option-schema bootstrap | **new** — hand-write spine option modules; no cache to tap; `Json` pass-through for vendor config tails |
+| D-NX6 | Option-schema bootstrap | **new** — hand-write spine option modules; no cache to tap; `JSON` pass-through for vendor config tails |
 
 **Imperative front door (headline feature):** `jetos add/set/remove` edit
 declarative config files only — never a second install database. Drift is

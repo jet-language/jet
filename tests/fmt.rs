@@ -28,11 +28,7 @@ fn fmt_is_idempotent_on_examples() {
             )
         });
         let twice = jet::format_source(&once).expect("second fmt should succeed");
-        assert_eq!(
-            once, twice,
-            "fmt is not idempotent on {}",
-            path.display()
-        );
+        assert_eq!(once, twice, "fmt is not idempotent on {}", path.display());
     }
 }
 
@@ -48,7 +44,10 @@ fn fmt_canonicalizes_s14_foreign_spellings() {
         out.contains("val x"),
         "expected `let` lowered to `val`, got:\n{out}"
     );
-    assert!(!out.contains("let x"), "foreign `let` should be gone:\n{out}");
+    assert!(
+        !out.contains("let x"),
+        "foreign `let` should be gone:\n{out}"
+    );
     let twice = jet::format_source(&out).expect("canonical output should re-fmt");
     assert_eq!(out, twice, "canonicalized output must be idempotent");
 }
@@ -63,6 +62,67 @@ fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
     assert!(
         out.contains("fn parse_count(raw: String) -> Int ? {"),
         "expected `Int?` return to format as `Int ?`, got:\n{out}"
+    );
+}
+
+#[test]
+fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
+    let src = r#"fn main() {
+    val fruit = "orange";
+    val frozen = false;
+    switch fruit {
+        fruit == apple -> { print("Apple Juice"); };
+        fruit == orange || frozen != true -> { print("Orange Juice"); };
+        fruit == tangerine || fruit == yuzu -> { print("Citrus Juice"); };
+        else -> { print("Water"); };
+    }
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should parse legacy switch syntax");
+    assert!(
+        out.contains("| apple {"),
+        "expected bare equality case, got:\n{out}"
+    );
+    assert!(
+        out.contains("| orange || (frozen != true) {"),
+        "expected mixed pipe condition, got:\n{out}"
+    );
+    assert!(
+        out.contains("| tangerine || yuzu {"),
+        "expected repeated subject equality to collapse, got:\n{out}"
+    );
+    assert!(out.contains("| else {"), "expected pipe else, got:\n{out}");
+    let twice = jet::format_source(&out).expect("pipe switch output should re-fmt");
+    assert_eq!(out, twice, "pipe switch formatting must be idempotent");
+}
+
+#[test]
+fn fmt_canonicalizes_collection_type_sugar() {
+    let src = r#"fn shell() -> [JSON] {
+    return [
+        JSON.Null;
+    ];
+}
+
+fn use_collections(items: List<String>, counts: Map<String, Int>) {}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept collection type sugar");
+    assert!(
+        out.contains("fn shell() -> [JSON]"),
+        "expected list return shorthand, got:\n{out}"
+    );
+    assert!(
+        out.contains("items: [String], counts: [String, Int]"),
+        "expected bracket collection type formatting, got:\n{out}"
+    );
+    assert!(
+        out.contains("return [JSON.Null];"),
+        "expected semicolon-separated list input to format cleanly, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("collection shorthand output should re-fmt");
+    assert_eq!(
+        out, twice,
+        "collection shorthand formatting must be idempotent"
     );
 }
 
@@ -95,11 +155,7 @@ fn fmt_is_idempotent_on_ui_fixes() {
                 )
             });
             let twice = jet::format_source(&once).expect("second fmt should succeed");
-            assert_eq!(
-                once, twice,
-                "fmt is not idempotent on {}",
-                path.display()
-            );
+            assert_eq!(once, twice, "fmt is not idempotent on {}", path.display());
         }
     }
 }

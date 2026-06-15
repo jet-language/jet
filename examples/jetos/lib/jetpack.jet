@@ -9,7 +9,7 @@
 // Why directives instead of a fluent `cfg.apps.installed.append(...)` builder:
 // in v1 Jet a module file cannot name another file's struct type or call its
 // methods, so a shared mutable `cfg` can't be passed between files. Directives
-// are plain `Json` values, which DO cross freely — and they keep modules
+// are plain `JSON` values, which DO cross freely — and they keep modules
 // liftable (a module's whole interface is the directives it emits). The fluent
 // surface is the next milestone; see docs/research/jetpack-config.md.
 
@@ -51,71 +51,71 @@ pub fn describe(take e: ConfigError) -> String {
 }
 
 // --- Directive constructors (the module-facing API) -----------------------
-// Each returns one `Json` directive. Modules build a `List<Json>` from these.
+// Each returns one `JSON` directive. Modules build a `[JSON]` from these.
 
 /// System-wide programs the user wants available (the headline list).
-pub fn installed(items: List<String>) -> Json {
+pub fn installed(items: List<String>) -> JSON {
     return pkgs_directive("apps", items.clone());
 }
 
 /// Per-user packages (the home-manager role).
-pub fn packages(items: List<String>) -> Json {
+pub fn packages(items: List<String>) -> JSON {
     return pkgs_directive("user", items.clone());
 }
 
 /// System services to switch on (e.g. `pipewire`, `bluetooth`).
-pub fn services(names: List<String>) -> Json {
-    var m: Map<String, Json> = [:];
-    m["op"] = Json.Text("service");
-    m["names"] = Json.Array(to_json_array(names.clone()));
-    return Json.Object(m);
+pub fn services(names: List<String>) -> JSON {
+    var m: Map<String, JSON> = [:];
+    m["op"] = JSON.Text("service");
+    m["names"] = JSON.Array(to_json_array(names.clone()));
+    return JSON.Object(m);
 }
 
 /// Set a scalar option at normal priority (hosts and users decide).
-pub fn option(path: String, value: String) -> Json {
+pub fn option(path: String, value: String) -> JSON {
     return scalar("normal", path.clone(), value.clone());
 }
 
 /// Suggest a scalar option (`default`) — used unless anyone else cares.
-pub fn suggest(path: String, value: String) -> Json {
+pub fn suggest(path: String, value: String) -> JSON {
     return scalar("default", path.clone(), value.clone());
 }
 
 /// Force a scalar option — end of discussion (two forces still conflict).
-pub fn force(path: String, value: String) -> Json {
+pub fn force(path: String, value: String) -> JSON {
     return scalar("force", path.clone(), value.clone());
 }
 
-fn pkgs_directive(scope: String, take items: List<String>) -> Json {
-    var m: Map<String, Json> = [:];
-    m["op"] = Json.Text("pkgs");
-    m["scope"] = Json.Text(scope.clone());
-    m["items"] = Json.Array(to_json_array(take items));
-    return Json.Object(m);
+fn pkgs_directive(scope: String, take items: List<String>) -> JSON {
+    var m: Map<String, JSON> = [:];
+    m["op"] = JSON.Text("pkgs");
+    m["scope"] = JSON.Text(scope.clone());
+    m["items"] = JSON.Array(to_json_array(take items));
+    return JSON.Object(m);
 }
 
-fn scalar(prio: String, path: String, value: String) -> Json {
-    var m: Map<String, Json> = [:];
-    m["op"] = Json.Text("set");
-    m["path"] = Json.Text(path.clone());
-    m["value"] = Json.Text(value.clone());
-    m["prio"] = Json.Text(prio.clone());
-    m["src"] = Json.Text("");
-    return Json.Object(m);
+fn scalar(prio: String, path: String, value: String) -> JSON {
+    var m: Map<String, JSON> = [:];
+    m["op"] = JSON.Text("set");
+    m["path"] = JSON.Text(path.clone());
+    m["value"] = JSON.Text(value.clone());
+    m["prio"] = JSON.Text(prio.clone());
+    m["src"] = JSON.Text("");
+    return JSON.Object(m);
 }
 
 /// Stamp a source label onto every `set` directive that lacks one. The tree
 /// generator wraps each module's contributions with `from(<path>, ...)` so a
 /// later conflict can name the exact files that disagree.
-pub fn from(src: String, take directives: List<Json>) -> List<Json> {
-    var out: List<Json> = [];
+pub fn from(src: String, take directives: [JSON]) -> [JSON] {
+    var out: [JSON] = [];
     for d in directives {
         out.push(stamp(src.clone(), take d));
     }
     return out;
 }
 
-fn stamp(src: String, take d: Json) -> Json {
+fn stamp(src: String, take d: JSON) -> JSON {
     val probe = d.clone();
     if probe == Object(entries) {
         var m = entries;
@@ -123,10 +123,10 @@ fn stamp(src: String, take d: Json) -> Json {
         val have = field_text(m, "src");
         if (op == "set") {
             if (have == "") {
-                m["src"] = Json.Text(src.clone());
+                m["src"] = JSON.Text(src.clone());
             }
         }
-        return Json.Object(m);
+        return JSON.Object(m);
     }
     return d;
 }
@@ -142,7 +142,7 @@ struct Assign {
 
 /// Merge every directive into the canonical system tree, or fail with the
 /// first conflict. Pure: no IO, deterministic, safe to unit-test.
-pub fn build_tree(source: String, host: String, take directives: List<Json>) -> String ? ConfigError {
+pub fn build_tree(source: String, host: String, take directives: [JSON]) -> String ? ConfigError {
     var apps: List<String> = [];
     var user_pkgs: List<String> = [];
     var svcs: List<String> = [];
@@ -214,32 +214,32 @@ fn label(take src: String) -> String {
 }
 
 fn render_tree(source: String, host: String, take apps: List<String>, take user_pkgs: List<String>, take svcs: List<String>, options: Map<String, String>) -> String {
-    var meta: Map<String, Json> = [:];
-    meta["host"] = Json.Text(host.clone());
-    meta["source"] = Json.Text(source.clone());
+    var meta: Map<String, JSON> = [:];
+    meta["host"] = JSON.Text(host.clone());
+    meta["source"] = JSON.Text(source.clone());
 
-    var pkgs_obj: Map<String, Json> = [:];
-    pkgs_obj["apps"] = Json.Array(to_json_array(unique_sorted(take apps)));
-    pkgs_obj["user"] = Json.Array(to_json_array(unique_sorted(take user_pkgs)));
+    var pkgs_obj: Map<String, JSON> = [:];
+    pkgs_obj["apps"] = JSON.Array(to_json_array(unique_sorted(take apps)));
+    pkgs_obj["user"] = JSON.Array(to_json_array(unique_sorted(take user_pkgs)));
 
-    var opts_obj: Map<String, Json> = [:];
+    var opts_obj: Map<String, JSON> = [:];
     for k, v in options {
-        opts_obj[k.clone()] = Json.Text(v.clone());
+        opts_obj[k.clone()] = JSON.Text(v.clone());
     }
 
-    var root: Map<String, Json> = [:];
-    root["meta"] = Json.Object(meta);
-    root["options"] = Json.Object(opts_obj);
-    root["packages"] = Json.Object(pkgs_obj);
-    root["services"] = Json.Array(to_json_array(unique_sorted(take svcs)));
-    return json.render_pretty(Json.Object(root));
+    var root: Map<String, JSON> = [:];
+    root["meta"] = JSON.Object(meta);
+    root["options"] = JSON.Object(opts_obj);
+    root["packages"] = JSON.Object(pkgs_obj);
+    root["services"] = JSON.Array(to_json_array(unique_sorted(take svcs)));
+    return json.render_pretty(JSON.Object(root));
 }
 
 // --- Evaluation entry points ----------------------------------------------
 
 /// Evaluate a config: print the canonical system tree, or print the conflict
 /// and exit 1. `config.jet`'s `main` calls this.
-pub fn emit(source: String, host: String, take directives: List<Json>) {
+pub fn emit(source: String, host: String, take directives: [JSON]) {
     switch build_tree(source.clone(), host.clone(), take directives) {
         it == ok(text) -> {
             print(text);
@@ -264,14 +264,14 @@ fn prio_rank(name: String) -> Int {
     return 1;
 }
 
-fn field_text(entries: Map<String, Json>, key: String) -> String {
+fn field_text(entries: Map<String, JSON>, key: String) -> String {
     if entries.get(key) == value(found) {
         return as_text(take found);
     }
     return "";
 }
 
-fn field_strings(entries: Map<String, Json>, key: String) -> List<String> {
+fn field_strings(entries: Map<String, JSON>, key: String) -> List<String> {
     if entries.get(key) == value(found) {
         return as_strings(take found);
     }
@@ -279,12 +279,12 @@ fn field_strings(entries: Map<String, Json>, key: String) -> List<String> {
     return empty;
 }
 
-fn as_text(take j: Json) -> String {
+fn as_text(take j: JSON) -> String {
     if j == Text(s) { return s; }
     return "";
 }
 
-fn as_strings(take j: Json) -> List<String> {
+fn as_strings(take j: JSON) -> List<String> {
     var out: List<String> = [];
     if j == Array(items) {
         for item in items {
@@ -294,10 +294,10 @@ fn as_strings(take j: Json) -> List<String> {
     return out;
 }
 
-fn to_json_array(take items: List<String>) -> List<Json> {
-    var out: List<Json> = [];
+fn to_json_array(take items: List<String>) -> [JSON] {
+    var out: [JSON] = [];
     for item in items {
-        out.push(Json.Text(item));
+        out.push(JSON.Text(item));
     }
     return out;
 }
@@ -324,7 +324,7 @@ fn contains_str(haystack: List<String>, needle: String) -> Bool {
 // --- Tests ----------------------------------------------------------------
 
 test "package lists from two modules combine, dedup, and sort" {
-    var ds: List<Json> = [];
+    var ds: [JSON] = [];
     ds.push(installed(["firefox", "btop"]));
     ds.push(installed(["btop", "fastfetch"]));
     val tree = build_tree("src", "host", take ds) or panic("should merge");
@@ -335,14 +335,14 @@ test "package lists from two modules combine, dedup, and sort" {
 }
 
 test "a scalar option resolves to its single value" {
-    var ds: List<Json> = [];
+    var ds: [JSON] = [];
     ds.push(option("sys.desktop.environment", "cinnamon"));
     val tree = build_tree("src", "host", take ds) or panic("should merge");
     require(tree.contains("cinnamon"));
 }
 
 test "normal priority beats default" {
-    var ds: List<Json> = from("modules/a", single(suggest("sys.x", "plasma")));
+    var ds: [JSON] = from("modules/a", single(suggest("sys.x", "plasma")));
     for d in from("hosts/laptop", single(option("sys.x", "cinnamon"))) {
         ds.push(d);
     }
@@ -352,7 +352,7 @@ test "normal priority beats default" {
 }
 
 test "force beats normal" {
-    var ds: List<Json> = [];
+    var ds: [JSON] = [];
     ds.push(option("sys.x", "cinnamon"));
     ds.push(force("sys.x", "plasma"));
     val tree = build_tree("src", "host", take ds) or panic("should merge");
@@ -360,7 +360,7 @@ test "force beats normal" {
 }
 
 test "two normal values for one scalar is a named conflict" {
-    var ds: List<Json> = from("modules/a", single(option("sys.x", "plasma")));
+    var ds: [JSON] = from("modules/a", single(option("sys.x", "plasma")));
     for d in from("hosts/laptop", single(option("sys.x", "cinnamon"))) {
         ds.push(d);
     }
@@ -377,7 +377,7 @@ test "two normal values for one scalar is a named conflict" {
 }
 
 test "services combine and sort" {
-    var ds: List<Json> = [];
+    var ds: [JSON] = [];
     ds.push(services(["pipewire", "bluetooth"]));
     ds.push(services(["pipewire", "tailscale"]));
     val tree = build_tree("src", "host", take ds) or panic("should merge");
@@ -385,8 +385,8 @@ test "services combine and sort" {
     require(tree.contains("tailscale"));
 }
 
-fn single(take d: Json) -> List<Json> {
-    var out: List<Json> = [];
+fn single(take d: JSON) -> [JSON] {
+    var out: [JSON] = [];
     out.push(d);
     return out;
 }

@@ -86,7 +86,7 @@ fn main() {
 }
 ```
 
-Each module has a small error type (`IoError`, `JsonError`, …). There is no
+Each module has a small error type (`IOError`, `JSONError`, …). There is no
 automatic conversion between error types in v1.
 
 ---
@@ -124,19 +124,19 @@ fn main() {
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `read(path)` | `String or IoError` | Read entire file as UTF-8 text |
-| `read_bytes(path)` | `List<U8> or IoError` | Read entire file as bytes |
-| `write(path, text)` | `() or IoError` | Create or overwrite a text file |
-| `append(path, text)` | `() or IoError` | Append text to a file |
+| `read(path)` | `String or IOError` | Read entire file as UTF-8 text |
+| `read_bytes(path)` | `[U8] or IOError` | Read entire file as bytes |
+| `write(path, text)` | `() or IOError` | Create or overwrite a text file |
+| `append(path, text)` | `() or IOError` | Append text to a file |
 | `exists(path)` | `Bool` | Whether the path exists |
-| `remove(path)` | `() or IoError` | Delete a file |
-| `list_dir(path)` | `List<String> or IoError` | Names in a directory |
-| `create_dir(path)` | `() or IoError` | Create a directory |
+| `remove(path)` | `() or IOError` | Delete a file |
+| `list_dir(path)` | `[String] or IOError` | Names in a directory |
+| `create_dir(path)` | `() or IOError` | Create a directory |
 | `is_dir(path)` | `Bool` | Whether the path is a directory |
-| `copy(from, to)` | `() or IoError` | Copy a file |
-| `rename(from, to)` | `() or IoError` | Rename or move a file |
+| `copy(from, to)` | `() or IOError` | Copy a file |
+| `rename(from, to)` | `() or IOError` | Rename or move a file |
 
-**`IoError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
+**`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
 
 ---
 
@@ -146,7 +146,7 @@ fn main() {
 import std.io as io;
 
 fn main() {
-    val args = io.args();                    // List<String>; index 0 is the program name
+    val args = io.args();                    // [String]; index 0 is the program name
     val name = io.input("your name? ") or return;  // reads one line, strips newline
     print("hi, {name}");
     io.eprint("(log) done");                 // like print, but to stderr
@@ -161,9 +161,9 @@ printf "Ada\n" | jet run ask.jet
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `args()` | `List<String>` | Command-line arguments |
-| `input([prompt])` | `String or IoError` | Read one line from stdin; optional prompt |
-| `read_all_input()` | `String or IoError` | Read all of stdin to end-of-file |
+| `args()` | `[String]` | Command-line arguments |
+| `input([prompt])` | `String or IOError` | Read one line from stdin; optional prompt |
+| `read_all_input()` | `String or IOError` | Read all of stdin to end-of-file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 
 `print` stays in the core prelude (no import). Use `io.eprint` for stderr.
@@ -190,7 +190,7 @@ fn main() {
 |----------|---------|--------------|
 | `get(name)` | `String?` | Environment variable, or null if unset |
 | `set(name, value)` | nothing | Set an environment variable |
-| `current_dir()` | `String or IoError` | Current working directory |
+| `current_dir()` | `String or IOError` | Current working directory |
 | `home_dir()` | `String?` | User home directory, if known |
 
 ---
@@ -212,7 +212,7 @@ fn main() {
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
-| `run(cmd)` | `ProcessResult or IoError` | Run a command; `cmd` is `List<String>` |
+| `run(cmd)` | `ProcessResult or IOError` | Run a command; `cmd` is `[String]` |
 
 **`ProcessResult`** — `code: Int`, `output: String`, `errors: String`.
 
@@ -310,7 +310,7 @@ this to pin output; normal programs ignore it.
 
 ### `std.json` — parse and print JSON
 
-Dynamic JSON — you walk a `Json` enum by hand. Typed JSON structs come later.
+Dynamic JSON — you walk a `JSON` enum by hand. Typed JSON structs come later.
 
 ```jet
 import std.json as json;
@@ -329,16 +329,16 @@ fn main() {
 }
 ```
 
-**`Json` variants:** `Null`, `Boolean(b)`, `Number(n)`, `Text(s)`,
-`Array(items)`, `Object(entries: Map<String, Json>)`.
+**`JSON` variants:** `Null`, `Boolean(b)`, `Number(n)`, `Text(s)`,
+`Array(items)`, `Object(entries: [String, JSON])`.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `parse(text)` | `Json or JsonError` | Parse a JSON string |
+| `parse(text)` | `JSON or JSONError` | Parse a JSON string |
 | `render(j)` | `String` | Compact JSON text |
 | `render_pretty(j)` | `String` | Indented JSON text |
 
-**`JsonError`** — `line` and `message` pointing at the parse failure.
+**`JSONError`** — `line` and `message` pointing at the parse failure.
 
 ---
 
@@ -409,7 +409,7 @@ fn main() {
     val b: U8 = 255;
     print(b.to_int());                       // 255 as Int
     val n = 42.to_u8() or return;            // checked conversion
-    val bytes = "hi".bytes();                // List<U8>
+    val bytes = "hi".bytes();                // [U8]
     val text = String.from_bytes(bytes) or return;
     print(text);
 }
@@ -417,8 +417,8 @@ fn main() {
 
 | API | Returns | What it does |
 |-----|---------|--------------|
-| `String.bytes()` | `List<U8>` | UTF-8 bytes of a string |
-| `String.from_bytes(bs)` | `String or Utf8Error` | Decode UTF-8 bytes |
+| `String.bytes()` | `[U8]` | UTF-8 bytes of a string |
+| `String.from_bytes(bs)` | `String or UTF8Error` | Decode UTF-8 bytes |
 | `n.to_u8()` | `U8 or String` | Checked Int → U8 |
 | `b.to_int()` | `Int` | U8 → Int |
 

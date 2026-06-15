@@ -143,17 +143,17 @@ fn main() {
 
 ## Collections
 
-`List<T>` is an ordered sequence; `Map<K, V>` is key–value lookup. Literals
+`[T]` is an ordered sequence; `[K, V]` is key–value lookup. Literals
 use `[ ]` and `[: ]`.
 
 ```jet
 fn main() {
-    var nums: List<Int> = [3, 1, 2];
+    var nums: [Int] = [3, 1, 2];
     nums.push(4);
     nums.sort();
     print(nums[0]);
 
-    var counts: Map<String, Int> = [:];
+    var counts: [String, Int] = [:];
     counts["jet"] = 1;
     print(counts["jet"]);
 }

@@ -61,70 +61,16 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
             .collect(),
         return_type: ef.return_type.clone(),
         crate_spec: block.crate_spec.clone(),
-        line_hint: format!(
-            "`{}` in `extern rust \"{}\"`",
-            ef.name, block.crate_spec
-        ),
+        line_hint: format!("`{}` in `extern rust \"{}\"`", ef.name, block.crate_spec),
     }
 }
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
 /// program has no `extern rust` declarations.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
-    let mut entries = collect_externs(bundle);
+    let entries = collect_externs(bundle);
     if entries.is_empty() {
         return Ok(None);
-    }
-
-    // M12.1: when a jet.toml is present, validate and resolve crate versions
-    // against [dependencies:rust] (E1205).
-    if let Some(manifest_result) = crate::manifest::load(&bundle.project_root) {
-        let manifest = manifest_result.map_err(|d| vec![d])?;
-        let mut diags: Vec<Diagnostic> = Vec::new();
-
-        for entry in &mut entries {
-            if entry.crate_spec == "std" {
-                continue;
-            }
-            if entry.crate_spec.contains('@') {
-                // Inline version pin is not allowed when jet.toml is present.
-                let (crate_name, _ver) = entry.crate_spec.split_once('@').unwrap();
-                diags.push(Diagnostic::error(
-                    "E1205",
-                    format!("`{}` pin belongs in `[dependencies:rust]`", entry.crate_spec),
-                    "when `jet.toml` is present, Rust crate versions are declared in `[dependencies:rust]`, not inline in `extern rust`".to_string(),
-                    format!(
-                        "remove `@{}` from `extern rust \"{}\"`, and add `{} = \"<version>\"` to `[dependencies:rust]` in `jet.toml`",
-                        entry.crate_spec.split_once('@').map(|(_, v)| v).unwrap_or("version"),
-                        entry.crate_spec,
-                        crate_name
-                    ),
-                    None,
-                ));
-            } else {
-                // No inline version — look up in [dependencies:rust].
-                let crate_name = entry.crate_spec.as_str();
-                if let Some(version) = manifest.dependencies_rust.get(crate_name) {
-                    // Resolve: set the crate_spec to "name@version" for build_bridge.
-                    entry.crate_spec = format!("{}@{}", crate_name, version);
-                } else {
-                    diags.push(Diagnostic::error(
-                        "E1205",
-                        format!("`{}` used in `extern rust` is not in `[dependencies:rust]`", crate_name),
-                        "when `jet.toml` is present, all Rust crate deps must be declared in `[dependencies:rust]`".to_string(),
-                        format!(
-                            "add `{} = \"<version>\"` to `[dependencies:rust]` in `jet.toml`",
-                            crate_name
-                        ),
-                        None,
-                    ));
-                }
-            }
-        }
-
-        if !diags.is_empty() {
-            return Err(diags);
-        }
     }
 
     build_bridge(&entries).map(Some)
@@ -140,33 +86,26 @@ pub fn build_bridge(entries: &[ExternEntry]) -> Result<FfiLink, Vec<Diagnostic>>
         return Err(vec![Diagnostic::error(
             "E0703",
             "can't call foreign Rust crates without `cargo`".to_string(),
-            "Jet builds a small helper crate for each `extern rust` dependency set"
-                .to_string(),
+            "Jet builds a small helper crate for each `extern rust` dependency set".to_string(),
             "install Rust from https://rustup.rs (this includes `cargo`), then try again"
                 .to_string(),
             None,
         )]);
     }
 
-    fs::create_dir_all(&cache_root).map_err(|e| tool_error(&format!(
-        "couldn't create the FFI cache folder: {}",
-        e
-    )))?;
+    fs::create_dir_all(&cache_root)
+        .map_err(|e| tool_error(&format!("couldn't create the FFI cache folder: {}", e)))?;
 
     let src_dir = cache_root.join("src");
-    fs::create_dir_all(&src_dir).map_err(|e| tool_error(&format!(
-        "couldn't create the FFI build folder: {}",
-        e
-    )))?;
+    fs::create_dir_all(&src_dir)
+        .map_err(|e| tool_error(&format!("couldn't create the FFI build folder: {}", e)))?;
 
     let manifest = cache_root.join("Cargo.toml");
     let lib_rs = src_dir.join("lib.rs");
-    fs::write(&manifest, emit_cargo_toml(&crate_name, &deps)).map_err(|e| {
-        tool_error(&format!("couldn't write the FFI manifest: {}", e))
-    })?;
-    fs::write(&lib_rs, emit_wrapper_lib(entries)).map_err(|e| {
-        tool_error(&format!("couldn't write the FFI wrappers: {}", e))
-    })?;
+    fs::write(&manifest, emit_cargo_toml(&crate_name, &deps))
+        .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
+    fs::write(&lib_rs, emit_wrapper_lib(entries))
+        .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     let target_dir = cache_root.join("target");
     let out = Command::new("cargo")
@@ -449,7 +388,13 @@ fn looks_like_signature_mismatch(stderr: &str) -> bool {
 
 fn indent_block(s: &str) -> String {
     s.lines()
-        .map(|line| if line.is_empty() { String::new() } else { format!("    {line}") })
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                format!("    {line}")
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -492,12 +437,7 @@ fn normalize_ffi_cache_path(line: &str) -> String {
     }
     let hash = &rest[..hash_len];
     let suffix = &rest[hash_len..];
-    format!(
-        "{}~/.cache/jet/ffi/{}{}",
-        &line[..path_start],
-        hash,
-        suffix
-    )
+    format!("{}~/.cache/jet/ffi/{}{}", &line[..path_start], hash, suffix)
 }
 
 fn tool_error(msg: &str) -> Vec<Diagnostic> {

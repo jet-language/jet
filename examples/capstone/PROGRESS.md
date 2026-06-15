@@ -1,4 +1,11 @@
-# Forge capstone — progress log
+# Forge capstone — progress log (superseded by Jetpack)
+
+> **Archived 2026-06-15:** Forge is superseded by Jetpack. Useful implementation
+> ideas were saved in
+> [`docs/plans/jetpack-jetos/forge-salvage.md`](../../docs/plans/jetpack-jetos/forge-salvage.md),
+> and `examples/capstone/forge/` was removed per D-JPK6. Do not use this file as
+> a package-manager implementation guide; use
+> [`docs/plans/jetpack-jetos/README.md`](../../docs/plans/jetpack-jetos/README.md).
 
 Living status so any agent can resume. Update after every meaningful step.
 See PLAN.md for the full design + build order.
@@ -21,7 +28,7 @@ See PLAN.md for the full design + build order.
 - [x] Step 1: Scaffold dirs + PLAN.md + PROGRESS.md.
 - [x] Step 2: `ansi` subpackage + tests. 5/5 green (`jet test ansi.jet`).
 - [x] Step 3: `manifest` subpackage + demo/forge.json + tests. 5/5 green.
-      Loads/validates forge.json by walking the std `Json` enum.
+      Loads/validates forge.json by walking the std `JSON` enum.
 - [x] Step 4: `taskrunner` + tests. 6/6 green. DFS topo sort + cycle
       detection + generic `first_or`. Made leaf (no ansi dep) so it
       file-tests in isolation; color is applied by the app layer.
@@ -114,10 +121,10 @@ All commands below were run through `nix develop` with
   in a project looks for `main.jet`. Test library packages by file path.
 - **JSON walking:** `.get(key)`/`["key"]` on a map bound directly from a
   `== Object(entries)` pattern mis-codegens as *list* indexing (rustc error).
-  Funnel the map through a function that **returns `Map<String,Json>`** so the
+  Funnel the map through a function that **returns `Map<String,JSON>`** so the
   binding is properly typed, then call `.get` on that typed value. Use `take`
   at call sites the compiler flags (L0201 implicit-clone warning tells you).
-- **`?`/inference fuel bug (compiler):** a `Map<String,Json>` (or other
+- **`?`/inference fuel bug (compiler):** a `Map<String,JSON>` (or other
   non-trivial) binding borrowed ~5+ times via helper calls that use `?`
   degrades — the binding's type falls back to `Int` and `?` then errors with a
   nonsensical "can't pass E into a function that returns E". Minimal repro

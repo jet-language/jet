@@ -42,17 +42,26 @@ fn ui_snapshots() {
     let mut checked = 0;
     for (path, shown_path) in entries {
         if shown_path.contains("ffi_bad_path") && !have_cargo {
-            eprintln!("note: skipping {} ui snapshot (need cargo for E0705)", shown_path);
+            eprintln!(
+                "note: skipping {} ui snapshot (need cargo for E0705)",
+                shown_path
+            );
             checked += 1;
             continue;
         }
         if shown_path.contains("ffi_fetch_failed") && !have_cargo {
-            eprintln!("note: skipping {} ui snapshot (need cargo for E0704)", shown_path);
+            eprintln!(
+                "note: skipping {} ui snapshot (need cargo for E0704)",
+                shown_path
+            );
             checked += 1;
             continue;
         }
         if shown_path.contains("ffi_no_cargo") && have_cargo {
-            eprintln!("note: skipping {} ui snapshot (need no cargo for E0703)", shown_path);
+            eprintln!(
+                "note: skipping {} ui snapshot (need no cargo for E0703)",
+                shown_path
+            );
             checked += 1;
             continue;
         }

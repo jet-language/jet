@@ -6,11 +6,7 @@ use crate::ast::Type;
 use crate::syntax;
 
 /// Built-in type names that users cannot redefine (E0106).
-pub const RESERVED_TYPES: &[&str] = &[
-    syntax::TYPE_LIST,
-    syntax::TYPE_MAP,
-    syntax::TYPE_CHAR,
-];
+pub const RESERVED_TYPES: &[&str] = &[syntax::TYPE_LIST, syntax::TYPE_MAP, syntax::TYPE_CHAR];
 
 pub fn is_reserved_type(name: &str) -> bool {
     RESERVED_TYPES.contains(&name)
@@ -49,8 +45,12 @@ pub fn builtin_method_return(
         Type::Named(n) if n == "U8" => u8_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
-        Type::Apply { name, args } if name == "Channel" => channel_method_return(args, method, arg_count),
-        Type::Apply { name, args } if name == "Sender" => sender_method_return(args, method, arg_count),
+        Type::Apply { name, args } if name == "Channel" => {
+            channel_method_return(args, method, arg_count)
+        }
+        Type::Apply { name, args } if name == "Sender" => {
+            sender_method_return(args, method, arg_count)
+        }
         Type::Int | Type::Float | Type::Bool | Type::Char => {
             builtin_static_return(recv_ty, method, arg_count)
         }
@@ -76,7 +76,7 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         (Type::String, "from_bytes", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::String),
-            err: Box::new(Type::Named("Utf8Error".to_string())),
+            err: Box::new(Type::Named(crate::syntax::TYPE_UTF8_ERROR.to_string())),
         })),
         (Type::Float, "to_string", 0) => Some(Some(Type::String)),
         (Type::Float, "to_int", 0) => Some(Some(Type::Int)),

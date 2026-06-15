@@ -9,10 +9,10 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, CallArg, ConstAttr, ConstDef, ElseBranch, EnumDef,
-    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, Lambda, LambdaBody,
-    LambdaMeta, LambdaParam, LValue, OrFallback, Param, Pattern, Program, Stmt, StrPart,
-    StructDef, SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam, UnOp,
-    Variant, VariantField, VariantPayload,
+    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
+    LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
+    SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam, UnOp, Variant,
+    VariantField, VariantPayload,
 };
 use crate::diag::{Diagnostic, Span};
 use crate::generics;
@@ -105,9 +105,28 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
 fn is_teaching_parse_diag(code: &str) -> bool {
     matches!(
         code,
-        "E0008" | "E0009" | "E0010" | "E0012" | "E0013" | "E0014" | "E0015" | "E0016"
-            | "E0017" | "E0018" | "E0020" | "E0021" | "E0023" | "E0024" | "E0025"
-            | "E0026" | "E0027" | "E0028" | "E0030" | "E0031" | "E0034" | "E0036"
+        "E0008"
+            | "E0009"
+            | "E0010"
+            | "E0012"
+            | "E0013"
+            | "E0014"
+            | "E0015"
+            | "E0016"
+            | "E0017"
+            | "E0018"
+            | "E0020"
+            | "E0021"
+            | "E0023"
+            | "E0024"
+            | "E0025"
+            | "E0026"
+            | "E0027"
+            | "E0028"
+            | "E0030"
+            | "E0031"
+            | "E0034"
+            | "E0036"
     )
 }
 
@@ -197,7 +216,10 @@ impl<'a> Parser<'a> {
     }
 
     fn type_starts_here(&self) -> bool {
-        matches!(self.peek().kind, TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen)
+        matches!(
+            self.peek().kind,
+            TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
+        )
     }
 
     fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
@@ -233,11 +255,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Skip tokens until the enclosing `Type<…>` argument ends.
+    /// Skip tokens until the enclosing `Type<…>` or `[T]` argument ends.
     fn sync_type_arg(&mut self) {
         while self.pos < self.toks.len() {
             match &self.peek().kind {
-                TokKind::Eq | TokKind::Semi | TokKind::Comma | TokKind::RParen | TokKind::RBrace => {
+                TokKind::Eq
+                | TokKind::Semi
+                | TokKind::Comma
+                | TokKind::RParen
+                | TokKind::RBrace
+                | TokKind::RBracket => {
                     break;
                 }
                 _ => {
@@ -472,10 +499,10 @@ impl<'a> Parser<'a> {
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
                 TokKind::KwPub => match self.peek2().kind {
-                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-                _ => self.func().map(Item::Func),
+                    TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                    TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                    TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                    _ => self.func().map(Item::Func),
                 },
                 TokKind::KwTest => self.test_def().map(Item::Test),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
@@ -506,9 +533,7 @@ impl<'a> Parser<'a> {
                     ));
                     self.struct_def(false).map(Item::Struct)
                 }
-                TokKind::Ident(name)
-                    if name == syntax::FOREIGN_INTERFACE =>
-                {
+                TokKind::Ident(name) if name == syntax::FOREIGN_INTERFACE => {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0022",
@@ -560,7 +585,11 @@ impl<'a> Parser<'a> {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0015",
-                        format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_USE),
+                        format!(
+                            "{} does not use `{}`",
+                            syntax::LANG_NAME,
+                            syntax::FOREIGN_USE
+                        ),
                         format!(
                             "other files are brought in with `{} \"path\"` or `{} name` (S16; M6)",
                             syntax::KW_IMPORT,
@@ -776,7 +805,11 @@ impl<'a> Parser<'a> {
             other => {
                 return Err(Diagnostic::error(
                     "E0003",
-                    format!("expected a piece of quoted text {}, found {}", context, describe(other)),
+                    format!(
+                        "expected a piece of quoted text {}, found {}",
+                        context,
+                        describe(other)
+                    ),
                     why_interp.to_string(),
                     fix.to_string(),
                     Some(self.peek().span),
@@ -787,7 +820,10 @@ impl<'a> Parser<'a> {
         if parts.len() != 1 {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("expected a piece of quoted text {}, found interpolation", context),
+                format!(
+                    "expected a piece of quoted text {}, found interpolation",
+                    context
+                ),
                 why_interp.to_string(),
                 fix.to_string(),
                 Some(span),
@@ -797,7 +833,10 @@ impl<'a> Parser<'a> {
             StrTokPart::Lit(s) => Ok((s.clone(), span)),
             StrTokPart::Interp(_) => Err(Diagnostic::error(
                 "E0003",
-                format!("expected a piece of quoted text {}, found interpolation", context),
+                format!(
+                    "expected a piece of quoted text {}, found interpolation",
+                    context
+                ),
                 why_interp.to_string(),
                 fix.to_string(),
                 Some(span),
@@ -1399,17 +1438,33 @@ impl<'a> Parser<'a> {
                     let full_span = Span::new(t.span.start, mut_tok.span.end);
                     self.diags.push(Diagnostic::error(
                         "E0009",
-                        format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_LET_MUT),
+                        format!(
+                            "{} does not use `{}`",
+                            syntax::LANG_NAME,
+                            syntax::FOREIGN_LET_MUT
+                        ),
                         binding_why(),
-                        format!("replace `{}` with `{}`", syntax::FOREIGN_LET_MUT, syntax::KW_VAR),
+                        format!(
+                            "replace `{}` with `{}`",
+                            syntax::FOREIGN_LET_MUT,
+                            syntax::KW_VAR
+                        ),
                         Some(full_span),
                     ));
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0009",
-                        format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_LET),
+                        format!(
+                            "{} does not use `{}`",
+                            syntax::LANG_NAME,
+                            syntax::FOREIGN_LET
+                        ),
                         binding_why(),
-                        format!("replace `{}` with `{}`", syntax::FOREIGN_LET, syntax::KW_VAL),
+                        format!(
+                            "replace `{}` with `{}`",
+                            syntax::FOREIGN_LET,
+                            syntax::KW_VAL
+                        ),
                         Some(t.span),
                     ));
                 }
@@ -1423,9 +1478,17 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0010",
-                    format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_SET),
+                    format!(
+                        "{} does not use `{}`",
+                        syntax::LANG_NAME,
+                        syntax::FOREIGN_SET
+                    ),
                     binding_why(),
-                    format!("replace `{}` with `{}`", syntax::FOREIGN_SET, syntax::KW_VAL),
+                    format!(
+                        "replace `{}` with `{}`",
+                        syntax::FOREIGN_SET,
+                        syntax::KW_VAL
+                    ),
                     Some(t.span),
                 ));
                 let binding = self.binding_after_kw(false)?;
@@ -1436,12 +1499,20 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0016",
-                    format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_MATCH),
+                    format!(
+                        "{} does not use `{}`",
+                        syntax::LANG_NAME,
+                        syntax::FOREIGN_MATCH
+                    ),
                     format!(
                         "choosing one branch from many is written with `{}`",
                         syntax::KW_SWITCH
                     ),
-                    format!("replace `{}` with `{}`", syntax::FOREIGN_MATCH, syntax::KW_SWITCH),
+                    format!(
+                        "replace `{}` with `{}`",
+                        syntax::FOREIGN_MATCH,
+                        syntax::KW_SWITCH
+                    ),
                     Some(t.span),
                 ));
                 self.switch_after_kw(t.span)
@@ -1478,14 +1549,9 @@ impl<'a> Parser<'a> {
                 let kind = if matches!(self.peek().kind, TokKind::DotDot) {
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    ForKind::Range {
-                        start: first,
-                        end,
-                    }
+                    ForKind::Range { start: first, end }
                 } else {
-                    ForKind::In {
-                        collection: first,
-                    }
+                    ForKind::In { collection: first }
                 };
                 self.expect(TokKind::LBrace, "to open the `for` body")?;
                 let body = self.block_stmts();
@@ -1543,9 +1609,7 @@ impl<'a> Parser<'a> {
                     });
                 }
                 match &expr {
-                    Expr::Call(_)
-                    | Expr::Field(_, _, _)
-                    | Expr::MethodCall { .. } => {}
+                    Expr::Call(_) | Expr::Field(_, _, _) | Expr::MethodCall { .. } => {}
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
@@ -1602,8 +1666,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// `switch` body, after the keyword (S24): condition arms with `->`,
-    /// each arm block followed by `;`, and a required `else` arm.
+    /// `switch` body, after the keyword (S24): either legacy condition arms
+    /// with `->`, or pipe arms where bare terms mean `subject == term`.
     fn switch_after_kw(&mut self, span: Span) -> Result<Stmt, Diagnostic> {
         let subject = self.expr_no_struct_lit()?;
         self.expect(TokKind::LBrace, "to open the `switch` body")?;
@@ -1624,6 +1688,32 @@ impl<'a> Parser<'a> {
                         "add a closing `}`".to_string(),
                         Some(self.peek().span),
                     ));
+                }
+                TokKind::Pipe => {
+                    let arm_start = self.bump().span;
+                    if matches!(self.peek().kind, TokKind::KwElse) {
+                        self.bump();
+                        self.expect(TokKind::LBrace, "to open the `else` arm")?;
+                        let body = self.block_stmts();
+                        if matches!(self.peek().kind, TokKind::Semi) {
+                            self.bump();
+                        }
+                        else_body = Some(body);
+                    } else {
+                        let raw_cond = self.expr_no_struct_lit()?;
+                        let cond = Self::switch_pipe_cond(subject.clone(), raw_cond);
+                        self.expect(TokKind::LBrace, "to open the arm's body")?;
+                        let body = self.block_stmts();
+                        let end = self.peek().span.end;
+                        if matches!(self.peek().kind, TokKind::Semi) {
+                            self.bump();
+                        }
+                        arms.push(SwitchArm {
+                            cond,
+                            body,
+                            span: Span::new(arm_start.start, end),
+                        });
+                    }
                 }
                 TokKind::Ident(name)
                     if name == syntax::FOREIGN_CASE || name == syntax::FOREIGN_DEFAULT =>
@@ -1688,6 +1778,31 @@ impl<'a> Parser<'a> {
             else_body,
             span,
         })
+    }
+
+    fn switch_pipe_cond(subject: Expr, cond: Expr) -> Expr {
+        match cond {
+            Expr::Binary(BinOp::And, lhs, rhs, span) => Expr::Binary(
+                BinOp::And,
+                Box::new(Self::switch_pipe_cond(subject.clone(), *lhs)),
+                Box::new(Self::switch_pipe_cond(subject, *rhs)),
+                span,
+            ),
+            Expr::Binary(BinOp::Or, lhs, rhs, span) => Expr::Binary(
+                BinOp::Or,
+                Box::new(Self::switch_pipe_cond(subject.clone(), *lhs)),
+                Box::new(Self::switch_pipe_cond(subject, *rhs)),
+                span,
+            ),
+            Expr::Binary(op, lhs, rhs, span) if op.is_comparison() => {
+                Expr::Binary(op, lhs, rhs, span)
+            }
+            Expr::PatternTest { .. } | Expr::Bool(_, _) => cond,
+            other => {
+                let span = Span::new(subject.span().start, other.span().end);
+                Expr::Binary(BinOp::Eq, Box::new(subject), Box::new(other), span)
+            }
+        }
     }
 
     fn binding(&mut self) -> Result<Binding, Diagnostic> {
@@ -1890,7 +2005,11 @@ impl<'a> Parser<'a> {
         let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
         let cmp = Expr::Binary(op, Box::new(lhs), Box::new(rhs), span);
         if let Some(second) = match &self.peek().kind {
-            TokKind::EqEq | TokKind::NotEq | TokKind::Lt | TokKind::Gt | TokKind::Le
+            TokKind::EqEq
+            | TokKind::NotEq
+            | TokKind::Lt
+            | TokKind::Gt
+            | TokKind::Le
             | TokKind::Ge => Some(self.peek().span),
             _ => None,
         } {
@@ -2009,18 +2128,26 @@ impl<'a> Parser<'a> {
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
             }
-            TokKind::Ident(n) if n == syntax::FOREIGN_NOT && self.starts_expr(&self.peek2().kind) => {
+            TokKind::Ident(n)
+                if n == syntax::FOREIGN_NOT && self.starts_expr(&self.peek2().kind) =>
+            {
                 self.foreign_logic_error(syntax::FOREIGN_NOT, syntax::OP_NOT);
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
             }
-            TokKind::Ident(n) if n == syntax::FOREIGN_TRY && self.starts_expr(&self.peek2().kind) => {
+            TokKind::Ident(n)
+                if n == syntax::FOREIGN_TRY && self.starts_expr(&self.peek2().kind) =>
+            {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0014",
-                    format!("{} does not use `{}`", syntax::LANG_NAME, syntax::FOREIGN_TRY),
+                    format!(
+                        "{} does not use `{}`",
+                        syntax::LANG_NAME,
+                        syntax::FOREIGN_TRY
+                    ),
                     format!(
                         "a call that can fail is marked with `{}` after it, like `parse(x){}`",
                         syntax::OP_TRY_SUFFIX,
@@ -2151,10 +2278,7 @@ impl<'a> Parser<'a> {
         match expr {
             Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),
             Expr::Index {
-                base,
-                index,
-                span,
-                ..
+                base, index, span, ..
             } => Ok(LValue::Index {
                 base,
                 index,
@@ -2213,10 +2337,7 @@ impl<'a> Parser<'a> {
                 return Ok(Expr::Absent(span));
             }
             TokKind::Ident(name)
-                if matches!(
-                    name.as_str(),
-                    syntax::FOREIGN_THROW | syntax::FOREIGN_RAISE
-                ) =>
+                if matches!(name.as_str(), syntax::FOREIGN_THROW | syntax::FOREIGN_RAISE) =>
             {
                 let t = self.bump();
                 let foreign = name.clone();
@@ -2243,7 +2364,10 @@ impl<'a> Parser<'a> {
                     format!("{} doesn't use `{}`", syntax::LANG_NAME, foreign),
                     "handle a failure with `or` for a fallback, or test with `== err(...)`"
                         .to_string(),
-                    format!("write `parse(x) or 0` or `if x == err(e) {{ ... }}` instead of `{}`", foreign),
+                    format!(
+                        "write `parse(x) or 0` or `if x == err(e) {{ ... }}` instead of `{}`",
+                        foreign
+                    ),
                     Some(t.span),
                 ));
                 return self.expr_primary(allow_struct_lit);
@@ -2259,9 +2383,11 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0025",
                     format!("{} doesn't use `{}`", syntax::LANG_NAME, foreign),
-                    "when failure should stop the program, use `or panic(\"…\")`"
-                        .to_string(),
-                    format!("write `parse(x) or panic(\"…\")` instead of `.{}()`", foreign),
+                    "when failure should stop the program, use `or panic(\"…\")`".to_string(),
+                    format!(
+                        "write `parse(x) or panic(\"…\")` instead of `.{}()`",
+                        foreign
+                    ),
                     Some(t.span),
                 ));
                 return self.expr_primary(allow_struct_lit);
@@ -2402,10 +2528,7 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0033",
-                    format!(
-                        "{} doesn't use `|` pipes for lambdas",
-                        syntax::LANG_NAME
-                    ),
+                    format!("{} doesn't use `|` pipes for lambdas", syntax::LANG_NAME),
                     "a short function is written with parentheses and `=>`".to_string(),
                     "write `(x) => x + 1` instead of `|x| x + 1`".to_string(),
                     Some(span),
@@ -2448,7 +2571,12 @@ impl<'a> Parser<'a> {
                 };
                 self.diags.push(Diagnostic::error(
                     "E0028",
-                    format!("{} uses `{}`, not `{}`", syntax::LANG_NAME, canonical, foreign),
+                    format!(
+                        "{} uses `{}`, not `{}`",
+                        syntax::LANG_NAME,
+                        canonical,
+                        foreign
+                    ),
                     format!("`{}` is the built-in collection type", canonical),
                     format!("replace `{}` with `{}`", foreign, canonical),
                     Some(t.span),
@@ -2492,10 +2620,7 @@ impl<'a> Parser<'a> {
                 let mut type_args = Vec::new();
                 if allow_struct_lit
                     && matches!(self.peek().kind, TokKind::Lt)
-                    && type_name
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_uppercase())
+                    && type_name.chars().next().is_some_and(|c| c.is_uppercase())
                 {
                     self.expect_type_args_open(&type_name)?;
                     loop {
@@ -2577,7 +2702,7 @@ impl<'a> Parser<'a> {
             self.bump();
             let value = self.expr()?;
             let mut entries = vec![(first, value)];
-            while matches!(self.peek().kind, TokKind::Comma) {
+            while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
                 self.bump();
                 if matches!(self.peek().kind, TokKind::RBracket) {
                     break;
@@ -2592,7 +2717,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr::MapLit(entries, Span::new(open.start, close.end)));
         }
         let mut elems = vec![first];
-        while matches!(self.peek().kind, TokKind::Comma) {
+        while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
             self.bump();
             if matches!(self.peek().kind, TokKind::RBracket) {
                 break;
@@ -2735,7 +2860,12 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, binding_span.end),
                 }));
             }
-            TokKind::Ident(variant) if matches!(self.toks.get(self.pos + 1).map(|t| &t.kind), Some(TokKind::LParen)) => {
+            TokKind::Ident(variant)
+                if matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokKind::LParen)
+                ) =>
+            {
                 let variant = variant.clone();
                 let span = self.peek().span;
                 self.bump();
@@ -2916,10 +3046,7 @@ impl<'a> Parser<'a> {
                         ),
                         "Jet has exactly one spelling for each thing, so all code reads the same"
                             .to_string(),
-                        format!(
-                            "remove `{}` and write `name: Type`",
-                            syntax::FOREIGN_READ
-                        ),
+                        format!("remove `{}` and write `name: Type`", syntax::FOREIGN_READ),
                         Some(span),
                     ));
                     return AccessConvention::Read;
@@ -2993,7 +3120,12 @@ impl<'a> Parser<'a> {
     fn foreign_logic_error(&mut self, foreign: &str, canonical: &str) {
         self.diags.push(Diagnostic::error(
             "E0012",
-            format!("{} writes \"{}\" as `{}`", syntax::LANG_NAME, foreign, canonical),
+            format!(
+                "{} writes \"{}\" as `{}`",
+                syntax::LANG_NAME,
+                foreign,
+                canonical
+            ),
             format!(
                 "logic uses the symbols `{}`, `{}`, and `{}`",
                 syntax::OP_AND,
@@ -3015,14 +3147,17 @@ impl<'a> Parser<'a> {
             TokKind::LBracket => Err(Diagnostic::error(
                 "E0034",
                 format!("`{type_name}[...]` isn't how Jet writes generic types"),
-                "square brackets `[]` are for list and map values — like `[1, 2]` and `[\"k\": v]`"
+                "square brackets start collection types like `[Int]` or `[String, Int]`, and collection values like `[1, 2]`"
                     .to_string(),
-                format!("write `{type_name}<...>` instead, e.g. `{type_name}<Int>`"),
+                format!("write `{type_name}<...>`, or use `[Int]` for a list type"),
                 Some(self.peek().span),
             )),
             other => Err(Diagnostic::error(
                 "E0003",
-                format!("expected `<` after `{type_name}`, found {}", describe(other)),
+                format!(
+                    "expected `<` after `{type_name}`, found {}",
+                    describe(other)
+                ),
                 format!("generic types use angle brackets, like `{type_name}<Int>`"),
                 format!("write `{type_name}<` here"),
                 Some(self.peek().span),
@@ -3096,6 +3231,22 @@ impl<'a> Parser<'a> {
                 };
                 Type::Fn { params, ret }
             }
+            TokKind::LBracket => {
+                self.bump();
+                let first = self.type_generic_arg("list/map type")?;
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    let value = self.type_generic_arg("map value")?;
+                    self.expect(TokKind::RBracket, "after the value type in `[K, V]`")?;
+                    Type::Map {
+                        key: Box::new(first),
+                        value: Box::new(value),
+                    }
+                } else {
+                    self.expect(TokKind::RBracket, "after the element type in `[T]`")?;
+                    Type::List(Box::new(first))
+                }
+            }
             TokKind::Ident(name) => {
                 self.bump();
                 match name.as_str() {
@@ -3151,9 +3302,11 @@ impl<'a> Parser<'a> {
                         self.diags.push(generics::e0036(syntax::FOREIGN_BOX, start));
                         if matches!(self.peek().kind, TokKind::Lt) {
                             self.expect_type_args_open("Box")?;
-                            if matches!(self.peek().kind, TokKind::Ident(ref n) if n == syntax::FOREIGN_DYN) {
+                            if matches!(self.peek().kind, TokKind::Ident(ref n) if n == syntax::FOREIGN_DYN)
+                            {
                                 self.bump();
-                                let (trait_name, _) = self.expect_ident("after `dyn` in `Box<dyn …>`")?;
+                                let (trait_name, _) =
+                                    self.expect_ident("after `dyn` in `Box<dyn …>`")?;
                                 self.maybe_close_type_args("after `Box<dyn …>`")?;
                                 Type::TraitObject(trait_name)
                             } else {
@@ -3198,11 +3351,7 @@ impl<'a> Parser<'a> {
                                 foreign
                             ),
                             format!("`{}` is the map type", syntax::TYPE_MAP),
-                            format!(
-                                "replace `{}` with `{}<K, V>`",
-                                foreign,
-                                syntax::TYPE_MAP
-                            ),
+                            format!("replace `{}` with `{}<K, V>`", foreign, syntax::TYPE_MAP),
                             Some(start),
                         ));
                         self.expect_type_args_open("Map")?;
@@ -3237,7 +3386,9 @@ impl<'a> Parser<'a> {
                             "between the two types in old `Result<T, E>` syntax",
                         )?;
                         let err_ty = self.type_generic_arg("Result err")?;
-                        self.maybe_close_type_args("after the error type in old `Result<T, E>` syntax")?;
+                        self.maybe_close_type_args(
+                            "after the error type in old `Result<T, E>` syntax",
+                        )?;
                         Type::Result {
                             ok: Box::new(ok_ty),
                             err: Box::new(err_ty),
@@ -3268,8 +3419,8 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!("expected a type name, found {}", describe(&other)),
-                    "types look like `Int`, `String`, or `List<Int>`".to_string(),
-                    "e.g. `x: Int` or `items: List<String>`".to_string(),
+                    "types look like `Int`, `String`, or `[Int]`".to_string(),
+                    "e.g. `x: Int` or `items: [String]`".to_string(),
                     Some(self.peek().span),
                 ));
             }

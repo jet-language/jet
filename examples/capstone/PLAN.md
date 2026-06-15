@@ -1,4 +1,11 @@
-# Capstone — **Forge**: a Nix-backed dev-environment & task runner, written in Jet
+# Capstone — Forge (superseded by Jetpack)
+
+> **Archived 2026-06-15:** Forge is superseded by Jetpack. Useful implementation
+> ideas were saved in
+> [`docs/plans/jetpack-jetos/forge-salvage.md`](../../docs/plans/jetpack-jetos/forge-salvage.md),
+> and `examples/capstone/forge/` was removed per D-JPK6. Do not implement from
+> this historical plan; use
+> [`docs/plans/jetpack-jetos/README.md`](../../docs/plans/jetpack-jetos/README.md).
 
 > A capstone stress-test project for the Jet language. One look should make a
 > developer want to use Jet: it's a real tool that solves a real problem
@@ -46,7 +53,7 @@ written entirely in Jet.
 | Sub-packages / a dependency graph | `taskrunner` depends on `ansi` |
 | Multi-file package (local `import "..."`) | `forge/` (forge.jet + cli.jet + app.jet) |
 | Structs + methods (`self`, static) | manifest models, `Style` |
-| Enums + exhaustive `switch` | `Color`, `ManifestError`, `Json` walks |
+| Enums + exhaustive `switch` | `Color`, `ManifestError`, `JSON` walks |
 | Recursive enum (invisible boxing) | task-graph error path / `Plan` tree |
 | Generics `<T>` + traits + `derive` | `taskrunner` topo sort, `Comparable` |
 | Trait-as-type (dynamic dispatch) | a `Reporter`/`Styler` interface |
@@ -88,7 +95,7 @@ examples/capstone/
   `paint(text)`; a `Styler` trait so callers depend on the interface.
   Pure Jet, zero std. Showcases enums/structs/methods/traits/strings.
 - **manifest** — `Project`, `Tool`, `Task` structs; `ManifestError` enum;
-  `load(path) -> Project ? ManifestError` walking the `Json` enum by hand.
+  `load(path) -> Project ? ManifestError` walking the `JSON` enum by hand.
   Showcases std.json/std.fs, Option, errors-as-values, Map, closures.
 - **taskrunner** — build a dependency graph from tasks, **topological sort**
   with **cycle detection** (the on-brand great error: "task cycle: build ->

@@ -60,8 +60,8 @@ fn ratified_decisions_enforced() {
     // Surface-syntax ratified IDs must have at least one syntax.rs entry.
     const SURFACE_IN_SYNTAX_RS: &[&str] = &[
         "N1", "N2", "S1", "S2", "S3", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S13", "S16",
-        "S17", "S18", "S19", "S20", "S22", "S23", "S24", "S27", "S29", "S30",
-        "S32", "S34", "S35", "S36", "S46", "S55", "S57",
+        "S17", "S18", "S19", "S20", "S22", "S23", "S24", "S27", "S29", "S30", "S32", "S34", "S35",
+        "S36", "S46", "S55", "S57",
     ];
     for id in SURFACE_IN_SYNTAX_RS {
         if ratified.contains(*id) {
@@ -74,9 +74,8 @@ fn ratified_decisions_enforced() {
 
     // Structural ratified decisions — enforced by parser/sema/tests, not constants.
     const STRUCTURAL_RATIFIED: &[&str] = &[
-        "S4", "S12", "S14", "S15", "S21", "S25", "S31", "S33", "S37", "S38",
-        "S28", "S39", "S40", "S41", "S42", "S43", "S44", "S45", "S46", "S47",
-        "S48", "S49", "S50", "S26", "S55", "S57",
+        "S4", "S12", "S14", "S15", "S21", "S25", "S31", "S33", "S37", "S38", "S28", "S39", "S40",
+        "S41", "S42", "S43", "S44", "S45", "S46", "S47", "S48", "S49", "S50", "S26", "S55", "S57",
     ];
     for id in STRUCTURAL_RATIFIED {
         assert!(
@@ -119,7 +118,11 @@ fn extract_open_registry_ids(docs: &str) -> BTreeSet<String> {
 }
 
 fn extract_provisional_table_ids(docs: &str) -> BTreeSet<String> {
-    let body = section_between(docs, "## Provisional — currently in the code", "## Open decisions");
+    let body = section_between(
+        docs,
+        "## Provisional — currently in the code",
+        "## Open decisions",
+    );
     ids_in_table_first_column(body)
         .into_iter()
         .filter(|id| id != "—")
@@ -138,7 +141,11 @@ fn extract_staged_manifest(docs: &str) -> BTreeMap<String, String> {
         if !line.starts_with('|') || line.starts_with("|---") || line.contains("ID") {
             continue;
         }
-        let cols: Vec<_> = line.split('|').map(str::trim).filter(|c| !c.is_empty()).collect();
+        let cols: Vec<_> = line
+            .split('|')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .collect();
         if cols.len() >= 4 {
             let id = cols[0].trim();
             let code = cols[3].trim();
@@ -178,7 +185,11 @@ fn ids_in_table_first_column(text: &str) -> BTreeSet<String> {
         if !line.starts_with('|') || line.starts_with("|---") {
             continue;
         }
-        let cols: Vec<_> = line.split('|').map(str::trim).filter(|c| !c.is_empty()).collect();
+        let cols: Vec<_> = line
+            .split('|')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .collect();
         if let Some(first) = cols.first() {
             let id = first.trim();
             if (id.starts_with('S') || id.starts_with('N')) && id.len() <= 4 {

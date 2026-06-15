@@ -38,7 +38,10 @@ pub fn load_entry_with_overlay(
     // M12.1: walk upward from the entry file's directory to find jet.toml.
     // If found, use that directory as project_root and validate the manifest.
     // If none found, fall back to the entry file's directory (R9 — single-file mode).
-    let entry_dir = entry_abs.parent().map(normalize_path).unwrap_or_else(|| cwd.clone());
+    let entry_dir = entry_abs
+        .parent()
+        .map(normalize_path)
+        .unwrap_or_else(|| cwd.clone());
     let (project_root, pkg_dep_dirs) = if let Some(manifest_dir) = find_manifest_root(&entry_dir) {
         // Found a jet.toml — validate it and collect dep source paths.
         let toml_path = manifest_dir.join("jet.toml");
@@ -67,9 +70,7 @@ pub fn load_entry_with_overlay(
                                 return Err(vec![d]);
                             }
                         } else {
-                            return Err(vec![crate::lock::e1202(
-                                &lock_path.display().to_string(),
-                            )]);
+                            return Err(vec![crate::lock::e1202(&lock_path.display().to_string())]);
                         }
                     }
                     // E1201: dry-resolve path deps for package name conflicts.
@@ -154,12 +155,10 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
 
 /// Dry-resolve path dependencies to catch version conflicts (E1201).
 /// Does not fetch, store, or link anything — only loads manifests.
-fn dry_resolve_path_deps(
-    mf: &manifest::Manifest,
-    project_root: &Path,
-) -> Result<(), Diagnostic> {
+fn dry_resolve_path_deps(mf: &manifest::Manifest, project_root: &Path) -> Result<(), Diagnostic> {
     // pkg_name → (version, blame_chain)
-    let mut seen: std::collections::HashMap<String, (String, Vec<String>)> = std::collections::HashMap::new();
+    let mut seen: std::collections::HashMap<String, (String, Vec<String>)> =
+        std::collections::HashMap::new();
     let root_name = mf.package.name.clone();
     dry_resolve_recursive(mf, project_root, &[root_name], &mut seen)
 }
@@ -367,8 +366,12 @@ fn resolve_import(
     pkg_dep_dirs: &HashMap<String, PathBuf>,
 ) -> Result<PathBuf, Diagnostic> {
     match &imp.kind {
-        ImportKind::File(path_str, span) => resolve_file_import(importing, path_str, project_root, *span),
-        ImportKind::Module(name, span) => resolve_module_import(name, project_root, pkg_dep_dirs, *span),
+        ImportKind::File(path_str, span) => {
+            resolve_file_import(importing, path_str, project_root, *span)
+        }
+        ImportKind::Module(name, span) => {
+            resolve_module_import(name, project_root, pkg_dep_dirs, *span)
+        }
     }
 }
 
@@ -398,8 +401,16 @@ pub fn normalize_std_module(name: &str) -> Option<String> {
 pub fn is_known_std_module(name: &str) -> bool {
     matches!(
         name,
-        "std" | "std.fs" | "std.io" | "std.env" | "std.process" | "std.math"
-            | "std.random" | "std.time" | "std.json" | "std.tasks"
+        "std"
+            | "std.fs"
+            | "std.io"
+            | "std.env"
+            | "std.process"
+            | "std.math"
+            | "std.random"
+            | "std.time"
+            | "std.json"
+            | "std.tasks"
     )
 }
 
@@ -433,7 +444,10 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
             format!("`{}` is reserved for first-party packages", alias),
             "`std`, `jet`, and the first-party ring names can't be used for local modules"
                 .to_string(),
-            format!("rename the module or import it with `{} other_name`", syntax::KW_AS),
+            format!(
+                "rename the module or import it with `{} other_name`",
+                syntax::KW_AS
+            ),
             Some(imp.alias_span),
         ));
     }
@@ -645,11 +659,7 @@ fn sanitize_alias(raw: &str) -> String {
 
 fn default_import_alias(kind: &ImportKind) -> String {
     match kind {
-        ImportKind::File(path, _) => path
-            .rsplit('/')
-            .next()
-            .unwrap_or("module")
-            .to_string(),
+        ImportKind::File(path, _) => path.rsplit('/').next().unwrap_or("module").to_string(),
         ImportKind::Module(name, _) => name.clone(),
     }
 }
@@ -669,10 +679,11 @@ pub fn resolve_import_target(
         ));
     }
     let importing = &bundle.modules[importing_idx];
-    let target_path = match resolve_import(imp, &importing.path, &bundle.project_root, &HashMap::new()) {
-        Ok(p) => normalize_path(&p),
-        Err(d) => return Err(d),
-    };
+    let target_path =
+        match resolve_import(imp, &importing.path, &bundle.project_root, &HashMap::new()) {
+            Ok(p) => normalize_path(&p),
+            Err(d) => return Err(d),
+        };
     for (i, m) in bundle.modules.iter().enumerate() {
         if normalize_path(&m.path) == target_path {
             return Ok(i);

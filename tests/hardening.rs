@@ -11,7 +11,10 @@ fn expect_error(src: &str, code: &str) {
     assert!(
         diags.iter().any(|d| d.code == code),
         "expected {code}, got: {:?}",
-        diags.iter().map(|d| (d.code, d.what.clone())).collect::<Vec<_>>()
+        diags
+            .iter()
+            .map(|d| (d.code, d.what.clone()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -401,7 +404,11 @@ fn compile_bundle(entry: &PathBuf) -> Result<String, Vec<jet::diag::Diagnostic>>
 #[test]
 fn hyphenated_file_name_gets_sane_module_alias() {
     let dir = temp_project("hyphen");
-    fs::write(dir.join("my-utils.jet"), "pub fn helper() -> Int {\n    return 42;\n}\n").unwrap();
+    fs::write(
+        dir.join("my-utils.jet"),
+        "pub fn helper() -> Int {\n    return 42;\n}\n",
+    )
+    .unwrap();
     fs::write(
         dir.join("main.jet"),
         "import \"my-utils\" as util;\nfn main() {\n    print(util.helper());\n}\n",
@@ -445,8 +452,16 @@ fn duplicate_file_stems_get_unique_module_names() {
     let dir = temp_project("dup");
     fs::create_dir_all(dir.join("a")).unwrap();
     fs::create_dir_all(dir.join("b")).unwrap();
-    fs::write(dir.join("a/util.jet"), "pub fn one() -> Int {\n    return 1;\n}\n").unwrap();
-    fs::write(dir.join("b/util.jet"), "pub fn two() -> Int {\n    return 2;\n}\n").unwrap();
+    fs::write(
+        dir.join("a/util.jet"),
+        "pub fn one() -> Int {\n    return 1;\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("b/util.jet"),
+        "pub fn two() -> Int {\n    return 2;\n}\n",
+    )
+    .unwrap();
     fs::write(
         dir.join("main.jet"),
         "import \"a/util\" as autil;\nimport \"b/util\" as butil;\nfn main() {\n    print(autil.one());\n    print(butil.two());\n}\n",

@@ -537,9 +537,7 @@ impl<'a> Lexer<'a> {
                 '\n' => break,
                 '\\' => {
                     let esc = self.at(self.i + 1);
-                    if let Some(&(_, decoded)) =
-                        syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
-                    {
+                    if let Some(&(_, decoded)) = syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
                         lit.push(decoded);
                         self.i += 2;
                     } else {
@@ -624,8 +622,10 @@ impl<'a> Lexer<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0003",
                             "there's nothing inside this `{ }` to show".to_string(),
-                            "interpolation puts a value into the text, so the braces need a value".to_string(),
-                            "put a value inside, like `{name}`, or write `{{}}` for literal braces".to_string(),
+                            "interpolation puts a value into the text, so the braces need a value"
+                                .to_string(),
+                            "put a value inside, like `{name}`, or write `{{}}` for literal braces"
+                                .to_string(),
                             Some(Span::new(open_pos, self.pos(self.i))),
                         ));
                         continue;
@@ -636,8 +636,10 @@ impl<'a> Lexer<'a> {
                     // Lex the inner expression; shift spans to absolute.
                     let (mut inner_toks, inner_diags) = lex(inner);
                     for t in &mut inner_toks {
-                        t.span =
-                            Span::new(t.span.start + inner_start_byte, t.span.end + inner_start_byte);
+                        t.span = Span::new(
+                            t.span.start + inner_start_byte,
+                            t.span.end + inner_start_byte,
+                        );
                     }
                     for mut d in inner_diags {
                         if let Some(s) = d.span.as_mut() {

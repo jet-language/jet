@@ -1,6 +1,6 @@
 //! M9 — generic types, traits, and built-in derive policy (S45/S28/S48/S55).
 
-use crate::ast::{Type, TypeParam, TraitMethodSig};
+use crate::ast::{TraitMethodSig, Type, TypeParam};
 use crate::diag::{Diagnostic, Span};
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
@@ -36,7 +36,10 @@ pub fn user_trait_rust(name: &str) -> String {
 /// Substitute type parameters in `ty` using `subst`.
 pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     match ty {
-        Type::Named(n) => subst.get(n).cloned().unwrap_or_else(|| Type::Named(n.clone())),
+        Type::Named(n) => subst
+            .get(n)
+            .cloned()
+            .unwrap_or_else(|| Type::Named(n.clone())),
         Type::Apply { name, args } => Type::Apply {
             name: name.clone(),
             args: args.iter().map(|a| substitute_type(a, subst)).collect(),
@@ -188,9 +191,7 @@ pub fn rust_type_param_list(
                 for b in ex {
                     let rb = match b.as_str() {
                         "Clone" | "JetShow" => b.clone(),
-                        _ if is_builtin_trait(b) => {
-                            rust_trait_bound(b).unwrap_or("").to_string()
-                        }
+                        _ if is_builtin_trait(b) => rust_trait_bound(b).unwrap_or("").to_string(),
                         _ => user_trait_rust(b),
                     };
                     if !rb.is_empty() && !bounds.contains(&rb) {
@@ -231,9 +232,7 @@ pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) 
     Diagnostic::error(
         "E0905",
         format!("`{type_name}` isn't `{trait_name}`"),
-        format!(
-            "`{type_name}` would need to implement `{trait_name}` before it can be used here"
-        ),
+        format!("`{type_name}` would need to implement `{trait_name}` before it can be used here"),
         fix,
         Some(span),
     )
@@ -379,7 +378,10 @@ pub fn generic_depth_exceeded(ty: &Type) -> Option<String> {
 pub fn e0036(keyword: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0036",
-        format!("{} uses the trait name directly, not `{keyword}`", syntax::LANG_NAME),
+        format!(
+            "{} uses the trait name directly, not `{keyword}`",
+            syntax::LANG_NAME
+        ),
         "a trait in type position means dynamic dispatch — Jet handles the details for you"
             .to_string(),
         "write the trait name, like `Shape` or `List<Shape>`".to_string(),

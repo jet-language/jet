@@ -29,7 +29,10 @@ fn ffi_example_compiles_and_runs() {
         );
     });
     assert!(out.ffi.is_some(), "expected an FFI bridge for 22_ffi.jet");
-    assert!(!out.rust.contains("unsafe"), "I1: FFI output must not use unsafe");
+    assert!(
+        !out.rust.contains("unsafe"),
+        "I1: FFI output must not use unsafe"
+    );
 
     let dir = std::env::temp_dir();
     let rs = dir.join("jet_ffi_test.rs");
@@ -54,4 +57,37 @@ fn ffi_example_compiles_and_runs() {
     assert!(run.status.success(), "22_ffi runtime failed");
     let expected = fs::read_to_string(root.join("examples/expected/22_ffi.out")).unwrap();
     assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
+}
+
+#[test]
+fn inline_ffi_pin_works_inside_manifest_project() {
+    let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
+    if !have_cargo {
+        eprintln!("note: cargo not found; skipping manifest FFI integration test");
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!(
+        "jet_manifest_ffi_{}_{}",
+        std::process::id(),
+        "inline"
+    ));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("jet.toml"),
+        "[package]\nname = \"ffi_app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let path = root.join("main.jet");
+    let src = "extern rust \"base64@0.22\" {\n    fn b64encode(s: String) -> String = \"base64::encode\";\n}\nfn main() { print(b64encode(\"hi\")); }\n";
+    fs::write(&path, src).unwrap();
+
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "inline FFI pin should work even when jet.toml exists:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        );
+    });
+    assert!(out.ffi.is_some(), "expected an FFI bridge");
 }

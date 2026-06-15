@@ -60,12 +60,8 @@ fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
     let n = variant;
     match rng.next() % 3 {
         0 => format!("{src}\nval _fuzz_{n} = {n};\n"),
-        1 => format!(
-            "{src}\nfn _fuzz_fn_{n}() {{\n    val _x = {n};\n    return;\n}}\n"
-        ),
-        _ => format!(
-            "{src}\nfn _fuzz_wrap_{n}() -> Int {{\n    return {n};\n}}\n"
-        ),
+        1 => format!("{src}\nfn _fuzz_fn_{n}() {{\n    val _x = {n};\n    return;\n}}\n"),
+        _ => format!("{src}\nfn _fuzz_wrap_{n}() -> Int {{\n    return {n};\n}}\n"),
     }
 }
 

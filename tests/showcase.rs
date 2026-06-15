@@ -21,9 +21,7 @@ fn jet_bin() -> PathBuf {
 
 fn run_showcase(root: &Path, jet: &Path, tool: &str, args: &[&str]) -> std::process::Output {
     let mut cmd = Command::new(jet);
-    cmd.arg("run")
-        .arg(root.join(tool))
-        .current_dir(root);
+    cmd.arg("run").arg(root.join(tool)).current_dir(root);
     for arg in args {
         cmd.arg(arg);
     }

@@ -200,7 +200,6 @@ before continuing.
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
-| E1205 | sema  | FFI pin belongs in `[dependencies:rust]` (M12.1) |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
 | E1207 | jet   | registry dependency not yet supported (M12.2) |
 | E1208 | jet   | toolchain `[package].jet` incompatible (M12.1) |

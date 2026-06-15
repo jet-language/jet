@@ -12,7 +12,7 @@ use crate::ast::{
     SwitchArm, TraitImplBlock, Type, TypeParam, UnOp, Variant, VariantPayload,
 };
 use crate::diag::Span;
-use crate::lexer::{line_comments, Token, TokKind};
+use crate::lexer::{line_comments, TokKind, Token};
 use crate::syntax;
 
 const INDENT: usize = 4;
@@ -126,18 +126,18 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Func(f) => func_decl_start(f, src),
         Item::Struct(s) => type_decl_start(s.is_pub, s.name_span.start, "struct", src),
         Item::Enum(e) => type_decl_start(e.is_pub, e.name_span.start, "enum", src),
-        Item::Impl(i) => {
-            src[..i.type_span.start]
-                .rfind("impl")
-                .unwrap_or(i.type_span.start)
-        }
+        Item::Impl(i) => src[..i.type_span.start]
+            .rfind("impl")
+            .unwrap_or(i.type_span.start),
         Item::Const(c) => {
             let kw = if c.is_comptime {
                 syntax::KW_COMPTIME
             } else {
                 syntax::KW_CONST
             };
-            src[..c.name_span.start].rfind(kw).unwrap_or(c.name_span.start)
+            src[..c.name_span.start]
+                .rfind(kw)
+                .unwrap_or(c.name_span.start)
         }
         Item::Test(t) => src[..t.name_span.start]
             .rfind(syntax::KW_TEST)
@@ -153,9 +153,7 @@ fn func_decl_start(f: &Func, src: &str) -> usize {
     let before = &src[..f.name_span.start];
     let fn_pos = before.rfind("fn").unwrap_or(f.name_span.start);
     if f.is_pub {
-        before[..fn_pos]
-            .rfind("pub")
-            .unwrap_or(fn_pos)
+        before[..fn_pos].rfind("pub").unwrap_or(fn_pos)
     } else {
         fn_pos
     }
@@ -174,18 +172,31 @@ fn type_decl_start(is_pub: bool, name_start: usize, kw: &str, src: &str) -> usiz
 fn item_span_end(item: &Item) -> usize {
     match item {
         Item::Func(f) => f.body.last().map(stmt_end).unwrap_or(f.name_span.end),
-        Item::Struct(s) => s.methods.last().map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
+        Item::Struct(s) => s
+            .methods
+            .last()
+            .map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
             .or_else(|| s.fields.last().map(|fld| fld.ty_span.end))
             .unwrap_or(s.name_span.end),
-        Item::Enum(e) => e.methods.last().map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
+        Item::Enum(e) => e
+            .methods
+            .last()
+            .map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
             .or_else(|| e.variants.last().map(|v| v.name_span.end))
             .unwrap_or(e.name_span.end),
-        Item::Impl(i) => i.methods.last().map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
+        Item::Impl(i) => i
+            .methods
+            .last()
+            .map(|m| m.body.last().map(stmt_end).unwrap_or(m.name_span.end))
             .unwrap_or(i.type_span.end),
         Item::Const(c) => c.value.span().end,
         Item::Test(t) => t.body.last().map(stmt_end).unwrap_or(t.name_span.end),
         Item::ExternRust(b) => b.span.end,
-        Item::Trait(t) => t.methods.last().map(|m| m.span.end).unwrap_or(t.name_span.end),
+        Item::Trait(t) => t
+            .methods
+            .last()
+            .map(|m| m.span.end)
+            .unwrap_or(t.name_span.end),
     }
 }
 
@@ -198,11 +209,16 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::If(i) => if_end(i),
         Stmt::While { body, .. } => body.last().map(stmt_end).unwrap_or(0),
         Stmt::For { body, .. } => body.last().map(stmt_end).unwrap_or(0),
-        Stmt::Switch { else_body, arms, .. } => else_body
+        Stmt::Switch {
+            else_body, arms, ..
+        } => else_body
             .as_ref()
             .and_then(|b| b.last())
             .map(stmt_end)
-            .or_else(|| arms.last().map(|a| a.body.last().map(stmt_end).unwrap_or(a.span.end)))
+            .or_else(|| {
+                arms.last()
+                    .map(|a| a.body.last().map(stmt_end).unwrap_or(a.span.end))
+            })
             .unwrap_or(0),
         Stmt::Break(s) | Stmt::Continue(s) => s.end,
         Stmt::Loop(inner, s) | Stmt::Unsafe(inner, s) => {
@@ -544,7 +560,10 @@ impl<'a> Fmt<'a> {
                 f.fmt_trait_impl_block(block);
             }
             for (i, m) in s.methods.iter().enumerate() {
-                if i > 0 || !s.fields.is_empty() || !s.derives.is_empty() || !s.trait_impls.is_empty()
+                if i > 0
+                    || !s.fields.is_empty()
+                    || !s.derives.is_empty()
+                    || !s.trait_impls.is_empty()
                 {
                     f.newline();
                     f.newline();
@@ -732,10 +751,7 @@ impl<'a> Fmt<'a> {
                 self.write(";");
             }
             Stmt::Assign {
-                target,
-                op,
-                value,
-                ..
+                target, op, value, ..
             } => {
                 self.fmt_lvalue(target);
                 if let Some(op) = op {
@@ -805,15 +821,14 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.with_indent(|f| {
                     for arm in arms {
-                        f.fmt_switch_arm(arm);
+                        f.fmt_switch_arm(subject, arm);
                         f.newline();
                     }
                     if let Some(else_b) = else_body {
-                        f.write("else -> {");
+                        f.write("| else {");
                         f.newline();
                         f.with_indent(|f| f.fmt_block_stmts(else_b));
                         f.end_block();
-                        f.write(";");
                     }
                 });
                 self.end_block();
@@ -856,13 +871,44 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    fn fmt_switch_arm(&mut self, arm: &SwitchArm) {
-        self.fmt_expr(&arm.cond, Prec::OrFallback);
-        self.write(" -> {");
+    fn fmt_switch_arm(&mut self, subject: &Expr, arm: &SwitchArm) {
+        self.write("| ");
+        self.fmt_switch_cond(subject, &arm.cond, Prec::OrFallback);
+        self.write(" {");
         self.newline();
         self.with_indent(|f| f.fmt_block_stmts(&arm.body));
         self.end_block();
-        self.write(";");
+    }
+
+    fn fmt_switch_cond(&mut self, subject: &Expr, cond: &Expr, prec: Prec) {
+        match cond {
+            Expr::Binary(op @ (BinOp::And | BinOp::Or), lhs, rhs, _) => {
+                let my_prec = Prec::of_bin(*op);
+                let needs_paren = prec > my_prec;
+                if needs_paren {
+                    self.write("(");
+                }
+                self.fmt_switch_cond(subject, lhs, my_prec);
+                self.write(" ");
+                self.write(op.spell());
+                self.write(" ");
+                self.fmt_switch_cond(subject, rhs, my_prec.add_rhs());
+                if needs_paren {
+                    self.write(")");
+                }
+            }
+            Expr::Binary(BinOp::Eq, lhs, rhs, _) if expr_same_subject(lhs, subject) => {
+                self.fmt_expr(rhs, Prec::Cmp);
+            }
+            Expr::PatternTest {
+                subject: lhs,
+                pattern,
+                ..
+            } if expr_same_subject(lhs, subject) => {
+                self.fmt_pattern(pattern);
+            }
+            _ => self.fmt_expr(cond, prec),
+        }
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
@@ -905,16 +951,16 @@ impl<'a> Fmt<'a> {
             Type::String => self.write(syntax::TYPE_STRING),
             Type::Char => self.write(syntax::TYPE_CHAR),
             Type::List(inner) => {
-                self.write("List<");
+                self.write("[");
                 self.fmt_type(inner);
-                self.write(">");
+                self.write("]");
             }
             Type::Map { key, value } => {
-                self.write("Map<");
+                self.write("[");
                 self.fmt_type(key);
                 self.write(", ");
                 self.fmt_type(value);
-                self.write(">");
+                self.write("]");
             }
             Type::Shared(inner) => {
                 self.write("Shared<");
@@ -1018,7 +1064,9 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(index, Prec::OrFallback);
                 self.write("]");
             }
-            Expr::Slice { base, start, end, .. } => {
+            Expr::Slice {
+                base, start, end, ..
+            } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("[");
                 self.fmt_expr(start, Prec::OrFallback);
@@ -1144,7 +1192,9 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write("null"),
-            Expr::PatternTest { subject, pattern, .. } => {
+            Expr::PatternTest {
+                subject, pattern, ..
+            } => {
                 self.fmt_expr(subject, Prec::Cmp);
                 self.write(" == ");
                 self.fmt_pattern(pattern);
@@ -1164,9 +1214,7 @@ impl<'a> Fmt<'a> {
                 self.write("?");
             }
             Expr::OrFallback {
-                value,
-                fallback,
-                ..
+                value, fallback, ..
             } => {
                 if prec > Prec::OrFallback {
                     self.write("(");
@@ -1248,7 +1296,9 @@ impl<'a> Fmt<'a> {
 
     fn fmt_pattern(&mut self, pat: &Pattern) {
         match pat {
-            Pattern::Variant { variant, bindings, .. } => {
+            Pattern::Variant {
+                variant, bindings, ..
+            } => {
                 self.write(variant);
                 if !bindings.is_empty() {
                     self.write("(");
@@ -1390,6 +1440,14 @@ fn fmt_char(c: char) -> String {
         '\r' => "'\\r'".to_string(),
         c if c.is_ascii() && !c.is_control() => format!("'{}'", c),
         c => format!("'\\u{{{:x}}}'", c as u32),
+    }
+}
+
+fn expr_same_subject(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Ident(la, _), Expr::Ident(lb, _)) => la == lb,
+        (Expr::Ident(name, _), _) if name == syntax::KW_IT => true,
+        _ => false,
     }
 }
 

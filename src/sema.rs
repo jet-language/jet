@@ -9,14 +9,16 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr,
-    ExternFn, ExternRustBlock, ForKind, Func, IfStmt, IndexKind, Item, Lambda, LambdaBody, LValue,
+    ExternFn, ExternRustBlock, ForKind, Func, IfStmt, IndexKind, Item, LValue, Lambda, LambdaBody,
     OrFallback, Pattern, Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, Type,
     UnOp, VariantPayload,
 };
-use crate::loader;
 use crate::collections::{self, is_map_key_type, is_reserved_type};
 use crate::diag::{Diagnostic, Span, TextEdit};
-use crate::generics::{e0901, e0904, e0905, e0909, generic_depth_exceeded, is_type_var_name, COMPARABLE};
+use crate::generics::{
+    e0901, e0904, e0905, e0909, generic_depth_exceeded, is_type_var_name, COMPARABLE,
+};
+use crate::loader;
 use crate::m9::M9Registry;
 use crate::syntax;
 use std::collections::{HashMap, HashSet};
@@ -95,7 +97,9 @@ impl TypeRegistry {
 
     fn field_names(&self, type_name: &str) -> Vec<String> {
         match self.types.get(type_name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().map(|(n, ..)| n.clone()).collect(),
+            Some(TypeDef::Struct { fields, .. }) => {
+                fields.iter().map(|(n, ..)| n.clone()).collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -264,11 +268,13 @@ fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         Some(TypeDef::Struct { fields, .. }) => fields
             .iter()
             .all(|(_, _, ty, _, _)| is_ffi_type(ty, registry)),
-        Some(TypeDef::Enum { variants, .. }) => variants.values().all(|(_, payload)| match payload {
-            VariantPayload::Unit => true,
-            VariantPayload::Single(ty, _) => is_ffi_type(ty, registry),
-            VariantPayload::Named(fs) => fs.iter().all(|f| is_ffi_type(&f.ty, registry)),
-        }),
+        Some(TypeDef::Enum { variants, .. }) => {
+            variants.values().all(|(_, payload)| match payload {
+                VariantPayload::Unit => true,
+                VariantPayload::Single(ty, _) => is_ffi_type(ty, registry),
+                VariantPayload::Named(fs) => fs.iter().all(|f| is_ffi_type(&f.ty, registry)),
+            })
+        }
         None => false,
     }
 }
@@ -391,10 +397,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 {
                     diags.push(Diagnostic::error(
                         "E0106",
-                        format!(
-                            "the name `{}` is built in and can't be redefined",
-                            f.name
-                        ),
+                        format!("the name `{}` is built in and can't be redefined", f.name),
                         format!("`{}` is provided by the language itself", f.name),
                         "choose a different name for this function".to_string(),
                         Some(f.name_span),
@@ -409,7 +412,14 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     funcs.insert(f.name.clone(), func_to_sig(f));
                 }
             }
-            Item::Struct(s) => register_struct(s, &mut registry, &mut struct_fields_legacy, &mut diags, &funcs, &consts),
+            Item::Struct(s) => register_struct(
+                s,
+                &mut registry,
+                &mut struct_fields_legacy,
+                &mut diags,
+                &funcs,
+                &consts,
+            ),
             Item::Enum(e) => register_enum(e, &mut registry, &mut diags, &funcs, &consts),
             Item::Impl(i) => {
                 if !registry.contains(&i.type_name) {
@@ -417,7 +427,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         "E0301",
                         format!("`impl {}` names a type that doesn't exist", i.type_name),
                         format!("`{}` hasn't been defined as a struct or enum", i.type_name),
-                        format!("define `struct {}` or `enum {}` first", i.type_name, i.type_name),
+                        format!(
+                            "define `struct {}` or `enum {}` first",
+                            i.type_name, i.type_name
+                        ),
                         Some(i.type_span),
                     ));
                 }
@@ -501,7 +514,12 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // S57 (M9.5): evaluate comptime bindings before bodies are checked, so
     // references to them resolve. Single-file mode has no path; embed_file
     // resolves against the current directory.
-    eval_comptime_items(&mut prog.items, &mut consts, std::path::Path::new("."), &mut diags);
+    eval_comptime_items(
+        &mut prog.items,
+        &mut consts,
+        std::path::Path::new("."),
+        &mut diags,
+    );
 
     let const_names: Vec<String> = consts.keys().cloned().collect();
     let mut address_taken: HashSet<String> = HashSet::new();
@@ -958,11 +976,7 @@ fn register_enum(
 fn register_type_methods(items: &[Item], registry: &mut TypeRegistry, diags: &mut Vec<Diagnostic>) {
     for item in items {
         let (type_name, methods, field_names) = match item {
-            Item::Struct(s) => (
-                s.name.as_str(),
-                &s.methods,
-                registry.field_names(&s.name),
-            ),
+            Item::Struct(s) => (s.name.as_str(), &s.methods, registry.field_names(&s.name)),
             Item::Enum(e) => (e.name.as_str(), &e.methods, Vec::new()),
             _ => continue,
         };
@@ -1068,8 +1082,8 @@ impl<'a> Checker<'a> {
     /// declare parameters, check the body, enforce definite return.
     fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
         for p in &f.params {
-            let skip_type_check = p.name == syntax::KW_SELF
-                && matches!(&p.ty, Type::Named(n) if n.is_empty());
+            let skip_type_check =
+                p.name == syntax::KW_SELF && matches!(&p.ty, Type::Named(n) if n.is_empty());
             if !skip_type_check {
                 let pty = self.resolve_type(p.ty.clone());
                 self.check_declared_type(&pty, p.ty_span);
@@ -1160,7 +1174,10 @@ fn defined_twice(name: &str, why: &str, span: Span) -> Diagnostic {
 fn method_field_clash(method: &str, type_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0105",
-        format!("method `{}` can't share a name with a field on `{}`", method, type_name),
+        format!(
+            "method `{}` can't share a name with a field on `{}`",
+            method, type_name
+        ),
         "a type's methods and fields must have different names".to_string(),
         "rename the method or the field".to_string(),
         Some(span),
@@ -1383,8 +1400,17 @@ impl<'a> Checker<'a> {
                                     if params.len() == 1 { "" } else { "s" },
                                     args.len()
                                 ),
-                                "every generic parameter needs a matching type argument".to_string(),
-                                format!("write `{}`<{}>", name, params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
+                                "every generic parameter needs a matching type argument"
+                                    .to_string(),
+                                format!(
+                                    "write `{}`<{}>",
+                                    name,
+                                    params
+                                        .iter()
+                                        .map(|p| p.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
                                 Some(span),
                             ));
                         }
@@ -1418,7 +1444,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0309",
                         "an optional type can't hold another optional type".to_string(),
-                        format!("`{}??` isn't supported — use one `?` only (S32)", inner.name()),
+                        format!(
+                            "`{}??` isn't supported — use one `?` only (S32)",
+                            inner.name()
+                        ),
                         "drop the inner `?` or unwrap before wrapping again".to_string(),
                         Some(span),
                     ));
@@ -1433,7 +1462,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0502",
                         format!("`{}` can't be a map key type yet", key.name()),
-                        "map keys must be Int, String, Bool, Char, or a payload-free enum".to_string(),
+                        "map keys must be Int, String, Bool, Char, or a payload-free enum"
+                            .to_string(),
                         "pick a simpler key type, or store a struct as the value".to_string(),
                         Some(span),
                     ));
@@ -1483,7 +1513,11 @@ impl<'a> Checker<'a> {
         if result_used_where_plain_expected(want, got) {
             self.diags.push(Diagnostic::error(
                 "E0401",
-                format!("this needs {}, but the value is {}", want.show(), got.show()),
+                format!(
+                    "this needs {}, but the value is {}",
+                    want.show(),
+                    got.show()
+                ),
                 "a fallible result must be checked before its value is used".to_string(),
                 format!(
                     "use `{}`, `{}`, or test with `== {}(...)` / `== {}(...)`",
@@ -1499,7 +1533,11 @@ impl<'a> Checker<'a> {
         if option_used_where_plain_expected(want, got) {
             self.diags.push(Diagnostic::error(
                 "E0310",
-                format!("this needs {}, but the value is {}", want.show(), got.show()),
+                format!(
+                    "this needs {}, but the value is {}",
+                    want.show(),
+                    got.show()
+                ),
                 "a plain value is required here, not an optional one".to_string(),
                 format!(
                     "test with `== {}(...)` or `== {}` first, e.g. `if x == {}(n) {{ ... }}`",
@@ -1528,7 +1566,11 @@ impl<'a> Checker<'a> {
         if want.unwrap_option().is_some() && got.unwrap_option().is_none() {
             self.diags.push(Diagnostic::error(
                 "E0108",
-                format!("this needs {}, but the value is {}", want.show(), got.show()),
+                format!(
+                    "this needs {}, but the value is {}",
+                    want.show(),
+                    got.show()
+                ),
                 "an optional value is required here".to_string(),
                 format!("wrap it with `{}(...)`", syntax::LIT_VALUE),
                 Some(span),
@@ -1541,7 +1583,8 @@ impl<'a> Checker<'a> {
                     return false;
                 }
                 let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
-                self.diags.push(e0905(type_name, trait_name, span, needs_derive));
+                self.diags
+                    .push(e0905(type_name, trait_name, span, needs_derive));
                 return true;
             }
             (Type::TraitObject(trait_name), Type::Apply { name, .. }) => {
@@ -1666,7 +1709,8 @@ impl<'a> Checker<'a> {
                             } else {
                                 format!(
                                     "declare it with `{} {} = ...` instead",
-                                    syntax::KW_VAR, name
+                                    syntax::KW_VAR,
+                                    name
                                 )
                             };
                             self.diags.push(Diagnostic::error(
@@ -1701,7 +1745,12 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    LValue::Index { base, index, span, kind } => {
+                    LValue::Index {
+                        base,
+                        index,
+                        span,
+                        kind,
+                    } => {
                         self.borrow_ctx = true;
                         let base_ty = self.infer(base);
                         let idx_ty = self.infer(index);
@@ -1724,7 +1773,8 @@ impl<'a> Checker<'a> {
                                             "E0202",
                                             format!(
                                                 "`{}` must be declared with `{}` to change it",
-                                                root, syntax::KW_VAR
+                                                root,
+                                                syntax::KW_VAR
                                             ),
                                             "assigning into a collection changes it".to_string(),
                                             format!("declare `var {}: ...`", root),
@@ -1751,7 +1801,11 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                         }
-                        if let Some(Type::Map { key, value: map_val_ty }) = base_ty {
+                        if let Some(Type::Map {
+                            key,
+                            value: map_val_ty,
+                        }) = base_ty
+                        {
                             if let Some(kt) = idx_ty {
                                 if kt != *key {
                                     self.diags.push(Diagnostic::error(
@@ -1944,7 +1998,11 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::If(ifs) => self.check_if(ifs),
-            Stmt::While { cond, body, span: _ } => {
+            Stmt::While {
+                cond,
+                body,
+                span: _,
+            } => {
                 self.require_bool(cond, "a `while` condition");
                 self.loop_depth += 1;
                 self.check_block(body, true);
@@ -1957,14 +2015,13 @@ impl<'a> Checker<'a> {
                 kind,
                 body,
                 span: _,
-            } => {
-                match kind {
-                    ForKind::Range { start, end } => {
-                        for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
-                            let t = self.infer(e);
-                            if let Some(t) = t {
-                                if t != Type::Int {
-                                    self.diags.push(Diagnostic::error(
+            } => match kind {
+                ForKind::Range { start, end } => {
+                    for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
+                        let t = self.infer(e);
+                        if let Some(t) = t {
+                            if t != Type::Int {
+                                self.diags.push(Diagnostic::error(
                                         "E0109",
                                         format!(
                                             "the {} of a `for` range must be {}, not {}",
@@ -1977,69 +2034,69 @@ impl<'a> Checker<'a> {
                                         "use Int values for both ends, like `1..10`".to_string(),
                                         Some(e.span()),
                                     ));
-                                }
                             }
                         }
-                        self.loop_depth += 1;
-                        self.push_scope();
-                        let vs = *var_span;
-                        let v = var.clone();
-                        if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
-                            self.diags.push(already_defined(&v, vs));
-                        }
-                        self.scopes.last_mut().unwrap().insert(
-                            v,
-                            LocalInfo {
-                                ty: Type::Int,
-                                mutable: false,
-                                param_conv: None,
-                                decl_loop_depth: self.loop_depth,
-                                sendable: true,
-                                task_lint_span: None,
-                            },
-                        );
-                        for s in body.iter_mut() {
-                            self.check_stmt(s);
-                        }
-                        self.pop_scope();
-                        self.loop_depth -= 1;
                     }
-                    ForKind::In { collection } => {
-                        let coll_ty = self.infer(collection);
-                        let borrowed = collection_root_name(collection);
-                        self.loop_depth += 1;
-                        if let Some(n) = borrowed.clone() {
-                            self.iter_borrowed.insert(n);
+                    self.loop_depth += 1;
+                    self.push_scope();
+                    let vs = *var_span;
+                    let v = var.clone();
+                    if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+                        self.diags.push(already_defined(&v, vs));
+                    }
+                    self.scopes.last_mut().unwrap().insert(
+                        v,
+                        LocalInfo {
+                            ty: Type::Int,
+                            mutable: false,
+                            param_conv: None,
+                            decl_loop_depth: self.loop_depth,
+                            sendable: true,
+                            task_lint_span: None,
+                        },
+                    );
+                    for s in body.iter_mut() {
+                        self.check_stmt(s);
+                    }
+                    self.pop_scope();
+                    self.loop_depth -= 1;
+                }
+                ForKind::In { collection } => {
+                    let coll_ty = self.infer(collection);
+                    let borrowed = collection_root_name(collection);
+                    self.loop_depth += 1;
+                    if let Some(n) = borrowed.clone() {
+                        self.iter_borrowed.insert(n);
+                    }
+                    self.push_scope();
+                    match &coll_ty {
+                        Some(Type::List(inner)) => {
+                            self.declare_loop_var(var.clone(), *var_span, inner);
                         }
-                        self.push_scope();
-                        match &coll_ty {
-                            Some(Type::List(inner)) => {
-                                self.declare_loop_var(var.clone(), *var_span, inner);
-                            }
-                            Some(Type::Map { key, value }) => {
-                                if var2.is_none() {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0003",
-                                        "a map needs two loop names: `for key, value in map`"
-                                            .to_string(),
-                                        "maps carry a key and a value on each step".to_string(),
-                                        format!(
-                                            "write `for key, value in {}`",
-                                            if let Expr::Ident(n, _) = &*collection {
-                                                n.clone()
-                                            } else {
-                                                "the_map".to_string()
-                                            }
-                                        ),
-                                        Some(collection.span()),
-                                    ));
-                                } else if let Some((v2, v2s)) = var2.as_ref() {
-                                    self.declare_loop_var(var.clone(), *var_span, key);
-                                    self.declare_loop_var(v2.clone(), *v2s, value);
-                                }
-                            }
-                            Some(other) => {
+                        Some(Type::Map { key, value }) => {
+                            if var2.is_none() {
                                 self.diags.push(Diagnostic::error(
+                                    "E0003",
+                                    "a map needs two loop names: `for key, value in map`"
+                                        .to_string(),
+                                    "maps carry a key and a value on each step".to_string(),
+                                    format!(
+                                        "write `for key, value in {}`",
+                                        if let Expr::Ident(n, _) = &*collection {
+                                            n.clone()
+                                        } else {
+                                            "the_map".to_string()
+                                        }
+                                    ),
+                                    Some(collection.span()),
+                                ));
+                            } else if let Some((v2, v2s)) = var2.as_ref() {
+                                self.declare_loop_var(var.clone(), *var_span, key);
+                                self.declare_loop_var(v2.clone(), *v2s, value);
+                            }
+                        }
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
                                     "E0109",
                                     format!(
                                         "`for x in` needs a list or map, not {}",
@@ -2049,20 +2106,19 @@ impl<'a> Checker<'a> {
                                     "use a `List`, `Map`, or `s.chars()`".to_string(),
                                     Some(collection.span()),
                                 ));
-                            }
-                            None => {}
                         }
-                        for s in body.iter_mut() {
-                            self.check_stmt(s);
-                        }
-                        self.pop_scope();
-                        if let Some(n) = borrowed {
-                            self.iter_borrowed.remove(&n);
-                        }
-                        self.loop_depth -= 1;
+                        None => {}
                     }
+                    for s in body.iter_mut() {
+                        self.check_stmt(s);
+                    }
+                    self.pop_scope();
+                    if let Some(n) = borrowed {
+                        self.iter_borrowed.remove(&n);
+                    }
+                    self.loop_depth -= 1;
                 }
-            }
+            },
             Stmt::Switch {
                 subject,
                 arms,
@@ -2071,7 +2127,8 @@ impl<'a> Checker<'a> {
             } => self.check_switch(subject, arms, else_body, *span),
             Stmt::Break(span) => {
                 if self.loop_depth == 0 {
-                    self.diags.push(loop_control_outside(syntax::KW_BREAK, *span));
+                    self.diags
+                        .push(loop_control_outside(syntax::KW_BREAK, *span));
                 }
             }
             Stmt::Continue(span) => {
@@ -2139,9 +2196,11 @@ impl<'a> Checker<'a> {
 
     fn check_condition_with_bindings(&mut self, cond: &mut Expr) -> HashMap<String, Type> {
         match cond {
-            Expr::PatternTest { subject, pattern, span } => {
-                self.check_pattern_test(subject, pattern, *span)
-            }
+            Expr::PatternTest {
+                subject,
+                pattern,
+                span,
+            } => self.check_pattern_test(subject, pattern, *span),
             Expr::Binary(BinOp::Eq, l, r, span) => {
                 let subj_name = match l.as_ref() {
                     Expr::Ident(n, _) => Some(n.clone()),
@@ -2208,12 +2267,8 @@ impl<'a> Checker<'a> {
         let all_pattern = subj_ty.is_some()
             && !arms.is_empty()
             && arms.iter().all(|a| {
-                self.switch_arm_pattern(
-                    &a.cond,
-                    subj_name.as_deref(),
-                    subj_ty.as_ref().unwrap(),
-                )
-                .is_some()
+                self.switch_arm_pattern(&a.cond, subj_name.as_deref(), subj_ty.as_ref().unwrap())
+                    .is_some()
             });
         let mut covered = HashSet::new();
         let move_before = self.moved.clone();
@@ -2232,7 +2287,10 @@ impl<'a> Checker<'a> {
                         if covered.contains(&variant) {
                             self.diags.push(Diagnostic::lint(
                                 "L0301",
-                                format!("arm `{}` is unreachable — that case is already handled", variant),
+                                format!(
+                                    "arm `{}` is unreachable — that case is already handled",
+                                    variant
+                                ),
                                 "every earlier arm already covers this pattern".to_string(),
                                 "remove this arm or merge it with the one above".to_string(),
                                 Some(pspan),
@@ -2302,8 +2360,12 @@ impl<'a> Checker<'a> {
                     if else_body.is_none() {
                         let mut diag = Diagnostic::error(
                             "E0307",
-                            format!("`switch` doesn't cover every case — missing: {}", missing.join(", ")),
-                            "when every arm is a pattern test, each variant must appear once".to_string(),
+                            format!(
+                                "`switch` doesn't cover every case — missing: {}",
+                                missing.join(", ")
+                            ),
+                            "when every arm is a pattern test, each variant must appear once"
+                                .to_string(),
                             format!("add an arm for: {}", missing.join(", ")),
                             Some(span),
                         );
@@ -2323,7 +2385,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0003",
                 "this `switch` needs an `else` branch".to_string(),
-                "mixed condition arms (or non-pattern arms) must always have a fallback (S24)".to_string(),
+                "mixed condition arms (or non-pattern arms) must always have a fallback (S24)"
+                    .to_string(),
                 format!("add `{} {{ ... }};` after the last arm", syntax::KW_ELSE),
                 Some(span),
             ));
@@ -2340,9 +2403,7 @@ impl<'a> Checker<'a> {
 
     fn resolve_type(&self, ty: Type) -> Type {
         match ty {
-            Type::Named(n)
-                if self.m9.is_trait_name(&n) && !self.registry.contains(&n) =>
-            {
+            Type::Named(n) if self.m9.is_trait_name(&n) && !self.registry.contains(&n) => {
                 Type::TraitObject(n)
             }
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
@@ -2529,10 +2590,7 @@ impl<'a> Checker<'a> {
             ) {
                 Ok(v) => {
                     b.ct = Some(v.clone());
-                    self.ct_scopes
-                        .last_mut()
-                        .unwrap()
-                        .insert(b.name.clone(), v);
+                    self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
                 }
                 Err(d) => self.diags.push(d),
             }
@@ -2568,10 +2626,14 @@ impl<'a> Checker<'a> {
             if t != Type::Bool {
                 self.diags.push(Diagnostic::error(
                     "E0110",
-                    format!("{} must be {}, but this is {}", what, Type::Bool.show(), t.show()),
+                    format!(
+                        "{} must be {}, but this is {}",
+                        what,
+                        Type::Bool.show(),
+                        t.show()
+                    ),
                     "the program needs a clear yes or no here".to_string(),
-                    "compare the value to something, e.g. `x > 0` or `name == \"ok\"`"
-                        .to_string(),
+                    "compare the value to something, e.g. `x > 0` or `name == \"ok\"`".to_string(),
                     Some(e.span()),
                 ));
             }
@@ -2579,11 +2641,7 @@ impl<'a> Checker<'a> {
     }
 
     fn unknown_name(&mut self, name: &str, span: Span) {
-        let mut fix = format!(
-            "declare it first: `{} {} = ...;`",
-            syntax::KW_VAL,
-            name
-        );
+        let mut fix = format!("declare it first: `{} {} = ...;`", syntax::KW_VAL, name);
         let mut best: Option<(String, usize)> = None;
         let candidates: Vec<String> = self
             .scopes
@@ -2680,8 +2738,7 @@ impl<'a> Checker<'a> {
     }
 
     fn lambda_value_sendable(&self, lam: &Lambda, fn_ty: &Type) -> bool {
-        let param_names: HashSet<String> =
-            lam.params.iter().map(|p| p.name.clone()).collect();
+        let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
         let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
         let mut read_caps = HashSet::new();
         let mut mut_caps = HashSet::new();
@@ -2747,7 +2804,9 @@ impl<'a> Checker<'a> {
             }
             Type::Named(name) if is_type_var_name(name) || std_type_known(name) => None,
             Type::Named(name) => self.named_sendability_problem(name, &[], seen),
-            Type::Apply { name, args } if matches!(name.as_str(), "Task" | "Channel" | "Sender") => {
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "Task" | "Channel" | "Sender") =>
+            {
                 args.iter()
                     .find_map(|arg| self.sendability_problem_inner(arg, true, seen))
             }
@@ -2785,9 +2844,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                     let actual_ty = self.m9.instantiate_type(field_ty, &subst);
-                    if let Some(problem) =
-                        self.sendability_problem_inner(&actual_ty, true, seen)
-                    {
+                    if let Some(problem) = self.sendability_problem_inner(&actual_ty, true, seen) {
                         return Some(prepend_send_path(name, field_name, problem));
                     }
                 }
@@ -2836,13 +2893,15 @@ impl<'a> Checker<'a> {
         if let Expr::Ident(name, _) = expr {
             if let Some(info) = self.lookup(name) {
                 if !info.sendable {
-                    return self.sendability_problem(&info.ty, closure_taken).or_else(|| {
-                        Some(SendabilityProblem {
-                            root: None,
-                            path: Vec::new(),
-                            kind: SendProblemKind::ClosureCaptures,
-                        })
-                    });
+                    return self
+                        .sendability_problem(&info.ty, closure_taken)
+                        .or_else(|| {
+                            Some(SendabilityProblem {
+                                root: None,
+                                path: Vec::new(),
+                                kind: SendProblemKind::ClosureCaptures,
+                            })
+                        });
                 }
             }
         }
@@ -2865,7 +2924,10 @@ impl<'a> Checker<'a> {
         };
         let what = match (crossing, &problem.kind) {
             (SendCrossing::TaskCapture, SendProblemKind::ViewBorrow) => {
-                format!("{} can't cross into a task because it is a borrowed view", value_text)
+                format!(
+                    "{} can't cross into a task because it is a borrowed view",
+                    value_text
+                )
             }
             (SendCrossing::TaskResult, SendProblemKind::ViewBorrow) => {
                 "this task returns a borrowed view, which can't cross into a task".to_string()
@@ -2874,13 +2936,19 @@ impl<'a> Checker<'a> {
                 format!("{} can't be sent because it is a borrowed view", value_text)
             }
             (SendCrossing::TaskCapture, _) => {
-                format!("{} can't cross into a task because `{}` isn't sendable", value_text, type_name)
+                format!(
+                    "{} can't cross into a task because `{}` isn't sendable",
+                    value_text, type_name
+                )
             }
             (SendCrossing::TaskResult, _) => {
                 format!("this task returns `{}`, which isn't sendable", type_name)
             }
             (SendCrossing::ChannelSend, _) => {
-                format!("{} can't be sent because `{}` isn't sendable", value_text, type_name)
+                format!(
+                    "{} can't be sent because `{}` isn't sendable",
+                    value_text, type_name
+                )
             }
         };
         let why = format!(
@@ -2905,7 +2973,9 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
-        self.infer(e).map(|t| t.name()).unwrap_or_else(|| fallback.to_string())
+        self.infer(e)
+            .map(|t| t.name())
+            .unwrap_or_else(|| fallback.to_string())
     }
 
     /// Infer and check an expression. Returns None when a problem was
@@ -2952,10 +3022,7 @@ impl<'a> Checker<'a> {
     /// value is a reference).
     fn is_view_call(&self, e: &Expr) -> bool {
         match e {
-            Expr::Call(c) => self
-                .funcs
-                .get(&c.name)
-                .is_some_and(|s| s.is_view_return),
+            Expr::Call(c) => self.funcs.get(&c.name).is_some_and(|s| s.is_view_return),
             Expr::MethodCall {
                 recv_type: Some(t),
                 method,
@@ -2964,7 +3031,9 @@ impl<'a> Checker<'a> {
                 .registry
                 .method(t, method)
                 .is_some_and(|m| m.is_view_return),
-            Expr::MethodCall { receiver, method, .. } => {
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
                 // Cross-file call through an import alias.
                 if let Expr::Ident(alias, _) = receiver.as_ref() {
                     if let (Some(&idx), Some(mods)) = (self.imports.get(alias), self.modules) {
@@ -3012,10 +3081,16 @@ impl<'a> Checker<'a> {
                     let _ = line_note;
                     self.diags.push(Diagnostic::error(
                         "E0121",
-                        format!("`{}` was given away earlier, so it can't be used here", name),
+                        format!(
+                            "`{}` was given away earlier, so it can't be used here",
+                            name
+                        ),
                         "after a value moves somewhere else, the old name no longer holds it"
                             .to_string(),
-                        format!("give away a copy instead (`{}.clone()`) where it moved", name),
+                        format!(
+                            "give away a copy instead (`{}.clone()`) where it moved",
+                            name
+                        ),
                         Some(*span),
                     ));
                     self.moved.remove(name); // report once
@@ -3036,8 +3111,18 @@ impl<'a> Checker<'a> {
             Expr::Char(_, _) => Some(Type::Char),
             Expr::ListLit(elems, span) => self.infer_list_lit(elems, *span),
             Expr::MapLit(entries, span) => self.infer_map_lit(entries, *span),
-            Expr::Index { base, index, span, kind } => self.infer_index(base, index, span, kind),
-            Expr::Slice { base, start, end, span } => self.infer_slice(base, start, end, *span),
+            Expr::Index {
+                base,
+                index,
+                span,
+                kind,
+            } => self.infer_index(base, index, span, kind),
+            Expr::Slice {
+                base,
+                start,
+                end,
+                span,
+            } => self.infer_slice(base, start, end, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
                 match self.check_call(call, true) {
@@ -3046,8 +3131,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0116",
                             format!("`{}` doesn't hand back a value", call.name),
-                            "only calls that declare `-> Type` can be used as a value"
-                                .to_string(),
+                            "only calls that declare `-> Type` can be used as a value".to_string(),
                             format!(
                                 "call `{}` on its own line, or give it a return type",
                                 call.name
@@ -3082,10 +3166,13 @@ impl<'a> Checker<'a> {
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0109",
-                                format!("`!` needs {}, but this is {}", Type::Bool.show(), t.show()),
+                                format!(
+                                    "`!` needs {}, but this is {}",
+                                    Type::Bool.show(),
+                                    t.show()
+                                ),
                                 "`!` flips a yes to a no and back".to_string(),
-                                "compare the value to something first, e.g. `!(x > 0)`"
-                                    .to_string(),
+                                "compare the value to something first, e.g. `!(x > 0)`".to_string(),
                                 Some(*span),
                             ));
                             None
@@ -3150,8 +3237,12 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0308",
                             "bare `null` needs a known optional type here".to_string(),
-                            format!("`{}` only fits where a `T?` is expected (S32)", syntax::LIT_NULL),
-                            "add a type annotation, or use `null` where the type is already known".to_string(),
+                            format!(
+                                "`{}` only fits where a `T?` is expected (S32)",
+                                syntax::LIT_NULL
+                            ),
+                            "add a type annotation, or use `null` where the type is already known"
+                                .to_string(),
                             Some(*span),
                         ));
                         None
@@ -3160,8 +3251,12 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0308",
                         "bare `null` needs a known optional type here".to_string(),
-                        format!("`{}` only fits where a `T?` is expected (S32)", syntax::LIT_NULL),
-                        "add a type annotation, or use `null` where the type is already known".to_string(),
+                        format!(
+                            "`{}` only fits where a `T?` is expected (S32)",
+                            syntax::LIT_NULL
+                        ),
+                        "add a type annotation, or use `null` where the type is already known"
+                            .to_string(),
                         Some(*span),
                     ));
                     None
@@ -3279,7 +3374,8 @@ impl<'a> Checker<'a> {
                         err: ret_err,
                     } if *ret_ok == ok
                         && (*ret_err == err
-                            || (is_default_error(ret_err) && matches!(err.as_ref(), Type::String))) =>
+                            || (is_default_error(ret_err)
+                                && matches!(err.as_ref(), Type::String))) =>
                     {
                         Some((*ok).clone())
                     }
@@ -3435,7 +3531,10 @@ impl<'a> Checker<'a> {
                     (None, _) => {
                         self.diags.push(Diagnostic::error(
                             "E0405",
-                            format!("`{} return` can't leave this function early", syntax::OP_OR_FALLBACK),
+                            format!(
+                                "`{} return` can't leave this function early",
+                                syntax::OP_OR_FALLBACK
+                            ),
                             "a bare return needs a function with a return type".to_string(),
                             "add `-> Type` to the function, or give a fallback value instead"
                                 .to_string(),
@@ -3595,8 +3694,7 @@ impl<'a> Checker<'a> {
         let escapes = self.lambda_escapes;
         lam.meta.escapes = escapes;
 
-        let param_names: HashSet<String> =
-            lam.params.iter().map(|p| p.name.clone()).collect();
+        let param_names: HashSet<String> = lam.params.iter().map(|p| p.name.clone()).collect();
         let take_set: HashSet<String> = lam.take_names.iter().map(|(n, _)| n.clone()).collect();
 
         let mut read_caps = HashSet::new();
@@ -3717,11 +3815,9 @@ impl<'a> Checker<'a> {
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0802",
-                                format!(
-                                    "`{}` can't be copied into a stored lambda",
-                                    name
-                                ),
-                                "a lambda that outlives this line must own its captures".to_string(),
+                                format!("`{}` can't be copied into a stored lambda", name),
+                                "a lambda that outlives this line must own its captures"
+                                    .to_string(),
                                 format!(
                                     "prefix the lambda with `take({})` to move `{}` in",
                                     name, name
@@ -3804,7 +3900,10 @@ impl<'a> Checker<'a> {
                         ) {
                             self.diags.push(Diagnostic::error(
                                 "E0120",
-                                format!("`{}` is only borrowed here, so the lambda can't take it", name),
+                                format!(
+                                    "`{}` is only borrowed here, so the lambda can't take it",
+                                    name
+                                ),
                                 "this function reads the value but doesn't own it".to_string(),
                                 format!(
                                     "take ownership in this function with `{} {}: {}`",
@@ -3827,11 +3926,7 @@ impl<'a> Checker<'a> {
                 if br != er.as_ref() {
                     self.diags.push(Diagnostic::error(
                         "E0113",
-                        format!(
-                            "this lambda should return {}, not {}",
-                            er.show(),
-                            br.show()
-                        ),
+                        format!("this lambda should return {}, not {}", er.show(), br.show()),
                         "the lambda's return type must match what's expected here".to_string(),
                         type_fix_hint(er, br),
                         Some(lam.span),
@@ -3860,7 +3955,10 @@ impl<'a> Checker<'a> {
                 {
                     self.diags.push(Diagnostic::error(
                         "E0120",
-                        format!("`{}` is only borrowed here, so `.{}()` can't consume it", name, method),
+                        format!(
+                            "`{}` is only borrowed here, so `.{}()` can't consume it",
+                            name, method
+                        ),
                         "this function reads the value but doesn't own it".to_string(),
                         format!(
                             "call it on a copy, or take ownership with `{} {}: {}`",
@@ -4048,7 +4146,9 @@ impl<'a> Checker<'a> {
                             (
                                 format!(
                                     "`{}` must be declared with `{}` before calling `.{}()`",
-                                    root, syntax::KW_VAR, method
+                                    root,
+                                    syntax::KW_VAR,
+                                    method
                                 ),
                                 format!("declare `var {}: ...`", root),
                             )
@@ -4093,7 +4193,10 @@ impl<'a> Checker<'a> {
                 self.lambda_escapes = saved_esc;
                 if let (Some(et), Some(gt)) = (expected.get(i), got) {
                     if collections::is_closure_method(method) && i == 0 && method == "map" {
-                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
                             if let Type::List(inner) = recv_ty {
                                 refined_ret = Some(Type::List(Box::new((**r).clone())));
                                 let _ = inner;
@@ -4101,7 +4204,10 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if method == "reduce" && i == 1 {
-                        if let Type::Fn { ret: Some(ref r), .. } = gt {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
                             refined_ret = Some((**r).clone());
                         }
                     }
@@ -4141,7 +4247,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty list needs a type".to_string(),
-                "write `[]` only where the list type is already known, like `val xs: List<Int> = []`"
+                "write `[]` only where the list type is already known, like `val xs: [Int] = []`"
                     .to_string(),
                 "add a type annotation on the binding".to_string(),
                 Some(span),
@@ -4210,7 +4316,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty map needs a type".to_string(),
-                "write `[:]` only where the map type is already known, like `var m: Map<String, Int> = [:]`"
+                    "write `[:]` only where the map type is already known, like `var m: [String, Int] = [:]`"
                     .to_string(),
                 "add a type annotation on the binding".to_string(),
                 Some(span),
@@ -4370,7 +4476,11 @@ impl<'a> Checker<'a> {
             if t != Type::Int {
                 self.diags.push(Diagnostic::error(
                     "E0505",
-                    format!("slice bounds must be {}, not {}", Type::Int.show(), t.show()),
+                    format!(
+                        "slice bounds must be {}, not {}",
+                        Type::Int.show(),
+                        t.show()
+                    ),
                     "both ends of `a..b` must be whole numbers (S22, inclusive)".to_string(),
                     "use Int positions".to_string(),
                     Some(e.span()),
@@ -4415,7 +4525,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(type_name, _) = &**inner {
-            if type_name == "Json" {
+            if is_json_type_name(type_name) {
                 if let Some(ret) = self.check_std_json_lit(member, &mut [], span) {
                     return Some(ret);
                 }
@@ -4447,8 +4557,7 @@ impl<'a> Checker<'a> {
                             return Some(fty.clone());
                         }
                     }
-                    let field_names: Vec<String> =
-                        fields.iter().map(|(n, ..)| n.clone()).collect();
+                    let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
                     let mut fix = format!("check the field names on `{}`", type_name);
                     if let Some(suggest) = suggest_field(member, &field_names) {
                         fix = format!("did you mean `{}`?", suggest);
@@ -4482,8 +4591,7 @@ impl<'a> Checker<'a> {
                             return Some(self.m9.instantiate_type(fty, &subst));
                         }
                     }
-                    let field_names: Vec<String> =
-                        fields.iter().map(|(n, ..)| n.clone()).collect();
+                    let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
                     let mut fix = format!("check the field names on `{}`", name);
                     if let Some(suggest) = suggest_field(member, &field_names) {
                         fix = format!("did you mean `{}`?", suggest);
@@ -4547,7 +4655,7 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(type_name, _) = &**receiver {
-            if type_name == "Json" {
+            if is_json_type_name(type_name) {
                 if let Some(ret) = self.check_std_json_lit(method, args, span) {
                     return Some(ret);
                 }
@@ -4556,14 +4664,10 @@ impl<'a> Checker<'a> {
                 if variants.contains_key(method) {
                     let saved: Vec<Expr> = args
                         .iter_mut()
-                        .map(|a| {
-                            std::mem::replace(&mut a.expr, Expr::Int(0, a.span))
-                        })
+                        .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span)))
                         .collect();
-                    let mut enum_args: Vec<EnumLitArg> = saved
-                        .into_iter()
-                        .map(EnumLitArg::Positional)
-                        .collect();
+                    let mut enum_args: Vec<EnumLitArg> =
+                        saved.into_iter().map(EnumLitArg::Positional).collect();
                     let ty = self.check_enum_lit(type_name, method, &mut enum_args, span);
                     for (a, ea) in args.iter_mut().zip(enum_args) {
                         if let EnumLitArg::Positional(e) = ea {
@@ -4577,8 +4681,7 @@ impl<'a> Checker<'a> {
                 return self.check_static_method(type_name, method, span, args);
             }
             if let Some(ty) = builtin_type_from_ident(type_name) {
-                if let Some(ret) =
-                    collections::builtin_method_return(&ty, method, args.len(), true)
+                if let Some(ret) = collections::builtin_method_return(&ty, method, args.len(), true)
                 {
                     return self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                 }
@@ -4606,7 +4709,11 @@ impl<'a> Checker<'a> {
             return self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
         }
         if let Type::TraitObject(trait_name) = &recv_ty {
-            let sig = self.m9.traits.get(trait_name).and_then(|t| t.methods.get(method));
+            let sig = self
+                .m9
+                .traits
+                .get(trait_name)
+                .and_then(|t| t.methods.get(method));
             if let Some(msig) = sig {
                 *recv_type_out = Some(trait_name.clone());
                 for arg in args.iter_mut() {
@@ -4667,15 +4774,9 @@ impl<'a> Checker<'a> {
             {
                 if matches!(field_ty, Type::Fn { .. }) {
                     *recv_type_out = Some(type_name.clone());
-                    let mut callee = Box::new(Expr::Field(
-                        receiver.clone(),
-                        method.to_string(),
-                        span,
-                    ));
-                    let end = args
-                        .last()
-                        .map(|a| a.expr.span().end)
-                        .unwrap_or(span.end);
+                    let mut callee =
+                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
+                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
                     let call_span = Span::new(span.start, end);
                     return self.infer_call_value(&mut callee, args, call_span);
                 }
@@ -4871,8 +4972,16 @@ impl<'a> Checker<'a> {
                                     n,
                                     syntax::KW_MUTATE
                                 ),
-                                format!("`{}` needs to change this value while it borrows it", name),
-                                format!("write `{} {}` when calling `{}`", syntax::KW_MUTATE, n, name),
+                                format!(
+                                    "`{}` needs to change this value while it borrows it",
+                                    name
+                                ),
+                                format!(
+                                    "write `{} {}` when calling `{}`",
+                                    syntax::KW_MUTATE,
+                                    n,
+                                    name
+                                ),
                                 Some(*nspan),
                             ));
                         }
@@ -4966,13 +5075,15 @@ impl<'a> Checker<'a> {
                 if let Some(arg) = args.get_mut(0) {
                     self.expect_std_arg(name, 0, &Type::String, arg);
                 }
-                return Some(result_ty(Type::String, Type::Named("IoError".to_string())));
+                return Some(result_ty(Type::String, io_error_ty()));
             }
             ("std.math", "abs") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
-                let Some(arg) = args.get_mut(0) else { return Some(Type::Int) };
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Int);
+                };
                 let ty = self.infer(&mut arg.expr)?;
                 if !matches!(ty, Type::Int | Type::Float) {
                     self.diags.push(Diagnostic::error(
@@ -5067,7 +5178,7 @@ impl<'a> Checker<'a> {
                     "E0112",
                     format!("`pick` needs a list, not {}", ty.show()),
                     "random.pick chooses one item from a List".to_string(),
-                    "pass a `List<T>` value".to_string(),
+                    "pass a `[T]` value".to_string(),
                     Some(arg.expr.span()),
                 ));
                 return None;
@@ -5076,7 +5187,9 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
-                let Some(arg) = args.get_mut(0) else { return None };
+                let Some(arg) = args.get_mut(0) else {
+                    return None;
+                };
                 if arg.convention != AccessConvention::Mutate {
                     self.diags.push(Diagnostic::error(
                         "E0202",
@@ -5092,7 +5205,7 @@ impl<'a> Checker<'a> {
                         "E0112",
                         format!("`shuffle` needs a list, not {}", ty.show()),
                         "random.shuffle reorders a List in place".to_string(),
-                        "pass a `List<T>` value".to_string(),
+                        "pass a `[T]` value".to_string(),
                         Some(arg.expr.span()),
                     ));
                 }
@@ -5100,7 +5213,8 @@ impl<'a> Checker<'a> {
             }
             ("std.tasks", "spawn") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity("spawn", 1, args.len(), span));
+                    self.diags
+                        .push(wrong_std_arity("spawn", 1, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -5136,7 +5250,8 @@ impl<'a> Checker<'a> {
                                 Some(args[0].expr.span()),
                             ));
                         }
-                        ret.map(|r| *r).unwrap_or_else(|| Type::Named("Unit".to_string()))
+                        ret.map(|r| *r)
+                            .unwrap_or_else(|| Type::Named("Unit".to_string()))
                     }
                     Some(other) => {
                         self.diags.push(Diagnostic::error(
@@ -5171,11 +5286,15 @@ impl<'a> Checker<'a> {
                         args[0].expr.span(),
                     );
                 }
-                return Some(Type::Apply { name: "Task".to_string(), args: vec![t] });
+                return Some(Type::Apply {
+                    name: "Task".to_string(),
+                    args: vec![t],
+                });
             }
             ("std.tasks", "channel") => {
                 if !args.is_empty() {
-                    self.diags.push(wrong_std_arity("channel", 0, args.len(), span));
+                    self.diags
+                        .push(wrong_std_arity("channel", 0, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -5199,7 +5318,10 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                 };
-                return Some(Type::Apply { name: "Channel".to_string(), args: vec![t] });
+                return Some(Type::Apply {
+                    name: "Channel".to_string(),
+                    args: vec![t],
+                });
             }
             _ => {}
         }
@@ -5240,7 +5362,7 @@ impl<'a> Checker<'a> {
         args: &mut [crate::ast::CallArg],
         span: Span,
     ) -> Option<Type> {
-        let json = Type::Named("Json".to_string());
+        let json = json_ty();
         let expected = match variant {
             "Null" => Vec::new(),
             "Boolean" => vec![Type::Bool],
@@ -5252,19 +5374,17 @@ impl<'a> Checker<'a> {
                 value: Box::new(json.clone()),
             }],
             _ => {
-                let candidates = [
-                    "Null", "Boolean", "Number", "Text", "Array", "Object",
-                ]
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>();
+                let candidates = ["Null", "Boolean", "Number", "Text", "Array", "Object"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
                 let mut fix = "check the variant name".to_string();
                 if let Some(s) = suggest_field(variant, &candidates) {
                     fix = format!("did you mean `{}`?", s);
                 }
                 self.diags.push(Diagnostic::error(
                     "E0304",
-                    format!("`Json` has no variant `{}`", variant),
+                    format!("`{}` has no variant `{}`", syntax::TYPE_JSON, variant),
                     "std.json exposes the dynamic JSON variants from the M10 API".to_string(),
                     fix,
                     Some(span),
@@ -5279,7 +5399,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0306",
                 format!(
-                    "`Json.{}` expects {} value{}, got {}",
+                    "`{}.{}` expects {} value{}, got {}",
+                    syntax::TYPE_JSON,
                     variant,
                     expected.len(),
                     if expected.len() == 1 { "" } else { "s" },
@@ -5427,8 +5548,7 @@ impl<'a> Checker<'a> {
                 }
                 let arg_ty = self.infer(&mut arg.expr);
                 if let Some(arg_ty) = arg_ty {
-                    let reported =
-                        self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
+                    let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     if !reported && arg_ty != *param_ty {
                         self.diags.push(Diagnostic::error(
                             "E0112",
@@ -5521,9 +5641,19 @@ impl<'a> Checker<'a> {
                         if let Expr::Ident(name, nspan) = &arg.expr {
                             self.diags.push(Diagnostic::error(
                                 "E0202",
-                                format!("parameter `{}` requires `{}` at the call site", name, syntax::KW_MUTATE),
-                                format!("`{method}` needs to change this value while it borrows it"),
-                                format!("write `{} {}` when calling `{method}`", syntax::KW_MUTATE, name),
+                                format!(
+                                    "parameter `{}` requires `{}` at the call site",
+                                    name,
+                                    syntax::KW_MUTATE
+                                ),
+                                format!(
+                                    "`{method}` needs to change this value while it borrows it"
+                                ),
+                                format!(
+                                    "write `{} {}` when calling `{method}`",
+                                    syntax::KW_MUTATE,
+                                    name
+                                ),
                                 Some(*nspan),
                             ));
                         }
@@ -5544,17 +5674,18 @@ impl<'a> Checker<'a> {
                                             method,
                                             syntax::KW_VAR
                                         ),
-                                        format!("declare it with `{} {} = ...`", syntax::KW_VAR, name),
+                                        format!(
+                                            "declare it with `{} {} = ...`",
+                                            syntax::KW_VAR,
+                                            name
+                                        ),
                                         Some(*span),
                                     ));
                                 }
                             }
                         }
                     }
-                    (
-                        AccessConvention::Read | AccessConvention::Mutate,
-                        AccessConvention::Move,
-                    ) => {
+                    (AccessConvention::Read | AccessConvention::Mutate, AccessConvention::Move) => {
                         self.diags.push(Diagnostic::error(
                             "E0203",
                             format!(
@@ -5623,7 +5754,11 @@ impl<'a> Checker<'a> {
         }
         self.modules
             .and_then(|mods| mods.get(owner_mod))
-            .and_then(|st| st.field_pub.get(&(type_name.to_string(), field.to_string())).copied())
+            .and_then(|st| {
+                st.field_pub
+                    .get(&(type_name.to_string(), field.to_string()))
+                    .copied()
+            })
             .unwrap_or(false)
     }
 
@@ -5691,9 +5826,7 @@ impl<'a> Checker<'a> {
                     Some(*name_span),
                 ));
             }
-            if owner_mod != self.module_idx
-                && !self.field_is_pub_in(owner_mod, type_name, name)
-            {
+            if owner_mod != self.module_idx && !self.field_is_pub_in(owner_mod, type_name, name) {
                 self.diags.push(private_item(name, *name_span));
             }
             let field_def = def_fields.iter().find(|(n, ..)| n == name);
@@ -5734,7 +5867,11 @@ impl<'a> Checker<'a> {
         if !missing.is_empty() {
             self.diags.push(Diagnostic::error(
                 "E0303",
-                format!("struct literal for `{}` is missing fields: {}", type_name, missing.join(", ")),
+                format!(
+                    "struct literal for `{}` is missing fields: {}",
+                    type_name,
+                    missing.join(", ")
+                ),
                 "every non-`ref` field must appear exactly once".to_string(),
                 format!("add: {}", missing.join(", ")),
                 Some(span),
@@ -5842,7 +5979,10 @@ impl<'a> Checker<'a> {
                 } else if let Some(EnumLitArg::Named { label, .. }) = args.first() {
                     self.diags.push(Diagnostic::error(
                         "E0303",
-                        format!("variant `{}` expects a positional value, not `{}:`", variant, label),
+                        format!(
+                            "variant `{}` expects a positional value, not `{}:`",
+                            variant, label
+                        ),
                         "single-payload variants use positional args only (S30)".to_string(),
                         format!("write `{type_name}.{variant}(value)`"),
                         Some(span),
@@ -5857,7 +5997,8 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0303",
                                 format!("variant `{}` requires labeled fields", variant),
-                                "multi-payload variants need `name: value` at the call site (S30)".to_string(),
+                                "multi-payload variants need `name: value` at the call site (S30)"
+                                    .to_string(),
                                 format!("write `{type_name}.{variant}(w: 1.0, h: 2.0)`"),
                                 Some(span),
                             ));
@@ -5886,8 +6027,8 @@ impl<'a> Checker<'a> {
                                         label,
                                         &fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
                                     )
-                                        .map(|s| format!("did you mean `{}`?", s))
-                                        .unwrap_or_else(|| "remove this label".to_string()),
+                                    .map(|s| format!("did you mean `{}`?", s))
+                                    .unwrap_or_else(|| "remove this label".to_string()),
                                     Some(expr.span()),
                                 ));
                             }
@@ -5902,7 +6043,11 @@ impl<'a> Checker<'a> {
                 if !missing.is_empty() {
                     self.diags.push(Diagnostic::error(
                         "E0303",
-                        format!("variant `{}` is missing fields: {}", variant, missing.join(", ")),
+                        format!(
+                            "variant `{}` is missing fields: {}",
+                            variant,
+                            missing.join(", ")
+                        ),
                         "every payload field must appear exactly once".to_string(),
                         format!("add: {}", missing.join(", ")),
                         Some(span),
@@ -5955,7 +6100,9 @@ impl<'a> Checker<'a> {
         subj_ty: &Type,
     ) -> Option<Pattern> {
         match cond {
-            Expr::PatternTest { subject, pattern, .. } => {
+            Expr::PatternTest {
+                subject, pattern, ..
+            } => {
                 if subject_name.is_some_and(|n| expr_is_same_ident(subject, n)) {
                     Some(pattern.clone())
                 } else {
@@ -5987,11 +6134,7 @@ impl<'a> Checker<'a> {
     /// Binding a non-copy payload out of a pattern gives the subject away in
     /// the generated Rust (`if let` / `matches!` move the place), so the old
     /// name must stop being usable — otherwise rustc rejects the output (I2).
-    fn mark_pattern_subject_moved(
-        &mut self,
-        subject: &Expr,
-        bindings: &HashMap<String, Type>,
-    ) {
+    fn mark_pattern_subject_moved(&mut self, subject: &Expr, bindings: &HashMap<String, Type>) {
         if bindings.values().all(type_is_copy) {
             return;
         }
@@ -6042,15 +6185,24 @@ impl<'a> Checker<'a> {
                 ));
                 HashMap::new()
             }
-            (Type::Named(enum_name), Pattern::Variant { variant, bindings, .. }) => {
-                if enum_name == "Json" {
+            (
+                Type::Named(enum_name),
+                Pattern::Variant {
+                    variant, bindings, ..
+                },
+            ) => {
+                if is_json_type_name(enum_name) {
                     let Some(expected) = std_json_pattern_types(variant) else {
                         self.diags.push(Diagnostic::error(
                             "E0305",
-                            format!("pattern `{}` doesn't belong to `Json`", variant),
+                            format!(
+                                "pattern `{}` doesn't belong to `{}`",
+                                variant,
+                                syntax::TYPE_JSON
+                            ),
                             "pattern tests must name a variant on the value's enum type"
                                 .to_string(),
-                            "check the Json variant spelling".to_string(),
+                            "check the JSON variant spelling".to_string(),
                             Some(span),
                         ));
                         return HashMap::new();
@@ -6115,7 +6267,14 @@ impl<'a> Checker<'a> {
                             bindings.len()
                         ),
                         "each payload field needs its own binding name".to_string(),
-                        format!("write `{}({})", variant, (0..expected.len()).map(|i| format!("v{i}")).collect::<Vec<_>>().join(", ")),
+                        format!(
+                            "write `{}({})",
+                            variant,
+                            (0..expected.len())
+                                .map(|i| format!("v{i}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
                         Some(span),
                     ));
                 }
@@ -6130,7 +6289,11 @@ impl<'a> Checker<'a> {
                     "E0305",
                     format!("pattern `{}` doesn't match {}", variant, subject_ty.show()),
                     "variant patterns only work on enum values".to_string(),
-                    format!("test an enum value, or use `{}` / `{}` for optionals", syntax::LIT_VALUE, syntax::LIT_NULL),
+                    format!(
+                        "test an enum value, or use `{}` / `{}` for optionals",
+                        syntax::LIT_VALUE,
+                        syntax::LIT_NULL
+                    ),
                     Some(span),
                 ));
                 HashMap::new()
@@ -6266,10 +6429,7 @@ impl<'a> Checker<'a> {
                     syntax::BUILTIN_REQUIRE_EQ
                 ),
                 "require_eq checks that two values are equal".to_string(),
-                format!(
-                    "e.g. {}(got, expected)",
-                    syntax::BUILTIN_REQUIRE_EQ
-                ),
+                format!("e.g. {}(got, expected)", syntax::BUILTIN_REQUIRE_EQ),
                 Some(call.name_span),
             ));
             for arg in call.args.iter_mut() {
@@ -6364,16 +6524,9 @@ impl<'a> Checker<'a> {
                     if let Some((subject, cmp_op)) = rightmost_comparison(lhs) {
                         let rhs_span = rhs.span();
                         let new_span = Span::new(subject.span().start, rhs_span.end);
-                        let old_rhs = std::mem::replace(
-                            rhs.as_mut(),
-                            Expr::Bool(false, rhs_span),
-                        );
-                        **rhs = Expr::Binary(
-                            cmp_op,
-                            Box::new(subject),
-                            Box::new(old_rhs),
-                            new_span,
-                        );
+                        let old_rhs = std::mem::replace(rhs.as_mut(), Expr::Bool(false, rhs_span));
+                        **rhs =
+                            Expr::Binary(cmp_op, Box::new(subject), Box::new(old_rhs), new_span);
                         // Re-check the rebuilt comparison; this reports a
                         // mismatch (E0109) if the value's type doesn't fit.
                         self.infer_rebuilt(rhs);
@@ -6467,8 +6620,7 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl
-            | BinOp::Shr => {
+            BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
                 if lt == Type::Int && rt == Type::Int {
                     Some(Type::Int)
                 } else {
@@ -6523,8 +6675,7 @@ impl<'a> Checker<'a> {
                         "E0109",
                         format!("text isn't ordered with `{}`", op.spell()),
                         "comparing text for order isn't supported yet".to_string(),
-                        "compare with `==` or `!=`, or compare lengths/numbers instead"
-                            .to_string(),
+                        "compare with `==` or `!=`, or compare lengths/numbers instead".to_string(),
                         Some(span),
                     ));
                     None
@@ -6580,8 +6731,7 @@ impl<'a> Checker<'a> {
                     target,
                     call.name
                 ),
-                "`print` writes to stdout; `io.eprint` is the stderr twin in `std.io`"
-                    .to_string(),
+                "`print` writes to stdout; `io.eprint` is the stderr twin in `std.io`".to_string(),
                 format!("replace `{}` with `{}`", call.name, target),
                 Some(call.name_span),
             ));
@@ -6595,7 +6745,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0038",
                 "`open` is not the M10 file API".to_string(),
-                "M10 uses whole-file helpers in `std.fs`; file handles are out of scope".to_string(),
+                "M10 uses whole-file helpers in `std.fs`; file handles are out of scope"
+                    .to_string(),
                 "import `std.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
                     .to_string(),
                 Some(call.name_span),
@@ -6626,10 +6777,7 @@ impl<'a> Checker<'a> {
         ) {
             self.diags.push(Diagnostic::error(
                 "E0040",
-                format!(
-                    "`{}` is not in Jet; use `tasks.spawn` instead",
-                    call.name
-                ),
+                format!("`{}` is not in Jet; use `tasks.spawn` instead", call.name),
                 "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
                     .to_string(),
                 "import `std.tasks as tasks` and call `tasks.spawn(() => your_work())`".to_string(),
@@ -6667,7 +6815,10 @@ impl<'a> Checker<'a> {
             if call.args.len() != 1 {
                 self.diags.push(Diagnostic::error(
                     "E0103",
-                    format!("`{}` needs exactly one thing to print", syntax::BUILTIN_PRINT),
+                    format!(
+                        "`{}` needs exactly one thing to print",
+                        syntax::BUILTIN_PRINT
+                    ),
                     "printing nothing isn't meaningful".to_string(),
                     format!("e.g. {}(\"hello\")", syntax::BUILTIN_PRINT),
                     Some(call.name_span),
@@ -6683,7 +6834,11 @@ impl<'a> Checker<'a> {
                 if !is_printable(&t, self.registry) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!("`{}` doesn't know how to show {}", syntax::BUILTIN_PRINT, t.show()),
+                        format!(
+                            "`{}` doesn't know how to show {}",
+                            syntax::BUILTIN_PRINT,
+                            t.show()
+                        ),
                         "print shows values that have a display".to_string(),
                         "print one of its parts instead".to_string(),
                         Some(arg.expr.span()),
@@ -6712,8 +6867,7 @@ impl<'a> Checker<'a> {
             if let Some(info) = self.lookup(&call.name) {
                 if matches!(info.ty, Type::Fn { .. }) {
                     let name_span = call.name_span;
-                    let mut callee =
-                        Box::new(Expr::Ident(call.name.clone(), name_span));
+                    let mut callee = Box::new(Expr::Ident(call.name.clone(), name_span));
                     let mut args = std::mem::take(&mut call.args);
                     let end = args
                         .last()
@@ -6808,14 +6962,12 @@ impl<'a> Checker<'a> {
         let effective_params: Vec<(AccessConvention, Type)> = if generic_subst.is_empty() {
             sig.params.clone()
         } else {
-            sig
-                .params
+            sig.params
                 .iter()
                 .map(|(c, t)| (*c, self.m9.instantiate_type(t, &generic_subst)))
                 .collect()
         };
-        let args_pre_inferred =
-            !generic_subst.is_empty() && pre_inferred.len() == call.args.len();
+        let args_pre_inferred = !generic_subst.is_empty() && pre_inferred.len() == call.args.len();
 
         let mut mut_borrowed: HashSet<String> = HashSet::new();
         let mut read_borrowed: HashSet<String> = HashSet::new();
@@ -6824,8 +6976,7 @@ impl<'a> Checker<'a> {
             if let Expr::Ident(name, span) = &arg.expr {
                 if mut_borrowed.contains(name) {
                     self.diags.push(aliasing_while_mut(name, *span));
-                } else if arg.convention == AccessConvention::Mutate
-                    && read_borrowed.contains(name)
+                } else if arg.convention == AccessConvention::Mutate && read_borrowed.contains(name)
                 {
                     self.diags.push(aliasing_mut_after_read(name, *span));
                 }
@@ -6859,8 +7010,7 @@ impl<'a> Checker<'a> {
             let Some((param_conv, param_ty)) = effective_params.get(i) else {
                 continue;
             };
-            if arg.convention == AccessConvention::Mutate
-                && !matches!(arg.expr, Expr::Ident(_, _))
+            if arg.convention == AccessConvention::Mutate && !matches!(arg.expr, Expr::Ident(_, _))
             {
                 self.diags.push(Diagnostic::error(
                     "E0202",
@@ -7004,18 +7154,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                (
-                    AccessConvention::Read | AccessConvention::Mutate,
-                    AccessConvention::Move,
-                ) => {
+                (AccessConvention::Read | AccessConvention::Mutate, AccessConvention::Move) => {
                     self.diags.push(Diagnostic::error(
                         "E0203",
                         format!(
                             "`{}` passed to a parameter that does not consume",
                             syntax::KW_MOVE
                         ),
-                        "only `take` parameters accept a moved value at the call site"
-                            .to_string(),
+                        "only `take` parameters accept a moved value at the call site".to_string(),
                         format!(
                             "remove `{}` or change the parameter to `take`",
                             syntax::KW_MOVE
@@ -7055,10 +7201,7 @@ impl<'a> Checker<'a> {
                                 ),
                                 "shared handles are cloned when used across a loop boundary"
                                     .to_string(),
-                                format!(
-                                    "hoist `{}` before the loop, or clone once outside",
-                                    name
-                                ),
+                                format!("hoist `{}` before the loop, or clone once outside", name),
                                 Some(*span),
                             ));
                         }
@@ -7067,17 +7210,13 @@ impl<'a> Checker<'a> {
             }
         }
 
-        Some(
-            sig.return_type
-                .as_ref()
-                .map(|t| {
-                    if generic_subst.is_empty() {
-                        t.clone()
-                    } else {
-                        self.m9.instantiate_type(t, &generic_subst)
-                    }
-                }),
-        )
+        Some(sig.return_type.as_ref().map(|t| {
+            if generic_subst.is_empty() {
+                t.clone()
+            } else {
+                self.m9.instantiate_type(t, &generic_subst)
+            }
+        }))
     }
 }
 
@@ -7127,8 +7266,7 @@ fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
             "`{}` is being changed in this call, so it can't be used again here",
             name
         ),
-        "while something is being changed, nobody else may be looking at it"
-            .to_string(),
+        "while something is being changed, nobody else may be looking at it".to_string(),
         format!(
             "pass `{} {}` only once, or copy first with `{} .clone()`",
             syntax::KW_MUTATE,
@@ -7146,12 +7284,10 @@ fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
             "`{}` is already shared in this call, so it can't be changed here too",
             name
         ),
-        "while something is being looked at, nobody else may be changing it"
-            .to_string(),
+        "while something is being looked at, nobody else may be changing it".to_string(),
         format!(
             "drop the extra use of `{}`, or copy first with `{} .clone()`",
-            name,
-            name
+            name, name
         ),
         Some(span),
     )
@@ -7219,24 +7355,28 @@ fn is_cloneable(
         Type::Map { key, value } => {
             is_cloneable(key, registry, structs) && is_cloneable(value, registry, structs)
         }
-        Type::Result { ok, err } => is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs),
+        Type::Result { ok, err } => {
+            is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs)
+        }
         Type::Fn { .. } => false,
         Type::Named(name) if is_type_var_name(name) || std_type_known(name) => true,
         Type::Named(name) => {
             registry.contains(name)
                 && match registry.types.get(name) {
-                    Some(TypeDef::Struct { fields, .. }) => fields
-                        .iter()
-                        .all(|(_, _, fty, is_ref, _)| !*is_ref && is_cloneable(fty, registry, structs)),
-                    Some(TypeDef::Enum { variants, .. }) => variants.values().all(|(_, p)| {
-                        match p {
+                    Some(TypeDef::Struct { fields, .. }) => {
+                        fields.iter().all(|(_, _, fty, is_ref, _)| {
+                            !*is_ref && is_cloneable(fty, registry, structs)
+                        })
+                    }
+                    Some(TypeDef::Enum { variants, .. }) => {
+                        variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
                             VariantPayload::Single(t, _) => is_cloneable(t, registry, structs),
-                            VariantPayload::Named(fs) => fs
-                                .iter()
-                                .all(|f| is_cloneable(&f.ty, registry, structs)),
-                        }
-                    }),
+                            VariantPayload::Named(fs) => {
+                                fs.iter().all(|f| is_cloneable(&f.ty, registry, structs))
+                            }
+                        })
+                    }
                     None => false,
                 }
         }
@@ -7245,11 +7385,7 @@ fn is_cloneable(
     }
 }
 
-fn walk_stmts_for_const_refs(
-    stmts: &[Stmt],
-    const_names: &[String],
-    taken: &mut HashSet<String>,
-) {
+fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], taken: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(e) => walk_expr_for_const_refs(e, const_names, taken),
@@ -7352,7 +7488,12 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
         }
-        Expr::OrFallback { value, fallback, is_option, .. } => {
+        Expr::OrFallback {
+            value,
+            fallback,
+            is_option,
+            ..
+        } => {
             walk_expr_for_const_refs(value, const_names, taken);
             match fallback {
                 OrFallback::Value(e) => walk_expr_for_const_refs(e, const_names, taken),
@@ -7366,10 +7507,7 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
             walk_expr_for_const_refs(l, const_names, taken);
             walk_expr_for_const_refs(r, const_names, taken);
         }
-        Expr::Char(_, _)
-        | Expr::Int(_, _)
-        | Expr::Float(_, _)
-        | Expr::Bool(_, _) => {}
+        Expr::Char(_, _) | Expr::Int(_, _) | Expr::Float(_, _) | Expr::Bool(_, _) => {}
         Expr::ListLit(elems, _) => {
             for e in elems {
                 walk_expr_for_const_refs(e, const_names, taken);
@@ -7385,7 +7523,9 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
             walk_expr_for_const_refs(base, const_names, taken);
             walk_expr_for_const_refs(index, const_names, taken);
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
             walk_expr_for_const_refs(base, const_names, taken);
             walk_expr_for_const_refs(start, const_names, taken);
             walk_expr_for_const_refs(end, const_names, taken);
@@ -7426,25 +7566,55 @@ fn missing_arms_text(subj_ty: &Type, missing: &[String], subj_name: Option<&str>
         .map(|v| match subj_ty {
             // Named enum: `(subject == VariantName) -> {};`
             Type::Named(_) => {
-                format!("    ({} == {}) {} {{}};", subj, v, crate::syntax::OP_ARM_ARROW)
+                format!(
+                    "    ({} == {}) {} {{}};",
+                    subj,
+                    v,
+                    crate::syntax::OP_ARM_ARROW
+                )
             }
             // Option: `value(inner) -> {};`  or  `null -> {};`
             Type::Option(_) => {
                 if v == crate::syntax::LIT_VALUE {
-                    format!("    ({} is {}(inner)) {} {{}};", subj, crate::syntax::LIT_VALUE, crate::syntax::OP_ARM_ARROW)
+                    format!(
+                        "    ({} is {}(inner)) {} {{}};",
+                        subj,
+                        crate::syntax::LIT_VALUE,
+                        crate::syntax::OP_ARM_ARROW
+                    )
                 } else {
-                    format!("    ({} == {}) {} {{}};", subj, crate::syntax::LIT_NULL, crate::syntax::OP_ARM_ARROW)
+                    format!(
+                        "    ({} == {}) {} {{}};",
+                        subj,
+                        crate::syntax::LIT_NULL,
+                        crate::syntax::OP_ARM_ARROW
+                    )
                 }
             }
             // Result: `ok(v) -> {};` or `err(e) -> {};`
             Type::Result { .. } => {
                 if v.starts_with(crate::syntax::LIT_OK) {
-                    format!("    ({} is {}(v)) {} {{}};", subj, crate::syntax::LIT_OK, crate::syntax::OP_ARM_ARROW)
+                    format!(
+                        "    ({} is {}(v)) {} {{}};",
+                        subj,
+                        crate::syntax::LIT_OK,
+                        crate::syntax::OP_ARM_ARROW
+                    )
                 } else {
-                    format!("    ({} is {}(e)) {} {{}};", subj, crate::syntax::LIT_ERR, crate::syntax::OP_ARM_ARROW)
+                    format!(
+                        "    ({} is {}(e)) {} {{}};",
+                        subj,
+                        crate::syntax::LIT_ERR,
+                        crate::syntax::OP_ARM_ARROW
+                    )
                 }
             }
-            _ => format!("    ({} == {}) {} {{}};", subj, v, crate::syntax::OP_ARM_ARROW),
+            _ => format!(
+                "    ({} == {}) {} {{}};",
+                subj,
+                v,
+                crate::syntax::OP_ARM_ARROW
+            ),
         })
         .collect();
     format!("\n{}", arms.join("\n"))
@@ -7556,15 +7726,17 @@ fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
 fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
     match ty {
         Type::Named(name) => match registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty, is_ref, _)| {
-                if *is_ref || !types_comparable(fty, registry) {
-                    Some(fname.clone())
-                } else {
-                    None
-                }
-            }),
-            Some(TypeDef::Enum { variants, .. }) => variants.values().find_map(|(_, payload)| {
-                match payload {
+            Some(TypeDef::Struct { fields, .. }) => {
+                fields.iter().find_map(|(fname, _, fty, is_ref, _)| {
+                    if *is_ref || !types_comparable(fty, registry) {
+                        Some(fname.clone())
+                    } else {
+                        None
+                    }
+                })
+            }
+            Some(TypeDef::Enum { variants, .. }) => {
+                variants.values().find_map(|(_, payload)| match payload {
                     VariantPayload::Unit => None,
                     VariantPayload::Single(t, _) if !types_comparable(t, registry) => {
                         Some("payload".to_string())
@@ -7577,8 +7749,8 @@ fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
                         }
                     }),
                     _ => None,
-                }
-            }),
+                })
+            }
             None => Some("?".to_string()),
         },
         Type::Option(inner) => incomparable_field(inner, registry),
@@ -7592,7 +7764,10 @@ fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
 fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0507",
-        format!("while the loop is reading `{}`, nothing may change it", name),
+        format!(
+            "while the loop is reading `{}`, nothing may change it",
+            name
+        ),
         "a `for` loop borrows the whole collection until the body finishes".to_string(),
         format!(
             "collect changes into a second list, or loop over indices: `for i in 0..{}.len()-1`",
@@ -7605,7 +7780,9 @@ fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
 fn collection_root_name(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Ident(n, _) => Some(n.clone()),
-        Expr::MethodCall { receiver, method, .. } if method == "chars" => collection_root_name(receiver),
+        Expr::MethodCall {
+            receiver, method, ..
+        } if method == "chars" => collection_root_name(receiver),
         _ => None,
     }
 }
@@ -7629,7 +7806,11 @@ fn is_task_type(ty: &Type) -> bool {
     matches!(ty, Type::Apply { name, .. } if name == "Task")
 }
 
-fn prepend_send_path(root: &str, field: &str, mut problem: SendabilityProblem) -> SendabilityProblem {
+fn prepend_send_path(
+    root: &str,
+    field: &str,
+    mut problem: SendabilityProblem,
+) -> SendabilityProblem {
     problem.root = Some(root.to_string());
     problem.path.insert(0, field.to_string());
     problem
@@ -7641,10 +7822,7 @@ fn describe_sendability_problem(problem: &SendabilityProblem) -> String {
             let root = problem.root.as_deref().unwrap_or("this value");
             match problem.path.as_slice() {
                 [] => format!("`{}` holds a `ref` field", root),
-                [field] => format!(
-                    "`{}` contains `{}`, which is a `ref` field",
-                    root, field
-                ),
+                [field] => format!("`{}` contains `{}`, which is a `ref` field", root, field),
                 [first, ..] => format!(
                     "`{}` contains `{}`, which holds a `ref` field at `{}`",
                     root,
@@ -7673,9 +7851,7 @@ fn describe_sendability_problem(problem: &SendabilityProblem) -> String {
                 name
             )
         }
-        SendProblemKind::ViewBorrow => {
-            "`view` results are borrowed, not owned".to_string()
-        }
+        SendProblemKind::ViewBorrow => "`view` results are borrowed, not owned".to_string(),
     }
 }
 
@@ -7733,7 +7909,10 @@ fn private_item(name: &str, span: Span) -> Diagnostic {
         "E0605",
         format!("`{}` exists but is private to its file", name),
         "only names marked `pub` can be used from another file (S18)".to_string(),
-        format!("add `pub` before `{}`, or don't reach across files here", name),
+        format!(
+            "add `pub` before `{}`, or don't reach across files here",
+            name
+        ),
         Some(span),
     )
 }
@@ -7750,27 +7929,63 @@ fn is_u8_ty(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if n == "U8")
 }
 
+fn json_ty() -> Type {
+    Type::Named(syntax::TYPE_JSON.to_string())
+}
+
+fn json_error_ty() -> Type {
+    Type::Named(syntax::TYPE_JSON_ERROR.to_string())
+}
+
+fn is_json_type_name(name: &str) -> bool {
+    name == syntax::TYPE_JSON || name == "Json"
+}
+
+fn is_json_error_type_name(name: &str) -> bool {
+    name == syntax::TYPE_JSON_ERROR || name == "JsonError"
+}
+
+fn is_io_error_type_name(name: &str) -> bool {
+    name == syntax::TYPE_IO_ERROR || name == "IoError"
+}
+
+fn is_utf8_error_type_name(name: &str) -> bool {
+    name == syntax::TYPE_UTF8_ERROR || name == "Utf8Error"
+}
+
 fn std_type_known(name: &str) -> bool {
     matches!(
         name,
-        "Unit" | "U8" | "Error" | "IoError" | "Utf8Error" | "ProcessResult" | "Stopwatch"
-            | "Json" | "JsonError" | "Closed"
-    )
+        "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
+    ) || is_json_type_name(name)
+        || is_json_error_type_name(name)
+        || is_io_error_type_name(name)
+        || is_utf8_error_type_name(name)
 }
 
 fn std_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if is_json_error_type_name(type_name) {
+        return match field {
+            "line" => Some(Type::Int),
+            "message" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if is_utf8_error_type_name(type_name) {
+        return match field {
+            "message" => Some(Type::String),
+            _ => None,
+        };
+    }
     match (type_name, field) {
         ("ProcessResult", "code") => Some(Type::Int),
         ("ProcessResult", "output" | "errors") => Some(Type::String),
-        ("JsonError", "line") => Some(Type::Int),
-        ("JsonError", "message") => Some(Type::String),
-        ("Utf8Error", "message") => Some(Type::String),
         _ => None,
     }
 }
 
 fn std_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
-    let json = Type::Named("Json".to_string());
+    let json = json_ty();
     match variant {
         "Null" => Some(Vec::new()),
         "Boolean" => Some(vec![Type::Bool]),
@@ -7786,11 +8001,7 @@ fn std_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
 }
 
 fn io_error_ty() -> Type {
-    Type::Named("IoError".to_string())
-}
-
-fn json_error_ty() -> Type {
-    Type::Named("JsonError".to_string())
+    Type::Named(syntax::TYPE_IO_ERROR.to_string())
 }
 
 fn result_ty(ok: Type, err: Type) -> Type {
@@ -7811,28 +8022,29 @@ fn std_fixed_sig(
     let bool_ = Type::Bool;
     let unit = unit_ty();
     let io = io_error_ty();
-    let json = Type::Named("Json".to_string());
+    let json = json_ty();
     let list_string = Type::List(Box::new(Type::String));
     let list_u8 = Type::List(Box::new(u8_ty()));
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
         ("std.fs", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
-        ("std.fs", "read_bytes") => {
-            Some((vec![(read, Type::String)], Some(result_ty(list_u8, io_error_ty()))))
-        }
+        ("std.fs", "read_bytes") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8, io_error_ty())),
+        )),
         ("std.fs", "write" | "append") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(io_unit),
         )),
-        ("std.fs", "exists" | "is_dir") => {
-            Some((vec![(read, Type::String)], Some(bool_)))
-        }
-        ("std.fs", "remove" | "create_dir") => {
-            Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty()))))
-        }
-        ("std.fs", "list_dir") => {
-            Some((vec![(read, Type::String)], Some(result_ty(list_string, io_error_ty()))))
-        }
+        ("std.fs", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
+        ("std.fs", "remove" | "create_dir") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("std.fs", "list_dir") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_string, io_error_ty())),
+        )),
         ("std.fs", "copy" | "rename") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
@@ -7846,21 +8058,25 @@ fn std_fixed_sig(
             Some(Type::Option(Box::new(Type::String))),
         )),
         ("std.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
-        ("std.env", "current_dir") => {
-            Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
-        }
+        ("std.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("std.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
         ("std.process", "exit") => Some((vec![(read, int)], None)),
         ("std.process", "run") => Some((
             vec![(read, Type::List(Box::new(Type::String)))],
-            Some(result_ty(Type::Named("ProcessResult".to_string()), io_error_ty())),
+            Some(result_ty(
+                Type::Named("ProcessResult".to_string()),
+                io_error_ty(),
+            )),
         )),
-        ("std.math", "sqrt" | "floor" | "ceil") => {
-            Some((vec![(read, float.clone())], Some(float)))
-        }
-        ("std.math", "pow") => Some((vec![(read, Type::Float), (read, Type::Float)], Some(Type::Float))),
+        ("std.math", "sqrt" | "floor" | "ceil") => Some((vec![(read, float.clone())], Some(float))),
+        ("std.math", "pow") => Some((
+            vec![(read, Type::Float), (read, Type::Float)],
+            Some(Type::Float),
+        )),
         ("std.math", "round") => Some((vec![(read, Type::Float)], Some(Type::Int))),
-        ("std.random", "int") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int))),
+        ("std.random", "int") => {
+            Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
+        }
         ("std.random", "float") => Some((vec![], Some(Type::Float))),
         ("std.random", "seed") => Some((vec![(read, Type::Int)], None)),
         ("std.time", "now") => Some((vec![], Some(Type::Int))),
@@ -7871,24 +8087,30 @@ fn std_fixed_sig(
             Some(result_ty(json.clone(), json_error_ty())),
         )),
         ("std.json", "render" | "render_pretty") => Some((vec![(read, json)], Some(Type::String))),
-        _ => {
-            None
-        }
+        _ => None,
     }
 }
 
 fn std_module_items(module: &str) -> Vec<String> {
     let items: &[&str] = match module {
         "std.fs" => &[
-            "read", "read_bytes", "write", "append", "exists", "remove", "list_dir",
-            "create_dir", "is_dir", "copy", "rename",
+            "read",
+            "read_bytes",
+            "write",
+            "append",
+            "exists",
+            "remove",
+            "list_dir",
+            "create_dir",
+            "is_dir",
+            "copy",
+            "rename",
         ],
         "std.io" => &["args", "input", "read_all_input", "eprint"],
         "std.env" => &["get", "set", "current_dir", "home_dir"],
         "std.process" => &["exit", "run"],
         "std.math" => &[
-            "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e",
-            "clamp",
+            "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e", "clamp",
         ],
         "std.random" => &["int", "float", "pick", "shuffle", "seed"],
         "std.time" => &["now", "sleep", "start"],
@@ -7972,20 +8194,30 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags),
                 Item::Struct(s) => {
-                    register_struct(s, &mut st.registry, &mut st.structs, &mut diags, &st.funcs, &st.consts);
+                    register_struct(
+                        s,
+                        &mut st.registry,
+                        &mut st.structs,
+                        &mut diags,
+                        &st.funcs,
+                        &st.consts,
+                    );
                     st.type_pub.insert(s.name.clone(), s.is_pub);
                     for fld in &s.fields {
-                        st.field_pub.insert((s.name.clone(), fld.name.clone()), fld.is_pub);
+                        st.field_pub
+                            .insert((s.name.clone(), fld.name.clone()), fld.is_pub);
                     }
                     for m in &s.methods {
-                        st.method_pub.insert((s.name.clone(), m.name.clone()), m.is_pub);
+                        st.method_pub
+                            .insert((s.name.clone(), m.name.clone()), m.is_pub);
                     }
                 }
                 Item::Enum(e) => {
                     register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                     st.type_pub.insert(e.name.clone(), e.is_pub);
                     for m in &e.methods {
-                        st.method_pub.insert((e.name.clone(), m.name.clone()), m.is_pub);
+                        st.method_pub
+                            .insert((e.name.clone(), m.name.clone()), m.is_pub);
                     }
                 }
                 Item::Impl(i) => {
@@ -7994,16 +8226,22 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                             "E0301",
                             format!("`impl {}` names a type that doesn't exist", i.type_name),
                             format!("`{}` hasn't been defined as a struct or enum", i.type_name),
-                            format!("define `struct {}` or `enum {}` first", i.type_name, i.type_name),
+                            format!(
+                                "define `struct {}` or `enum {}` first",
+                                i.type_name, i.type_name
+                            ),
                             Some(i.type_span),
                         ));
                     } else if !i.type_name.contains('.') {
                         for m in &i.methods {
-                            st.method_pub.insert((i.type_name.clone(), m.name.clone()), m.is_pub);
+                            st.method_pub
+                                .insert((i.type_name.clone(), m.name.clone()), m.is_pub);
                         }
                     }
                 }
-                Item::Const(c) => register_const(c, &mut st.consts, &mut diags, &st.funcs, &st.registry),
+                Item::Const(c) => {
+                    register_const(c, &mut st.consts, &mut diags, &st.funcs, &st.registry)
+                }
                 Item::Test(t) => {
                     if name_defined(&t.name, &st.funcs, &st.registry, &st.consts)
                         || st.tests.contains_key(&t.name)
@@ -8046,7 +8284,12 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
-        eval_comptime_items(&mut module.items, &mut states[idx].consts, &base, &mut diags);
+        eval_comptime_items(
+            &mut module.items,
+            &mut states[idx].consts,
+            &base,
+            &mut diags,
+        );
     }
 
     for (idx, module) in bundle.modules.iter().enumerate() {
@@ -8113,7 +8356,10 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                     "E0301",
                     format!("`impl {}` names a type that doesn't exist", i.type_name),
                     format!("`{}` hasn't been defined as a struct or enum", i.type_name),
-                    format!("define `struct {}` or `enum {}` first", i.type_name, i.type_name),
+                    format!(
+                        "define `struct {}` or `enum {}` first",
+                        i.type_name, i.type_name
+                    ),
                     Some(i.type_span),
                 ));
             } else {
@@ -8158,12 +8404,12 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                         walk_stmts_for_const_refs(&m.body, &const_names, &mut address_taken);
                     }
                 }
-            Item::Test(t) => {
-                walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
+                Item::Test(t) => {
+                    walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
+                }
+                Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) => {}
             }
-            Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) => {}
         }
-    }
         for item in &mut module.items {
             if let Item::Const(c) = item {
                 let force_static = c.attrs.contains(&ConstAttr::ForceStatic);
@@ -8190,7 +8436,10 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                     m.alias, m.display
                 ),
                 "a type and an imported module can't share a name".to_string(),
-                format!("rename the type, or import with `{} other_name`", syntax::KW_AS),
+                format!(
+                    "rename the type, or import with `{} other_name`",
+                    syntax::KW_AS
+                ),
                 None,
             ));
         }
@@ -8240,12 +8489,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
     }
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
-        diags.extend(check_module_bodies(
-            module,
-            idx,
-            &states,
-            mode,
-        ));
+        diags.extend(check_module_bodies(module, idx, &states, mode));
     }
     bundle.used_std = collect_used_std(bundle, &states);
     diags
@@ -8372,11 +8616,7 @@ fn collect_std_if(ifs: &IfStmt, imports: &HashMap<String, String>, used: &mut Ha
     }
 }
 
-fn collect_std_lvalue(
-    lv: &LValue,
-    imports: &HashMap<String, String>,
-    used: &mut HashSet<String>,
-) {
+fn collect_std_lvalue(lv: &LValue, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
     match lv {
         LValue::Local { .. } => {}
         LValue::Index { base, index, .. } => {
@@ -8394,7 +8634,7 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
             args,
             ..
         } => {
-            if matches!(receiver.as_ref(), Expr::Ident(n, _) if n == "Json") {
+            if matches!(receiver.as_ref(), Expr::Ident(n, _) if is_json_type_name(n)) {
                 used.insert("core::json".to_string());
             }
             if matches!(
@@ -8425,7 +8665,7 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
             }
         }
         Expr::Field(inner, member, _) => {
-            if matches!(inner.as_ref(), Expr::Ident(n, _) if n == "Json")
+            if matches!(inner.as_ref(), Expr::Ident(n, _) if is_json_type_name(n))
                 && member == "Null"
             {
                 used.insert("core::json".to_string());
@@ -8670,13 +8910,16 @@ fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
 }
 
 fn fn_types_compatible(want: &Type, got: &Type) -> bool {
-    let (Type::Fn {
-        params: wp,
-        ret: wr,
-    }, Type::Fn {
-        params: gp,
-        ret: gr,
-    }) = (want, got)
+    let (
+        Type::Fn {
+            params: wp,
+            ret: wr,
+        },
+        Type::Fn {
+            params: gp,
+            ret: gr,
+        },
+    ) = (want, got)
     else {
         return false;
     };
@@ -8717,10 +8960,12 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::MethodCall { receiver, args, .. } => {
             expr_refs_name(receiver, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }
-        Expr::Index { base, index, .. } => expr_refs_name(base, name) || expr_refs_name(index, name),
-        Expr::Slice { base, start, end, .. } => {
-            expr_refs_name(base, name) || expr_refs_name(start, name) || expr_refs_name(end, name)
+        Expr::Index { base, index, .. } => {
+            expr_refs_name(base, name) || expr_refs_name(index, name)
         }
+        Expr::Slice {
+            base, start, end, ..
+        } => expr_refs_name(base, name) || expr_refs_name(start, name) || expr_refs_name(end, name),
         Expr::ListLit(elems, _) => elems.iter().any(|el| expr_refs_name(el, name)),
         Expr::MapLit(entries, _) => entries
             .iter()
@@ -8731,7 +8976,9 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
             EnumLitArg::Named { expr, .. } => expr_refs_name(expr, name),
         }),
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_refs_name(inner, name),
-        Expr::OrFallback { value, fallback, .. } => {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
             expr_refs_name(value, name)
                 || match fallback {
                     OrFallback::Value(e) => expr_refs_name(e, name),
@@ -8768,7 +9015,9 @@ fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         Stmt::If(i) => {
             expr_refs_name(&i.cond, name)
                 || i.then_body.iter().any(|s| stmt_refs_name(s, name))
-                || i.else_branch.as_ref().is_some_and(|e| else_refs_name(e, name))
+                || i.else_branch
+                    .as_ref()
+                    .is_some_and(|e| else_refs_name(e, name))
         }
         Stmt::While { cond, body, .. } => {
             expr_refs_name(cond, name) || body.iter().any(|s| stmt_refs_name(s, name))
@@ -8790,16 +9039,13 @@ fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         } => {
             expr_refs_name(subject, name)
                 || arms.iter().any(|a| {
-                    expr_refs_name(&a.cond, name)
-                        || a.body.iter().any(|s| stmt_refs_name(s, name))
+                    expr_refs_name(&a.cond, name) || a.body.iter().any(|s| stmt_refs_name(s, name))
                 })
                 || else_body
                     .as_ref()
                     .is_some_and(|b| b.iter().any(|s| stmt_refs_name(s, name)))
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => {
-            body.iter().any(|s| stmt_refs_name(s, name))
-        }
+        Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(None, _) => false,
     }
 }
@@ -8810,7 +9056,9 @@ fn else_refs_name(e: &ElseBranch, name: &str) -> bool {
         ElseBranch::ElseIf(i) => {
             expr_refs_name(&i.cond, name)
                 || i.then_body.iter().any(|s| stmt_refs_name(s, name))
-                || i.else_branch.as_ref().is_some_and(|e| else_refs_name(e, name))
+                || i.else_branch
+                    .as_ref()
+                    .is_some_and(|e| else_refs_name(e, name))
         }
     }
 }
@@ -8885,12 +9133,10 @@ fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Option<Span> {
                     .find_map(|stmt| stmt_view_return_span(checker, stmt))
             })
             .or_else(|| {
-                else_body
-                    .as_ref()
-                    .and_then(|body| {
-                        body.iter()
-                            .find_map(|stmt| stmt_view_return_span(checker, stmt))
-                    })
+                else_body.as_ref().and_then(|body| {
+                    body.iter()
+                        .find_map(|stmt| stmt_view_return_span(checker, stmt))
+                })
             }),
         _ => None,
     }
@@ -8966,7 +9212,9 @@ fn expr_collect_captures(
             expr_collect_captures(base, bound, read, mut_cap);
             expr_collect_captures(index, bound, read, mut_cap);
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
             expr_collect_captures(base, bound, read, mut_cap);
             expr_collect_captures(start, bound, read, mut_cap);
             expr_collect_captures(end, bound, read, mut_cap);
@@ -8997,7 +9245,9 @@ fn expr_collect_captures(
                 }
             }
         }
-        Expr::OrFallback { value, fallback, .. } => {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
             expr_collect_captures(value, bound, read, mut_cap);
             match fallback {
                 OrFallback::Value(ex) => expr_collect_captures(ex, bound, read, mut_cap),

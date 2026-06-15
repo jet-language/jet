@@ -6,7 +6,7 @@ building something with shape to it.
 
 ## Generics: same code, any type
 
-You already used generics — `List<Int>` is one. Writing your own means putting a
+You already used generics — `[Int]` is one. Writing your own means putting a
 type variable in angle brackets and letting the caller fill it in:
 
 ```jet
@@ -78,7 +78,7 @@ fn print_area(s: Shape) {
 }
 
 fn main() {
-    val shapes: List<Shape> = [Circle {radius: 1.0}, Square {side: 2.0}];
+    val shapes: [Shape] = [Circle {radius: 1.0}, Square {side: 2.0}];
     shapes.each((s) => {
         print_area(s);
     });
@@ -102,7 +102,7 @@ behavior. "Find the largest element" only makes sense if elements can be
 compared, so you say so with a bound — `T: Comparable`:
 
 ```jet
-fn largest<T: Comparable>(xs: List<T>) -> (T?) {
+fn largest<T: Comparable>(xs: [T]) -> (T?) {
     if xs.len() == 0 {
         return null;
     }
@@ -154,7 +154,7 @@ trait implementation by hand when the automatic one isn't what you mean.
 - `Type<T>` makes a type generic; the caller picks `T`, with no runtime cost.
 - A `trait` lists method signatures; types implement it inside (`impl Trait`) or
   outside (`impl Type: Trait`).
-- A trait name *is* a usable type — `fn f(s: Shape)`, `List<Shape>` — and
+- A trait name *is* a usable type — `fn f(s: Shape)`, `[Shape]` — and
   dispatch is invisible.
 - `<T: Trait>` lets generic code assume behavior; mismatches are caught at the call.
 - Printing and equality are automatic; `derive Comparable;` adds ordering.

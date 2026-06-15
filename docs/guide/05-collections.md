@@ -4,7 +4,7 @@
 
 ```jet
 fn main() {
-    var nums: List<Int> = [3, 1, 2];
+    var nums: [Int] = [3, 1, 2];
     nums.push(4);
     nums.sort();
     print(nums[0]);
@@ -17,7 +17,7 @@ fn main() {
 2,3,4
 ```
 
-A `List<T>` holds many values of one type. You write a literal with `[ ]`,
+A `[T]` holds many values of one type. You write a literal with `[ ]`,
 index with `[i]`, and slice a range with `[start..end]` — and like the `for`
 ranges from chapter one, that slice is **inclusive**, so `[1..3]` is indices 1,
 2, and 3. The methods you'd expect are there — `push`, `sort`, `len`, `join`,
@@ -37,7 +37,7 @@ there, otherwise -1" — no crash, no forgotten check.
 
 ```jet
 fn main() {
-    var counts: Map<String, Int> = [:];
+    var counts: [String, Int] = [:];
     for word in "the quick the brown".split(" ") {
         counts[word] = (counts.get(word) or 0) + 1;
     }
@@ -53,7 +53,7 @@ quick: 1
 the: 2
 ```
 
-A `Map<K, V>` associates keys with values. The empty map literal is `[:]` (the
+A `[K, V]` associates keys with values. The empty map literal is `[:]` (the
 colon is what tells it apart from an empty list). `counts.get(word) or 0` is the
 classic "current count, or zero if I haven't seen this key" — the same `or` from
 the errors chapter, doing the same job. Looping over a map gives you the key and
@@ -87,7 +87,7 @@ fn main() {
 
 `map` makes a new list by transforming each element, `filter` keeps the ones
 that pass a test, and `reduce` folds the whole list down to one value (starting
-from `0` here, adding each element). The full set on `List<T>` is `map`,
+from `0` here, adding each element). The full set on `[T]` is `map`,
 `filter`, `each`, `find`, `any`, `all`, `sort_by`, and `reduce`. You can leave
 the parameter type off when Jet can already tell what it must be — that's why
 `filter((n) => n > 5)` doesn't repeat `: Int`.
@@ -114,8 +114,8 @@ For the common case — `map`, `filter`, `each` over a list right here, right no
 
 ## What you actually have to remember
 
-- `List<T>` with `[ ]`, index `[i]`, slice `[a..b]`; `get` returns an optional.
-- `Map<K, V>` with `[:]` for empty; `for key, value in m` to walk it.
+- `[T]` with `[ ]`, index `[i]`, slice `[a..b]`; `get` returns an optional.
+- `[K, V]` with `[:]` for empty; `for key, value in m` to walk it.
 - Closures are `(params) => expr` (or `=> { ... }`); types are optional when inferable.
 - `map` / `filter` / `reduce` / `sort_by` / `each` / `find` / `any` / `all` cover most list work.
 

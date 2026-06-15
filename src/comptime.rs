@@ -176,8 +176,7 @@ impl CtValue {
                 if m.is_empty() {
                     "std::collections::BTreeMap::new()".to_string()
                 } else {
-                    let mut s =
-                        String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                    let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
                     for (k, v) in m {
                         s.push_str(&format!(
                             "_m.insert(({}), {}); ",
@@ -369,10 +368,7 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Unsafe(_, span) => Err(unsupported(
-                "an `unsafe` block",
-                *span,
-            )),
+            Stmt::Unsafe(_, span) => Err(unsupported("an `unsafe` block", *span)),
         }
     }
 
@@ -494,7 +490,9 @@ impl<'a> Interp<'a> {
                 scope.insert(name.clone(), new);
                 Ok(())
             }
-            crate::ast::LValue::Index { base, index, span, .. } => {
+            crate::ast::LValue::Index {
+                base, index, span, ..
+            } => {
                 // Only `name[key] = v` is supported (the common case).
                 let Expr::Ident(bname, _) = base.as_ref() else {
                     return Err(unsupported("this indexed assignment", *span));
@@ -610,7 +608,9 @@ impl<'a> Interp<'a> {
                 let rv = self.eval(r, scope)?;
                 eval_binop(*op, lv, rv, *span)
             }
-            Expr::Index { base, index, span, .. } => {
+            Expr::Index {
+                base, index, span, ..
+            } => {
                 let b = self.eval(base, scope)?;
                 let i = self.eval(index, scope)?;
                 match b {
@@ -618,9 +618,7 @@ impl<'a> Interp<'a> {
                     CtValue::Map(m) => {
                         let k = CtKey::from_value(i)
                             .ok_or_else(|| unsupported("this map key type", index.span()))?;
-                        m.get(&k)
-                            .cloned()
-                            .ok_or_else(|| map_missing(*span))
+                        m.get(&k).cloned().ok_or_else(|| map_missing(*span))
                     }
                     _ => Err(unsupported("indexing this value", *span)),
                 }
@@ -676,7 +674,12 @@ impl<'a> Interp<'a> {
                     args: out,
                 })
             }
-            Expr::Slice { base, start, end, span } => {
+            Expr::Slice {
+                base,
+                start,
+                end,
+                span,
+            } => {
                 let b = self.eval(base, scope)?;
                 let a = as_int(&self.eval(start, scope)?, start.span())?;
                 let z = as_int(&self.eval(end, scope)?, end.span())?;
@@ -688,7 +691,9 @@ impl<'a> Interp<'a> {
                         if a < 0 || z < 0 || a > z || z >= n {
                             return Err(slice_oob(n, a, z, *span));
                         }
-                        Ok(CtValue::Str(chars[a as usize..=z as usize].iter().collect()))
+                        Ok(CtValue::Str(
+                            chars[a as usize..=z as usize].iter().collect(),
+                        ))
                     }
                     _ => Err(unsupported("slicing this value", *span)),
                 }
@@ -830,8 +835,9 @@ impl<'a> Interp<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         // Mutating list/map methods on a named variable write back in place.
-        const MUTATING: &[&str] =
-            &["push", "pop", "insert", "remove", "clear", "reverse", "sort"];
+        const MUTATING: &[&str] = &[
+            "push", "pop", "insert", "remove", "clear", "reverse", "sort",
+        ];
         if MUTATING.contains(&method) {
             if let Expr::Ident(bname, _) = receiver {
                 let mut container = scope
@@ -892,13 +898,28 @@ fn slice_inclusive(xs: &[CtValue], a: i64, b: i64, span: Span) -> Result<Vec<CtV
 fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Result<CtValue, Diagnostic> {
     use CtValue::*;
     match (op, l, r) {
-        (BinOp::Add, Int(a), Int(b)) => a.checked_add(b).map(Int).ok_or_else(|| overflow("add", span)),
-        (BinOp::Sub, Int(a), Int(b)) => a.checked_sub(b).map(Int).ok_or_else(|| overflow("subtract", span)),
-        (BinOp::Mul, Int(a), Int(b)) => a.checked_mul(b).map(Int).ok_or_else(|| overflow("multiply", span)),
+        (BinOp::Add, Int(a), Int(b)) => a
+            .checked_add(b)
+            .map(Int)
+            .ok_or_else(|| overflow("add", span)),
+        (BinOp::Sub, Int(a), Int(b)) => a
+            .checked_sub(b)
+            .map(Int)
+            .ok_or_else(|| overflow("subtract", span)),
+        (BinOp::Mul, Int(a), Int(b)) => a
+            .checked_mul(b)
+            .map(Int)
+            .ok_or_else(|| overflow("multiply", span)),
         (BinOp::Div, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Div, Int(a), Int(b)) => a.checked_div(b).map(Int).ok_or_else(|| overflow("divide", span)),
+        (BinOp::Div, Int(a), Int(b)) => a
+            .checked_div(b)
+            .map(Int)
+            .ok_or_else(|| overflow("divide", span)),
         (BinOp::Rem, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Rem, Int(a), Int(b)) => a.checked_rem(b).map(Int).ok_or_else(|| overflow("take the remainder of", span)),
+        (BinOp::Rem, Int(a), Int(b)) => a
+            .checked_rem(b)
+            .map(Int)
+            .ok_or_else(|| overflow("take the remainder of", span)),
         (BinOp::BitAnd, Int(a), Int(b)) => Ok(Int(a & b)),
         (BinOp::BitOr, Int(a), Int(b)) => Ok(Int(a | b)),
         (BinOp::BitXor, Int(a), Int(b)) => Ok(Int(a ^ b)),
@@ -922,7 +943,9 @@ fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnos
     use CtValue::*;
     match (a, b) {
         (Int(a), Int(b)) => Ok(a.cmp(&b)),
-        (Float(a), Float(b)) => a.partial_cmp(&b).ok_or_else(|| unsupported("comparing NaN", span)),
+        (Float(a), Float(b)) => a
+            .partial_cmp(&b)
+            .ok_or_else(|| unsupported("comparing NaN", span)),
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
         (Str(a), Str(b)) => Ok(a.cmp(&b)),
         _ => Err(unsupported("comparing these values", span)),
@@ -978,7 +1001,10 @@ fn apply_mutating(
             m.remove(&k);
             Ok(CtValue::Unit)
         }
-        _ => Err(unsupported(&format!("the method `.{}` at compile time", method), span)),
+        _ => Err(unsupported(
+            &format!("the method `.{}` at compile time", method),
+            span,
+        )),
     }
 }
 
@@ -994,7 +1020,10 @@ fn apply_method(
         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),
         // Int / Float conversions
         (CtValue::Int(n), "to_float") => Ok(CtValue::Float(*n as f64)),
-        (CtValue::Int(n), "abs") => n.checked_abs().map(CtValue::Int).ok_or_else(|| overflow("take the absolute value of", span)),
+        (CtValue::Int(n), "abs") => n
+            .checked_abs()
+            .map(CtValue::Int)
+            .ok_or_else(|| overflow("take the absolute value of", span)),
         (CtValue::Float(f), "to_int") => Ok(CtValue::Int(*f as i64)),
         (CtValue::Float(f), "abs") => Ok(CtValue::Float(f.abs())),
         // List
@@ -1079,7 +1108,10 @@ fn apply_method(
             ))
         }
         (CtValue::Str(s), "chars") => Ok(CtValue::List(s.chars().map(CtValue::Char).collect())),
-        _ => Err(unsupported(&format!("the method `.{}` at compile time", method), span)),
+        _ => Err(unsupported(
+            &format!("the method `.{}` at compile time", method),
+            span,
+        )),
     }
 }
 
@@ -1089,7 +1121,10 @@ fn comptime_panic(msg: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0953",
         "your comptime code stopped the build".to_string(),
-        format!("while computing this value at compile time, the program panicked: {}", msg),
+        format!(
+            "while computing this value at compile time, the program panicked: {}",
+            msg
+        ),
         "this is the sanctioned way to validate at compile time — fix the input the check rejects"
             .to_string(),
         Some(span),
@@ -1097,7 +1132,13 @@ fn comptime_panic(msg: &str, span: Span) -> Diagnostic {
 }
 
 fn overflow(verb: &str, span: Span) -> Diagnostic {
-    comptime_panic(&format!("tried to {} two numbers and the result was too big for an Int", verb), span)
+    comptime_panic(
+        &format!(
+            "tried to {} two numbers and the result was too big for an Int",
+            verb
+        ),
+        span,
+    )
 }
 
 fn divide_by_zero(span: Span) -> Diagnostic {
@@ -1106,7 +1147,10 @@ fn divide_by_zero(span: Span) -> Diagnostic {
 
 fn index_oob(len: usize, i: i64, span: Span) -> Diagnostic {
     comptime_panic(
-        &format!("the list has {} items, so position {} doesn't exist", len, i),
+        &format!(
+            "the list has {} items, so position {} doesn't exist",
+            len, i
+        ),
         span,
     )
 }
@@ -1204,7 +1248,10 @@ fn check_purity_stmt(
 
 fn impurity_diag(name: &str, path: &[String], span: Span) -> Diagnostic {
     let why = if path.is_empty() {
-        format!("`{}` touches the outside world, so it can't run while compiling", name)
+        format!(
+            "`{}` touches the outside world, so it can't run while compiling",
+            name
+        )
     } else {
         format!(
             "{} calls `{}`, which touches the outside world — comptime must give the same answer on every machine",
@@ -1254,7 +1301,9 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
             walk_calls(base, f);
             walk_calls(index, f);
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
             walk_calls(base, f);
             walk_calls(start, f);
             walk_calls(end, f);
@@ -1300,7 +1349,12 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
             }
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }
-        Stmt::Switch { subject, arms, else_body, .. } => {
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             f(subject);
             for a in arms {
                 f(&a.cond);
@@ -1322,9 +1376,7 @@ fn walk_if_exprs(ifs: &crate::ast::IfStmt, f: &mut impl FnMut(&Expr)) {
     ifs.then_body.iter().for_each(|s| walk_stmt_exprs(s, f));
     match &ifs.else_branch {
         Some(crate::ast::ElseBranch::ElseIf(inner)) => walk_if_exprs(inner, f),
-        Some(crate::ast::ElseBranch::Else(body)) => {
-            body.iter().for_each(|s| walk_stmt_exprs(s, f))
-        }
+        Some(crate::ast::ElseBranch::Else(body)) => body.iter().for_each(|s| walk_stmt_exprs(s, f)),
         None => {}
     }
 }

@@ -23,11 +23,7 @@ static STORE_LOCK: Mutex<()> = Mutex::new(());
 // ─────────────────────────────────────────────
 
 fn tmp_dir(label: &str) -> PathBuf {
-    let base = std::env::temp_dir().join(format!(
-        "jet_pkg_{}_{}",
-        label,
-        std::process::id()
-    ));
+    let base = std::env::temp_dir().join(format!("jet_pkg_{}_{}", label, std::process::id()));
     fs::create_dir_all(&base).unwrap();
     base
 }
@@ -110,10 +106,9 @@ repository = "https://example.com"
 
 #[test]
 fn manifest_parse_dep_path() {
-    let raw = min_manifest("root", "0.1.0")
-        + "\n[dependencies]\nhelpers = { path = \"../helpers\" }\n";
-    let mf = jet::manifest::parse(&PathBuf::from("jet.toml"), &raw)
-        .expect("path dep should parse");
+    let raw =
+        min_manifest("root", "0.1.0") + "\n[dependencies]\nhelpers = { path = \"../helpers\" }\n";
+    let mf = jet::manifest::parse(&PathBuf::from("jet.toml"), &raw).expect("path dep should parse");
     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
     assert!(matches!(dep, jet::manifest::DepSpec::Path { path } if path == "../helpers"));
 }
@@ -122,8 +117,8 @@ fn manifest_parse_dep_path() {
 fn manifest_parse_dep_git_tag() {
     let raw = min_manifest("root", "0.1.0")
         + "\n[dependencies]\nparsekit = { git = \"https://github.com/acme/parsekit\", tag = \"v0.4.1\" }\n";
-    let mf = jet::manifest::parse(&PathBuf::from("jet.toml"), &raw)
-        .expect("git tag dep should parse");
+    let mf =
+        jet::manifest::parse(&PathBuf::from("jet.toml"), &raw).expect("git tag dep should parse");
     let dep = mf.dependencies.get("parsekit").expect("missing parsekit");
     assert!(matches!(
         dep,
@@ -136,11 +131,13 @@ fn manifest_parse_dep_git_tag() {
 
 #[test]
 fn manifest_parse_rust_dep_section() {
-    let raw = min_manifest("ffi_app", "0.1.0")
-        + "\n[dependencies:rust]\nbase64 = \"0.22\"\n";
+    let raw = min_manifest("ffi_app", "0.1.0") + "\n[dependencies:rust]\nbase64 = \"0.22\"\n";
     let mf = jet::manifest::parse(&PathBuf::from("jet.toml"), &raw)
         .expect("rust dep section should parse");
-    assert_eq!(mf.dependencies_rust.get("base64").map(|s| s.as_str()), Some("0.22"));
+    assert_eq!(
+        mf.dependencies_rust.get("base64").map(|s| s.as_str()),
+        Some("0.22")
+    );
 }
 
 #[test]
@@ -186,7 +183,10 @@ fn manifest_template_plain_parses() {
         .expect("plain template should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "0.1.0");
-    assert!(mf.package.jet_constraint.is_some(), "plain template needs jet constraint");
+    assert!(
+        mf.package.jet_constraint.is_some(),
+        "plain template needs jet constraint"
+    );
 }
 
 #[test]
@@ -194,11 +194,13 @@ fn manifest_template_annotated_has_dep_comments() {
     let raw = jet::manifest::new_template("myapp", true);
     assert!(
         raw.contains("# Jet package dependencies:"),
-        "annotated template should have dep comment block: {}", raw
+        "annotated template should have dep comment block: {}",
+        raw
     );
     assert!(
         raw.contains("[dependencies:rust]"),
-        "annotated template should have rust dep example: {}", raw
+        "annotated template should have rust dep example: {}",
+        raw
     );
     // Must still parse cleanly.
     jet::manifest::parse(&PathBuf::from("jet.toml"), &raw)
@@ -215,7 +217,9 @@ fn manifest_add_dep_inserts_in_existing_table() {
     let updated = jet::manifest::add_dependency(
         &raw,
         "helpers",
-        &jet::manifest::DepSpec::Path { path: "../helpers".to_string() },
+        &jet::manifest::DepSpec::Path {
+            path: "../helpers".to_string(),
+        },
     );
     assert!(updated.contains("helpers = { path = \"../helpers\" }"));
 }
@@ -226,9 +230,14 @@ fn manifest_add_dep_creates_table_when_absent() {
     let updated = jet::manifest::add_dependency(
         &raw,
         "helpers",
-        &jet::manifest::DepSpec::Path { path: "../helpers".to_string() },
+        &jet::manifest::DepSpec::Path {
+            path: "../helpers".to_string(),
+        },
     );
-    assert!(updated.contains("[dependencies]"), "should create [dependencies]");
+    assert!(
+        updated.contains("[dependencies]"),
+        "should create [dependencies]"
+    );
     assert!(updated.contains("helpers = { path = \"../helpers\" }"));
 }
 
@@ -249,7 +258,10 @@ fn manifest_remove_dep_removes_correct_entry() {
 fn sha256_empty_vector() {
     // SHA-256 of the empty string — matches FIPS 180-4 test vector.
     let hash = jet::sha256::sha256_hex(b"");
-    assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    assert_eq!(
+        hash,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
 }
 
 #[test]
@@ -259,7 +271,10 @@ fn sha256_known_vector_matches_self() {
     let hash = jet::sha256::sha256_hex(b"abc");
     assert_eq!(hash.len(), 64, "sha256 hex must be exactly 64 chars");
     // NIST FIPS 180-4 first 16 hex chars of SHA-256("abc").
-    assert!(hash.starts_with("ba7816bf8f01cfea"), "sha256(abc) prefix mismatch");
+    assert!(
+        hash.starts_with("ba7816bf8f01cfea"),
+        "sha256(abc) prefix mismatch"
+    );
 }
 
 #[test]
@@ -271,7 +286,10 @@ fn tree_hash_deterministic() {
     let h1 = jet::sha256::tree_hash(&tmp);
     let h2 = jet::sha256::tree_hash(&tmp);
     assert_eq!(h1, h2, "tree hash must be deterministic");
-    assert!(h1.starts_with("sha256-"), "tree hash must have sha256- prefix");
+    assert!(
+        h1.starts_with("sha256-"),
+        "tree hash must have sha256- prefix"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -305,7 +323,10 @@ fn fingerprint_is_deterministic() {
 fn fingerprint_changes_with_deps() {
     let fp1 = jet::lock::compute_fingerprint("sha256-aabbcc", &[]);
     let fp2 = jet::lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
-    assert_ne!(fp1, fp2, "fingerprint must change when dep fingerprints differ");
+    assert_ne!(
+        fp1, fp2,
+        "fingerprint must change when dep fingerprints differ"
+    );
 }
 
 // ─────────────────────────────────────────────
@@ -316,7 +337,10 @@ fn fingerprint_changes_with_deps() {
 fn store_path_format_name_version_fp() {
     let p = jet::store::store_path("mylib", "1.0.0", "sha256-deadbeef");
     let name = p.file_name().unwrap().to_str().unwrap();
-    assert_eq!(name, "mylib-1.0.0-deadbeef", "store entry: <name>-<version>-<fp_no_prefix>");
+    assert_eq!(
+        name, "mylib-1.0.0-deadbeef",
+        "store entry: <name>-<version>-<fp_no_prefix>"
+    );
 }
 
 #[test]
@@ -337,7 +361,11 @@ fn store_ensure_path_dep_creates_entry() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn hello() -> String { return \"hi\"; }\n");
+    write(
+        &src,
+        "mylib.jet",
+        "pub fn hello() -> String { return \"hi\"; }\n",
+    );
     write(&src, "jet.toml", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-0000000000000000000000000000000000000000000000000000000000000000";
@@ -348,7 +376,10 @@ fn store_ensure_path_dep_creates_entry() {
     });
 
     assert!(entry.is_dir(), "store entry dir must exist");
-    assert!(entry.join("mylib.jet").is_file(), "source file must be in store");
+    assert!(
+        entry.join("mylib.jet").is_file(),
+        "source file must be in store"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -398,7 +429,11 @@ fn store_tamper_detected_e1204() {
     });
 
     // Tamper: modify the stored file outside the locked section.
-    fs::write(entry.join("mylib.jet"), "pub fn evil() { /* tampered */ }\n").unwrap();
+    fs::write(
+        entry.join("mylib.jet"),
+        "pub fn evil() { /* tampered */ }\n",
+    )
+    .unwrap();
 
     let result = jet::store::verify_entry("mylib", &entry, &genuine_hash);
     let diag = result.expect_err("verify_entry must return E1204 after tampering");
@@ -456,7 +491,11 @@ fn path_dep_compiles_ok() {
 
     // Greeter library.
     write(&tmp, "greeter/jet.toml", &min_manifest("greeter", "0.1.0"));
-    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hello!\"; }\n");
+    write(
+        &tmp,
+        "greeter/greeter.jet",
+        "pub fn greet() -> String { return \"hello!\"; }\n",
+    );
 
     // Root project with path dep.
     write(
@@ -465,13 +504,20 @@ fn path_dep_compiles_ok() {
         &(min_manifest("myapp", "0.1.0") + "\n[dependencies]\ngreeter = { path = \"greeter\" }\n"),
     );
     let entry = tmp.join("main.jet");
-    fs::write(&entry, "import greeter;\nfn main() { print(greeter.greet()); }\n").unwrap();
+    fs::write(
+        &entry,
+        "import greeter;\nfn main() { print(greeter.greet()); }\n",
+    )
+    .unwrap();
 
     let result = jet::compile_with_path("", &entry.to_string_lossy());
     assert!(
         result.is_ok(),
         "path dep project should compile:\n{}",
-        result.err().map(|d| jet::render_diagnostics("main.jet", "", &d)).unwrap_or_default()
+        result
+            .err()
+            .map(|d| jet::render_diagnostics("main.jet", "", &d))
+            .unwrap_or_default()
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -508,13 +554,16 @@ fn stale_lock_emits_e1202() {
     let tmp = tmp_dir("stale_lock");
 
     write(&tmp, "greeter/jet.toml", &min_manifest("greeter", "0.1.0"));
-    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\"; }\n");
+    write(
+        &tmp,
+        "greeter/greeter.jet",
+        "pub fn greet() -> String { return \"hi\"; }\n",
+    );
 
     write(
         &tmp,
         "jet.toml",
-        &(min_manifest("app", "0.1.0")
-            + "\n[dependencies]\ngreeter = { path = \"greeter\" }\n"),
+        &(min_manifest("app", "0.1.0") + "\n[dependencies]\ngreeter = { path = \"greeter\" }\n"),
     );
     // Lock exists but lists no dependencies — stale.
     write(
@@ -582,12 +631,15 @@ fn fetch_locked_rejects_missing_lock() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    let raw = min_manifest("app", "0.1.0")
-        + "\n[dependencies]\ngreeter = { path = \"greeter\" }\n";
+    let raw = min_manifest("app", "0.1.0") + "\n[dependencies]\ngreeter = { path = \"greeter\" }\n";
     write(&tmp, "jet.toml", &raw);
 
     let mf = jet::manifest::parse(&tmp.join("jet.toml"), &raw).unwrap();
-    let opts = jet::fetch::FetchOptions { locked: true, update: false, update_dep: None };
+    let opts = jet::fetch::FetchOptions {
+        locked: true,
+        update: false,
+        update_dep: None,
+    };
 
     let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
     let diags = result.expect_err("--locked with no lock file should fail");
@@ -616,7 +668,10 @@ fn git_dep_local_bare_repo_fetches_ok() {
 
     // Init bare repo.
     let bare = tmp.join("mylib.git");
-    Command::new("git").args(["init", "--bare", bare.to_str().unwrap()]).output().unwrap();
+    Command::new("git")
+        .args(["init", "--bare", bare.to_str().unwrap()])
+        .output()
+        .unwrap();
 
     // Clone, add files, commit, push tag.
     let clone = tmp.join("mylib_clone");
@@ -628,13 +683,37 @@ fn git_dep_local_bare_repo_fetches_ok() {
         fs::copy(e.path(), clone.join(e.file_name())).unwrap();
     }
     for (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
-        Command::new("git").args(["config", k, v]).current_dir(&clone).output().unwrap();
+        Command::new("git")
+            .args(["config", k, v])
+            .current_dir(&clone)
+            .output()
+            .unwrap();
     }
-    Command::new("git").args(["add", "."]).current_dir(&clone).output().unwrap();
-    Command::new("git").args(["commit", "-m", "init"]).current_dir(&clone).output().unwrap();
-    Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&clone).output().unwrap();
-    Command::new("git").args(["tag", "v0.1.0"]).current_dir(&clone).output().unwrap();
-    Command::new("git").args(["push", "origin", "v0.1.0"]).current_dir(&clone).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["push", "origin", "HEAD:main"])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["tag", "v0.1.0"])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["push", "origin", "v0.1.0"])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
 
     let repo_url = format!("file://{}", bare.to_str().unwrap());
     let raw = min_manifest("app", "0.1.0")
@@ -648,10 +727,18 @@ fn git_dep_local_bare_repo_fetches_ok() {
     fs::create_dir_all(&store).unwrap();
 
     let mf = jet::manifest::parse(&tmp.join("jet.toml"), &raw).unwrap();
-    let opts = jet::fetch::FetchOptions { locked: false, update: false, update_dep: None };
+    let opts = jet::fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+    };
 
     let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
-    assert!(result.is_ok(), "git dep fetch should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "git dep fetch should succeed: {:?}",
+        result.err()
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -676,20 +763,40 @@ fn git_dep_branch_update_rewrites_lock() {
 
     // Init a non-bare repo, commit, then mirror to a bare repo (avoids HEAD ambiguity).
     let init_repo = tmp.join("mylib_init");
-    Command::new("git").args(["init", "-b", "main", init_repo.to_str().unwrap()]).output().unwrap();
+    Command::new("git")
+        .args(["init", "-b", "main", init_repo.to_str().unwrap()])
+        .output()
+        .unwrap();
     for e in fs::read_dir(&src).unwrap().flatten() {
         fs::copy(e.path(), init_repo.join(e.file_name())).unwrap();
     }
     for (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
-        Command::new("git").args(["config", k, v]).current_dir(&init_repo).output().unwrap();
+        Command::new("git")
+            .args(["config", k, v])
+            .current_dir(&init_repo)
+            .output()
+            .unwrap();
     }
-    Command::new("git").args(["add", "."]).current_dir(&init_repo).output().unwrap();
-    Command::new("git").args(["commit", "-m", "init"]).current_dir(&init_repo).output().unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&init_repo)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "init"])
+        .current_dir(&init_repo)
+        .output()
+        .unwrap();
 
     // Create the bare repo from this.
     let bare = tmp.join("mylib.git");
     Command::new("git")
-        .args(["clone", "--bare", init_repo.to_str().unwrap(), bare.to_str().unwrap()])
+        .args([
+            "clone",
+            "--bare",
+            init_repo.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
 
@@ -700,7 +807,11 @@ fn git_dep_branch_update_rewrites_lock() {
         .output()
         .unwrap();
     for (k, v) in [("user.email", "test@jet.test"), ("user.name", "Jet Test")] {
-        Command::new("git").args(["config", k, v]).current_dir(&clone).output().unwrap();
+        Command::new("git")
+            .args(["config", k, v])
+            .current_dir(&clone)
+            .output()
+            .unwrap();
     }
 
     let repo_url = format!("file://{}", bare.to_str().unwrap());
@@ -717,40 +828,78 @@ fn git_dep_branch_update_rewrites_lock() {
     let mf = jet::manifest::parse(&tmp.join("jet.toml"), &raw).unwrap();
 
     // Initial fetch (no lock yet) — writes the lock file.
-    let opts = jet::fetch::FetchOptions { locked: false, update: false, update_dep: None };
+    let opts = jet::fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+    };
     let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
-    assert!(result.is_ok(), "initial git branch fetch should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "initial git branch fetch should succeed: {:?}",
+        result.err()
+    );
 
     // Capture the initial rev from the lock file.
     let lock_raw = fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist");
     let initial_rev = extract_rev_from_lock(&lock_raw);
-    assert!(!initial_rev.is_empty(), "lock must contain a rev after initial fetch");
+    assert!(
+        !initial_rev.is_empty(),
+        "lock must contain a rev after initial fetch"
+    );
 
     // Make a NEW commit to the branch.
-    write(&clone, "extra.jet", "pub fn extra() -> Int { return 99; }\n");
-    Command::new("git").args(["add", "."]).current_dir(&clone).output().unwrap();
+    write(
+        &clone,
+        "extra.jet",
+        "pub fn extra() -> Int { return 99; }\n",
+    );
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
     Command::new("git")
         .args(["commit", "-m", "second commit"])
         .current_dir(&clone)
         .output()
         .unwrap();
-    Command::new("git").args(["push", "origin", "HEAD:main"]).current_dir(&clone).output().unwrap();
+    Command::new("git")
+        .args(["push", "origin", "HEAD:main"])
+        .current_dir(&clone)
+        .output()
+        .unwrap();
 
     // Re-fetch with update = true — should re-resolve the branch and update the lock.
     let lock_str = fs::read_to_string(tmp.join("jet.lock")).unwrap();
     let existing_lock = jet::lock::parse(&lock_str).expect("initial lock must parse");
-    let update_opts = jet::fetch::FetchOptions { locked: false, update: true, update_dep: None };
+    let update_opts = jet::fetch::FetchOptions {
+        locked: false,
+        update: true,
+        update_dep: None,
+    };
     let result2 = with_store(&store, || {
         jet::fetch::fetch(&tmp, &mf, Some(&existing_lock), &update_opts)
     });
-    assert!(result2.is_ok(), "update fetch should succeed: {:?}", result2.err());
+    assert!(
+        result2.is_ok(),
+        "update fetch should succeed: {:?}",
+        result2.err()
+    );
 
     // Capture the new rev from the lock file.
-    let lock_raw2 = fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist after update");
+    let lock_raw2 =
+        fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist after update");
     let new_rev = extract_rev_from_lock(&lock_raw2);
-    assert!(!new_rev.is_empty(), "lock must contain a rev after update fetch");
+    assert!(
+        !new_rev.is_empty(),
+        "lock must contain a rev after update fetch"
+    );
 
-    assert_ne!(initial_rev, new_rev, "lock rev must change after a new commit was pushed");
+    assert_ne!(
+        initial_rev, new_rev,
+        "lock rev must change after a new commit was pushed"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -790,15 +939,25 @@ fn cli_jet_new_creates_project_structure() {
     fs::create_dir_all(&store).unwrap();
 
     let out = jet_cmd(&["new", "myapp"], &tmp, &store);
-    assert!(out.status.success(), "jet new failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "jet new failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let proj = tmp.join("myapp");
-    assert!(proj.join("jet.toml").is_file(), "jet new must create jet.toml");
+    assert!(
+        proj.join("jet.toml").is_file(),
+        "jet new must create jet.toml"
+    );
     assert!(
         proj.join(".jet/main.jet").is_file() || proj.join("main.jet").is_file(),
         "jet new must create an entry point"
     );
-    assert!(proj.join(".gitignore").is_file(), "jet new must create .gitignore");
+    assert!(
+        proj.join(".gitignore").is_file(),
+        "jet new must create .gitignore"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -820,7 +979,8 @@ fn cli_jet_new_annotated_has_dep_comments() {
         .expect("jet.toml must exist after jet new --annotated");
     assert!(
         toml.contains("# Jet package dependencies:") || toml.contains("[dependencies:rust]"),
-        "annotated template should have dep comments:\n{}", toml
+        "annotated template should have dep comments:\n{}",
+        toml
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -839,7 +999,11 @@ fn cli_end_to_end_new_then_add_path() {
 
     // 1. jet new myapp
     let out = jet_cmd(&["new", "myapp"], &tmp, &store);
-    assert!(out.status.success(), "jet new failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "jet new failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     // 2. Create a local lib for `jet add --path`.
     let lib = tmp.join("mylib");
@@ -857,7 +1021,10 @@ fn cli_end_to_end_new_then_add_path() {
 
     // jet.toml must now reference mylib.
     let toml = fs::read_to_string(proj.join("jet.toml")).unwrap();
-    assert!(toml.contains("mylib"), "jet.toml should list mylib after jet add");
+    assert!(
+        toml.contains("mylib"),
+        "jet.toml should list mylib after jet add"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }

@@ -83,7 +83,11 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str(&format!("fingerprint = \"{}\"\n", pkg.fingerprint));
 
         if !pkg.dependencies.is_empty() {
-            let deps: Vec<String> = pkg.dependencies.iter().map(|d| format!("\"{}\"", d)).collect();
+            let deps: Vec<String> = pkg
+                .dependencies
+                .iter()
+                .map(|d| format!("\"{}\"", d))
+                .collect();
             out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
         } else {
             out.push_str("dependencies = []\n");
@@ -93,7 +97,11 @@ pub fn write(lock: &LockFile) -> String {
     out.push('\n');
     out.push_str("[root]\n");
     if !lock.root_dependencies.is_empty() {
-        let deps: Vec<String> = lock.root_dependencies.iter().map(|d| format!("\"{}\"", d)).collect();
+        let deps: Vec<String> = lock
+            .root_dependencies
+            .iter()
+            .map(|d| format!("\"{}\"", d))
+            .collect();
         out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
     } else {
         out.push_str("dependencies = []\n");
@@ -221,7 +229,11 @@ impl PartialPkg {
 }
 
 fn parse_source(s: &str) -> Result<LockSource, String> {
-    let s = s.trim().trim_start_matches('{').trim_end_matches('}').trim();
+    let s = s
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .trim();
     if let Some(v) = kv_field(s, "root") {
         let _ = v;
         return Ok(LockSource::Root);
@@ -245,13 +257,21 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
 }
 
 fn parse_locked(s: &str) -> Result<LockedRevision, String> {
-    let s = s.trim().trim_start_matches('{').trim_end_matches('}').trim();
+    let s = s
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .trim();
     let rev = kv_field(s, "rev").unwrap_or_default();
     let tree_hash = kv_field(s, "tree-hash").unwrap_or_default();
     let last_modified = kv_field(s, "last-modified")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    Ok(LockedRevision { rev, tree_hash, last_modified })
+    Ok(LockedRevision {
+        rev,
+        tree_hash,
+        last_modified,
+    })
 }
 
 /// Extract the value for `key = "..."` or `key = digits` from an inline table string.
@@ -288,8 +308,7 @@ pub fn verify_lock_matches_manifest(
     manifest: &Manifest,
     _lock_path: &str,
 ) -> Result<(), Diagnostic> {
-    let locked_names: BTreeSet<&str> =
-        lock.packages.iter().map(|p| p.name.as_str()).collect();
+    let locked_names: BTreeSet<&str> = lock.packages.iter().map(|p| p.name.as_str()).collect();
 
     for (dep_name, _spec) in &manifest.dependencies {
         // Root package deps must appear in the lock.

@@ -76,7 +76,7 @@ struct System {
     options: Map<String, String>;
 }
 
-fn parse_system(take data: Json) -> System {
+fn parse_system(take data: JSON) -> System {
     var host = "";
     var source = "";
     var apps: List<String> = [];
@@ -114,24 +114,24 @@ fn load_system(path: String) -> System ? String {
     }
 }
 
-// --- JSON walkers (plain Json -> typed values) ----------------------------
+// --- JSON walkers (plain JSON -> typed values) ----------------------------
 
-fn obj(entries: Map<String, Json>, key: String) -> Map<String, Json> {
+fn obj(entries: Map<String, JSON>, key: String) -> Map<String, JSON> {
     if entries.get(key) == value(found) {
         if found == Object(inner) { return inner; }
     }
-    var empty: Map<String, Json> = [:];
+    var empty: Map<String, JSON> = [:];
     return empty;
 }
 
-fn field_text(entries: Map<String, Json>, key: String) -> String {
+fn field_text(entries: Map<String, JSON>, key: String) -> String {
     if entries.get(key) == value(found) {
         return as_text(take found);
     }
     return "";
 }
 
-fn field_strings(entries: Map<String, Json>, key: String) -> List<String> {
+fn field_strings(entries: Map<String, JSON>, key: String) -> List<String> {
     if entries.get(key) == value(found) {
         return as_strings(take found);
     }
@@ -139,20 +139,20 @@ fn field_strings(entries: Map<String, Json>, key: String) -> List<String> {
     return empty;
 }
 
-fn field_array(entries: Map<String, Json>, key: String) -> List<Json> {
+fn field_array(entries: Map<String, JSON>, key: String) -> [JSON] {
     if entries.get(key) == value(found) {
         if found == Array(items) { return items; }
     }
-    var empty: List<Json> = [];
+    var empty: [JSON] = [];
     return empty;
 }
 
-fn as_text(take j: Json) -> String {
+fn as_text(take j: JSON) -> String {
     if j == Text(s) { return s; }
     return "";
 }
 
-fn as_strings(take j: Json) -> List<String> {
+fn as_strings(take j: JSON) -> List<String> {
     var out: List<String> = [];
     if j == Array(items) {
         for item in items {
@@ -363,7 +363,7 @@ fn cmd_generations(theme: Theme) -> Int {
     }
 }
 
-fn render_generations(theme: Theme, take data: Json) -> Int {
+fn render_generations(theme: Theme, take data: JSON) -> Int {
     header(theme, "generations");
     if data == Object(root) {
         val current = field_text(root, "current");
@@ -374,7 +374,7 @@ fn render_generations(theme: Theme, take data: Json) -> Int {
     return 0;
 }
 
-fn print_generation(theme: Theme, take g: Json, current: String) {
+fn print_generation(theme: Theme, take g: JSON, current: String) {
     if g == Object(o) {
         val id = field_text(o, "id");
         val time = field_text(o, "time");

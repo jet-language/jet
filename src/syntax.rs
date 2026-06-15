@@ -99,7 +99,8 @@ pub const KW_LOOP: &str = "loop";
 /// M2 tier 2: unsafe block for expert code.
 pub const KW_UNSAFE: &str = "unsafe";
 
-/// S33 (ratified M5): list type constructor `List<T>`.
+/// S33 (ratified M5): legacy list type constructor.
+/// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
 pub const TYPE_LIST: &str = "List";
 
 /// S38 (ratified M5): map type constructor.
@@ -107,6 +108,12 @@ pub const TYPE_MAP: &str = "Map";
 
 /// S41 (ratified M5): character type.
 pub const TYPE_CHAR: &str = "Char";
+
+/// S66 (ratified 2026-06-15): standard acronyms are fully capitalized in Jet source.
+pub const TYPE_IO_ERROR: &str = "IOError";
+pub const TYPE_UTF8_ERROR: &str = "UTF8Error";
+pub const TYPE_JSON: &str = "JSON";
+pub const TYPE_JSON_ERROR: &str = "JSONError";
 
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
@@ -323,3 +330,46 @@ pub const SOURCE_ROOT_DIR: &str = ".jet";
 pub const DEP_TABLE_JET: &str = "dependencies";
 pub const DEP_TABLE_RUST: &str = "dependencies:rust";
 pub const DEP_TABLE_C: &str = "dependencies:c";
+
+// ──────────────────────────────────────────────
+// Jetpack (Phase 1) — user-typeable surface (I7).
+// All decisions ratified in docs/admin/02-syntax-decisions.md (D-JPK*).
+// These IDs start with `D`, so tests/decisions.rs leaves them alone, but
+// I7 still wants every typeable token to live here with its decision ID.
+// ──────────────────────────────────────────────
+
+/// D-JPK1/9: the Jetpack package-manager binary name.
+pub const JETPACK_BINARY_NAME: &str = "jetpack";
+
+/// D-JPK13/8: the root Jet pack file and its lockfile.
+pub const PACK_FILE: &str = "pack.jet";
+pub const PACK_LOCK_FILE: &str = "pack.lock";
+
+/// D-JPK7/15: the `<source>:<package/path>` ref separator. Users never type
+/// Nix's `#` selector; Jetpack translates `:` to the provider's form.
+pub const REF_SEPARATOR: &str = ":";
+
+/// D-JPK7/15: recognized ref source prefixes.
+pub const REF_SOURCE_NIXPKGS: &str = "nixpkgs";
+pub const REF_SOURCE_GITHUB: &str = "github";
+pub const REF_SOURCE_PATH: &str = "path";
+
+/// D-JPK2/9: the Phase 1 verb set.
+pub const JETPACK_VERBS: &[&str] = &["run", "build", "list", "clean", "add", "remove"];
+
+/// D-JPK14: the default visible prompt label inside a Jetpack shell.
+pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
+
+/// D-JPK14: shell marker env var set inside a Jetpack shell.
+pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";
+
+/// D-JPK3/17: the directive calls a `pack.jet` author writes. `pkg.source`
+/// takes one arg (default built-in source) or two (named source + upstream/pin,
+/// D-JPK17). Packages reference named sources inline via `<name>:<package>`.
+pub const PACK_DIRECTIVE_SOURCE: &str = "pkg.source";
+pub const PACK_DIRECTIVE_PACKAGES: &str = "pkg.packages";
+pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
+
+/// D-JPK16 (R2): a first-party Jet package a repo's `pack.jet` provides, for
+/// the `core` provider to build: `pkg.package("<name>", "<source-subpath>")`.
+pub const PACK_DIRECTIVE_PACKAGE: &str = "pkg.package";

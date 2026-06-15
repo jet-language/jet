@@ -5,6 +5,15 @@
 > found doing it, and the two paths to the *exact* fluent surface the owner
 > asked for (`apps.installed.append([firefox, fastfetch, btop])`). It is the
 > ground-level companion to the post-v1 vision in `docs/research/jetos.md`.
+>
+> **SEQUENCING (2026-06-15): superseded by docs/plans/jetpack-jetos/README.md.**
+> The owner has elevated **jetpack** to a real package-manager tool whose Phase 1
+> engine is built independently first with `jetpack run/build/list/clean/add/remove`
+> (a Nix-`shell`/`devenv` replacement). The Jet pack file role is ratified as
+> Jet's `flake.nix`; ratified filenames are `pack.jet` and `pack.lock`.
+> `jet` plumbing can come later. The directive-vs-fluent analysis here (Path
+> A/B, D-JP1…5) still holds and feeds decision **D-JPK3** in the consolidated
+> plan; read that first for phase order.
 
 ## 1. What was asked for
 
@@ -28,7 +37,7 @@ A complete, tested vertical slice, built only on **ratified v1 syntax**:
   same-level conflicts reported with both source files) + canonical JSON
   render. 6 unit tests.
 - **dendritic modules** under `modules/**` and a **host** under `hosts/`,
-  each a liftable file returning `List<Json>` directives.
+  each a liftable file returning `[JSON]` directives.
 - **`generated/tree.jet`** — the import-tree (what `jetos sync` regenerates).
 - **`jetos.jet`** — the `nh`-style CLI: `check/list/diff/switch/generations/
   sync/help`, colored, with a real `+`/`-`/`~` diff and generations.
@@ -38,11 +47,11 @@ A real machine config reads beautifully:
 
 ```jet
 // modules/apps/desktop.jet
-pub fn contribute() -> List<Json> {
+pub fn contribute() -> [JSON] {
     return [
-        pkg.installed(["firefox", "fastfetch", "btop", "vlc"]),
-        pkg.services(["pipewire", "bluetooth"]),
-        pkg.suggest("sys.desktop.environment", "gnome"),
+        pkg.installed(["firefox", "fastfetch", "btop", "vlc"]);
+        pkg.services(["pipewire", "bluetooth"]);
+        pkg.suggest("sys.desktop.environment", "gnome");
     ];
 }
 ```
@@ -68,7 +77,7 @@ multi-level Jet programs codegen at all — high-value beyond jetos.
 
 | # | Symptom | Where it bit |
 |---|---------|--------------|
-| B1 | `Json.Text(x)` where `x` is a *view* param moves it → rustc ICE (sema should insert a clone or reject; never ICE — I2/I3). | every directive constructor; worked around with `.clone()` |
+| B1 | `JSON.Text(x)` where `x` is a *view* param moves it → rustc ICE (sema should insert a clone or reject; never ICE — I2/I3). | every directive constructor; worked around with `.clone()` |
 | B2 | Field access on a **std** struct mangles the field name (`result.code` → `user_code`) → rustc ICE. | `process.run(...).code` — avoided by not touching the field |
 | B3 | `.get(k)` on a `Map` bound via an `Object(root)` pattern lowers to **list indexing** (`"k".to_string() as usize`) → rustc ICE. Passing the map to a typed `Map` param fixes the dispatch. | `root.get("generations")` — routed through a helper |
 | B4 | `for k, v in recv.field { … }` parses `recv.field {` as a **struct literal**. Ending the subject in `()` (`recv.field.clone()`) disambiguates. | `for k, v in sys.options` |
@@ -93,7 +102,7 @@ Consequences for a shared, mutable `cfg`:
   forbid that. The previous "forge" capstone hit the same walls and degraded to
   funneling everything through JSON strings.
 - What *does* cross a file boundary cleanly: **primitive types** and the
-  **compiler-provided `Json`** type. So a module returns `List<Json>`
+  **compiler-provided `JSON`** type. So a module returns `[JSON]`
   directives, and the merge engine (which owns no shared user type) folds them.
   This is exactly OS-I2 in `jetos.md` ("modules communicate only through
   declared options"), just realized with today's types.

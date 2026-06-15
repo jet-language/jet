@@ -192,8 +192,7 @@ impl<'a> JsonParser<'a> {
                             return Err(());
                         }
                         self.i += 4;
-                        char::from_u32(u32::from_str_radix(&hex, 16).map_err(|_| ())?)
-                            .ok_or(())?
+                        char::from_u32(u32::from_str_radix(&hex, 16).map_err(|_| ())?).ok_or(())?
                     }
                     _ => return Err(()),
                 });
@@ -315,7 +314,10 @@ pub fn lsp_pos_to_offset(src: &str, pos: LspPos) -> usize {
 fn full_document_range(src: &str) -> LspRange {
     let end = byte_offset_to_lsp(src, src.len());
     LspRange {
-        start: LspPos { line: 0, character: 0 },
+        start: LspPos {
+            line: 0,
+            character: 0,
+        },
         end,
     }
 }
@@ -408,7 +410,12 @@ struct SymbolDB {
 
 impl SymbolDB {
     fn new() -> Self {
-        SymbolDB { defs: Vec::new(), refs: Vec::new(), hover: Vec::new(), inlay: Vec::new() }
+        SymbolDB {
+            defs: Vec::new(),
+            refs: Vec::new(),
+            hover: Vec::new(),
+            inlay: Vec::new(),
+        }
     }
 
     /// Find definition(s) of `name` (all modules).
@@ -432,9 +439,7 @@ impl SymbolDB {
         // Check refs
         self.refs
             .iter()
-            .find(|r| {
-                r.module_path == path && r.span.start <= offset && offset <= r.span.end
-            })
+            .find(|r| r.module_path == path && r.span.start <= offset && offset <= r.span.end)
             .map(|r| r.name.as_str())
     }
 
@@ -453,7 +458,10 @@ impl SymbolDB {
 
     /// All inlay hints for a module path.
     fn inlay_hints_for(&self, path: &str) -> Vec<&InlayHint> {
-        self.inlay.iter().filter(|h| h.module_path == path).collect()
+        self.inlay
+            .iter()
+            .filter(|h| h.module_path == path)
+            .collect()
     }
 }
 
@@ -482,7 +490,10 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
                 name: f.name.clone(),
                 def_span: f.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Function { params: params.clone(), ret: f.return_type.clone() },
+                kind: SymKind::Function {
+                    params: params.clone(),
+                    ret: f.return_type.clone(),
+                },
             };
             let hover_text = hover_for_fn(f);
             db.hover.push(HoverEntry {
@@ -511,13 +522,18 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
             collect_stmts(&f.body, mp, module, db);
         }
         Item::Struct(s) => {
-            let fields: Vec<(String, ast::Type)> =
-                s.fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect();
+            let fields: Vec<(String, ast::Type)> = s
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), f.ty.clone()))
+                .collect();
             db.defs.push(SymDef {
                 name: s.name.clone(),
                 def_span: s.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Struct { fields: fields.clone() },
+                kind: SymKind::Struct {
+                    fields: fields.clone(),
+                },
             });
             db.hover.push(HoverEntry {
                 span: s.name_span,
@@ -529,7 +545,10 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
                     name: f.name.clone(),
                     def_span: f.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::Field { ty: f.ty.clone(), parent: s.name.clone() },
+                    kind: SymKind::Field {
+                        ty: f.ty.clone(),
+                        parent: s.name.clone(),
+                    },
                 });
                 db.hover.push(HoverEntry {
                     span: f.name_span,
@@ -582,23 +601,23 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
                 name: e.name.clone(),
                 def_span: e.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Enum { variants: variants.clone() },
+                kind: SymKind::Enum {
+                    variants: variants.clone(),
+                },
             });
             db.hover.push(HoverEntry {
                 span: e.name_span,
                 module_path: mp.to_string(),
-                text: format!(
-                    "enum `{}` — variants: {}",
-                    e.name,
-                    variants.join(", ")
-                ),
+                text: format!("enum `{}` — variants: {}", e.name, variants.join(", ")),
             });
             for v in &e.variants {
                 db.defs.push(SymDef {
                     name: v.name.clone(),
                     def_span: v.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::EnumVariant { parent: e.name.clone() },
+                    kind: SymKind::EnumVariant {
+                        parent: e.name.clone(),
+                    },
                 });
                 db.hover.push(HoverEntry {
                     span: v.name_span,
@@ -750,19 +769,32 @@ fn collect_stmt(stmt: &ast::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
             collect_expr(cond, mp, db);
             collect_stmts(body, mp, module, db);
         }
-        ast::Stmt::For { var, var_span, var2, kind, body, .. } => {
+        ast::Stmt::For {
+            var,
+            var_span,
+            var2,
+            kind,
+            body,
+            ..
+        } => {
             db.defs.push(SymDef {
                 name: var.clone(),
                 def_span: *var_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Local { mutable: false, ty: None },
+                kind: SymKind::Local {
+                    mutable: false,
+                    ty: None,
+                },
             });
             if let Some((v2, s2)) = var2 {
                 db.defs.push(SymDef {
                     name: v2.clone(),
                     def_span: *s2,
                     module_path: mp.to_string(),
-                    kind: SymKind::Local { mutable: false, ty: None },
+                    kind: SymKind::Local {
+                        mutable: false,
+                        ty: None,
+                    },
                 });
             }
             match kind {
@@ -776,7 +808,12 @@ fn collect_stmt(stmt: &ast::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
             }
             collect_stmts(body, mp, module, db);
         }
-        ast::Stmt::Switch { subject, arms, else_body, .. } => {
+        ast::Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
             collect_expr(subject, mp, db);
             for arm in arms {
                 collect_expr(&arm.cond, mp, db);
@@ -807,7 +844,11 @@ fn collect_if(if_stmt: &ast::IfStmt, mp: &str, module: &LoadedModule, db: &mut S
 fn collect_lvalue(lv: &ast::LValue, mp: &str, db: &mut SymbolDB) {
     match lv {
         ast::LValue::Local { name, name_span } => {
-            db.refs.push(SymRef { name: name.clone(), span: *name_span, module_path: mp.to_string() });
+            db.refs.push(SymRef {
+                name: name.clone(),
+                span: *name_span,
+                module_path: mp.to_string(),
+            });
         }
         ast::LValue::Index { base, index, .. } => {
             collect_expr(base, mp, db);
@@ -824,7 +865,10 @@ fn collect_binding(b: &ast::Binding, mp: &str, db: &mut SymbolDB) {
         name: b.name.clone(),
         def_span: b.name_span,
         module_path: mp.to_string(),
-        kind: SymKind::Local { mutable: b.mutable, ty: ty.clone() },
+        kind: SymKind::Local {
+            mutable: b.mutable,
+            ty: ty.clone(),
+        },
     });
     if let Some(t) = &ty {
         let kw = if b.mutable { "var" } else { "val" };
@@ -845,11 +889,14 @@ fn collect_binding(b: &ast::Binding, mp: &str, db: &mut SymbolDB) {
     collect_expr(&b.init, mp, db);
 }
 
-
 fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
     match e {
         ast::Expr::Ident(name, span) => {
-            db.refs.push(SymRef { name: name.clone(), span: *span, module_path: mp.to_string() });
+            db.refs.push(SymRef {
+                name: name.clone(),
+                span: *span,
+                module_path: mp.to_string(),
+            });
         }
         ast::Expr::Call(call) => {
             db.refs.push(SymRef {
@@ -861,7 +908,13 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
                 collect_expr(&arg.expr, mp, db);
             }
         }
-        ast::Expr::MethodCall { receiver, method, method_span, args, .. } => {
+        ast::Expr::MethodCall {
+            receiver,
+            method,
+            method_span,
+            args,
+            ..
+        } => {
             collect_expr(receiver, mp, db);
             db.refs.push(SymRef {
                 name: method.clone(),
@@ -874,7 +927,11 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
         }
         ast::Expr::Field(base, field, span) => {
             collect_expr(base, mp, db);
-            db.refs.push(SymRef { name: field.clone(), span: *span, module_path: mp.to_string() });
+            db.refs.push(SymRef {
+                name: field.clone(),
+                span: *span,
+                module_path: mp.to_string(),
+            });
         }
         ast::Expr::Binary(_, l, r, _) => {
             collect_expr(l, mp, db);
@@ -886,7 +943,9 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
             collect_expr(base, mp, db);
             collect_expr(index, mp, db);
         }
-        ast::Expr::Slice { base, start, end, .. } => {
+        ast::Expr::Slice {
+            base, start, end, ..
+        } => {
             collect_expr(base, mp, db);
             collect_expr(start, mp, db);
             collect_expr(end, mp, db);
@@ -926,7 +985,9 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
         | ast::Expr::Ok(inner, _)
         | ast::Expr::Err(inner, _)
         | ast::Expr::Try(inner, _) => collect_expr(inner, mp, db),
-        ast::Expr::OrFallback { value, fallback, .. } => {
+        ast::Expr::OrFallback {
+            value, fallback, ..
+        } => {
             collect_expr(value, mp, db);
             match fallback {
                 ast::OrFallback::Value(v) => collect_expr(v, mp, db),
@@ -949,7 +1010,9 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
                     name: p.name.clone(),
                     def_span: p.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::Param { ty: p.ty.clone().unwrap_or(ast::Type::Int) },
+                    kind: SymKind::Param {
+                        ty: p.ty.clone().unwrap_or(ast::Type::Int),
+                    },
                 });
             }
             match &l.body {
@@ -1061,17 +1124,15 @@ impl CompletionItem {
 
 /// Jet keywords for completion.
 const JET_KEYWORDS: &[&str] = &[
-    "fn", "pub", "val", "var", "if", "else", "while", "for", "in",
-    "switch", "break", "continue", "return", "struct", "enum", "impl",
-    "trait", "const", "comptime", "import", "extern", "test", "derive",
-    "mut", "take", "view", "ref", "self", "loop", "unsafe", "or",
-    "true", "false", "null", "ok", "err", "value", "it",
+    "fn", "pub", "val", "var", "if", "else", "while", "for", "in", "switch", "break", "continue",
+    "return", "struct", "enum", "impl", "trait", "const", "comptime", "import", "extern", "test",
+    "derive", "mut", "take", "view", "ref", "self", "loop", "unsafe", "or", "true", "false",
+    "null", "ok", "err", "value", "it",
 ];
 
 /// Built-in type names for completion.
 const JET_TYPES: &[&str] = &[
-    "Int", "Float", "Bool", "String", "Char", "List", "Map", "Shared",
-    "Result",
+    "Int", "Float", "Bool", "String", "Char", "List", "Map", "Shared", "Result",
 ];
 
 /// Is the character sequence before `offset` indicative of member access (`.`)?
@@ -1092,7 +1153,11 @@ fn context_is_member_access(src: &str, offset: usize) -> Option<String> {
             i -= 1;
         }
         if i < end {
-            return Some(std::str::from_utf8(&bytes[i..end]).unwrap_or("").to_string());
+            return Some(
+                std::str::from_utf8(&bytes[i..end])
+                    .unwrap_or("")
+                    .to_string(),
+            );
         }
     }
     None
@@ -1112,8 +1177,13 @@ fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Op
             // Look up ident in DB to find its type
             for d in &db.defs {
                 if d.name == ident {
-                    if let SymKind::Local { ty: Some(ast::Type::Named(type_name)), .. }
-                    | SymKind::Param { ty: ast::Type::Named(type_name) } = &d.kind
+                    if let SymKind::Local {
+                        ty: Some(ast::Type::Named(type_name)),
+                        ..
+                    }
+                    | SymKind::Param {
+                        ty: ast::Type::Named(type_name),
+                    } = &d.kind
                     {
                         // Check if that type is an enum
                         for ed in &db.defs {
@@ -1131,7 +1201,12 @@ fn detect_switch_enum_type<'a>(src: &str, offset: usize, db: &'a SymbolDB) -> Op
     None
 }
 
-fn compute_completions(db: &SymbolDB, src: &str, offset: usize, current_path: &str) -> Vec<CompletionItem> {
+fn compute_completions(
+    db: &SymbolDB,
+    src: &str,
+    offset: usize,
+    current_path: &str,
+) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
@@ -1150,13 +1225,18 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize, current_path: &s
                                     detail: Some(fty.name()),
                                     insert_text: None,
                                     insert_text_format: 1,
-                                auto_import: None,
+                                    auto_import: None,
                                 });
                             }
                         }
                     }
-                    SymKind::Local { ty: Some(ast::Type::Named(tn)), .. }
-                    | SymKind::Param { ty: ast::Type::Named(tn) } => {
+                    SymKind::Local {
+                        ty: Some(ast::Type::Named(tn)),
+                        ..
+                    }
+                    | SymKind::Param {
+                        ty: ast::Type::Named(tn),
+                    } => {
                         // look up tn's fields/methods
                         let tn = tn.clone();
                         for td in &db.defs {
@@ -1203,7 +1283,7 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize, current_path: &s
                                     detail: Some(detail),
                                     insert_text: None,
                                     insert_text_format: 1,
-                                auto_import: None,
+                                    auto_import: None,
                                 });
                             }
                         }
@@ -1292,7 +1372,11 @@ fn compute_completions(db: &SymbolDB, src: &str, offset: usize, current_path: &s
                     items.push(CompletionItem {
                         label: def.name.clone(),
                         kind: ck::ENUM,
-                        detail: Some(format!("enum {} — variants: {}", def.name, variants.join(", "))),
+                        detail: Some(format!(
+                            "enum {} — variants: {}",
+                            def.name,
+                            variants.join(", ")
+                        )),
                         insert_text: None,
                         insert_text_format: 1,
                         auto_import: auto_import_for(&def.module_path),
@@ -1413,7 +1497,13 @@ fn collect_doc_comment(tokens: &[Token], def_start: usize) -> Option<String> {
     Some(lines.join("\n"))
 }
 
-fn compute_hover(db: &SymbolDB, tokens: &[Token], _src: &str, path: &str, offset: usize) -> Option<String> {
+fn compute_hover(
+    db: &SymbolDB,
+    tokens: &[Token],
+    _src: &str,
+    path: &str,
+    offset: usize,
+) -> Option<String> {
     // Collect the base hover text (type signature / ownership annotation).
     let base = if let Some(text) = db.hover_at(path, offset) {
         text.to_string()
@@ -1434,7 +1524,15 @@ fn compute_hover(db: &SymbolDB, tokens: &[Token], _src: &str, path: &str, offset
                     format!("fn {}({}){}", name, ps.join(", "), r)
                 }
                 SymKind::Struct { fields } => {
-                    format!("struct `{}`\n\nFields: {}", name, fields.iter().map(|(n, t)| format!("{}: {}", n, t.name())).collect::<Vec<_>>().join(", "))
+                    format!(
+                        "struct `{}`\n\nFields: {}",
+                        name,
+                        fields
+                            .iter()
+                            .map(|(n, t)| format!("{}: {}", n, t.name()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 }
                 SymKind::Enum { variants } => {
                     format!("enum `{}`\n\nVariants: {}", name, variants.join(", "))
@@ -1442,7 +1540,9 @@ fn compute_hover(db: &SymbolDB, tokens: &[Token], _src: &str, path: &str, offset
                 SymKind::Trait => format!("trait `{}`", name),
                 SymKind::Const => format!("const `{}`", name),
                 SymKind::EnumVariant { parent } => format!("`{}` — variant of `{}`", name, parent),
-                SymKind::Field { ty, parent } => format!("`{}`: {} (field of `{}`)", name, ty.name(), parent),
+                SymKind::Field { ty, parent } => {
+                    format!("`{}`: {} (field of `{}`)", name, ty.name(), parent)
+                }
                 SymKind::Local { mutable, ty } => {
                     let kw = if *mutable { "var" } else { "val" };
                     match ty {
@@ -1460,7 +1560,11 @@ fn compute_hover(db: &SymbolDB, tokens: &[Token], _src: &str, path: &str, offset
     // B7: prepend any `///` doc comment lines found before the definition.
     let name = find_ident_at(tokens, offset);
     if let Some(name) = name {
-        if let Some(def) = db.defs.iter().find(|d| d.name == name && d.module_path == path) {
+        if let Some(def) = db
+            .defs
+            .iter()
+            .find(|d| d.name == name && d.module_path == path)
+        {
             if let Some(doc) = collect_doc_comment(tokens, def.def_span.start) {
                 return Some(format!("{}\n\n---\n\n{}", doc, base));
             }
@@ -1482,11 +1586,21 @@ fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
 
 // ── Go-to-definition ──────────────────────────────────────────────────────────
 
-fn compute_definition(db: &SymbolDB, tokens: &[Token], src: &str, path: &str, offset: usize) -> Option<(String, Span)> {
+fn compute_definition(
+    db: &SymbolDB,
+    tokens: &[Token],
+    src: &str,
+    path: &str,
+    offset: usize,
+) -> Option<(String, Span)> {
     let name = find_ident_at(tokens, offset)?;
     // Look for a top-level or local def with this name
     // Prefer defs in same module, then other modules
-    if let Some(def) = db.defs.iter().find(|d| d.name == name && d.module_path == path) {
+    if let Some(def) = db
+        .defs
+        .iter()
+        .find(|d| d.name == name && d.module_path == path)
+    {
         return Some((def.module_path.clone(), def.def_span));
     }
     if let Some(def) = db.defs.iter().find(|d| d.name == name) {
@@ -1553,7 +1667,10 @@ fn compute_rename(
         return Err(format!("`{}` is not a valid identifier", new_name));
     }
     if is_keyword(new_name) {
-        return Err(format!("`{}` is a keyword and cannot be used as a name", new_name));
+        return Err(format!(
+            "`{}` is a keyword and cannot be used as a name",
+            new_name
+        ));
     }
     let name = match find_ident_at(tokens, offset) {
         Some(n) => n,
@@ -1704,7 +1821,9 @@ fn encode_semantic_tokens(tokens: &[Token], src: &str) -> Vec<u32> {
         let start = lsp_start.character;
 
         // Compute length in UTF-16 code units
-        let text = src.get(tok.span.start..tok.span.end.min(src.len())).unwrap_or("");
+        let text = src
+            .get(tok.span.start..tok.span.end.min(src.len()))
+            .unwrap_or("");
         // For multi-line tokens (strings with newlines) just use first line
         let first_line_text: &str = text.split('\n').next().unwrap_or(text);
         let length = first_line_text.encode_utf16().count() as u32;
@@ -1713,7 +1832,11 @@ fn encode_semantic_tokens(tokens: &[Token], src: &str) -> Vec<u32> {
         }
 
         let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 { start - prev_start } else { start };
+        let delta_start = if delta_line == 0 {
+            start - prev_start
+        } else {
+            start
+        };
 
         data.push(delta_line);
         data.push(delta_start);
@@ -1796,7 +1919,9 @@ impl Server {
             }
         }
         let diags = check_document(&doc.path, &doc.text);
-        self.diag_cache.borrow_mut().insert(doc.path.clone(), (h, diags.clone()));
+        self.diag_cache
+            .borrow_mut()
+            .insert(doc.path.clone(), (h, diags.clone()));
         diags
     }
 
@@ -1855,7 +1980,9 @@ pub fn run_stdio() -> io::Result<()> {
 }
 
 /// Catch panics in a handler; on panic, log and return None (LSP-I2).
-fn catch_handler<F: FnOnce() -> Option<String>>(f: std::panic::AssertUnwindSafe<F>) -> Option<String> {
+fn catch_handler<F: FnOnce() -> Option<String>>(
+    f: std::panic::AssertUnwindSafe<F>,
+) -> Option<String> {
     match std::panic::catch_unwind(f) {
         Ok(r) => r,
         Err(e) => {
@@ -2012,7 +2139,10 @@ fn initialize_response(id: &JsonValue) -> String {
 
 fn response(id: &JsonValue, result_json: &str) -> String {
     let id_json = serialize_id(id);
-    format!(r#"{{"jsonrpc":"2.0","id":{},"result":{}}}"#, id_json, result_json)
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"result":{}}}"#,
+        id_json, result_json
+    )
 }
 
 fn error_response(id: &JsonValue, code: i64, message: &str) -> String {
@@ -2073,12 +2203,24 @@ fn publish_after_change_impl(
     let path = uri_to_path(&uri);
 
     if let Some(text) = json_get(td, "text").and_then(json_str) {
-        server.docs.insert(uri.clone(), Document { path, text: text.to_string() });
+        server.docs.insert(
+            uri.clone(),
+            Document {
+                path,
+                text: text.to_string(),
+            },
+        );
     } else if let Some(changes) = json_get(params, "contentChanges") {
         if let JsonValue::Array(arr) = changes {
             if let Some(JsonValue::Object(chg)) = arr.first() {
                 if let Some(text) = chg.get("text").and_then(json_str) {
-                    server.docs.insert(uri.clone(), Document { path, text: text.to_string() });
+                    server.docs.insert(
+                        uri.clone(),
+                        Document {
+                            path,
+                            text: text.to_string(),
+                        },
+                    );
                 }
             }
         }
@@ -2200,7 +2342,11 @@ fn format_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
     Some(response(id, &edit))
 }
 
-fn completion_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
+fn completion_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -2225,7 +2371,10 @@ fn completion_response(server: &Server, params: Option<&JsonValue>, id: &JsonVal
         }
         json_items.push_str(&item.to_json());
     }
-    Some(response(id, &format!(r#"{{"isIncomplete":false,"items":[{}]}}"#, json_items)))
+    Some(response(
+        id,
+        &format!(r#"{{"isIncomplete":false,"items":[{}]}}"#, json_items),
+    ))
 }
 
 fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
@@ -2258,7 +2407,11 @@ fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -
     }
 }
 
-fn definition_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
+fn definition_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -2296,7 +2449,11 @@ fn definition_response(server: &Server, params: Option<&JsonValue>, id: &JsonVal
     }
 }
 
-fn references_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
+fn references_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -2310,7 +2467,13 @@ fn references_response(server: &Server, params: Option<&JsonValue>, id: &JsonVal
     let ctx = json_get(params, "context");
     let include_decl = ctx
         .and_then(|c| json_get(c, "includeDeclaration"))
-        .and_then(|v| if let JsonValue::Bool(b) = v { Some(*b) } else { None })
+        .and_then(|v| {
+            if let JsonValue::Bool(b) = v {
+                Some(*b)
+            } else {
+                None
+            }
+        })
         .unwrap_or(false);
 
     let tokens = server.lex(doc);
@@ -2393,11 +2556,7 @@ fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
                         json_escape(new_name)
                     ));
                 }
-                changes.push_str(&format!(
-                    r#""{}": [{}]"#,
-                    json_escape(&file_uri),
-                    edits
-                ));
+                changes.push_str(&format!(r#""{}": [{}]"#, json_escape(&file_uri), edits));
             }
             Some(response(id, &format!(r#"{{"changes":{{{}}}}}"#, changes)))
         }
@@ -2418,7 +2577,10 @@ fn semantic_tokens_response(
     let tokens = server.lex(doc);
     let data = encode_semantic_tokens(&tokens, &doc.text);
     let data_str: Vec<String> = data.iter().map(|n| n.to_string()).collect();
-    Some(response(id, &format!(r#"{{"data":[{}]}}"#, data_str.join(","))))
+    Some(response(
+        id,
+        &format!(r#"{{"data":[{}]}}"#, data_str.join(",")),
+    ))
 }
 
 fn inlay_hint_response(
@@ -2522,7 +2684,10 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 }
 
 /// Check one document, also returning the bundle for symbol analysis.
-pub fn check_document_with_bundle(path: &str, text: &str) -> (Vec<Diagnostic>, Option<ProgramBundle>) {
+pub fn check_document_with_bundle(
+    path: &str,
+    text: &str,
+) -> (Vec<Diagnostic>, Option<ProgramBundle>) {
     let abs = canonical_path(path);
     match crate::loader::load_entry_with_overlay(path, Some((&abs, text)), true) {
         Ok(mut bundle) => {
@@ -2578,19 +2743,29 @@ pub fn run_doctor() {
     let transcript_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/lsp");
     if transcript_dir.exists() {
         let count = std::fs::read_dir(&transcript_dir)
-            .map(|rd| rd.filter_map(|e| e.ok()).filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json")).count())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+                    .count()
+            })
             .unwrap_or(0);
-        println!("  [ok] transcript runner: {} fixture(s) found in tests/lsp/", count);
+        println!(
+            "  [ok] transcript runner: {} fixture(s) found in tests/lsp/",
+            count
+        );
     } else {
         println!("  [WARN] transcript runner: tests/lsp/ not found");
     }
 
     // C13: tree-sitter grammar presence.
-    let ts_grammar = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-jet/grammar.js");
+    let ts_grammar =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-jet/grammar.js");
     if ts_grammar.exists() {
         println!("  [ok] tree-sitter-jet/grammar.js present");
     } else {
-        println!("  [WARN] tree-sitter-jet/grammar.js not found — run `tree-sitter generate` to build");
+        println!(
+            "  [WARN] tree-sitter-jet/grammar.js not found — run `tree-sitter generate` to build"
+        );
     }
 
     // C13: TextMate grammar presence.
@@ -2622,7 +2797,11 @@ pub fn run_bench(src: &str, rounds: usize, budget_ms: u128) {
         per_round_ms,
         elapsed.as_millis(),
         budget_ms,
-        if per_round_ms <= budget_ms { "PASS" } else { "FAIL" }
+        if per_round_ms <= budget_ms {
+            "PASS"
+        } else {
+            "FAIL"
+        }
     );
     if per_round_ms > budget_ms {
         std::process::exit(1);
@@ -2669,7 +2848,8 @@ mod tests {
 
     #[test]
     fn hover_returns_function_signature() {
-        let src = "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn main() { val r = add(1, 2); }\n";
+        let src =
+            "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn main() { val r = add(1, 2); }\n";
         let (_, bundle) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle);
@@ -2719,7 +2899,10 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle);
         let hints = db.inlay_hints_for("test.jet");
-        assert!(hints.iter().any(|h| h.label.contains("Int")), "expected Int inlay hint");
+        assert!(
+            hints.iter().any(|h| h.label.contains("Int")),
+            "expected Int inlay hint"
+        );
     }
 
     #[test]
@@ -2729,7 +2912,13 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle);
         let items = compute_completions(&db, src, 14, "test.jet");
-        assert!(items.iter().any(|i| i.label == "val"), "expected val in completions");
-        assert!(items.iter().any(|i| i.label == "fn"), "expected fn in completions");
+        assert!(
+            items.iter().any(|i| i.label == "val"),
+            "expected val in completions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "fn"),
+            "expected fn in completions"
+        );
     }
 }

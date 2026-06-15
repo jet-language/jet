@@ -326,7 +326,12 @@ struct TomlParser<'a> {
 
 impl<'a> TomlParser<'a> {
     fn new(src: &'a str, file: &'a str) -> Self {
-        TomlParser { src, file, pos: 0, line: 1 }
+        TomlParser {
+            src,
+            file,
+            pos: 0,
+            line: 1,
+        }
     }
 
     fn parse(&mut self) -> Result<Manifest, Diagnostic> {
@@ -359,7 +364,10 @@ impl<'a> TomlParser<'a> {
                 let line_no = self.line;
                 self.advance();
                 if self.pos < self.src.len() && self.cur_char() == '[' {
-                    return Err(self.e1206(line_no, "array tables `[[…]]` are not supported in jet.toml"));
+                    return Err(self.e1206(
+                        line_no,
+                        "array tables `[[…]]` are not supported in jet.toml",
+                    ));
                 }
                 let table_name = self.read_until_char(']')?;
                 self.expect_char(']', "expected `]` to close table header")?;
@@ -444,12 +452,10 @@ impl<'a> TomlParser<'a> {
         }
 
         // Validate required [package] fields.
-        let name = pkg_name.ok_or_else(|| {
-            self.e1206(1, "missing required field `name` in `[package]`")
-        })?;
-        let version = pkg_version.ok_or_else(|| {
-            self.e1206(1, "missing required field `version` in `[package]`")
-        })?;
+        let name = pkg_name
+            .ok_or_else(|| self.e1206(1, "missing required field `name` in `[package]`"))?;
+        let version = pkg_version
+            .ok_or_else(|| self.e1206(1, "missing required field `version` in `[package]`"))?;
 
         Ok(Manifest {
             package: PackageMeta {
@@ -528,14 +534,14 @@ impl<'a> TomlParser<'a> {
 
             return Err(self.e1206(
                 self.line,
-                &format!(
-                    "dependency `{}` must have a `path` or `git` field",
-                    key
-                ),
+                &format!("dependency `{}` must have a `path` or `git` field", key),
             ));
         }
 
-        Err(self.e1206(self.line, &format!("expected a string or inline table for dependency `{}`", key)))
+        Err(self.e1206(
+            self.line,
+            &format!("expected a string or inline table for dependency `{}`", key),
+        ))
     }
 
     fn read_key(&mut self) -> Result<String, Diagnostic> {

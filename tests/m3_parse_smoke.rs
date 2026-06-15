@@ -15,3 +15,76 @@ fn main() {}
     let prog = jet::parser::parse(&toks).expect("parse");
     assert_eq!(prog.items.len(), 2);
 }
+
+#[test]
+fn parse_pipe_switch_arms_as_subject_tests() {
+    let src = r#"
+fn main() {
+    val fruit = "orange";
+    val frozen = false;
+    switch fruit {
+        | apple { print("Apple Juice"); }
+        | orange || frozen != true { print("Orange Juice"); }
+        | tangerine || yuzu { print("Citrus Juice"); }
+        | else { print("Water"); }
+    }
+}
+"#;
+    let (toks, lex_diags) = jet::lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let prog = jet::parser::parse(&toks).expect("parse");
+    let jet::ast::Item::Func(func) = &prog.items[0] else {
+        panic!("expected function");
+    };
+    let jet::ast::Stmt::Switch {
+        subject,
+        arms,
+        else_body,
+        ..
+    } = &func.body[2]
+    else {
+        panic!("expected switch");
+    };
+    assert!(matches!(subject, jet::ast::Expr::Ident(name, _) if name == "fruit"));
+    assert_eq!(arms.len(), 3);
+    assert!(else_body.is_some());
+    assert!(matches!(
+        &arms[0].cond,
+        jet::ast::Expr::Binary(jet::ast::BinOp::Eq, _, _, _)
+    ));
+    assert!(matches!(
+        &arms[1].cond,
+        jet::ast::Expr::Binary(jet::ast::BinOp::Or, _, _, _)
+    ));
+}
+
+#[test]
+fn parse_bracket_collection_types_and_semicolon_list_items() {
+    let src = r#"
+pub fn shell() -> [JSON] {
+    return [
+        JSON.Null;
+    ];
+}
+
+fn use_collections(items: [String], counts: [String, Int]) {}
+"#;
+    let (toks, lex_diags) = jet::lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let prog = jet::parser::parse(&toks).expect("parse");
+    let jet::ast::Item::Func(shell) = &prog.items[0] else {
+        panic!("expected shell function");
+    };
+    assert!(matches!(shell.return_type, Some(jet::ast::Type::List(_))));
+    let jet::ast::Item::Func(use_collections) = &prog.items[1] else {
+        panic!("expected use_collections function");
+    };
+    assert!(matches!(
+        use_collections.params[0].ty,
+        jet::ast::Type::List(_)
+    ));
+    assert!(matches!(
+        use_collections.params[1].ty,
+        jet::ast::Type::Map { .. }
+    ));
+}

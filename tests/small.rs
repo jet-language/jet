@@ -18,8 +18,11 @@ fn small_profile_binary_is_smaller_than_default() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/16_wordcount.jet");
-    assert!(example.is_file(), "examples/16_wordcount.jet must exist");
+    let example = root.join("examples/features/16_wordcount.jet");
+    assert!(
+        example.is_file(),
+        "examples/features/16_wordcount.jet must exist"
+    );
 
     let dir = std::env::temp_dir().join(format!("jet_small_test_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

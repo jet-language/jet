@@ -7,19 +7,20 @@
 
 pub mod ast;
 pub mod build_cache;
-pub mod collections;
 pub mod codegen;
+pub mod collections;
 pub mod comptime;
 pub mod diag;
 pub mod fetch;
 pub mod ffi;
 pub mod fmt;
-pub mod lock;
-pub mod m9;
 pub mod generics;
+pub mod jetpack;
 pub mod lexer;
 pub mod loader;
+pub mod lock;
 pub mod lsp;
+pub mod m9;
 pub mod manifest;
 pub mod parser;
 pub mod sema;
@@ -62,7 +63,10 @@ pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
     }
 }
 
-fn compile_bundle_path(file: &str, mode: sema::CompileMode) -> Result<CompileOutput, Vec<Diagnostic>> {
+fn compile_bundle_path(
+    file: &str,
+    mode: sema::CompileMode,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     let mut bundle = loader::load_entry_with_overlay(file, None, false)?;
     let diags = sema::check_bundle(&mut bundle, mode);
     let mut errors = Vec::new();

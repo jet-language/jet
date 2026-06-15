@@ -24,8 +24,6 @@ fn gen_stdlib_doc() {
             "docs/08-stdlib.md is stale — run: UPDATE_DOCS=1 cargo test gen_stdlib_doc"
         );
     } else {
-        panic!(
-            "docs/08-stdlib.md missing — run: UPDATE_DOCS=1 cargo test gen_stdlib_doc"
-        );
+        panic!("docs/08-stdlib.md missing — run: UPDATE_DOCS=1 cargo test gen_stdlib_doc");
     }
 }

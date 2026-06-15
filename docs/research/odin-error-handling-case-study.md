@@ -381,7 +381,7 @@ Example:
 ```jet
 fn load_profile(path: String) -> Profile ? {
     val text = read_file(path)?;       // FileError -> Error
-    val data = parse_json(text)?;      // JsonError -> Error
+    val data = parse_json(text)?;      // JSONError -> Error
     return ok(Profile.from_json(data)?); // ProfileError -> Error
 }
 ```

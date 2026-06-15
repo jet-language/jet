@@ -44,7 +44,9 @@ pub fn fetch(
     // --locked: verify lock matches manifest, then stop.
     if opts.locked {
         let lock = existing_lock.ok_or_else(|| {
-            vec![lock::e1202(&project_root.join("jet.lock").display().to_string())]
+            vec![lock::e1202(
+                &project_root.join("jet.lock").display().to_string(),
+            )]
         })?;
         if let Err(d) = lock::verify_lock_matches_manifest(
             lock,
@@ -249,29 +251,29 @@ impl<'a> Resolver<'a> {
                 let fp = lock::compute_fingerprint(&th, &dep_fps);
 
                 // Store the path dep (copy to store for inode sharing).
-                let store_path = store::ensure_path_dep(
-                    dep_name,
-                    &dep_version,
-                    &fp,
-                    &abs_path,
-                ).map_err(|d| vec![d])?;
+                let store_path = store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
+                    .map_err(|d| vec![d])?;
 
                 // Link into project build dir.
-                let link_dir = self.project_root
+                let link_dir = self
+                    .project_root
                     .join(".jet-build")
                     .join("deps")
                     .join(dep_name);
                 store::link_into_project(&store_path, &link_dir).map_err(|d| vec![d])?;
 
-                self.resolved.insert(dep_name.to_string(), ResolvedPkg {
-                    version: dep_version,
-                    source: LockSource::Path(path.clone()),
-                    locked: None,
-                    fingerprint: fp,
-                    deps: trans_deps,
-                    source_dir: abs_path,
-                    tree_hash: th,
-                });
+                self.resolved.insert(
+                    dep_name.to_string(),
+                    ResolvedPkg {
+                        version: dep_version,
+                        source: LockSource::Path(path.clone()),
+                        locked: None,
+                        fingerprint: fp,
+                        deps: trans_deps,
+                        source_dir: abs_path,
+                        tree_hash: th,
+                    },
+                );
             }
 
             DepSpec::Git { url, selector } => {
@@ -294,8 +296,9 @@ impl<'a> Resolver<'a> {
                 let dep_version = dep_manifest.package.version.clone();
 
                 // Get the git tree hash.
-                let git_tree_hash = git_tree_hash(&clone_dir, &rev_to_fetch)
-                    .unwrap_or_else(|_| format!("sha256-{}", &rev_to_fetch[..8.min(rev_to_fetch.len())]));
+                let git_tree_hash = git_tree_hash(&clone_dir, &rev_to_fetch).unwrap_or_else(|_| {
+                    format!("sha256-{}", &rev_to_fetch[..8.min(rev_to_fetch.len())])
+                });
 
                 // Check for version conflicts.
                 let dep_name_in_manifest = dep_manifest.package.name.clone();
@@ -335,15 +338,12 @@ impl<'a> Resolver<'a> {
                 let fp = lock::compute_fingerprint(&git_tree_hash, &dep_fps);
 
                 // Store.
-                let store_path = store::ensure_git_dep(
-                    dep_name,
-                    &dep_version,
-                    &fp,
-                    &clone_dir,
-                ).map_err(|d| vec![d])?;
+                let store_path = store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
+                    .map_err(|d| vec![d])?;
 
                 // Link into project build dir.
-                let link_dir = self.project_root
+                let link_dir = self
+                    .project_root
                     .join(".jet-build")
                     .join("deps")
                     .join(dep_name);
@@ -355,18 +355,21 @@ impl<'a> Resolver<'a> {
                     last_modified: unix_now(),
                 };
 
-                self.resolved.insert(dep_name.to_string(), ResolvedPkg {
-                    version: dep_version,
-                    source: LockSource::Git {
-                        url: url.clone(),
-                        selector: lock::git_selector_str(selector),
+                self.resolved.insert(
+                    dep_name.to_string(),
+                    ResolvedPkg {
+                        version: dep_version,
+                        source: LockSource::Git {
+                            url: url.clone(),
+                            selector: lock::git_selector_str(selector),
+                        },
+                        locked: Some(locked),
+                        fingerprint: fp,
+                        deps: trans_deps,
+                        source_dir: clone_dir,
+                        tree_hash: git_tree_hash,
                     },
-                    locked: Some(locked),
-                    fingerprint: fp,
-                    deps: trans_deps,
-                    source_dir: clone_dir,
-                    tree_hash: git_tree_hash,
-                });
+                );
             }
 
             DepSpec::Registry(version) => {
@@ -387,22 +390,16 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    fn load_dep_manifest(
-        &self,
-        dir: &Path,
-        dep_name: &str,
-    ) -> Result<Manifest, Vec<Diagnostic>> {
+    fn load_dep_manifest(&self, dir: &Path, dep_name: &str) -> Result<Manifest, Vec<Diagnostic>> {
         let result = crate::manifest::load(dir);
         match result {
-            None => {
-                Err(vec![Diagnostic::error(
-                    "E1206",
-                    format!("dependency `{}` has no `jet.toml`", dep_name),
-                    "every Jet package must have a `jet.toml` manifest".to_string(),
-                    format!("add a `jet.toml` to `{}`", dir.display()),
-                    None,
-                )])
-            }
+            None => Err(vec![Diagnostic::error(
+                "E1206",
+                format!("dependency `{}` has no `jet.toml`", dep_name),
+                "every Jet package must have a `jet.toml` manifest".to_string(),
+                format!("add a `jet.toml` to `{}`", dir.display()),
+                None,
+            )]),
             Some(Err(d)) => Err(vec![d]),
             Some(Ok(m)) => Ok(m),
         }
@@ -464,9 +461,7 @@ fn build_dep_dirs_from_lock(
     let mut dep_dirs = HashMap::new();
     for (dep_name, spec) in &manifest.dependencies {
         let source_dir = match spec {
-            DepSpec::Path { path } => {
-                normalize_path(&project_root.join(path))
-            }
+            DepSpec::Path { path } => normalize_path(&project_root.join(path)),
             DepSpec::Git { .. } => {
                 // Find the locked rev and use the git cache dir.
                 let locked_pkg = lock.packages.iter().find(|p| p.name == *dep_name);
@@ -579,7 +574,13 @@ fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
     }
 
     let checkout_ok = Command::new("git")
-        .args(["-C", tmp.to_str().unwrap_or("."), "checkout", "--quiet", rev])
+        .args([
+            "-C",
+            tmp.to_str().unwrap_or("."),
+            "checkout",
+            "--quiet",
+            rev,
+        ])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -610,7 +611,12 @@ fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
 
 fn git_tree_hash(repo_dir: &Path, _rev: &str) -> Result<String, String> {
     let out = Command::new("git")
-        .args(["-C", repo_dir.to_str().unwrap_or("."), "rev-parse", "HEAD^{tree}"])
+        .args([
+            "-C",
+            repo_dir.to_str().unwrap_or("."),
+            "rev-parse",
+            "HEAD^{tree}",
+        ])
         .output()
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
@@ -624,7 +630,9 @@ fn normalize_path(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in p.components() {
         match comp {
-            std::path::Component::ParentDir => { out.pop(); }
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
             std::path::Component::CurDir => {}
             other => out.push(other.as_os_str()),
         }

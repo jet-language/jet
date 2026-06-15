@@ -121,9 +121,7 @@ fn render_page(code: &str, jet_rel: &str, diag: &ParsedDiag, has_fixed: bool) ->
     let title = format!("{code}: {}", diag.what);
     let fixed = if has_fixed {
         let fixed_rel = jet_rel.replace(".jet", ".fixed.jet");
-        format!(
-            "\n## Fixed program\n\nSee [`{fixed_rel}`](../../{fixed_rel}).\n"
-        )
+        format!("\n## Fixed program\n\nSee [`{fixed_rel}`](../../{fixed_rel}).\n")
     } else {
         String::new()
     };
@@ -175,16 +173,12 @@ const PREFERRED_UI: &[(&str, &str)] = &[
 
 fn load_preferred_diag(root: &Path, code: &str, jet_rel: &str) -> ParsedDiag {
     let stderr_path = if jet_rel.ends_with("/main.jet") {
-        PathBuf::from(jet_rel)
-            .parent()
-            .unwrap()
-            .join("stderr")
+        PathBuf::from(jet_rel).parent().unwrap().join("stderr")
     } else {
         PathBuf::from(jet_rel).with_extension("stderr")
     };
-    let stderr = fs::read_to_string(root.join(&stderr_path)).unwrap_or_else(|_| {
-        panic!("missing stderr for {jet_rel} at {}", stderr_path.display())
-    });
+    let stderr = fs::read_to_string(root.join(&stderr_path))
+        .unwrap_or_else(|_| panic!("missing stderr for {jet_rel} at {}", stderr_path.display()));
     parse_stderr(&stderr)
         .into_iter()
         .find(|d| d.code == code)

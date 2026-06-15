@@ -39,7 +39,11 @@ fn examples_compile_and_run() {
                 entries.push((
                     main.clone(),
                     stem,
-                    format!("examples/{}/main.{}", path.file_name().unwrap().to_string_lossy(), ext),
+                    format!(
+                        "examples/{}/main.{}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        ext
+                    ),
                 ));
             }
         }
@@ -91,9 +95,11 @@ fn examples_compile_and_run() {
                 .arg("-o")
                 .arg(&bin);
             if let Some(link) = &ffi_link {
-                rustc_cmd
-                    .arg("--extern")
-                    .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+                rustc_cmd.arg("--extern").arg(format!(
+                    "{}={}",
+                    link.crate_name,
+                    link.rlib_path.display()
+                ));
                 if link.deps_dir.is_dir() {
                     rustc_cmd
                         .arg("-L")
@@ -110,10 +116,8 @@ fn examples_compile_and_run() {
             let run = Command::new(&bin).output().unwrap();
             let err_path = ex_dir.join("expected").join(format!("{}.err.out", stem));
             if err_path.exists() {
-                let expected_err =
-                    fs::read_to_string(&err_path).unwrap_or_else(|_| {
-                        panic!("missing examples/expected/{}.err.out", stem)
-                    });
+                let expected_err = fs::read_to_string(&err_path)
+                    .unwrap_or_else(|_| panic!("missing examples/expected/{}.err.out", stem));
                 assert_eq!(
                     run.status.code(),
                     Some(70),
@@ -134,10 +138,9 @@ fn examples_compile_and_run() {
                     String::from_utf8_lossy(&run.stdout),
                     String::from_utf8_lossy(&run.stderr)
                 );
-                let expected = fs::read_to_string(
-                    ex_dir.join("expected").join(format!("{}.out", stem)),
-                )
-                .unwrap_or_else(|_| panic!("missing examples/expected/{}.out", stem));
+                let expected =
+                    fs::read_to_string(ex_dir.join("expected").join(format!("{}.out", stem)))
+                        .unwrap_or_else(|_| panic!("missing examples/expected/{}.out", stem));
                 assert_eq!(
                     String::from_utf8_lossy(&run.stdout),
                     expected,
@@ -148,5 +151,9 @@ fn examples_compile_and_run() {
         }
         checked += 1;
     }
-    assert!(checked >= 2, "expected at least 2 examples, found {}", checked);
+    assert!(
+        checked >= 2,
+        "expected at least 2 examples, found {}",
+        checked
+    );
 }

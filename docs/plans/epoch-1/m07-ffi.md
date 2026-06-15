@@ -29,7 +29,7 @@ fn main() {
   (E0701) — reproducibility without a manifest.
 - `extern rust "std" { … }` works for std items with no dependency.
 - Allowed boundary types (both directions): `Int`, `Float`, `Bool`,
-  `String`, `Char`, `List<…>`/`Map<…>`/`T?`/`T ? E` **of allowed
+  `String`, `Char`, `[T]`/`[K, V]`/`T?`/`T ? E` **of allowed
   types**, and user structs/enums whose fields are allowed. Everything
   passes **by value** (move/copy/clone at the boundary; M2 call rules
   apply — default params still read, so codegen clones into the call).
@@ -90,5 +90,5 @@ Teaching: E0031 `unsafe` → not in Jet; whole blocks live behind
 Exporting Jet to Rust, callbacks/closures over the boundary, borrowed
 returns, async, raw pointers, build.rs crates with system deps (document
 "pure-Rust crates only" in the error text when the build fails),
-auto-binding generation. Registry/manifest integration is M12 (the
-manifest will later list FFI deps; the inline pin keeps working).
+auto-binding generation. Manifest metadata may list FFI deps for tools, but
+the inline `extern rust "crate@version"` declaration remains sufficient.

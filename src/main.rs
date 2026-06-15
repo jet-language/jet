@@ -123,13 +123,19 @@ fn main() {
             run_upgrade();
             return;
         }
-        "fetch" => { run_fetch(locked); return; }
+        "fetch" => {
+            run_fetch(locked);
+            return;
+        }
         "update" => {
             let dep = args.get(1).map(|s| s.as_str());
             run_update(dep);
             return;
         }
-        "gc" => { run_gc(); return; }
+        "gc" => {
+            run_gc();
+            return;
+        }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
             match sub {
@@ -156,16 +162,26 @@ fn main() {
                         let entry = find_project_entry(&root);
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
-                            "test" => { run_test(&entry_str); return; }
+                            "test" => {
+                                run_test(&entry_str);
+                                return;
+                            }
                             _ => {
-                                let program_args: Vec<&String> = args.iter().skip(1).copied().collect();
+                                let program_args: Vec<&String> =
+                                    args.iter().skip(1).copied().collect();
                                 run_compile_cmd(cmd, &entry_str, emit_rust, small, &program_args);
                                 return;
                             }
                         }
                     }
-                    eprintln!("error: no file given and no `jet.toml` found in this directory or above");
-                    eprintln!(" fix: run `jet {} <file.{}>` or cd into a project", cmd, jet::syntax::FILE_EXT);
+                    eprintln!(
+                        "error: no file given and no `jet.toml` found in this directory or above"
+                    );
+                    eprintln!(
+                        " fix: run `jet {} <file.{}>` or cd into a project",
+                        cmd,
+                        jet::syntax::FILE_EXT
+                    );
                     exit(2);
                 }
                 _ => {
@@ -199,7 +215,9 @@ fn main() {
 
 /// Find the entry .jet file for a project (`.jet/main.jet` if exists, else `main.jet`).
 fn find_project_entry(root: &Path) -> PathBuf {
-    let dot_jet = root.join(".jet").join(format!("main.{}", jet::syntax::FILE_EXT));
+    let dot_jet = root
+        .join(".jet")
+        .join(format!("main.{}", jet::syntax::FILE_EXT));
     if dot_jet.is_file() {
         return dot_jet;
     }
@@ -219,7 +237,11 @@ fn run_upgrade() {
 }
 
 fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_args: &[&String]) {
-    let profile = if small { BuildProfile::Small } else { BuildProfile::Default };
+    let profile = if small {
+        BuildProfile::Small
+    } else {
+        BuildProfile::Default
+    };
 
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -334,7 +356,12 @@ fn run_fix(file: &str) {
         eprintln!("error: couldn't write {}: {}", file, e);
         exit(1);
     });
-    println!("{}: applied {} fix{}", file, edits.len(), if edits.len() == 1 { "" } else { "es" });
+    println!(
+        "{}: applied {} fix{}",
+        file,
+        edits.len(),
+        if edits.len() == 1 { "" } else { "es" }
+    );
 }
 
 fn run_new(name: &str, annotated: bool) {
@@ -405,7 +432,9 @@ fn run_add(raw_args: &[String]) {
     let rev_val = flag_value(raw_args, "--rev");
 
     let spec = if let Some(p) = path_val {
-        jet::manifest::DepSpec::Path { path: p.to_string() }
+        jet::manifest::DepSpec::Path {
+            path: p.to_string(),
+        }
     } else if let Some(url) = git_val {
         let selector = if let Some(t) = tag_val {
             jet::manifest::GitSelector::Tag(t.to_string())
@@ -414,13 +443,22 @@ fn run_add(raw_args: &[String]) {
         } else if let Some(r) = rev_val {
             jet::manifest::GitSelector::Rev(r.to_string())
         } else {
-            eprintln!("error: git dependency `{}` needs one of: --tag, --branch, --rev", dep_name);
+            eprintln!(
+                "error: git dependency `{}` needs one of: --tag, --branch, --rev",
+                dep_name
+            );
             exit(1);
         };
-        jet::manifest::DepSpec::Git { url: url.to_string(), selector }
+        jet::manifest::DepSpec::Git {
+            url: url.to_string(),
+            selector,
+        }
     } else {
         eprintln!("error: `jet add {}` needs --path or --git", dep_name);
-        eprintln!(" fix: try `jet add {} --path ../{}` or `jet add {} --git <url> --tag <tag>`", dep_name, dep_name, dep_name);
+        eprintln!(
+            " fix: try `jet add {} --path ../{}` or `jet add {} --git <url> --tag <tag>`",
+            dep_name, dep_name, dep_name
+        );
         exit(1);
     };
 
@@ -486,7 +524,10 @@ fn run_update(dep: Option<&str>) {
         exit(1);
     });
     let mf = jet::manifest::parse(&toml_path, &raw).unwrap_or_else(|d| {
-        eprintln!("{}", jet::render_diagnostics(&toml_path.display().to_string(), &raw, &[d]));
+        eprintln!(
+            "{}",
+            jet::render_diagnostics(&toml_path.display().to_string(), &raw, &[d])
+        );
         exit(1);
     });
     let existing_lock = jet::lock::load(&root);
@@ -543,7 +584,10 @@ fn run_gc() {
     // Without a global registry of in-use locks, we print a stub message.
     // Full gc would walk all jet.lock files; M12.1 ships the infrastructure.
     let entries = jet::store::list_entries();
-    println!("store has {} entries; use `jet store verify` to check hashes", entries.len());
+    println!(
+        "store has {} entries; use `jet store verify` to check hashes",
+        entries.len()
+    );
     println!("(gc: removing unreferenced entries requires a future registry — coming in M12.2)");
 }
 
@@ -554,7 +598,10 @@ fn do_fetch(root: &Path, locked: bool) {
         exit(1);
     });
     let mf = jet::manifest::parse(&toml_path, &raw).unwrap_or_else(|d| {
-        eprint!("{}", jet::render_diagnostics(&toml_path.display().to_string(), &raw, &[d]));
+        eprint!(
+            "{}",
+            jet::render_diagnostics(&toml_path.display().to_string(), &raw, &[d])
+        );
         exit(1);
     });
     let existing_lock = jet::lock::load(root);
@@ -756,7 +803,8 @@ fn build(
         cmd.arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
         if link.deps_dir.is_dir() {
-            cmd.arg("-L").arg(format!("dependency={}", link.deps_dir.display()));
+            cmd.arg("-L")
+                .arg(format!("dependency={}", link.deps_dir.display()));
         }
     }
 
@@ -764,7 +812,9 @@ fn build(
         Ok(o) => o,
         Err(_) => {
             eprintln!("error: couldn't find `rustc` on this machine");
-            eprintln!(" why: v1 of this language uses Rust as its backend (docs/03-architecture.md)");
+            eprintln!(
+                " why: v1 of this language uses Rust as its backend (docs/03-architecture.md)"
+            );
             eprintln!(" fix: install Rust from https://rustup.rs, then try again");
             exit(1);
         }

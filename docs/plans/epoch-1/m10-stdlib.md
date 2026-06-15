@@ -34,14 +34,14 @@ import std.io as io;
 import std.json as json;
 
 fn main() {
-    val args = io.args();                       // List<String>
+    val args = io.args();                       // [String]
     val path = args.get(1) or panic("usage: tool <file>");
 
-    val text = fs.read(path) or return;         // String or IoError
+    val text = fs.read(path) or return;         // String or IOError
     fs.write("out.txt", text.to_upper()) or panic("can't write");
 
-    val name = io.input("your name? ");         // String or IoError
-    val data = json.parse(text) or return;      // Json or JsonError
+    val name = io.input("your name? ");         // String or IOError
+    val data = json.parse(text) or return;      // JSON or JSONError
 }
 ```
 
@@ -72,23 +72,23 @@ Selective imports are rejected by SL3: no `import std.math { clamp }`, no
 All paths are `String` in M10 (SL7). There is no `Path` type and no
 `std.path` helper module in this milestone.
 
-**std/fs** — `read(path) -> String or IoError` ·
-`read_bytes(path) -> List<U8> or IoError` · `write(path, text) -> ()
-or IoError` · `append(path, text)` · `exists(path) -> Bool` ·
-`remove(path)` · `list_dir(path) -> List<String> or IoError` ·
+**std/fs** — `read(path) -> String or IOError` ·
+`read_bytes(path) -> [U8] or IOError` · `write(path, text) -> ()
+or IOError` · `append(path, text)` · `exists(path) -> Bool` ·
+`remove(path)` · `list_dir(path) -> [String] or IOError` ·
 `create_dir(path)` · `is_dir(path) -> Bool` · `copy(from, to)` ·
-`rename(from, to)`. `enum IoError { NotFound(path: String);
+`rename(from, to)`. `enum IOError { NotFound(path: String);
 PermissionDenied(path: String); Other(message: String); }`
 
-**std/io** — `args() -> List<String>` · `input([prompt]) -> String or
-IoError` (reads a line, strips newline) · `read_all_input() -> String or
-IoError` (stdin to EOF) · `eprint(value)` (stderr twin of `print`).
+**std/io** — `args() -> [String]` · `input([prompt]) -> String or
+IOError` (reads a line, strips newline) · `read_all_input() -> String or
+IOError` (stdin to EOF) · `eprint(value)` (stderr twin of `print`).
 
 **std/env** — `get(name) -> (String?)` · `set(name, value)` ·
-`current_dir() -> String ? IoError` · `home_dir() -> (String?)`.
+`current_dir() -> String ? IOError` · `home_dir() -> (String?)`.
 
-**std/process** — `exit(code)` (no return) · `run(cmd: List<String>) ->
-ProcessResult or IoError` where
+**std/process** — `exit(code)` (no return) · `run(cmd: [String]) ->
+ProcessResult or IOError` where
 `struct ProcessResult { code: Int; output: String; errors: String; }`.
 
 **std/math** — `sqrt` `pow` `abs` (Int+Float overloads via two names if
@@ -97,7 +97,7 @@ bound) · `min[T: Comparable](a, b)` · `max[T: Comparable]` · `floor`
 `ceil` `round -> Int` · constants `pi`, `e` · `clamp(x, lo, hi)`.
 
 **std/random** — `int(low, high) -> Int` (inclusive, S22) · `float() ->
-Float` (0..1) · `pick<T>(xs: List<T>) -> (T?)` · `shuffle<T>(mut xs)` ·
+Float` (0..1) · `pick<T>(xs: [T]) -> (T?)` · `shuffle<T>(mut xs)` ·
 `seed(n)`. Backed by a tiny PRNG written in the prelude (xoshiro256++)
 — deterministic under `seed`, no external crate (I6).
 
@@ -105,21 +105,21 @@ Float` (0..1) · `pick<T>(xs: List<T>) -> (T?)` · `shuffle<T>(mut xs)` ·
 `Stopwatch` struct (`start()`, `elapsed_millis()`). No dates, calendar
 types, timezone conversion, or formatting in M10 (SL8).
 
-**std/json** — `enum Json { Null; Boolean(b: Bool); Number(n: Float);
-Text(s: String); Array(items: List<Json>); Object(entries: Map<String,
-Json>); }` · `parse(text) -> Json or JsonError` · `render(j) -> String`
+**std/json** — `enum JSON { Null; Boolean(b: Bool); Number(n: Float);
+Text(s: String); Array(items: [JSON]); Object(entries: [String, JSON]); }`
+· `parse(text) -> JSON or JSONError` · `render(j) -> String`
 · `render_pretty(j) -> String`. Parser hand-written in the prelude
 (recursive descent, ~200 lines) — also the flagship proof that Jet's
-own data types model real-world data. `JsonError { line, message }`.
+own data types model real-world data. `JSONError { line, message }`.
 M10 is dynamic JSON only; typed JSON lands later via the S55 derive
 direction. When typed JSON lands, unknown fields are errors by default with
 an explicit tolerant-parsing opt-out (SL10).
 
 **Binary data** (S42): `U8` is the 8-bit unsigned sized type; std binary
-APIs use `List<U8>` with range checks at literals (E1003 "a U8 holds
+APIs use `[U8]` with range checks at literals (E1003 "a U8 holds
 0..255"); `b.to_int()`, `n.to_u8()` checked at runtime;
-`String.bytes() -> List<U8>` and `String.from_bytes(List<U8>) -> String or
-Utf8Error` land here.
+`String.bytes() -> [U8]` and `String.from_bytes([U8]) -> String or
+UTF8Error` land here.
 
 ## Rules & sema notes
 
@@ -207,7 +207,7 @@ Core std stays the M10 eight modules. The ring ships as versioned
 | 8 | `jet.db` (sqlite) | FFI-tier (M7 machinery) |
 
 Package delivery and `import http#0.8.1 as http` resolution land in M12.2
-(see docs/plans/m12-packages.md, SL2). Everything below this line is
+(see docs/plans/epoch-1/m12-packages.md, SL2). Everything below this line is
 community-package territory.
 
 ## Out of scope

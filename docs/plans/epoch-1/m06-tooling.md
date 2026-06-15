@@ -99,7 +99,7 @@ emits ONE Rust file with `mod` blocks. Name mangling becomes
 
 - `jet build --small`: `opt-level="z"`, full LTO, and the S15-ratified
 panic stance. Exit criterion: measurably smaller binary than default
-on examples/16_wordcount.jet (a test asserts the size relation, not
+on examples/features/16_wordcount.jet (a test asserts the size relation, not
 absolute numbers).
 - **LSP v0** (`jet lsp`, stdio JSON-RPC): scope is exactly
 (a) publish full-document diagnostics on open/change — reusing the

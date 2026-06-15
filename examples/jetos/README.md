@@ -1,15 +1,27 @@
-# jetos — a declarative system, configured in Jet
+# jetos prototype — Phase 2 research, configured in Jet
 
 > Your whole machine in a few small files, a merge engine that resolves them
 > the way Nix's module system does, and a CLI that feels like `nh`. Written
 > entirely in Jet.
 
-This is the Jet answer to **Nix flakes + the NixOS/home-manager module system**.
-You describe *what* you want (programs, services, settings) in dendritic,
-liftable feature files; jetpack merges them into one canonical system tree;
-`jetos` shows you the diff and makes it live, with generations you can roll
-back to. Nix stays the package *provider* (jetos shells `nix build` to realize
-store paths); **jetos is the experience.**
+> **Status, 2026-06-15:** this directory is a prototype/research slice, not the
+> near-term product target. The current plan is in
+> [`docs/plans/jetpack-jetos/README.md`](../../docs/plans/jetpack-jetos/README.md):
+> **jet** is the language, **jetpack** is the package/environment manager, and
+> **jetos** is Phase 2, the distro/ISO built on jetpack. Phase 1 is
+> independent `jetpack run/build/list/clean/add/remove`, a Nix-shell/devenv
+> replacement. `jet` plumbing can come later.
+
+This is the Phase 2 JetOS answer to **NixOS/home-manager modules**. You
+describe *what* you want (programs, services, settings) in dendritic, liftable
+feature files; a temporary in-repo merge library currently named `jetpack`
+merges them into one canonical system tree; `jetos` shows you the diff and
+makes it live, with generations you can roll back to. Nix stays the package
+*provider* in the prototype.
+
+The `lib/jetpack.jet` name is historical and should be treated as a stand-in
+for the future real `jetpack` tool/module. Per the naming canon, **jetpack** is
+the package manager, not merely this local merge library.
 
 ```
 config.jet ──(jet)──▶ merged system tree (canonical JSON) ──▶ jetos ──▶ nix build
@@ -51,11 +63,11 @@ directives it returns — never by importing other modules.
 import jetpack as pkg;
 import std.json as json;
 
-pub fn contribute() -> List<Json> {
+pub fn contribute() -> [JSON] {
     return [
-        pkg.installed(["firefox", "fastfetch", "btop", "vlc"]),
-        pkg.services(["pipewire", "bluetooth"]),
-        pkg.suggest("sys.desktop.environment", "gnome"),   // a polite default
+        pkg.installed(["firefox", "fastfetch", "btop", "vlc"]);
+        pkg.services(["pipewire", "bluetooth"]);
+        pkg.suggest("sys.desktop.environment", "gnome");   // a polite default
     ];
 }
 ```
@@ -64,11 +76,11 @@ A host is just a module that decides things for one machine:
 
 ```jet
 // hosts/laptop.jet
-pub fn contribute() -> List<Json> {
+pub fn contribute() -> [JSON] {
     return [
-        pkg.option("sys.desktop.environment", "cinnamon"),  // normal > the suggestion
-        pkg.option("sys.networking.hostName", "laptop"),
-        pkg.installed(["tlp", "powertop"]),
+        pkg.option("sys.desktop.environment", "cinnamon");  // normal > the suggestion
+        pkg.option("sys.networking.hostName", "laptop");
+        pkg.installed(["tlp", "powertop"]);
     ];
 }
 ```
@@ -132,8 +144,12 @@ otherwise resolves from `nix/fixtures/` offline so the demo is deterministic).
 
 ## Honest scope
 
-* jetpack **orchestrates** Nix; it does not replace Nix's sandboxed builder.
-  That's the realistic, shippable layer — and it's where the experience lives.
+* This prototype's local `lib/jetpack.jet` **models** merge/package-provider
+  behavior; the real Phase 1 front door is independent `jetpack` commands per
+  the consolidated plan.
+* Phase 1 jetpack **orchestrates** Nix; it does not replace Nix's sandboxed
+  builder. That's the realistic, shippable layer — and it's where the initial
+  experience lives.
 * The deterministic commands (`list`/`diff`/`check`/`generations`/`sync`) read
   JSON state in `state/` and need neither network nor Nix; they are golden-tested.
 * `config.jet` is a real Jet program; `jet run config.jet` stands in for the
