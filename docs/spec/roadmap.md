@@ -1,4 +1,4 @@
-# 05 — Roadmap
+# Roadmap
 
 Each milestone is done when its exit criteria pass as tests. Examples are
 the executable spec: a milestone ships with new examples/ programs and new
@@ -18,8 +18,8 @@ tests/ui fixtures, all green.
 **M3 onward each have a full implementation plan in docs/plans/** (one
 file per milestone: surface, grammar, sema rules, lowering, diagnostics,
 tests, out-of-scope). Implementing agents follow docs/plans/README.md.
-Plans are gated on the decision ballots in docs/06-decision-ballots.md —
-a milestone may not start until its ballot group is ratified in docs/02.
+Plans are gated on the decision ballots in docs/spec/decision-ballots.md —
+a milestone may not start until its ballot group is ratified in docs/spec/syntax-decisions.md.
 
 **Owner direction (2026-06-11, amended 2026-06-12):** the v1.x horizon is
 a complete language — data types, errors, collections, closures,
@@ -34,7 +34,7 @@ unchanged; single-file `jet run` stays ceremony-free forever (R9).
 
 Hello world end-to-end: jet → parse → sema → emit Rust → rustc → run.
 Diagnostics framework, ui snapshot harness, golden harness, ICE policy.
-**Exit:** `cargo test` green; `jet run examples/01_hello.jet` prints. ✓
+**Exit:** `cargo test` green; `jet run examples/features/01_hello.jet` prints. ✓
 
 ## M1 — Values and expressions  *(done; verified 2026-06-11)*
 
@@ -59,7 +59,7 @@ covers every new error; type errors name both types in plain words. ✓
 
 Moves, implicit copy for scalars, explicit `.clone()`, parameter access
 keywords (S10: default/`mut`/`take`/`view`/`ref`), the ownership checker
-in sema, E02xx diagnostics written to docs/04 voice rules. Teaching errors
+in sema, E02xx diagnostics written to docs/spec/diagnostics.md voice rules. Teaching errors
 for foreign `read`/`write` (E0017/E0018). References cannot be stored or
 returned in tier 1 — therefore no lifetime syntax exists.
 **Exit:** an example that *fails* ownership exists for every E02xx code,
@@ -67,7 +67,7 @@ each with a `.fixed.jet` companion that compiles (`tests/ui_fixes.rs`);
 lint snapshots in `tests/ui_lint/`; golden tests prove rustc never rejects
 what sema passes (the verifier earning its keep). ✓
 
-## M3 — Data  *(plan: docs/plans/m03-data.md; ballots: Group 2 ✅)* ✓ 2026-06-11
+## M3 — Data  *(plan: docs/plans/epoch-1/m03-data.md; ballots: Group 2 ✅)* ✓ 2026-06-11
 
 Structs, enums (sum types), `switch` exhaustiveness for enums ("you
 forgot the `Circle` case"), `==` pattern tests, Option (`T?`, no null,
@@ -79,7 +79,7 @@ out of M3 — they land in M9.
 and E0020–E0023 has a ui snapshot; exhaustiveness errors list missing
 cases verbatim. ✓
 
-## M4 — Errors as values  *(plan: docs/plans/m04-errors.md; done 2026-06-11)*
+## M4 — Errors as values  *(plan: docs/plans/epoch-1/m04-errors.md; done 2026-06-11)*
 
 `T ? E` fallible returns, `ok`/`err`, propagation `?` (S7), `or`
 fallback, `panic`/`require` for bugs with a friendly runtime report.
@@ -87,7 +87,7 @@ No exceptions, no null, no silently ignored failures.
 **Exit:** a file-parsing example showing the happy path staying clean;
 the runtime report format pinned by a golden stderr test. ✓
 
-## M5 — Collections & one string story  *(plan: docs/plans/m05-collections.md; ballots: Group 4)* ✓ 2026-06-12
+## M5 — Collections & one string story  *(plan: docs/plans/epoch-1/m05-collections.md; ballots: Group 4)* ✓ 2026-06-12
 
 `[T]`, `[K, V]` (bridging Rust's Vec/BTreeMap internally),
 literals, iteration, indexing with friendly runtime reports, copy-based
@@ -96,7 +96,7 @@ one string type.
 **Exit:** wordcount example; out-of-bounds and iterator-invalidation
 mistakes produce great errors, not Rust concepts. ✓
 
-## M6 — Tooling I  *(plan: docs/plans/m06-tooling.md; ballots: Group 5; four phases)* ✓ 2026-06-12
+## M6 — Tooling I  *(plan: docs/plans/epoch-1/m06-tooling.md; ballots: Group 5; four phases)* ✓ 2026-06-12
 
 `jet fmt` (one true style, zero config), `jet test` (`test "name" { }`
 blocks), `jet new`. Multi-file imports (S16: `import "path" as alias;`)
@@ -108,7 +108,7 @@ files (philosophy: minimal configuration).
 C-style snippet into canonical Jet; `--small` produces a measurably
 smaller binary than the default; a new project runs in two commands.
 
-## M7 — Rust FFI (interop tier)  *(plan: docs/plans/m07-ffi.md; done 2026-06-12)*
+## M7 — Rust FFI (interop tier)  *(plan: docs/plans/epoch-1/m07-ffi.md; done 2026-06-12)*
 
 `extern rust` blocks for calling vetted Rust functions across an
 owned/copied boundary (no borrowed returns), version-pinned, built via a
@@ -117,7 +117,7 @@ project. This is C2's resolution: interop without importing Rust's type
 system.
 **Exit:** an example calling a real Rust crate function. ✓
 
-## M8 — Functions as values  *(plan: docs/plans/m08-closures.md; done 2026-06-12)* ✓
+## M8 — Functions as values  *(plan: docs/plans/epoch-1/m08-closures.md; done 2026-06-12)* ✓
 
 Lambdas, function types, closures whose captures obey the M2 ownership
 rules (no Fn/FnMut/FnOnce surfaced), and the closure-powered collection
@@ -125,7 +125,7 @@ methods: `map`/`filter`/`each`/`find`/`sort_by`/`reduce`.
 **Exit:** a pipeline example; capture-ownership fixtures both failing
 and fixed; rustc-as-verifier battery over Fn-inference cases. ✓
 
-## M9 — Generics & traits  *(plan: docs/plans/m09-generics-traits.md)*
+## M9 — Generics & traits  *(plan: docs/plans/epoch-1/m09-generics-traits.md)*
 
 `fn f<T: Trait>`, generic structs/enums, `trait` + in-type `impl` or
 `impl Type: Trait`, trait-as-type with invisible boxing/dynamic dispatch,
@@ -137,7 +137,7 @@ values only and lands in M9.5.
 **Exit:** shapes-with-traits example; generic container example; an
 instantiation soundness matrix test. ✓
 
-## M9.5 — Comptime v1 (CTFE)  *(plan: docs/plans/m095-comptime.md; resolves S26 layer 1, S57)*
+## M9.5 — Comptime v1 (CTFE)  *(plan: docs/plans/epoch-1/m095-comptime.md; resolves S26 layer 1, S57)*
 
 `comptime x = expr;` — evaluate a pure, deterministic Jet subset at
 compile time (sema tree-walking interpreter; no FFI/IO/time/random),
@@ -151,12 +151,12 @@ snapshots; the **differential battery** green in CI (every
 comptime-evaluable fixture also runs at runtime and must agree
 bit-for-bit — divergence is a P0 miscompile).
 
-## M10 — Standard library  *(plan: docs/plans/m10-stdlib.md; Group 7 ✅)* ✓ 2026-06-13
+## M10 — Standard library  *(plan: docs/plans/epoch-1/m10-stdlib.md; Group 7 ✅)* ✓ 2026-06-13
 
 `import std.<module>`: fs, io, env, process, math, random, time, json —
 exact v1 APIs frozen in the plan; every fallible call returns `T ? E`.
 `U8` byte buffers and byte/string conversions. Enough batteries for real
-CLI tools. User-facing reference: **docs/stdlib.md**.
+CLI tools. User-facing reference: **docs/reference/stdlib.md**.
 **Exit:** file-transform, JSON, and mini-CLI examples with golden tests. ✓
 
 ## M12 — Package manager  *(plan: docs/plans/epoch-1/m12-packages.md; ✅ ratified 2026-06-13; two phases)*
@@ -172,7 +172,7 @@ Single files never need any of it (R9).
 **Exit:** M12.1 store+lock battery + new→add→run ✓; M12.2 registry and
 resolver snapshots per plan.
 
-## M13 — LSP v2  *(plan: docs/plans/m13-lsp.md)* ✓ 2026-06-13
+## M13 — LSP v2  *(plan: docs/plans/epoch-1/m13-lsp.md)* ✓ 2026-06-13
 
 The real language server: completion (incl. switch-arm snippets for
 enums), hover with types + ownership + doc comments, go-to-definition,
@@ -183,7 +183,7 @@ fed by unsaved buffers. Tree-sitter + TextMate grammars.
 under budget in CI.
 **M13 verified 2026-06-13.**
 
-## M14 — v1.0  *(plan: docs/plans/m14-v1.md)* ✓ 2026-06-14
+## M14 — v1.0  *(plan: docs/plans/epoch-1/m14-v1.md)* ✓ 2026-06-14
 
 The proof: three showcase tools (grep-lite, JSON formatter, wordfreq)
 benchmarked at ≤1.5× their Rust references. Diagnostics,
@@ -226,9 +226,11 @@ before work starts. None of these may compromise the v1 milestones.
    allocators, layout, volatile, raw memory; never in onboarding.
 7. **C FFI** (S59 ratified deferred to v2) — `extern c` import and a
    Jet-export story; the gateway to the non-Rust ecosystem and to
-   embedded toolchains.
+   embedded toolchains. **Manual `extern c` blocks only in Epoch 2**
+   (E2-M14). C-header auto-binding (`jet bind` / magic `import c`) is
+   deferred post–Epoch 2: docs/plans/post-epoch-2/c-header-bindings.md.
 8. **Freestanding profile** — `no_std`-class output for embedded/
-   kernels (long-horizon target per docs/00 owner direction).
+   kernels (long-horizon target per docs/spec/philosophy.md owner direction).
 9. **Pure-function marking & evaluation** (S60 ratified) — `pure fn`
    and `jet eval --pure` over marked-pure functions; layer 3 post-v1
    (docs/plans/epoch-1/m12-packages.md § out of scope;

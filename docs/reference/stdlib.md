@@ -1,6 +1,3 @@
-<!-- AUTO-GENERATED from docs/stdlib.md — do not edit by hand.
-Regenerate: ./scripts/gen_stdlib.sh or UPDATE_DOCS=1 cargo test gen_stdlib_doc -->
-
 # Standard library (`jet.std`)
 
 The Jet standard library gives you files, terminal I/O, environment variables,
@@ -449,7 +446,7 @@ first-party packages later:
 - Open file handles and streaming I/O (whole-file reads only)
 - Async / threads (concurrency is v2)
 
-See `docs/plans/m10-stdlib.md` for the exact frozen API and ring build order.
+See `docs/plans/epoch-1/m10-stdlib.md` for the exact frozen API and ring build order.
 
 ---
 
@@ -484,8 +481,8 @@ layer stays for I/O and process control until Jet has its own OS interface.
 
 | Example | Shows |
 |---------|-------|
-| `examples/29_files.jet` | Read, transform, write with errors |
-| `examples/30_json.jet` | Parse, inspect, mutate, re-render JSON |
-| `examples/31_cli.jet` | Args, environment, exit codes |
+| `examples/features/29_files.jet` | Read, transform, write with errors |
+| `examples/features/30_json.jet` | Parse, inspect, mutate, re-render JSON |
+| `examples/features/31_cli.jet` | Args, environment, exit codes |
 
 Run the full battery: `cargo test --test golden` and `cargo test --test stdlib`.

@@ -5,7 +5,7 @@
 //!
 //!     UPDATE_EXPECT=1 cargo test
 //!
-//! Never bless a snapshot you haven't read against docs/04-diagnostics.md.
+//! Never bless a snapshot you haven't read against docs/spec/diagnostics.md.
 //! These files are the product: the error messages ARE the language's UX.
 
 use std::fs;
@@ -84,7 +84,7 @@ fn ui_snapshots() {
             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
             assert_eq!(
                 actual, expected,
-                "\nui snapshot mismatch for {}\n(if the new output is intentional and matches docs/04-diagnostics.md, run: UPDATE_EXPECT=1 cargo test)\n",
+                "\nui snapshot mismatch for {}\n(if the new output is intentional and matches docs/spec/diagnostics.md, run: UPDATE_EXPECT=1 cargo test)\n",
                 shown_path
             );
         }

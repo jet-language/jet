@@ -2,11 +2,11 @@
 //!
 //! Every keyword, sigil, and built-in name a user can type lives in this
 //! file and nowhere else (invariant I7). Each constant maps to a decision
-//! ID in docs/02-syntax-decisions.md. Changing a provisional choice means:
-//! change it here, update docs/02, re-bless the ui snapshots. Done.
+//! ID in docs/spec/syntax-decisions.md. Changing a provisional choice means:
+//! change it here, update docs/spec/syntax-decisions.md, re-bless the ui snapshots. Done.
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
-//! owner in docs/02-syntax-decisions.md.
+//! owner in docs/spec/syntax-decisions.md.
 
 /// N1 (ratified): language name.
 pub const LANG_NAME: &str = "Jet";
@@ -118,7 +118,7 @@ pub const TYPE_JSON_ERROR: &str = "JSONError";
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
 
-/// M1 (docs/05, owner-blessed examples 2026-06-11): branching keywords.
+/// M1 (docs/spec/roadmap.md, owner-blessed examples 2026-06-11): branching keywords.
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
 
@@ -147,7 +147,7 @@ pub const OP_LAMBDA_ARROW: &str = "=>";
 pub const LIT_TRUE: &str = "true";
 pub const LIT_FALSE: &str = "false";
 
-/// M1 (docs/05): arithmetic operators. `+ - * /` on Int and Float;
+/// M1 (docs/spec/roadmap.md): arithmetic operators. `+ - * /` on Int and Float;
 /// `% & | ^ << >>` on Int only. No `+` on String (S8: interpolate instead).
 pub const OP_PLUS: &str = "+";
 pub const OP_MINUS: &str = "-";
@@ -333,7 +333,7 @@ pub const DEP_TABLE_C: &str = "dependencies:c";
 
 // ──────────────────────────────────────────────
 // Jetpack (Phase 1) — user-typeable surface (I7).
-// All decisions ratified in docs/admin/02-syntax-decisions.md (D-JPK*).
+// All decisions ratified in docs/spec/syntax-decisions.md (D-JPK*).
 // These IDs start with `D`, so tests/decisions.rs leaves them alone, but
 // I7 still wants every typeable token to live here with its decision ID.
 // ──────────────────────────────────────────────

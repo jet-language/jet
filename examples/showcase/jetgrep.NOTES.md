@@ -9,8 +9,8 @@ line numbers (`-n`), match counts (`-c`), exit 0 on match / 1 on none / 2 on usa
 
 | Implementation | Lines (.jet / .rs) |
 |----------------|-------------------|
-| Jet (`showcase/jetgrep.jet`) | ~250 |
-| Rust (`showcase/ref/jetgrep.rs`) | ~120 |
+| Jet (`examples/showcase/jetgrep.jet`) | ~250 |
+| Rust (`examples/showcase/ref/jetgrep.rs`) | ~120 |
 
 Jet is longer mainly because of explicit ownership workarounds (clone path before
 reuse, `if (field == true)` instead of `if field`, no `or return` with struct literals).
@@ -31,4 +31,4 @@ reuse, `if (field == true)` instead of `if field`, no `or return` with struct li
 
 ## Benchmark (see BENCHMARKS.md)
 
-Target ≤1.5× Rust reference on `showcase/fixtures/`.
+Target ≤1.5× Rust reference on `examples/showcase/fixtures/`.

@@ -813,7 +813,7 @@ fn build(
         Err(_) => {
             eprintln!("error: couldn't find `rustc` on this machine");
             eprintln!(
-                " why: v1 of this language uses Rust as its backend (docs/03-architecture.md)"
+                " why: v1 of this language uses Rust as its backend (docs/spec/architecture.md)"
             );
             eprintln!(" fix: install Rust from https://rustup.rs, then try again");
             exit(1);

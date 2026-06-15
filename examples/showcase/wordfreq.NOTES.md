@@ -9,8 +9,8 @@ Walks directories recursively, counts words in `.txt` files, prints
 
 | Implementation | Lines |
 |----------------|-------|
-| Jet (`showcase/wordfreq.jet`) | ~95 |
-| Rust (`showcase/ref/wordfreq.rs`) | ~70 |
+| Jet (`examples/showcase/wordfreq.jet`) | ~95 |
+| Rust (`examples/showcase/ref/wordfreq.rs`) | ~70 |
 
 ## Where Jet fought the author
 

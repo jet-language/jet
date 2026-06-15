@@ -2,7 +2,7 @@
 
 **Status:** unratified exploration — owner decision input. Nothing here is
 implemented or promised. This is the briefing that *precedes* an Open
-Decision row in docs/admin/02-syntax-decisions.md.
+Decision row in docs/spec/syntax-decisions.md.
 
 **Audience:** the owner, deciding which (if any) pattern-matching features
 to add to Jet, and in what spelling. Written to be read cold — every
@@ -187,7 +187,7 @@ So list patterns are attractive *grammatically* but carry a semantic
 mismatch with Jet's data model. Options if pursued: (a) allow only
 fixed-length list patterns (`[a, b, c]`, no rest) — safe, no copy
 surprise; (b) make `...rest` borrow a slice, not copy — but tier-1 Jet
-forbids stored/returned references (docs/00 C1); (c) lint loudly (like the
+forbids stored/returned references (docs/spec/philosophy.md C1); (c) lint loudly (like the
 existing L0501 slice-in-loop lint). **This needs care before it's a clear
 win.**
 
@@ -369,7 +369,7 @@ trades a single source of truth per name for distributed definition.
 
 This collides with several ratified decisions and the constitution:
 
-- **docs/00 priority #4 (smallness, "one obvious way")** and **S14 (no
+- **docs/spec/philosophy.md priority #4 (smallness, "one obvious way")** and **S14 (no
 aliases / one canonical form)** — multi-clause heads are a *second* way
 to express what `switch` already does inside one body.
 - **Beginner experience (priority #2):** "first compiled language" readers
@@ -474,7 +474,7 @@ Hold or decline:
 ### What happens next (per the syntax protocol)
 
 Nothing is built until you ratify. When you've decided, I'll: add the
-chosen items as a row in docs/admin/02-syntax-decisions.md Open Decisions
+chosen items as a row in docs/spec/syntax-decisions.md Open Decisions
 (or directly to Ratified with your option), then — and only then — update
 `src/syntax.rs`, write the failing ui fixtures + examples first, and
 implement parser → sema → codegen with snapshots, per the workflow loop.

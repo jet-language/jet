@@ -9,8 +9,8 @@ on stderr and exits 1 on invalid JSON.
 
 | Implementation | Lines |
 |----------------|-------|
-| Jet (`showcase/jsonfmt.jet`) | ~60 |
-| Rust (`showcase/ref/jsonfmt.rs`) | ~45 |
+| Jet (`examples/showcase/jsonfmt.jet`) | ~60 |
+| Rust (`examples/showcase/ref/jsonfmt.rs`) | ~45 |
 
 ## Where Jet fought the author
 

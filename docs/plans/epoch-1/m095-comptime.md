@@ -98,7 +98,7 @@ Codegen stays dumb (I3): it serializes already-computed values to
 literals; it never evaluates anything. rustc sees only constants it can
 trivially verify (I2 risk ≈ zero).
 
-## Diagnostics to register (docs/04)
+## Diagnostics to register (docs/spec/diagnostics.md)
 
 E0951 comptime code reaches an impure operation (shows the call path) ·
 E0952 comptime budget exhausted (call trace + loop counts) · E0953
@@ -109,9 +109,9 @@ shown relative to the importing file).
 
 ## Examples & tests
 
-- `examples/27_comptime_table.jet` — baked lookup table; golden output
+- `examples/features/27_comptime_table.jet` — baked lookup table; golden output
   proves identical results to a runtime-computed copy.
-- `examples/28_embed.jet` — `embed_file` + a comptime `require`
+- `examples/features/28_embed.jet` — `embed_file` + a comptime `require`
   validating the embedded content (with a `.fixed.jet` companion for
   the failing variant).
 - ui fixtures for every E095x, including the E0951 call-path rendering

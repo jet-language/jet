@@ -1,17 +1,17 @@
-# jetos — a declarative OS (post-v1 research)
+# jetos — a declarative OS (Phase 2 design-of-record)
 
-> **STATUS (2026-06-13): NOT RATIFIED — post-v1 exploration only.**
+> **STATUS: NOT RATIFIED — post-v1, do not implement.**
 > Depends on M12 layer 3 (`jet eval --pure`, sandboxed builds, signed
 > caches) on the same store as docs/plans/epoch-1/m12-packages.md. No decision
 > in this file (D-OS1…7, D-NX1…6) is ratified. Agents: do not implement.
 >
-> **SEQUENCING (2026-06-15): superseded by docs/plans/jetpack-jetos/README.md.**
+> This is the **detailed Phase 2 design** the consolidated plan
+> (docs/plans/jetpack-jetos/README.md) sequences and references. Read the
+> README first for phase order and owner decision gates, then this file for the
+> module-system mechanics, merge rules, diagnostics, invariants, and milestones.
 > Per the naming canon, **jetos is Phase 2**, built on the **jetpack** tool
-> (the package manager) whose Phase 1 — a Nix-`shell`/`devenv`-class
-> `jetpack run <remote-ref>` temporary environment — is the near-term,
-> buildable-now work. `jet` plumbing comes later.
-> The vision in this file is unchanged; read the consolidated plan first for the
-> current phase order and owner decision gates.
+> whose Phase 1 (a Nix-`shell`/`devenv`-class temporary environment) is the
+> near-term, buildable-now work.
 
 Audience: the project owner and implementing agents. v1 Jet source-library
 package management is docs/plans/epoch-1/m12-packages.md; the active
@@ -193,7 +193,7 @@ modules/apps/kde-tools.jet: sys.desktop.environment = plasma
 
 This conflict-instead-of-silent-override behavior is a FEATURE: it is the
 moment a lifted module and your setup disagree, surfaced loudly with file
-and line, in the docs/04 voice.
+and line, in the docs/spec/diagnostics.md voice.
 
 ### 5.5 Why modules may not import each other (the liftability law)
 

@@ -80,7 +80,7 @@ impl Theme {
     }
 
     /// A `jet explain`-style error block: a red headline, a why line, and a
-    /// fix pointer. Beginner-first voice (docs/04 diagnostics).
+    /// fix pointer. Beginner-first voice (docs/spec/diagnostics.md diagnostics).
     pub fn error(&self, headline: &str, why: &str, fix: &str) {
         eprintln!();
         eprintln!("  {} {}", self.red("error:"), self.bold(headline));

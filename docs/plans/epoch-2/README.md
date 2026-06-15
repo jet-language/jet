@@ -87,7 +87,7 @@ launch after GA hardening.
 
 These are CEO-level choices. Agents should not write detailed `mN-*.md` files
 until each item is approved or explicitly deferred. Tactical syntax ballots stay
-in `docs/admin/06-decision-ballots.md`; this section is product direction.
+in `docs/spec/decision-ballots.md`; this section is product direction.
 
 ### Strategic decisions (whole epoch)
 
@@ -213,7 +213,7 @@ Scope:
 
 Exit criteria:
 
-- `docs/admin` has a ratified compatibility/release policy.
+- `docs/spec` has a ratified compatibility/release policy.
 - `jet --version` prints compiler version, language epoch/edition support, and
   std/package registry compatibility.
 - Package manifests can reject unsupported future editions/epochs with a clear
@@ -264,7 +264,7 @@ Scope:
 Exit criteria:
 
 - Save-to-diagnostic latency has a budget and test.
-- `jet dev examples/31_cli.jet` watches, rechecks, reruns, and streams output.
+- `jet dev examples/features/31_cli.jet` watches, rechecks, reruns, and streams output.
 - Unsupported programs fail with a plain explanation and a suggested full build.
 - No release build ever uses the interpreter/JIT path.
 
@@ -499,6 +499,11 @@ Scope from S59:
 - Header/library discovery diagnostics.
 - Jet-export story for C callers, if scope allows.
 
+**Out of scope (deferred post–Epoch 2):** C-header auto-binding (`jet bind`,
+compile-time `import c`, clang/bindgen in the compiler). See
+docs/plans/post-epoch-2/c-header-bindings.md. Registry packages may ship
+hand-written bindings without waiting for that tooling.
+
 Exit criteria:
 
 - Example calls a small C library.
@@ -608,6 +613,10 @@ Audit gates:
 - JetOS as a shipped OS product. Epoch 2 can build `jet eval --pure` and layer
   3 foundations, but JetOS should remain research until those foundations are
   real.
+- **C-header auto-binding** (`jet bind`, compile-time `import c`, clang/bindgen
+  translation layer). Epoch 2 ships manual `extern c` only (E2-M14). Optional
+  header-to-Jet tooling is post–Epoch 2; plan and decisions:
+  docs/plans/post-epoch-2/c-header-bindings.md (D-CBIND1…8).
 
 ## Concurrence checklist
 

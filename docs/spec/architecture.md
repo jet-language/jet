@@ -1,4 +1,4 @@
-# 03 — Architecture
+# Architecture
 
 ## Pipeline
 
@@ -82,7 +82,7 @@
    The error messages are the product; treat snapshot diffs like UI diffs.
 2. **golden examples** (tests/golden.rs): examples/ must front-end-pass,
    contain no `unsafe`, and — when rustc is present — build and print
-   exactly examples/expected/*.out.
+   exactly examples/features/expected/*.out.
 3. rustc-as-verifier: golden tests assert rustc accepts generated code,
    so a sema soundness hole becomes a loud test failure, not a shipped bug.
 

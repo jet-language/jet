@@ -5,9 +5,9 @@ use std::process::Command;
 #[test]
 fn generic_examples_build_and_run() {
     for name in [
-        "examples/25_traits.jet",
-        "examples/26_generic_types.jet",
-        "examples/27_printable.jet",
+        "examples/features/25_traits.jet",
+        "examples/features/26_generic_types.jet",
+        "examples/features/27_printable.jet",
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_jet"))
             .arg("run")

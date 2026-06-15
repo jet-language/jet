@@ -76,7 +76,7 @@ pattern += "ok" "(" ident ")" | "err" "(" ident ")" ;
 `or` the fallback operator is expression-only (S35); the lexer token is
 distinct from logical `||` (S13). Precedence: `e or f` binds looser than
 `&&`/`||` so `a? or b` and `x == 1 || y or 0` parse predictably;
-document in docs/01.
+document in docs/spec/spec.md.
 
 ## Sema rules
 
@@ -142,9 +142,9 @@ now-real feature.
 
 ## Examples & tests
 
-- `examples/13_errors.jet` — parse a config-like string; happy path uses
+- `examples/features/13_errors.jet` — parse a config-like string; happy path uses
   `?` and stays clean; one `or` default; one full `switch`.
-- `examples/14_panic.jet` — require + panic output (golden test pins the
+- `examples/features/14_panic.jet` — require + panic output (golden test pins the
   runtime report and exit code 70).
 - ui fixtures: every E04xx + the three teaching errors + `.fixed.jet`
   companions. A fixture proving `?` in `main` errors cleanly.

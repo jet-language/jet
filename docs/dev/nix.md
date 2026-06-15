@@ -45,7 +45,7 @@ Or from the repo directory:
 
 ```bash
 nix build
-./result/bin/jet run examples/01_hello.jet
+./result/bin/jet run examples/features/01_hello.jet
 ```
 
 ## Development
@@ -54,7 +54,7 @@ nix build
 nix develop          # cargo, rustc, gcc, nodejs, jet on PATH
 cargo build
 cargo test
-jet run examples/01_hello.jet
+jet run examples/features/01_hello.jet
 ```
 
 Editor extension (id **`jet-lang.jet`**): `editors/vscode/install.sh` packs and
@@ -67,6 +67,6 @@ Legacy: `nix-shell` uses the same dev shell via `shell.nix`.
 ## Notes
 
 - The compiler has **no** runtime dependency on Cargo for user programs —
-  only `rustc` is invoked (see docs/03-architecture.md).
+  only `rustc` is invoked (see docs/spec/architecture.md).
 - FFI (M7) will need Cargo available when calling external Rust crates;
   add `cargo` to the wrap when that milestone lands.

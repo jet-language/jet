@@ -6,11 +6,11 @@ Command shape (from repo root):
 
 ```bash
 # Jet (cached rebuild after first compile)
-hyperfine --warmup 3 'nix develop -c jet run showcase/jetgrep.jet -- -n the showcase/fixtures/sample.txt'
+hyperfine --warmup 3 'nix develop -c jet run examples/showcase/jetgrep.jet -- -n the examples/showcase/fixtures/sample.txt'
 
-# Rust reference (showcase/ref/jetgrep.rs)
-rustc -O showcase/ref/jetgrep.rs -o /tmp/jetgrep-ref
-hyperfine --warmup 3 '/tmp/jetgrep-ref -n the showcase/fixtures/sample.txt'
+# Rust reference (examples/showcase/ref/jetgrep.rs)
+rustc -O examples/showcase/ref/jetgrep.rs -o /tmp/jetgrep-ref
+hyperfine --warmup 3 '/tmp/jetgrep-ref -n the examples/showcase/fixtures/sample.txt'
 ```
 
 ## Results (target ≤1.5× Rust runtime)
@@ -27,8 +27,8 @@ Jet repeat `jet run` on unchanged source: **<100ms** with `~/.cache/jet/build/` 
 
 ```bash
 nix develop -c cargo build --release
-hyperfine 'nix develop -c jet run showcase/jetgrep.jet -- -r grep showcase/fixtures' \
-          '/tmp/jetgrep-ref -r grep showcase/fixtures'
+hyperfine 'nix develop -c jet run examples/showcase/jetgrep.jet -- -r grep examples/showcase/fixtures' \
+          '/tmp/jetgrep-ref -r grep examples/showcase/fixtures'
 ```
 
 Update this table when hardware or codegen changes materially.

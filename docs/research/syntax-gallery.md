@@ -160,6 +160,8 @@ obj.method arg
 UFCS (Nim-style) is **undecided** — see `07` §Nim; big ergonomics, smallness
 cost.
 
+Owner: What are the tradeoffs of the nim version? It seems nice & convenient, but there are no free lunches.
+
 ---
 
 ## 4. Comments
@@ -185,6 +187,8 @@ cost.
 
 **▶ Jet today (S5):** `//` line comments. No block-comment decision yet
 (undecided). Doc-comment spelling also undecided.
+
+Owner: I want to add block comments with the same syntax as Rust/Go/C++
 
 ---
 
@@ -220,6 +224,8 @@ fmt"hi {name}"
 **▶ Jet today (S8):** `"hi {name}"` — braces inside quoted text, `{{`/`}}` for
 literals (S20). Matches Python f-string/C#/Kotlin family. No `+` concat for
 strings (one obvious way).
+
+Owner: I like the highlighting for the javascript/python curly braces that make it clear they are part of the string interpolation syntax, rather than string itself. We need to implement this.
 
 ---
 
@@ -262,6 +268,8 @@ line`
 **▶ Jet today:** **undecided.** Candidates: triple-quote (Python/Swift), Go
 backticks, Zig `\\` prefix. Interpolation-in-multiline behavior also TBD.
 
+Owner: Let's implement triple quote style.
+
 ---
 
 ## 7. If / else (statement vs. expression)
@@ -291,6 +299,8 @@ puts "big" if a > b
 **▶ Jet today (KW_IF/KW_ELSE):** `if cond { } else { }`, C-family braces but no
 parens around the condition. Whether `if` *yields a value* (expression form) is
 worth confirming against the Rust/Kotlin model.
+
+Owner: I want to support both expression & statement. I also want to support putting the conditional expression inside of parenthesis for readability, but it is supported in both forms.
 
 ---
 
@@ -348,6 +358,8 @@ default:     return "many"
 **▶ Jet today (S24):** keyword **`switch`**, arms use `->`. `match`/`case`/
 `default` are teaching errors. Exhaustiveness is the design intent (M3 enums).
 Spelling is Go-ish keyword + Rust-ish arrow arms.
+
+Owner: I want to change the keyword to when from switch. 
 
 ---
 

@@ -1,4 +1,4 @@
-# 02 — Syntax Decisions (the owner's control surface)
+# Syntax Decisions (the owner's control surface)
 
 **The owner has final say on all user-facing syntax.** Agents implement
 only what is Ratified, may rely on Provisional choices (clearly marked,
@@ -7,7 +7,7 @@ new: add a row to Open Decisions with options and tradeoffs, and stop.
 
 How to ratify: move the row to Ratified with your chosen option. Agents
 then update `src/syntax.rs` (and parser if structural), re-bless ui
-snapshots (`UPDATE_EXPECT=1 cargo test`), and update docs/01-spec.md.
+snapshots (`UPDATE_EXPECT=1 cargo test`), and update docs/spec/spec.md.
 
 ## Ratified
 
@@ -214,7 +214,7 @@ selective imports (`import module { item }`, `from module import item`).
 name required exactly once; order may differ from the declaration.
 Rejected: call-style `Point(x: 1.0, y: 2.0)` (B), required factory
 `new` (C). Parser disambiguates `ident {` from blocks in condition
-position (see docs/plans/m03-data.md).
+position (see docs/plans/epoch-1/m03-data.md).
 
 **S30 — Enum declaration & variants (M3)** *(ratified 2026-06-11)*:
 
@@ -652,7 +652,10 @@ by-value boundary first, pointers only inside the S58 tier. Like Rust FFI,
 C FFI declarations are source-level declarations; a package manager may help
 install or locate native libraries, but it must not be required just to declare
 an external function. Rejected for v1: bindgen-style auto-generation as the
-primary surface, Rust-crate detour only.
+primary surface, Rust-crate detour only. **Amended (owner, 2026-06-15):**
+optional header-to-Jet tooling (`jet bind`, compile-time `import c`) is
+deferred **past Epoch 2** — see docs/plans/post-epoch-2/c-header-bindings.md.
+Epoch 2 (E2-M14) ships manual `extern c` only.
 
 **S60 — Pure-function marking** *(ratified 2026-06-12; post-1.0 milestone
 pending)*: `**pure fn name(…)**` — a checked modifier; purity is part of
@@ -795,7 +798,7 @@ which fails if:
 - any `src/syntax.rs` entry is `(provisional)` while ratified in this file;
 - any open or deferred decision ID appears in `src/syntax.rs`;
 - the Provisional table below lists a real decision ID;
-- a staged decision loses its pinned error code in docs/04.
+- a staged decision loses its pinned error code in docs/spec/diagnostics.md.
 
 Agents: after ratifying a row, update `syntax.rs` to `(ratified)`, clear
 the Provisional table row, and add a ui snapshot if behavior changes.
@@ -823,11 +826,11 @@ implementation milestone is pending.
 
 > **Ballots:** every open decision below (and all new ones for M3–M14)
 > has a full ballot — options, how Rust does it, expert lean, beginner
-> lean, recommendation — in **docs/06-decision-ballots.md**, grouped so
+> lean, recommendation — in **docs/spec/decision-ballots.md**, grouped so
 > the owner decides one milestone-sized batch at a time. The rows here
 > are the registry; the ballots are the briefing.
 
-### Registered for M3–M14 (see docs/06-decision-ballots.md for options)
+### Registered for M3–M14 (see docs/spec/decision-ballots.md for options)
 
 
 | ID  | Question                                   | Needed by |

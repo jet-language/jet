@@ -1,7 +1,7 @@
 # M13 — LSP v2: a real language server
 
 **Status:** implemented and verified 2026-06-14. D-LSP1…13 ratified
-2026-06-14 (all recommendations accepted — see docs/admin/06-decision-ballots.md Group 10).
+2026-06-14 (all recommendations accepted — see docs/spec/decision-ballots.md Group 10).
 Depends on M6 phase 4 (LSP v0 skeleton), M12 (multi-package projects).
 **Error codes:** none new (tooling); internal robustness instead.
 
@@ -111,7 +111,7 @@ autocorrect code actions, VS Code extension skeleton.
 - **JSON-RPC:** revisit M6 hand-rolled JSON under load; if bottleneck,
   request owner approval for serde_json in tooling binary (I6 protocol).
 - **VS Code extension:** binary path config, semantic token theme defaults.
-  Ship `editors/jet.tmGrammar` + tree-sitter-jet/ generated from syntax.rs.
+  Ship `editors/jet.tmGrammar` + editors/tree-sitter/ generated from syntax.rs.
 
 ---
 

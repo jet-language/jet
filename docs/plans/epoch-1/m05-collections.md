@@ -104,7 +104,7 @@ receiver (reuses M2 E0202 machinery via `mut self`).
    non-clonable; `take`/moves compose through (extend M2 tables).
    `xs[i]` on a list of non-copy `T` yields a clone with lint L0201
    (consistent with M2) — `.get` + `is` borrows nothing in tier 1, it
-   also clones; document honestly in docs/01.
+   also clones; document honestly in docs/spec/spec.md.
 
 ## Codegen lowering
 
@@ -139,10 +139,10 @@ Teaching: E0026 `as` casts → `.to_float()` etc. · E0027 `append`/`add`
 
 ## Examples & tests
 
-- `examples/15_lists.jet` — build/sort/slice/join.
+- `examples/features/15_lists.jet` — build/sort/slice/join.
 - `examples/features/16_wordcount.jet` — THE exit-criteria example: split, count
   into a map, print sorted results.
-- `examples/17_strings.jet` — chars, unicode (`"héllo"`), trim/split/
+- `examples/features/17_strings.jet` — chars, unicode (`"héllo"`), trim/split/
   replace, parse with `or` defaults.
 - Golden stderr tests for out-of-bounds and missing-key reports.
 - ui fixtures for all E05xx/L0501 + teaching errors, with `.fixed.jet`.

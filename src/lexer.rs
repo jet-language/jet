@@ -456,7 +456,7 @@ impl<'a> Lexer<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0001",
                         format!("the character `{}` doesn't mean anything here (yet)", other),
-                        "check docs/01-spec.md for what's supported so far".to_string(),
+                        "check docs/spec/spec.md for what's supported so far".to_string(),
                         "remove it, or use supported syntax".to_string(),
                         Some(Span::new(start, self.pos(self.i + 1))),
                     ));

@@ -1,6 +1,6 @@
 //! jet — compiler library.
 //!
-//! Pipeline: lex -> parse -> sema -> codegen (docs/03-architecture.md).
+//! Pipeline: lex -> parse -> sema -> codegen (docs/spec/architecture.md).
 //! The front end (everything before codegen) owns ALL user-facing
 //! correctness and every diagnostic. The Rust backend is a verifier and
 //! optimizer, never a source of user-facing errors.

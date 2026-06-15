@@ -87,8 +87,8 @@ fn hello_world_small_binary_stays_under_budget() {
     }
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let example = root.join("examples/01_hello.jet");
-    assert!(example.is_file(), "examples/01_hello.jet must exist");
+    let example = root.join("examples/features/01_hello.jet");
+    assert!(example.is_file(), "examples/features/01_hello.jet must exist");
 
     let dir = std::env::temp_dir().join(format!("jet_hello_budget_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

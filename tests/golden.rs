@@ -14,7 +14,7 @@ use std::process::Command;
 #[test]
 fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let ex_dir = root.join("examples");
+    let ex_dir = root.join("examples/features");
     let ext = jet::syntax::FILE_EXT;
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
@@ -30,7 +30,7 @@ fn examples_compile_and_run() {
             entries.push((
                 path.clone(),
                 stem.clone(),
-                format!("examples/{}.{}", stem, ext),
+                format!("examples/features/{}.{}", stem, ext),
             ));
         } else if path.is_dir() {
             let main = path.join(format!("main.{}", ext));
@@ -40,7 +40,7 @@ fn examples_compile_and_run() {
                     main.clone(),
                     stem,
                     format!(
-                        "examples/{}/main.{}",
+                        "examples/features/{}/main.{}",
                         path.file_name().unwrap().to_string_lossy(),
                         ext
                     ),
@@ -55,7 +55,7 @@ fn examples_compile_and_run() {
         let src = fs::read_to_string(&path).unwrap();
 
         if stem == "22_ffi" && !have_cargo {
-            eprintln!("note: skipping examples/22_ffi.jet golden (need cargo for FFI bridge)");
+            eprintln!("note: skipping examples/features/22_ffi.jet golden (need cargo for FFI bridge)");
             checked += 1;
             continue;
         }
@@ -65,7 +65,7 @@ fn examples_compile_and_run() {
             Err(diags) => panic!(
                 "example {} failed the front end:\n{}",
                 stem,
-                jet::render_diagnostics(&format!("examples/{}.{}", stem, ext), &src, &diags)
+                jet::render_diagnostics(&format!("examples/features/{}.{}", stem, ext), &src, &diags)
             ),
         };
         let rust_code = compiled.rust;
@@ -117,7 +117,7 @@ fn examples_compile_and_run() {
             let err_path = ex_dir.join("expected").join(format!("{}.err.out", stem));
             if err_path.exists() {
                 let expected_err = fs::read_to_string(&err_path)
-                    .unwrap_or_else(|_| panic!("missing examples/expected/{}.err.out", stem));
+                    .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.err.out", stem));
                 assert_eq!(
                     run.status.code(),
                     Some(70),
@@ -140,7 +140,7 @@ fn examples_compile_and_run() {
                 );
                 let expected =
                     fs::read_to_string(ex_dir.join("expected").join(format!("{}.out", stem)))
-                        .unwrap_or_else(|_| panic!("missing examples/expected/{}.out", stem));
+                        .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.out", stem));
                 assert_eq!(
                     String::from_utf8_lossy(&run.stdout),
                     expected,

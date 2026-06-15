@@ -5,7 +5,7 @@ D-MF1…5). Architecture **ratified** (D-PM1…8, owner 2026-06-13).
 M12.2 (registry, semver ranges, PubGrub resolver, jet publish/vendor/audit)
 is the next milestone.
 Depends on M6 (multi-file), M7 (FFI deps in manifest), M10 (std imports).
-**Error codes:** E1201–E1209 (claim in docs/04 as implemented).
+**Error codes:** E1201–E1209 (claim in docs/spec/diagnostics.md as implemented).
 
 ## Goal
 
@@ -29,7 +29,7 @@ LAYER 2 — M12.2
   git-index registry · semver ranges + PubGrub resolver · jet publish
   · --as-of · local compile-once cache · jet vendor · jet audit
 
-LAYER 3 — post-v1 (same store/lockfile; needs ballots + docs/research/jetos.md)
+LAYER 3 — post-v1 (same store/lockfile; needs ballots + docs/plans/jetpack-jetos/jetos-design.md)
   jet eval --pure recipes · sandboxed builds · signed binary caches
   · generations/rollback for installed tools · packaging non-Jet software
 ```
@@ -444,7 +444,7 @@ add without `--git`.
 
 ## Examples & tests
 
-- `examples/32_packages/` — multi-file project with path dep.
+- `examples/features/32_packages/` — multi-file project with path dep.
 - `tests/pkg/` — fixture workspaces (see Phase 1 exit).
 - Ui: `tests/ui/manifest_*.jet` driven from bad toml fixtures.
 
@@ -458,12 +458,12 @@ content. Features/conditional compilation. Binary dep artifacts in phase 1.
 Yanking/mirrors implementation beyond spec.
 
 **Post-v1 OS and environment direction:** declarative OS work lives in
-**docs/research/jetos.md**, but active sequencing and naming now live in
+**docs/plans/jetpack-jetos/jetos-design.md**, but active sequencing and naming now live in
 **docs/plans/jetpack-jetos/README.md**. Phase 1 is `jetpack run` for
 temporary/dev environments plus `build/list/clean/add/remove`; Phase 2 is jetos
 and installable ISOs. Not M12 source-library work.
 
-**Dev environment:** repo Nix flake for building Jet itself — **docs/nix.md**
+**Dev environment:** repo Nix flake for building Jet itself — **docs/dev/nix.md**
 (unchanged; not part of the user package manager).
 
 ---
@@ -479,7 +479,7 @@ and installable ISOs. Not M12 source-library work.
 **Agent checklist before M12.1:**
 
 1. Read this file end-to-end; implement per ratified D-PM1…8.
-2. Claim E1201–E1209 in docs/04 as diagnostics land.
+2. Claim E1201–E1209 in docs/spec/diagnostics.md as diagnostics land.
 3. Store paths: `~/.jet/store/<name>-<version>-<full-fingerprint>/`.
 4. Do not implement layer-3 recipes, `package.jet` manifest, or `jetpack`
    from the M12 plan. Public `jetpack` is a separate owner-gated track in

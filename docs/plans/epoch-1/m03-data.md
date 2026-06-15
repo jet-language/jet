@@ -55,7 +55,7 @@ fn main() {
 }
 ```
 
-### Grammar additions (EBNF, extends docs/01)
+### Grammar additions (EBNF, extends docs/spec/spec.md)
 
 ```
 program   = { func | structdef | enumdef | const } ;
@@ -156,7 +156,7 @@ A `switch` that is fully patterns lowers to a native Rust `match` on the
 subject. Mixed switches keep the M1 if/else-chain lowering with `==`
 pattern tests becoming `matches!`/`if let` chains.
 
-## Diagnostics to register (docs/04)
+## Diagnostics to register (docs/spec/diagnostics.md)
 
 E0301 `impl` for unknown type · E0302 unknown field (suggestion) ·
 E0303 construction missing/duplicate/extra fields (lists names) ·
@@ -172,11 +172,11 @@ Teaching: E0020 `nil`/`None`/`Some`/`none`/`some` → `null`/`value` · E0021
 
 ## Examples & tests
 
-- `examples/10_structs.jet` — shapes with methods, static constructor,
+- `examples/features/10_structs.jet` — shapes with methods, static constructor,
   printing; expected output pinned.
-- `examples/11_enums.jet` — traffic-light state machine driven by an
+- `examples/features/11_enums.jet` — traffic-light state machine driven by an
   exhaustive switch.
-- `examples/12_option.jet` — search returning `Int?`, handled with `==`.
+- `examples/features/12_option.jet` — search returning `Int?`, handled with `==`.
 - ui fixtures for every E03xx/L0301 + the four teaching errors, each
   errorful fixture with a `.fixed.jet` companion (pattern from M2).
 - Ownership interaction tests: struct moves, `take self` consume,
@@ -200,4 +200,4 @@ enforcement across files (M6), operator overloading (never).
 5. Methods/receivers wired into the M2 ownership checker.
 6. Recursion detection + box marking.
 7. Codegen + golden examples; derive Display/Clone/PartialEq.
-8. Teaching errors; re-bless snapshots; update docs/01, docs/04, docs/05.
+8. Teaching errors; re-bless snapshots; update docs/spec/spec.md, docs/spec/diagnostics.md, docs/spec/roadmap.md.

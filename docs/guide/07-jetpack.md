@@ -152,5 +152,5 @@ shows you a raw Nix error.
 ---
 
 *Phase 1 scope and decisions: `docs/plans/jetpack-jetos/README.md` and the
-`D-JPK*` rows in `docs/admin/02-syntax-decisions.md`. Phase 2 (jetos, the
+`D-JPK*` rows in `docs/spec/syntax-decisions.md`. Phase 2 (jetos, the
 declarative distro) builds on top of Jetpack.*

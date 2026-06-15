@@ -2759,12 +2759,12 @@ pub fn run_doctor() {
 
     // C13: tree-sitter grammar presence.
     let ts_grammar =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-jet/grammar.js");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("editors/tree-sitter/grammar.js");
     if ts_grammar.exists() {
-        println!("  [ok] tree-sitter-jet/grammar.js present");
+        println!("  [ok] editors/tree-sitter/grammar.js present");
     } else {
         println!(
-            "  [WARN] tree-sitter-jet/grammar.js not found — run `tree-sitter generate` to build"
+            "  [WARN] editors/tree-sitter/grammar.js not found — run `tree-sitter generate` to build"
         );
     }
 

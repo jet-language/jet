@@ -19,7 +19,7 @@ fn jet_test_example_output() {
         return;
     }
 
-    let example = root.join("examples/20_tests.jet");
+    let example = root.join("examples/features/20_tests.jet");
     let out = Command::new(&jet)
         .arg("test")
         .arg(&example)
@@ -27,12 +27,12 @@ fn jet_test_example_output() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet test examples/20_tests.jet failed:\nstdout: {}\nstderr: {}",
+        "jet test examples/features/20_tests.jet failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let expected = fs::read_to_string(root.join("examples/expected/20_tests.test.out"))
-        .expect("examples/expected/20_tests.test.out");
+    let expected = fs::read_to_string(root.join("examples/features/expected/20_tests.test.out"))
+        .expect("examples/features/expected/20_tests.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
 

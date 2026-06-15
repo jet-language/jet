@@ -2,8 +2,8 @@
 
 Status: exploratory analysis, **not ratified**, decides no syntax or
 semantics. Written to answer: "what would we want to implement for
-industry/enterprises to start using Jet?" Grounded in docs/00 and
-docs/05. Most of what enterprises need is already on the roadmap — the
+industry/enterprises to start using Jet?" Grounded in docs/spec/philosophy.md and
+docs/spec/roadmap.md. Most of what enterprises need is already on the roadmap — the
 real gaps are policy and operations, not language features.
 
 ## Already on the roadmap (enterprise checklist items)
@@ -43,7 +43,7 @@ is the wrong shelf. No enterprise team ships a language its developers
 cannot step through. Since Jet transpiles to Rust, the pragmatic v1 is
 line-directive-style source mapping so gdb/lldb/VS Code show Jet source
 lines, not generated Rust. Recommendation: promote to the
-committed-additions list in docs/05.
+committed-additions list in docs/spec/roadmap.md.
 
 ### 3. Supply-chain features in M12 Phase 2
 
@@ -100,7 +100,7 @@ Mostly packaging work.
 
 Async/await, exceptions, configurability of fmt/lints, or compliance
 certifications (ISO spec, safety-critical) — all premature or contrary
-to docs/00. Enterprises ask for configurability reflexively; Go proved
+to docs/spec/philosophy.md. Enterprises ask for configurability reflexively; Go proved
 you can refuse and win.
 
 ## Sequencing reality
@@ -111,5 +111,5 @@ CLI tools and small services first (exactly M14's showcase), get
 adopted bottom-up by individual engineers, and have the policy story
 (item 1) ready the day a platform team asks "can we standardize on
 this?" The only items actionable now are doc-only ones: write the
-stability/edition intent into docs/00 or a new doc, and promote the
+stability/edition intent into docs/spec/philosophy.md or a new doc, and promote the
 debugger from "deferred" to committed additions — both owner decisions.

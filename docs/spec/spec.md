@@ -1,8 +1,8 @@
-# 01 — Language Spec (living document)
+# Language Spec (living document)
 
 Behavior described here is authoritative when ratified in
-docs/02-syntax-decisions.md (enforced by `tests/decisions.rs` on every
-`cargo test`). Open decisions in docs/02 are not implemented until
+docs/spec/syntax-decisions.md (enforced by `tests/decisions.rs` on every
+`cargo test`). Open decisions in docs/spec/syntax-decisions.md are not implemented until
 ratified. The examples/ directory is the executable form of this spec: if
 the spec and a passing example disagree, the spec is wrong — fix the spec.
 
@@ -88,7 +88,7 @@ expr     = precedence climbing over:
 ### Staged errors
 
 Features that exist in the roadmap but not the language yet fail with an
-error naming the milestone (see staged table in docs/02).
+error naming the milestone (see staged table in docs/spec/syntax-decisions.md).
 A future feature must never die as a generic syntax error. Teaching
 errors (S14, E0008–E0016) recognize foreign spellings — `def`, `let`,
 `set`, `println`, `and`/`or`/`not`, `Text`, `try`, `use`, `match` — and
@@ -227,7 +227,7 @@ and exit **1** when any test fails. **`require_eq`** failures print
 **`jet new <name>`** creates `<name>/main.jet` (hello world) and
 `<name>/.gitignore` (`build/`). No manifest (M12; opt-in).
 
-Example: `examples/20_tests.jet`. Goldens: `examples/expected/20_tests.test.out`,
+Example: `examples/features/20_tests.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
 `tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`.
 
 **NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
@@ -258,7 +258,7 @@ at the boundary and become the M4 runtime report (exit 70).
 
 Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**).
 
-Example: `examples/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
+Example: `examples/features/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
 Integration: `tests/ffi.rs` (gated on `cargo`).
 
 ## M6 phase 3 — multi-file imports (done)
@@ -278,7 +278,7 @@ blocks and `user_<module>_<name>` mangling (`main` stays `main`).
 
 Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
 **E0604** import cycle · **E0605** private item · **E0606** ambiguous module.
-Example: `examples/21_imports/` (three files; file import + `as alias`). UI
+Example: `examples/features/21_imports/` (three files; file import + `as alias`). UI
 fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambiguous}/`.
 
 ## M6 phase 4 — `--small` + LSP v0 (done)
@@ -322,7 +322,7 @@ the binding is rejected (**E0804**). Calling a non-function → **E0803**.
 Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
 **`|x|`** pipes → `(x) => …` (**E0033**).
 
-Examples: `examples/23_closures.jet`, `examples/24_callbacks.jet`. Ui:
+Examples: `examples/features/23_closures.jet`, `examples/features/24_callbacks.jet`. Ui:
 `tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
 E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 `tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`
@@ -330,8 +330,8 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 
 ## M10 — Standard library (done)
 
-Full user-facing reference: **docs/stdlib.md**. Implementation plan and frozen
-API inventory: **docs/plans/m10-stdlib.md**.
+Full user-facing reference: **docs/reference/stdlib.md**. Implementation plan and frozen
+API inventory: **docs/plans/epoch-1/m10-stdlib.md**.
 
 M10 standard library modules are compiler-known namespaces backed by Rust std
 helpers in the generated prelude. Import the short `std` spelling or the
@@ -365,8 +365,8 @@ deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
 Codegen invariant: importing std modules is free; sema records reachable std
 calls and codegen emits only those helpers (R10).
 
-Examples: `examples/29_files.jet`, `examples/30_json.jet`,
-`examples/31_cli.jet`. UI: `tests/ui/std_*`, `tests/ui/u8_out_of_range.jet`,
+Examples: `examples/features/29_files.jet`, `examples/features/30_json.jet`,
+`examples/features/31_cli.jet`. UI: `tests/ui/std_*`, `tests/ui/u8_out_of_range.jet`,
 and M10 teaching errors **E0037**–**E0039**.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
@@ -402,6 +402,6 @@ Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
 
 ## Deliberately absent
 
-See non-goals in docs/00-philosophy.md. The parser should produce staged
+See non-goals in docs/spec/philosophy.md. The parser should produce staged
 or guiding errors for the ones users will reach for (e.g. `and` → teaching
 error naming `&&`, per S14).

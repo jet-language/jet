@@ -155,7 +155,7 @@ otherwise resolves from `nix/fixtures/` offline so the demo is deterministic).
 * `config.jet` is a real Jet program; `jet run config.jet` stands in for the
   future `jet eval --pure` (S60). The **fluent** `apps.installed.append([...])`
   surface needs first-party compiler support — see the design brief in
-  [`docs/research/jetpack-config.md`](../../docs/research/jetpack-config.md),
+  [`docs/plans/jetpack-jetos/jetpack-config-brief.md`](../../docs/plans/jetpack-jetos/jetpack-config-brief.md),
   which compares the with- and without-pure-evaluation paths.
 
 ## Layout

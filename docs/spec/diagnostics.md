@@ -1,4 +1,4 @@
-# 04 — Diagnostics
+# Diagnostics
 
 Error messages are the language's user interface. They are designed, not
 written; every change is reviewed against this file and pinned by a

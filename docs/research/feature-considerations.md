@@ -1,4 +1,4 @@
-# 07 — Feature Considerations (cross-language idea bank)
+# Feature Considerations (cross-language idea bank)
 
 **Status:** research / owner reading material. Nothing here is ratified.
 This file surveys unique features from other languages and judges each one

@@ -40,7 +40,7 @@ explicit conversion trait.
 
 Current Jet error handling is described in `docs/guide/04-errors.md`,
 `docs/plans/epoch-1/m04-errors.md`, and the living spec in
-`docs/admin/01-spec.md`.
+`docs/spec/spec.md`.
 
 The current model is:
 
@@ -496,5 +496,5 @@ handling.
 
 - Jet current guide: `docs/guide/04-errors.md`
 - Jet M4 plan: `docs/plans/epoch-1/m04-errors.md`
-- Jet living spec: `docs/admin/01-spec.md`
+- Jet living spec: `docs/spec/spec.md`
 - Odin overview: https://odin-lang.org/docs/overview/

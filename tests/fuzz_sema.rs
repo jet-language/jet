@@ -37,7 +37,7 @@ fn fuzz_seed() -> u64 {
 }
 
 fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
-    let ex_dir = root.join("examples");
+    let ex_dir = root.join("examples/features");
     let ext = jet::syntax::FILE_EXT;
     let mut seeds = Vec::new();
     for e in fs::read_dir(&ex_dir).unwrap().flatten() {
@@ -48,7 +48,7 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
                 continue;
             }
             let src = fs::read_to_string(&path).unwrap();
-            let shown = format!("examples/{}.{}", stem, ext);
+            let shown = format!("examples/features/{}.{}", stem, ext);
             seeds.push((shown, src));
         }
     }

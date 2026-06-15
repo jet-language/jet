@@ -53,7 +53,7 @@ pub enum Type {
 }
 
 impl Type {
-    /// Plain-words name for diagnostics (docs/04 voice: name both types).
+    /// Plain-words name for diagnostics (docs/spec/diagnostics.md voice: name both types).
     pub fn show(&self) -> String {
         match self {
             Type::Int => "Int (a whole number)".to_string(),
@@ -193,7 +193,7 @@ pub struct ProgramBundle {
 #[derive(Debug)]
 pub struct LoadedModule {
     pub path: std::path::PathBuf,
-    /// Stable path string for diagnostics/codegen (e.g. `examples/21_imports/main.jet`).
+    /// Stable path string for diagnostics/codegen (e.g. `examples/features/21_imports/main.jet`).
     pub display: String,
     pub source: String,
     /// Namespace when this file is imported (`import … as alias`).

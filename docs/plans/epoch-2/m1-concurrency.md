@@ -93,8 +93,8 @@ Teaching: E0040 `async`/`await` → not in Jet; tasks block · E0041
 
 ## Examples & tests
 
-- `examples/32_tasks.jet` — parallel sum split across 4 tasks.
-- `examples/33_pipeline.jet` — producer/consumer over a channel.
+- `examples/features/32_tasks.jet` — parallel sum split across 4 tasks.
+- `examples/features/33_pipeline.jet` — producer/consumer over a channel.
 - ui fixtures: shared-var capture (E1101 + fixed-with-channel
   companion), unsendable struct (E1102), unjoined task lint.
 - Golden tests with deterministic outputs (sorted collection of

@@ -100,7 +100,7 @@
 
             echo "Jet dev shell"
             echo "  build:    cargo build"
-            echo "  run:      jet run examples/01_hello.jet"
+            echo "  run:      jet run examples/features/01_hello.jet"
             echo "  search:   rg \"pattern\" docs src tests"
             echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
             echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"

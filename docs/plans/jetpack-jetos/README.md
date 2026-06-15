@@ -11,12 +11,14 @@ Phase 1 commands are **`jetpack run/build/list/clean/add/remove`**. Later,
 Jet equivalent of `flake.nix`; ratified filenames are **`pack.jet`** and
 **`pack.lock`**. **jetos** (the OS) is Phase 2 and is built *on top of* jetpack.
 
-**If you are a fresh agent picking this up:** read this file top to bottom, then
-`docs/plans/jetpack-jetos/halcyonomega-nixos-audit.md`, then the two background
-briefs `docs/research/jetpack-config.md` and `docs/research/jetos.md` (older;
-superseded by this file where they disagree).
+**If you are a fresh agent picking this up:** read this file top to bottom (it is
+the sequencing + decision overview), then the detailed design docs in this folder:
+`halcyonomega-nixos-audit.md`, the Phase 1 brief `jetpack-config-brief.md`, and
+the Phase 2 design-of-record `jetos-design.md`. This file owns sequencing and the
+D-JPK gates; those files own the detailed design they reference (merge rules,
+J-M diagnostics, OS invariants/milestones, B1–B4, Path A/B).
 **Do not write code yet** unless the owner explicitly asks you to proceed. All
-D-JPK decisions are ratified in `docs/admin/02-syntax-decisions.md`. Build the
+D-JPK decisions are ratified in `docs/spec/syntax-decisions.md`. Build the
 failing tests/examples first once the owner asks you to proceed.
 
 ---
@@ -62,7 +64,7 @@ Phase 2 — jetos: the declarative distro                (depends on jetpack + l
 Phase 1 is deliberately **buildable on today's language** — it orchestrates Nix to
 realize packages and composes the shell itself (std-only Rust: `std::process`,
 `std::env`). It does **not** need pure-eval / M12 layer 3. Phase 2 (own builder,
-activation, ISO) wants the layer-3 foundations from `docs/research/jetos.md`.
+activation, ISO) wants the layer-3 foundations from `docs/plans/jetpack-jetos/jetos-design.md`.
 
 ---
 
@@ -205,7 +207,7 @@ every diagnostic has a snapshot; every feature ships an example + expected outpu
 
 ## 4. Phase 2 — jetos (the declarative distro + ISO)
 
-Phase 2 is the existing vision in `docs/research/jetos.md` (NixOS restated in Jet),
+Phase 2 is the existing vision in `docs/plans/jetpack-jetos/jetos-design.md` (NixOS restated in Jet),
 now explicitly **built on the jetpack tool from Phase 1**. The merge engine,
 option tree, dendritic modules, hosts, generations, and `switch/diff/rollback`
 described there are unchanged; jetpack provides the store/build/activation
@@ -283,7 +285,7 @@ New for the owner's stated goal ("an installable iso so I can test in a VM"):
 
 | MS | Goal | Exit criteria |
 |---|---|---|
-| OS0–OS4 | as in `docs/research/jetos.md` §8 (merge engine → import-tree → activation → std option tree) | unchanged; gated on M12 layer 3 + S60 pure-eval |
+| OS0–OS4 | as in `docs/plans/jetpack-jetos/jetos-design.md` §8 (merge engine → import-tree → activation → std option tree) | unchanged; gated on M12 layer 3 + S60 pure-eval |
 | **OS-ISO** | a bootable installable image built by jetpack | `jet os build --image` / `jetpack build --image` (spelling TBD) produces an x86_64 graphical ISO; boots in QEMU/VM; reaches a login; parity target is the current `modules/hosts/iso/iso.nix` Calamares Plasma image |
 | **OS-VM** | a scripted VM test harness | CI/local: build ISO → boot in QEMU → `switch` → `rollback` round-trip; power-cut sim boots prior generation (jetos.md OS2) |
 
@@ -359,11 +361,12 @@ D-NX1..6; jetpack-config.md D-JP1..5. This file supersedes their *sequencing*
 3. **forge capstone.** Per D-JPK6/D-JP4, useful Forge ideas were saved in
    `docs/plans/jetpack-jetos/forge-salvage.md`; `examples/capstone/forge/` is
    removed so Jetpack is the only package-manager path.
-4. **Roadmap pointer.** `docs/admin/05-roadmap.md` gains a short "jetpack & jetos"
+4. **Roadmap pointer.** `docs/spec/roadmap.md` gains a short "jetpack & jetos"
    subsection pointing here (done 2026-06-15).
-5. **Research-doc status notes.** `docs/research/jetos.md` and
-   `docs/research/jetpack-config.md` get a banner pointing to this consolidated
-   plan as the live sequencing source (done 2026-06-15).
+5. **Design docs co-located.** The detailed design briefs `jetos-design.md`
+   (Phase 2) and `jetpack-config-brief.md` (Phase 1) live alongside this plan in
+   `docs/plans/jetpack-jetos/`; this README owns sequencing, they own the detail
+   (done 2026-06-15).
 
 ---
 

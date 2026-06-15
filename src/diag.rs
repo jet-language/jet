@@ -1,6 +1,6 @@
 //! Diagnostics: every user-facing error in the language flows through here.
 //!
-//! Contract (docs/04-diagnostics.md): every Diagnostic has a stable code,
+//! Contract (docs/spec/diagnostics.md): every Diagnostic has a stable code,
 //! a `what` (one line, plain language), a `why` (the rule behind it), and
 //! a `fix` (a concrete next step, copy-pasteable when possible).
 //!
@@ -126,7 +126,7 @@ impl Diagnostic {
         self
     }
 
-    /// Render in the exact format specified by docs/04-diagnostics.md.
+    /// Render in the exact format specified by docs/spec/diagnostics.md.
     /// The ui snapshot tests pin this format; change it deliberately.
     pub fn render(&self, file: &str, src: &str) -> String {
         let mut out = String::new();

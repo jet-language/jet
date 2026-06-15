@@ -1,19 +1,16 @@
-# jetpack config — design brief (owner decision)
+# jetpack config — design brief (Phase 1 fluent-surface analysis)
 
-> **Status (2026-06-15): a working slice ships in `examples/jetos/`.** This brief
-> records what was built within today's language, the language/compiler walls
-> found doing it, and the two paths to the *exact* fluent surface the owner
-> asked for (`apps.installed.append([firefox, fastfetch, btop])`). It is the
-> ground-level companion to the post-v1 vision in `docs/research/jetos.md`.
+> **What this is:** the ground-level design brief behind the jetpack pack-file
+> surface. It records the working slice in `examples/jetos/`, the language/compiler
+> walls found building it, the B1–B4 compiler bugs, and the two paths (A/B) to the
+> *exact* fluent surface the owner asked for
+> (`apps.installed.append([firefox, fastfetch, btop])`). It is the ground-level
+> companion to the Phase 2 vision in
+> `docs/plans/jetpack-jetos/jetos-design.md`.
 >
-> **SEQUENCING (2026-06-15): superseded by docs/plans/jetpack-jetos/README.md.**
-> The owner has elevated **jetpack** to a real package-manager tool whose Phase 1
-> engine is built independently first with `jetpack run/build/list/clean/add/remove`
-> (a Nix-`shell`/`devenv` replacement). The Jet pack file role is ratified as
-> Jet's `flake.nix`; ratified filenames are `pack.jet` and `pack.lock`.
-> `jet` plumbing can come later. The directive-vs-fluent analysis here (Path
-> A/B, D-JP1…5) still holds and feeds decision **D-JPK3** in the consolidated
-> plan; read that first for phase order.
+> The directive-vs-fluent analysis here (Path A/B, D-JP1…5) feeds decision
+> **D-JPK3** in the consolidated plan (docs/plans/jetpack-jetos/README.md); read
+> the README first for phase order, then this brief for the detail.
 
 ## 1. What was asked for
 
@@ -145,7 +142,7 @@ pub fn contribute(mut sys: jetpack.System) {
 
 ### Path B — language-level options (`option`/`when`), the jetos.md vision
 
-The full §5 of `docs/research/jetos.md`: `option a.b.c: T = default "doc"`,
+The full §5 of `docs/plans/jetpack-jetos/jetos-design.md`: `option a.b.c: T = default "doc"`,
 `when expr { … }`, prefix priorities (`default`/`force`), a compiler option
 registry + merge engine, and `jet eval --pure`. This is the grander design and
 the right *end state*, but it's gated on unratified ballots (D-OS1…7) and on

@@ -1,14 +1,14 @@
 # M6 — Tooling I: fmt, test, new, multi-file, LSP v0
 
 **Blocked on decisions:** none (Group 5 ratified: S43, S44, S49). S15 and
-S16 are **ratified** (see docs/02 Staged
+S16 are **ratified** (see docs/spec/syntax-decisions.md Staged
 implementation); M6 implements them. Depends on M3–M5 (fmt must handle
 the whole surface).
 **Error codes:** E0601+ (imports/visibility), tool exit codes below.
 
 This milestone is four separable phases; implement and commit in order.
 Each phase has its own exit criterion and can be a separate agent run if
-needed (prompts: "Implement M6 phase N per docs/plans/m06-tooling.md").
+needed (prompts: "Implement M6 phase N per docs/plans/epoch-1/m06-tooling.md").
 
 ## Phase 1 — `jet fmt` ✓ 2026-06-12
 

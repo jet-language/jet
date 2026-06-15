@@ -1,8 +1,8 @@
 # E2-M18 — Interactive REPL (`jet repl`)
 
 **Status:** draft — **blocked on owner decisions D-REPL1…D-REPL21** (Group 12 in
-docs/admin/06-decision-ballots.md). No implementation until every listed
-decision is ratified in docs/admin/02-syntax-decisions.md or explicitly
+docs/spec/decision-ballots.md). No implementation until every listed
+decision is ratified in docs/spec/syntax-decisions.md or explicitly
 deferred with a recorded default.
 
 **Depends on:** E2-M4 (`jet dev` interpreter — whole-program tree-walker
@@ -10,7 +10,7 @@ extended from M9.5 comptime), E2-M3 (CLI polish, `--json` patterns). Soft
 dependency on M13 LSP infrastructure if D-REPL11 chooses completion
 integration.
 
-**Error codes:** E18xx block (claim in docs/04 as implemented).
+**Error codes:** E18xx block (claim in docs/spec/diagnostics.md as implemented).
 
 ---
 
@@ -168,8 +168,8 @@ Likely in scope once D-REPL1=A and D-REPL21=A:
 - `jet repl` starts, accepts `1 + 2`, prints `3` (or per D-REPL16).
 - Declaring `val x = 10;` then `x * 2` prints `20` in accumulating mode.
 - Moving a binding and reusing it surfaces the same E02xx diagnostic as batch.
-- `:load examples/01_hello.jet` (if D-REPL15 ≥ B) runs or explains limits.
-- FFI/tasks snippet fails with a plain what/why/fix per docs/04.
+- `:load examples/features/01_hello.jet` (if D-REPL15 ≥ B) runs or explains limits.
+- FFI/tasks snippet fails with a plain what/why/fix per docs/spec/diagnostics.md.
 - Unsupported interpreter features name `jet run` / `jet build` as the fix.
 - No new external crates unless D-REPL11/18 ratified.
 

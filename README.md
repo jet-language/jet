@@ -1,7 +1,7 @@
 # Jet
 
 <h1 align="center">
-    <img src="./jetlang.png" width="120px" />
+    <img src="./assets/jetlang.png" width="120px" />
 </h1>
 
 Jet is a compiled, memory-safe language built for beginners and small tools.
@@ -11,35 +11,35 @@ Rust for speed. No `unsafe`, no exceptions, no hidden control flow.
 ## Quickstart
 
 ```bash
-nix develop                  # Rust, rustc, jet wrapper — see docs/nix.md
+nix develop                  # Rust, rustc, jet wrapper — see docs/dev/nix.md
 cargo build
-jet run examples/01_hello.jet
+jet run examples/features/01_hello.jet
 ```
 
 `hello, world` means the toolchain is working. Next:
 
 ```bash
-jet check examples/02_functions.jet
+jet check examples/features/02_functions.jet
 cargo test                   # golden examples + error snapshots
 ```
 
-Read the **[15-minute tour](docs/tour.md)** for the full language sketch.
+Read the **[15-minute tour](docs/guide/tour.md)** for the full language sketch.
 
 ## Showcase tools
 
-Three real CLI tools live in `showcase/`. They are golden-tested like
-`examples/` and show what Jet looks like in practice.
+Three real CLI tools live in `examples/showcase/`. They are golden-tested like
+`examples/features/` and show what Jet looks like in practice.
 
 | Tool | Lines | What it exercises |
 |------|------:|-------------------|
-| [jetgrep](showcase/jetgrep.jet) | 253 | `std.fs`, `std.io`, `std.process`, CLI flags, exit codes |
-| [jsonfmt](showcase/jsonfmt.jet) | 56 | `std.json`, fallible `T ? E`, stdin/files |
-| [wordfreq](showcase/wordfreq.jet) | 96 | `Map`, sorting, directory walk, closures |
+| [jetgrep](examples/showcase/jetgrep.jet) | 253 | `std.fs`, `std.io`, `std.process`, CLI flags, exit codes |
+| [jsonfmt](examples/showcase/jsonfmt.jet) | 56 | `std.json`, fallible `T ? E`, stdin/files |
+| [wordfreq](examples/showcase/wordfreq.jet) | 96 | `Map`, sorting, directory walk, closures |
 
 ```bash
-jet run showcase/jetgrep.jet pattern showcase/fixtures/
-jet run showcase/jsonfmt.jet showcase/fixtures/sample.json
-jet run showcase/wordfreq.jet showcase/fixtures/
+jet run examples/showcase/jetgrep.jet pattern examples/showcase/fixtures/
+jet run examples/showcase/jsonfmt.jet examples/showcase/fixtures/sample.json
+jet run examples/showcase/wordfreq.jet examples/showcase/fixtures/
 ```
 
 ## Errors that teach
@@ -51,8 +51,8 @@ test. Try a typo:
 jet check tests/ui/unknown_function.jet
 ```
 
-Browse generated pages: [docs/errors/](docs/errors/) (e.g.
-[E0102](docs/errors/E0102.md), [E0107](docs/errors/E0107.md)).
+Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
+[E0102](docs/reference/errors/E0102.md), [E0107](docs/reference/errors/E0107.md)).
 
 ## FAQ
 
@@ -69,7 +69,7 @@ in v1; use `std.tasks` channels when you need concurrency (v1 is blocking).
 
 **Where is async?**  
 Not in v1. Use blocking I/O and `std.tasks` for background work. Async syntax
-is planned post-1.0 (see [roadmap](docs/admin/05-roadmap.md)).
+is planned post-1.0 (see [roadmap](docs/spec/roadmap.md)).
 
 **Why semicolons?**  
 Statements end with `;`. Block headers (`if`, `while`, `for`, `fn`) do not.
@@ -77,18 +77,21 @@ Statements end with `;`. Block headers (`if`, `while`, `for`, `fn`) do not.
 
 **Can I use this in production?**  
 Jet is approaching v1.0. The compiler and stdlib are still evolving; pin your
-toolchain in `jet.toml` and read [versioning](docs/versioning.md).
+toolchain in `jet.toml` and read [versioning](docs/reference/versioning.md).
 
 ## Repo map
 
 | Path | What |
 |------|------|
-| [docs/tour.md](docs/tour.md) | 15-minute language tour (every snippet compiles) |
-| [docs/errors/](docs/errors/) | Error code pages generated from snapshots |
-| [docs/08-stdlib.md](docs/08-stdlib.md) | Standard library reference (synced from stdlib.md) |
-| [docs/admin/](docs/admin/) | Philosophy, syntax decisions, diagnostics, roadmap |
-| [examples/](examples/) | Executable spec with golden expected output |
-| [showcase/](showcase/) | Real CLI tools (jetgrep, jsonfmt, wordfreq) |
+| [docs/](docs/README.md) | Docs index — start here to find anything |
+| [docs/guide/](docs/guide/) | Learner's guide + 15-minute tour |
+| [docs/spec/](docs/spec/) | Authoritative: philosophy, syntax decisions, diagnostics, roadmap |
+| [docs/reference/](docs/reference/) | Stdlib, versioning, generated error pages |
+| [docs/plans/](docs/plans/) | Milestone implementation plans |
+| [docs/research/](docs/research/) | Exploratory notes & cross-language idea banks |
+| [examples/features/](examples/features/) | Executable spec with golden expected output |
+| [examples/showcase/](examples/showcase/) | Real CLI tools (jetgrep, jsonfmt, wordfreq) |
+| [editors/](editors/) | VS Code / Zed extensions + tree-sitter grammar |
 | [tests/ui/](tests/ui/) | Snapshot-pinned diagnostics |
 | `src/` | Compiler: lexer → parser → sema → codegen |
 
@@ -99,7 +102,7 @@ nix build                    # produces ./result/bin/jet
 nix develop                  # dev shell
 ```
 
-See [docs/nix.md](docs/nix.md) for flake inputs and `configuration.nix`.
+See [docs/dev/nix.md](docs/dev/nix.md) for flake inputs and `configuration.nix`.
 
 ## License
 

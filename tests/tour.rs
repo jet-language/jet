@@ -1,4 +1,4 @@
-//! Every ```jet block in docs/tour.md must compile (M14, invariant I5).
+//! Every ```jet block in docs/guide/tour.md must compile (M14, invariant I5).
 //!
 //! Snippets are written to a temp file and checked with `jet::check_with_path`.
 
@@ -34,7 +34,7 @@ fn extract_jet_blocks(markdown: &str) -> Vec<(usize, String)> {
     }
     assert!(
         !in_block,
-        "docs/tour.md has an unclosed ```jet block starting near line {start_line}"
+        "docs/guide/tour.md has an unclosed ```jet block starting near line {start_line}"
     );
     blocks
 }
@@ -42,12 +42,12 @@ fn extract_jet_blocks(markdown: &str) -> Vec<(usize, String)> {
 #[test]
 fn tour_snippets_compile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let tour = root.join("docs/tour.md");
-    let src = fs::read_to_string(&tour).expect("docs/tour.md");
+    let tour = root.join("docs/guide/tour.md");
+    let src = fs::read_to_string(&tour).expect("docs/guide/tour.md");
     let blocks = extract_jet_blocks(&src);
     assert!(
         blocks.len() >= 12,
-        "docs/tour.md should have at least 12 jet blocks, found {}",
+        "docs/guide/tour.md should have at least 12 jet blocks, found {}",
         blocks.len()
     );
 
@@ -57,7 +57,7 @@ fn tour_snippets_compile() {
     for (idx, (line, code)) in blocks.into_iter().enumerate() {
         let path = tmp.join(format!("snippet_{idx:02}.jet"));
         fs::write(&path, &code).unwrap();
-        let shown = format!("docs/tour.md (block near line {line})");
+        let shown = format!("docs/guide/tour.md (block near line {line})");
         let diags = jet::check_with_path(path.to_str().unwrap());
         let errors: Vec<_> = diags
             .iter()

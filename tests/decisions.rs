@@ -1,6 +1,6 @@
-//! Ratification enforcement (invariant I7 + docs/02).
+//! Ratification enforcement (invariant I7 + docs/spec/syntax-decisions.md).
 //!
-//! Every `cargo test` run verifies that `docs/02-syntax-decisions.md` and
+//! Every `cargo test` run verifies that `docs/spec/syntax-decisions.md` and
 //! `src/syntax.rs` stay in sync — ratified decisions cannot drift back to
 //! "provisional" in code, and open/deferred decisions cannot land in
 //! syntax.rs without owner sign-off.
@@ -10,9 +10,10 @@ use std::fs;
 
 #[test]
 fn ratified_decisions_enforced() {
-    let docs = fs::read_to_string("docs/admin/02-syntax-decisions.md").expect("docs/admin/02");
+    let docs =
+        fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
     let syntax = fs::read_to_string("src/syntax.rs").expect("src/syntax.rs");
-    let diag = fs::read_to_string("docs/admin/04-diagnostics.md").expect("docs/admin/04");
+    let diag = fs::read_to_string("docs/spec/diagnostics.md").expect("docs/spec/diagnostics.md");
 
     let ratified = extract_section_ids(&docs, "## Ratified", "## Provisional");
     let open = extract_open_registry_ids(&docs);
@@ -26,7 +27,7 @@ fn ratified_decisions_enforced() {
     let provisional_table = extract_provisional_table_ids(&docs);
     assert!(
         provisional_table.is_empty(),
-        "docs/02 Provisional table still lists {:?}; move to Ratified or delete the row",
+        "docs/spec/syntax-decisions.md Provisional table still lists {:?}; move to Ratified or delete the row",
         provisional_table
     );
 
@@ -34,15 +35,15 @@ fn ratified_decisions_enforced() {
     for id in &syntax_ids {
         assert!(
             ratified.contains(id.as_str()),
-            "{id} is in src/syntax.rs but not ratified in docs/02 Ratified section"
+            "{id} is in src/syntax.rs but not ratified in docs/spec/syntax-decisions.md Ratified section"
         );
         assert!(
             !open.contains(id.as_str()),
-            "{id} is open in docs/02 but already present in src/syntax.rs — ratify or remove"
+            "{id} is open in docs/spec/syntax-decisions.md but already present in src/syntax.rs — ratify or remove"
         );
         assert!(
             !deferred.contains(id.as_str()),
-            "{id} is deferred in docs/02 but present in src/syntax.rs"
+            "{id} is deferred in docs/spec/syntax-decisions.md but present in src/syntax.rs"
         );
     }
 
@@ -52,7 +53,7 @@ fn ratified_decisions_enforced() {
             assert_ne!(
                 status.as_str(),
                 "provisional",
-                "{id} is ratified in docs/02 but still provisional in src/syntax.rs"
+                "{id} is ratified in docs/spec/syntax-decisions.md but still provisional in src/syntax.rs"
             );
         }
     }
@@ -80,11 +81,11 @@ fn ratified_decisions_enforced() {
     for id in STRUCTURAL_RATIFIED {
         assert!(
             ratified.contains(*id),
-            "structural decision {id} must stay ratified in docs/02"
+            "structural decision {id} must stay ratified in docs/spec/syntax-decisions.md"
         );
     }
 
-    // Staged ratified: pinned error codes must exist in docs/04.
+    // Staged ratified: pinned error codes must exist in docs/spec/diagnostics.md.
     for (id, code) in &staged {
         assert!(
             ratified.contains(id.as_str()),
@@ -92,7 +93,7 @@ fn ratified_decisions_enforced() {
         );
         assert!(
             diag.contains(&format!("| {code} |")),
-            "staged decision {id} requires error code {code} in docs/04-diagnostics.md"
+            "staged decision {id} requires error code {code} in docs/spec/diagnostics.md"
         );
     }
 
@@ -160,11 +161,11 @@ fn extract_staged_manifest(docs: &str) -> BTreeMap<String, String> {
 fn section_between<'a>(docs: &'a str, start: &str, end: &str) -> &'a str {
     let from = docs
         .find(start)
-        .unwrap_or_else(|| panic!("docs/02 missing section header: {start}"));
+        .unwrap_or_else(|| panic!("docs/spec/syntax-decisions.md missing section header: {start}"));
     let rest = &docs[from + start.len()..];
     let to = rest
         .find(end)
-        .unwrap_or_else(|| panic!("docs/02 missing section header after {start}: {end}"));
+        .unwrap_or_else(|| panic!("docs/spec/syntax-decisions.md missing section header after {start}: {end}"));
     &rest[..to]
 }
 

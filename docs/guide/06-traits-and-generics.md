@@ -159,6 +159,6 @@ trait implementation by hand when the automatic one isn't what you mean.
 - `<T: Trait>` lets generic code assume behavior; mismatches are caught at the call.
 - Printing and equality are automatic; `derive Comparable;` adds ordering.
 
-That's the tour. From here the reference material in `docs/01-spec.md` is the
-exact, complete word on everything you've seen, and `docs/04-diagnostics.md`
+That's the tour. From here the reference material in `docs/spec/spec.md` is the
+exact, complete word on everything you've seen, and `docs/spec/diagnostics.md`
 lists every error the compiler can produce and why.

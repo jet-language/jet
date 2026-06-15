@@ -62,7 +62,7 @@ lparams = ident [ ":" type ] { "," ident [ ":" type ] } ;
 ```
 
 `=>` is a new token (S46); keep `->` for return types and switch arms —
-the two never overlap, document the distinction in docs/01.
+the two never overlap, document the distinction in docs/spec/spec.md.
 
 ## Sema rules
 
@@ -107,8 +107,8 @@ E0033 `|x| …` Rust pipes → `(x) => …`.
 
 ## Examples & tests
 
-- `examples/23_closures.jet` — map/filter/reduce pipeline + sort_by.
-- `examples/24_callbacks.jet` — function-typed params, a stored callback
+- `examples/features/23_closures.jet` — map/filter/reduce pipeline + sort_by.
+- `examples/features/24_callbacks.jet` — function-typed params, a stored callback
   in a struct field (exercises boxing + capture cloning).
 - ui fixtures for all E08xx/L0801 + teaching errors with fixes.
 - Ownership torture fixtures: mut capture conflicting with outer use

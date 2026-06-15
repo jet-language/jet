@@ -1,4 +1,4 @@
-# 00 — Philosophy
+# Philosophy
 
 This file is the constitution. When two goals collide, the higher-ranked one
 wins. The accepted currency for having both is **implementation effort** —
@@ -78,7 +78,7 @@ audience — experienced developers who would otherwise reach for Go, Zig,
 C, or Rust for small tools, and who should *prefer* Jet: minimal
 friction by default, control when wanted, with performance and safety
 enforced underneath by the Rust backend and the ownership model. The
-roadmap (docs/05) reflects this; the ranked priorities above do not
+roadmap (docs/spec/roadmap.md) reflects this; the ranked priorities above do not
 change — beginner experience still outranks everything but safety.
 
 **Owner direction (2026-06-12):** Jet's identity is the **best hybrid

@@ -39,40 +39,40 @@ fn showcase_tools_golden() {
         return;
     }
 
-    let expected_dir = root.join("showcase/expected");
+    let expected_dir = root.join("examples/showcase/expected");
     let cases = [
         ShowcaseCase {
             name: "jetgrep",
-            tool: "showcase/jetgrep.jet",
-            args: &["-n", "the", "showcase/fixtures/sample.txt"],
+            tool: "examples/showcase/jetgrep.jet",
+            args: &["-n", "the", "examples/showcase/fixtures/sample.txt"],
             exit_code: None,
             stderr_contains: None,
         },
         ShowcaseCase {
             name: "jetgrep_r",
-            tool: "showcase/jetgrep.jet",
-            args: &["-r", "grep", "showcase/fixtures"],
+            tool: "examples/showcase/jetgrep.jet",
+            args: &["-r", "grep", "examples/showcase/fixtures"],
             exit_code: None,
             stderr_contains: None,
         },
         ShowcaseCase {
             name: "jsonfmt",
-            tool: "showcase/jsonfmt.jet",
-            args: &["showcase/fixtures/sample.json"],
+            tool: "examples/showcase/jsonfmt.jet",
+            args: &["examples/showcase/fixtures/sample.json"],
             exit_code: None,
             stderr_contains: None,
         },
         ShowcaseCase {
             name: "jsonfmt_err",
-            tool: "showcase/jsonfmt.jet",
-            args: &["showcase/fixtures/bad.json"],
+            tool: "examples/showcase/jsonfmt.jet",
+            args: &["examples/showcase/fixtures/bad.json"],
             exit_code: Some(1),
             stderr_contains: Some("line"),
         },
         ShowcaseCase {
             name: "wordfreq",
-            tool: "showcase/wordfreq.jet",
-            args: &["showcase/fixtures"],
+            tool: "examples/showcase/wordfreq.jet",
+            args: &["examples/showcase/fixtures"],
             exit_code: None,
             stderr_contains: None,
         },
@@ -101,7 +101,7 @@ fn showcase_tools_golden() {
             }
             let err_path = expected_dir.join(format!("{}.err.out", case.name));
             let expected_err = fs::read_to_string(&err_path)
-                .unwrap_or_else(|_| panic!("missing showcase/expected/{}.err.out", case.name));
+                .unwrap_or_else(|_| panic!("missing examples/showcase/expected/{}.err.out", case.name));
             assert_eq!(stderr, expected_err, "stderr mismatch for {}", case.name);
         } else {
             assert!(
@@ -113,7 +113,7 @@ fn showcase_tools_golden() {
             );
             let out_path = expected_dir.join(format!("{}.out", case.name));
             let expected = fs::read_to_string(&out_path)
-                .unwrap_or_else(|_| panic!("missing showcase/expected/{}.out", case.name));
+                .unwrap_or_else(|_| panic!("missing examples/showcase/expected/{}.out", case.name));
             assert_eq!(stdout, expected, "output mismatch for {}", case.name);
         }
     }

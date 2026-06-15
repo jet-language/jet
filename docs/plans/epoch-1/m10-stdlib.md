@@ -161,7 +161,7 @@ Rust, not string soup in codegen.rs.
 Pay-for-what-you-call is an M10 invariant (SL9): codegen emits a std helper
 only if sema proves the program can call it. Importing a module is free;
 only calls cost generated Rust/binary size. This should become architecture
-rule R10 in docs/03.
+rule R10 in docs/spec/architecture.md.
 
 ## Diagnostics to register
 
@@ -175,9 +175,9 @@ Teaching: E0037 `println!`/`eprintln!` → `print`/`io.eprint` · E0038
 
 ## Examples & tests
 
-- `examples/29_files.jet` — read/transform/write with error handling.
-- `examples/30_json.jet` — parse, walk, mutate, re-render JSON.
-- `examples/31_cli.jet` — args + env + exit codes (a real mini-tool).
+- `examples/features/29_files.jet` — read/transform/write with error handling.
+- `examples/features/30_json.jet` — parse, walk, mutate, re-render JSON.
+- `examples/features/31_cli.jet` — args + env + exit codes (a real mini-tool).
 - Golden tests use tempdirs; `std/time`/`std/random` examples pin output
   via `seed` and injected clock (the prelude reads `LEX_TEST_EPOCH` env
   var when set — test hook, documented as such).
@@ -187,7 +187,7 @@ Teaching: E0037 `println!`/`eprintln!` → `print`/`io.eprint` · E0038
 - Size-regression tests enforce SL9: `01_hello.jet --small` stays under a
   pinned byte budget, and a fixture importing all M10 std modules but
   calling nothing stays within noise of hello-world.
-- User-facing std reference: **docs/stdlib.md** (example-first tour of every module).
+- User-facing std reference: **docs/reference/stdlib.md** (example-first tour of every module).
 
 ## First-party ring (post-M10, SL1/SL2 ratified)
 

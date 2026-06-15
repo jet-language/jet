@@ -1,4 +1,4 @@
-//! Generate docs/errors/E####.md from ui snapshots (M14 workstream 3).
+//! Generate docs/reference/errors/E####.md from ui snapshots (M14 workstream 3).
 //!
 //! Run: `UPDATE_DOCS=1 cargo test gen_error_pages -- --nocapture`
 //! Or:  `./scripts/gen_errors.sh`
@@ -189,7 +189,7 @@ fn load_preferred_diag(root: &Path, code: &str, jet_rel: &str) -> ParsedDiag {
 fn gen_error_pages() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ui_dir = root.join("tests/ui");
-    let out_dir = root.join("docs/errors");
+    let out_dir = root.join("docs/reference/errors");
     let _cases = collect_ui_cases(&ui_dir);
 
     let mut generated = 0usize;

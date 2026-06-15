@@ -246,4 +246,4 @@ fn main() {
 
 **Next steps:** [Getting started guide](guide/01-getting-started.md) ·
 [Ownership](guide/02-ownership.md) · [Error index](errors/) ·
-[Standard library](08-stdlib.md)
+[Standard library](../reference/stdlib.md)

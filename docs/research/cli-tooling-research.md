@@ -4,7 +4,7 @@ Status: exploratory research, **not ratified**, decides no syntax or
 semantics. A survey of the most loved CLI tools and language toolchains
 — what makes them loved, and which ideas Jet could adopt. Greenfield
 thinking encouraged; every adoption still passes through the normal
-decision protocol (docs/02) and the simplicity ratchet (I8).
+decision protocol (docs/spec/syntax-decisions.md) and the simplicity ratchet (I8).
 
 Organizing claim: the most loved tools share five traits — **fast,
 zero-config, beautiful by default, scriptable when piped, and they
@@ -28,7 +28,7 @@ the survey below is mostly concrete techniques for delivering them.
   10–100× faster than the incumbent with a compatible interface.
   Lesson: speed converts users even when features are equal; "it's
   instant" is a product moat. Directly validates the `jet dev`
-  rapid-prototype direction (docs/05, committed addition 10).
+  rapid-prototype direction (docs/spec/roadmap.md, committed addition 10).
 - **hyperfine** — benchmarking with statistical rigor (warmup runs,
   outlier detection, "Did you forget to warm up?" warnings) and
   beautiful comparative output. Lesson candidate: `jet bench` should
@@ -105,7 +105,7 @@ the survey below is mostly concrete techniques for delivering them.
 
 - **Elm** — still the gold standard: errors as prose, written in
   second person, with the *actual fix* shown, and links to deeper
-  explanation. Jet's docs/04 voice is already Elm-school; the
+  explanation. Jet's docs/spec/diagnostics.md voice is already Elm-school; the
   remaining Elm trick to steal is **links out** — every error
   carrying a URL (or `jet explain` pointer) to a longer-form page.
 - **Rust** — error codes + `rustc --explain E0382` (a full essay with
@@ -240,7 +240,7 @@ the survey below is mostly concrete techniques for delivering them.
 
 ## Part 3 — Synthesis: ranked shortlist for Jet
 
-Items that fit docs/00 priorities, keyed to where they'd land.
+Items that fit docs/spec/philosophy.md priorities, keyed to where they'd land.
 None of this starts without a roadmap slot or owner sign-off (I8).
 
 **Near-term (M6 era — mostly cheap, high leverage):**
