@@ -92,27 +92,34 @@ first.**
 ### A. Blocked on owner ratification (syntax gate — STOP, do not code yet)
 
 These appear only as examples in `unified-ecosystem.md` / owner ballots, not in
-the ratified U-series. Per I7: add an Open Decisions row, get the owner's
-ratification, *then* implement test-first.
+the ratified U-series. **The blocking decisions are now written up as Open rows in
+`docs/spec/decision-ballots.md` (section "Open — jetpack/jetos surface (gaps #4 &
+#5)").** Per I7: owner answers there first, *then* implement test-first. Do not
+code any of these until its ballot row is answered + ratified into
+`syntax-decisions.md`.
 
 1. **gap #5 — `System` / `Image` semantics.** Both types parse and validate
    syntactically but are **inert**: no field checking, no realize path. Only
-   `env` / `Env` means anything today. Needs the field-level surface ratified
-   (e.g. `services:` / `options:` / `set(…)` / `from:`) before any code.
+   `env` / `Env` means anything today. **Gated by ballot D-SYS-FIELDS / D-SVC /
+   D-OPTS / D-IMG-FIELDS** (the `target`/`packages`/`services`/`options` set, the
+   `Service` type, the `set(…)` options hatch, and `Image { from: }`). Settle
+   these first — gap #4 sits on top.
 2. **gap #4 — `config.jet` + the entire `jetos` tier (Scale-3).** `CONFIG_FILE`
    is a `src/syntax.rs` constant only — never loaded; there is no `jetos` binary
-   and no `src/jetos/`. Needs the `config.jet` surface ratified, then a loader +
-   `jetos switch/build`. Sits on top of gap #5.
+   and no `src/jetos/`. **Gated by ballot D-JETOS-BIN** (new `jetos` binary vs
+   `jet os` subcommand) **and D-CFG-LOAD** (`config.jet` discovery). Then a loader
+   + `jetos switch/build`.
 3. **D-CFFI2-SYN — C FFI surface syntax.** Owner direction **K**
    (`@extern module c.<lib> { … }` + `use "<header>" / use c.<lib> [as alias]`)
-   is recorded as **draft, NOT ratified** in `docs/spec/decision-ballots*.md`
-   (link resolution is already ratified). When the owner ratifies: amend S59/S16
-   in `syntax-decisions.md`, move the decision out of the ballot, unblock E2-M14.
+   is recorded as **draft, NOT ratified** in the C-FFI ballot section (link
+   resolution is already ratified; the `import → use` keyword it leans on is now
+   ratified via D-S16-USE). Bind-engine sub-picks are open as **D-CBIND2/3/5/6**
+   and **D-LL2**. When the owner ratifies: amend S59/S16 in `syntax-decisions.md`,
+   move the decision out of the ballot, unblock E2-M14.
 4. **Consumer-side "import a lib vs install an exec" syntax.** A `library`
    package realizes (staged source) but **nothing consumes that source yet** —
-   there is no import-a-Jet-library path at the call site. Needs a syntax
-   decision for how a project pulls a `library` into code vs putting an
-   `executable` on PATH.
+   there is no import-a-Jet-library path at the call site. **Gated by ballot
+   D-LIB-USE** (`use <pkg>` after realize vs a separate `libraries: […]` list).
 
 ### B. Buildable without new syntax
 
@@ -132,16 +139,16 @@ envfile,cli}.rs`, `src/syntax.rs`, `docs/spec/diagnostics.md`,
 
 ## Working-tree state (2026-06-16)
 
-`master` head is `188c0f3` (gap #6) + `59b81ee` (this handoff doc). The D-S16-USE
-`import → use` rename is **complete and green in the working tree** (full
-`nix develop -c cargo test` passes, `tests/decisions.rs` passes) **but not yet
-committed** as of this note.
+`master` head: the **D-S16-USE `import → use` rename is COMMITTED** as `380b6a5`
+(72 files; full `nix develop -c cargo test` green, `tests/decisions.rs` green).
+Handoff-doc commits: `59b81ee` + `f546444`.
 
-**⚠ Stage selectively — never `git add -A`/`git add .`.** Bundled in the same
-uncommitted working tree as the rename are **owner C-FFI ballot drafts**
-(`docs/spec/decision-ballots.md`, `docs/spec/decision-ballots-owner.md`,
-`docs/plans/epoch-2/m14-c-ffi.md`, `docs/plans/epoch-3/c-header-bindings.md`) —
-these record the **draft, unratified** D-CFFI2-SYN direction and should **not**
-be committed with the rename. Separate the rename (src + examples + tests +
-`tests/ui` snapshots + the `use`-related doc/editor updates) from the C-FFI
-draft material when committing.
+**Still uncommitted (owner's in-flight C-FFI / decision-ballot restructure — leave
+for the owner; ⚠ never `git add -A`):** `docs/spec/decision-ballots.md` (now also
+carries the new gaps #4/#5 Open rows added this session),
+`docs/spec/decision-ballots-owner.md` (del), `docs/spec/decision-ballots.html`
+(del), `docs/spec/roadmap.md`, `docs/plans/persona-examples.md`,
+`docs/plans/epoch-2/{README,m14-c-ffi}.md`, `docs/plans/epoch-2/c-ffi-syntax-examples.md`
+(del), `docs/plans/epoch-3/{README,c-header-bindings}.md`. These record the
+**draft, unratified** D-CFFI2-SYN direction + the C-FFI epoch rework; the owner
+answers/commits them. The rename deliberately held them back.
