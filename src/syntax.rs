@@ -448,6 +448,14 @@ pub const BUILTIN_FIND: &str = "find";
 pub const MODULE_FIELD_SOURCES: &str = "sources";
 pub const MODULE_FIELD_IMPORTS: &str = "imports";
 
+/// U6/U8: the conventional name of the default source (`sources: { default: … }`)
+/// that bare packages and `default.ripgrep` sugar resolve against. Not a
+/// reserved keyword — just the well-known name `jetpack` falls back to.
+pub const DEFAULT_SOURCE: &str = "default";
+
+/// U3/U8: the `Env` contribution field carrying the shell prompt label.
+pub const ENV_FIELD_PROMPT: &str = "prompt";
+
 /// U6 (ratified 2026-06-16): package value type, and the `provider@target`
 /// source-ref separator (`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`).
 /// Provider names reuse REF_SOURCE_* (github / path / nixpkgs).

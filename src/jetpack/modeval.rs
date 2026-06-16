@@ -18,7 +18,7 @@
 //! see commit 2b3825e), so this module owns the only pass that gives module
 //! bodies meaning.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use crate::ast::{Contribution, Expr, Func, Item, ModuleDecl, Namespace};
@@ -27,6 +27,7 @@ use crate::diag::{Diagnostic, Span};
 use crate::syntax;
 
 use super::merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
+use super::refspec::{self, ProviderKind, SourceTable};
 
 /// One module's contributions, keyed by `(namespace, path)` so `merge_all`
 /// can combine same-keyed contributions from different modules.
@@ -172,6 +173,141 @@ pub fn merge_all(
     Ok(out)
 }
 
+/// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
+/// the named-source table, the package refs to realize (`<source>:<package>`),
+/// and the prompt label. Only the `env` namespace is consulted — `system`/`image`
+/// are the jetos tiers and have no meaning for `jetpack`.
+#[derive(Debug)]
+pub struct EnvPlan {
+    pub table: SourceTable,
+    pub package_refs: Vec<String>,
+    pub prompt: Option<String>,
+}
+
+/// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
+/// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
+/// file that parses with at least one module declaration is evaluated through
+/// `evaluate_env`; everything else (including text that doesn't parse cleanly)
+/// falls back to the directive scanner, which is deliberately tolerant.
+pub fn is_module_surface(src: &str) -> bool {
+    let (toks, diags) = crate::lexer::lex(src);
+    if !diags.is_empty() {
+        return false;
+    }
+    match crate::parser::parse(&toks) {
+        Ok(program) => program
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Module(_))),
+        Err(_) => false,
+    }
+}
+
+/// Evaluate a typed `env.jet` (the `module name { sources:/imports:/env.X: }`
+/// surface, U3/U6/U8) into an `EnvPlan`. Sources merge across modules by key
+/// (U5); package sugar resolves to `<source>:<package>` refs; the `prompt`
+/// scalar becomes the label. `imports: find(…)` is parsed but not yet walked
+/// (U4 discovery is a separate chunk).
+pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
+    let (toks, lex_diags) = crate::lexer::lex(src);
+    if let Some(d) = lex_diags.into_iter().next() {
+        return Err(d);
+    }
+    let program = crate::parser::parse(&toks).map_err(|mut diags| {
+        diags.pop().unwrap_or_else(|| {
+            Diagnostic::error("E0000", "parse failed".into(), String::new(), String::new(), None)
+        })
+    })?;
+
+    let table = build_source_table(&program.items, src)?;
+
+    let modules = evaluate_modules(&program.items, src, base_dir)?;
+    let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
+
+    // Collect the `env`-namespace contributions in a deterministic order so the
+    // realized package list is stable across runs (merge_all returns a HashMap).
+    let mut env_keys: Vec<(Namespace, String)> = merged
+        .keys()
+        .filter(|(ns, _)| *ns == Namespace::Env)
+        .cloned()
+        .collect();
+    env_keys.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let mut package_refs = Vec::new();
+    let mut prompt = None;
+    for key in &env_keys {
+        let entry = &merged[key];
+        for pkg in &entry.packages {
+            package_refs.push(pkg_ref(pkg));
+        }
+        if prompt.is_none() {
+            if let Some(label) = entry.settings.get(syntax::ENV_FIELD_PROMPT) {
+                prompt = Some(label.clone());
+            }
+        }
+    }
+    Ok(EnvPlan {
+        table,
+        package_refs,
+        prompt,
+    })
+}
+
+/// Merge every enabled module's `sources:` block into one `(name → upstream)`
+/// table (U5: same name + different ref conflicts, E0967). Each `provider@target`
+/// ref (U6) is translated to the colon/flake upstream the providers realize
+/// (`github:owner/repo/rev`, `path:./local`, `nixpkgs:channel`).
+fn build_source_table(items: &[Item], src: &str) -> Result<SourceTable, Diagnostic> {
+    let mut maps: Vec<BTreeMap<String, String>> = Vec::new();
+    for item in items {
+        let Item::Module(m) = item else { continue };
+        if m.disabled {
+            continue;
+        }
+        let mut map = BTreeMap::new();
+        for s in &m.sources {
+            let ref_text = src[s.ref_span.start..s.ref_span.end].trim();
+            let pref = refspec::classify_provider_ref(ref_text)
+                .map_err(|_| bad_source_ref(ref_text, s.ref_span))?;
+            let upstream = format!(
+                "{}{}{}",
+                pref.provider.label(),
+                syntax::REF_SEPARATOR,
+                pref.target
+            );
+            map.insert(s.name.clone(), upstream);
+        }
+        maps.push(map);
+    }
+    let merged = merge::merge_sources(&maps).map_err(|e| merge_error_to_diagnostic(&e))?;
+    Ok(SourceTable::from_decls(
+        merged
+            .into_iter()
+            .map(|(name, upstream)| (name, upstream, ProviderKind::Nix)),
+    ))
+}
+
+/// Render one merged `Pkg` as a `<source>:<package>` ref. A bare package (the
+/// sugar's empty source) resolves against the conventional `default` source.
+fn pkg_ref(pkg: &merge::Pkg) -> String {
+    let source = if pkg.source.is_empty() {
+        syntax::DEFAULT_SOURCE
+    } else {
+        pkg.source.as_str()
+    };
+    format!("{}{}{}", source, syntax::REF_SEPARATOR, pkg.name)
+}
+
+fn bad_source_ref(ref_text: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0968",
+        format!("`{ref_text}` isn't a `provider@target` source ref"),
+        "a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`".to_string(),
+        "write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`".to_string(),
+        Some(span),
+    )
+}
+
 fn not_a_namespace_literal(expected: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0966",
@@ -304,6 +440,69 @@ module _gaming {
             rendered,
             "Error [E0966]: expected a `Env` literal here, found `System`\n  --> env.jet:3:14\n    |\n  3 |     env.dev: System {\n    |              ^^^^^^^^\n Why: a contribution to this namespace must use the matching type `Env`\n Fix: change `System { … }` to `Env { … }`\n"
         );
+    }
+
+    #[test]
+    fn evaluate_env_builds_plan_from_typed_surface() {
+        let src = r#"
+module dev {
+    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    imports: find("./modules")
+    env.dev: Env {
+        packages: [default.[ripgrep, fd]],
+        prompt: "wordstats",
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.prompt.as_deref(), Some("wordstats"));
+        assert_eq!(plan.package_refs, vec!["default:ripgrep", "default:fd"]);
+        // The `provider@target` ref is translated to the colon/flake upstream the
+        // provider realizes (`github:…#pkg`).
+        assert_eq!(
+            plan.table.upstream("default"),
+            Some("github:NixOS/nixpkgs/nixos-24.05")
+        );
+    }
+
+    #[test]
+    fn evaluate_env_bare_package_resolves_to_default_source() {
+        let src = r#"
+module dev {
+    sources: { default: nixpkgs@nixpkgs-unstable }
+    env.dev: Env { packages: [ripgrep] }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+    }
+
+    #[test]
+    fn evaluate_env_rejects_non_provider_source_ref() {
+        let src = "\nmodule dev {\n    sources: { default: nixos-24.05 }\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0968");
+        let rendered = crate::diag::render_all("env.jet", src, std::slice::from_ref(&err));
+        assert_eq!(
+            rendered,
+            "Error [E0968]: `nixos-24.05` isn't a `provider@target` source ref\n  --> env.jet:3:25\n    |\n  3 |     sources: { default: nixos-24.05 }\n    |                         ^^^^^^^^^^^\n Why: a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`\n Fix: write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`\n"
+        );
+    }
+
+    #[test]
+    fn evaluate_env_conflicting_sources_are_a_merge_error() {
+        let src = r#"
+module a {
+    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    env.dev: Env { packages: [default.ripgrep] }
+}
+module b {
+    sources: { default: github@NixOS/nixpkgs/nixos-23.11 }
+    env.dev: Env { packages: [default.fd] }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0967");
     }
 
     #[test]

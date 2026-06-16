@@ -41,7 +41,38 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U8 — nested `sources:`/`imports:` (parser layer)
+## Latest chunk (2026-06-16): wire `modeval` into the `jetpack` CLI
+
+The typed `module { … }` env surface is now **evaluated and realized** end to
+end, not just unit-tested. Closes gap #1; gap #3 (typed surface loaded by the
+CLI) is now true for `env.jet` `build`/`run`.
+
+Landed this run:
+- `modeval::evaluate_env(src, base_dir) -> EnvPlan` (`{ table, package_refs,
+  prompt }`): builds the §6-merged `SourceTable` from every module's `sources:`
+  (each `provider@target` ref sliced from `SourceDecl.ref_span`, translated
+  at-form→colon-form, U6), merges all `env.*` contributions, expands `Pkg` sugar
+  to `<source>:<package>` refs (bare/`default` → the `default` source), and
+  takes the merged `prompt` as the label. Source conflicts surface as **E0967**
+  (U5); a non-`provider@target` source ref is the new **E0968**.
+- `modeval::is_module_surface(src)` — the CLI routes on it: a file that parses
+  with ≥1 `module` decl goes through `evaluate_env`; everything else falls back
+  to the tolerant Phase-1 `pkg.*` directive scanner.
+- `src/jetpack/cli.rs::load_project_plan` reads `env.jet` text once and branches
+  (typed via `typed_plan` → modeval; else `envfile::parse`). Shared
+  `classify_all` helper.
+- Diagnostic **E0968** added to `docs/spec/diagnostics.md` (index + detail).
+- Example + offline e2e: `examples/jetpack-typed/env.jet` (+ `fixtures/`) and
+  `tests/jetpack.rs::typed_module_example_builds_offline_end_to_end` mirror the
+  directive `committed_example_builds_offline_end_to_end`.
+
+**Still open:** `imports: find(…)` parses but is **not walked** (gap #2) — kept
+separate per the note below. `System`/`Image` namespaces still inert (gap #5).
+The typed surface lacks a `via: core` source marker (the directive surface has
+one); core-provider sources in a typed `env.jet` need an owner syntax decision
+before they work — deferred.
+
+## Prior chunk (2026-06-16): U8 — nested `sources:`/`imports:` (parser layer)
 
 Owner decided `module` stays the single outermost construct: `sources:` and
 `imports:` **nest inside the module body** as siblings of the `env.dev: Env { … }`
@@ -103,19 +134,17 @@ Ordered roughly by leverage. Each is a candidate chunk; confirm the relevant
 decision is Ratified (not just designed) before coding, and write the failing
 test/example first.
 
-1. **`modeval` is not wired into the `jetpack` binary.** The typed
-   module-evaluation engine (`src/jetpack/modeval.rs`) parses `module {}`,
-   validates namespaces, expands `Pkg` sugar, and merges contributions — but is
-   **only unit-tested**; the sole non-test reference is `pub mod modeval;`
-   (`src/jetpack/mod.rs:16`). The CLI still reads the Phase-1 `pkg.*` scanner.
-   *Highest-leverage next step: make `jetpack build`/`run` evaluate the typed
-   `env.jet` surface via `modeval`.*
+1. ~~**`modeval` is not wired into the `jetpack` binary.**~~ **DONE
+   (2026-06-16).** `jetpack build`/`run` now evaluate a typed `env.jet` via
+   `modeval::evaluate_env`, routed by `modeval::is_module_surface`. Directive
+   scanner remains the fallback.
 2. **`find("./modules")` auto-discovery — not implemented.** `BUILTIN_FIND`
    constant exists (`src/syntax.rs:442`) but is referenced nowhere; no directory
    walk. Needed for the import-tree surface (U4).
-3. **Typed `env.jet` surface not loaded by the CLI.** `sources: {}` /
-   `imports: find(...)` / `module dev { env.dev: Env { … } }` parses but jetpack
-   ignores it in favor of the bootstrap directives. (Depends on #1 + #2.)
+3. **Typed `env.jet` surface loaded by the CLI — DONE for `sources:`/`env.*`
+   (2026-06-16).** `module dev { sources: {…} env.dev: Env { … } }` now builds
+   and realizes. Remaining: `imports: find(...)` is parsed but ignored (folds
+   into gap #2), and `config.jet`/`system`/`image` (gaps #4/#5).
 4. **`config.jet` + the entire `jetos` tier — not implemented.** `CONFIG_FILE`
    constant only (`src/syntax.rs:438`); never loaded; no `jetos` binary, no
    `src/jetos/`. Scale-3 (`jetos switch/build`).
@@ -128,23 +157,20 @@ test/example first.
 
 ## Next up (pick one chunk; owner to confirm)
 
-**Continue #1 — wire `modeval` into `jetpack`** (U8 parser foundation now landed).
-Next chunk:
-1. `modeval`: evaluate `ModuleDecl.sources` (slice `ref_span`, validate via
-   `refspec::classify_provider_ref`) into a `refspec::SourceTable`; surface
-   conflicts as the existing E0967 (U5 merge).
-2. `modeval`/CLI: map merged `env.*` `MergedEntry` → `RunPlan` — each `Pkg`
-   (source filled from the sources table; bare/`default` → the table's default)
-   becomes a `<source>:<package>` ref; the `prompt` scalar → the label.
-3. `jetpack build`/`run`: load `env.jet` via `modeval` when it declares
-   `module {}` blocks (keep the `pkg.*` directive path as fallback for the
-   Phase-1 surface until the typed example replaces it).
-4. Example + offline e2e: a typed `examples/jetpack/env.jet` resolving via
-   fixtures (mirror `committed_example_builds_offline_end_to_end`).
+**#1 wired (done above).** Strongest follow-ons, owner to pick:
 
-`imports: find(...)` parses but the directory walk is still gap #2 — decide with
-owner whether to fold `find` into this chunk or keep it separate (it uses
-`BUILTIN_FIND`, `src/syntax.rs`). Write the failing e2e/example first.
+- **#2 — `find("./modules")` auto-discovery.** Now the highest-leverage gap: the
+  typed surface evaluates, but the import-tree (U4, the headline "drop a file in
+  and it merges" feature) is inert. `evaluate_env` would walk `imports:
+  find(dir)`, parse each discovered `.jet`, and feed its modules into the same
+  merge. `BUILTIN_FIND` exists (`src/syntax.rs`); write the failing e2e
+  (a `modules/` file contributing a package that shows up in `jetpack build`)
+  first. **Liftability law:** discovered modules may not import each other.
+- **`via: core` for typed sources** (deferred, needs owner syntax). The directive
+  surface has a third `pkg.source(name, upstream, "core")` arg; the typed
+  `sources: { name: provider@target }` has no slot for the provider kind, so
+  `build_source_table` hard-codes `ProviderKind::Nix`. A typed env can't yet
+  declare a first-party `core` source. Add an Open Decisions row before coding.
 
 ---
 

@@ -8,9 +8,9 @@ use super::provider::{self, ProviderError};
 use super::refspec::{self, RefSpec};
 use super::shell::{self, Env, ShellKind};
 use super::store::{self, Roots};
-use super::{envfile, refspec::RefError};
+use super::{envfile, modeval, refspec::RefError};
 use crate::syntax;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Parsed global flags shared by every command.
 struct Flags {
@@ -225,7 +225,8 @@ struct RunPlan {
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
 /// carries the exit code to return.
 fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
-    let Some(ef) = envfile::load(&std::env::current_dir().unwrap_or_default()) else {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let Ok(src) = std::fs::read_to_string(envfile::path_in(&dir)) else {
         theme.error(
             "nothing to do",
             &format!(
@@ -236,10 +237,55 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
         );
         return Err(2);
     };
+
+    // Two author surfaces share one file. The typed `module { … }` surface
+    // (U3/U6/U8) is evaluated through `modeval`; the Phase-1 `pkg.*` directive
+    // surface stays the fallback until the typed example fully replaces it.
+    if modeval::is_module_surface(&src) {
+        return typed_plan(theme, &src, &dir);
+    }
+
+    let ef = envfile::parse(&src);
     let table = ef.source_table();
+    let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
+    Ok(RunPlan {
+        refs,
+        table,
+        label: ef.prompt_label(),
+    })
+}
+
+/// Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan. Source
+/// refs merge across modules and `Pkg` sugar resolves to `<source>:<package>`
+/// refs; the merged `prompt` becomes the shell label.
+fn typed_plan(theme: &Theme, src: &str, dir: &Path) -> Result<RunPlan, i32> {
+    let plan = modeval::evaluate_env(src, dir).map_err(|d| {
+        eprint!(
+            "{}",
+            crate::diag::render_all(syntax::ENV_FILE, src, std::slice::from_ref(&d))
+        );
+        2
+    })?;
+    let refs = classify_all(theme, plan.package_refs.iter().map(String::as_str), &plan.table)?;
+    Ok(RunPlan {
+        refs,
+        table: plan.table,
+        label: plan
+            .prompt
+            .unwrap_or_else(|| syntax::JETPACK_PROMPT_LABEL.to_string()),
+    })
+}
+
+/// Classify a sequence of `<source>:<package>` refs against `table`, printing
+/// the first failure and returning exit code 2.
+fn classify_all<'a>(
+    theme: &Theme,
+    raws: impl Iterator<Item = &'a str>,
+    table: &refspec::SourceTable,
+) -> Result<Vec<RefSpec>, i32> {
     let mut refs = Vec::new();
-    for r in ef.refs() {
-        match refspec::classify_in(&r, &table) {
+    for raw in raws {
+        match refspec::classify_in(raw, table) {
             Ok(s) => refs.push(s),
             Err(e) => {
                 output::ref_error(theme, &e);
@@ -247,11 +293,7 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
             }
         }
     }
-    Ok(RunPlan {
-        refs,
-        table,
-        label: ef.prompt_label(),
-    })
+    Ok(refs)
 }
 
 /// `jetpack run [<ref>] [-- cmd…]`

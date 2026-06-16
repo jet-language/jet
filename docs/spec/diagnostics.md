@@ -207,6 +207,7 @@ before continuing.
 | E0965 | sema  | compile-time index out of range on `[T#N]` (S76) |
 | E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
 | E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
+| E0968 | jetpack | a module `sources:` entry isn't a `provider@target` ref (U6/U8) |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
@@ -246,6 +247,7 @@ CLI.
 |------|------|-----|-----|
 | E0966 | A module contribution's value isn't a struct literal of its namespace's type. | `env.dev: Env { … }` ties a namespace to its matching type so the merge engine knows what it's combining. | Wrap the value in the matching type, e.g. `Env { … }`. |
 | E0967 | Two modules contributed irreconcilable values to the same source name or scalar setting. | §6: sources merge by name (refs must agree) and scalar settings merge to one value; without a priority marker, differing contributions can't be reconciled automatically. | Make every contribution agree, or remove the conflicting one. |
+| E0968 | A `sources:` entry's value isn't a `provider@target` ref. | A named source resolves to an upstream written as `provider@target` (U6), e.g. `github@NixOS/nixpkgs/nixos-24.05`; the resolver needs the provider and target to realize it. | Write the ref as `provider@target`, e.g. `default: github@owner/repo/rev`. |
 
 ## Concurrency diagnostics
 

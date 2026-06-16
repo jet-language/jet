@@ -415,6 +415,39 @@ fn committed_example_builds_offline_end_to_end() {
 }
 
 #[test]
+fn typed_module_example_builds_offline_end_to_end() {
+    // I5: the committed `examples/jetpack-typed/` project is the executable spec
+    // for the typed `module { … }` env surface (U3/U6/U8). `jetpack build` with
+    // no ref evaluates env.jet through `modeval`: the `default` source merges to
+    // its pinned nixpkgs upstream, `default.[ripgrep, fd]` expands to two `Pkg`
+    // refs, and both realize from the committed fixtures, fully offline. The
+    // store lives under a scratch JETPACK_ROOT, so nothing is written back.
+    let typed_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-typed");
+    let root = Scratch::new("typed-e2e");
+    let output = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(&typed_dir)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", typed_dir.join("fixtures"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for pkg in ["ripgrep", "fd"] {
+        assert!(
+            stderr.contains(pkg),
+            "expected `{pkg}` in build output: {stderr}"
+        );
+    }
+    assert!(stderr.contains("built 2 package(s)"), "stderr: {stderr}");
+}
+
+#[test]
 fn core_provider_fetches_remote_git_package_from_env() {
     if Command::new("git").arg("--version").output().is_err() {
         eprintln!("note: skipping remote core provider integration test (git not found)");
