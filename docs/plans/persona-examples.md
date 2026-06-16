@@ -199,7 +199,7 @@ These are compiler/sema/spec changes. Highest blast radius — get them right be
 | **Pipelines (`\|>`)** — collection transforms readable without nested calls | — | Owner todo §15 |
 | **Tier-2 stored/returned references** — entity graphs, parent pointers, zero-copy parse buffers | T, D | E2-M5; biggest unlock for Rust-territory programs; tier 1 intentionally blocks this |
 | **Expert low-level tier (S58)** — `volatile`, MMIO, layout, allocators behind `import std/mem` + `unsafe` | Ma, D | Ratified; E2-M13; not in onboarding |
-| **`extern c` surface** — manual `extern c` blocks (C ABI imports) | Ma, T, D | E2-M14; distinct from `extern rust`; gateway to Raylib/SDL/vendor `.a` |
+| **`extern c` surface** — `@bindgen` / `@extern module`, `use c.<lib>` (S59) | Ma, T, D | E2-M14; overlay + auto-bind cache; gateway to Raylib/SDL |
 | **Fixed-size lists `[T#N]` + fan-out `.[…]`** — grids and homogenous literals without nested dynamic lists | T | Ratified in `fan-out-and-fixed-size-lists.md`; in progress |
 | **JSON ↔ typed struct bridge** — no schema inference or typed decode at the language/stdlib boundary today | E | Could be std `json` enhancement *or* a comptime/reflection layer; decide at language boundary before bolting on libs |
 | **Semicolons required** — unlike Python/JS habits | M | Intentional (S6); not a bug — teaching errors help; optional semicolons would be a major syntax ratchet decision |

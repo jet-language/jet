@@ -16,7 +16,7 @@ Epoch 2 GA is [`../epoch-2/README.md`](../epoch-2/README.md) (E2-M17).
 | [`async-networking.md`](async-networking.md) | D-NET2, E2-V5 | `@async` runtime; Go-class concurrency; 100k+ connections |
 | [`plugin-api.md`](plugin-api.md) | D-DX5-B | Formal `jet` plugin ABI (PATH discovery stays Epoch 2) |
 | [`user-derives-reflection.md`](user-derives-reflection.md) | S56, layer 3 | User-defined `@derive` / typed reflection |
-| [`c-header-bindings.md`](c-header-bindings.md) | D-CBIND1…8 | Optional `jet bind` / header → Jet (on manual `extern c`) |
+| [`c-header-bindings.md`](c-header-bindings.md) | D-CBIND2…6 ✅ ratified | `jet bind` engine — surface in **E2-M14** / S59 |
 
 ---
 

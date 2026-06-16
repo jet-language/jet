@@ -98,7 +98,7 @@ stop inheriting the older, smaller vision:
   Gating ratified as S58 (`std/mem` import + `unsafe` blocks,
   Zig-style allocators). Onboarding materials never mention it until
   needed.
-- **C FFI is a needed future addition** (S59 ratified deferred to v2).
+- **C FFI is a needed future addition** (S59 ships in **Epoch 2**, E2-M14).
   Rust FFI (M7) ships first; the C ABI story follows in v2.
 - **Purity is a product feature, not just a comptime detail.** `pure fn`
   (S60 ratified) marks functions the compiler verifies as pure so Jet

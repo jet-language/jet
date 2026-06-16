@@ -45,7 +45,7 @@ S14).
 prefix `**pub`** to export an item. Applies to top-level functions (M0+),
 types and their fields (M3), and any future module-level bindings.
 Within a file, private and `pub` items are equally visible to each other;
-`pub` only controls what other files may access via `import` (S16, M6+).
+`pub` only controls what other files may access via `use` (S16, M6+).
 Rejected: public-by-default (Go), explicit `private` keyword (noisy).
 Considered and declined (owner, 2026-06-12): grouped visibility —
 Jai-style `pub { }` blocks, `pub:`/`private:` section markers, and
@@ -590,22 +590,21 @@ where one suffices), `const` (a second binding keyword competing with
 and kills the comptime-panic feature).
 
 **S58 — Expert low-level tier** *(ratified 2026-06-12; **amended 2026-06-16,
-S82**; post-1.0 milestone pending)*: **two gates, one keyword.**
-`**import core.mem**` is the discovery gate — unlocks the low-level
+S82, D-LL2**)*: **two gates, one keyword.**
+`**use core.mem**` is the discovery gate — unlocks the low-level
 vocabulary: explicit **Zig-style allocators** (allocating APIs take an
 allocator parameter; a fixed arena works on embedded), `**Ptr<T>**`,
 layout/repr control, volatile wrappers. The audit gate for operations that can
 violate memory safety — pointer **deref**, pointer math, transmute-class casts,
-FFI pointer crossings — uses **`@unsafe { … }`** block form and **`@unsafe`**
-on the line before `fn` (whole-function contract; calling one requires an
-enclosing `@unsafe` block, Rust's rule). Optional **`@audit "…"`** on the line
-before an `@unsafe` block carries a structured audit comment (D-LL2); a lint
-flags missing/empty audits. Taking a pointer (`&x`) is legal outside a block (a
-pointer is inert data); *using* one (`*p`, `.offset`) requires the block.
-`&`/`*` are **core grammar, sema-gated**: outside the gates they keep producing
-E0208-family teaching errors. Codegen lowers blocks to Rust `unsafe`; **I1 is
-amended** — generated `unsafe` appears only inside user-gated regions plus
-vetted std/mem internals. Onboarding materials never mention any of it.
+FFI pointer crossings — uses **`@audit("…")`** then **`@unsafe { … }`** (D-LL2:
+audit required; lint **L3101** if missing). **`@unsafe`** on the line before `fn`
+marks a whole-function contract; calling one requires an enclosing `@unsafe`
+block. Taking a pointer (`&x`) is legal outside a block (a pointer is inert
+data); *using* one (`*p`, `.offset`) requires the block. `&`/`*` are **core
+grammar, sema-gated**: outside the gates they keep producing E0208-family
+teaching errors. Codegen lowers blocks to Rust `unsafe`; **I1 is amended** —
+generated `unsafe` appears only inside user-gated regions plus vetted std/mem
+internals. Onboarding materials never mention any of it.
 Rejected: bare `unsafe { }` / `unsafe fn` (former S58 spelling), `trust`
 spelling, library-only gating (Swift style), ungated sigils (C/Zig style).
 
@@ -759,8 +758,19 @@ fn main() {
 }
 ```
 
-**Bind timing (D-CFFI2-SYN-3):** compile-time check of `.jet/bindings/c/` + header
-hash; invoke `jet bind` on cache miss/stale. Optional `jet bind` CLI for refresh.
+**Bind timing (D-CFFI2-SYN-3 / D-CBIND2):** compile-time check of `.jet/bindings/c/` +
+header hash; invoke **`jet bind`** (same backend) on cache miss/stale; manual
+**`jet bind`** subcommand for refresh.
+
+**Bind engine (D-CBIND3):** bindgen-based helper (I6 waiver). Optional libclang fallback later.
+
+**C strings (D-CBIND5):** `const char*` / `char*` at the edge → **`String`** (copy in/out);
+lifetime-heavy cases → overlay or gated pointers.
+
+**C macros (D-CBIND6):** bind emits **`#define` constants only**; skip function-like macros;
+overlay for macro-wrapped symbols.
+
+**Unsafe audit (D-LL2):** `@audit("reason")` required on `@unsafe { … }` blocks.
 
 Rejected: bare `extern c raylib { }` globals (S59 provisional A); shadow-only
 override (overlay must merge with bindgen); two `use` forms for the same C lib
@@ -830,7 +840,8 @@ the Nix provider.
 **D-JPK6 — Forge removal** *(ratified 2026-06-15)*:
 Salvage useful Forge ideas into Jetpack planning, then remove
 `examples/capstone/forge/` so there is not a competing package-manager capstone.
-The salvage record lives in `docs/plans/jetpack-jetos/forge-salvage.md`.
+The salvage record was folded into the jetpack plan and retired; its detail
+lives in git history (`docs/plans/jetpack-jetos/forge-salvage.md`).
 
 **D-JPK7 — Jetpack priority and ref syntax** *(ratified 2026-06-15)*:
 Jetpack Phase 1 is the next implementation track. Public package refs use
@@ -880,7 +891,8 @@ source for bare (unprefixed) package entries. The realizing provider is inferred
 from the upstream (R1 routes all named sources through the `nix` provider; the
 first-party `core` provider and explicit `via:` override arrive with R2). An
 unknown source name is a friendly error listing the built-ins plus any declared
-names. Design + worked examples: `docs/plans/jetpack-jetos/native-resolver.md`.
+names. Provider roadmap: `docs/plans/jetpack-jetos/README.md` §3.3 (the
+native-resolver design doc was folded in and retired; detail in git history).
 Rejected: a separate `packages_from("name", [...])` grouping (introduces a second
 way to attach a source; the inline `<source>:<package>` form is preferred).
 
@@ -1327,6 +1339,97 @@ end-state now). **Amends U1** (manifest filename + identity block). Rejected: a
 moves); a separate `via:`/path index; and reusing `env.jet` as a package index
 (category error — a dev shell is not an export list).
 
+**U11 — `System` field set** *(ratified 2026-06-16; D-SYS-FIELDS A)*: a `System`
+(a jetos machine) has four fields — **`target`** (a typed platform value,
+`linux.x64` / `linux.arm64`, *not* a string; see U13), **`packages`** (a `Pkg`
+list; U6 sugar applies), **`services`** (a keyed `Service` map; U12), and
+**`options`** (the escape hatch; U13). Constructed through the `system.<name>`
+namespace (U3) with the type name inferred (U18). Rejected: a
+`target`+`packages`-only v1 — a machine that can't enable a service or set an
+option is not yet a machine.
+
+**U12 — `Service` is an open record** *(ratified 2026-06-16; D-SVC A)*: a
+`Service` is a record whose first field is **`enable: Bool`** and which carries
+further typed per-service fields (`openssh: { enable: true, ports: [22] }`).
+Modelling it as a record from the start means the first service that needs a knob
+doesn't force a type change. Written as a bare `{ … }` under `services:` (type
+inferred, U18). Rejected: an `enable`-only v1; folding services into raw
+`options` strings (loses typing and discoverability).
+
+**U13 — `options:` is an ordered list of `key: value` pairs** *(ratified
+2026-06-16; D-OPTS, list-typed variant of B)*: the machine-option escape hatch is
+a **list** of direct dotted-key/value entries — `options: [ net.hostName: laptop,
+time.timeZone: "Europe/London" ]` — with **no `set(…)` wrapper**. A list (not a
+map) keeps entries ordered and avoids map-merge ambiguity; a dotted key is a path
+into the upstream option set. **Quoting:** values that are jet identifiers or
+typed values are written **bare** (`net.hostName: laptop`, `users.nate.shell:
+default.fish`); only free-form strings (timezones, locales, paths — anything with
+`/`, spaces, or non-identifier characters) keep quotes. **`target`** is likewise a
+**typed platform value** (`linux.x64`), not a string, so it type-checks and
+LSP-completes. Typed value tables for timezones/locales may be added later; until
+then those stay quoted strings. Rejected: the `set("k", v)` list-of-calls form
+(A); a map literal (B as written — dotted string keys + ambiguous merge); a
+typed-fields-only surface with no hatch (every gap becomes a ratification
+request).
+
+**U14 — `Image` derives from its source `System`** *(ratified 2026-06-16;
+D-IMG-FIELDS B + anti-repetition)*: an `Image` (ISO / VM / disk) has **`from:
+system.<name>`** and an optional **`format:`** — **`iso`** / **`qcow`** /
+**`raw`** (default `iso`). `target`, `packages`, `services`, and `options` are
+**inherited from the referenced `System`**: they are written once on the system
+and never restated on the image. An explicit `target:` on the image is only for
+cross-compiling to a different arch. Constructed through the `image.<name>`
+namespace (type inferred, U18). Rejected: a `from`-only image with no `format` (B
+chosen — installer/VM/raw is the immediate real need); restating
+`target`/`packages` on the image (the duplication the owner rejected).
+
+**U15 — the jetos tier lives under `jetpack os`** *(ratified 2026-06-16;
+D-JETOS-BIN, `jetpack` subcommand)*: whole-machine management is a **`jetpack os
+<verb>`** subcommand group (`jetpack os switch`, `jetpack os build`) — **not** a
+separate `jetos` binary and **not** folded onto the sacred `jet` tool. The `os`
+namespace preserves the conceptual separation NixOS gets from a distinct
+`nixos-rebuild` binary, without shipping a third binary. Verbs mirror
+`nixos-rebuild`: **`switch`** (build + activate + set boot default) and
+**`build`** (build only); `boot` / `test` may be added under this protocol.
+Rejected: a new `jetos` binary (A — extra binary to ship); `jet os …` (B —
+muddies the language tool's boundary); a bare `jetpack switch` verb (overloads
+package management).
+
+**U16 — `config.jet` discovery + `@host` selector** *(ratified 2026-06-16;
+D-CFG-LOAD)*: `jetpack os <verb>` takes a positional target **`[<config-path>]@<host>`**.
+The **`@host`** segment selects which `System` in the config to apply (`jetpack os
+switch @halcyon`); `<host>` is required. The **config path is optional** and
+defaults to **`~/.jet/config.jet`**; an explicit path is the prefix before `@`
+(`jetpack os switch ./jet-test@halcyon`). This reuses jet's existing `@`
+source-selector convention — jet's `@host` is NixOS's `#hostname` flake-ref
+selector. Rejected: an always-explicit path (B — verbose for the common case); a
+`cwd → ~/.jet` search (C — dangerous ambiguity for a whole-system switch); a
+separate `--config` flag (the path-prefix subsumes it).
+
+**U17 — a `library` package is consumed with `use`** *(ratified 2026-06-16;
+D-LIB-USE A)*: once a `library` package (U10) is realized (its source staged), it
+is brought into code with the ordinary **`use <pkg>`** module form
+(S16 / D-S16-USE) — `use jsonutil;` then `jsonutil.parse(…)`. One import concept
+covers files, modules, and library packages; an `executable` package still goes on
+PATH, not `use`. Rejected: a separate `libraries: […]` list distinct from
+`packages:` (B — a second concept where `use` already fits); a bespoke
+library-import keyword.
+
+**U18 — inferred constructors via expected type** *(ratified 2026-06-16;
+D-INFER-CTOR)*: when a value's **expected type is known** — a typed namespace
+(`system.<name>:`, `image.<name>:`, `env.<name>:`) or a typed field (`services:`
+holds `Service`s) — the constructor type name is **optional**: a bare `{ … }`
+elaborates to it (`system.halcyon: { … }` ≡ `system.halcyon: System { … }`;
+`pipewire: { enable: true }` ≡ `pipewire: Service { … }`). The explicit
+`Type { … }` form (S29) stays legal as an escape hatch and wherever no expected
+type is inferable (a bare binding, an ambiguous union); there, an un-annotated
+`{ … }` is a diagnostic ("name it, e.g. `System { … }`"). Field typos still report
+against the inferred type ("unknown field … in `Service`"). This is expected-type
+elaboration — the Blueprint "typed pin" model — and applies wherever an expected
+type reaches a record literal. Rejected: requiring the type name at every
+constructor (the duplication the owner rejected); inferring a type for a value
+binding that has no contextual type (kept explicit).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -1400,7 +1503,7 @@ implementation milestone is pending.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
-> section above and `docs/plans/jetpack-jetos/native-resolver.md`.
+> section above and `docs/plans/jetpack-jetos/README.md` §3.3 (provider roadmap).
 
 
 Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) and Group 7 (S51–S54, S52)
@@ -1544,7 +1647,11 @@ are fully ratified above. **S59 (C FFI)** ships in **Epoch 2** (E2-M14). **S53**
 | 2026-06-16 | D-CFFI2-SYN-1 | one C `use` form per lib per file | owner |
 | 2026-06-16 | D-CFFI2-SYN-2 | empty overlay = no overrides; `__bindgen__` reserved for autogen | owner |
 | 2026-06-16 | D-CFFI2-SYN-3 | compile-time bind on cache miss; `.jet/bindings/c/` | owner |
-| 2026-06-16 | D-CBIND1 | tool-generated `.jet` in cache (S59 default) | spec |
+| 2026-06-16 | D-CBIND6 | `#define` constants in bind output; skip function-like macros | owner |
+| 2026-06-16 | D-CBIND2 | auto bind on compile + `jet bind` subcommand (same backend) | owner |
+| 2026-06-16 | D-CBIND3 | bindgen helper crate (I6 waiver) | owner |
+| 2026-06-16 | D-CBIND5 | `String` at C string boundary | owner |
+| 2026-06-16 | D-LL2 | `@audit("…")` on `@unsafe` blocks | owner |
 | 2026-06-16 | D-CBIND4 | `Ptr<T>` for C pointers (S58) | spec |
 | 2026-06-16 | D-CBIND7 | cache dir `.jet/bindings/c/` (D-CFFI2-SYN-3) | spec |
 | 2026-06-16 | D-CBIND8 | encourage curated registry packages | spec |
@@ -1567,4 +1674,12 @@ are fully ratified above. **S59 (C FFI)** ships in **Epoch 2** (E2-M14). **S53**
 | 2026-06-16 | D-SUGAR3 | transparent type alias declined for now (use newtype/struct) | owner |
 | 2026-06-16 | D-SUGAR5 | `defer` keyword declined; RAII (S63) is the cleanup story | owner |
 | 2026-06-16 | D-FP6 | list spread `[...xs, y]` deferred; use `.concat`/`.with` for now | owner |
+| 2026-06-16 | U11 | `System` fields: `target`(typed)/`packages`/`services`/`options` (D-SYS-FIELDS A) | owner |
+| 2026-06-16 | U12 | `Service` open record (`enable: Bool` + typed per-service fields) (D-SVC A) | owner |
+| 2026-06-16 | U13 | `options:` ordered list of bare `key: value` pairs, no `set()`; quotes only for free-form strings (D-OPTS) | owner |
+| 2026-06-16 | U14 | `Image { from: system.X, format: iso\|qcow\|raw }`; target/packages inherited from system (D-IMG-FIELDS B) | owner |
+| 2026-06-16 | U15 | jetos tier under `jetpack os <verb>` (switch/build); no separate binary (D-JETOS-BIN) | owner |
+| 2026-06-16 | U16 | `jetpack os` target `[<config-path>]@<host>`; path defaults `~/.jet/config.jet`; `@host` selects System (D-CFG-LOAD) | owner |
+| 2026-06-16 | U17 | a realized `library` package is consumed with `use <pkg>` (D-LIB-USE A) | owner |
+| 2026-06-16 | U18 | inferred constructors: bare `{…}` elaborates to the expected type; explicit `Type {…}` optional (D-INFER-CTOR) | owner |
 | 2026-06-16 | D-PAT6 | parameter destructuring deferred; unpack on first body line | owner |

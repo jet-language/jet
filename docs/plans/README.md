@@ -9,9 +9,12 @@ Special product tracks may live under `docs/plans/<track>/` when they cut
 across milestones. The active example is
 [`jetpack-jetos`](jetpack-jetos/README.md): Phase 1 is the `jetpack`
 package/environment engine exposed directly as `jetpack
-run/build/list/clean/add/remove`, and Phase 2 is the `jetos` distro/ISO built
-on top of it. Its remaining open D-JPK decisions must be ratified before
-implementation.
+run/enter/build/list/clean/add/remove`, and Phase 2 is the `jetos` distro/ISO
+built on top of it. The ratified design-of-record is
+[`jetpack-jetos/unified-ecosystem.md`](jetpack-jetos/unified-ecosystem.md);
+live build-vs-pending status is in [`active-task.md`](active-task.md). All Phase-1
+surface decisions (D-JPK*, U1–U10) are ratified; the open items are the jetos
+config surface and `System`/`Image` semantics.
 
 Post-v1 Epoch 2 plans live in [`epoch-2/`](epoch-2/README.md). Milestone
 

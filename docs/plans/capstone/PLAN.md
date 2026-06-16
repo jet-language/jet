@@ -1,9 +1,8 @@
 # Capstone — Forge (superseded by Jetpack)
 
-> **Archived 2026-06-15:** Forge is superseded by Jetpack. Useful implementation
-> ideas were saved in
-> [`docs/plans/jetpack-jetos/forge-salvage.md`](../../docs/plans/jetpack-jetos/forge-salvage.md),
-> and `examples/capstone/forge/` was removed per D-JPK6. Do not implement from
+> **Archived 2026-06-15:** Forge is superseded by Jetpack. Its salvage notes were
+> folded into the jetpack plan and retired (detail in git history), and
+> `examples/capstone/forge/` was removed per D-JPK6. Do not implement from
 > this historical plan; use
 > [`docs/plans/jetpack-jetos/README.md`](../../docs/plans/jetpack-jetos/README.md).
 

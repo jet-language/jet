@@ -158,7 +158,7 @@ after concurrence.
 | E2-M11 | `m11-testing-docs-bench.md` | Doctests, coverage, snapshot UX, property tests, `jet bench`, `jet doc` |
 | E2-M12 | `m12-debug-observe.md` | DAP/source maps, panic locals, structured logging/tracing/metrics |
 | E2-M13 | `m13-low-level-tier.md` | `std.mem`, allocators, layout, `Ptr<T>`, volatile, unsafe audit model |
-| E2-M14 | `m14-c-ffi.md` | `extern c`, headers/libs, C ABI imports/exports, pointer boundary rules |
+| E2-M14 | `m14-c-ffi.md` | C FFI: `@bindgen` / `@extern module`, `use c.<lib>`, link discovery, overlay merge |
 | E2-M15 | `m15-freestanding-cross.md` | Cross-compilation, `no_std`/freestanding profile, embedded smoke target |
 | E2-M16 | `m16-pure-eval-layer3.md` | `pure fn`, `jet eval --pure`, package recipes, sandbox/cache foundations |
 | E2-M17 | `m17-epoch2-ga.md` | Production showcase, audits, performance, docs, release checklist |
@@ -475,8 +475,8 @@ Goal: provide C/C++/Rust/Zig-class control behind explicit gates.
 
 Scope from S58:
 
-- `import std.mem` discovery gate.
-- `unsafe { ... }` audit gate and `unsafe fn` contract.
+- `use core.mem` discovery gate.
+- `@audit("…")` + `@unsafe { … }` audit gate (D-LL2 ✅) and `@unsafe fn` contract.
 - `Ptr<T>`, pointer deref/math, transmute-class casts.
 - Explicit allocators, including arenas and fixed allocators.
 - Layout/repr controls.
@@ -491,31 +491,26 @@ Exit criteria:
 - Unsafe examples are small, audited, and tested against Rust output.
 - Memory-safe Jet code pays no runtime cost for this tier.
 
-## E2-M14 - C FFI
+## E2-M14 — C FFI
 
-Goal: connect Jet to the non-Rust ecosystem without importing C's unsafety into
-ordinary Jet.
+Goal: connect Jet to the C ecosystem with auto-generated bindings (default) and
+optional user overlay modules — without C unsafety in ordinary Jet.
 
-Scope from S59:
+**Spec:** [`m14-c-ffi.md`](m14-c-ffi.md) · **S59** in syntax-decisions.md.
 
-- `extern c "header-or-lib" { ... }` blocks mirroring `extern rust`.
-- By-value boundary first.
-- Pointers only through E2-M13 rules.
-- Linker flags/dependencies from `[dependencies:c]`.
-- Header/library discovery diagnostics.
-- Jet-export story for C callers, if scope allows.
+Scope (ratified):
 
-**Out of scope (deferred post–Epoch 2):** C-header auto-binding (`jet bind`,
-compile-time `import c`, clang/bindgen in the compiler). See
-docs/plans/epoch-3/c-header-bindings.md. Registry packages may ship
-hand-written bindings without waiting for that tooling.
+- **`@bindgen module c.<lib>.__bindgen__`** (generated cache under `.jet/bindings/c/`)
+- **`@extern module c.<lib> { … }`** overlay — merge; overlay wins on clash
+- **`use "header.h" as alias`** or **`use c.<lib> as alias`** (one per lib per file)
+- By-value boundary first; pointers via E2-M13 gates
+- Link: hangar dep → else **`pkg-config <lib>`** → **E3201**
+- Import-only (no Jet-export to C in M14)
 
-Exit criteria:
+**Phased:** Phases 1–2 (overlay + link) unblocked; Phases 3–4 use ratified CBIND picks
+(bindgen helper, `String` boundary, `#define` constants, auto + `jet bind`).
 
-- Example calls a small C library.
-- Pointer misuse is rejected unless inside the low-level gates.
-- C build/link failures become Jet diagnostics where possible.
-- Rust FFI remains unchanged.
+Exit criteria: see `m14-c-ffi.md`.
 
 ## E2-M15 - Cross-compilation and freestanding profile
 
@@ -619,10 +614,8 @@ Audit gates:
 - JetOS as a shipped OS product. Epoch 2 can build `jet eval --pure` and layer
   3 foundations, but JetOS should remain research until those foundations are
   real.
-- **C-header auto-binding** (`jet bind`, compile-time `import c`, clang/bindgen
-  translation layer). Epoch 2 ships manual `extern c` only (E2-M14). Optional
-  header-to-Jet tooling is post–Epoch 2; plan and decisions:
-  docs/plans/epoch-3/c-header-bindings.md (D-CBIND1…8).
+- C FFI **`jet bind`** engine (bindgen helper, I6) — **E2-M14** / [`m14-c-ffi.md`](m14-c-ffi.md);
+  pillar notes in [`c-header-bindings.md`](../epoch-3/c-header-bindings.md).
 
 ## Concurrence checklist
 

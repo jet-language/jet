@@ -16,8 +16,8 @@ since grown into the typed `module { … }` surface. Ratified (U1–U10) ≠
 implemented — check **Remaining work** below before assuming a feature exists.
 
 Supporting design docs (own their detail):
-- `docs/plans/jetpack-jetos/README.md` — sequencing + D-JPK gates (§3.3 surface superseded by unified-ecosystem.md)
-- `docs/plans/jetpack-jetos/jetos-design.md` — jetos tier (D-OS* superseded by U3/U4)
+- `docs/plans/jetpack-jetos/README.md` — sequencing, milestones, provider roadmap (R3/tvix pending), jetos parity baseline
+- `docs/plans/jetpack-jetos/jetos-design.md` — jetos tier (D-OS1/7 superseded by U3/U4; D-OS2-6 still open)
 - `docs/plans/IMPLEMENTATION.md` — the implementing-agent kickoff prompt + chunk protocol
 - `docs/plans/README.md` — repo protocol: **one chunk per run, test-first, stop and report**
 
@@ -89,37 +89,38 @@ Ordered roughly by leverage. Each is its own multi-chunk arc. **Confirm the
 relevant decision is Ratified before coding, and write the failing test/example
 first.**
 
-### A. Blocked on owner ratification (syntax gate — STOP, do not code yet)
+### A. Ratified, ready to implement (test-first; syntax now settled)
 
-These appear only as examples in `unified-ecosystem.md` / owner ballots, not in
-the ratified U-series. **The blocking decisions are now written up as Open rows in
-`docs/spec/decision-ballots.md` (section "Open — jetpack/jetos surface (gaps #4 &
-#5)").** Per I7: owner answers there first, *then* implement test-first. Do not
-code any of these until its ballot row is answered + ratified into
-`syntax-decisions.md`.
+The jetpack/jetos surface decisions are **all ratified** as **U11–U18** in
+`docs/spec/syntax-decisions.md` (owner picks in `decision-ballots-owner.md`,
+2026-06-16). End-state worked `config.jet` is in `decision-ballots.md` (§ "gaps
+#4/#5 — ratified surface"). Per the workflow loop: write the failing ui
+fixture/example first, spec it, then parser → sema → codegen. Note **U18 (inferred
+constructors)** and **U13 (typed `target` / bare-vs-quoted option values)** touch
+the record-literal path broadly — land them deliberately.
 
-1. **gap #5 — `System` / `Image` semantics.** Both types parse and validate
-   syntactically but are **inert**: no field checking, no realize path. Only
-   `env` / `Env` means anything today. **Gated by ballot D-SYS-FIELDS / D-SVC /
-   D-OPTS / D-IMG-FIELDS** (the `target`/`packages`/`services`/`options` set, the
-   `Service` type, the `set(…)` options hatch, and `Image { from: }`). Settle
-   these first — gap #4 sits on top.
-2. **gap #4 — `config.jet` + the entire `jetos` tier (Scale-3).** `CONFIG_FILE`
-   is a `src/syntax.rs` constant only — never loaded; there is no `jetos` binary
-   and no `src/jetos/`. **Gated by ballot D-JETOS-BIN** (new `jetos` binary vs
-   `jet os` subcommand) **and D-CFG-LOAD** (`config.jet` discovery). Then a loader
-   + `jetos switch/build`.
-3. **D-CFFI2-SYN — C FFI surface syntax.** Owner direction **K**
-   (`@extern module c.<lib> { … }` + `use "<header>" / use c.<lib> [as alias]`)
-   is recorded as **draft, NOT ratified** in the C-FFI ballot section (link
-   resolution is already ratified; the `import → use` keyword it leans on is now
-   ratified via D-S16-USE). Bind-engine sub-picks are open as **D-CBIND2/3/5/6**
-   and **D-LL2**. When the owner ratifies: amend S59/S16 in `syntax-decisions.md`,
-   move the decision out of the ballot, unblock E2-M14.
-4. **Consumer-side "import a lib vs install an exec" syntax.** A `library`
-   package realizes (staged source) but **nothing consumes that source yet** —
-   there is no import-a-Jet-library path at the call site. **Gated by ballot
-   D-LIB-USE** (`use <pkg>` after realize vs a separate `libraries: […]` list).
+1. **gap #5 — `System` / `Image` / `Service` semantics.** Today both types parse
+   but are **inert** (no field checking, no realize). Implement per **U11**
+   (`System` = `target`/`packages`/`services`/`options`), **U12** (`Service` open
+   record), **U13** (`options:` ordered `key: value` list, no `set()`; typed
+   `target` platform value; bare words vs quoted free-form strings), **U14**
+   (`Image { from: system.X, format: }`, target/packages inherited from the
+   system), and **U18** (bare `{…}` elaborates to the expected type). Do gap #5
+   first — gap #4 sits on top.
+2. **gap #4 — `config.jet` + the `jetos` tier (Scale-3).** `CONFIG_FILE` is a
+   `src/syntax.rs` constant only — never loaded. Implement per **U15** (`jetpack os
+   <verb>` subcommand group — switch/build — **not** a separate binary, **not**
+   under `jet`) and **U16** (positional `[<config-path>]@<host>`, path defaults
+   `~/.jet/config.jet`, `@host` selects the `System`). Then the loader + activate.
+3. **E2-M14 — C FFI implementation.** Surface syntax ratified (**D-CFFI2-SYN-1…4**,
+   **S59**); bind engine picks ratified (**D-CBIND2/3/5/6**); **`use`** keyword
+   ratified (**D-S16-USE**); **`@audit("…")`** required (**D-LL2**). Agent spec:
+   [`docs/plans/epoch-2/m14-c-ffi.md`](epoch-2/m14-c-ffi.md). No owner ballot
+   blockers remain — implement parser/sema/codegen + `jet bind`.
+4. **Consumer-side library import.** A `library` package realizes (staged source)
+   but **nothing consumes it yet**. Implement per **U17**: a realized `library` is
+   brought in with the ordinary `use <pkg>` form (reuse S16/D-S16-USE);
+   `executable` packages still go on PATH.
 
 ### B. Buildable without new syntax
 
@@ -130,6 +131,24 @@ code any of these until its ballot row is answered + ratified into
 6. **The real Jet→binary compiler.** Both package kinds stage source / prebuilt
    bytes today; there is no compile step. Large; needs its own design pass
    (no ratified syntax dependency, but a major architecture arc).
+7. **Verify/fix the compiler bugs found during the jetpack/config bring-up**
+   (carried over from the retired `jetpack-config-brief.md`; confirm each is
+   still open before fixing — the typed `module {}` surface may already have
+   worked around or fixed some). Each is an I2/I3 violation (rustc ICE instead of
+   a sema diagnostic) with a one-line repro:
+   - **B1** — `JSON.Text(x)` where `x` is a *view* param moves it → rustc ICE.
+     Sema should insert a clone or reject; never ICE.
+   - **B2** — field access on a **std** struct mangles the name
+     (`result.code` → `user_code`) → rustc ICE. Tracked also in
+     `docs/plans/capstone/PROGRESS.md` (`ProcessResult`).
+   - **B3** — `.get(k)` on a `Map` bound via an `Object(root)` pattern lowers to
+     **list indexing** (`"k".to_string() as usize`) → rustc ICE.
+   - **B4** — `for k, v in recv.field { … }` parses `recv.field {` as a **struct
+     literal**; ending the subject in `()` disambiguates.
+   - **Cross-file language walls** (v1, may want lifting): a module file cannot
+     (1) name another file's struct type in a signature, (2) call another file's
+     methods on an imported value, or (3) `use`-import with `..`. These are why
+     the legacy Phase-1 surface funneled everything through `[JSON]` directives.
 
 Entry points for the jetpack side: `src/jetpack/{packmanifest,provider,modeval,
 envfile,cli}.rs`, `src/syntax.rs`, `docs/spec/diagnostics.md`,
@@ -143,12 +162,7 @@ envfile,cli}.rs`, `src/syntax.rs`, `docs/spec/diagnostics.md`,
 (72 files; full `nix develop -c cargo test` green, `tests/decisions.rs` green).
 Handoff-doc commits: `59b81ee` + `f546444`.
 
-**Still uncommitted (owner's in-flight C-FFI / decision-ballot restructure — leave
-for the owner; ⚠ never `git add -A`):** `docs/spec/decision-ballots.md` (now also
-carries the new gaps #4/#5 Open rows added this session),
-`docs/spec/decision-ballots-owner.md` (del), `docs/spec/decision-ballots.html`
-(del), `docs/spec/roadmap.md`, `docs/plans/persona-examples.md`,
-`docs/plans/epoch-2/{README,m14-c-ffi}.md`, `docs/plans/epoch-2/c-ffi-syntax-examples.md`
-(del), `docs/plans/epoch-3/{README,c-header-bindings}.md`. These record the
-**draft, unratified** D-CFFI2-SYN direction + the C-FFI epoch rework; the owner
-answers/commits them. The rename deliberately held them back.
+**Still uncommitted (owner's in-flight doc sync — leave for the owner; ⚠ never `git add -A`):**
+C-FFI / decision-ballot doc updates may remain on disk from this session; C FFI
+surface + CBIND + LL2 + S16-USE are **ratified** in `syntax-decisions.md` and
+[`m14-c-ffi.md`](epoch-2/m14-c-ffi.md).

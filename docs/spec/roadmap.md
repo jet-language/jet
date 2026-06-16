@@ -224,11 +224,9 @@ before work starts. None of these may compromise the v1 milestones.
    tasks/channels (no async). This is the Go-territory stdlib buildout.
 6. **Expert low-level tier** (S58) — `std/mem`-style gated access to
    allocators, layout, volatile, raw memory; never in onboarding.
-7. **C FFI** (S59 ratified deferred to v2) — `extern c` import and a
-   Jet-export story; the gateway to the non-Rust ecosystem and to
-   embedded toolchains. **Manual `extern c` blocks only in Epoch 2**
-   (E2-M14). C-header auto-binding (`jet bind` / magic `import c`) is
-   deferred post–Epoch 2: docs/plans/epoch-3/c-header-bindings.md.
+7. **C FFI** (S59, **E2-M14**) — `@bindgen` / `@extern module` overlay, `use c.<lib>`,
+   compile-time bind cache (`.jet/bindings/c/`). Bind **engine** picks ratified
+   (**D-CBIND2/3/5/6**). Spec: docs/plans/epoch-2/m14-c-ffi.md.
 8. **Freestanding profile** — `no_std`-class output for embedded/
    kernels (long-horizon target per docs/spec/philosophy.md owner direction).
 9. **Pure-function marking & evaluation** (S60 ratified) — `pure fn`

@@ -1,8 +1,8 @@
 # E2-M13 — Expert low-level tier
 
-**Status:** draft — **blocked on D-LL1…D-LL3** (Group M13). Implements the
-ratified S58 low-level gate. **D-LL1 ratifies the I1 amendment wording** — until
-then, no generated `unsafe` may ship.
+**Status:** ready to implement — **D-LL1** ✅, **D-LL2** ✅, **D-LL3** ✅ ratified.
+Implements S58. **D-LL1** I1 amendment must be recorded in `architecture.md` before
+codegen emits `unsafe`.
 **Depends on:** E2-M5 (references). Unblocks E2-M14 (C FFI pointers) and E2-M15
 (freestanding allocator story).
 **Error codes:** E31xx block (claim in docs/spec/diagnostics.md).
@@ -18,7 +18,7 @@ systems programmers, still gated). Beginner docs never require this tier.
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
 | D-LL1 | **I1 amendment wording** | **A** — generated `unsafe` only inside user-gated regions or vetted std/mem internals | A (else block M13) | ✅ ratified 2026-06-16 — A: amend I1 for user-gated `unsafe` |
-| D-LL2 | `@unsafe` audit story | — | — | **OPEN** — [`decision-ballots.md`](../../spec/decision-ballots.md) |
+| D-LL2 | `@unsafe` audit story | — | — | ✅ **B** — `@audit("…")` on `@unsafe` blocks |
 | D-LL3 | `std.mem` API breadth | **A** — narrow: `Ptr<T>`, alloc, layout, volatile | A | ✅ ratified 2026-06-16 — A: narrow `std.mem` core PLUS an opt-in wider expert API (name TBD) |
 
 **The I1 amendment (D-LL1) is the gating decision.** I1 today: *no `unsafe` in
@@ -29,38 +29,37 @@ docs/spec/architecture.md before any code emits `unsafe`.
 
 ## Scope (from S58)
 
-- **Discovery gate:** `import std.mem` is required to name any low-level item.
-- **`unsafe { … }` audit gate** and the `unsafe fn` contract.
+- **Discovery gate:** `use core.mem` is required to name any low-level item.
+- **`@audit("…")` + `@unsafe { … }` audit gate** (D-LL2 ✅).
 - **`Ptr<T>`,** pointer deref/math, transmute-class casts.
 - **Explicit allocators,** including arenas and fixed allocators (coordinate with
   E2-M5 arenas and E2-M15 freestanding).
 - **Layout/repr controls.**
 - **Volatile / MMIO wrappers.**
-- **Audit model (D-LL2):** every `unsafe` block carries a structured audit
-  comment; a lint flags missing/empty audits.
+- **Audit model (D-LL2 ✅):** `@audit("…")` required immediately before each `@unsafe` block; lint **L3101** if missing.
 
 ## Surface (example — everything is gated)
 
 ```jet
-import std.mem;                          // discovery gate
+use core.mem;
 
 fn read_reg(addr: Int) -> Int {
-    unsafe {                             // audit gate
-        // SAFETY: addr is a valid MMIO register mapped by the platform HAL.
+    @audit("addr is a valid MMIO register mapped by the platform HAL")
+    @unsafe {
         val p = mem.Ptr<Int>.from_addr(addr);
         return mem.volatile_read(p);
     }
 }
 ```
-Using `mem.Ptr` or `volatile_read` **outside** an `unsafe` block in a module that
-imported `std.mem` is **E3101**.
+Using `mem.Ptr` or `volatile_read` **outside** an `@unsafe` block in a module that
+used `core.mem` is **E3101**.
 
 ## Diagnostics to register
 
 - **E3101** low-level operation used outside an `unsafe` gate.
-- **E3102** `std.mem` item named without `import std.mem`.
-- **E3103** `unsafe fn` called without an `unsafe` block.
-- **L3101** `unsafe` block missing a `// SAFETY:` audit comment (D-LL2).
+- **E3102** `core.mem` item named without `use core.mem`.
+- **E3103** `@unsafe fn` called without an `@unsafe` block.
+- **L3101** `@unsafe` block missing `@audit("…")` (D-LL2).
 
 ## Examples & tests
 

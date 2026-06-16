@@ -243,29 +243,25 @@ jet a beginner's first compiled language.
 | project-managed folder | `.jet/` · lockfile `.jet/lock` (replaces `pack.lock`/`jet.lock`) |
 | source refs | `provider@target` (`github@owner/repo/rev`, `path@…`) |
 
-## 11. Decisions (U-series — RATIFIED 2026-06-16) + downstream edits
+## 11. Decisions (U-series — RATIFIED 2026-06-16)
 
-U1–U7 are **ratified** and recorded in `docs/spec/syntax-decisions.md` (Ratified
+U1–U10 are **ratified** and recorded in `docs/spec/syntax-decisions.md` (Ratified
 section + decision log) and `src/syntax.rs`; `tests/decisions.rs` enforces them.
 
 | ID | Decision | Status |
 |---|---|---|
-| U1 | Retire `jet.toml` → `pack.jet` (Jet syntax) as the package manifest; amends ratified **S52** | ratified |
-| U2 | Unify `jet.lock` + `pack.lock` → single `.jet/lock` (amends S52) | ratified |
+| U1 | Retire `jet.toml` → a Jet-syntax package manifest; amends ratified **S52** (filename finalized by U10) | ratified |
+| U2 | Unify `jet.lock` + `pack.lock` → single `.jet/lock`; `.jet/` managed folder (amends S52) | ratified |
 | U3 | Explicit `module name {}` + `_` disable everywhere; **supersedes jetos D-OS1** (file-is-module) | ratified |
 | U4 | `find(...)` auto-discovery as the default import surface (generalizes jetos D-OS7) | ratified |
-| U5 | The §6 canonical merge table across all tiers (replaces jetos §5.4 + pack-abi) | ratified |
+| U5 | The §6 canonical merge table across all tiers (replaces jetos §5.4 + the former pack-abi table) | ratified |
 | U6 | `provider@target` source refs (was D-JPK18) + `Pkg` sugar (was D-JPK19) | ratified |
 | U7 | `jet run file.jet` stays zero-ceremony forever | ratified |
 | U8 | `sources:`/`imports:` nest inside `module {}` (siblings of contributions), not file top-level; amends U4 | ratified |
+| U9 | A source's provider kind is **inferred, never declared** — target with a `payload.jet` → core, else nix flake; `nixpkgs@…` always nix; manifest-only remote probe (no `via:` marker) | ratified |
+| U10 | Manifest is **`payload.jet`**, identity block **`payload: { … }`**; `packages: { name: library\|executable }` model; package = top-level `module` discovered by name; `env.jet` is the dev shell only. Amends U1 | ratified |
 
-**Downstream edits (now that U1–U7 are confirmed; tracked, applied per chunk):**
-
-- **S52 (jet manifest):** amend — `pack.jet` replaces `jet.toml`; `.jet/lock`
-  replaces `jet.lock`; `.jet/` folder already ratified (S52 amendment 2026-06-13).
-- **jetpack README:** §3.3 pack-file surface superseded by this doc; D-JPK8/13
-  file roles revised (`pack.jet` = package, not "everything"); `pack.lock` →
-  `.jet/lock`.
-- **jetos-design.md:** D-OS1 (file-is-module) superseded by U3; default config
-  location `~/.jet/config.jet`; namespaces/types adopt `env/system/image` +
-  `Env/System/Image`; merge table points here.
+The downstream edits these decisions required (S52 amendment, this folder's
+`README.md`, and `jetos-design.md`) are **applied**; those docs now read in the
+ratified U1–U10 naming. The package manifest filename is `payload.jet`
+everywhere (U10); `pack.jet`/`pack.lock` no longer appear in the plan.

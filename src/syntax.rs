@@ -241,6 +241,8 @@ pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
 pub const ATTR_BINDGEN: &str = "bindgen"; // S59
 /// S59 (S82): attribute on user C overlay modules — `@extern module c.…`.
 pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `@extern module`, not `extern rust`
+/// S58 / D-LL2: required reason on `@unsafe { … }` — `@audit("…")`.
+pub const ATTR_AUDIT: &str = "audit"; // S58
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 

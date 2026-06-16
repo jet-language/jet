@@ -6,10 +6,18 @@ stop and report**, and most Epoch 2 milestones are gated on owner ballots. Paste
 the block below to start; the agent does one chunk, commits `<chunk> verified`,
 and stops. Paste it again (or say "continue") for the next chunk.
 
-**Owner gates to remember:** Chunk 0 records the S52 amendment (`jet.toml` →
-`pack.jet`, unified `.jet/lock`). Chunk 6 (Epoch 2 milestones) requires the
-relevant ballot group in docs/spec/decision-ballots.md to be ratified first —
-the agent will stop and ask when one is open.
+> **⚠ Live status, read first:** Chunks 0–5 and provider stages R0–R2 have
+> **shipped** (two binaries; `payload.jet` manifest; typed `module {}` `env.jet`
+> surface; `core`+`nix` providers; hangar store; `.jet/lock`; merge engine). The
+> authoritative, current list of what is built vs. pending is
+> [`active-task.md`](active-task.md) — consult it before picking up a chunk. The
+> remaining live work is **R3 (tvix)** and the **still-open jetos surface**
+> (Chunk 5 tail + Chunk 6). This file remains the chunk protocol + kickoff prompt.
+
+**Owner gates to remember:** Chunk 0 recorded the S52 amendment (`jet.toml` →
+`payload.jet` per U10, unified `.jet/lock`). Chunk 6 (Epoch 2 milestones)
+requires the relevant ballot group in docs/spec/decision-ballots.md to be
+ratified first — the agent will stop and ask when one is open.
 
 ---
 
@@ -23,8 +31,9 @@ Do NOT try to do everything in one run.
 2. docs/spec/philosophy.md, syntax-decisions.md, architecture.md, diagnostics.md
 3. docs/plans/README.md  ← the implementing-agent protocol; follow it exactly
 4. docs/plans/jetpack-jetos/unified-ecosystem.md  ← the owner-RATIFIED design-of-record
-5. docs/plans/jetpack-jetos/README.md (sequencing, D-JPK gates)
-6. docs/spec/decision-ballots.md (what is still OPEN — never implement an open ID)
+5. docs/plans/jetpack-jetos/README.md (sequencing, milestones, provider roadmap, jetos parity)
+6. docs/plans/active-task.md (LIVE status — what is built vs. pending right now)
+7. docs/spec/decision-ballots.md (what is still OPEN — never implement an open ID)
 
 # Non-negotiable rules
 - Invariants I1–I8. In particular: NO `unsafe` in generated code (golden-tested);
@@ -32,9 +41,10 @@ Do NOT try to do everything in one run.
   every diagnostic has a code + what/why/fix + a tests/ui snapshot (I4); zero new
   compiler crates without owner approval (I6).
 - Syntax gate (docs/plans/README.md step 2): only implement syntax that is
-  Ratified in docs/spec/syntax-decisions.md. The unified-ecosystem names are
-  owner-ratified but not yet recorded there — see Chunk 0. If ANY decision a
-  chunk needs is still open, STOP and report to the owner; do not pick an option.
+  Ratified in docs/spec/syntax-decisions.md. The unified-ecosystem names
+  (U1–U10) are now recorded there and enforced by tests/decisions.rs. If ANY
+  decision a chunk needs is still open, STOP and report to the owner; do not
+  pick an option.
 - Test-first: write the failing ui fixture / example BEFORE the code. Build in
   pipeline order: src/syntax.rs → lexer → parser → sema → codegen. Never skip
   sema into codegen.
@@ -55,14 +65,16 @@ Do NOT try to do everything in one run.
    docs/spec/syntax-decisions.md and src/syntax.rs (keywords/sigils: `module`,
    leading `_` disable, `find`, namespaces `env`/`system`/`image`, types
    `Env`/`System`/`Image`/`Pkg`, `provider@target` refs) and the S52 amendment
-   (`pack.jet` replaces `jet.toml`; single `.jet/lock` replaces `jet.lock`;
-   `.jet/` managed folder; `/etc/jet/hangar` store). Update tests/decisions.rs so
-   the ratification test stays green. No behavior yet — registry + tests only.
+   (`payload.jet` replaces `jet.toml` per U10; single `.jet/lock` replaces
+   `jet.lock`; `.jet/` managed folder; `/etc/jet/hangar` store). Update
+   tests/decisions.rs so the ratification test stays green. No behavior yet —
+   registry + tests only.
 1. JPK-0 foundation (jetpack README §3.5): jetpack entrypoint, command parser,
    source-ref classifier (`github@…`, `path@…`, `nixpkgs@…`), `.jet/` + hangar
    store roots. Unit-test the classifier.
-2. Manifest reshape (U1/U2): parse `pack.jet` (Jet-syntax package manifest:
-   package/deps/exports) and the unified `.jet/lock`; migrate the jet.toml path.
+2. Manifest reshape (U1/U2/U10): parse `payload.jet` (Jet-syntax package
+   manifest: `payload:`/`deps:`/`packages:`) and the unified `.jet/lock`; migrate
+   the jet.toml path.
 3. Module surface: parse `module name {}` (+ `_`-disable) and top-level
    `sources:` / `imports: find("./modules")`; sema for the `env`/`system`/`image`
    namespaces with `Env`/`System`/`Image`/`Pkg`; the merge engine per
