@@ -19,7 +19,7 @@ separate tutorial language (see docs/spec/decision-ballots.md Group 19).
 |---|---|---|---|---|
 | D-TEST1 | Property testing | **A** — in, if a small shrinking design exists | A | OPEN — needs owner |
 | D-TEST4 = D-TOOL1 | Doctests run under `jet test` | **A** — yes (I5 for user code) | A | ✅ ratified 2026-06-16 — A: doctests run under `jet test` |
-| D-TOOL4 | Snapshot testing w/ one-key bless | **A** — yes | A | OPEN — needs owner |
+| D-TOOL4 | Snapshot testing w/ `-u` / `--update-snapshots` | **A** — yes | A | ✅ ratified 2026-06-16 — A; flags `-u` and `--update-snapshots` (not "bless") |
 | D-TEST2 = D-TOOL2 | `todo` typed-hole expression | **B** — defer unless small | defer | OPEN — needs owner |
 | D-TEST3 | Guided learning (`jet tour`/`jet learn`) | **B** — docs-first; A if cheap | docs-first | ✅ ratified 2026-06-16 — B: docs-led learning first, `jet tour` later |
 | D-TOOL3 | `jet emit --rust` expert window | — | — | ✅ ratified 2026-06-16 — A: ship gated `jet emit --rust` expert window |
@@ -29,7 +29,8 @@ separate tutorial language (see docs/spec/decision-ballots.md Group 19).
 
 - **`jet doc`** from doc comments; **doctests** — examples in docs run under
   `jet test` (D-TOOL1; I5 generalized to user code — "docs cannot lie").
-- **Snapshot testing (D-TOOL4)** with one-command bless, mirroring the internal
+- **Snapshot testing (D-TOOL4)** with **`jet test -u`** / **`jet test --update-snapshots`**
+  to accept changed golden files (mirrors internal ui snapshot workflow).
   `UPDATE_EXPECT` workflow shipped to users.
 - **Coverage** output from `jet test` in CI-readable and human-readable modes.
 - **Property testing (D-TEST1)** with shrinking, *only if* a small enough design

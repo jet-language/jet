@@ -424,7 +424,7 @@ impl<'a> Parser<'a> {
                 "selective imports aren't part of Jet".to_string(),
                 "modules keep their namespace so call sites show where a library function comes from"
                     .to_string(),
-                "import the module with `as`, then call items through the alias: `import std.math as math; math.clamp(x, lo, hi);`"
+                "import the module with `as`, then call items through the alias: `import core.math as math; math.clamp(x, lo, hi);`"
                     .to_string(),
                 Some(self.peek().span),
             ));

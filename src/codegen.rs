@@ -3340,8 +3340,8 @@ fn emit_builtin_method(
 
 fn emit_std_field(module: &str, name: &str) -> String {
     match (module, name) {
-        ("std.math", "pi") => "std::f64::consts::PI".to_string(),
-        ("std.math", "e") => "std::f64::consts::E".to_string(),
+        ("core.math", "pi") => "std::f64::consts::PI".to_string(),
+        ("core.math", "e") => "std::f64::consts::E".to_string(),
         _ => "/* unknown std field */".to_string(),
     }
 }
@@ -3360,85 +3360,85 @@ fn emit_std_call(
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
     match (module, method) {
-        ("std.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
-        ("std.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
-        ("std.fs", "write") => format!(
+        ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
+        ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
+        ("core.fs", "write") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_write"),
             arg(0),
             arg(1)
         ),
-        ("std.fs", "append") => format!(
+        ("core.fs", "append") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_append"),
             arg(0),
             arg(1)
         ),
-        ("std.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
-        ("std.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
-        ("std.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
-        ("std.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
-        ("std.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
-        ("std.fs", "copy") => format!(
+        ("core.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
+        ("core.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
+        ("core.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
+        ("core.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
+        ("core.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
+        ("core.fs", "copy") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_copy"),
             arg(0),
             arg(1)
         ),
-        ("std.fs", "rename") => format!(
+        ("core.fs", "rename") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_rename"),
             arg(0),
             arg(1)
         ),
-        ("std.io", "args") => format!("{}()", helper("jet_std_io_args")),
-        ("std.io", "input") => {
+        ("core.io", "args") => format!("{}()", helper("jet_std_io_args")),
+        ("core.io", "input") => {
             if args.is_empty() {
                 format!("{}(None)", helper("jet_std_io_input"))
             } else {
                 format!("{}(Some(&({})))", helper("jet_std_io_input"), arg(0))
             }
         }
-        ("std.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
-        ("std.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
-        ("std.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
-        ("std.env", "set") => format!(
+        ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
+        ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
+        ("core.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
+        ("core.env", "set") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_env_set"),
             arg(0),
             arg(1)
         ),
-        ("std.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
-        ("std.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
-        ("std.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
-        ("std.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
-        ("std.math", "sqrt") => format!("{}({})", helper("jet_std_math_sqrt"), arg(0)),
-        ("std.math", "pow") => format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)),
-        ("std.math", "abs") => format!("({}).abs()", arg(0)),
-        ("std.math", "min") => format!("({}).min({})", arg(0), arg(1)),
-        ("std.math", "max") => format!("({}).max({})", arg(0), arg(1)),
-        ("std.math", "floor") => format!("{}({})", helper("jet_std_math_floor"), arg(0)),
-        ("std.math", "ceil") => format!("{}({})", helper("jet_std_math_ceil"), arg(0)),
-        ("std.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
-        ("std.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
-        ("std.random", "int") => {
+        ("core.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
+        ("core.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
+        ("core.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
+        ("core.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
+        ("core.math", "sqrt") => format!("{}({})", helper("jet_std_math_sqrt"), arg(0)),
+        ("core.math", "pow") => format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)),
+        ("core.math", "abs") => format!("({}).abs()", arg(0)),
+        ("core.math", "min") => format!("({}).min({})", arg(0), arg(1)),
+        ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),
+        ("core.math", "floor") => format!("{}({})", helper("jet_std_math_floor"), arg(0)),
+        ("core.math", "ceil") => format!("{}({})", helper("jet_std_math_ceil"), arg(0)),
+        ("core.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
+        ("core.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
+        ("core.random", "int") => {
             format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1))
         }
-        ("std.random", "float") => format!("{}()", helper("jet_std_random_float")),
-        ("std.random", "pick") => format!("{}(&({}))", helper("jet_std_random_pick"), arg(0)),
-        ("std.random", "shuffle") => {
+        ("core.random", "float") => format!("{}()", helper("jet_std_random_float")),
+        ("core.random", "pick") => format!("{}(&({}))", helper("jet_std_random_pick"), arg(0)),
+        ("core.random", "shuffle") => {
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
-        ("std.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
-        ("std.time", "now") => format!("{}()", helper("jet_std_time_now")),
-        ("std.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
-        ("std.time", "start") => format!("{}()", helper("jet_std_time_start")),
-        ("std.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
-        ("std.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
-        ("std.json", "render_pretty") => {
+        ("core.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
+        ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),
+        ("core.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
+        ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
+        ("core.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        ("core.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
+        ("core.json", "render_pretty") => {
             format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0))
         }
-        ("std.tasks", "spawn") => {
+        ("core.tasks", "spawn") => {
             if let Some(lam_arg) = args.first() {
                 if let crate::ast::Expr::Lambda(lam) = &lam_arg.expr {
                     let closure = emit_spawn_lambda(cx, lam, env);
@@ -3447,7 +3447,7 @@ fn emit_std_call(
             }
             format!("{}jet_std::JetTask::spawn({})", cx.root_prefix, arg(0))
         }
-        ("std.tasks", "channel") => format!("{}jet_std::JetChannel::new()", cx.root_prefix),
+        ("core.tasks", "channel") => format!("{}jet_std::JetChannel::new()", cx.root_prefix),
         _ => "/* unknown std call */".to_string(),
     }
 }

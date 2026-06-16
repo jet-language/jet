@@ -62,7 +62,7 @@ fn ratified_decisions_enforced() {
     const SURFACE_IN_SYNTAX_RS: &[&str] = &[
         "N1", "N2", "S1", "S2", "S3", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S13", "S16",
         "S17", "S18", "S19", "S20", "S22", "S23", "S24", "S27", "S29", "S30", "S32", "S34", "S35",
-        "S36", "S46", "S55", "S57", "S75", "S76",
+        "S36", "S46", "S55", "S57", "S75", "S76", "S82",
     ];
     for id in SURFACE_IN_SYNTAX_RS {
         if ratified.contains(*id) {

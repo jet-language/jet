@@ -507,7 +507,7 @@ Scope from S59:
 
 **Out of scope (deferred post–Epoch 2):** C-header auto-binding (`jet bind`,
 compile-time `import c`, clang/bindgen in the compiler). See
-docs/plans/post-epoch-2/c-header-bindings.md. Registry packages may ship
+docs/plans/epoch-3/c-header-bindings.md. Registry packages may ship
 hand-written bindings without waiting for that tooling.
 
 Exit criteria:
@@ -622,7 +622,7 @@ Audit gates:
 - **C-header auto-binding** (`jet bind`, compile-time `import c`, clang/bindgen
   translation layer). Epoch 2 ships manual `extern c` only (E2-M14). Optional
   header-to-Jet tooling is post–Epoch 2; plan and decisions:
-  docs/plans/post-epoch-2/c-header-bindings.md (D-CBIND1…8).
+  docs/plans/epoch-3/c-header-bindings.md (D-CBIND1…8).
 
 ## Concurrence checklist
 
@@ -648,7 +648,7 @@ approve or edit:
 - [x] E2-V9 editor priority (include Zed dev extension?). ✅ ratified 2026-06-16 — A&C: VS Code/Cursor + Zed + Neovim.
 - [x] E2-V10 public launch trigger. ✅ ratified 2026-06-16 — owner launches manually when happy.
 - [x] E2-V11 governance at launch. ✅ ratified 2026-06-16 — governance deferred to post-Epoch-2.
-- [x] E2-V12 JetOS / pure eval / layer 3 boundary. ✅ ratified 2026-06-16 — redundant; resolved by D-PURE1/2 (not a separate decision).
+- [x] E2-V12 JetOS / pure eval / layer 3 boundary. ✅ ratified 2026-06-16 — **retired**; D-PURE1/2 (Epoch 2), S56 user-derives → [`epoch-3/`](../epoch-3/README.md).
 
 ### Milestone order and scope
 
@@ -657,7 +657,7 @@ approve or edit:
 - [ ] Whether package registry/supply-chain work should move before library
   authoring.
 - [ ] Whether low-level tier and C FFI are both required inside Epoch 2.
-- [ ] Whether pure evaluation/layer 3 belongs in Epoch 2 or should start Epoch 3.
+- [x] Pure evaluation vs layer 3. ✅ D-PURE1/2 in Epoch 2; user derives (S56) → Epoch 3.
 
 ### REPL (E2-M18 / D-REPL1…21)
 

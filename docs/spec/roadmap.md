@@ -228,7 +228,7 @@ before work starts. None of these may compromise the v1 milestones.
    Jet-export story; the gateway to the non-Rust ecosystem and to
    embedded toolchains. **Manual `extern c` blocks only in Epoch 2**
    (E2-M14). C-header auto-binding (`jet bind` / magic `import c`) is
-   deferred post–Epoch 2: docs/plans/post-epoch-2/c-header-bindings.md.
+   deferred post–Epoch 2: docs/plans/epoch-3/c-header-bindings.md.
 8. **Freestanding profile** — `no_std`-class output for embedded/
    kernels (long-horizon target per docs/spec/philosophy.md owner direction).
 9. **Pure-function marking & evaluation** (S60 ratified) — `pure fn`

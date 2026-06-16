@@ -292,12 +292,27 @@ report.jet uses:  filesystem (read/write), network (http)   — no FFI, no unsaf
 <!-- Low level -->
 <h3 class="group" id="low">1F · Expert / low-level, networking, FFI</h3>
 
-<div class="card"><div><span class="id">D-CFFI2</span><span class="q">— how C libraries get found. (“show me use cases”)</span></div>
-<pre><code>// system lib (raylib): extern c "raylib" { fn init_window(...) = "InitWindow"; }
-// A: jet asks `pkg-config raylib` for include/link flags automatically.
-// C: you point jet at the paths yourself in pack.jet.</code></pre>
-<ol class="opts"><li><b>A (rec):</b> pkg-config + standard flags from <code>pack.jet</code>.</li><li><b>B:</b> bundled.</li><li><b>C:</b> manual paths only.</li></ol>
-<div class="rec">Recommend A — how C/C++/Rust locate system libs, so raylib (your D-CFFI3 showcase) “just links”.</div></div>
+<div class="card"><div><span class="id">D-CFFI2</span><span class="q">— how C libraries get found. <span class="badge b-done">✅ resolution ratified</span></span></div>
+<pre><code>// Hangar dep in pack.jet → pinned store paths.
+// No dep → pkg-config raylib.
+// Missing → E3201 (install system lib OR add hangar dep).</code></pre>
+<div class="rec"><b>Decided:</b> layered hangar → pkg-config. Surface <i>syntax</i> re-opened as <b>D-CFFI2-SYN</b> below.</div></div>
+
+<div class="card"><div><span class="id">D-CFFI2-SYN</span><span class="q">— how you write C imports in source. (“don’t like current block much”)</span></div>
+<p>Link resolution stays ratified. This picks declaration + call-site shape. Full briefing: <a href="decision-ballots.md"><code>decision-ballots.md</code></a> (options A–I, D/Rust/Zig/Go/Swift/Nim/Odin).</p>
+<ol class="opts">
+<li><b>A:</b> D-style <code>extern c raylib { fn … = "InitWindow"; }</code> — bare global calls *(provisional S59)*</li>
+<li><b>B:</b> Rust-style <code>@link(name = "raylib") extern c { … }</code></li>
+<li><b>C:</b> Go cgo-style — block declares, calls via fixed <code>c.init_window(...)</code></li>
+<li><b>D:</b> Odin-style <code>foreign import raylib;</code> + <code>extern c { … }</code></li>
+<li><b>E (rec):</b> Jet module path <code>extern c.raylib { … }</code> + <code>import c.raylib as rl</code> — mirrors <code>core.fs</code></li>
+<li><b>F:</b> <code>link c raylib;</code> + shared <code>extern c { … }</code></li>
+<li><b>G:</b> deps in manifest; bindings module + <code>import c.raylib</code></li>
+<li><b>H:</b> Nim-style header / per-fn <code>@extern</code></li>
+<li><b>I:</b> quoted link <code>extern c "raylib" { … }</code></li>
+</ol>
+<div class="rec"><b>Lean E or G</b> for consistency with <code>core.*</code> and multi-lib projects. <b>A</b> is shortest for one-file scripts but clutters namespace. Pick one letter (or hybrid) in <code>decision-ballots-owner.md</code>.</div>
+<div class="decide" data-id="D-CFFI2-SYN" data-opts="A|B|C|D|E|F|G|H|I"></div></div>
 
 <div class="card"><div><span class="id">D-NET1</span><span class="q">— TLS/HTTPS. (“don’t know enough”)</span></div>
 <ol class="opts"><li><b>A (rec):</b> <b>rustls</b> — audited, memory-safe, pure-Rust, via FFI.</li><li><b>B:</b> <b>openssl</b> (C) — ubiquitous but a CVE/build headache.</li><li><b>C:</b> defer TLS to Epoch 3.</li></ol>

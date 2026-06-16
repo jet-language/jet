@@ -12,12 +12,15 @@
 //!     edition: "2026",
 //!     license: "MIT OR Apache-2.0",
 //! }
+//! packages: {
+//!     web: library,
+//!     cli: executable,
+//! }
 //! deps: {
 //!     textkit:  "1.2.0",
 //!     helpers:  path@../helpers,
 //!     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 //! }
-//! exports: [module web, module cli]   // optional
 //! ```
 //!
 //! This module is the structural parser for that shape (U1). It is std-only
@@ -32,6 +35,7 @@
 use super::refspec::{self, RefError, Source};
 use crate::diag::Diagnostic;
 use crate::syntax;
+use std::path::{Path, PathBuf};
 
 /// Payload identity (the `payload: { … }` block, U10 — was `package:`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -44,6 +48,21 @@ pub struct PackageMeta {
     pub repository: Option<String>,
     /// Toolchain constraint, e.g. `jet: ">=1.0.0"` (E1208).
     pub jet_constraint: Option<String>,
+}
+
+/// A package's kind (U10): `library` is imported for code; `executable` installs
+/// a binary on PATH (the devshell case).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageKind {
+    Library,
+    Executable,
+}
+
+/// One entry in the `packages: { … }` block (U10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageEntry {
+    pub name: String,
+    pub kind: PackageKind,
 }
 
 /// Where a dependency resolves from.
@@ -74,8 +93,8 @@ pub struct PackManifest {
     pub package: PackageMeta,
     /// Dependencies, in declaration order.
     pub deps: Vec<Dep>,
-    /// Public modules this package exports (the `exports: [module x, …]` list).
-    pub exports: Vec<String>,
+    /// Packages this payload declares (the `packages: { name: kind }` block, U10).
+    pub packages: Vec<PackageEntry>,
 }
 
 /// Why a `payload.jet` package manifest could not be parsed. These are internal
@@ -94,8 +113,10 @@ pub enum ManifestError {
     /// An inline git dep (D-JPK23) is missing `git`, or doesn't have exactly
     /// one of `tag`/`branch`/`rev`.
     BadGitDep { name: String, reason: &'static str },
-    /// An `exports` item is not `module <name>`.
-    BadExport(String),
+    /// A `packages:` entry's kind is not `library` or `executable` (E1210).
+    BadPackageKind { name: String, value: String },
+    /// A `packages:` block-form entry (`{ kind: … }`) is missing the `kind` field (E1211).
+    MalformedPackageEntry { name: String },
     /// A reserved top-level key (`dev_deps`/`patch`/`workspace`) was used
     /// non-empty (carries forward jet.toml's reserved-section guard, S52/E1209).
     ReservedSection(&'static str),
@@ -133,8 +154,8 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         None => Vec::new(),
     };
 
-    let exports = match block_body(&text, "exports", '[', ']') {
-        Some(body) => parse_exports(&body)?,
+    let packages = match block_body(&text, syntax::MANIFEST_BLOCK_PACKAGES, '{', '}') {
+        Some(body) => parse_packages(&body)?,
         None => Vec::new(),
     };
 
@@ -149,8 +170,133 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     Ok(PackManifest {
         package,
         deps,
-        exports,
+        packages,
     })
+}
+
+// ── package discovery (U10 Chunk 3) ─────────────────────────────────────────
+
+/// Why discovering a package's module failed (U10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscoveryError {
+    /// No `.jet` file in the source tree declares `module <name>`.
+    NotFound { name: String },
+    /// Multiple `.jet` files declare `module <name>`.
+    Ambiguous { name: String, paths: Vec<PathBuf> },
+}
+
+/// Resolve package `name` to its source directory by finding the unique `.jet`
+/// file under `root` that declares `module <name> { … }` at the top level.
+///
+/// Returns the **parent directory** of that file (the package's source tree).
+/// Skips `.jet/`, hidden paths (starting with `.`), and `target/`. Scans
+/// files in sorted order for determinism. Returns `DiscoveryError::NotFound`
+/// if no file declares the module, `DiscoveryError::Ambiguous` if more than
+/// one does.
+pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryError> {
+    let mut files = Vec::new();
+    walk_jet_files(root, &mut files);
+    let mut matches: Vec<PathBuf> = Vec::new();
+    for file in &files {
+        if let Ok(text) = std::fs::read_to_string(file) {
+            if file_declares_module(&text, name) {
+                matches.push(file.clone());
+            }
+        }
+    }
+    match matches.len() {
+        0 => Err(DiscoveryError::NotFound { name: name.to_string() }),
+        1 => Ok(matches[0].parent().unwrap_or(root).to_path_buf()),
+        _ => Err(DiscoveryError::Ambiguous {
+            name: name.to_string(),
+            paths: matches
+                .into_iter()
+                .map(|p| {
+                    p.strip_prefix(root)
+                        .unwrap_or(&p)
+                        .to_path_buf()
+                })
+                .collect(),
+        }),
+    }
+}
+
+/// Walk `dir` recursively, collecting sorted `.jet` file paths into `out`.
+/// Skips: paths whose name starts with `.` (hidden/`.jet/` managed folder)
+/// and `target/` directories.
+fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let fname = entry.file_name();
+        let fname_str = fname.to_string_lossy();
+        if fname_str.starts_with('.') || fname_str == "target" {
+            continue;
+        }
+        if path.is_dir() {
+            walk_jet_files(&path, out);
+        } else if path.extension().and_then(|x| x.to_str()) == Some(syntax::FILE_EXT)
+            && fname_str != syntax::PAYLOAD_FILE
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// Return `true` if `text` (a `.jet` source file) declares `module <name> { … }`
+/// at brace depth 0. Line comments are stripped before scanning.
+fn file_declares_module(text: &str, name: &str) -> bool {
+    let text = strip_line_comments(text);
+    let bytes = text.as_bytes();
+    let kw = b"module";
+    let name_bytes = name.as_bytes();
+    let mut depth: i32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            b'm' if depth == 0 => {
+                if bytes[i..].starts_with(kw) {
+                    let after_kw = i + kw.len();
+                    // `module` must be followed by whitespace.
+                    if bytes
+                        .get(after_kw)
+                        .map_or(false, |&c| c == b' ' || c == b'\t' || c == b'\n' || c == b'\r')
+                    {
+                        // Skip whitespace between keyword and name.
+                        let mut j = after_kw;
+                        while j < bytes.len()
+                            && (bytes[j] == b' ' || bytes[j] == b'\t')
+                        {
+                            j += 1;
+                        }
+                        if bytes[j..].starts_with(name_bytes) {
+                            let after_name = j + name_bytes.len();
+                            let next = bytes.get(after_name).copied();
+                            // Word boundary: end of input or a non-ident char.
+                            if next
+                                .map_or(true, |c| !c.is_ascii_alphanumeric() && c != b'_')
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Convert a parsed `PackManifest` into the compiler's `manifest::Manifest`
@@ -501,23 +647,47 @@ fn parse_git_dep(name: &str, body: &str) -> Result<DepSource, ManifestError> {
     Ok(DepSource::Git { url, selector })
 }
 
-fn parse_exports(body: &str) -> Result<Vec<String>, ManifestError> {
-    let mut exports = Vec::new();
-    for item in body.split(',') {
-        let item = item.trim();
-        if item.is_empty() {
-            continue;
-        }
-        // Each item is `module <name>` (U3 module keyword) — require real
-        // whitespace after `module` so `moduleweb` is not accepted.
-        match item.strip_prefix(syntax::KW_MODULE) {
-            Some(rest) if rest.starts_with(char::is_whitespace) && is_ident(rest.trim()) => {
-                exports.push(rest.trim().to_string());
+fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestError> {
+    let mut packages = Vec::new();
+    for (name, value) in key_value_entries(body) {
+        let trimmed = value.trim();
+        let kind = if trimmed == syntax::PACKAGE_KIND_LIBRARY {
+            PackageKind::Library
+        } else if trimmed == syntax::PACKAGE_KIND_EXECUTABLE {
+            PackageKind::Executable
+        } else if let Some(inner) = trimmed.strip_prefix('{') {
+            let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
+            parse_package_entry_block(&name, inner)?
+        } else {
+            return Err(ManifestError::BadPackageKind {
+                name,
+                value: trimmed.to_string(),
+            });
+        };
+        packages.push(PackageEntry { name, kind });
+    }
+    Ok(packages)
+}
+
+fn parse_package_entry_block(name: &str, body: &str) -> Result<PackageKind, ManifestError> {
+    for (key, value) in key_value_entries(body) {
+        if key == syntax::PACKAGE_FIELD_KIND {
+            let v = value.trim();
+            if v == syntax::PACKAGE_KIND_LIBRARY {
+                return Ok(PackageKind::Library);
+            } else if v == syntax::PACKAGE_KIND_EXECUTABLE {
+                return Ok(PackageKind::Executable);
+            } else {
+                return Err(ManifestError::BadPackageKind {
+                    name: name.to_string(),
+                    value: v.to_string(),
+                });
             }
-            _ => return Err(ManifestError::BadExport(item.to_string())),
         }
     }
-    Ok(exports)
+    Err(ManifestError::MalformedPackageEntry {
+        name: name.to_string(),
+    })
 }
 
 // ── small structural helpers (std-only, comment-stripped input) ──────────────
@@ -649,12 +819,6 @@ fn unquote(s: &str) -> String {
     }
 }
 
-fn is_ident(s: &str) -> bool {
-    let mut chars = s.chars();
-    matches!(chars.next(), Some(c) if c.is_alphabetic() || c == '_')
-        && chars.all(|c| c.is_alphanumeric() || c == '_')
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,11 +830,14 @@ payload: {
     edition: "2026",
     license: "MIT OR Apache-2.0",
 }
+packages: {
+    web: library,
+    cli: executable,
+}
 deps: {
     textkit: "1.2.0",
     helpers: path@../helpers,
 }
-exports: [module web, module cli]   // optional: public modules
 "#;
 
     #[test]
@@ -699,17 +866,70 @@ exports: [module web, module cli]   // optional: public modules
     }
 
     #[test]
-    fn parses_exports_modules() {
+    fn parses_packages_block() {
         let m = parse(FULL).unwrap();
-        assert_eq!(m.exports, vec!["web", "cli"]);
+        assert_eq!(m.packages.len(), 2);
+        assert_eq!(m.packages[0].name, "web");
+        assert_eq!(m.packages[0].kind, PackageKind::Library);
+        assert_eq!(m.packages[1].name, "cli");
+        assert_eq!(m.packages[1].kind, PackageKind::Executable);
     }
 
     #[test]
-    fn deps_and_exports_are_optional() {
+    fn packages_block_form() {
+        let src = r#"
+payload: { name: "x", version: "1" }
+packages: {
+    server: { kind: executable },
+    utils:  { kind: library },
+}
+"#;
+        let m = parse(src).unwrap();
+        assert_eq!(m.packages.len(), 2);
+        assert_eq!(m.packages[0].kind, PackageKind::Executable);
+        assert_eq!(m.packages[1].kind, PackageKind::Library);
+    }
+
+    #[test]
+    fn deps_and_packages_are_optional() {
         let m = parse("payload: { name: \"x\", version: \"0.0.1\" }").unwrap();
         assert!(m.deps.is_empty());
-        assert!(m.exports.is_empty());
+        assert!(m.packages.is_empty());
         assert_eq!(m.package.name, "x");
+    }
+
+    #[test]
+    fn bad_package_kind_bare_errors() {
+        let src = "payload: { name: \"x\", version: \"1\" }\npackages: { web: plugin }";
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BadPackageKind { ref name, ref value }
+                if name == "web" && value == "plugin"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn bad_package_kind_in_block_errors() {
+        let src =
+            "payload: { name: \"x\", version: \"1\" }\npackages: { web: { kind: plugin } }";
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BadPackageKind { ref name, ref value }
+                if name == "web" && value == "plugin"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_package_entry_missing_kind_errors() {
+        let src =
+            "payload: { name: \"x\", version: \"1\" }\npackages: { web: { desc: \"no kind\" } }";
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::MalformedPackageEntry { ref name } if name == "web"),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -751,12 +971,6 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
         let err = parse("payload: { name: \"x\", version: \"1\" }\ndeps: { y: notaref }")
             .unwrap_err();
         assert!(matches!(err, ManifestError::BadDepValue { .. }));
-    }
-
-    #[test]
-    fn bad_export_errors() {
-        let err = parse("payload: { name: \"x\", version: \"1\" }\nexports: [web]").unwrap_err();
-        assert!(matches!(err, ManifestError::BadExport(_)));
     }
 
     #[test]
@@ -1045,5 +1259,112 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
         let m = parse(&updated).unwrap();
         assert_eq!(m.deps.len(), 1);
         assert_eq!(m.deps[0].name, "b");
+    }
+
+    // ── package discovery (U10 Chunk 3) ──
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!("{tag}-{nanos}"));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn discovers_module_in_subdirectory() {
+        let root = scratch_dir("disc-found");
+        let sub = root.join("pkgs/hello");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("hello.jet"), "module hello {\n}\n").unwrap();
+        let result = discover_module_in(&root, "hello").unwrap();
+        assert_eq!(result, sub);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovers_module_at_root() {
+        let root = scratch_dir("disc-root");
+        std::fs::write(root.join("world.jet"), "module world { }\n").unwrap();
+        let result = discover_module_in(&root, "world").unwrap();
+        assert_eq!(result, root);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_not_found_returns_error() {
+        let root = scratch_dir("disc-none");
+        std::fs::write(root.join("other.jet"), "module other { }\n").unwrap();
+        let err = discover_module_in(&root, "hello").unwrap_err();
+        assert!(matches!(err, DiscoveryError::NotFound { ref name } if name == "hello"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_ambiguous_returns_error() {
+        let root = scratch_dir("disc-ambig");
+        std::fs::write(root.join("a.jet"), "module hello { }\n").unwrap();
+        std::fs::write(root.join("b.jet"), "module hello { }\n").unwrap();
+        let err = discover_module_in(&root, "hello").unwrap_err();
+        assert!(matches!(err, DiscoveryError::Ambiguous { ref name, .. } if name == "hello"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_skips_payload_jet() {
+        // payload.jet should never be scanned for module declarations.
+        let root = scratch_dir("disc-skip-payload");
+        std::fs::write(
+            root.join("payload.jet"),
+            "payload: { name: \"x\", version: \"1\" }\n// module hello { }\n",
+        )
+        .unwrap();
+        let err = discover_module_in(&root, "hello").unwrap_err();
+        assert!(matches!(err, DiscoveryError::NotFound { .. }));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_skips_hidden_dirs() {
+        let root = scratch_dir("disc-skip-hidden");
+        let hidden = root.join(".cache");
+        std::fs::create_dir_all(&hidden).unwrap();
+        std::fs::write(hidden.join("hello.jet"), "module hello { }\n").unwrap();
+        let err = discover_module_in(&root, "hello").unwrap_err();
+        assert!(matches!(err, DiscoveryError::NotFound { .. }));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_ignores_module_in_comments() {
+        let root = scratch_dir("disc-comment");
+        std::fs::write(root.join("x.jet"), "// module hello { }\nmodule other { }\n").unwrap();
+        let err = discover_module_in(&root, "hello").unwrap_err();
+        assert!(matches!(err, DiscoveryError::NotFound { .. }));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn discovery_ignores_nested_module() {
+        // `module hello` inside another module (depth > 0) must not count.
+        let root = scratch_dir("disc-nested");
+        std::fs::write(
+            root.join("outer.jet"),
+            "module outer {\n    module hello { }\n}\n",
+        )
+        .unwrap();
+        let err = discover_module_in(&root, "hello").unwrap_err();
+        assert!(matches!(err, DiscoveryError::NotFound { .. }));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn file_declares_module_word_boundary() {
+        // `module hellostuff` must not match `hello`.
+        assert!(!file_declares_module("module hellostuff { }", "hello"));
+        assert!(file_declares_module("module hello { }", "hello"));
+        assert!(file_declares_module("module hello\n{}", "hello"));
     }
 }

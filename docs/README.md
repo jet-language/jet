@@ -32,7 +32,7 @@ These are binding. When they disagree with anything else, they win.
 ## plans/ — implementation plans
 
 Milestone plans by epoch ([epoch-1/](plans/epoch-1/), [epoch-2/](plans/epoch-2/),
-[post-epoch-2/](plans/post-epoch-2/)) and the
+[epoch-3/](plans/epoch-3/)) and the
 [jetpack & jetos](plans/jetpack-jetos/README.md) track (package manager + OS),
 which keeps its detailed design-of-record docs alongside the plan.
 

@@ -14,6 +14,7 @@ on top of it. Its remaining open D-JPK decisions must be ratified before
 implementation.
 
 Post-v1 Epoch 2 plans live in [`epoch-2/`](epoch-2/README.md). Milestone
+
 **E2-M18** (`jet repl`) is draft-only until Group 12 ballots (D-REPL1…21) in
 docs/spec/decision-ballots.md are ratified — see
 [`epoch-2/m18-repl.md`](epoch-2/m18-repl.md).
@@ -68,29 +69,6 @@ Post–Epoch 2 deferred work (e.g. C-header auto-binding) lives in
 - M13: `Implement milestone M13 exactly per docs/plans/epoch-1/m13-lsp.md, following the protocol in docs/plans/README.md.`
 - M14: `Implement milestone M14 exactly per docs/plans/epoch-1/m14-v1.md, following the protocol in docs/plans/README.md.`
 
-### Epoch 2 (post-v1; one detailed plan per milestone, blocked on its ballots)
-
-Each plan lists the ballot IDs it is blocked on (docs/spec/decision-ballots.md);
-ratify those before starting. E2-M1 is verified.
-
-- E2-M2:  `Implement milestone E2-M2 exactly per docs/plans/epoch-2/m2-release-policy.md, following the protocol in docs/plans/README.md.`
-- E2-M3:  `Implement milestone E2-M3 exactly per docs/plans/epoch-2/m3-dx-cli.md, following the protocol in docs/plans/README.md.`
-- E2-M4:  `Implement milestone E2-M4 exactly per docs/plans/epoch-2/m4-jet-dev.md, following the protocol in docs/plans/README.md.`
-- E2-M5:  `Implement milestone E2-M5 exactly per docs/plans/epoch-2/m5-references.md, following the protocol in docs/plans/README.md.`
-- E2-M6:  `Implement milestone E2-M6 exactly per docs/plans/epoch-2/m6-library-authoring.md, following the protocol in docs/plans/README.md.`
-- E2-M7:  `Implement milestone E2-M7 exactly per docs/plans/epoch-2/m7-streaming-io.md, following the protocol in docs/plans/README.md.`
-- E2-M8:  `Implement milestone E2-M8 exactly per docs/plans/epoch-2/m8-packages-supply-chain.md, following the protocol in docs/plans/README.md.`
-- E2-M9:  `Implement milestone E2-M9 exactly per docs/plans/epoch-2/m9-first-party-libraries.md, following the protocol in docs/plans/README.md.`
-- E2-M10: `Implement milestone E2-M10 exactly per docs/plans/epoch-2/m10-network-services.md, following the protocol in docs/plans/README.md.`
-- E2-M11: `Implement milestone E2-M11 exactly per docs/plans/epoch-2/m11-testing-docs-bench.md, following the protocol in docs/plans/README.md.`
-- E2-M12: `Implement milestone E2-M12 exactly per docs/plans/epoch-2/m12-debug-observe.md, following the protocol in docs/plans/README.md.`
-- E2-M13: `Implement milestone E2-M13 exactly per docs/plans/epoch-2/m13-low-level-tier.md, following the protocol in docs/plans/README.md.`
-- E2-M14: `Implement milestone E2-M14 exactly per docs/plans/epoch-2/m14-c-ffi.md, following the protocol in docs/plans/README.md.`
-- E2-M15: `Implement milestone E2-M15 exactly per docs/plans/epoch-2/m15-freestanding-cross.md, following the protocol in docs/plans/README.md.`
-- E2-M16: `Implement milestone E2-M16 exactly per docs/plans/epoch-2/m16-pure-eval-layer3.md, following the protocol in docs/plans/README.md.`
-- E2-M17: `Implement milestone E2-M17 exactly per docs/plans/epoch-2/m17-epoch2-ga.md, following the protocol in docs/plans/README.md.`
-- E2-M18: `Implement milestone E2-M18 exactly per docs/plans/epoch-2/m18-repl.md, following the protocol in docs/plans/README.md.`
-
 ## Dependency graph
 
 ```
@@ -131,19 +109,5 @@ milestone example. Multi-file demos use a directory (`examples/features/21_impor
 | 25–26 | M9 | traits, generic_types |
 | 27–28 | M9.5 | comptime_table, embed |
 | 29–31 | M10 | files, json, cli |
-| 32–33 | E2-M1 | tasks, pipeline (per m1-concurrency.md) |
-| 34 | E2-M3 | digits |
-| 35 | E2-M5 | zerocopy |
-| 36 | E2-M6 | library |
-| 37 | E2-M7 | stream |
-| 38 | E2-M8 | packages/ (supply chain) |
-| 39–43 | E2-M9 | csv, toml, log, archive, hash |
-| 44–45 | E2-M10 | http_client, http_server |
-| 46 | E2-M11 | doctest |
-| 47 | E2-M12 | debug |
-| 48 | E2-M13 | lowlevel |
-| 49 | E2-M14 | cffi |
-| 50–51 | E2-M15 | cross, freestanding |
-| 52 | E2-M16 | pure |
-
-(E2-M18 REPL has no numbered example — its spec is a `tests/repl/` transcript.)
+| 32 | M12 | packages/ |
+| 33–34 | M11 | tasks, pipeline |

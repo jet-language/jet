@@ -1,4 +1,4 @@
-# Standard library (`jet.std`)
+# Standard library (`jet.core`)
 
 The Jet standard library gives you files, terminal I/O, environment variables,
 process control, math, time, random numbers, JSON, tasks, and channels —
@@ -9,17 +9,21 @@ enough to write real command-line tools. Every fallible call returns a
 name; the compiler type-checks your calls and generates only the helpers you
 actually use (see [Imports](#imports) and [Pay for what you call](#pay-for-what-you-call)).
 
-**Canonical name:** `jet.std`. The short spelling `std` is reserved and means the
+**Canonical name:** `jet.core`. The short spelling `core` is reserved and means the
 same thing.
+
+**Naming (S54):** types and error enums are PascalCase (`String`, `IOError`,
+`JSON`); functions and module segments are snake_case (`read`, `core.fs`).
+See S66 for acronym capitalization.
 
 ---
 
 ## Quick start
 
 ```jet
-import std.fs as fs;
-import std.io as io;
-import std.env as env;
+import core.fs as fs;
+import core.io as io;
+import core.env as env;
 
 fn main() {
     val args = io.args();
@@ -48,21 +52,21 @@ jet run tool.jet World
 Std uses **module imports** — no quotes, unlike file imports.
 
 ```jet
-import std.fs as fs;           // one submodule
-import jet.std.json as json;   // same module, canonical spelling
+import core.fs as fs;           // one submodule
+import jet.core.json as json;   // same module, canonical spelling
 ```
 
-Both `import std.fs` and `import jet.std.fs` resolve to the same compiler-known
+Both `import core.fs` and `import jet.core.fs` resolve to the same compiler-known
 module.
 
 **Not allowed:**
 
 ```jet
-import std.math { clamp };     // selective imports — use an alias instead
+import core.math { clamp };     // selective imports — use an alias instead
 import "std/fs";               // quoted paths are for .jet files only
 ```
 
-If you name a local file or folder `std`, `jet`, `http`, `regex`, `csv`, `toml`,
+If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
 `crypto`, or `archive`, the compiler rejects it — those names are reserved for
 first-party packages.
 
@@ -74,7 +78,7 @@ Fallible std functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet
-import std.fs as fs;
+import core.fs as fs;
 
 fn main() {
     val text = fs.read("data.txt") ?? return;   // stop on error
@@ -105,7 +109,7 @@ Whole-file helpers only (no open file handles in v1). Paths are plain
 `String`s.
 
 ```jet
-import std.fs as fs;
+import core.fs as fs;
 
 fn main() {
     val path = "/tmp/notes.txt";
@@ -140,7 +144,7 @@ fn main() {
 ### `std.io` — terminal and arguments
 
 ```jet
-import std.io as io;
+import core.io as io;
 
 fn main() {
     val args = io.args();                    // [String]; index 0 is the program name
@@ -170,7 +174,7 @@ printf "Ada\n" | jet run ask.jet
 ### `std.env` — environment and working directory
 
 ```jet
-import std.env as env;
+import core.env as env;
 
 fn main() {
     val home = env.home_dir();               // String? — may be null
@@ -195,7 +199,7 @@ fn main() {
 ### `std.process` — exit and subprocesses
 
 ```jet
-import std.process as process;
+import core.process as process;
 
 fn main() {
     val result = process.run(["echo", "hi"]) ?? return;
@@ -218,7 +222,7 @@ fn main() {
 ### `std.math` — numbers
 
 ```jet
-import std.math as math;
+import core.math as math;
 
 fn main() {
     print(math.sqrt(2.0));
@@ -249,7 +253,7 @@ fn main() {
 ### `std.random` — random numbers
 
 ```jet
-import std.random as random;
+import core.random as random;
 
 fn main() {
     random.seed(42);                         // make the sequence repeatable
@@ -280,7 +284,7 @@ not for tests.
 Time in v1 is **Unix milliseconds** only — no dates, time zones, or formatting.
 
 ```jet
-import std.time as time;
+import core.time as time;
 
 fn main() {
     val started = time.now();                // milliseconds since 1970-01-01 UTC
@@ -310,7 +314,7 @@ this to pin output; normal programs ignore it.
 Dynamic JSON — you walk a `JSON` enum by hand. Typed JSON structs come later.
 
 ```jet
-import std.json as json;
+import core.json as json;
 
 fn main() {
     val raw = "{{\"name\":\"jet\",\"ok\":true,\"n\":1.5}}";
@@ -345,7 +349,7 @@ Blocking tasks and typed channels are Jet's concurrency model. There is no
 `async`/`await` and no mutex API; tasks communicate by sending owned values.
 
 ```jet
-import std.tasks as tasks;
+import core.tasks as tasks;
 
 fn sum_range(first: Int, last: Int) -> Int {
     var total = 0;
@@ -367,7 +371,7 @@ fn main() {
 Channels carry one type:
 
 ```jet
-import std.tasks as tasks;
+import core.tasks as tasks;
 
 fn main() {
     val ch: Channel<Int> = tasks.channel();
@@ -460,8 +464,8 @@ To ship a Jet-source standard library, these prerequisites are still open:
 
 | Prerequisite | Milestone | Why it's needed |
 |--------------|-----------|-----------------|
-| Package manager + store | **M12** | `jet.std` must install as a real package (`jet.toml`, lockfile, content-addressed store) |
-| Toolchain-selected `jet.std` | **M12 + SL2** | Compiler picks one std version; imports resolve through the package graph |
+| Package manager + store | **M12** | `jet.core` must install as a real package (`jet.toml`, lockfile, content-addressed store) |
+| Toolchain-selected `jet.core` | **M12 + SL2** | Compiler picks one std version; imports resolve through the package graph |
 | OS boundary story | **M7 (partial)** | Files, processes, and env ultimately need the OS — either keep thin `extern rust` shims or expand FFI |
 | Error conversion for `?` | post-v1 | Multi-module std wants propagating across error enums without boilerplate |
 | Streaming I/O | post-v1 | Jet-source std can't rely on whole-file helpers forever |
@@ -471,7 +475,7 @@ helpers, and data structures — the language has structs, enums, generics,
 traits, closures, and fallible `T ? E` values. **What still needs a native bridge:** syscalls
 (read/write files, spawn processes, sleep, environment).
 
-The likely migration path: M12 delivers `jet.std` as a bundled first-party
+The likely migration path: M12 delivers `jet.core` as a bundled first-party
 package; pure Jet modules replace Rust where possible; a small audited native
 layer stays for I/O and process control until Jet has its own OS interface.
 

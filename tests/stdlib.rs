@@ -88,8 +88,8 @@ fn canonical_and_short_std_imports_resolve() {
     let out = compile_temp(
         "std_imports.jet",
         r#"
-import std.fs as fs;
-import jet.std.fs as files;
+import core.fs as fs;
+import jet.core.fs as files;
 
 fn main() {
     print(fs.exists("/tmp"));
@@ -105,14 +105,14 @@ fn importing_std_without_calls_is_free_in_codegen() {
     let out = compile_temp(
         "std_import_only.jet",
         r#"
-import std.fs as fs;
-import std.io as io;
-import std.env as env;
-import std.process as process;
-import std.math as math;
-import std.random as random;
-import std.time as time;
-import std.json as json;
+import core.fs as fs;
+import core.io as io;
+import core.env as env;
+import core.process as process;
+import core.math as math;
+import core.random as random;
+import core.time as time;
+import core.json as json;
 
 fn main() {
     print("ok");
@@ -138,7 +138,7 @@ fn io_input_reads_a_line_from_stdin() {
         &dir,
         "input_demo",
         r#"
-import std.io as io;
+import core.io as io;
 
 fn main() {
     val name = io.input("name? ") ?? panic("read failed");
@@ -170,8 +170,8 @@ fn random_and_time_output_pins_with_seed_and_epoch() {
         &dir,
         "time_random",
         r#"
-import std.random as random;
-import std.time as time;
+import core.random as random;
+import core.time as time;
 
 fn main() {
     random.seed(42);
@@ -211,14 +211,14 @@ fn importing_all_std_modules_without_calls_stays_hello_world_sized() {
     fs::write(
         dir.join("std_import_only.jet"),
         r#"
-import std.fs as fs;
-import std.io as io;
-import std.env as env;
-import std.process as process;
-import std.math as math;
-import std.random as random;
-import std.time as time;
-import std.json as json;
+import core.fs as fs;
+import core.io as io;
+import core.env as env;
+import core.process as process;
+import core.math as math;
+import core.random as random;
+import core.time as time;
+import core.json as json;
 
 fn main() {
     print("ok");
@@ -267,7 +267,7 @@ fn channel_stress_1000_messages() {
         &dir,
         "channel_stress",
         r#"
-import std.tasks as tasks;
+import core.tasks as tasks;
 
 fn main() {
     val ch: Channel<Int> = tasks.channel();

@@ -21,7 +21,7 @@ same-error-type contortions.
 |---|---|---|---|---|
 | D-LIB1 | S61 (labels/defaults) + S62 (delegation) timing | **A** — both in M6 | A | OPEN — needs owner |
 | D-LIB2 | Generics step | **A** — associated types + default method bodies | A | OPEN — needs owner |
-| D-LIB3 = D-ERR2 | `?` error-conversion shape | **A** — `From`-style `IntoError` trait | trait, opt-in | OPEN — needs owner |
+| D-LIB3 = D-ERR2 | `?` error-conversion shape | **A** — `From`-style **`Fallible`** trait | trait, opt-in | ✅ ratified 2026-06-16 — **`Fallible` trait, `Error` type** |
 | D-ERR1 | Grow `Error` carrier (msg + code + source) | **A** | A | — |
 | D-FP1 | Struct field punning | **A** — `Source { name, upstream }` | A | — |
 | D-FP3 | Core `module name {}` typed declaration | — | — | ✅ ratified 2026-06-16 — A: core `module name {}` typed declaration |
@@ -45,11 +45,11 @@ impl Service using inner;                  // forwards Service methods to `inner
 // D-FP1 — field punning:
 return Source { name, upstream, via: "nix" };
 
-// D-ERR2 — `?` converts across error types via an opt-in trait:
-impl JsonError: IntoError { fn into_error(self) -> Error { … } }
+// D-ERR2 — `?` converts across error types via the Fallible trait:
+impl JsonError: Fallible { fn to_error(self) -> Error { … } }
 fn load(path: String) -> Config ? {
-    val text = fs.read(path)?;   // FileError -> Error
-    ok(parse(text)?)             // JsonError -> Error
+    val text = fs.read(path)?;   // FileError -> Error via Fallible
+    ok(parse(text)?)             // JsonError -> Error via Fallible
 }
 ```
 
@@ -58,7 +58,8 @@ fn load(path: String) -> Config ? {
 - **Generics v1.5 (D-LIB2):** associated types and default method bodies.
   Re-evaluate trait inheritance and blanket impls only with evidence (I8).
 - **Error conversion (D-LIB3/D-ERR2):** `?` across different error types via the
-  opt-in `IntoError` trait; `String` and std error types convert by default;
+  opt-in **`Fallible`** trait (`impl E: Fallible { fn to_error(self) -> Error }`);
+  `String` and std error types convert by default;
   arbitrary unrelated enums do **not** silently collapse.
 - **`Error` carrier (D-ERR1):** grow the prelude `Error` to hold message +
   optional code + optional source, replacing today's `String` backing.
@@ -73,8 +74,8 @@ fn load(path: String) -> Config ? {
 
 - **E2401** delegation target lacks a required method ("`inner` does not provide
   `flush`").
-- **E2402** `?` error type has no `IntoError` path to the function's error type
-  (names both types; suggests an `impl`).
+- **E2402** `?` error type has no **`Fallible`** path to the function's error type
+  (names both types; suggests an `impl Fallible`).
 - **E2403** field-pun name not in scope / not a field (with "did you mean").
 - **L2401** advisory: public API takes a positional `Bool`; consider a label.
 

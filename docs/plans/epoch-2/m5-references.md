@@ -20,7 +20,7 @@ rather than inventing a new model. No user-written lifetime names, ever.
 |---|---|---|---|---|
 | D-REF1 | Teaching order | **A** — after the beginner ownership chapter | A | ✅ ratified 2026-06-16 — A: teach references after the beginner ownership chapter |
 | D-REF2 | Ship arenas this milestone | **A** — only if the parser example needs them | A | OPEN — needs owner |
-| D-REF3 | Inlay-hint defaults beyond clone | **A** — borrowed-return + cleanup scopes on | A | OPEN — needs owner |
+| D-REF3 | Inlay-hint defaults beyond clone | **A** — borrowed-return + cleanup scopes on | A | ✅ ratified 2026-06-16 — A: borrowed-return + cleanup-scope hints on by default |
 | D-PAT1/2 (opt) | Nested patterns / `&&` guard scope | see Group 15 | deferred | — |
 
 ## Scope

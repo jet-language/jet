@@ -330,20 +330,17 @@ fn unknown_named_source_in_env_is_friendly() {
 
 #[test]
 fn core_provider_runs_first_party_package_without_nix() {
-    // R2: a `core` named source realizes a first-party Jet package with no nix
-    // anywhere. We strip nix from PATH to prove it.
+    // R2/U10: a `core` named source realizes a first-party Jet package with no
+    // nix anywhere. Package is discovered by module name — no env.jet index.
     let base = Scratch::new("core");
     let repo = base.join("jet-pkgs");
     let proj = base.join("proj");
     let root = base.join("root");
-    let hello_bin = repo.join("pkgs/hello/bin");
+    let hello_pkg = repo.join("pkgs/hello");
+    let hello_bin = hello_pkg.join("bin");
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    fs::write(
-        repo.join("env.jet"),
-        "pkg.package(\"hello\", \"./pkgs/hello\");\n",
-    )
-    .unwrap();
+    fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
     let greet = hello_bin.join("hello");
     fs::write(&greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
     #[cfg(unix)]
@@ -381,30 +378,28 @@ fn core_provider_runs_first_party_package_without_nix() {
 
 #[test]
 fn typed_core_source_inferred_from_pack_jet() {
-    // U9: a typed `module { … }` env declares `sources: { mine: path@<dir> }`
-    // with no provider marker. The kind is *inferred* from the resolved target —
-    // the target has a `payload.jet`, so it realizes through the first-party `core`
-    // provider with no nix anywhere (we strip nix from PATH to prove it). This is
-    // the typed-surface mirror of `core_provider_runs_first_party_package_without_nix`.
+    // U9/U10: a typed `module { … }` env declares `sources: { mine: path@<dir> }`
+    // with no provider marker. The kind is *inferred* from `payload.jet` in the
+    // target → realizes through the first-party `core` provider. U10 Chunk 3:
+    // the package is discovered by module name — `module hello` in the source tree
+    // — with no `env.jet` index. No nix on PATH proves no nix is involved.
     let base = Scratch::new("typed-core");
     let repo = base.join("jet-pkgs");
     let proj = base.join("proj");
     let root = base.join("root");
-    let hello_bin = repo.join("pkgs/hello/bin");
+    let hello_pkg = repo.join("pkgs/hello");
+    let hello_bin = hello_pkg.join("bin");
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    // `payload.jet` is the U9 marker that makes this a Jet package repo (→ core).
+    // `payload.jet` is both the U9 probe marker and the U10 package index.
     fs::write(
         repo.join("payload.jet"),
-        "payload: {\n    name: \"jet-pkgs\",\n    edition: \"2026\",\n}\n",
+        "payload: {\n    name: \"jet-pkgs\",\n    version: \"0.1.0\",\n}\npackages: {\n    hello: executable,\n}\n",
     )
     .unwrap();
-    // `env.jet` is still the core provider's package index (pkg.package → subpath).
-    fs::write(
-        repo.join("env.jet"),
-        "pkg.package(\"hello\", \"./pkgs/hello\");\n",
-    )
-    .unwrap();
+    // The `module hello` declaration is the U10 Chunk 3 discovery target — no
+    // `env.jet` pkg.package index needed anymore (dual marker retired).
+    fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
     let greet = hello_bin.join("hello");
     fs::write(&greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
     #[cfg(unix)]
@@ -523,14 +518,11 @@ fn core_provider_fetches_remote_git_package_from_env() {
     let repo = base.join("remote");
     let proj = base.join("proj");
     let root = base.join("root");
-    let hello_bin = repo.join("pkgs/hello/bin");
+    let hello_pkg = repo.join("pkgs/hello");
+    let hello_bin = hello_pkg.join("bin");
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    fs::write(
-        repo.join("env.jet"),
-        "pkg.package(\"hello\", \"./pkgs/hello\");\n",
-    )
-    .unwrap();
+    fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
     let greet = hello_bin.join("hello");
     fs::write(&greet, "#!/bin/sh\necho hello from remote jet-pkgs\n").unwrap();
     #[cfg(unix)]

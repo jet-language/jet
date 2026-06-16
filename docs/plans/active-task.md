@@ -13,10 +13,9 @@ chunk lands, update "Where we are" and "Next up", and move finished items into
 design-of-record** for the `jet` + `jetpack` + `jetos` ecosystem. It is the
 TARGET surface; it explicitly says Phase-1 directive scanning is the shippable
 bootstrap that evolves into the typed surface. Do **not** treat ratified
-(U1–U9) as implemented — see the gap list below (e.g. U9 inferred provider kind
-is fully built for both `path@…` and `github@…`, but a `core` source still
-carries the dual `payload.jet`+`env.jet` marker; `System`/`Image` types parse but
-are inert).
+(U1–U9) as implemented — see the gap list below (e.g. U10 Chunks 1–3 are built:
+`payload.jet` manifest, `packages:` parser, module discovery — but `library`/`executable`
+realize (Chunk 4) is not yet done; `System`/`Image` types parse but are inert).
 
 Supporting design docs (own their detail):
 - `docs/plans/jetpack-jetos/README.md` — sequencing + D-JPK gates (§3.3 surface superseded by unified-ecosystem.md)
@@ -44,7 +43,73 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U10 Chunk 1 — rename the manifest (`pack.jet` → `payload.jet`)
+## Latest chunk (2026-06-16): U10 Chunk 3 — recursive package discovery
+
+`CoreProvider::realize` now discovers a package's source directory by walking
+the source tree for `module <name>` — no `env.jet` index needed. The dual
+marker (U9 step 3) is retired: a `core` source only needs `payload.jet`.
+
+Landed this run:
+- **`packmanifest::discover_module_in(root, name)`** walks the source tree
+  (sorted, skips `.jet/`/hidden dirs/`target/`, skips `payload.jet` itself),
+  finds the unique `.jet` file declaring `module <name>` at brace depth 0, and
+  returns its parent directory as `src_dir`. Zero matches → `DiscoveryError::NotFound`;
+  two or more → `DiscoveryError::Ambiguous`. `file_declares_module` strips line
+  comments before scanning; `walk_jet_files` is sorted + bounded.
+- **`manifest::e1212` / `e1213`** (E1212/E1213): "no `module <name>` found" and
+  "`module <name>` is ambiguous" diagnostics, both public.
+- **`loader.rs`**: after manifest shape validation (E1210/E1211), calls
+  `discover_module_in` for each `packages:` entry; returns E1212 or E1213 on
+  failure. Discovery check runs at compile time so errors surface via `jet compile`.
+- **`CoreProvider::realize`** (`provider.rs:148`): replaced `envfile::load` +
+  `ef.provided()` with `packmanifest::discover_module_in`. No more `env.jet`
+  read in the provider path. `envfile` import removed from `provider.rs`.
+- **UI snapshots**: `tests/ui/manifest_package_not_found/` (E1212) and
+  `tests/ui/manifest_package_ambiguous/` (E1213) created and blessed.
+- **Tests updated**: `provider.rs` tests (`core_provider_builds_local_package`,
+  `core_provider_fetches_remote_git_package`, `realize_resolves_inferred_remote_to_core`)
+  now write `pkgs/hello/hello.jet` (`module hello { }`) instead of `env.jet`.
+  `tests/jetpack.rs`: `core_provider_runs_first_party_package_without_nix`,
+  `core_provider_fetches_remote_git_package_from_env`,
+  `typed_core_source_inferred_from_pack_jet` updated likewise.
+- **`examples/jetpack/jet-pkgs/pkgs/hello/hello.jet`** added (`module hello { }`),
+  making `committed_example_builds_offline_end_to_end` work without `env.jet`.
+- **Unit tests** for discovery in `packmanifest.rs`: found/not-found/ambiguous/
+  skips-payload-jet/skips-hidden/ignores-comments/ignores-nested/word-boundary.
+
+Verified: `nix develop -c cargo test` fully green; `cargo test --test decisions`
+passes; `jet run examples/features/01_hello.jet` prints `hello, world`.
+
+## Prior chunk (2026-06-16): U10 Chunk 2 — `packages:` block parser
+
+`packages: { name: library|executable|{ kind: … } }` is now parsed in
+`packmanifest.rs`; the old `exports: [module …]` block is retired (clean break,
+no alias). Two new diagnostics cover bad kind values and malformed block entries.
+
+Landed this run:
+- **`PackageKind`** (`Library`/`Executable`) + **`PackageEntry`** (`name`, `kind`)
+  structs added to `packmanifest.rs`; `PackManifest.exports: Vec<String>` replaced
+  with `PackManifest.packages: Vec<PackageEntry>`.
+- **`ManifestError`**: `BadExport` removed; `BadPackageKind { name, value }` (E1210)
+  and `MalformedPackageEntry { name }` (E1211) added.
+- **`parse_packages()`** parses bare-keyword form (`web: library`) and block form
+  (`web: { kind: library, … }`); `parse_package_entry_block()` extracts the `kind`
+  field from a block, rejecting unknown kinds (E1210) and missing `kind` (E1211).
+- **`parse_exports()`** and `is_ident()` removed; `FULL` test constant updated to
+  `packages:` block; old `parses_exports_modules`/`bad_export_errors` tests replaced
+  with `parses_packages_block`, `packages_block_form`, `deps_and_packages_are_optional`,
+  `bad_package_kind_bare_errors`, `bad_package_kind_in_block_errors`,
+  `malformed_package_entry_missing_kind_errors`.
+- **`manifest.rs`**: `to_diagnostic` handles `BadPackageKind`→E1210 and
+  `MalformedPackageEntry`→E1211; `e1210`/`e1211` helpers added.
+- **`diagnostics.md`**: E1210/E1211 rows added.
+- **UI snapshots**: `tests/ui/manifest_bad_package_kind/` and
+  `tests/ui/manifest_malformed_package_entry/` created and blessed.
+
+Verified: `nix develop -c cargo test` fully green; `cargo test --test decisions`
+passes; `jet run examples/features/01_hello.jet` prints `hello, world`.
+
+## Prior chunk (2026-06-16): U10 Chunk 1 — rename the manifest (`pack.jet` → `payload.jet`)
 
 The package manifest is now **`payload.jet`** and its identity block is
 **`payload: { … }`** — a clean break off `pack.jet`/`package:`, no alias (mirrors
@@ -208,7 +273,16 @@ Landed this run:
 
 ## Where we are (verified 2026-06-16)
 
-Last **committed**: `819b756` ("Updating jetpack ecosystem") — the U9 **remote
+Last **committed**: `819b756` (U9 remote probe); **U10 Chunks 1–3 are uncommitted**
+in the working tree. See ⚠ note below.
+
+### ⚠ Working tree: U10 Chunks 1–3 uncommitted
+
+All three chunks are implemented and green but not yet committed. When committing,
+stage selectively — owner doc noise (epoch-2, decision-ballots, owner-todo) must
+stay unstaged. See the "Pre-existing working-tree noise" section below.
+
+Last **committed-before-this-session**: `819b756` ("Updating jetpack ecosystem") — the U9 **remote
 probe** (`ProviderKind::Infer` in `refspec.rs`; `provider::{resolve_kind,
 infer_remote_kind, remote_has_pack_jet}`; dispatch rewired to `provider_for(kind)`
 / `uses_nix_provider(…, offline, cache_dir)` / `cli.rs::realize_ref`) landed
@@ -323,21 +397,13 @@ dev-shell only). No Jet→binary compiler yet: `library` stages module source,
   parser keys on `MANIFEST_BLOCK_PAYLOAD` (`MissingPackage`→`MissingPayload`);
   E1206/E1208 copy + the U9 probe + all `tests/`/`tests/ui` fixtures + §2.1 docs
   updated. Clean break, no alias. See the Latest chunk above.
-- **Chunk 2 — `packages:` block parser. ← START HERE.** Parse `packages: { name: <bare-kw |
-  { kind, … }> }` in `packmanifest.rs`; ratify-token spellings already in
-  `syntax.rs`. Fold the old `exports: [module …]` into `packages:` (remove
-  `parse_exports`/`exports` field or repoint it). Diagnostics for a bad kind /
-  malformed entry (new E-codes → `diagnostics.md` + `tests/ui` snapshot, I4).
-  *Exit:* manifest with a `packages:` block parses to a typed structure; bad
-  entries diagnose; snapshots blessed.
-- **Chunk 3 — recursive package discovery.** Resolve each `packages:` name → its
-  `module <name>` declaration by walking the source tree (sorted, bounded — skip
-  `.jet/`/hidden/build dirs). Exactly-one-or-error: **two new diagnostics** —
-  "package declared but no `module <name>`" and "ambiguous: `module <name>` in A
-  and B" (I4: code + what/why/fix + `tests/ui` snapshot each). Wire into
-  `CoreProvider::realize` to replace the `envfile::provided` lookup
-  (`provider.rs:160`). *Exit:* a typed `core` source resolves a package by module
-  name with **no `env.jet` index**; the dual marker is gone.
+- **Chunk 2 — `packages:` block parser. ✅ DONE (2026-06-16).** `packages: { name:
+  library|executable|{ kind: … } }` parsed; `exports:` retired (clean break);
+  `BadPackageKind`→E1210, `MalformedPackageEntry`→E1211; UI snapshots blessed.
+- **Chunk 3 — recursive package discovery. ✅ DONE (2026-06-16).** `discover_module_in`
+  walks the source tree for `module <name>`; `CoreProvider::realize` uses it;
+  E1212/E1213 cover not-found and ambiguous; UI snapshots blessed; dual `env.jet`
+  marker retired. See Latest chunk above.
 - **Chunk 4 — `library` vs `executable` realize.** `executable` stages the
   package dir's prebuilt `bin/` (today's behavior, now keyed by kind);
   `library` stages module source for import. Retire the `env.jet`

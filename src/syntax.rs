@@ -215,14 +215,18 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_IMPORT: &str = "import";
 pub const KW_AS: &str = "as";
 
-/// S51 (ratified M10): compiler-known standard library package roots.
-pub const STD_SHORT: &str = "std";
+/// S51 (ratified M10; amended 2026-06-16): compiler-known **core** library roots.
+pub const STD_SHORT: &str = "core";
 pub const STD_CANONICAL_ROOT: &str = "jet";
-pub const STD_CANONICAL: &str = "jet.std";
+pub const STD_CANONICAL: &str = "jet.core";
+
+/// S51 (amended 2026-06-16): former `std` spellings — teaching errors only (S14).
+pub const LEGACY_STD_SHORT: &str = "std";
+pub const LEGACY_STD_CANONICAL: &str = "jet.std";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "std", "jet", "http", "regex", "csv", "toml", "crypto", "archive",
+    "core", "jet", "http", "regex", "csv", "toml", "crypto", "archive",
 ];
 
 /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
@@ -349,6 +353,22 @@ pub const FOREIGN_ASYNC: &str = "async";
 pub const FOREIGN_AWAIT: &str = "await";
 pub const FOREIGN_MUTEX: &str = "Mutex";
 pub const FOREIGN_LOCK: &str = "lock";
+
+/// S82 (ratified 2026-06-16): attribute prefix sigil — `@Marker` / `@[a, b]`.
+pub const ATTR_PREFIX: &str = "@";
+
+/// S82 (ratified 2026-06-16): multi-attribute list delimiters after `@`.
+pub const ATTR_LIST_OPEN: &str = "[";
+pub const ATTR_LIST_CLOSE: &str = "]";
+
+/// S82: rejected Rust-style attribute spelling (teaching error).
+pub const FOREIGN_HASH_ATTR: &str = "#[";
+
+/// S80 (ratified 2026-06-16): cross-type `?` conversion trait (D-ERR2).
+pub const TRAIT_FALLIBLE: &str = "Fallible";
+
+/// S80 (ratified 2026-06-16): `Fallible` method returning default `Error`.
+pub const FN_TO_ERROR: &str = "to_error";
 
 // S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the
 // manifest reshape chunk (U1/U2): the manifest is now `PAYLOAD_FILE`

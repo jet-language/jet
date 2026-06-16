@@ -169,7 +169,11 @@ impl Circle {
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
-  `Printable`/`Equatable`; explicit `derive Comparable;` / `derive Serialize;`.
+  `Printable`/`Equatable`; explicit `@Comparable` / `@Serialize` (S82).
+- **Attributes (S82):** `@Marker` or `@[a, b]` on the line before a
+  declaration; `@Marker { … }` for scoped effects (`@transact`, `@unsafe`) or
+  in-body config (`@Serialize { rename …; }`). **`pure fn`** and **`comptime`**
+  stay prefix keywords.
 
 ## M4 — errors as values (done)
 
@@ -178,6 +182,9 @@ Fallible functions return **`T ? E`** (S34): `T` is the success payload,
 the error side in a function return — **`T ?`** — means **`T ? Error`**.
 Build outcomes with **`ok(v)`** and **`err(e)`**; test them with
 **`== ok(n)`** / **`== err(e)`** (same pattern machinery as M3 optionals).
+Cross-type **`?`** conversion is opt-in via the **`Fallible`** trait
+(D-ERR2): `impl MyFail: Fallible { fn to_error(self) -> Error { … } }`.
+Prelude types implement **`Fallible`** by default.
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
@@ -225,7 +232,7 @@ Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 
 ## M6 phase 2 — `jet test` + `jet new` (done)
 
-**`test "name" { … }`** (S43) — top-level blocks only. Bodies parse like a
+**`@test fn name { … }`** (S43, S82) — top-level blocks only. Bodies parse like a
 parameterless function; use **`require(cond)`** / **`require(cond, "msg")`**
 and **`require_eq(a, b)`** (S36) for checks. Duplicate test names → **E0105**;
 a nested `test` block → **E0601**. **`jet run`** / **`jet build`** ignore test
@@ -256,7 +263,7 @@ entry is a normal Jet signature plus **`= "rust::path"`** naming the target
 item. This source-level declaration is sufficient even inside a project with
 `pack.jet`; users do not need the package manager just to call a foreign
 function. **`extern rust "std" { … }`** works for standard-library items with
-no extra dependency. Non-`std` crates require an exact version pin (**E0701**).
+no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
 `Char`, `List`/`Map`/`T?`/`T ? E` built from allowed types, and
@@ -281,8 +288,8 @@ Two import forms (S16): **quotes = file path, no quotes = module.**
 **`import "path/to/file";`** — quoted path to a `.jet` file, relative to
 the importing file's directory (`import "./lib";` for a sibling file;
 default namespace = last path segment). **`import name;`** or
-**`import std.fs;`** — unquoted module name (searches recursively from
-the project root for `name.jet` or `name/{name,main}.jet`; `std` is a
+**`import core.fs;`** — unquoted module name (searches recursively from
+the project root for `name.jet` or `name/{name,main}.jet`; `core` is a
 compiler-exported module per S51). Optional **`as alias`** in both forms.
 
 Cross-file access uses **`namespace.item`**; only **`pub`** items are visible from
@@ -348,18 +355,18 @@ Full user-facing reference: **docs/reference/stdlib.md**. Implementation plan an
 API inventory: **docs/plans/epoch-1/m10-stdlib.md**.
 
 M10 standard library modules are compiler-known namespaces backed by Rust std
-helpers in the generated prelude. Import the short `std` spelling or the
-canonical `jet.std` spelling:
+helpers in the generated prelude. Import the short `core` spelling or the
+canonical `jet.core` spelling:
 
 ```
-import std.fs as fs;
-import jet.std.json as json;
+import core.fs as fs;
+import jet.core.json as json;
 ```
 
 Implemented modules: `std.fs`, `std.io`, `std.env`, `std.process`,
 `std.math`, `std.random`, `std.time`, and `std.json`. Unknown std modules are
 **E1001**; local modules/import aliases may not shadow reserved first-party
-roots (`std`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
+roots (`core`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
 **E1002**. Selective imports are rejected; keep qualified access through an
 alias.
 
@@ -389,7 +396,7 @@ and M10 teaching errors **E0037**–**E0039**.
 std module:
 
 ```jet
-import std.tasks as tasks;
+import core.tasks as tasks;
 ```
 
 `tasks.spawn(() => work()) -> Task<T>` starts a task from a zero-parameter

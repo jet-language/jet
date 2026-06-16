@@ -196,9 +196,21 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadGitDep { name, reason } => {
             e1206(&file, &format!("dependency `{name}`'s git struct {reason}"))
         }
-        ManifestError::BadExport(item) => {
-            e1206(&file, &format!("`exports` item `{item}` is not `module <name>`"))
-        }
+        ManifestError::BadPackageKind { name, value } => e1210(
+            &file,
+            &format!(
+                "package `{name}` has kind `{value}`, which is not `{}` or `{}`",
+                syntax::PACKAGE_KIND_LIBRARY,
+                syntax::PACKAGE_KIND_EXECUTABLE,
+            ),
+        ),
+        ManifestError::MalformedPackageEntry { name } => e1211(
+            &file,
+            &format!(
+                "package `{name}` is declared as a block but is missing the `{}` field",
+                syntax::PACKAGE_FIELD_KIND,
+            ),
+        ),
         ManifestError::ReservedSection(section) => e1209(&file, section),
     }
 }
@@ -224,6 +236,74 @@ pub fn e1209(_file: &str, section: &str) -> Diagnostic {
             section,
             syntax::PAYLOAD_FILE
         ),
+        None,
+    )
+}
+
+fn e1210(_file: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1210",
+        format!("`{}` has an unknown package kind", syntax::PAYLOAD_FILE),
+        detail.to_string(),
+        format!(
+            "use `{}` or `{}` as the package kind",
+            syntax::PACKAGE_KIND_LIBRARY,
+            syntax::PACKAGE_KIND_EXECUTABLE,
+        ),
+        None,
+    )
+}
+
+fn e1211(_file: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1211",
+        format!("`{}` has a malformed package entry", syntax::PAYLOAD_FILE),
+        detail.to_string(),
+        format!(
+            "add a `{}: {}` or `{}: {}` field to the block",
+            syntax::PACKAGE_FIELD_KIND,
+            syntax::PACKAGE_KIND_LIBRARY,
+            syntax::PACKAGE_FIELD_KIND,
+            syntax::PACKAGE_KIND_EXECUTABLE,
+        ),
+        None,
+    )
+}
+
+pub fn e1212(_file: &str, name: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1212",
+        format!(
+            "`{}` declares package `{name}` but no `module {name}` was found",
+            syntax::PAYLOAD_FILE
+        ),
+        format!(
+            "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{}` file in the source tree",
+            syntax::FILE_EXT
+        ),
+        format!(
+            "add a `.{}` file containing `module {name} {{ … }}`, or remove `{name}` from `packages:` in `{}`",
+            syntax::FILE_EXT,
+            syntax::PAYLOAD_FILE,
+        ),
+        None,
+    )
+}
+
+pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnostic {
+    let list = paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Diagnostic::error(
+        "E1213",
+        format!(
+            "`{}` declares package `{name}` but `module {name}` is ambiguous",
+            syntax::PAYLOAD_FILE
+        ),
+        format!("`module {name}` was found in multiple files: {list}; each package name must map to exactly one module"),
+        format!("rename one of the conflicting `module {name}` declarations so each package has a unique name"),
         None,
     )
 }

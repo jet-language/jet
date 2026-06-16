@@ -10,7 +10,7 @@
 use crate::ast::{
     AccessConvention, BinOp, BindPattern, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg,
     Expr,
-    ExternFn, ExternRustBlock, ForKind, Func, IfStmt, IndexKind, Item, LValue, Lambda, LambdaBody,
+    ExternFn, ExternRustBlock, ForKind, Func, IfStmt, ImportKind, IndexKind, Item, LValue, Lambda, LambdaBody,
     OrFallback, Pattern, Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, Type,
     UnOp, VariantPayload,
 };
@@ -5058,8 +5058,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0039",
                     "`os.environ` is written `env.get` in Jet".to_string(),
-                    "environment access lives in the `std.env` module".to_string(),
-                    "import `std.env as env` and call `env.get(name)`".to_string(),
+                    "environment access lives in the `core.env` module".to_string(),
+                    "import `core.env as env` and call `env.get(name)`".to_string(),
                     Some(span),
                 ));
                 return None;
@@ -5206,9 +5206,9 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0038",
                     "`File.open` is not the M10 file API".to_string(),
-                    "M10 uses whole-file helpers in `std.fs`; file handles are out of scope"
+                    "M10 uses whole-file helpers in `core.fs`; file handles are out of scope"
                         .to_string(),
-                    "import `std.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                    "import `core.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
                         .to_string(),
                     Some(span),
                 ));
@@ -5620,7 +5620,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         match (module, name) {
-            ("std.math", "pi" | "e") => Some(Type::Float),
+            ("core.math", "pi" | "e") => Some(Type::Float),
             _ => {
                 self.diags.push(unknown_std_item(module, name, span));
                 let _ = alias_span;
@@ -5639,7 +5639,7 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         let sig = std_fixed_sig(module, name);
         match (module, name) {
-            ("std.io", "eprint") => {
+            ("core.io", "eprint") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
@@ -5660,7 +5660,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            ("std.io", "input") => {
+            ("core.io", "input") => {
                 if args.len() > 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
@@ -5669,7 +5669,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(result_ty(Type::String, io_error_ty()));
             }
-            ("std.math", "abs") => {
+            ("core.math", "abs") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
@@ -5689,7 +5689,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(ty);
             }
-            ("std.math", "min" | "max") => {
+            ("core.math", "min" | "max") => {
                 if args.len() != 2 {
                     self.diags.push(wrong_std_arity(name, 2, args.len(), span));
                 }
@@ -5721,7 +5721,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(first);
             }
-            ("std.math", "clamp") => {
+            ("core.math", "clamp") => {
                 if args.len() != 3 {
                     self.diags.push(wrong_std_arity(name, 3, args.len(), span));
                 }
@@ -5755,7 +5755,7 @@ impl<'a> Checker<'a> {
                 }
                 return Some(first);
             }
-            ("std.random", "pick") => {
+            ("core.random", "pick") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
@@ -5775,7 +5775,7 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
-            ("std.random", "shuffle") => {
+            ("core.random", "shuffle") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
                 }
@@ -5803,7 +5803,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            ("std.tasks", "spawn") => {
+            ("core.tasks", "spawn") => {
                 if args.len() != 1 {
                     self.diags
                         .push(wrong_std_arity("spawn", 1, args.len(), span));
@@ -5883,7 +5883,7 @@ impl<'a> Checker<'a> {
                     args: vec![t],
                 });
             }
-            ("std.tasks", "channel") => {
+            ("core.tasks", "channel") => {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_std_arity("channel", 0, args.len(), span));
@@ -5977,7 +5977,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0304",
                     format!("`{}` has no variant `{}`", syntax::TYPE_JSON, variant),
-                    "std.json exposes the dynamic JSON variants from the M10 API".to_string(),
+                    "core.json exposes the dynamic JSON variants from the M10 API".to_string(),
                     fix,
                     Some(span),
                 ));
@@ -7323,7 +7323,7 @@ impl<'a> Checker<'a> {
                     target,
                     call.name
                 ),
-                "`print` writes to stdout; `io.eprint` is the stderr twin in `std.io`".to_string(),
+                "`print` writes to stdout; `io.eprint` is the stderr twin in `core.io`".to_string(),
                 format!("replace `{}` with `{}`", call.name, target),
                 Some(call.name_span),
             ));
@@ -7337,9 +7337,9 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0038",
                 "`open` is not the M10 file API".to_string(),
-                "M10 uses whole-file helpers in `std.fs`; file handles are out of scope"
+                "M10 uses whole-file helpers in `core.fs`; file handles are out of scope"
                     .to_string(),
-                "import `std.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                "import `core.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
                     .to_string(),
                 Some(call.name_span),
             ));
@@ -7353,8 +7353,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0039",
                 "`getenv` is written `env.get` in Jet".to_string(),
-                "environment access lives in the `std.env` module".to_string(),
-                "import `std.env as env` and call `env.get(name)`".to_string(),
+                "environment access lives in the `core.env` module".to_string(),
+                "import `core.env as env` and call `env.get(name)`".to_string(),
                 Some(call.name_span),
             ));
             for arg in call.args.iter_mut() {
@@ -7372,7 +7372,7 @@ impl<'a> Checker<'a> {
                 format!("`{}` is not in Jet; use `tasks.spawn` instead", call.name),
                 "Jet uses blocking tasks and channels, not async/await — simpler and race-free"
                     .to_string(),
-                "import `std.tasks as tasks` and call `tasks.spawn(() => your_work())`".to_string(),
+                "import `core.tasks as tasks` and call `tasks.spawn(() => your_work())`".to_string(),
                 Some(call.name_span),
             ));
             for a in call.args.iter_mut() {
@@ -7393,7 +7393,7 @@ impl<'a> Checker<'a> {
                 ),
                 "Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory"
                     .to_string(),
-                "import `std.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`"
+                "import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`"
                     .to_string(),
                 Some(call.name_span),
             ));
@@ -8658,73 +8658,73 @@ fn std_fixed_sig(
     let list_u8 = Type::List(Box::new(u8_ty()));
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
-        ("std.fs", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
-        ("std.fs", "read_bytes") => Some((
+        ("core.fs", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
+        ("core.fs", "read_bytes") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8, io_error_ty())),
         )),
-        ("std.fs", "write" | "append") => Some((
+        ("core.fs", "write" | "append") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(io_unit),
         )),
-        ("std.fs", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
-        ("std.fs", "remove" | "create_dir") => Some((
+        ("core.fs", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
+        ("core.fs", "remove" | "create_dir") => Some((
             vec![(read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
-        ("std.fs", "list_dir") => Some((
+        ("core.fs", "list_dir") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_string, io_error_ty())),
         )),
-        ("std.fs", "copy" | "rename") => Some((
+        ("core.fs", "copy" | "rename") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
-        ("std.io", "args") => Some((vec![], Some(Type::List(Box::new(Type::String))))),
-        ("std.io", "read_all_input") => {
+        ("core.io", "args") => Some((vec![], Some(Type::List(Box::new(Type::String))))),
+        ("core.io", "read_all_input") => {
             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
         }
-        ("std.env", "get") => Some((
+        ("core.env", "get") => Some((
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
-        ("std.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
-        ("std.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
-        ("std.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
-        ("std.process", "exit") => Some((vec![(read, int)], None)),
-        ("std.process", "run") => Some((
+        ("core.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
+        ("core.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
+        ("core.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        ("core.process", "exit") => Some((vec![(read, int)], None)),
+        ("core.process", "run") => Some((
             vec![(read, Type::List(Box::new(Type::String)))],
             Some(result_ty(
                 Type::Named("ProcessResult".to_string()),
                 io_error_ty(),
             )),
         )),
-        ("std.math", "sqrt" | "floor" | "ceil") => Some((vec![(read, float.clone())], Some(float))),
-        ("std.math", "pow") => Some((
+        ("core.math", "sqrt" | "floor" | "ceil") => Some((vec![(read, float.clone())], Some(float))),
+        ("core.math", "pow") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),
-        ("std.math", "round") => Some((vec![(read, Type::Float)], Some(Type::Int))),
-        ("std.random", "int") => {
+        ("core.math", "round") => Some((vec![(read, Type::Float)], Some(Type::Int))),
+        ("core.random", "int") => {
             Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
         }
-        ("std.random", "float") => Some((vec![], Some(Type::Float))),
-        ("std.random", "seed") => Some((vec![(read, Type::Int)], None)),
-        ("std.time", "now") => Some((vec![], Some(Type::Int))),
-        ("std.time", "sleep") => Some((vec![(read, Type::Int)], None)),
-        ("std.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
-        ("std.json", "parse") => Some((
+        ("core.random", "float") => Some((vec![], Some(Type::Float))),
+        ("core.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        ("core.time", "now") => Some((vec![], Some(Type::Int))),
+        ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
+        ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
+        ("core.json", "parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), json_error_ty())),
         )),
-        ("std.json", "render" | "render_pretty") => Some((vec![(read, json)], Some(Type::String))),
+        ("core.json", "render" | "render_pretty") => Some((vec![(read, json)], Some(Type::String))),
         _ => None,
     }
 }
 
 fn std_module_items(module: &str) -> Vec<String> {
     let items: &[&str] = match module {
-        "std.fs" => &[
+        "core.fs" => &[
             "read",
             "read_bytes",
             "write",
@@ -8737,17 +8737,17 @@ fn std_module_items(module: &str) -> Vec<String> {
             "copy",
             "rename",
         ],
-        "std.io" => &["args", "input", "read_all_input", "eprint"],
-        "std.env" => &["get", "set", "current_dir", "home_dir"],
-        "std.process" => &["exit", "run"],
-        "std.math" => &[
+        "core.io" => &["args", "input", "read_all_input", "eprint"],
+        "core.env" => &["get", "set", "current_dir", "home_dir"],
+        "core.process" => &["exit", "run"],
+        "core.math" => &[
             "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e", "clamp",
         ],
-        "std.random" => &["int", "float", "pick", "shuffle", "seed"],
-        "std.time" => &["now", "sleep", "start"],
-        "std.json" => &["parse", "render", "render_pretty"],
-        "std.tasks" => &["spawn", "channel"],
-        "std" => &[],
+        "core.random" => &["int", "float", "pick", "shuffle", "seed"],
+        "core.time" => &["now", "sleep", "start"],
+        "core.json" => &["parse", "render", "render_pretty"],
+        "core.tasks" => &["spawn", "channel"],
+        "core" => &[],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -8756,7 +8756,7 @@ fn std_module_items(module: &str) -> Vec<String> {
 fn unknown_std_item(module: &str, name: &str, span: Span) -> Diagnostic {
     let items = std_module_items(module);
     let mut fix = if items.is_empty() {
-        "import a specific std module, like `import std.fs as fs;`".to_string()
+        "import a specific core module, like `import core.fs as fs;`".to_string()
     } else {
         format!("use one of: {}", items.join(", "))
     };
@@ -8948,12 +8948,28 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 ));
                 continue;
             }
+            if let ImportKind::Module(name, _) = &imp.kind {
+                if loader::is_legacy_std_import(name) {
+                    diags.push(Diagnostic::error(
+                        "E0019",
+                        format!("`{name}` is the old standard-library import spelling"),
+                        "the standard library module was renamed to `core`".to_string(),
+                        format!(
+                            "use `import {}` or `import {}.fs as fs`",
+                            syntax::STD_SHORT,
+                            syntax::STD_SHORT
+                        ),
+                        Some(imp.span),
+                    ));
+                    continue;
+                }
+            }
             if let Some(module) = loader::std_module_path(imp) {
                 if !loader::is_known_std_module(&module) {
                     diags.push(Diagnostic::error(
                         "E1001",
-                        format!("there is no standard module `{}`", module),
-                        "`std` is compiler-known in M10, and only the frozen core modules exist"
+                        format!("there is no core module `{}`", module),
+                        "`core` is compiler-known in M10, and only the frozen core modules exist"
                             .to_string(),
                         format!("import one of: {}", loader::std_modules_list()),
                         Some(imp.span),

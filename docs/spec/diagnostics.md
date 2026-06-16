@@ -226,6 +226,10 @@ before continuing.
 | E1207 | jet   | registry dependency not yet supported (M12.2) |
 | E1208 | jet   | toolchain `jet:` field in `payload.jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
+| E1210 | jet   | unknown package kind in `packages:` block (U10) |
+| E1211 | jet   | `packages:` block-form entry missing `kind` field (U10) |
+| E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
+| E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
 
 ## Fan-out and fixed-size list diagnostics
 

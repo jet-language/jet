@@ -1,7 +1,8 @@
 # M10 — Standard library
 
 **Decisions:** S51 (std import spelling; amended 2026-06-13 for canonical
-`jet.std`), S54 (no naming lint), and SL1-SL10 ratified. Depends on M4
+`jet.core`), S54 (PascalCase types, snake_case fn/modules; no user lint),
+and SL1-SL10 ratified. Depends on M4
 (errors), M5 (collections), M8 (closures), M9 (generics for signatures like
 `max[T: Comparable]`).
 **Error codes:** E1001+.
@@ -142,8 +143,10 @@ UTF8Error` land here.
    - no abbreviated module names (`random`, not `rand`);
    - verbs are actions, nouns are values, bool functions ask questions;
    - one canonical spelling per task in M10 core std by default.
-5. No naming lint (S54): Jet does not prescribe snake_case or other
-   naming conventions in v1 — `jet fmt` handles layout only (S44).
+5. Naming default (S54): **`core`** and Jet docs/examples use PascalCase for
+   types, traits, enums, and constants; snake_case for functions and module
+   segments (`core.fs`, `read_bytes`). v1 does not lint user naming —
+   `jet fmt` handles layout only (S44).
 6. No global state: `std/random`'s default generator is a thread-local
    seeded from time; document determinism story honestly.
 7. All blocking calls (`input`, `sleep`, `run`) are fine in v1 (no async

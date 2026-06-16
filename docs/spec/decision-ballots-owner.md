@@ -1,55 +1,36 @@
-# Jet decision ballot — owner responses (open items only)
+# Jet decision ballot — owner responses
 
-Your ratified answers have been incorporated into `docs/spec/syntax-decisions.md`
-and `docs/plans/epoch-2/` and removed from here — this file now holds **only the
-decisions still waiting on you**. The briefing (examples, comparisons, the
-attribute-shape syntax mockup) is in `docs/spec/decision-ballots.md`; the section
-numbers below (§0–§11) point into it. Write your answer under each item.
+Ratified answers are in `docs/spec/syntax-decisions.md` (decision log) and
+milestone plans.
 
-## §0 — Attributes shape (ATTR-SHAPE / D-LL2 / D-JSON1)
-- **Decision:** (pending — α or β? confirm the two-shape rule)
-- **Your earlier notes:**
-  - *ATTR-SHAPE:* "let's do `#[attribute(s)]` so we can support a list of attributes instead of just one. Then we can use a block for scoped effects"
-  - *D-LL2:* "include the list of attributes in a `#[...]` - rust style, for a list or a single attribute; allow scoping with blocks, i.e. `async {... async code ...}`. Before locking in show me what you think I mean for the syntax so we are clear."
-  - *D-JSON1:* "treat 'serialize' as an attribute, like transact — a `#[Serialize]` block right before `struct Profile {...}`; explicitly defined automatically with a single word but overridable."
+## Open — needs owner pick
 
-## §1 — D-ERR2: name the concrete error carrier
-- **Decision:** option 1 ratified (the capability is the `Error` trait). **Carrier name still pending** — pick from the menu in §1 (lean `Fault`).
+| § | ID | Question |
+|---|---|---|
+| — | **D-CFFI2-SYN** | C FFI **surface syntax** — see full ballot in [`decision-ballots.md`](decision-ballots.md) (options A–I, other-language comparisons). Link resolution (hangar → pkg-config) stays ratified. |
 
-## §2 — D-DEV2: JIT / Cranelift
-- **Decision:** (pending — open the Epoch-3 JIT-runtime-type-server design doc?)
-- **Your note:** "Give me more information - i dont know what cranelift is & I want a JIT runtime type server system so we can try replacing typescript/javascript with high performance safe apps" → answered in §2.
+**Review:** [`decision-ballots.html`](decision-ballots.html) → card *D-CFFI2-SYN* · examples → [`c-ffi-syntax-examples.md`](../plans/epoch-2/c-ffi-syntax-examples.md)
 
-## §3 — D-DX5: external subcommands
-- **Decision:** (pending — confirm A)
-- **Your note:** "I don't understand, give me a more clear, slightly more verbose real world example. A plugin api sounds nice but i dont know what that means" → answered in §3.
+## Ratified this cycle
 
-## §4 — D-FP2: expression-body functions
-- **Decision:** (pending — A / B / C)
-- **Your note:** "The options are not clear here. Clear them up for me to decide" → clarified in §4.
+| § | ID | Decision |
+|---|---|---|
+| — | S82 | `@` attribute syntax |
+| — | D-ERR2 | `Fallible` trait + `Error` type |
+| — | D-DEV2 | JIT runtime type server → **Epoch 3** (`docs/plans/epoch-3/jit-runtime-type-server.md`) |
+| — | D-FP2 | **C:** defer `fn … = expr` |
+| — | D-REF3 | **A:** borrowed-return + cleanup inlay hints |
+| — | D-DX5 | **A now:** PATH `jet-*` discovery · **B Epoch 3:** formal plugin API |
+| — | D-PAT5 / S83 | **B:** accept multi-head functions |
+| — | D-PURE1 | **A:** pure eval + sandboxed package build blocks (not JetOS) |
+| — | D-PURE2 | **A:** no ambient I/O/network; `embed_file` only |
+| — | E2-V12 | **Retired** — use D-PURE + Epoch 3 pillar docs |
+| — | D-TOOL4 | **A:** snapshot testing · flags **`-u` / `--update-snapshots`** |
+| — | D-CFFI2 | Layered hangar/pkg-config resolution *(syntax → **D-CFFI2-SYN**, re-open)* |
+| — | S54 | Amended: PascalCase default for types/traits/enums/constants; snake_case fn/modules; no user lint |
+| — | D-NET2 | Go-scale concurrency → **Epoch 3** (`docs/plans/epoch-3/async-networking.md`) |
+| — | S56 | User-defined derives / typed reflection → **Epoch 3** (`docs/plans/epoch-3/user-derives-reflection.md`) |
 
-## §5 — D-PAT5: multiple function bodies by pattern
-- **Decision:** (pending — A decline / B accept)
-- **Your note:** "Need better comparison between options & better explanation. Give me an example plus an example from a persona perspective for each case" → in §5.
+## When you decide D-CFFI2-SYN
 
-## §6 — D-PURE1 & D-PURE2: pure eval + sandbox
-- **Decision:** (pending — confirm A + A)
-- **Your note:** "The visual presentation is unclear, the examples are too terse & not well explained. Separate D-PURE 1 & 2 then represent them to me" → done in §6.
-
-## §7 — E2-V12: JetOS / pure eval / layer-3 boundary
-- **Decision:** (pending — OK to retire as redundant?)
-- **Your note:** "This makes no sense to me. Present it more clearly with examples." → in §7.
-
-## §8 — D-TOOL4: snapshot testing
-- **Decision:** (pending — A / B)
-- **Your note:** "I need an actual example, I don't understand this" → in §8.
-
-## §9 — D-CFFI2: finding C libraries
-- **Decision:** (pending — confirm layered answer)
-- **Your note:** "This seems like it could be messy if not using jetpack. What if a user doesnt have the lib already? Shouldn't it be pulled into the jet hangar?" → answered in §9.
-
-## §10 — D-NET2: server concurrency model
-- **Decision:** (pending — confirm A)
-
-## §11 — D-REF3: inlay hints beyond clone
-- **Decision:** (pending — confirm A)
+Add a row under *Ratified this cycle* with your letter (A–I) and any override tweak; agents amend S59 and unblock E2-M14.

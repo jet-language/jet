@@ -334,8 +334,8 @@ bounds (`<T: Comparable>`): `impl other.Point: Serialize { … }` extends a
 dependency's type. `::` is reserved for foreign Rust paths in `extern rust`
 (S50), not user-facing Jet paths. Orphan rule: at least one of trait/type
 defined in this program. Rejected: `impl Trait for Type`, `impl Type.Trait`,
-Go implicit interfaces, `::` in Jet paths. Naming style is not prescribed
-(S54). v1: signatures only —
+Go implicit interfaces, `::` in Jet paths. Jet defaults to PascalCase for
+types/traits/enums (S54); v1: signatures only —
 no default bodies, associated types, or trait inheritance.
 *Future relook (owner, 2026-06-15):* the owner may revisit trait-attach sugar
 post-v1 (e.g. a C++-ish `Type::Trait` feel). Constraint to carry into that
@@ -368,28 +368,46 @@ L0801); non-clonable captures require an explicit `**take(name)**` prefix
 on the lambda: `take(sender) () => …`. Rejected: surfacing Rust's
 Fn/FnMut/FnOnce, C++ capture lists on every lambda.
 
-**S55 — Built-in derive policy (M9)** *(ratified 2026-06-12)*: **hybrid**
-derive policy for the four built-in traits. **Auto-derive (silent):**
-`Printable`, `Equatable` — whenever every field qualifies,
-`print("{p}")` and `==` work on day one; a hand-written `impl` overrides
-the freebie. **Explicit opt-in:** `Comparable`, `Serialize` — require a
-`**derive Trait;**` line in the type body (S28's in-type scope):
+**S55 — Built-in derive policy (M9)** *(ratified 2026-06-12; amended
+2026-06-16, S82)*: **hybrid** derive policy for the four built-in traits.
+**Auto-derive (silent):** `Printable`, `Equatable` — whenever every field
+qualifies, `print("{p}")` and `==` work on day one; a hand-written `impl`
+overrides the freebie. **Explicit opt-in:** `Comparable`, `Serialize` — require
+a prefix attribute on the line before the type (S82):
 
 ```jet
+@Comparable
+@Serialize
 struct Point {
     x: Float;
     y: Float;
-    derive Comparable;
-    derive Serialize;
+}
+```
+
+**Configurable overrides** (D-JSON1): prefix `@Serialize` = automatic default
+wire format; partial overrides go **inside the type body** as the first
+statement(s):
+
+```jet
+@Serialize
+struct Profile {
+    @Serialize {
+        rename score -> "user_score";
+        skip internal_id;
+    }
+    name: String;
+    score: Int;
+    internal_id: String;
 }
 ```
 
 Comparable commits field order to sort/`largest`/`Map` ordering;
 Serialize commits a public wire format — both are semantic commitments no
-silent derive should make. Missing-trait errors teach `derive Trait;` or
-`sort_by` (M8) as alternatives. Rejected: auto-derive all four (owner lean
-B), Rust `#[derive(…)]` attributes, user-defined derive macros in v1
-(S56 post-1.0).
+silent derive should make. Missing-trait errors teach `@Comparable` /
+`@Serialize` or `sort_by` (M8) as alternatives. Rejected: auto-derive all
+four (owner lean B), Rust `#[derive(…)]` attributes, prefix-line config
+blocks (`@Serialize { … } struct …`), in-body `derive Trait;` (former S55
+spelling), user-defined derive macros in v1 (S56 post-1.0).
 
 **S35 — Error handling ergonomics (M4)** *(ratified 2026-06-11; fallback
 operator changed to `??` 2026-06-15, D-SG6/S71)*: a **fallback** on a fallible
@@ -504,11 +522,12 @@ no `**as**` keyword (E0030 teaches the named forms), and no C-style
 arbitrary-precision integers (C), implicit widening, lowercase Rust
 spellings (`i64`), C/Go cast punctuation.
 
-**S43 — Test syntax (M6)** *(ratified 2026-06-12)*: first-class
-`**test "name" { … }**` blocks at top level only, using `**require**` and
-`**require_eq**` (M4/S36) for assertions. `jet run`/`build` ignore test
-blocks; `jet test` runs them. Rejected: `#[test]` attributes, `fn test_*`
-naming convention.
+**S43 — Test syntax (M6)** *(ratified 2026-06-12; amended 2026-06-16, S82)*:
+top-level **`@test fn name { … }`** blocks (S82 attribute form), using
+`**require**` and `**require_eq**` (M4/S36) for assertions. The test name is
+the function identifier (replaces `test "name" { … }`). `jet run`/`build`
+ignore test blocks; `jet test` runs them. Rejected: `#[test]` attributes,
+`fn test_*` naming convention, quoted-name test blocks (former S43 spelling).
 
 **S44 — Formatter style (M6)** *(ratified 2026-06-12)*: one true style,
 zero config — **4-space indent**, **same-line `{`**, **line width 100**,
@@ -551,9 +570,9 @@ comptime is a user-authored compile error (a feature); results lower to
 plain Rust constant data (codegen stays dumb, I3). Requires the permanent
 differential CI battery: the comptime interpreter and the compiled
 runtime must agree bit-for-bit on every evaluable expression. **Layer 2
-(M9):** built-in derives (S55 hybrid policy). **Layer 3
-(post-1.0):** typed reflection / user derives (S56, deferred). **Rejected
-forever:** token/AST macros, custom syntax, attribute macros, comptime
+(M9):** built-in derives (S55 hybrid policy). **Layer 3 (Epoch 3):** typed reflection / user derives (S56) — see
+[`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md).
+**Rejected forever:** token/AST macros, custom syntax, attribute macros, comptime
 types (types-as-values), const generics in v1. Rejected: closing comptime
 entirely (prior recommendation), full Zig-style comptime (imports
 instantiation-time diagnostics — the part of Zig we refuse).
@@ -569,24 +588,25 @@ where one suffices), `const` (a second binding keyword competing with
 `val`), silent const-folding with no keyword (invisible, unpredictable,
 and kills the comptime-panic feature).
 
-**S58 — Expert low-level tier** *(ratified 2026-06-12; post-1.0
-milestone pending)*: **two gates, one keyword.**
-`**import std.mem**` is the discovery gate — unlocks the low-level
+**S58 — Expert low-level tier** *(ratified 2026-06-12; **amended 2026-06-16,
+S82**; post-1.0 milestone pending)*: **two gates, one keyword.**
+`**import core.mem**` is the discovery gate — unlocks the low-level
 vocabulary: explicit **Zig-style allocators** (allocating APIs take an
 allocator parameter; a fixed arena works on embedded), `**Ptr<T>**`,
-layout/repr control, volatile wrappers. The keyword `**unsafe**` is the
-audit gate for operations that can violate memory safety — pointer
-**deref**, pointer math, transmute-class casts, FFI pointer crossings —
-in block form (`unsafe { … }`) and contract form (`unsafe fn`; calling
-one requires an enclosing block, Rust's rule). Taking a pointer (`&x`)
-is legal outside a block (a pointer is inert data); *using* one (`*p`,
-`.offset`) requires the block. `&`/`*` are **core grammar, sema-gated**:
-outside the gates they keep producing E0208-family teaching errors.
-Codegen lowers blocks to Rust `unsafe`; **I1 is amended** — generated
-`unsafe` appears only inside user-gated regions plus vetted std/mem
-internals. Onboarding materials never mention any of it. Rejected:
-`trust` spelling, library-only gating (Swift style), ungated sigils
-(C/Zig style).
+layout/repr control, volatile wrappers. The audit gate for operations that can
+violate memory safety — pointer **deref**, pointer math, transmute-class casts,
+FFI pointer crossings — uses **`@unsafe { … }`** block form and **`@unsafe`**
+on the line before `fn` (whole-function contract; calling one requires an
+enclosing `@unsafe` block, Rust's rule). Optional **`@audit "…"`** on the line
+before an `@unsafe` block carries a structured audit comment (D-LL2); a lint
+flags missing/empty audits. Taking a pointer (`&x`) is legal outside a block (a
+pointer is inert data); *using* one (`*p`, `.offset`) requires the block.
+`&`/`*` are **core grammar, sema-gated**: outside the gates they keep producing
+E0208-family teaching errors. Codegen lowers blocks to Rust `unsafe`; **I1 is
+amended** — generated `unsafe` appears only inside user-gated regions plus
+vetted std/mem internals. Onboarding materials never mention any of it.
+Rejected: bare `unsafe { }` / `unsafe fn` (former S58 spelling), `trust`
+spelling, library-only gating (Swift style), ungated sigils (C/Zig style).
 
 **S61 — Argument labels & defaults** *(ratified 2026-06-12; post-1.0
 milestone pending)*: **optional labels, positional order fixed.** A
@@ -624,30 +644,35 @@ actions (timers, logging) — owner-gated, and never required for
 correctness. Rejected: `defer`-as-primary (leak-by-omission, Go's
 perennial bug class), `with`-blocks (nesting pyramids).
 
-**S51 — Std library import (M10)** *(ratified 2026-06-12; amended
-2026-06-13)*: the std library is **exported as the `std` module** — a
-module import (S16 form 2, no quotes), not a file path. `std` is the
-reserved short spelling for canonical package `jet.std`; both spellings are
-valid. Dot paths select submodules:
+**S51 — Core library import (M10)** *(ratified 2026-06-12; amended
+2026-06-13, **renamed `std` → `core` 2026-06-16**)*: the core library is
+**exported as the `core` module** — a module import (S16 form 2, no quotes), not
+a file path. `core` is the reserved short spelling for canonical package
+`jet.core`; both spellings are valid. Dot paths select submodules:
 
 ```
-import std;                    // whole std → namespace std
-import jet.std as std;         // explicit canonical spelling
-import std.fs as fs;           // submodule, optional alias
-import std.io;                  // default namespace io
+import core;                    // whole core → namespace core
+import jet.core as core;        // explicit canonical spelling
+import core.fs as fs;           // submodule, optional alias
+import core.io;                  // default namespace io
 ```
 
-`std` and `jet.std` are compiler-reserved module roots; `std.<module>` and
-`jet.std.<module>` select compiler-known submodules (`fs`, `io`, `json`,
-…). Optional `as alias` works like S16. Std is never imported via a quoted
-path — `import "std/fs"` is wrong because `"std/fs"` is file-path syntax;
-use `import std.fs`. Rejected: quoted std paths, separate `use std::`
-syntax.
+`core` and `jet.core` are compiler-reserved module roots; `core.<module>` and
+`jet.core.<module>` select compiler-known submodules (`fs`, `io`, `json`,
+…). Optional `as alias` works like S16. Core is never imported via a quoted
+path — `import "core/fs"` is wrong because `"core/fs"` is file-path syntax;
+use `import core.fs`. The former spellings `import std` / `import jet.std` /
+`import std.fs` emit a teaching error pointing at `core` (S14). Rejected:
+quoted core paths, separate `use core::` syntax, keeping the `std` module name.
 
-**S54 — Naming convention** *(ratified 2026-06-12)*: **no prescribed naming
-convention** in v1 — Jet does not lint or enforce snake_case vs
-camelCase/PascalCase. `jet fmt` handles layout only (S44). Rejected:
-mandatory snake_case lint.
+**S54 — Naming convention** *(ratified 2026-06-12; **amended 2026-06-16**)*:
+Jet and **`core`** default to **PascalCase** for types, traits, enums, and
+constants (`Int`, `String`, `IOError`, `Fallible`, `Serialize`). Functions,
+module path segments, and locals use **snake_case** (`read`, `core.fs`,
+`my_var`) — the usual companion to PascalCase type names. Built-in type
+capitalization is S11; standard acronyms are S66. v1 does **not** lint or
+enforce naming on user code — `jet fmt` handles layout only (S44). Rejected:
+mandatory snake_case lint; all-PascalCase for every identifier kind.
 
 **S52 — Package manifest (M12)** *(ratified 2026-06-12; amended
 2026-06-13)*: `**jet.toml`** — tiny TOML subset, hand-parsed in the
@@ -688,18 +713,54 @@ implemented, the planned surface is ballot option A: `tasks.spawn(closure)
 rejects it). Rejected for v1: `go`-style `spawn { }` fire-and-forget,
 shipping concurrency in v1.
 
-**S59 — C FFI** *(ratified 2026-06-12; deferred past v1.0)*: **deferred to
-v2**. Rust FFI (S50/M7) is v1's interop story. When implemented, the
-planned surface is ballot option A: `extern c "header-or-lib" { … }` blocks
-mirroring S50's `extern rust` shape — one FFI idiom, two backends;
-by-value boundary first, pointers only inside the S58 tier. Like Rust FFI,
-C FFI declarations are source-level declarations; a package manager may help
-install or locate native libraries, but it must not be required just to declare
-an external function. Rejected for v1: bindgen-style auto-generation as the
-primary surface, Rust-crate detour only. **Amended (owner, 2026-06-15):**
-optional header-to-Jet tooling (`jet bind`, compile-time `import c`) is
-deferred **past Epoch 2** — see docs/plans/post-epoch-2/c-header-bindings.md.
-Epoch 2 (E2-M14) ships manual `extern c` only.
+**S59 — C FFI** *(ratified 2026-06-12; **amended 2026-06-16, D-CFFI2**)*:
+Epoch 2 (E2-M14) ships manual C import. **`extern c <link-name> { … }`** blocks
+mirror `extern rust` shape — one FFI idiom, two backends; by-value boundary
+first, pointers only inside the S58 tier.
+
+**Link resolution (D-CFFI2, ratified):**
+
+1. **Jetpack project** — if `payload.jet` declares a matching dep (content-hash
+   pinned in hangar), use hangar include/lib paths. No system install required.
+2. **Otherwise** — `pkg-config <link-name>` (or platform equivalent) for
+   include/link flags on the **system** install.
+3. **Missing** — one Jet diagnostic naming both paths: add a hangar dep *or*
+   install the system package.
+
+**Recommended surface (D-CFFI2-SYN, owner lean):**
+
+```jet
+extern c raylib {
+    fn init_window(w: Int, h: Int, title: String) = "InitWindow";
+    fn close_window() = "CloseWindow";
+}
+```
+
+`<link-name>` is an identifier (preferred) or quoted string. **Auto** mode above.
+Explicit overrides when both exist:
+
+```jet
+extern c system raylib { … }              // force pkg-config / system lib
+extern c hangar raylib { … }              // force hangar dep (error if missing)
+```
+
+**Alternatives considered (not default):**
+
+| Variant | Shape | Tradeoff |
+|---|---|---|
+| **Quoted string only** | `extern c "raylib" { … }` | familiar from S59 draft; less D-like |
+| **Separate `link c`** | `link c raylib;` + `extern c { fn … = "raylib::InitWindow"; }` | two statements; explicit but noisy |
+| **Header path in block** | `extern c "raylib.h" from hangar { … }` | C-header-shaped; hangar deps aren't always headers |
+| **E — `c.<lib>` namespace** | `extern c.raylib { … }` · `import c.raylib as rl` | ballot **E**; mirrors `core.fs` — see **D-CFFI2-SYN** |
+
+**Open (D-CFFI2-SYN):** link resolution is ratified; **surface syntax** is owner
+re-review. Provisional spelling below is variant **A** until **`decision-ballots.md`**
+option A–I is ratified. See also [`c-ffi-syntax-examples.md`](../plans/epoch-2/c-ffi-syntax-examples.md).
+
+Rejected: requiring Jetpack to declare any `extern c`; silent fallback when hangar
+and system versions differ (must pin hash in hangar). Optional header tooling
+(`jet bind`) → Epoch 3 [`docs/plans/epoch-3/c-header-bindings.md`](../plans/epoch-3/c-header-bindings.md).
+Rust FFI (S50) unchanged.
 
 **S60 — Pure-function marking** *(ratified 2026-06-12; post-1.0 milestone
 pending)*: `**pure fn name(…)**` — a checked modifier; purity is part of
@@ -1023,20 +1084,23 @@ indexing, ranges — e.g. `for p in shape.points()`, `for c in row[i].chars()`,
 Rejected: restricting the head to a bare name or literal range.
 
 **S80 — Error carrier & fallible `main`** *(ratified 2026-06-16; amends
-S34/S12; milestone pending)*: the default `Error` type (S34) grows from a
+S34/S12; milestone pending)*: the default **`Error`** type (S34) grows from a
 `String` wrapper to a structured carrier — a **message**, an **optional code**,
 and an **optional source** (the lower-level error it wrapped) — so context
 survives as an error travels up through `?`. Beginners still write
-`-> Config ?` and get the default `Error`; the richer fields are
+`-> Config ?` and get the default **`Error`**; the richer fields are
 constructors/accessors used only when wanted (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)` — exact shape settled with the carrier
-work). **Fallible `main`:** `fn main() -> Unit ?` is allowed (amends S12); a
-returned `Error` is printed in the standard diagnostic voice and the process
-exits non-zero. Rejected: message-only carrier, keeping `String`-only, a
-non-fallible `main` as the only form. *Still open (decision-ballots.md
-D-ERR2):* the spelling of the opt-in cross-type `?` conversion — the owner
-asked to name the conversion capability `Error`, which collides with the
-`Error` type, so the name is pending one confirmation.
+`Error.code(n)`, `Error.with_source(e)`). **Fallible `main`:** `fn main() -> Unit ?`
+is allowed (amends S12); a returned **`Error`** is printed in the standard
+diagnostic voice and the process exits non-zero. **Cross-type `?` conversion
+(D-ERR2, ratified 2026-06-16):** opt-in via the **`Fallible`** trait —
+`impl MyFail: Fallible { fn to_error(self) -> Error { … } }`. The default
+**`Error`** type is both what bare `-> T ?` returns and the target of
+`Fallible` conversion. Prelude types (`String`, std I/O errors, …) implement
+**`Fallible`** by default; unrelated enums do not convert silently. Rejected:
+message-only carrier, keeping `String`-only, a non-fallible `main` as the only
+form, naming the conversion trait **`Error`** (collides with the type), separate
+carrier type names (`Fault`, `Snag`, …).
 
 **S81 — `?continue` loop skip** *(ratified 2026-06-16; milestone pending)*:
 inside a `for`/`while` body, postfix **`?continue`** on a fallible or optional
@@ -1046,6 +1110,92 @@ line, or skip this turn". A loop-scoped sibling of `?` propagation (S7) and
 `??` fallback (S71); legal only inside a loop (outside → teaching error).
 `?break` is **not** added in v1 (write `?? break`). Rejected: deferring the
 feature (owner chose to add it), a method `.or_continue()` form.
+
+**S82 — Attribute syntax (`@` markers)** *(ratified 2026-06-16; ATTR-SHAPE,
+D-LL2, D-JSON1)*: **`@` not `#`** — declaration markers and scoped effects
+share one sigil; **position disambiguates**.
+
+| Form | Meaning |
+|---|---|
+| `@Marker` | single attribute, line immediately before a declaration |
+| `@[Marker, Marker, …]` | comma-separated list on that prefix line |
+| `@Marker { … }` | scoped effect region (statement in a function body), **or** in-body config (first lines inside a type body) |
+
+**Declaration markers** — `@Marker` or `@[…]` on the line before `struct`,
+`enum`, or `fn`. Covers derive-like markers (`@Serialize`, `@Comparable`),
+harness markers (`@test`, `@todo`), and whole-item effects (`@transact`,
+`@unsafe` on a function). **`pure fn`** and **`comptime`** bindings stay prefix
+keywords (not migrated to `@`).
+
+**Scoped effects** — `@Marker { … }` as a statement inside a function (`@transact
+{ … }`, `@unsafe { … }`, `@async { … }` reserved for Epoch 3). Same spelling as
+in-body config; parser distinguishes by context.
+
+**Configurable markers (D-JSON1):** prefix `@Serialize` (etc.) = automatic
+default; partial overrides go **inside the type body** as `@Serialize { rename …;
+skip …; }` — **not** on the prefix line. Rejected: `#[…]` Rust-style attributes,
+prefix-line config blocks.
+
+**LSP (owner requirement):** surface every attribute applicable to the item
+under the cursor — prefix attrs, in-body config attrs, and scoped blocks —
+via hover, inlays, and completion filtered by item kind.
+
+```jet
+@Serialize
+struct Profile {
+    @Serialize { rename score -> "user_score"; skip internal_id; }
+    name: String;
+    score: Int;
+    internal_id: String;
+}
+
+@[Comparable, Serialize]
+struct Score { value: Int; }
+
+@test
+fn reversing_twice(xs: [Int]) {
+    require_eq(reverse(reverse(xs)), xs);
+}
+
+fn try_move(player: mut Player, target: Point) -> Bool ? {
+    @transact {
+        player.spend_stamina(10)?;
+        player.step(target)?;
+    }
+    return ok(true);
+}
+
+@audit "bounds checked against len"
+@unsafe { slice.get_unchecked(i); }
+```
+
+**S83 — Multi-head functions (D-PAT5)** *(ratified 2026-06-16)*: a function may
+have **multiple heads** — same name, different parameter **patterns** — each
+with its own body. Dispatched by matching the call argument shape (Haskell/
+ML-style case analysis on definitions):
+
+```jet
+fn area(Circle(r: Float)) -> Float {
+    return 3.14 * r * r;
+}
+
+fn area(Rect(w: Float, h: Float)) -> Float {
+    return w * h;
+}
+
+fn eval(Lit(n: Int)) -> Int {
+    return n;
+}
+
+fn eval(Add(a: Int, b: Int)) -> Int {
+    return eval(a) + eval(b);
+}
+```
+
+Heads must be **exhaustive** for the types they collectively cover (same rule
+spirit as enum `when`). **`when` inside a single body remains valid** — two
+branching forms coexist by owner choice (D-PAT5 = accept B). Rejected: deferring
+multi-head forever (owner prefers the math/recursion ergonomics).
 
 ### Unified ecosystem — `jet` + `jetpack` + `jetos` (U-series)
 
@@ -1218,8 +1368,9 @@ implementation milestone is pending.
 
 | ID  | Question                                   | Needed by |
 | --- | ------------------------------------------ | --------- |
-| S56 | typed reflection / user derives (deferred) | post-1.0  |
+| S56 | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
+| D-CFFI2-SYN | C FFI surface syntax (options A–I; other-language comparisons) — [`decision-ballots.md`](decision-ballots.md) | E2-M14 |
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the
@@ -1334,7 +1485,8 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-15 | S73 | named-only tuples `(x: 1, y: 2)` (D-SG7)    | owner |
 | 2026-06-15 | S74 | standalone destructuring (D-SG4)            | owner |
 | 2026-06-15 | S42 | confirmed: named-method casts; C/Go casts declined (D-SG9) | owner |
-| 2026-06-12 | S51 | std imports: `import std.fs as fs` module form | owner |
+| 2026-06-16 | S51 | amended: std library module renamed **`core`** (`jet.core`); `import std` → teaching error | owner |
+| 2026-06-16 | S54 | amended: PascalCase default for types/traits/enums/constants; snake_case for fn/module/local; no user lint | owner |
 | 2026-06-12 | S54 | no prescribed naming convention in v1        | owner |
 | 2026-06-12 | S52 | `jet.toml` manifest; `jet.lock`; jet add/fetch | owner |
 | 2026-06-13 | S52 | amended: `[dependencies:*]` colon tables, lock graph, `@latest`, `.jet/` folder, useful `jet new` template | owner |
@@ -1375,6 +1527,21 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | S78 | contextual empty-list inference; explicit `[]: [T]` kept (D-FP4) | owner |
 | 2026-06-16 | S79 | expressions allowed in `for … in <expr>` heads (D-FP5) | owner |
 | 2026-06-16 | S80 | rich `Error` carrier (msg+code+source); fallible `main` (D-ERR1/D-ERR3) | owner |
+| 2026-06-16 | D-ERR2 | cross-type `?` via **`Fallible`** trait; default type stays **`Error`** | owner |
+| 2026-06-16 | D-DEV2 | JIT runtime type server → Epoch 3 pillar; Epoch 2 interpreter-only | owner |
+| 2026-06-16 | D-FP2 | defer expression-body `fn … = expr;` (use `{ return …; }` or lambdas) | owner |
+| 2026-06-16 | D-REF3 | LSP: borrowed-return + cleanup-scope inlay hints on by default | owner |
+| 2026-06-16 | D-DX5 | PATH `jet-*` discovery now; formal plugin API → Epoch 3 | owner |
+| 2026-06-16 | D-PAT5 | multi-head functions (S83); `when` + heads both allowed | owner |
+| 2026-06-16 | D-PURE1 | pure eval + sandboxed package build blocks in Epoch 2 | owner |
+| 2026-06-16 | D-PURE2 | no ambient I/O/network in pure eval; `embed_file` only | owner |
+| 2026-06-16 | D-TOOL4 | snapshot testing; `-u` / `--update-snapshots` | owner |
+| 2026-06-16 | D-CFFI2 | hangar-if-dep else pkg-config; `extern c raylib { }` auto (S59) | owner |
+| 2026-06-16 | D-NET2 | Go-scale async/concurrency → Epoch 3 pillar | owner |
+| 2026-06-16 | E2-V12 | retired — split across D-PURE + Epoch 3 pillars | owner |
+| 2026-06-16 | S56 | user derives / typed reflection → Epoch 3 (layer 3) | owner |
+| 2026-06-16 | S83 | multi-head function patterns (D-PAT5) | owner |
+| 2026-06-16 | S82 | `@` attribute syntax; amends S43/S55/S58 (ATTR-SHAPE, D-LL2, D-JSON1) | owner |
 | 2026-06-16 | S81 | `?continue` loop skip (D-ERR4)                       | owner |
 | 2026-06-16 | S31 | amended: nested patterns in payload slots (D-PAT1)   | owner |
 | 2026-06-16 | S74 | amended: refutable bind requires `??` fallback (D-PAT3) | owner |

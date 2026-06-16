@@ -19,7 +19,7 @@ not 100k-connection async workloads (E2-V5/V7).
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
 | D-NET1 | TLS/HTTP dependency | **A** — rustls-class via the FFI tier, never hand-rolled | A | OPEN — needs owner |
-| D-NET2 | Server concurrency story | **A** — blocking thread-per-task + channels | A | OPEN — needs owner |
+| D-NET2 | Server concurrency story | **A** — S53 tasks/channels in Epoch 2; Go-scale async → Epoch 3 | A | ✅ ratified 2026-06-16 — Epoch 2: S53; Go-scale → `docs/plans/epoch-3/async-networking.md` |
 | D-NET3 | Service showcase backing store | **A** — sqlite-first | A | ✅ ratified 2026-06-16 — A: sqlite-first service showcase |
 
 ## Scope

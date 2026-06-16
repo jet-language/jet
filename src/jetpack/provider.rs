@@ -10,7 +10,7 @@
 //! instead of shelling out — exactly the Forge fixture pattern.
 
 use super::json;
-use super::envfile;
+use super::packmanifest;
 use super::refspec::{ProviderKind, RefSpec, Source, SourceTable};
 use crate::sha256;
 use std::path::{Path, PathBuf};
@@ -150,20 +150,28 @@ impl Provider for CoreProvider {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
         let repo = source_repo(upstream, ctx)?;
-        let ef = envfile::load(&repo).ok_or_else(|| {
-            ProviderError::CoreBuild(format!(
-                "the source repo at {} has no {}",
-                repo.display(),
-                crate::syntax::ENV_FILE
-            ))
+        let src_dir = packmanifest::discover_module_in(&repo, &spec.package).map_err(|e| {
+            match e {
+                packmanifest::DiscoveryError::NotFound { name } => ProviderError::CoreBuild(
+                    format!(
+                        "source repo at {} has no `module {name}` — add a .{} file declaring it",
+                        repo.display(),
+                        crate::syntax::FILE_EXT,
+                    ),
+                ),
+                packmanifest::DiscoveryError::Ambiguous { name, paths } => {
+                    let list = paths
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    ProviderError::CoreBuild(format!(
+                        "source repo at {} has `module {name}` in multiple files: {list}",
+                        repo.display(),
+                    ))
+                }
+            }
         })?;
-        let subpath = ef.provided(&spec.package).ok_or_else(|| {
-            ProviderError::CoreBuild(format!(
-                "repo `{source_name}` does not provide a package named `{}`",
-                spec.package
-            ))
-        })?;
-        let src_dir = repo.join(subpath.trim_start_matches("./"));
         if !src_dir.is_dir() {
             return Err(ProviderError::CoreBuild(format!(
                 "package source {} does not exist",
@@ -731,18 +739,15 @@ mod tests {
     #[test]
     fn core_provider_builds_local_package() {
         use super::super::refspec::{classify_in, ProviderKind, SourceTable};
-        // Build a throwaway repo: env.jet declaring a `hello` package whose
-        // source tree has a runnable bin/hello.
+        // Repo with payload.jet + a `module hello` declaration + bin/. No env.jet
+        // (U10 Chunk 3: CoreProvider discovers the package by module name).
         let base = unique_dir("jpk-core");
         let repo = base.join("jet-pkgs");
         let store = base.join("store");
-        let hello_bin = repo.join("pkgs/hello/bin");
+        let hello_pkg = repo.join("pkgs/hello");
+        let hello_bin = hello_pkg.join("bin");
         std::fs::create_dir_all(&hello_bin).unwrap();
-        std::fs::write(
-            repo.join("env.jet"),
-            "pkg.package(\"hello\", \"./pkgs/hello\");\n",
-        )
-        .unwrap();
+        std::fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
         std::fs::write(hello_bin.join("hello"), "#!/bin/sh\necho hi\n").unwrap();
         std::fs::create_dir_all(&store).unwrap();
 
@@ -779,14 +784,11 @@ mod tests {
         let base = unique_dir("jpk-core-remote");
         let repo = base.join("remote");
         let store = base.join("store");
-        let hello_bin = repo.join("pkgs/hello/bin");
+        let hello_pkg = repo.join("pkgs/hello");
+        let hello_bin = hello_pkg.join("bin");
         std::fs::create_dir_all(&hello_bin).unwrap();
         std::fs::create_dir_all(&store).unwrap();
-        std::fs::write(
-            repo.join("env.jet"),
-            "pkg.package(\"hello\", \"./pkgs/hello\");\n",
-        )
-        .unwrap();
+        std::fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
         std::fs::write(hello_bin.join("hello"), "#!/bin/sh\necho remote\n").unwrap();
 
         std::process::Command::new("git")
@@ -978,7 +980,7 @@ mod tests {
             &repo,
             &[
                 ("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n"),
-                ("env.jet", "pkg.package(\"hello\", \"./pkgs/hello\");\n"),
+                ("pkgs/hello/hello.jet", "module hello { }\n"),
                 ("pkgs/hello/bin/hello", "#!/bin/sh\necho hi-infer\n"),
             ],
         ) {

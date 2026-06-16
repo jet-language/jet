@@ -79,6 +79,37 @@ pub fn load_entry_with_overlay(
                     }
                 }
 
+                // E1212/E1213: each packages: entry must have exactly one
+                // module declaration in the source tree (U10 Chunk 3).
+                if let Ok(pm) = crate::jetpack::packmanifest::parse(&raw) {
+                    for pkg in &pm.packages {
+                        match crate::jetpack::packmanifest::discover_module_in(
+                            &manifest_dir,
+                            &pkg.name,
+                        ) {
+                            Ok(_) => {}
+                            Err(crate::jetpack::packmanifest::DiscoveryError::NotFound {
+                                name,
+                            }) => {
+                                return Err(vec![manifest::e1212(
+                                    &pack_path.display().to_string(),
+                                    &name,
+                                )]);
+                            }
+                            Err(crate::jetpack::packmanifest::DiscoveryError::Ambiguous {
+                                name,
+                                paths,
+                            }) => {
+                                return Err(vec![manifest::e1213(
+                                    &pack_path.display().to_string(),
+                                    &name,
+                                    &paths,
+                                )]);
+                            }
+                        }
+                    }
+                }
+
                 // Collect package dep source directories for module search.
                 let dep_dirs = collect_dep_dirs(&mf, &manifest_dir);
                 (manifest_dir, dep_dirs)
@@ -386,36 +417,43 @@ pub fn normalize_std_module(name: &str) -> Option<String> {
     if name == syntax::STD_SHORT {
         return Some(syntax::STD_SHORT.to_string());
     }
-    if let Some(rest) = name.strip_prefix("std.") {
-        return Some(format!("std.{rest}"));
+    if let Some(rest) = name.strip_prefix("core.") {
+        return Some(format!("core.{rest}"));
     }
     if name == syntax::STD_CANONICAL {
         return Some(syntax::STD_SHORT.to_string());
     }
-    if let Some(rest) = name.strip_prefix("jet.std.") {
-        return Some(format!("std.{rest}"));
+    if let Some(rest) = name.strip_prefix("jet.core.") {
+        return Some(format!("core.{rest}"));
     }
     None
+}
+
+pub fn is_legacy_std_import(name: &str) -> bool {
+    name == syntax::LEGACY_STD_SHORT
+        || name.starts_with("std.")
+        || name == syntax::LEGACY_STD_CANONICAL
+        || name.starts_with("jet.std.")
 }
 
 pub fn is_known_std_module(name: &str) -> bool {
     matches!(
         name,
-        "std"
-            | "std.fs"
-            | "std.io"
-            | "std.env"
-            | "std.process"
-            | "std.math"
-            | "std.random"
-            | "std.time"
-            | "std.json"
-            | "std.tasks"
+        "core"
+            | "core.fs"
+            | "core.io"
+            | "core.env"
+            | "core.process"
+            | "core.math"
+            | "core.random"
+            | "core.time"
+            | "core.json"
+            | "core.tasks"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "std, std.fs, std.io, std.env, std.process, std.math, std.random, std.time, std.json, std.tasks"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
@@ -427,8 +465,8 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
             };
             return Err(Diagnostic::error(
                 "E1001",
-                format!("there is no standard module `{}`", module),
-                "`std` is compiler-known in M10, and only the frozen core modules exist"
+                format!("there is no core module `{}`", module),
+                "`core` is compiler-known in M10, and only the frozen core modules exist"
                     .to_string(),
                 format!("import one of: {}", std_modules_list()),
                 Some(span),
@@ -442,7 +480,7 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
         return Err(Diagnostic::error(
             "E1002",
             format!("`{}` is reserved for first-party packages", alias),
-            "`std`, `jet`, and the first-party ring names can't be used for local modules"
+            "`core`, `jet`, and the first-party ring names can't be used for local modules"
                 .to_string(),
             format!(
                 "rename the module or import it with `{} other_name`",
@@ -457,7 +495,7 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
             return Err(Diagnostic::error(
                 "E1002",
                 format!("`{}` is reserved for first-party packages", root),
-                "`std`, `jet`, and the first-party ring names can't be used for local modules"
+                "`core`, `jet`, and the first-party ring names can't be used for local modules"
                     .to_string(),
                 "choose a different module name".to_string(),
                 Some(*span),
@@ -672,8 +710,8 @@ pub fn resolve_import_target(
     if std_module_path(imp).is_some() {
         return Err(Diagnostic::error(
             "E1001",
-            "standard modules do not resolve to files".to_string(),
-            "`std` is provided by the compiler in M10".to_string(),
+            "core modules do not resolve to files".to_string(),
+            "`core` is provided by the compiler in M10".to_string(),
             "handle this import as a compiler-known module".to_string(),
             Some(imp.span),
         ));

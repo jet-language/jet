@@ -52,7 +52,7 @@ val text = fs.read("config.toml")?;
   resource and operation ("could not write to `out.csv`: disk full").
 - **Streaming std streams.** `stdin`/`stdout`/`stderr` as streaming
   readers/writers.
-- **Error conversion.** I/O errors integrate with E2-M6's `IntoError` so `?`
+- **Error conversion.** I/O errors integrate with E2-M6's **`Fallible`** trait so `?`
   works in `-> T ?` functions.
 - **`transact` (adjacent, D-TXN).** If ratified, a `transact { … }` block rolls
   back in-memory mutation when an inner `?` short-circuits; doing I/O inside is a
