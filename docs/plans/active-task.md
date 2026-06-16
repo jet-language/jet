@@ -45,6 +45,9 @@ Supporting design docs (own their detail):
 
 ## Latest chunk (2026-06-16): gap #6 (partial) — `jetpack enter` + `jet dev` Scale-2 commands
 
+**COMMITTED as `188c0f3 "gap #6: jetpack enter + jet dev Scale-2 commands"`.** (An
+earlier revision of this doc called it uncommitted — stale; corrected here.)
+
 The two **Scale-2 commands** named in the ratified scale table
 (`unified-ecosystem.md` §8: `jet dev` / `jetpack enter`) now exist. They are
 *commands*, not new authoring syntax, so no syntax-decision row was needed — the
@@ -73,8 +76,10 @@ Landed this run (uncommitted in the working tree):
   asserting the first-party package landed on PATH and ran. The `jet` binary is
   spawned via `env!("CARGO_BIN_EXE_jet")`. No new diagnostic (behavior only).
 
-Verified: `nix develop -c cargo test` fully green; `cargo test --test decisions`
-passes; `jet run examples/features/01_hello.jet` prints `hello, world`.
+Verified (at commit time): `nix develop -c cargo test` fully green; `cargo test
+--test decisions` passes; `jet run examples/features/01_hello.jet` prints
+`hello, world`. (See the working-tree note below: a separate parallel rename is
+being landed on top — that is **not** gap #6.)
 
 ## Prior chunk (2026-06-16): U10 Chunk 4 — `library` vs `executable` realize
 
@@ -354,24 +359,25 @@ uncommitted — that is now stale and corrected here).
   noise — epoch-2, decision-ballots — so the history is not a clean per-chunk arc,
   but the code is all in.)
 
-- **Uncommitted (this session, gap #6 partial):** `jetpack enter` + `jet dev`.
-  See the "Latest chunk" section above for the file-by-file record. The
-  working-tree diff is exactly: `src/jetpack/cli.rs`, `src/syntax.rs`,
-  `src/main.rs`, `tests/jetpack.rs`, and this handoff doc — **plus pre-existing
-  owner doc noise** (`docs/spec/decision-ballots.md`,
-  `docs/spec/decision-ballots-owner.md`) that must stay unstaged.
+- **gap #6 (`jetpack enter` + `jet dev`) is COMMITTED** as `188c0f3`. The doc
+  previously listed it as uncommitted — stale, now corrected.
 
-### ⚠ Committing gap #6
+- **Uncommitted (parallel work, NOT gap #6):** a sweeping **`import` → `use`
+  keyword rename** (decision **D-S16-USE**) is being landed in the working tree
+  by a **separate agent on owner guidance**. It flips `KW_IMPORT`/`"import"` →
+  `KW_USE`/`"use"` across `src/{syntax,lexer,parser,fmt,lsp,loader}.rs`, inverts
+  the old `FOREIGN_USE` diagnostic to `FOREIGN_IMPORT`, and rewrites every
+  `import` in examples / tests / `tests/ui` snapshots / docs (~219 occurrences),
+  plus the `docs/spec/decision-ballots*.md` owner edits recording the direction.
+  **Do not touch, stage, or revert these files** — that rename is the other
+  agent's chunk. Before relying on it as ratified syntax, verify D-S16-USE has
+  been recorded in `docs/spec/syntax-decisions.md` + `tests/decisions.rs` (it was
+  still owner-draft / not in the decision log when this note was written).
 
-Stage **selectively** — never `git add -A`/`git add .`. Stage only the files
-listed above (`src/jetpack/cli.rs`, `src/syntax.rs`, `src/main.rs`,
-`tests/jetpack.rs`, and this handoff doc). The decision-ballots edits are owner
-doc noise (see "Pre-existing working-tree noise" below) — leave them unstaged.
+### ⚠ Committing in this shared tree
 
-**Verified green (2026-06-16):** `nix develop -c cargo test` fully green (jetpack
-suite 22 incl. the two new `enter`/`dev` tests + all golden/ui); `cargo test
---test decisions` passes; `jet run examples/features/01_hello.jet` prints
-`hello, world`.
+Stage **selectively** — never `git add -A`/`git add .`. The tree currently holds
+another agent's in-flight rename; stage only the exact files for *your* chunk.
 
 U10 was **ratified** (`payload.jet` manifest + `packages:` model) in
 `docs/spec/syntax-decisions.md` + `src/syntax.rs` before implementation, and is
@@ -532,12 +538,12 @@ Entry points: `src/jetpack/{packmanifest,provider,modeval,envfile,cli}.rs`,
 ## Pre-existing working-tree noise (not part of the arc; leave unstaged)
 
 **⚠ Stage selectively — never `git add -A`/`git add .`.** As of this session the
-working tree holds only **owner in-progress doc edits** beside the gap-#6 code:
-
-- **Owner doc noise (leave unstaged):** `docs/spec/decision-ballots.md`,
-  `docs/spec/decision-ballots-owner.md`.
+working tree holds a **parallel agent's in-flight `import` → `use` rename
+(D-S16-USE)** — see "Where we are" above. That spans `src/{syntax,lexer,parser,
+fmt,lsp,loader}.rs` and the owner `docs/spec/decision-ballots*.md` edits, and
+leaves the tree RED until that agent finishes. **Do not stage, revert, or extend
+those files** — they belong to the other agent's chunk.
 
 (The earlier large noise list — epoch-2 annotations, `owner-todo.md`, deleted
 `release.yml`/`gen_errors.sh`, untracked persona/fan-out drafts — is no longer in
-the tree; it was committed or cleaned. Confirm with the owner before touching any
-ballots edit.)
+the tree; it was committed or cleaned.)
