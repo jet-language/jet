@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jet — Decision Ballots</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --rec-bg: #1c1528;
+    --rec: #bc8cff;
+    --done-bg: #12261e;
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--text);
+    background: var(--bg);
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  header {
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+  header h1 { margin: 0 0 0.5rem; font-size: 1.75rem; letter-spacing: -0.02em; }
+  header p, header li { color: var(--muted); }
+  header ul { padding-left: 1.25rem; }
+  .glossary {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  nav.toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2rem;
+  }
+  nav.toc h2 { margin: 0 0 0.75rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  nav.toc ul { margin: 0; padding-left: 1.25rem; columns: 2; column-gap: 2rem; }
+  nav.toc a { color: var(--accent); text-decoration: none; font-size: 0.9rem; }
+  nav.toc a:hover { text-decoration: underline; }
+  h2.part {
+    margin: 2.5rem 0 0.5rem;
+    font-size: 1.35rem;
+    padding-top: 1rem;
+    border-top: 2px solid var(--border);
+  }
+  h2.part:first-of-type { border-top: none; padding-top: 0; }
+  h3.group {
+    margin: 1.75rem 0 0.75rem;
+    font-size: 1.05rem;
+    color: var(--accent);
+  }
+  .context {
+    margin: 0 0 1rem;
+    padding: 0.85rem 1rem;
+    background: #0d1117;
+    border-left: 3px solid var(--border);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .context pre {
+    background: #010409;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.15rem;
+    margin-bottom: 0.75rem;
+  }
+  .item h4 {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .item code {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    background: #0d1117;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    color: var(--accent);
+    margin-right: 0.35rem;
+  }
+  .options { display: flex; flex-direction: column; gap: 0.65rem; margin: 0.75rem 0; }
+  .opt {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+  }
+  .opt-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .opt-head .letter {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--accent);
+    background: rgba(88,166,255,0.12);
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .opt-head .summary { font-size: 0.88rem; color: var(--text); font-weight: 500; }
+  .opt-ex {
+    margin: 0;
+    padding: 0.55rem 0.65rem;
+    background: #010409;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--muted);
+    overflow-x: auto;
+    white-space: pre-wrap;
+  }
+  .rec {
+    margin: 0 0 0.75rem;
+    padding: 0.4rem 0.65rem;
+    background: var(--rec-bg);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--rec);
+  }
+  .fields { display: grid; gap: 0.6rem; }
+  .fields label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin-bottom: 0.25rem;
+  }
+  .fields input[type="text"] {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 0.9rem;
+    background: #0d1117;
+    color: var(--text);
+  }
+  .fields textarea {
+    width: 100%;
+    min-height: 56px;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+    background: #0d1117;
+    color: var(--text);
+  }
+  .fields input:focus, .fields textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  table.tally {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-top: 1rem;
+  }
+  table.tally th, table.tally td {
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.65rem;
+    text-align: left;
+  }
+  table.tally th { background: #0d1117; }
+  footer.note {
+    margin-top: 2.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .save-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    margin-top: 1rem;
+    padding: 0.65rem 0.85rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.88rem;
+  }
+  #save-status { color: var(--muted); }
+  #save-status[data-state="saved"] { color: #3fb950; }
+  .save-bar button {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #0d1117;
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .save-bar button:hover { border-color: var(--accent); }
+  @media (max-width: 600px) { nav.toc ul { columns: 1; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Decision Ballots</h1>
+  <p>Open decisions awaiting the owner. Ratified choices live in <code>syntax-decisions.md</code> — when you decide, agents add the row there and remove it from the queue.</p>
+  <p><strong>Decide one group at a time.</strong> A group must be fully decided before its milestone starts.</p>
+  <ul>
+    <li><strong>Part 1 — Strategic</strong> — Epoch 2 product direction. Decide first.</li>
+    <li><strong>Part 2 — Milestone gates</strong> — CEO-level calls per milestone plan.</li>
+    <li><strong>Part 3 — Feature ballots</strong> — Concrete syntax/semantics with worked examples.</li>
+  </ul>
+  <p class="glossary"><em>Glossary:</em> <em>epoch</em> = large era (E1 language core, E2 production platform). <em>edition</em> = per-project compatibility marker. <em>tier-2</em> = post-v1 <code>view</code>/<code>ref</code>. <em>ring</em> = first-party <code>jet.*</code> packages.</p>
+  <div class="save-bar">
+    <span id="save-status" data-state="idle">Loading saved answers…</span>
+    <button type="button" id="download-md">Download answers (.md)</button>
+  </div>
+  <p style="margin:0.75rem 0 0;font-size:0.88rem;color:var(--muted)">Answers auto-save in this browser as you type. Cursor/agents only see them if you download the <code>.md</code> file into the repo or overwrite this HTML with <kbd>Ctrl+S</kbd>.</p>
+</header>
+
+<nav class="toc">
+  <h2>Jump to group</h2>
+  <ul>
+    <li><a href="#e2v">E2V — Strategic vision</a></li>
+    <li><a href="#e2d">E2D — Release policy</a></li>
+    <li><a href="#m2">M2 — Editions</a></li>
+    <li><a href="#m3">M3 — Developer UX</a></li>
+    <li><a href="#m4">M4 — jet dev</a></li>
+    <li><a href="#m5">M5 — References</a></li>
+    <li><a href="#m6">M6 — Library authoring</a></li>
+    <li><a href="#m7">M7 — Streaming I/O</a></li>
+    <li><a href="#m8">M8 — Packages</a></li>
+    <li><a href="#m9">M9 — Library ring</a></li>
+    <li><a href="#m10">M10 — Networking</a></li>
+    <li><a href="#m11">M11 — Testing/docs</a></li>
+    <li><a href="#m12">M12 — Debug/observe</a></li>
+    <li><a href="#m13">M13 — Low-level</a></li>
+    <li><a href="#m14">M14 — C FFI</a></li>
+    <li><a href="#m15">M15 — Cross-compile</a></li>
+    <li><a href="#m16">M16 — Pure eval</a></li>
+    <li><a href="#m17">M17 — GA</a></li>
+    <li><a href="#g14">14 — Error handling</a></li>
+    <li><a href="#g15">15 — Pattern matching</a></li>
+    <li><a href="#g16">16 — Field punning</a></li>
+    <li><a href="#g17">17 — Readability sugar</a></li>
+    <li><a href="#g18">18 — transact</a></li>
+    <li><a href="#g19">19 — Tooling</a></li>
+    <li><a href="#g20">20 — Ownership teaching</a></li>
+    <li><a href="#g21">21 — std.fs helpers</a></li>
+    <li><a href="#g22">22 — JSON decode</a></li>
+    <li><a href="#g23">23 — Build transparency</a></li>
+    <li><a href="#g12">12 — REPL (M18)</a></li>
+  </ul>
+</nav>
+
+<h2 class="part" id="part1">Part 1 — Epoch 2 product direction</h2>
+
+<h3 class="group" id="e2v">Group E2V — Strategic vision</h3>
+
+<article class="item"><h4><code>E2-V1</code> Who is Epoch 2 GA for?</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Beginners + small-tool authors</span></div><pre class="opt-ex">Day-1 user, zero Jet experience:
+$ jet run report.jet
+hello, processed 42 rows
+Docs voice: "Write one file. Run it. Done."</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Small teams first</span></div><pre class="opt-ex">Team ships internal service:
+$ jet new service &amp;&amp; cd service
+$ jet test &amp;&amp; jet dev
+Showcase: 3 devs, one sprint, real HTTP API on a laptop</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Enterprise platform buyers first</span></div><pre class="opt-ex">Sales demo leads with:
+- Vendor approval workflow for jet add
+- SBOM export on every build
+First tutorial is compliance policy, not hello world</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong> (with B as the proof)</p>
+<div class="fields"><div><label for="d-E2-V1">Decision</label><input type="text" id="d-E2-V1" name="E2-V1-decision"></div><div><label for="c-E2-V1">Comment</label><textarea id="c-E2-V1" name="E2-V1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V2</code> What does "production platform" mean at GA?</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Internal services + CLIs</span></div><pre class="opt-ex">GA checklist includes:
+- jetgrep CLI (batch tool)
+- internal REST service behind VPN
+- jet dev for fast iteration
+Not required: public internet, PCI/HIPAA</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also public-facing SaaS</span></div><pre class="opt-ex">GA showcase also ships:
+- HTTPS API on the public internet
+- TLS termination + rate limits documented
+- "Deploy this todo API to Fly" guide</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Also regulated/audit-heavy</span></div><pre class="opt-ex">GA bar includes:
+- Immutable audit log of who published what
+- Signed releases required in CI
+- Regulated-customer checklist in docs</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-E2-V2">Decision</label><input type="text" id="d-E2-V2" name="E2-V2-decision"></div><div><label for="c-E2-V2">Comment</label><textarea id="c-E2-V2" name="E2-V2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V3</code> Who must we beat convincingly?</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Python/Node scripts</span></div><pre class="opt-ex">Persona: "I have rename_files.py and a package.json script"
+$ jet run rename.jet   # beats python3 + venv ceremony
+Benchmark story: same 80-line log parser, fewer steps to run</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Go services</span></div><pre class="opt-ex">Persona: "We'd pick Go for a small HTTP service"
+Showcase: thread-per-task server + channels
+Compare: jet service.jet vs go mod init + main.go boilerplate</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Rust small tools</span></div><pre class="opt-ex">Persona: "ripgrep but in Jet"
+Marketing: memory-safe CLI as fast as rustc tools
+Requires expert tier + C FFI story polished</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">D</span><span class="summary">Zig/C systems</span></div><pre class="opt-ex">Persona: "embedded firmware team"
+Showcase: freestanding smoke + cross-compile
+Docs compete with zig build, not Python tutorials</pre></div>
+</div>
+<p class="rec">Rec: <strong>A primary, B secondary</strong></p>
+<div class="fields"><div><label for="d-E2-V3">Decision</label><input type="text" id="d-E2-V3" name="E2-V3-decision"></div><div><label for="c-E2-V3">Comment</label><textarea id="c-E2-V3" name="E2-V3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V4</code> How sacred is single-file <code>jet run</code>?</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Forever default path</span></div><pre class="opt-ex">$ jet run hello.jet        # always works, no manifest
+$ jet run ../other.jet     # still works
+jet.toml never required for learning or one-offs</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Package-first after tutorial</span></div><pre class="opt-ex">Tutorial chapter 2:
+$ jet new mytool           # now expected
+error: run hello.jet in a project dir — use jet new first</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Workspace-first for teams</span></div><pre class="opt-ex">$ jet run tool.jet
+error: not in a workspace — run from repo root or jet init</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-E2-V4">Decision</label><input type="text" id="d-E2-V4" name="E2-V4-decision"></div><div><label for="c-E2-V4">Comment</label><textarea id="c-E2-V4" name="E2-V4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V5</code> Concurrency model lock for the epoch</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Tasks/channels only (S53)</span></div><pre class="opt-ex">fn handle(c: Channel Request) {
+    spawn { process(c.recv()?)?; };
+}
+Docs: "Jet services scale like Go circa 2012 — thread-per-task."</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Reserve async for Epoch 3</span></div><pre class="opt-ex">// async fn fetch() — syntax reserved, not implemented
+note: async/await planned for Epoch 3; use tasks today</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Promote async inside Epoch 2</span></div><pre class="opt-ex">async fn handle(req: Request) -> Response ? {
+    val body = await upstream.get("/data")?;
+    ok(Response { body })
+}</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-E2-V5">Decision</label><input type="text" id="d-E2-V5" name="E2-V5-decision"></div><div><label for="c-E2-V5">Comment</label><textarea id="c-E2-V5" name="E2-V5-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V6</code> Expert/low-level appetite</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Smoke demos only</span></div><pre class="opt-ex">Expert chapter: "This exists" + one freestanding blink demo
+No promise: "Ship your firmware in Jet at GA"</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Credible for systems programmers, gated</span></div><pre class="opt-ex">Showcase: C FFI game + cross-compile CLI
+unsafe { } behind audit comment + expert guide
+Still beginner path stays default</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer C FFI + freestanding to Epoch 3</span></div><pre class="opt-ex">E2-M14/M15 removed from roadmap
+GA has no raylib/sqlite FFI story — docs say "coming"</pre></div>
+</div>
+<p class="rec">Rec: <strong>B</strong></p>
+<div class="fields"><div><label for="d-E2-V6">Decision</label><input type="text" id="d-E2-V6" name="E2-V6-decision"></div><div><label for="c-E2-V6">Comment</label><textarea id="c-E2-V6" name="E2-V6-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V7</code> Networking/services ambition</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Internal HTTP/CLI only</span></div><pre class="opt-ex">Showcase: API on localhost:8080, VPN-only deploy guide
+No TLS chapter; "put nginx in front" workaround</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Small public APIs with TLS</span></div><pre class="opt-ex">$ curl https://my-jet-api.example/health
+ok
+Service terminates TLS via rustls FFI tier — documented, vetted</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer services to Epoch 3</span></div><pre class="opt-ex">E2-M10 networking deferred
+GA: CLIs + file tools only; HTTP is "research preview"</pre></div>
+</div>
+<p class="rec">Rec: <strong>B</strong></p>
+<div class="fields"><div><label for="d-E2-V7">Decision</label><input type="text" id="d-E2-V7" name="E2-V7-decision"></div><div><label for="c-E2-V7">Comment</label><textarea id="c-E2-V7" name="E2-V7-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V8</code> Supply-chain minimum bar</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">pub.dev-class (semver + lockfile)</span></div><pre class="opt-ex">$ jet add csv@2.1.0
+$ jet.lock committed; semver ranges in jet.toml
+Good enough for solo devs and small teams</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Enterprise-class</span></div><pre class="opt-ex">$ jet vendor --sbom out.spdx
+$ jet audit deps
+Mirror registry + signed metadata design doc shipped</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Air-gapped-first</span></div><pre class="opt-ex">Default install docs assume no internet
+$ jet add from /mnt/registry-mirror
+Online registry is optional add-on</pre></div>
+</div>
+<p class="rec">Rec: <strong>B</strong></p>
+<div class="fields"><div><label for="d-E2-V8">Decision</label><input type="text" id="d-E2-V8" name="E2-V8-decision"></div><div><label for="c-E2-V8">Comment</label><textarea id="c-E2-V8" name="E2-V8-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V9</code> Editor ecosystem priority</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">VS Code/Cursor + Zed dev extension</span></div><pre class="opt-ex">Install: Jet (VS Code) + Jet (Zed, dev channel)
+Both get LSP, same jet doctor check</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">VS Code/Cursor only until GA</span></div><pre class="opt-ex">Zed users: "Use VS Code extension until GA"
+One extension team, half the surface area</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Also Neovim in Epoch 2</span></div><pre class="opt-ex">Ship nvim-jet with parity checklist
+Three editor integrations maintained pre-GA</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-E2-V9">Decision</label><input type="text" id="d-E2-V9" name="E2-V9-decision"></div><div><label for="c-E2-V9">Comment</label><textarea id="c-E2-V9" name="E2-V9-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V10</code> Public launch trigger</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">E2-M17 technical GA = launch</span></div><pre class="opt-ex">Tag v1.0.0 when M17 exit criteria pass
+Blog post same day: "Jet 1.0"</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Separate launch after audits</span></div><pre class="opt-ex">M17: jet 0.9.0 — technical GA, docs complete
+Launch milestone: security audit + marketing → jet 1.0.0 public</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No encoded epoch ever</span></div><pre class="opt-ex">Forever: jet 0.x → 1.x SemVer only
+"Epoch 2" stays docs/marketing, never in version number</pre></div>
+</div>
+<p class="rec">Rec: <strong>B</strong></p>
+<div class="fields"><div><label for="d-E2-V10">Decision</label><input type="text" id="d-E2-V10" name="E2-V10-decision"></div><div><label for="c-E2-V10">Comment</label><textarea id="c-E2-V10" name="E2-V10-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V11</code> Governance at launch</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">OSS project, owner-led LTS</span></div><pre class="opt-ex">README: "Maintained by @owner; LTS policy in GOVERNANCE.md"
+No foundation paperwork in Epoch 2</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Foundation prep in Epoch 2</span></div><pre class="opt-ex">Draft charter + trademark plan before GA
+Launch tied to neutral governance body</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer governance messaging</span></div><pre class="opt-ex">No GOVERNANCE.md at launch
+"Who maintains this?" answered ad hoc in issues</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-E2-V11">Decision</label><input type="text" id="d-E2-V11" name="E2-V11-decision"></div><div><label for="c-E2-V11">Comment</label><textarea id="c-E2-V11" name="E2-V11-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-V12</code> JetOS / pure eval / layer-3 boundary</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary"><code>pure fn</code> + <code>jet eval --pure</code> only</span></div><pre class="opt-ex">$ jet eval --pure 'pure fn sq(x: Int) -> Int { x * x }; sq(5)'
+25
+No package recipes, no ambient I/O in eval</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Package recipes in Epoch 2</span></div><pre class="opt-ex">// pack.jet recipe blocks run in sandbox
+$ jet build --recipe pack.jet
+Builds dev shell from pure eval + pinned inputs</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">JetOS research-only</span></div><pre class="opt-ex">JetOS docs moved to docs/research/
+Ship: pure fn (S60) only; Nix-like OS layer is post-GA research</pre></div>
+</div>
+<p class="rec">Rec: <strong>C</strong></p>
+<div class="fields"><div><label for="d-E2-V12">Decision</label><input type="text" id="d-E2-V12" name="E2-V12-decision"></div><div><label for="c-E2-V12">Comment</label><textarea id="c-E2-V12" name="E2-V12-comment"></textarea></div></div></article>
+
+<h3 class="group" id="e2d">Group E2D — External release &amp; versioning *(E2-M2)*</h3>
+
+<article class="item"><h4><code>E2-D1</code> External release policy</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Normal SemVer until launch</span></div><pre class="opt-ex">$ jet --version
+jet 0.9.0  (language epoch 2, edition 2026)</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Encoded Epoch SemVer now</span></div><pre class="opt-ex">$ jet --version
+jet 2000.0.0</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Calendar/edition for language, SemVer for binary</span></div><pre class="opt-ex">jet 0.9.0 + separate "language edition 2026" policy doc</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-E2-D1">Decision</label><input type="text" id="d-E2-D1" name="E2-D1-decision"></div><div><label for="c-E2-D1">Comment</label><textarea id="c-E2-D1" name="E2-D1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>E2-D2</code> What event flips on encoded Epoch SemVer, if ever?</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Never</span></div><pre class="opt-ex">Always normal SemVer — no jet 2000.x ever</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">At E2-M17 GA only</span></div><pre class="opt-ex">M17 tag: 0.9.0 → 2000.0.0 same commit</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Separate launch after GA</span></div><pre class="opt-ex">M17: 0.9.0 technical GA → later public launch flips version story</pre></div>
+</div>
+<p class="rec">Rec: <strong>C</strong></p>
+<div class="fields"><div><label for="d-E2-D2">Decision</label><input type="text" id="d-E2-D2" name="E2-D2-decision"></div><div><label for="c-E2-D2">Comment</label><textarea id="c-E2-D2" name="E2-D2-comment"></textarea></div></div></article>
+
+<h2 class="part" id="part2">Part 2 — Per-milestone owner gates</h2>
+
+<h3 class="group" id="m2">Group M2 — Release policy &amp; editions *(E2-M2)*</h3>
+
+<article class="item"><h4><code>D-REL1</code> Versioning policy</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Normal SemVer (= E2-D1 A)</span></div><pre class="opt-ex">$ jet --version → jet 0.9.0 (epoch 2, edition 2026)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Encoded Epoch SemVer</span></div><pre class="opt-ex">$ jet --version → jet 2000.0.0</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Split language/binary versioning</span></div><pre class="opt-ex">jet 0.9.0 binary + edition 2026 language marker</pre></div></div>
+<p class="rec">Rec: A (normal SemVer)</p>
+<div class="fields"><div><label for="d-D-REL1">Decision</label><input type="text" id="d-D-REL1" name="D-REL1-decision"></div><div><label for="c-D-REL1">Comment</label><textarea id="c-D-REL1" name="D-REL1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REL2</code> Epoch-SemVer flip</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Never (= E2-D2 A)</span></div><pre class="opt-ex">Stay 0.x → 1.x forever</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Flip at M17 GA</span></div><pre class="opt-ex">Tag day: 0.9.0 → 2000.0.0</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Separate launch (= E2-D2 C)</span></div><pre class="opt-ex">Technical GA 0.9.0, public launch later</pre></div></div>
+<p class="rec">Rec: C (separate launch)</p>
+<div class="fields"><div><label for="d-D-REL2">Decision</label><input type="text" id="d-D-REL2" name="D-REL2-decision"></div><div><label for="c-D-REL2">Comment</label><textarea id="c-D-REL2" name="D-REL2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REL3</code> Project compatibility marker</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">edition field</span></div><pre class="opt-ex">edition = "2026"
+error[E2001]: edition "2027" — toolchain supports up to 2026</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">epoch field</span></div><pre class="opt-ex">epoch = "2"</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Both</span></div><pre class="opt-ex">edition = "2026" + epoch = "2"</pre></div><div class="opt"><div class="opt-head"><span class="letter">D</span><span class="summary">Toolchain constraint only</span></div><pre class="opt-ex">jet-toolchain = "0.9.0"</pre></div></div>
+<p class="rec">Rec: <strong>A — edition</strong></p>
+<div class="fields"><div><label for="d-D-REL3">Decision</label><input type="text" id="d-D-REL3" name="D-REL3-decision"></div><div><label for="c-D-REL3">Comment</label><textarea id="c-D-REL3" name="D-REL3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REL4</code> LTS window length</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">1 year LTS</span></div><pre class="opt-ex">0.8.x security fixes until 2027-06</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">2 year LTS</span></div><pre class="opt-ex">24-month support window in GOVERNANCE.md</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No LTS pre-GA</span></div><pre class="opt-ex">"LTS announced at 1.0" — no 0.x promise</pre></div></div>
+<p class="rec">Rec: <strong>C until GA</strong></p>
+<div class="fields"><div><label for="d-D-REL4">Decision</label><input type="text" id="d-D-REL4" name="D-REL4-decision"></div><div><label for="c-D-REL4">Comment</label><textarea id="c-D-REL4" name="D-REL4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REL5</code> Who may run migrations</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Owner-approved jet fix only</span></div><pre class="opt-ex">$ jet fix --edition 2027  # only listed migrations</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Any quick-fix may migrate</span></div><pre class="opt-ex">LSP quick-fix rewrites syntax across edition</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No auto-migration</span></div><pre class="opt-ex">Manual edit only when bumping edition</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-REL5">Decision</label><input type="text" id="d-D-REL5" name="D-REL5-decision"></div><div><label for="c-D-REL5">Comment</label><textarea id="c-D-REL5" name="D-REL5-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m3">Group M3 — Developer command UX *(E2-M3)*</h3>
+
+<article class="item"><h4><code>D-DX1</code> <code>--json</code> diagnostic schema stability</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Stable &amp; versioned by M3 exit</span></div><pre class="opt-ex">$ jet build --json 2&gt;&amp;1 | jq .version → "diagnostic.v1"</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Unstable in M3</span></div><pre class="opt-ex">warning: --json schema may change weekly</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DX1">Decision</label><input type="text" id="d-D-DX1" name="D-DX1-decision"></div><div><label for="c-D-DX1">Comment</label><textarea id="c-D-DX1" name="D-DX1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DX2</code> <code>jet doctor</code> scope</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Full health check</span></div><pre class="opt-ex">$ jet doctor → rustc ✓ cache ✓ LSP ✗ registry ✓</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also auto-fix</span></div><pre class="opt-ex">$ jet doctor --fix → created missing cache dir</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Minimal</span></div><pre class="opt-ex">$ jet doctor → jet 0.9.0 ok</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DX2">Decision</label><input type="text" id="d-D-DX2" name="D-DX2-decision"></div><div><label for="c-D-DX2">Comment</label><textarea id="c-D-DX2" name="D-DX2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DX3</code> Zed dev extension in Epoch 2?</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Yes, dev-tier</span></div><pre class="opt-ex">Install Jet extension in Zed (dev channel)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">VS Code/Cursor only until GA</span></div><pre class="opt-ex">Zed users wait for GA</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> (=E2-V9)</p>
+<div class="fields"><div><label for="d-D-DX3">Decision</label><input type="text" id="d-D-DX3" name="D-DX3-decision"></div><div><label for="c-D-DX3">Comment</label><textarea id="c-D-DX3" name="D-DX3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DX4</code> Shell completions + man pages</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Ship in M3</span></div><pre class="opt-ex">$ jet completions bash; $ man jet run</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Defer to GA</span></div><pre class="opt-ex">No tab completion until GA</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DX4">Decision</label><input type="text" id="d-D-DX4" name="D-DX4-decision"></div><div><label for="c-D-DX4">Comment</label><textarea id="c-D-DX4" name="D-DX4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DX5</code> External subcommands</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">PATH discovery</span></div><pre class="opt-ex">$ jet bench-compare a.json b.json → runs jet-bench-compare</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">None</span></div><pre class="opt-ex">error: unknown subcommand bench-compare</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Full plugin API</span></div><pre class="opt-ex">[plugins] in jet.toml loads .so modules</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DX5">Decision</label><input type="text" id="d-D-DX5" name="D-DX5-decision"></div><div><label for="c-D-DX5">Comment</label><textarea id="c-D-DX5" name="D-DX5-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DX6</code> OSC 8 terminal hyperlinks</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">When terminal supports it</span></div><pre class="opt-ex">error at main.jet:12 — clickable in WezTerm/iTerm2</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Never</span></div><pre class="opt-ex">Plain text file:line only</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DX6">Decision</label><input type="text" id="d-D-DX6" name="D-DX6-decision"></div><div><label for="c-D-DX6">Comment</label><textarea id="c-D-DX6" name="D-DX6-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m4">Group M4 — <code>jet dev</code> *(E2-M4)*</h3>
+<article class="item"><h4><code>D-DEV1</code> Interpreter coverage boundary</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Common programs; native-only explained</span></div><pre class="opt-ex">$ jet dev app.jet   # works for loops, structs, ?
+note: FFI/tasks need jet run — see native-only list</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Attempt everything</span></div><pre class="opt-ex">$ jet dev game.jet  # tries FFI in interpreter (slow/fallback)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Expressions only</span></div><pre class="opt-ex">$ jet dev
+> 1 + 2   # no fn main, no control flow</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DEV1">Decision</label><input type="text" id="d-D-DEV1" name="D-DEV1-decision"></div><div><label for="c-D-DEV1">Comment</label><textarea id="c-D-DEV1" name="D-DEV1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DEV2</code> JIT in Epoch 2</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Design-only note</span></div><pre class="opt-ex">docs/dev.md: "JIT evaluated for Epoch 3; interpreter only today"</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Implement Cranelift JIT</span></div><pre class="opt-ex">$ jet dev --jit hot.jet  # hot loops compiled at runtime</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No JIT mention</span></div><pre class="opt-ex">Docs never discuss JIT</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DEV2">Decision</label><input type="text" id="d-D-DEV2" name="D-DEV2-decision"></div><div><label for="c-D-DEV2">Comment</label><textarea id="c-D-DEV2" name="D-DEV2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-DEV3</code> Save-to-diagnostic latency budget</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">&lt;200ms w/ CI test</span></div><pre class="opt-ex">tests/dev_latency.rs: save file → first diagnostic &lt; 200ms</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">&lt;500ms</span></div><pre class="opt-ex">Looser target; no hard fail in CI</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No budget</span></div><pre class="opt-ex">"Fast enough" — no measured SLA</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-DEV3">Decision</label><input type="text" id="d-D-DEV3" name="D-DEV3-decision"></div><div><label for="c-D-DEV3">Comment</label><textarea id="c-D-DEV3" name="D-DEV3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m5">Group M5 — Tier-2 references *(E2-M5)*</h3>
+<article class="item"><h4><code>D-REF1</code> Teaching order</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">After beginner ownership chapter</span></div><pre class="opt-ex">Guide: ch4 ownership → ch5 "When you need more: view/ref"</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Alongside ownership</span></div><pre class="opt-ex">Same chapter introduces mut, take, and view together</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Appendix only</span></div><pre class="opt-ex">view/ref hidden in expert appendix</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-REF1">Decision</label><input type="text" id="d-D-REF1" name="D-REF1-decision"></div><div><label for="c-D-REF1">Comment</label><textarea id="c-D-REF1" name="D-REF1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REF2</code> Ship arenas this milestone</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Only if parser example needs them</span></div><pre class="opt-ex">examples/parser.jet uses Arena if the plan requires it</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Always ship arenas</span></div><pre class="opt-ex">std.arena in tier-2 guide + API for all experts</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Never in Epoch 2</span></div><pre class="opt-ex">Defer arenas to Epoch 3</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-REF2">Decision</label><input type="text" id="d-D-REF2" name="D-REF2-decision"></div><div><label for="c-D-REF2">Comment</label><textarea id="c-D-REF2" name="D-REF2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REF3</code> Inlay-hint defaults beyond clone</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Borrowed-return + cleanup scopes on</span></div><pre class="opt-ex">fn f() -> String  // inlay: -&gt; borrowed String
+{ val h = open(f)?; }  // inlay: cleanup at scope end</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Clone hints only</span></div><pre class="opt-ex">Only implicit-clone (L0201) inlays shown</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">All off by default</span></div><pre class="opt-ex">User enables inlays in editor settings</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-REF3">Decision</label><input type="text" id="d-D-REF3" name="D-REF3-decision"></div><div><label for="c-D-REF3">Comment</label><textarea id="c-D-REF3" name="D-REF3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m6">Group M6 — Library authoring *(E2-M6)*</h3>
+<article class="item"><h4><code>D-LIB1</code> S61 (labels/defaults) + S62 (delegation) timing</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Both in M6</span></div><pre class="opt-ex">fn connect(host: String, port: Int = 8080) { ... }
+impl Server: Handler { delegate log to logger; }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Labels only</span></div><pre class="opt-ex">Default params ship; delegation waits</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Delegation only</span></div><pre class="opt-ex">No default params until later</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LIB1">Decision</label><input type="text" id="d-D-LIB1" name="D-LIB1-decision"></div><div><label for="c-D-LIB1">Comment</label><textarea id="c-D-LIB1" name="D-LIB1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LIB2</code> Generics step</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Associated types + default method bodies</span></div><pre class="opt-ex">trait Iterator { type Item; fn next(self) -> Item? { null } }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also trait inheritance</span></div><pre class="opt-ex">trait Read: Iterator { ... }</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Also blanket impls</span></div><pre class="opt-ex">impl Display for all T: ToString { ... }</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LIB2">Decision</label><input type="text" id="d-D-LIB2" name="D-LIB2-decision"></div><div><label for="c-D-LIB2">Comment</label><textarea id="c-D-LIB2" name="D-LIB2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LIB3</code> <code>?</code> error-conversion shape</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">IntoError trait (= D-ERR2 A)</span></div><pre class="opt-ex">impl FileError: IntoError { fn into_error(self) -> Error { ... } }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Manual wrap only</span></div><pre class="opt-ex">match fs.read(p) { ok(v)->v; err(e)->return err(wrap(e)); }</pre></div></div>
+<p class="rec">Rec: From-style <code>IntoError</code> trait</p>
+<div class="fields"><div><label for="d-D-LIB3">Decision</label><input type="text" id="d-D-LIB3" name="D-LIB3-decision"></div><div><label for="c-D-LIB3">Comment</label><textarea id="c-D-LIB3" name="D-LIB3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m7">Group M7 — Streaming I/O &amp; resources *(E2-M7)*</h3>
+<article class="item"><h4><code>D-IO1</code> Path handling</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">std.path helper module</span></div><pre class="opt-ex">path.join("logs", name); path.parent(p)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">First-class Path type</span></div><pre class="opt-ex">val p: Path = Path.from("logs/app.log");</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Strings only</span></div><pre class="opt-ex">Manual "/" concatenation everywhere</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-IO1">Decision</label><input type="text" id="d-D-IO1" name="D-IO1-decision"></div><div><label for="c-D-IO1">Comment</label><textarea id="c-D-IO1" name="D-IO1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-IO2</code> Resource cleanup surface</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">RAII handle types (S63)</span></div><pre class="opt-ex">val input = files.open(src)?;  // auto-close on scope exit, even on ?</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Explicit close</span></div><pre class="opt-ex">input.close();  // required on every exit path</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">defer keyword</span></div><pre class="opt-ex">defer input.close();</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-IO2">Decision</label><input type="text" id="d-D-IO2" name="D-IO2-decision"></div><div><label for="c-D-IO2">Comment</label><textarea id="c-D-IO2" name="D-IO2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-IO3</code> Keep whole-file <code>fs.read</code>/<code>fs.write</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Keep as sugar over handles</span></div><pre class="opt-ex">val text = fs.read("cfg.toml")?;  // beginner-friendly; uses handles internally</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Deprecate</span></div><pre class="opt-ex">warning: fs.read is deprecated — use files.open + read_all</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Remove</span></div><pre class="opt-ex">error: fs.read not found — use streaming API</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-IO3">Decision</label><input type="text" id="d-D-IO3" name="D-IO3-decision"></div><div><label for="c-D-IO3">Comment</label><textarea id="c-D-IO3" name="D-IO3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m8">Group M8 — Packages &amp; supply chain *(E2-M8)*</h3>
+<article class="item"><h4><code>D-PKGS1</code> Registry hosting model</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Append-only git registry</span></div><pre class="opt-ex">$ jet add csv@1.2.0  # resolves from github.com/jet-lang/registry git</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Hosted HTTP service</span></div><pre class="opt-ex">$ jet add csv  # POST to registry.jet-lang.org</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Both</span></div><pre class="opt-ex">Git canonical + HTTP mirror for speed</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PKGS1">Decision</label><input type="text" id="d-D-PKGS1" name="D-PKGS1-decision"></div><div><label for="c-D-PKGS1">Comment</label><textarea id="c-D-PKGS1" name="D-PKGS1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PKGS2</code> <code>jet.*</code> namespace policy</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Owner-held reserved</span></div><pre class="opt-ex">$ jet publish jet.mylib  # error: jet.* is reserved</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Open namespace</span></div><pre class="opt-ex">Anyone can publish jet.foo on first claim</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Reserved + petition</span></div><pre class="opt-ex">Request jet.mylib via governance issue</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PKGS2">Decision</label><input type="text" id="d-D-PKGS2" name="D-PKGS2-decision"></div><div><label for="c-D-PKGS2">Comment</label><textarea id="c-D-PKGS2" name="D-PKGS2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PKGS3</code> Signing</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Signed metadata optional v1</span></div><pre class="opt-ex">$ jet publish  # works unsigned; signed releases get badge</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Required signing</span></div><pre class="opt-ex">error: package metadata must be signed</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">None</span></div><pre class="opt-ex">No signing story in Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PKGS3">Decision</label><input type="text" id="d-D-PKGS3" name="D-PKGS3-decision"></div><div><label for="c-D-PKGS3">Comment</label><textarea id="c-D-PKGS3" name="D-PKGS3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PKGS4</code> Yank/immutability rules</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Immutable releases, yank hides</span></div><pre class="opt-ex">$ jet yank csv@1.0.1  # existing lockfiles ok; new solves skip it</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Hard delete allowed</span></div><pre class="opt-ex">$ jet delete csv@1.0.1  # breaks old lockfiles</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No yank</span></div><pre class="opt-ex">Published versions permanent in registry index</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PKGS4">Decision</label><input type="text" id="d-D-PKGS4" name="D-PKGS4-decision"></div><div><label for="c-D-PKGS4">Comment</label><textarea id="c-D-PKGS4" name="D-PKGS4-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m9">Group M9 — First-party library ring *(E2-M9)*</h3>
+<article class="item"><h4><code>D-LR1</code> First wave order</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">csv/toml/log/time first</span></div><pre class="opt-ex">jet add csv jet.toml jet.log jet.time in wave 1</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">regex first</span></div><pre class="opt-ex">jet.regex ships before csv/toml</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">db first</span></div><pre class="opt-ex">jet.sqlite before csv/toml</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LR1">Decision</label><input type="text" id="d-D-LR1" name="D-LR1-decision"></div><div><label for="c-D-LR1">Comment</label><textarea id="c-D-LR1" name="D-LR1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LR2</code> sqlite</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Via E2-M14 C FFI</span></div><pre class="opt-ex">import jet.sqlite;  // wraps libsqlite3 through FFI tier</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Pure-Jet impl</span></div><pre class="opt-ex">jet.sqlite written entirely in Jet (large effort)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer db ring</span></div><pre class="opt-ex">No jet.sqlite in Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LR2">Decision</label><input type="text" id="d-D-LR2" name="D-LR2-decision"></div><div><label for="c-D-LR2">Comment</label><textarea id="c-D-LR2" name="D-LR2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LR3</code> crypto surface</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Hashes/HMAC/RNG only</span></div><pre class="opt-ex">jet.crypto.sha256(data); jet.crypto.random_bytes(32)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also symmetric ciphers</span></div><pre class="opt-ex">jet.crypto.aes_encrypt(key, plain)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Also TLS primitives</span></div><pre class="opt-ex">jet.crypto.tls_handshake(...) in ring</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LR3">Decision</label><input type="text" id="d-D-LR3" name="D-LR3-decision"></div><div><label for="c-D-LR3">Comment</label><textarea id="c-D-LR3" name="D-LR3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LR4</code> YAML in the ring</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer past first wave</span></div><pre class="opt-ex">Wave 1: csv + toml only; YAML later</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">jet.yaml in wave 1</span></div><pre class="opt-ex">jet add jet.yaml alongside jet.toml</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Never</span></div><pre class="opt-ex">No first-party YAML parser in ring</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LR4">Decision</label><input type="text" id="d-D-LR4" name="D-LR4-decision"></div><div><label for="c-D-LR4">Comment</label><textarea id="c-D-LR4" name="D-LR4-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m10">Group M10 — Networking &amp; services *(E2-M10)*</h3>
+<article class="item"><h4><code>D-NET1</code> TLS/HTTP dependency</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">rustls-class via FFI</span></div><pre class="opt-ex">import net.tls;  // vetted rustls bridge, never hand-rolled TLS</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">openssl FFI</span></div><pre class="opt-ex">Links libssl.so — system dependency</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer TLS</span></div><pre class="opt-ex">HTTP localhost only; TLS docs say "use nginx"</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-NET1">Decision</label><input type="text" id="d-D-NET1" name="D-NET1-decision"></div><div><label for="c-D-NET1">Comment</label><textarea id="c-D-NET1" name="D-NET1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-NET2</code> Concurrency story for servers</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Blocking thread-per-task + channels</span></div><pre class="opt-ex">spawn { handle(conn)?; };  // one OS thread per connection</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Small async exception</span></div><pre class="opt-ex">async fn handle(conn) { ... }  // limited async in M10</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Thread pool</span></div><pre class="opt-ex">Fixed worker pool accepts connections</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-NET2">Decision</label><input type="text" id="d-D-NET2" name="D-NET2-decision"></div><div><label for="c-D-NET2">Comment</label><textarea id="c-D-NET2" name="D-NET2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-NET3</code> Service showcase backing store</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">sqlite-first</span></div><pre class="opt-ex">Showcase todo API uses jet.sqlite file on disk</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Postgres-first</span></div><pre class="opt-ex">Showcase requires DATABASE_URL postgres://...</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">File store</span></div><pre class="opt-ex">JSON files in data/ directory — no SQL</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-NET3">Decision</label><input type="text" id="d-D-NET3" name="D-NET3-decision"></div><div><label for="c-D-NET3">Comment</label><textarea id="c-D-NET3" name="D-NET3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m11">Group M11 — Testing, docs, bench *(E2-M11)*</h3>
+<article class="item"><h4><code>D-TEST1</code> Property testing</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">In if small design exists</span></div><pre class="opt-ex">test prop reverse_twice(xs) { reverse(reverse(xs)) == xs }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Required</span></div><pre class="opt-ex">Every std module ships property tests</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">Unit tests only in M11</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TEST1">Decision</label><input type="text" id="d-D-TEST1" name="D-TEST1-decision"></div><div><label for="c-D-TEST1">Comment</label><textarea id="c-D-TEST1" name="D-TEST1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TEST2</code> <code>todo</code> typed holes</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">= D-TOOL2 A</span></div><pre class="opt-ex">val x: Int = todo();  // compiles, panics at runtime with type info</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">= D-TOOL2 B defer</span></div><pre class="opt-ex">Not available in Epoch 2</pre></div></div>
+<p class="rec">Rec: defer unless small</p>
+<div class="fields"><div><label for="d-D-TEST2">Decision</label><input type="text" id="d-D-TEST2" name="D-TEST2-decision"></div><div><label for="c-D-TEST2">Comment</label><textarea id="c-D-TEST2" name="D-TEST2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TEST3</code> Guided learning</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">jet tour / jet learn</span></div><pre class="opt-ex">$ jet tour
+lesson 1: edit hello.jet → compiler checks your answer</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Docs-only</span></div><pre class="opt-ex">Static guide on docs site — no CLI integration</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Separate site</span></div><pre class="opt-ex">learn.jet-lang.org interactive playground</pre></div></div>
+<p class="rec">Rec: <strong>B first, A if cheap</strong></p>
+<div class="fields"><div><label for="d-D-TEST3">Decision</label><input type="text" id="d-D-TEST3" name="D-TEST3-decision"></div><div><label for="c-D-TEST3">Comment</label><textarea id="c-D-TEST3" name="D-TEST3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TEST4</code> Doctests run under <code>jet test</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">= D-TOOL1 A yes</span></div><pre class="opt-ex">/// Example: assert add(1,2) == 3
+$ jet test  # runs doc comment examples</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Docs not tested</span></div><pre class="opt-ex">Doc examples are illustrative only</pre></div></div>
+<p class="rec">Rec: <strong>yes</strong></p>
+<div class="fields"><div><label for="d-D-TEST4">Decision</label><input type="text" id="d-D-TEST4" name="D-TEST4-decision"></div><div><label for="c-D-TEST4">Comment</label><textarea id="c-D-TEST4" name="D-TEST4-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m12">Group M12 — Debug &amp; observability *(E2-M12)*</h3>
+<article class="item"><h4><code>D-OBS1</code> DAP timing</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Ship in M12 (before GA)</span></div><pre class="opt-ex">VS Code: set breakpoint → jet-lsp DAP in M12</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">At GA</span></div><pre class="opt-ex">Debugging ships same day as GA tag</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Post-GA</span></div><pre class="opt-ex">Print-debug only until after launch</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-OBS1">Decision</label><input type="text" id="d-D-OBS1" name="D-OBS1-decision"></div><div><label for="c-D-OBS1">Comment</label><textarea id="c-D-OBS1" name="D-OBS1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-OBS2</code> Panic local-value privacy</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Safe locals only in dev mode</span></div><pre class="opt-ex">panic: index out of bounds (dev: i=5, len=3) — secrets redacted</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">All locals</span></div><pre class="opt-ex">panic dump includes api_key= "sk-live-..."</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">None</span></div><pre class="opt-ex">panic: index out of bounds — no locals shown</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-OBS2">Decision</label><input type="text" id="d-D-OBS2" name="D-OBS2-decision"></div><div><label for="c-D-OBS2">Comment</label><textarea id="c-D-OBS2" name="D-OBS2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-OBS3</code> Metrics conventions</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Structured logs first; OTel later</span></div><pre class="opt-ex">log.info("request", method: "GET", ms: 42);</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Full OTel now</span></div><pre class="opt-ex">jet.obs.export_otel(traces, metrics) at GA</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Logs only</span></div><pre class="opt-ex">print("done") — no structured logging std</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-OBS3">Decision</label><input type="text" id="d-D-OBS3" name="D-OBS3-decision"></div><div><label for="c-D-OBS3">Comment</label><textarea id="c-D-OBS3" name="D-OBS3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m13">Group M13 — Expert low-level tier *(E2-M13)*</h3>
+<article class="item"><h4><code>D-LL1</code> I1 amendment wording</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Generated unsafe only in user gates or vetted std</span></div><pre class="opt-ex">unsafe { ... }  // user code; compiler emits unsafe only inside here</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Broader unsafe allowance</span></div><pre class="opt-ex">More codegen paths may emit unsafe without user block</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No amendment — block M13</span></div><pre class="opt-ex">I1 unchanged: zero unsafe ever</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LL1">Decision</label><input type="text" id="d-D-LL1" name="D-LL1-decision"></div><div><label for="c-D-LL1">Comment</label><textarea id="c-D-LL1" name="D-LL1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LL2</code> <code>unsafe</code> audit story</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Structured audit comment + lint</span></div><pre class="opt-ex">// SAFETY: ptr valid for len bytes — reviewed 2026-06-01
+unsafe { ... }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Attribute</span></div><pre class="opt-ex">@audit("bounds checked") unsafe { ... }</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">External tool</span></div><pre class="opt-ex">jet-audit unsafe blocks in CI — no syntax requirement</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LL2">Decision</label><input type="text" id="d-D-LL2" name="D-LL2-decision"></div><div><label for="c-D-LL2">Comment</label><textarea id="c-D-LL2" name="D-LL2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-LL3</code> <code>std.mem</code> API breadth</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Narrow: Ptr, alloc, layout, volatile</span></div><pre class="opt-ex">mem.alloc(size); mem.write_volatile(addr, val)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Wide mem API</span></div><pre class="opt-ex">Also memcpy, align_of, fence, etc. in std.mem</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Minimal Ptr only</span></div><pre class="opt-ex">Only Ptr type — no allocator in std.mem</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-LL3">Decision</label><input type="text" id="d-D-LL3" name="D-LL3-decision"></div><div><label for="c-D-LL3">Comment</label><textarea id="c-D-LL3" name="D-LL3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m14">Group M14 — C FFI *(E2-M14)*</h3>
+<article class="item"><h4><code>D-CFFI1</code> Jet-export to C in scope?</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Import-only first</span></div><pre class="opt-ex">extern c "raylib" fn init_window(...);  // call C from Jet</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also export Jet fns to C</span></div><pre class="opt-ex">export fn jet_add(a: Int, b: Int) -> Int  // callable from C</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer all FFI to Epoch 3</span></div><pre class="opt-ex">No extern c in Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-CFFI1">Decision</label><input type="text" id="d-D-CFFI1" name="D-CFFI1-decision"></div><div><label for="c-D-CFFI1">Comment</label><textarea id="c-D-CFFI1" name="D-CFFI1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-CFFI2</code> Header/library discovery</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">pkg-config + [dependencies:c]</span></div><pre class="opt-ex">[dependencies.c.raylib]
+pkg-config = "raylib"</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Bundled libs</span></div><pre class="opt-ex">Vendor raylib sources in .jet/vendor/</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Manual paths only</span></div><pre class="opt-ex">CFLAGS=-I/usr/include LDFLAGS=-lraylib in env</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-CFFI2">Decision</label><input type="text" id="d-D-CFFI2" name="D-CFFI2-decision"></div><div><label for="c-D-CFFI2">Comment</label><textarea id="c-D-CFFI2" name="D-CFFI2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-CFFI3</code> C example to ship</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">One small C lib (hash/compress)</span></div><pre class="opt-ex">examples/ffi_xxhash.jet wraps libxxhash</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">sqlite</span></div><pre class="opt-ex">FFI showcase is sqlite3 from day one</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">None</span></div><pre class="opt-ex">FFI documented but no shipped C example</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-CFFI3">Decision</label><input type="text" id="d-D-CFFI3" name="D-CFFI3-decision"></div><div><label for="c-D-CFFI3">Comment</label><textarea id="c-D-CFFI3" name="D-CFFI3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m15">Group M15 — Cross-compile &amp; freestanding *(E2-M15)*</h3>
+<article class="item"><h4><code>D-CROSS1</code> First non-host target</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">One CLI target (aarch64-linux)</span></div><pre class="opt-ex">$ jet build --target aarch64-linux tool.jet</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Target matrix</span></div><pre class="opt-ex">linux x64/arm, macos x64/arm from M15</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">Host-only builds in Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-CROSS1">Decision</label><input type="text" id="d-D-CROSS1" name="D-CROSS1-decision"></div><div><label for="c-D-CROSS1">Comment</label><textarea id="c-D-CROSS1" name="D-CROSS1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-CROSS2</code> Freestanding panic strategy</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Abort default</span></div><pre class="opt-ex">Freestanding: panic → abort() — no unwinding</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Custom handler hook</span></div><pre class="opt-ex">@panic_handler fn my_panic(msg: String) { led_blink(); }</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Unwind</span></div><pre class="opt-ex">Try unwinding on embedded (heavy)</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-CROSS2">Decision</label><input type="text" id="d-D-CROSS2" name="D-CROSS2-decision"></div><div><label for="c-D-CROSS2">Comment</label><textarea id="c-D-CROSS2" name="D-CROSS2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-CROSS3</code> Embedded smoke</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Documented local harness minimum</span></div><pre class="opt-ex">docs/embedded.md: QEMU smoke test steps</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">CI hardware-in-loop</span></div><pre class="opt-ex">CI runs on real board farm</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Doc-only</span></div><pre class="opt-ex">No runnable embedded smoke in repo</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-CROSS3">Decision</label><input type="text" id="d-D-CROSS3" name="D-CROSS3-decision"></div><div><label for="c-D-CROSS3">Comment</label><textarea id="c-D-CROSS3" name="D-CROSS3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m16">Group M16 — Pure eval &amp; layer 3 *(E2-M16)*</h3>
+<article class="item"><h4><code>D-PURE1</code> Recipe scope</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Pure eval + sandboxed package recipes</span></div><pre class="opt-ex">$ jet eval --pure recipe.jet  // sandboxed build recipe</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Pure eval only</span></div><pre class="opt-ex">$ jet eval --pure '1+2'  // no package recipes</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Full JetOS</span></div><pre class="opt-ex">Nix-like OS config in Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PURE1">Decision</label><input type="text" id="d-D-PURE1" name="D-PURE1-decision"></div><div><label for="c-D-PURE1">Comment</label><textarea id="c-D-PURE1" name="D-PURE1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PURE2</code> Sandbox guarantees</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">No ambient I/O or network during eval</span></div><pre class="opt-ex">pure fn f() { fs.read("x") }  // compile error in --pure</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Allowlist I/O</span></div><pre class="opt-ex">--pure --allow-read=/tmp only</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Trust author</span></div><pre class="opt-ex">pure fn may read files — honor system only</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PURE2">Decision</label><input type="text" id="d-D-PURE2" name="D-PURE2-decision"></div><div><label for="c-D-PURE2">Comment</label><textarea id="c-D-PURE2" name="D-PURE2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PURE3</code> Signed cache / rollback</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Design now, ship later</span></div><pre class="opt-ex">docs/pure-eval-cache.md records generations; impl post-GA</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Ship signed cache in M16</span></div><pre class="opt-ex">$ jet eval --pure --cache signed store/</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">None</span></div><pre class="opt-ex">No cache design</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PURE3">Decision</label><input type="text" id="d-D-PURE3" name="D-PURE3-decision"></div><div><label for="c-D-PURE3">Comment</label><textarea id="c-D-PURE3" name="D-PURE3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="m17">Group M17 — Epoch 2 GA *(E2-M17)*</h3>
+<article class="item"><h4><code>D-GA1</code> Mandatory showcase set</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">4 showcases + jet dev demo</span></div><pre class="opt-ex">jetgrep, wordfreq, internal API, jet dev loop — 4 + dev</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">All 6 incl. C interop + freestanding</span></div><pre class="opt-ex">Above + raylib game + freestanding blink</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">2 only</span></div><pre class="opt-ex">hello + one CLI tool only</pre></div></div>
+<p class="rec">Rec: <strong>A, with B as stretch</strong></p>
+<div class="fields"><div><label for="d-D-GA1">Decision</label><input type="text" id="d-D-GA1" name="D-GA1-decision"></div><div><label for="c-D-GA1">Comment</label><textarea id="c-D-GA1" name="D-GA1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-GA2</code> Perf/size budgets</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Record per-showcase, no hard fail</span></div><pre class="opt-ex">BENCHMARKS.md lists targets; CI records, doesn't gate</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Hard CI gates</span></div><pre class="opt-ex">CI fails if jetgrep binary &gt; 2MB</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">None</span></div><pre class="opt-ex">No perf/size tracking at GA</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-GA2">Decision</label><input type="text" id="d-D-GA2" name="D-GA2-decision"></div><div><label for="c-D-GA2">Comment</label><textarea id="c-D-GA2" name="D-GA2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-GA3</code> Beta period before GA tag</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Short public beta after audits</span></div><pre class="opt-ex">4-week beta: jet 0.9.0-beta.1 → feedback → GA</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">None</span></div><pre class="opt-ex">Tag GA when M17 checklist passes</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Long beta</span></div><pre class="opt-ex">6+ month beta period</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-GA3">Decision</label><input type="text" id="d-D-GA3" name="D-GA3-decision"></div><div><label for="c-D-GA3">Comment</label><textarea id="c-D-GA3" name="D-GA3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-GA4</code> Launch versioning</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">= E2-D2 A never</span></div><pre class="opt-ex">GA stays normal SemVer</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">= E2-D2 B at M17</span></div><pre class="opt-ex">GA tag flips to 2000.0.0</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">= E2-D2 C separate launch</span></div><pre class="opt-ex">Technical GA 0.9.0; public launch later flips version story</pre></div></div>
+<p class="rec">Rec: C (separate launch)</p>
+<div class="fields"><div><label for="d-D-GA4">Decision</label><input type="text" id="d-D-GA4" name="D-GA4-decision"></div><div><label for="c-D-GA4">Comment</label><textarea id="c-D-GA4" name="D-GA4-comment"></textarea></div></div></article>
+
+<h2 class="part" id="part3">Part 3 — Feature ballots</h2>
+
+<h3 class="group" id="g14">Group 14 — Error-handling ergonomics *(E2-M6)*</h3>
+<p class="context" style="margin-top:0">Already ratified: <code>T ? E</code> (S34), <code>?</code> propagation (S7), <code>??</code>/<code>?.</code> (S71). Open deltas only.</p>
+
+<article class="item"><h4><code>D-ERR1</code> Grow the <code>Error</code> carrier</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Message + optional code + optional source</span></div><pre class="opt-ex">fn load_config(path: String) -> Config ? {
+    val text = fs.read(path)?;
+    ok(parse_config(text)?)
+}
+// Error.message("…"), Error.code(2), Error.with_source(e)</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Message only</span></div><pre class="opt-ex">Error("file not found")  // string message, nothing else</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Keep String-only</span></div><pre class="opt-ex">-> Config ? means Config ? String today — no Error type growth</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-ERR1">Decision</label><input type="text" id="d-D-ERR1" name="D-ERR1-decision"></div><div><label for="c-D-ERR1">Comment</label><textarea id="c-D-ERR1" name="D-ERR1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-ERR2</code> <code>?</code> cross-type conversion</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Opt-in IntoError trait</span></div><pre class="opt-ex">impl FileError: IntoError {
+    fn into_error(self) -> Error { Error.message("file: {self}") }
+}
+fn load(path: String) -> Profile ? {
+    val text = fs.read(path)?;  // FileError -> Error via trait
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">No conversion — manual wrap</span></div><pre class="opt-ex">val text = match fs.read(path) {
+    ok(t) -> t,
+    err(e) -> return err(Error.message("{e}")),
+};</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Implicit any→any</span></div><pre class="opt-ex">fn f() -> MyError ? {
+    fs.read(path)?;  // any error silently becomes MyError — meaning erased
+}</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-ERR2">Decision</label><input type="text" id="d-D-ERR2" name="D-ERR2-decision"></div><div><label for="c-D-ERR2">Comment</label><textarea id="c-D-ERR2" name="D-ERR2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-ERR3</code> <code>fn main() -> Unit ?</code></h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Allow — print Error, exit 1</span></div><pre class="opt-ex">fn main() -> Unit ? {
+    run_app()?;
+}
+$ jet run app.jet
+error: config missing key "port"
+$ echo $?
+1</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Keep main non-fallible</span></div><pre class="opt-ex">fn main() -> Unit ? {
+// error: main cannot return a fallible type</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Allow only Unit ? Error</span></div><pre class="opt-ex">fn main() -> Unit ? Error { ... }  // ok
+fn main() -> Unit ? FileError { ... }  // error: main error must be Error</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-ERR3">Decision</label><input type="text" id="d-D-ERR3" name="D-ERR3-decision"></div><div><label for="c-D-ERR3">Comment</label><textarea id="c-D-ERR3" name="D-ERR3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-ERR4</code> <code>or_continue</code>-style loop skip</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer</span></div><pre class="opt-ex">for row in rows {
+    val parsed = parse(row) ?? continue;  // not valid yet — use switch/if
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add ?continue in loops</span></div><pre class="opt-ex">for row in rows {
+    val parsed = parse(row)?continue;  // skip bad row, keep looping
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Decline</span></div><pre class="opt-ex">Always use explicit switch/if — no loop-specific ? sugar</pre></div>
+</div>
+<p class="rec">Rec: <strong>A (defer)</strong></p>
+<div class="fields"><div><label for="d-D-ERR4">Decision</label><input type="text" id="d-D-ERR4" name="D-ERR4-decision"></div><div><label for="c-D-ERR4">Comment</label><textarea id="c-D-ERR4" name="D-ERR4-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g15">Group 15 — Pattern-matching ergonomics</h3>
+<article class="item"><h4><code>D-PAT1</code> Nested patterns in <code>switch</code>/<code>if</code> arms</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Allow nested patterns in payload slots</span></div><pre class="opt-ex">switch response {
+    response == ok(Response { status, body }) -> { print("{status}"); };
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Bare names only</span></div><pre class="opt-ex">switch response {
+    response == ok(r) -> { val status = r.status; ... };  // extra steps
+}</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PAT1">Decision</label><input type="text" id="d-D-PAT1" name="D-PAT1-decision"></div><div><label for="c-D-PAT1">Comment</label><textarea id="c-D-PAT1" name="D-PAT1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PAT2</code> Guards</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Ratify &amp;&amp; binding-scope</span></div><pre class="opt-ex">response == ok(Response { status, body }) &amp;&amp; status == 200
+    -> { print("body: {body}"); };  // status bound for guard + arm</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add when keyword</span></div><pre class="opt-ex">response == ok(r) when r.status == 200 -> { ... };</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Neither</span></div><pre class="opt-ex">Nested if inside arm body for extra conditions only</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PAT2">Decision</label><input type="text" id="d-D-PAT2" name="D-PAT2-decision"></div><div><label for="c-D-PAT2">Comment</label><textarea id="c-D-PAT2" name="D-PAT2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PAT3</code> Refutable-bind policy</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Reject — teach switch/if</span></div><pre class="opt-ex">val value(n) = maybe_port();
+// error: this binding can fail (value might be null)</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Require ?? fallback</span></div><pre class="opt-ex">val value(n) = maybe_port() ?? return;</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Runtime panic (Elixir-style)</span></div><pre class="opt-ex">val value(n) = maybe_port();  // panics at runtime if null</pre></div>
+</div>
+<p class="rec">Rec: <strong>B</strong></p>
+<div class="fields"><div><label for="d-D-PAT3">Decision</label><input type="text" id="d-D-PAT3" name="D-PAT3-decision"></div><div><label for="c-D-PAT3">Comment</label><textarea id="c-D-PAT3" name="D-PAT3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PAT4</code> List rest-spread patterns</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer</span></div><pre class="opt-ex">// [head, ...tail] — not in v1; use library concat</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Fixed-length stays the limit</span></div><pre class="opt-ex">val [a, b, c] = list;  // S74 — length must match, no rest</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Full spread with slice design</span></div><pre class="opt-ex">val [h, ...t] = list;  // copies tail — perf doc required</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PAT4">Decision</label><input type="text" id="d-D-PAT4" name="D-PAT4-decision"></div><div><label for="c-D-PAT4">Comment</label><textarea id="c-D-PAT4" name="D-PAT4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PAT5</code> Multi-clause function heads</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Decline for v1</span></div><pre class="opt-ex">fn classify(x: Int) -> String {
+    switch x { x == 0 -> "zero"; _ -> "other"; }
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add multi-clause heads</span></div><pre class="opt-ex">fn classify(0) -> String { "zero" }
+fn classify(n) -> String { "other" }</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PAT5">Decision</label><input type="text" id="d-D-PAT5" name="D-PAT5-decision"></div><div><label for="c-D-PAT5">Comment</label><textarea id="c-D-PAT5" name="D-PAT5-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-PAT6</code> Destructuring in parameters</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer — S74 bindings only</span></div><pre class="opt-ex">fn area(p: Point) -> Int {
+    val Point { x, y } = p;  // bind inside body
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also destructure in params</span></div><pre class="opt-ex">fn area(Point { x, y }: Point) -> Int { x + y }</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-PAT6">Decision</label><input type="text" id="d-D-PAT6" name="D-PAT6-decision"></div><div><label for="c-D-PAT6">Comment</label><textarea id="c-D-PAT6" name="D-PAT6-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g16">Group 16 — Field punning &amp; functional config</h3>
+<article class="item"><h4><code>D-FP1</code> Struct field punning</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Punning when local matches field name</span></div><pre class="opt-ex">return Source { name, upstream, via: "nix" };</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Keep explicit</span></div><pre class="opt-ex">return Source { name: name, upstream: upstream, via: "nix" };</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-FP1">Decision</label><input type="text" id="d-D-FP1" name="D-FP1-decision"></div><div><label for="c-D-FP1">Comment</label><textarea id="c-D-FP1" name="D-FP1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-FP2</code> Expression-body functions</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">fn f(x: T) -> U = expr;</span></div><pre class="opt-ex">fn double(x: Int) -> Int = x * 2;</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Block body only</span></div><pre class="opt-ex">fn double(x: Int) -> Int { return x * 2; }</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">Use lambdas for short exprs: val double = fn(x: Int) -> Int { x * 2 };</pre></div>
+</div>
+<p class="rec">Rec: <strong>C (defer)</strong></p>
+<div class="fields"><div><label for="d-D-FP2">Decision</label><input type="text" id="d-D-FP2" name="D-FP2-decision"></div><div><label for="c-D-FP2">Comment</label><textarea id="c-D-FP2" name="D-FP2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-FP3</code> Core <code>module name { … }</code> declaration</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Typed top-level decl</span></div><pre class="opt-ex">module root {
+    sources: { default: github@nixpkgs/... },
+    shells: { dev: Shell { packages: [...] } },
+}</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Jetpack directive scanning</span></div><pre class="opt-ex">// @jetpack module — special comment parser, not core syntax</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">Jetpack stays external DSL until later</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-FP3">Decision</label><input type="text" id="d-D-FP3" name="D-FP3-decision"></div><div><label for="c-D-FP3">Comment</label><textarea id="c-D-FP3" name="D-FP3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-FP4</code> Contextual empty-list inference</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Infer [] from expected type</span></div><pre class="opt-ex">fn sum(xs: List&lt;Int&gt;) -> Int { ... }
+sum([])  // ok — [] is List&lt;Int&gt;</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Require explicit type</span></div><pre class="opt-ex">sum([]: List&lt;Int&gt;)  // required annotation</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-FP4">Decision</label><input type="text" id="d-D-FP4" name="D-FP4-decision"></div><div><label for="c-D-FP4">Comment</label><textarea id="c-D-FP4" name="D-FP4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-FP5</code> Arbitrary expressions in <code>for … in</code> heads</h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Allow calls, fields, ranges</span></div><pre class="opt-ex">for row in csv.rows(path) { ... }
+for i in 0..10 { ... }</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Keep restricted</span></div><pre class="opt-ex">for row in rows { ... }  // rows must be a simple name only</pre></div>
+</div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-FP5">Decision</label><input type="text" id="d-D-FP5" name="D-FP5-decision"></div><div><label for="c-D-FP5">Comment</label><textarea id="c-D-FP5" name="D-FP5-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-FP6</code> List spread <code>[...xs, y]</code></h4>
+<div class="options">
+<div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer</span></div><pre class="opt-ex">concat(xs, [y])  // library helper for now</pre></div>
+<div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add general spread</span></div><pre class="opt-ex">val all = [...xs, y, z];</pre></div>
+</div>
+<p class="rec">Rec: <strong>A (defer)</strong></p>
+<div class="fields"><div><label for="d-D-FP6">Decision</label><input type="text" id="d-D-FP6" name="D-FP6-decision"></div><div><label for="c-D-FP6">Comment</label><textarea id="c-D-FP6" name="D-FP6-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g17">Group 17 — Readability sugar</h3>
+<article class="item"><h4><code>D-SUGAR1</code> Digit separators <code>1_000_000</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Add (lexer-only)</span></div><pre class="opt-ex">val budget = 1_000_000;  // parses as 1000000</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Skip</span></div><pre class="opt-ex">val budget = 1000000;  // only form allowed</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR1">Decision</label><input type="text" id="d-D-SUGAR1" name="D-SUGAR1-decision"></div><div><label for="c-D-SUGAR1">Comment</label><textarea id="c-D-SUGAR1" name="D-SUGAR1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-SUGAR2</code> Pipe operator <code>|&gt;</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer</span></div><pre class="opt-ex">text.trim().lower()  // S69 newline dot-chains</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add |&gt;</span></div><pre class="opt-ex">text |&gt; trim |&gt; lower</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Decline</span></div><pre class="opt-ex">No pipe operator ever</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR2">Decision</label><input type="text" id="d-D-SUGAR2" name="D-SUGAR2-decision"></div><div><label for="c-D-SUGAR2">Comment</label><textarea id="c-D-SUGAR2" name="D-SUGAR2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-SUGAR3</code> Transparent type alias</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer</span></div><pre class="opt-ex">struct UserId { val: Int; }  // newtype via struct today</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add type X = …</span></div><pre class="opt-ex">type UserId = Int;  // transparent alias</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Decline</span></div><pre class="opt-ex">No type aliases</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR3">Decision</label><input type="text" id="d-D-SUGAR3" name="D-SUGAR3-decision"></div><div><label for="c-D-SUGAR3">Comment</label><textarea id="c-D-SUGAR3" name="D-SUGAR3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-SUGAR4</code> Newtype (distinct single-field)</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer — one-field struct</span></div><pre class="opt-ex">struct Meters { value: Float; }  // distinct by struct name</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Dedicated keyword</span></div><pre class="opt-ex">newtype Meters = Float;  // distinct from raw Float</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR4">Decision</label><input type="text" id="d-D-SUGAR4" name="D-SUGAR4-decision"></div><div><label for="c-D-SUGAR4">Comment</label><textarea id="c-D-SUGAR4" name="D-SUGAR4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-SUGAR5</code> <code>defer</code>/<code>errdefer</code> cleanup keyword</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">None — RAII handles</span></div><pre class="opt-ex">val f = files.open(p)?;  // closes on scope exit</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add defer</span></div><pre class="opt-ex">defer f.close();</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Add defer + errdefer</span></div><pre class="opt-ex">errdefer cleanup();  // runs only on error path</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR5">Decision</label><input type="text" id="d-D-SUGAR5" name="D-SUGAR5-decision"></div><div><label for="c-D-SUGAR5">Comment</label><textarea id="c-D-SUGAR5" name="D-SUGAR5-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-SUGAR6</code> <code>?.</code> through methods</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Ship obj?.method()</span></div><pre class="opt-ex">val label = user?.display_name();  // String?</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Fields-only</span></div><pre class="opt-ex">error[E0046]: ?. only reaches fields, not methods</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">Use match/switch for optional method calls</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR6">Decision</label><input type="text" id="d-D-SUGAR6" name="D-SUGAR6-decision"></div><div><label for="c-D-SUGAR6">Comment</label><textarea id="c-D-SUGAR6" name="D-SUGAR6-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-SUGAR7</code> Optional semicolons</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Keep required (S6)</span></div><pre class="opt-ex">print("hi");  // semicolon required</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">ASI like JS</span></div><pre class="opt-ex">print("hi")  // newline inserts semicolon</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Newline-terminated only</span></div><pre class="opt-ex">print("hi")  // stmt ends at newline, no ;</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-SUGAR7">Decision</label><input type="text" id="d-D-SUGAR7" name="D-SUGAR7-decision"></div><div><label for="c-D-SUGAR7">Comment</label><textarea id="c-D-SUGAR7" name="D-SUGAR7-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g18">Group 18 — Transactional rollback (<code>transact</code>)</h3>
+<article class="item"><h4><code>D-TXN1</code> Adopt <code>transact</code> at all?</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Block form tied to ?</span></div><pre class="opt-ex">transact {
+    player.spend_stamina(10)?;
+    player.step(target)?;  // fail → stamina undone
+}</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">fn … transacts modifier</span></div><pre class="opt-ex">fn try_move(...) transacts { ... }</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Decline</span></div><pre class="opt-ex">Manual undo in application code</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TXN1">Decision</label><input type="text" id="d-D-TXN1" name="D-TXN1-decision"></div><div><label for="c-D-TXN1">Comment</label><textarea id="c-D-TXN1" name="D-TXN1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TXN2</code> I/O inside a transaction</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Compile error</span></div><pre class="opt-ex">transact { fs.write("x", data)?; }  // error: I/O in transact</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Allow, document non-undoable</span></div><pre class="opt-ex">I/O allowed but won't roll back on ?</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Warn only</span></div><pre class="opt-ex">warning: I/O inside transact is not undoable</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TXN2">Decision</label><input type="text" id="d-D-TXN2" name="D-TXN2-decision"></div><div><label for="c-D-TXN2">Comment</label><textarea id="c-D-TXN2" name="D-TXN2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TXN3</code> Snapshot cost posture</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Snapshot mutated bindings only, opt-in</span></div><pre class="opt-ex">transact(snapshot: player) { ... }  // explicit snapshot</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Snapshot whole scope</span></div><pre class="opt-ex">transact { ... }  // copies all locals in block (slow)</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TXN3">Decision</label><input type="text" id="d-D-TXN3" name="D-TXN3-decision"></div><div><label for="c-D-TXN3">Comment</label><textarea id="c-D-TXN3" name="D-TXN3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g19">Group 19 — Tooling surfaces *(E2-M3/M11)*</h3>
+<article class="item"><h4><code>D-TOOL1</code> Doctests</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Doc examples run under jet test</span></div><pre class="opt-ex">/// assert add(1,2) == 3
+$ jet test  # runs doc examples</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Docs not tested</span></div><pre class="opt-ex">Doc comments are illustrative only</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TOOL1">Decision</label><input type="text" id="d-D-TOOL1" name="D-TOOL1-decision"></div><div><label for="c-D-TOOL1">Comment</label><textarea id="c-D-TOOL1" name="D-TOOL1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TOOL2</code> <code>todo</code> typed-hole expression</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Compiles, panics at runtime</span></div><pre class="opt-ex">val x: Int = todo();  // panic: todo() expected Int</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Defer</span></div><pre class="opt-ex">Not available in Epoch 2</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Decline</span></div><pre class="opt-ex">Use unimplemented() pattern only</pre></div></div>
+<p class="rec">Rec: <strong>B (defer unless small)</strong></p>
+<div class="fields"><div><label for="d-D-TOOL2">Decision</label><input type="text" id="d-D-TOOL2" name="D-TOOL2-decision"></div><div><label for="c-D-TOOL2">Comment</label><textarea id="c-D-TOOL2" name="D-TOOL2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TOOL3</code> <code>jet emit --rust</code> expert window</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Gated show generated Rust</span></div><pre class="opt-ex">$ jet emit --rust main.jet
+banner: this is generated code, not the language you write</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Never</span></div><pre class="opt-ex">No emit command — backend stays hidden</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TOOL3">Decision</label><input type="text" id="d-D-TOOL3" name="D-TOOL3-decision"></div><div><label for="c-D-TOOL3">Comment</label><textarea id="c-D-TOOL3" name="D-TOOL3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TOOL4</code> Snapshot testing in <code>jet test</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">One-key bless like UPDATE_EXPECT</span></div><pre class="opt-ex">$ jet test --bless  # update .snap files</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Defer</span></div><pre class="opt-ex">Manual snapshot updates only</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-TOOL4">Decision</label><input type="text" id="d-D-TOOL4" name="D-TOOL4-decision"></div><div><label for="c-D-TOOL4">Comment</label><textarea id="c-D-TOOL4" name="D-TOOL4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-TOOL5</code> Build-time capability summary from std imports</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Defer (deno-style)</span></div><pre class="opt-ex">No capability summary at build time</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Add capability summary</span></div><pre class="opt-ex">$ jet build
+note: this program uses: net, fs.read, env</pre></div></div>
+<p class="rec">Rec: <strong>A (defer)</strong></p>
+<div class="fields"><div><label for="d-D-TOOL5">Decision</label><input type="text" id="d-D-TOOL5" name="D-TOOL5-decision"></div><div><label for="c-D-TOOL5">Comment</label><textarea id="c-D-TOOL5" name="D-TOOL5-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g20">Group 20 — Ownership teaching ergonomics</h3>
+<article class="item"><h4><code>D-OWN1</code> L0201 implicit-clone lint posture</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Keep lint, strengthen teaching</span></div><pre class="opt-ex">move_file(src, dest); print(src);
+// L0201: cloned `src` — still usable; explains clone cost</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Silence for scalars</span></div><pre class="opt-ex">No lint when cloning Int/String scalars</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Remove lint</span></div><pre class="opt-ex">No L0201 diagnostic</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-OWN1">Decision</label><input type="text" id="d-D-OWN1" name="D-OWN1-decision"></div><div><label for="c-D-OWN1">Comment</label><textarea id="c-D-OWN1" name="D-OWN1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-OWN2</code> First ownership chapter examples</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Add mini-examples to guide</span></div><pre class="opt-ex">Guide: "pass a score" + "rename files" walkthroughs in ch4</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Docs-only appendix</span></div><pre class="opt-ex">Ownership deep-dive in appendix only</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">No new ownership examples in M6</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-OWN2">Decision</label><input type="text" id="d-D-OWN2" name="D-OWN2-decision"></div><div><label for="c-D-OWN2">Comment</label><textarea id="c-D-OWN2" name="D-OWN2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-OWN3</code> Call-site <code>take</code> hint for non-clonable params</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Diagnostic suggests take</span></div><pre class="opt-ex">consume(buf);
+// error[E0201]: must be moved — fix: call `consume(take buf)`</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Auto-insert quick-fix only</span></div><pre class="opt-ex">LSP offers "insert take" but no error text upgrade</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Neither</span></div><pre class="opt-ex">Generic E0201 move error only</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-OWN3">Decision</label><input type="text" id="d-D-OWN3" name="D-OWN3-decision"></div><div><label for="c-D-OWN3">Comment</label><textarea id="c-D-OWN3" name="D-OWN3-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g21">Group 21 — Core <code>std.fs</code> / timing helpers</h3>
+<article class="item"><h4><code>D-FS1</code> Recursive directory walk</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">fs.walk in core std</span></div><pre class="opt-ex">for path in fs.walk("logs", recursive: true) ?? return {
+    if path.ends_with(".log") { scan(path); }
+}</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">jet.fs ring package</span></div><pre class="opt-ex">import jet.fs; jet.fs.walk(...)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">Copy 30-line walk helper into each example</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-FS1">Decision</label><input type="text" id="d-D-FS1" name="D-FS1-decision"></div><div><label for="c-D-FS1">Comment</label><textarea id="c-D-FS1" name="D-FS1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-FS2</code> Game-loop / poll-input packaging</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Example + guide only</span></div><pre class="opt-ex">examples/44_game_loop.jet + guide section on blocking io.input</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">std.io.poll_input helper</span></div><pre class="opt-ex">val key = io.poll_key(timeout_ms: 16) ?? null;</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer until TUI/FFI</span></div><pre class="opt-ex">No game-loop story in Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>A first, B if roguelike needs it</strong></p>
+<div class="fields"><div><label for="d-D-FS2">Decision</label><input type="text" id="d-D-FS2" name="D-FS2-decision"></div><div><label for="c-D-FS2">Comment</label><textarea id="c-D-FS2" name="D-FS2-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g22">Group 22 — JSON typed decode</h3>
+<article class="item"><h4><code>D-JSON1</code> Typed decode surface</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">json.decode&lt;Profile&gt;(text)</span></div><pre class="opt-ex">ok(json.decode&lt;Profile&gt;(text)?)
+// field mismatch → JSONError with field name</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Runtime Value tree only</span></div><pre class="opt-ex">val v = json.parse(text)?; val name = v["name"].as_string();</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer schema macros</span></div><pre class="opt-ex">Hand-map fields until S56 layer 3</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-JSON1">Decision</label><input type="text" id="d-D-JSON1" name="D-JSON1-decision"></div><div><label for="c-D-JSON1">Comment</label><textarea id="c-D-JSON1" name="D-JSON1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-JSON2</code> Unknown/extra fields policy</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Ignore unknown by default, opt-in strict</span></div><pre class="opt-ex">decode&lt;Profile&gt;(text)  // ignores "extra_field"
+decode_strict&lt;Profile&gt;(text)  // errors on extras</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Always strict</span></div><pre class="opt-ex">error[E2703]: unknown field "nickname"</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Always ignore</span></div><pre class="opt-ex">Extra fields silently dropped always</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-JSON2">Decision</label><input type="text" id="d-D-JSON2" name="D-JSON2-decision"></div><div><label for="c-D-JSON2">Comment</label><textarea id="c-D-JSON2" name="D-JSON2-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g23">Group 23 — Build / FFI transparency</h3>
+<article class="item"><h4><code>D-BUILD1</code> <code>jet doctor</code> FFI section</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Report cargo cache, stale artifacts, missing libs</span></div><pre class="opt-ex">$ jet doctor
+✗ FFI: libraylib.so not found (pkg-config raylib)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Minimal "FFI ok"</span></div><pre class="opt-ex">$ jet doctor → FFI: ok</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer</span></div><pre class="opt-ex">No FFI section in doctor</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-BUILD1">Decision</label><input type="text" id="d-D-BUILD1" name="D-BUILD1-decision"></div><div><label for="c-D-BUILD1">Comment</label><textarea id="c-D-BUILD1" name="D-BUILD1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-BUILD2</code> <code>jet build -v</code> / <code>jet explain-build</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Print bridge steps on -v</span></div><pre class="opt-ex">$ jet build -v game.jet
+note: emitting Rust to .jet/build/game/main.rs
+note: cargo build (fingerprint abc123)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">jet explain-build subcommand</span></div><pre class="opt-ex">$ jet explain-build game.jet  # dedicated command</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Never show</span></div><pre class="opt-ex">Build steps hidden from users</pre></div></div>
+<p class="rec">Rec: <strong>A</strong></p>
+<div class="fields"><div><label for="d-D-BUILD2">Decision</label><input type="text" id="d-D-BUILD2" name="D-BUILD2-decision"></div><div><label for="c-D-BUILD2">Comment</label><textarea id="c-D-BUILD2" name="D-BUILD2-comment"></textarea></div></div></article>
+
+<h3 class="group" id="g12">Group 12 — E2-M18 REPL</h3>
+<article class="item"><h4><code>D-REPL1</code> Ship terminal REPL in Epoch 2?</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Yes — E2-M18 after E2-M4</span></div><pre class="opt-ex">$ jet repl
+jet&gt; 1 + 2
+3</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Defer entire REPL to Epoch 3</span></div><pre class="opt-ex">$ jet repl
+error: unknown subcommand 'repl'</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No terminal REPL; web only</span></div><pre class="opt-ex">Try Jet at playground.jet-lang.org (no local REPL)</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — E2-M18 after E2-M4</p>
+<div class="fields"><div><label for="d-D-REPL1">Decision</label><input type="text" id="d-D-REPL1" name="D-REPL1-decision"></div><div><label for="c-D-REPL1">Comment</label><textarea id="c-D-REPL1" name="D-REPL1-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL2</code> Web playground in this milestone?</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Terminal only; playground later</span></div><pre class="opt-ex">$ jet repl  # local terminal session only</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Terminal now + playground spec stub</span></div><pre class="opt-ex">docs/plans/playground.md stub; no shipped web UI</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Terminal + playground ship together</span></div><pre class="opt-ex">$ jet repl  and  playground.jet-lang.org  same milestone</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — terminal only</p>
+<div class="fields"><div><label for="d-D-REPL2">Decision</label><input type="text" id="d-D-REPL2" name="D-REPL2-decision"></div><div><label for="c-D-REPL2">Comment</label><textarea id="c-D-REPL2" name="D-REPL2-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL3</code> Entry: <code>jet repl</code> only vs bare <code>jet</code> in TTY</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Explicit jet repl only</span></div><pre class="opt-ex">$ jet repl
+jet&gt; print("hi");</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also bare jet in TTY (python-style)</span></div><pre class="opt-ex">$ jet
+jet&gt; 1 + 1  # no subcommand when stdin is a TTY</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">jet repl + seed from file</span></div><pre class="opt-ex">$ jet repl examples/features/01_hello.jet
+jet&gt;  # session preloaded from file</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — <code>jet repl</code> only</p>
+<div class="fields"><div><label for="d-D-REPL3">Decision</label><input type="text" id="d-D-REPL3" name="D-REPL3-decision"></div><div><label for="c-D-REPL3">Comment</label><textarea id="c-D-REPL3" name="D-REPL3-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL4</code> Backend: interpreter vs compile-each vs hybrid</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Interpreter only (E2-M4)</span></div><pre class="opt-ex">jet&gt; spawn(task { ... });
+error[E1801]: tasks not supported in REPL — use `jet run`</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Compile+run each input via rustc</span></div><pre class="opt-ex">jet&gt; 1 + 2
+note: compiling session… (2–5s per line)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Hybrid: interpreter, fallback compile</span></div><pre class="opt-ex">warning: falling back to compile for this input</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — interpreter</p>
+<div class="fields"><div><label for="d-D-REPL4">Decision</label><input type="text" id="d-D-REPL4" name="D-REPL4-decision"></div><div><label for="c-D-REPL4">Comment</label><textarea id="c-D-REPL4" name="D-REPL4-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL5</code> Input: stmts vs full decls vs expressions only</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Stmts + control flow</span></div><pre class="opt-ex">jet&gt; val x = 10;
+jet&gt; if x &gt; 5 { print("yes"); }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also fn/struct/enum/trait items</span></div><pre class="opt-ex">jet&gt; fn double(n: Int) -&gt; Int { n * 2 }</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Expressions only</span></div><pre class="opt-ex">jet&gt; fn foo() { }  // error: use :load for declarations</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — stmts + control flow</p>
+<div class="fields"><div><label for="d-D-REPL5">Decision</label><input type="text" id="d-D-REPL5" name="D-REPL5-decision"></div><div><label for="c-D-REPL5">Comment</label><textarea id="c-D-REPL5" name="D-REPL5-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL6</code> Reject FFI/tasks/low-level vs also package imports</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Reject native-only set</span></div><pre class="opt-ex">jet&gt; import raylib.*;
+error[E1802]: FFI not available in REPL — use `jet run`</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Also reject jet.toml package imports</span></div><pre class="opt-ex">jet&gt; import my_pkg;
+error[E1803]: package imports need `jet run --project`</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Full project shell with imports</span></div><pre class="opt-ex">jet&gt; import my_pkg; my_pkg.hello();  // loads jet.toml graph</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — reject native-only set</p>
+<div class="fields"><div><label for="d-D-REPL6">Decision</label><input type="text" id="d-D-REPL6" name="D-REPL6-decision"></div><div><label for="c-D-REPL6">Comment</label><textarea id="c-D-REPL6" name="D-REPL6-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL7</code> Session: accumulating module vs cells vs both</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">One accumulating module</span></div><pre class="opt-ex">jet&gt; val x = 10;
+jet&gt; x * 2
+20</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Notebook cells only</span></div><pre class="opt-ex">:cell 1&gt; val x = 10;
+:cell 2&gt; x * 2  // x not visible unless wired</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Accumulating default + optional :cell</span></div><pre class="opt-ex">jet&gt; val x = 1;
+:cell&gt; x + 1  // isolated cell mode on demand</pre></div></div>
+<p class="rec">Rec: <strong>C</strong> — accumulating + optional <code>:cell</code></p>
+<div class="fields"><div><label for="d-D-REPL7">Decision</label><input type="text" id="d-D-REPL7" name="D-REPL7-decision"></div><div><label for="c-D-REPL7">Comment</label><textarea id="c-D-REPL7" name="D-REPL7-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL8</code> Ownership across lines</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Real move semantics</span></div><pre class="opt-ex">jet&gt; val buf = take data;
+jet&gt; print(buf);
+error[E0201]: use of moved value `buf`</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">REPL auto-clones on move</span></div><pre class="opt-ex">jet&gt; consume(take buf);
+jet&gt; print(buf);  // still works (clone)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Borrow-only cross-line</span></div><pre class="opt-ex">jet&gt; consume(take buf);
+error: moves not allowed in REPL — use view/ref</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — real move semantics</p>
+<div class="fields"><div><label for="d-D-REPL8">Decision</label><input type="text" id="d-D-REPL8" name="D-REPL8-decision"></div><div><label for="c-D-REPL8">Comment</label><textarea id="c-D-REPL8" name="D-REPL8-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL9</code> Multi-line input</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Brace-count + ... prompt</span></div><pre class="opt-ex">jet&gt; fn f() {
+...&gt;     return 1;
+...&gt; }</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Require ; to submit every fragment</span></div><pre class="opt-ex">jet&gt; fn f() {;
+error: unexpected ; — paste whole block at once</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Single-line only</span></div><pre class="opt-ex">jet&gt; fn f() { return 1; }  // one line or paste</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — brace-count + <code>...</code></p>
+<div class="fields"><div><label for="d-D-REPL9">Decision</label><input type="text" id="d-D-REPL9" name="D-REPL9-decision"></div><div><label for="c-D-REPL9">Comment</label><textarea id="c-D-REPL9" name="D-REPL9-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL10</code> Project context</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Sandbox + --project</span></div><pre class="opt-ex">$ jet repl --project ./my_game
+jet&gt; import game.player;  // loads jet.toml</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Auto-detect jet.toml in cwd</span></div><pre class="opt-ex">$ cd my_game &amp;&amp; jet repl
+note: loaded jet.toml from cwd</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Always sandboxed std-only</span></div><pre class="opt-ex">jet&gt; import my_pkg;
+error: no project mode in REPL v1</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — sandbox + <code>--project</code></p>
+<div class="fields"><div><label for="d-D-REPL10">Decision</label><input type="text" id="d-D-REPL10" name="D-REPL10-decision"></div><div><label for="c-D-REPL10">Comment</label><textarea id="c-D-REPL10" name="D-REPL10-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL11</code> Line editor</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Std-only minimal read loop</span></div><pre class="opt-ex">jet&gt;  # no history, no arrow keys</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Line-editing crate (history, editing)</span></div><pre class="opt-ex">jet&gt; pr█  # ↑ recalls prior line, ←→ edit</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">B + LSP-style completions</span></div><pre class="opt-ex">jet&gt; pri█
+print  println  print_debug</pre></div></div>
+<p class="rec">Rec: <strong>B</strong> — line-editing crate</p>
+<div class="fields"><div><label for="d-D-REPL11">Decision</label><input type="text" id="d-D-REPL11" name="D-REPL11-decision"></div><div><label for="c-D-REPL11">Comment</label><textarea id="c-D-REPL11" name="D-REPL11-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL12</code> vs <code>jet eval --pure</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Separate commands</span></div><pre class="opt-ex">$ jet eval --pure '1 + 2'   # config/comptime only
+$ jet repl                  # impure-by-default session</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">jet repl --pure restricted subset</span></div><pre class="opt-ex">$ jet repl --pure
+jet&gt; fs.read("x")  // error: not pure</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">No REPL; eval --pure only</span></div><pre class="opt-ex">No interactive session — one-shot eval only</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — separate commands</p>
+<div class="fields"><div><label for="d-D-REPL12">Decision</label><input type="text" id="d-D-REPL12" name="D-REPL12-decision"></div><div><label for="c-D-REPL12">Comment</label><textarea id="c-D-REPL12" name="D-REPL12-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL13</code> vs <code>jet dev</code></h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Independent; share interpreter lib</span></div><pre class="opt-ex">$ jet dev main.jet     # watch + re-run file
+$ jet repl             # separate line-based session</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">jet dev --repl flag</span></div><pre class="opt-ex">$ jet dev --repl
+watching…  (repl prompt inside dev server)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">REPL mode inside dev server</span></div><pre class="opt-ex">One long-lived binary: file watch + repl prompt</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — share library only</p>
+<div class="fields"><div><label for="d-D-REPL13">Decision</label><input type="text" id="d-D-REPL13" name="D-REPL13-decision"></div><div><label for="c-D-REPL13">Comment</label><textarea id="c-D-REPL13" name="D-REPL13-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL14</code> Native snippet</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Reject with workaround</span></div><pre class="opt-ex">jet&gt; raylib.init_window(800, 600, "x");
+error[E1802]: FFI not in REPL — run `jet run game.jet`</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">One-shot compile-and-run session</span></div><pre class="opt-ex">jet&gt; :compile-run
+note: wrote .jet/repl/tmp/bin, running…</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — reject with workaround</p>
+<div class="fields"><div><label for="d-D-REPL14">Decision</label><input type="text" id="d-D-REPL14" name="D-REPL14-decision"></div><div><label for="c-D-REPL14">Comment</label><textarea id="c-D-REPL14" name="D-REPL14-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL15</code> Meta-commands</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">:quit :reset only</span></div><pre class="opt-ex">jet&gt; :reset
+session cleared</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">+ :load :type :help</span></div><pre class="opt-ex">jet&gt; :type x
+x: Int</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">+ :doc :imports :emit</span></div><pre class="opt-ex">jet&gt; :emit
+// generated Rust for current session module</pre></div></div>
+<p class="rec">Rec: <strong>B</strong> — +<code>:load</code> <code>:type</code> <code>:help</code></p>
+<div class="fields"><div><label for="d-D-REPL15">Decision</label><input type="text" id="d-D-REPL15" name="D-REPL15-decision"></div><div><label for="c-D-REPL15">Comment</label><textarea id="c-D-REPL15" name="D-REPL15-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL16</code> Results display</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Implicit echo; ; suppresses</span></div><pre class="opt-ex">jet&gt; 1 + 2
+3
+jet&gt; 1 + 2;
+(no output)</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Always type + value</span></div><pre class="opt-ex">jet&gt; 1 + 2
+= 3 : Int</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Explicit print only</span></div><pre class="opt-ex">jet&gt; 1 + 2
+(no output — use print())</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — implicit echo, <code>;</code> suppresses</p>
+<div class="fields"><div><label for="d-D-REPL16">Decision</label><input type="text" id="d-D-REPL16" name="D-REPL16-decision"></div><div><label for="c-D-REPL16">Comment</label><textarea id="c-D-REPL16" name="D-REPL16-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL17</code> Diagnostics</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Byte-identical to batch</span></div><pre class="opt-ex">error[E0042]: expected Int, found String
+  --&gt; repl input:1:5
+   |
+ 1 | 1 + "x"
+   |     ^^^</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Shorter headers; same codes/fix</span></div><pre class="opt-ex">E0042: expected Int, found String (line 1)</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Extra session context line</span></div><pre class="opt-ex">error[E0042]: …
+note: in this REPL session, x was bound on input #3</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — identical to batch</p>
+<div class="fields"><div><label for="d-D-REPL17">Decision</label><input type="text" id="d-D-REPL17" name="D-REPL17-decision"></div><div><label for="c-D-REPL17">Comment</label><textarea id="c-D-REPL17" name="D-REPL17-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL18</code> Crate if D-REPL11≠A</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">rustyline (I6 approval)</span></div><pre class="opt-ex">// Cargo.toml dev-dep: rustyline = "…"</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">reedline</span></div><pre class="opt-ex">// Cargo.toml dev-dep: reedline = "…"</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Other (owner names crate)</span></div><pre class="opt-ex">Owner picks crate; needs I6 sign-off</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — <code>rustyline</code> (I6)</p>
+<div class="fields"><div><label for="d-D-REPL18">Decision</label><input type="text" id="d-D-REPL18" name="D-REPL18-decision"></div><div><label for="c-D-REPL18">Comment</label><textarea id="c-D-REPL18" name="D-REPL18-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL19</code> Playground arch (if D-REPL2≠A)</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Separate service + shared ABI</span></div><pre class="opt-ex">playground repo calls jet interpreter via stable ABI</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">jet playground serve in binary</span></div><pre class="opt-ex">$ jet playground serve
+listening on http://127.0.0.1:8080</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer playground indefinitely</span></div><pre class="opt-ex">No web playground planned for Epoch 2</pre></div></div>
+<p class="rec">Rec: <strong>C</strong> — defer</p>
+<div class="fields"><div><label for="d-D-REPL19">Decision</label><input type="text" id="d-D-REPL19" name="D-REPL19-decision"></div><div><label for="c-D-REPL19">Comment</label><textarea id="c-D-REPL19" name="D-REPL19-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL20</code> Tests</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Transcript fixtures</span></div><pre class="opt-ex">tests/repl/basics.txt → expected stdout/stderr snapshot</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Transcripts + scripted PTY</span></div><pre class="opt-ex">PTY tests simulate ↑ history and multi-line paste</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Manual smoke only</span></div><pre class="opt-ex">No automated REPL tests in CI</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — transcript fixtures</p>
+<div class="fields"><div><label for="d-D-REPL20">Decision</label><input type="text" id="d-D-REPL20" name="D-REPL20-decision"></div><div><label for="c-D-REPL20">Comment</label><textarea id="c-D-REPL20" name="D-REPL20-comment"></textarea></div></div></article>
+
+<article class="item"><h4><code>D-REPL21</code> Timing</h4>
+<div class="options"><div class="opt"><div class="opt-head"><span class="letter">A</span><span class="summary">Separate E2-M18 after M4</span></div><pre class="opt-ex">M4 ships interpreter; M18 adds jet repl</pre></div><div class="opt"><div class="opt-head"><span class="letter">B</span><span class="summary">Thin REPL in M4; M18 expands</span></div><pre class="opt-ex">M4: jet repl (expressions only)
+M18: full stmts + meta-commands</pre></div><div class="opt"><div class="opt-head"><span class="letter">C</span><span class="summary">Defer all REPL to Epoch 3</span></div><pre class="opt-ex">No REPL until post-Epoch-2</pre></div></div>
+<p class="rec">Rec: <strong>A</strong> — separate E2-M18</p>
+<div class="fields"><div><label for="d-D-REPL21">Decision</label><input type="text" id="d-D-REPL21" name="D-REPL21-decision"></div><div><label for="c-D-REPL21">Comment</label><textarea id="c-D-REPL21" name="D-REPL21-comment"></textarea></div></div></article>
+
+<footer class="note">
+  <p>Your decisions auto-save in this browser (same machine + browser profile). To share with agents or commit to git: use <strong>Download answers (.md)</strong> above, or save this page (<kbd>Ctrl+S</kbd>) so values are written into the HTML file. Ratified items are recorded in <code>docs/spec/syntax-decisions.md</code>, not here.</p>
+</footer>
+
+</div>
+<script>
+(function () {
+  var KEY = "jet-decision-ballots-v1";
+  var fields = document.querySelectorAll(".fields input, .fields textarea");
+  var status = document.getElementById("save-status");
+  var timer;
+
+  function readStore() {
+    try { return JSON.parse(localStorage.getItem(KEY) || "{}"); }
+    catch (e) { return {}; }
+  }
+
+  function load() {
+    var data = readStore();
+    fields.forEach(function (el) {
+      if (Object.prototype.hasOwnProperty.call(data, el.name)) {
+        el.value = data[el.name];
+      }
+    });
+    if (status) {
+      status.textContent = "Saved locally — restores when you reopen this page";
+      status.dataset.state = "saved";
+    }
+  }
+
+  function save() {
+    var data = {};
+    fields.forEach(function (el) { data[el.name] = el.value; });
+    localStorage.setItem(KEY, JSON.stringify(data));
+    if (status) {
+      status.textContent = "Saved locally — restores when you reopen this page";
+      status.dataset.state = "saved";
+    }
+  }
+
+  function scheduleSave() {
+    if (status) {
+      status.textContent = "Saving…";
+      status.dataset.state = "pending";
+    }
+    clearTimeout(timer);
+    timer = setTimeout(save, 250);
+  }
+
+  function itemId(name) {
+    var m = name.match(/^([A-Z0-9-]+)-(decision|comment)$/);
+    return m ? m[1] : name;
+  }
+
+  function downloadMarkdown() {
+    var byItem = {};
+    fields.forEach(function (el) {
+      var id = itemId(el.name);
+      if (!byItem[id]) byItem[id] = { decision: "", comment: "" };
+      if (el.name.endsWith("-decision")) byItem[id].decision = el.value.trim();
+      if (el.name.endsWith("-comment")) byItem[id].comment = el.value.trim();
+    });
+    var ids = Object.keys(byItem).sort();
+    var lines = [
+      "# Jet decision ballot — owner responses",
+      "",
+      "Generated from decision-ballots.html. Commit this file if you want agents to read your answers.",
+      ""
+    ];
+    ids.forEach(function (id) {
+      var row = byItem[id];
+      if (!row.decision && !row.comment) return;
+      lines.push("## " + id);
+      if (row.decision) lines.push("- **Decision:** " + row.decision);
+      if (row.comment) lines.push("- **Comment:** " + row.comment);
+      lines.push("");
+    });
+    var blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "decision-ballots-owner.md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    save();
+  }
+
+  fields.forEach(function (el) { el.addEventListener("input", scheduleSave); });
+  document.getElementById("download-md").addEventListener("click", downloadMarkdown);
+  load();
+})();
+</script>
+</body>
+</html>

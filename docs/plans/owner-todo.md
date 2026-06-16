@@ -2,49 +2,66 @@
 
 ## Prompt
 
-> Implement S73 (named-only tuples), ratified in `docs/spec/syntax-decisions.md`.
-> Read the shared context above first.
->
-> **Spec:** lightweight aggregates with **named members only**:
-> `val p = (x: 1, y: 2);`, member access `p.x`, and usable in type position
-> `fn bounds() -> (min: Int, max: Int)`. **Positional tuples and `.0` access are
-> rejected** (`.0` collides with float-literal lexing). Field order is not
-> significant for type identity — `(x: Int, y: Int)` and `(y: Int, x: Int)` are
-> the same type; canonicalize by sorting fields by name.
->
-> **Suggested design (keeps codegen dumb, I3):** lower each distinct tuple shape
-> to a generated Rust struct so member access reuses ordinary struct-field
-> codegen — no type-routing needed in the `Expr::Field` arm.
-> - `ast.rs`: add `Type::Tuple(Vec<(String, Box<Type>)>)` (store sorted) and
->   `Expr::TupleLit(Vec<(String, Expr)>, Span)`; add to `Expr::span()`.
-> - `parser.rs`: in the primary-expression `(` path, look ahead for
->   `ident :` to choose tuple-literal vs parenthesized-expr vs (if S74 lands)
->   tuple-destructuring. In type position, parse `( ident : Type , … )`.
->   Disallow a 1-element tuple if it's ambiguous with grouping — decide and
->   document. Reject positional form (`(1, 2)`) with a teaching error pointing at
->   named members.
-> - `sema.rs`: infer `TupleLit` → `Type::Tuple` (sorted); extend `field_type`
->   with a `Type::Tuple` arm so `p.x` resolves; `Type` already derives
->   `PartialEq`/`Eq`, so equality is automatic once fields are sorted. Add a
->   teaching diagnostic for `.0`/positional access.
-> - `codegen.rs`: maintain a registry of distinct tuple shapes; emit a
->   `#[derive(Clone, …)] struct JetTup_<stable-hash> { … }` per shape; lower
->   `TupleLit` to that struct literal and `Type::Tuple` to the struct name.
->   Member access falls through existing `Expr::Field` codegen unchanged.
-> - `fmt.rs`, `lsp.rs`, `comptime.rs`: handle the new `Expr`/`Type` variants
->   (fmt prints `(x: 1, y: 2)` / `(x: Int, y: Int)`; lsp `collect_expr` recurses;
->   comptime can reject or eval as needed).
-> - **Tests/docs:** `tests/fmt.rs` round-trip; a `tests/ui` snapshot for the
->   positional-tuple / `.0` teaching error (give it the next free `E00xx`, add it
->   to `diagnostics.md` and to `is_teaching_parse_diag` in `parser.rs` if it's a
->   recoverable parse diag); a runnable example (per owner: examples are
->   currently hands-off — confirm before adding under `examples/`); mark S73
->   **implemented** in `syntax-decisions.md`. Verify with `/tmp` scratch files
->   that literal, type position, member access, and equality all work and that
->   generated Rust compiles (I2).
+ You are implementing a ratified language feature in the jet compiler. Read these first, in order:
+    1. CLAUDE.md (operating manual — invariants I1–I8, the nix dev-shell command rules, the workflow loop, the syntax-decision protocol)
+    2. docs/plans/fan-out-and-fixed-size-lists.md  ← THIS IS THE SPEC. The owner has ratified it. Implement exactly what it says.
+    3. docs/spec/diagnostics.md (error voice + the I4 snapshot rule)
+    4. docs/spec/philosophy.md (settles any judgment call)
+
+  Goal: ship the fan-out operator `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]` and the fixed-size list type `[T#N]`, per the design doc. Package list sugar `default.[ripgrep, fd]` becomes one instance of this — it supersedes the old "Stage 1b = Pkg sugar" idea.
+
+  Hard constraints (violating one = stop and fix):
+    - Run everything through the nix dev shell: `nix develop -c cargo test`, etc. No host cargo/rustc.
+    - Test-first: write the failing test (ui fixture or example) BEFORE the implementation, for every stage.
+    - I1 no `unsafe`. I3 codegen stays dumb — `[T#N]` is a COMPILE-TIME refinement enforced in sema; at codegen it erases to the normal list (Vec). All fixed-size checks (destructure length, index bounds, no-grow) live in sema, never codegen.
+    - I4 every new diagnostic (E0961–E0965 in the doc) needs a docs/spec/diagnostics.md entry + a tests/ui/*.stderr snapshot, blessed with `nix develop -c env UPDATE_EXPECT=1 cargo test` only after you read the output against the diagnostics voice.
+    - I6 std-only, zero new crates.
+    - I7 every new token/sigil (`.[`, `#`, the `[T#N]` type form) goes in src/syntax.rs with a decision ID.
+
+  Step 0 — ratification bookkeeping: add the surface tokens to src/syntax.rs, add the decision rows + decision-log entries to docs/spec/syntax-decisions.md (cite the design doc), and extend tests/decisions.rs if it enforces the new IDs.
+
+  Then build it test-first in the 5 stages in §6 of the design doc:
+    1. Type + parser only (Type::FixedList; parse `[T#N]` in type position; parse `.[ … ]` into a new Expr::FanOut; add exhaustiveness arms — no-op/erase — across codegen/sema/fmt/lsp). The module-parser commit 2b3825e is a worked example of how to add an Item/Expr variant and chase down every match site.
+    2. Fan-out sema (one-arg callable; items elaborated against the parameter type, mirroring the existing enum-unit-variant resolution at syntax-decisions.md:254; homogeneity; splicing). Diagnostics E0961/E0962.
+    3. Fixed-size sema (val/var rule, one-way widening coercion, `.map` preserves N, `.len` const, destructure length check E0963, no-grow E0964, const-index bounds E0965).
+    4. Codegen (fan-out → build a Vec by mapping f; `[T#N]` erases to Vec).
+    5. An examples/features/*.jet example + expected output exercising fan-out, fixed-size destructure, `.map` preservation, and the package-list use (I5 golden-tested).
+
+  Done means: `nix develop -c cargo test` fully green, the new example runs, docs (spec.md, syntax-decisions.md, diagnostics.md) match behavior, no invariant bent. Commit per stage with a clear message ending in the Co-Authored-By trailer from CLAUDE.md. If you hit a genuine surface-syntax gap not covered by the design doc, STOP and follow the syntax-decision protocol — do not invent syntax.
+
+
+
+  You are continuing the jet "unified ecosystem" build (jetpack = the package manager / nix-shell-and-NixOS replacement, built on the jet language). Read these first, in order:
+    1. CLAUDE.md (invariants, nix dev-shell rules, workflow, syntax-decision protocol)
+    2. docs/plans/jetpack-jetos/README.md and docs/plans/jetpack-jetos/unified-ecosystem.md (the architecture, the U1–U7 decisions, env.jet/config.jet/pack.jet, the hangar store, the module tree)
+    3. The agent memory index (MEMORY.md) — especially: packjet-migration-sequencing, computed-modules-pure-eval-shifted-up, jetpack-jetos-track, do-it-right-measure-twice, owner-design-kill-criteria.
+
+  PRECONDITION: the fan-out operator + fixed-size lists (docs/plans/fan-out-and-fixed-size-lists.md) must already be merged — `packages: [default.[ripgrep, fd]]` depends on it. Verify `nix develop -c cargo test` is green before starting.
+
+  What's already landed (don't redo): module-declaration parser (Item::Module, commit 2b3825e, Stage 1a); canonical §6 merge engine src/jetpack/merge.rs (sources/packages/scalars, default/force priority, conflict diagnostics); Jet-syntax pack.jet package-manifest PARSER src/jetpack/packmanifest.rs (unwired); provider@target classifier src/jetpack/refspec.rs.
+
+  Owner-ratified decisions to honor:
+    - The `pack.jet` → `env.jet` rename is a CLEAN BREAK — no back-compat alias (see packjet-migration-sequencing). Do the rename FIRST (frees the name), THEN retire jet.toml
+  - The `pack.jet` → `env.jet` rename is a CLEAN BREAK — no back-compat alias (see packjet-migration-sequencing). Do the rename FIRST (frees the name), THEN retire jet.toml into the pack.jet manifest. Doing it the other way makes pack.jet mean two things at once.
+  - Full COMPUTED modules: module fields may hold expressions, evaluated via pure-eval. Pure-eval = the existing M9.5 comptime tree-walking interpreter (src/comptime.rs) extended to whole module bodies — NOT a new engine; its differential battery (tests/comptime_diff.rs) is the safety net. (see computed-modules-pure-eval-shifted-up)
+  - The unified lockfile is `.jet/lock` — reconcile with the existing graph format in src/lock.rs; do NOT invent a second lock format.
+
+Work, in order, each test-first and as its own commit:
+  1. Rename the jetpack env directive file pack.jet → env.jet (src/jetpack/packfile.rs and the ~1035 lines of tests in tests/pkg.rs). Clean break.
+  2. Module evaluation (Stages 2–4 of the computed-modules arc): extend src/comptime.rs to reduce a module's contribution expressions (incl. computed `if … { } else { }`) to values; feed the evaluated env/system/image contributions into merge.rs; surface the U5 conflict diagnostics with I4 snapshots.
+  3. Wire src/jetpack/packmanifest.rs in as the compiler manifest, retiring jet.toml/jet.lock into pack.jet + .jet/lock. Migrate tests/pkg.rs.
+  4. Drive env.jet end-to-end: a real example project (env.jet with `imports: find("./modules")` and `packages: [default.[…]]`) realized through the hangar store.
+
+Hard constraints: nix dev shell for all commands; std-only (I6); no `unsafe` (I1); codegen/eval checking lives in sema/comptime, never "try rustc and see" (I3); every diagnostic gets a code + ui snapshot (I4); examples are the executable spec (I5). The owner works "measure twice, cut once" — if a step turns out to need a surface-syntax or architecture decision that isn't already ratified in the docs, STOP and follow the syntax-decision protocol (add an Open Decisions row, build something else meanwhile). Don't guess on owner-facing syntax even when the feature was requested.
+
+Done means each step: `nix develop -c cargo test` green, docs updated to match behavior, no invariant bent, committed with the CLAUDE.md Co-Authored-By trailer.
+
+## End Prompt
 
 - Change import to use
-- Relook module implementation & pack.jet @docs/research/functional-pack-debrief.md
+- Support for labeled loop "blocks"?
+- Ensure we support multiple constructor types
+- Relook module implementation & pack.jet @docs/plans/jetpack-jetos/unified-ecosystem.md
 - REPL Support
 - Pipelines (|>): F#, Elixir, Gleam, Elm, OCaml, Julia. (§15)
 - Named + default arguments: Swift, Kotlin, Gleam (labels), Python, C#, Ruby. Big readability/beginner win. (§23)

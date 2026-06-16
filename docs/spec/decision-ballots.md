@@ -229,6 +229,7 @@ fn copy(src: String, dst: String) -> Unit ? {
 | D-LR1 | First wave order | A: csv/toml/log/time first, then regex/archive/db · B: regex first · C: db first | **A** |
 | D-LR2 | sqlite | A: via E2-M14 C FFI when ready · B: pure-Jet impl · C: defer db ring | **A** |
 | D-LR3 | crypto surface | A: vetted hashes/HMAC/RNG only · B: also symmetric ciphers · C: also TLS primitives | **A** |
+| D-LR4 | YAML in the ring | A: defer past first wave (m9 plan default) · B: add `jet.yaml` in wave 1 with toml · C: never | **A** |
 
 ## Group M10 — Networking & services *(E2-M10)*
 
@@ -432,7 +433,8 @@ module root {
 ## Group 17 — Readability sugar *(cross-milestone)*
 
 From `owner-todo.md` and the CLI-tooling survey. Small, mostly-free wins and two
-explicit declines.
+explicit declines. Extended 2026-06-16 from persona crosscheck
+(`docs/plans/persona-examples.md`).
 
 | ID | Question | Options | Rec |
 |---|---|---|---|
@@ -441,6 +443,8 @@ explicit declines.
 | D-SUGAR3 | Transparent type alias `type X = …` | A: defer · B: add · C: decline | **A** |
 | D-SUGAR4 | Newtype (distinct single-field) | A: defer (one-field struct covers it) · B: dedicated keyword | **A** |
 | D-SUGAR5 | `defer`/`errdefer` cleanup keyword | A: none — RAII handles (S63/D-IO2) are the model · B: add `defer` · C: add both | **A** |
+| D-SUGAR6 | `?.` through **methods** (S71 field chaining shipped; E0046 today) | A: ship `obj?.method()` desugaring to optional call · B: keep fields-only · C: defer | **A** |
+| D-SUGAR7 | Optional semicolons | A: keep required (S6) · B: ASI like JS · C: newline-terminated stmts only | **A** |
 
 D-SUGAR1 example: `val budget = 1_000_000;` parses identically to `1000000`; the
 formatter never inserts or removes separators.
@@ -449,6 +453,133 @@ D-SUGAR5 note: the owner-todo lists `defer/errdefer` as a recurring need. The
 recommendation is to satisfy it with RAII handle types (D-IO2) rather than a new
 keyword, keeping "one obvious way". Reopen as B only if RAII proves insufficient
 in E2-M7.
+
+**D-SUGAR6 example** — Elena chains optional profile fields; today this errors
+with E0046; option A completes S71 without new syntax:
+
+```jet
+val city = user?.profile?.city;           // field chain — works today
+val label = user?.display_name();         // A: optional method call → String?
+// B: error[E0046]: optional chaining `?.` only reaches fields, not methods
+```
+
+**D-SUGAR7 note** — Maria persona push factor. S6 is load-bearing for fmt and
+beginner statement boundaries. Reopen only with an edition bump (D-REL3).
+
+## Group 20 — Ownership teaching ergonomics *(persona-derived; E2-M6 window)*
+
+From `docs/plans/persona-examples.md` (Maria, Priya). Tier-1 ownership is
+correct; these decisions tune how beginners *meet* `mut`/`take` without changing
+the borrow checker.
+
+| ID | Question | Options | Rec |
+|---|---|---|---|
+| D-OWN1 | L0201 implicit-clone lint posture | A: keep lint, strengthen teaching text + quick-fix · B: silence lint for scalars · C: remove lint | **A** |
+| D-OWN2 | First ownership chapter examples | A: add "pass a score" + "rename files" mini-examples to guide · B: docs-only appendix · C: defer | **A** |
+| D-OWN3 | Call-site `take` hint for non-clonable params | A: diagnostic suggests `take` when move required (E0201 upgrade) · B: auto-insert `take` quick-fix only · C: neither | **A** |
+
+**D-OWN1 example** — Priya passes a path string twice; the lint is the teaching
+moment, not a punishment:
+
+```jet
+fn move_file(path: String, dest: String) { fs.rename(path, dest) ?? return; }
+fn main() {
+    val src = "/tmp/photo.jpg";
+    move_file(src, "/backup/photo.jpg");   // L0201: cloned `src` — still usable below
+    print(src);                            // intentional reuse → lint explains clone cost
+}
+```
+
+**D-OWN3 example** — when `take` is required and the user forgot it:
+
+```jet
+fn consume(take data: Buffer) { ... }
+fn main() {
+    val buf = read_bytes("fw.bin") ?? return;
+    consume(buf);
+// error[E0201]: `buf` must be moved here — the function takes ownership
+// fix: call `consume(take buf)` — after this call, `buf` is no longer available
+}
+```
+
+## Group 21 — Core `std.fs` / timing helpers *(persona-derived; E2-M7 / E2-M9)*
+
+Small std additions that remove copy-paste from showcases (jetgrep, wordfreq,
+roguelike). Not the `jet.*` ring — these live in core std because every CLI
+tool needs them.
+
+| ID | Question | Options | Rec |
+|---|---|---|---|
+| D-FS1 | Recursive directory walk | A: `fs.walk(path, recursive: Bool) -> [String] ? IOError` in core std · B: `jet.fs` ring package · C: defer, keep manual walk in examples | **A (E2-M7)** |
+| D-FS2 | Game-loop / poll-input packaging | A: `examples/features/44_game_loop.jet` + guide section only · B: `std.io.poll_input(timeout_ms)` helper · C: defer until TUI/FFI | **A first, B if roguelike example needs it** |
+
+**D-FS1 example** — replaces 30 lines copied from jetgrep in every tool:
+
+```jet
+import std.fs as fs;
+
+fn main() {
+    for path in fs.walk("logs", recursive: true) ?? return {
+        if path.ends_with(".log") { scan(path); }
+    }
+}
+```
+
+**D-FS2 example** — Tom's roguelike without ncurses; option B only if the
+showcase needs non-blocking input before C FFI:
+
+```jet
+// A: guide shows while + io.input with documented blocking behavior
+// B: val key = io.poll_key(timeout_ms: 16) ?? null;  // null = no input this frame
+```
+
+## Group 22 — JSON typed decode *(persona-derived; E2-M6 + ring)*
+
+Elena persona: offline JSON works; analysts want struct-shaped data without hand
+mapping every field. Depends on **D-ERR2** (`IntoError`) for fallible decode.
+
+| ID | Question | Options | Rec |
+|---|---|---|---|
+| D-JSON1 | Typed decode surface | A: `json.decode<Profile>(text) -> Profile ? JSONError` (monomorphized fields) · B: runtime `Value` tree only (today) · C: defer schema macros to S56 layer 3 | **A** |
+| D-JSON2 | Unknown/extra fields policy | A: ignore unknown keys by default, opt-in strict · B: always strict · C: always ignore | **A** |
+
+**D-JSON1 example** — after decode lands, Elena's pipeline stays one expression
+per step:
+
+```jet
+struct Profile { name: String, score: Int; }
+
+fn load(path: String) -> Profile ? {
+    val text = fs.read(path)?;
+    ok(json.decode<Profile>(text)?)    // field mismatch → JSONError with field name
+}
+```
+
+```
+error[E2703]: JSON field `score` has the wrong type
+ Why: `Profile.score` is `Int`, but the file has `"score": "high"`
+ Fix: fix the file, or change the struct field type
+```
+
+## Group 23 — Build / FFI transparency *(persona-derived; E2-M3 / E2-M7)*
+
+Marcus and Priya persona: first FFI build pulls in a hidden cargo bridge; experts
+want predictable, explainable builds.
+
+| ID | Question | Options | Rec |
+|---|---|---|---|
+| D-BUILD1 | `jet doctor` FFI section | A: report cargo cache path, stale artifacts, missing system libs · B: minimal "FFI ok" only · C: defer | **A** (= D-DX2 scope) |
+| D-BUILD2 | `jet build -v` / `jet explain-build` | A: print bridge steps (emit Rust, cargo, link) on `-v` · B: `jet explain-build` subcommand · C: never show | **A** |
+
+**D-BUILD2 example** — Marcus debugging Raylib link flags after E2-M14:
+
+```
+$ jet build -v game.jet
+note: resolving extern c "raylib" via pkg-config
+note: emitting Rust to .jet/build/game/main.rs
+note: cargo build (cached bridge, fingerprint abc123)
+note: linking ./build/game
+```
 
 ## Group 18 — Transactional rollback (`transact`) *(owner-flagged)*
 
@@ -546,7 +677,7 @@ questions.
 | M6 — library authoring | D-LIB1…3 | E2-M6 | ☐ |
 | M7 — streaming I/O | D-IO1…3 | E2-M7 | ☐ |
 | M8 — packages | D-PKGS1…4 | E2-M8 | ☐ |
-| M9 — library ring | D-LR1…3 | E2-M9 | ☐ |
+| M9 — library ring | D-LR1…4 | E2-M9 | ☐ |
 | M10 — networking | D-NET1…3 | E2-M10 | ☐ |
 | M11 — testing/docs/bench | D-TEST1…4 | E2-M11 | ☐ |
 | M12 — debug/observe | D-OBS1…3 | E2-M12 | ☐ |
@@ -558,9 +689,13 @@ questions.
 | 14 — error ergonomics | D-ERR1…4 | E2-M6 | ☐ |
 | 15 — pattern matching | D-PAT1…6 | E2-M5/M6 | ☐ |
 | 16 — punning/config | D-FP1…6 | E2-M6 | ☐ |
-| 17 — readability sugar | D-SUGAR1…5 | E2-M3+ | ☐ |
+| 17 — readability sugar | D-SUGAR1…7 | E2-M3+ | ☐ |
 | 18 — transact | D-TXN1…3 | E2-M7 window | ☐ |
 | 19 — tooling surfaces | D-TOOL1…5 | E2-M3/M11 | ☐ |
+| 20 — ownership teaching | D-OWN1…3 | E2-M6 | ☐ |
+| 21 — core std helpers | D-FS1, D-FS2 | E2-M7 / E2-M9 | ☐ |
+| 22 — JSON typed decode | D-JSON1…2 | E2-M6 + ring | ☐ |
+| 23 — build transparency | D-BUILD1…2 | E2-M3 / E2-M7 | ☐ |
 | 12 — E2-M18 REPL | D-REPL1…21 | E2-M18 | ☐ |
 | — (deferred) | S56 | post-1.0 | ☐ |
 

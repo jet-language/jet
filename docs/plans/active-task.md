@@ -13,7 +13,8 @@ chunk lands, update "Where we are" and "Next up", and move finished items into
 design-of-record** for the `jet` + `jetpack` + `jetos` ecosystem. It is the
 TARGET surface; it explicitly says Phase-1 directive scanning is the shippable
 bootstrap that evolves into the typed surface. Do **not** treat ratified
-(U1–U7) as implemented — see the gap list below.
+(U1–U8) as implemented — see the gap list below (e.g. U4 `find` is ratified but
+not built).
 
 Supporting design docs (own their detail):
 - `docs/plans/jetpack-jetos/README.md` — sequencing + D-JPK gates (§3.3 surface superseded by unified-ecosystem.md)
@@ -96,11 +97,14 @@ reads the Phase-1 `pkg.*` scanner. That is the next chunk (see Next up).
 
 ## Where we are (verified 2026-06-16)
 
-Recent arc (committed): the `pack.jet`→`env.jet` clean break + computed modules
-+ manifest reshape, finishing with `examples/jetpack` made runnable end-to-end.
-Last commit on the arc: **`98ff3be`** ("Step 4: make examples/jetpack runnable
-as env.jet, end-to-end test"). `cargo test` green; `jet run
+Last commit: **`11e7df8`** ("Wire modeval into jetpack: typed env.jet build/run
+end-to-end"). `nix develop -c cargo test` green (278 passed, 0 failed); `jet run
 examples/features/01_hello.jet` prints `hello, world`.
+
+Recent arc (committed): `pack.jet`→`env.jet` clean break + computed modules +
+manifest reshape (`98ff3be`) → U8 nested `sources:`/`imports:` parser (prior
+chunk) → `modeval` wired into the CLI (latest chunk). The typed `module { … }`
+`env.jet` surface now builds and realizes end-to-end.
 
 ### Implemented & shipping (Phase-1 bootstrap)
 - Two binaries: `jet`, `jetpack` (Cargo.toml `[[bin]]`).
@@ -123,7 +127,7 @@ examples/features/01_hello.jet` prints `hello, world`.
 - `core` provider (first-party Jet packages, no nix) + `nix` provider, realize
   into the hangar (`src/jetpack/provider.rs`). Offline e2e tests in
   `tests/jetpack.rs` (incl. `committed_example_builds_offline_end_to_end`).
-- U1–U7 ratified in `docs/spec/syntax-decisions.md`, enforced by
+- U1–U8 ratified in `docs/spec/syntax-decisions.md`, enforced by
   `tests/decisions.rs`.
 
 ---
@@ -155,22 +159,48 @@ test/example first.
 
 ---
 
-## Next up (pick one chunk; owner to confirm)
+## Next up — START HERE: gap #2, `find(...)` auto-discovery
 
-**#1 wired (done above).** Strongest follow-ons, owner to pick:
+This is the highest-leverage chunk and it is **ratified (U4) and ready** — no
+syntax gate to clear. The typed surface evaluates today, but the import-tree
+(the headline "drop a file in `modules/` and it merges" feature) is inert.
 
-- **#2 — `find("./modules")` auto-discovery.** Now the highest-leverage gap: the
-  typed surface evaluates, but the import-tree (U4, the headline "drop a file in
-  and it merges" feature) is inert. `evaluate_env` would walk `imports:
-  find(dir)`, parse each discovered `.jet`, and feed its modules into the same
-  merge. `BUILTIN_FIND` exists (`src/syntax.rs`); write the failing e2e
-  (a `modules/` file contributing a package that shows up in `jetpack build`)
-  first. **Liftability law:** discovered modules may not import each other.
-- **`via: core` for typed sources** (deferred, needs owner syntax). The directive
-  surface has a third `pkg.source(name, upstream, "core")` arg; the typed
-  `sources: { name: provider@target }` has no slot for the provider kind, so
-  `build_source_table` hard-codes `ProviderKind::Nix`. A typed env can't yet
-  declare a first-party `core` source. Add an Open Decisions row before coding.
+**Concrete plan (test-first, one chunk):**
+
+1. **Failing e2e first** (`tests/jetpack.rs`, mirror
+   `typed_module_example_builds_offline_end_to_end`): extend the
+   `examples/jetpack-typed/` project with a `modules/tools.jet` that declares
+   `module tools { env.dev: Env { packages: [default.jq] } }`, keep
+   `imports: find("./modules")` in the root `env.jet`, add a `default-jq.json`
+   fixture, and assert `jetpack build` realizes `jq` too (→ "built 3 package(s)").
+2. **Implement the walk in `modeval`.** `evaluate_env` already parses the root
+   file and has `base_dir`. After parsing, for each module's
+   `ModuleDecl.imports` (a `Vec<Expr>`), detect `Expr::Call { name == "find", .. }`
+   (`syntax::BUILTIN_FIND`, currently referenced nowhere), resolve its string
+   arg relative to `base_dir`, walk that dir for `*.jet`, parse each, and feed
+   their `Item::Module`s into the **same** `evaluate_modules` + `merge_all`
+   pass (and their `sources:` into `build_source_table`). Reuse, don't fork, the
+   existing merge so cross-file source conflicts still surface as **E0967**.
+3. **Guardrails:** skip `_`-disabled modules (already handled by
+   `evaluate_modules`); **liftability law** — discovered modules may not import
+   each other (a `find` inside a discovered file is an error; pick/define a
+   diagnostic, add it to `diagnostics.md` + a `tests/ui` snapshot per I4).
+   Missing `find` dir and non-literal `find` arg each need a diagnostic too.
+4. Update `unified-ecosystem.md` §4 if behavior nuances emerge; update this doc.
+
+Entry points: `src/jetpack/modeval.rs` (`evaluate_env`, `evaluate_modules`,
+`build_source_table`); `Expr::Call` shape in `src/ast.rs`; `syntax::BUILTIN_FIND`.
+
+### Also queued (do NOT start without owner sign-off)
+
+- **`via: core` for typed sources** — *blocked on owner syntax decision.* The
+  directive surface has a third `pkg.source(name, upstream, "core")` arg; the
+  typed `sources: { name: provider@target }` has no slot for the provider kind,
+  so `build_source_table` hard-codes `ProviderKind::Nix`. A typed env can't yet
+  declare a first-party `core` source. **Add an Open Decisions row to
+  `syntax-decisions.md` and STOP** until ratified.
+- Gaps #4 (`config.jet`/jetos tier), #5 (`System`/`Image` semantics), #6
+  (`jet dev`/`jetpack enter`) — larger, later.
 
 ---
 
