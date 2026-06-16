@@ -73,6 +73,7 @@ pub fn main(args: Vec<String>) -> i32 {
 
     match verb.as_str() {
         "run" => cmd_run(&theme, &parsed),
+        "enter" => cmd_enter(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
         "list" => cmd_list(&theme),
         "clean" => cmd_clean(&theme),
@@ -330,12 +331,51 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         },
     };
 
+    let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
+        return 1;
+    };
+
+    match &parsed.command {
+        Some(cmd) if !cmd.is_empty() => shell::run_command(&env, cmd),
+        _ => shell::enter(theme, &env, ShellKind::detect()),
+    }
+}
+
+/// `jetpack enter [-- cmd]` — realize the project environment and drop into its
+/// shell (Scale-2; U §8). Unlike `run`, `enter` is project-scoped: it never
+/// takes an explicit ref, it always composes the env declared by the project
+/// `env.jet`. The `-- cmd` form runs a one-off command in that env, then exits.
+fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
+    let roots = store::resolve();
+    if roots.dev_mode {
+        theme.detail(&theme.gray(&format!(
+            "dev mode: using {} (no write access to {})",
+            roots.root.display(),
+            "/etc/jet"
+        )));
+    }
+
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
+        return 1;
+    };
+
+    match &parsed.command {
+        Some(cmd) if !cmd.is_empty() => shell::run_command(&env, cmd),
+        _ => shell::enter(theme, &env, ShellKind::detect()),
+    }
+}
+
+/// Realize every ref in `plan` and compose the shell env (PATH dirs + prompt
+/// label). Returns `None` after reporting if any ref fails to realize.
+fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Option<Env> {
     let mut bin_dirs = Vec::new();
     let mut realized_refs = Vec::new();
     for spec in &plan.refs {
-        let Some(entry) = realize_ref(theme, &roots, &parsed.flags, &plan.table, spec) else {
-            return 1;
-        };
+        let entry = realize_ref(theme, roots, flags, &plan.table, spec)?;
         // A `library` package realizes with an empty `bin` (U10) — it stages
         // source for import and contributes nothing to PATH.
         if !entry.bin.is_empty() {
@@ -343,18 +383,11 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         realized_refs.push(entry.reference);
     }
-    let label = plan.label;
-
-    let env = Env {
+    Some(Env {
         bin_dirs,
         refs: realized_refs,
-        label,
-    };
-
-    match &parsed.command {
-        Some(cmd) if !cmd.is_empty() => shell::run_command(&env, cmd),
-        _ => shell::enter(theme, &env, ShellKind::detect()),
-    }
+        label: plan.label.clone(),
+    })
 }
 
 /// `jetpack build [<ref>]` — realize without entering a shell.
@@ -526,6 +559,8 @@ usage:
   {bin} run   <source>:<package>        enter a temporary shell with that package
   {bin} run   <source>:<package> -- cmd run a command in that environment, then exit
   {bin} run                            enter the shell described by ./{pack}
+  {bin} enter                          enter the project shell described by ./{pack}
+  {bin} enter -- cmd                   run a command in the project shell, then exit
   {bin} build [<source>:<package>]     realize a package/environment, don't enter
   {bin} list                           show realized packages
   {bin} clean                          drop unused store records

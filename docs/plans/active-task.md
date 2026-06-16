@@ -43,7 +43,40 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U10 Chunk 4 — `library` vs `executable` realize
+## Latest chunk (2026-06-16): gap #6 (partial) — `jetpack enter` + `jet dev` Scale-2 commands
+
+The two **Scale-2 commands** named in the ratified scale table
+(`unified-ecosystem.md` §8: `jet dev` / `jetpack enter`) now exist. They are
+*commands*, not new authoring syntax, so no syntax-decision row was needed — the
+names are already in the ratified naming/scale ledger. This is **partial** gap #6
+(the other Scale-2 piece, an interactive dev shell beyond what `run` already
+gives, is the same `shell::enter` path; `jetpack run` no-arg has always entered).
+
+Landed this run (uncommitted in the working tree):
+- **`jetpack enter [-- cmd]`** (`cli.rs::cmd_enter`): the **project-scoped** env
+  command. Unlike `run`, it never takes an explicit ref — it always loads the
+  project `env.jet` via `load_project_plan`, composes the env, and enters the
+  dev shell (or runs `-- cmd` one-off, then exits). Added to the dispatch match
+  and to `usage()`.
+- **`compose_env(theme, roots, flags, plan) -> Option<Env>`** (`cli.rs`):
+  extracted from `cmd_run`'s body (realize every ref, skip empty `library` bins
+  per U10, build the `Env`); `cmd_run` and `cmd_enter` now share it.
+- **`jet dev [-- cmd]`** (`src/main.rs`): the friendly front door. A no-target
+  command that forwards all args (flags + trailing `-- cmd`) to
+  `jet::jetpack::run`, swapping the `dev` token for `enter`. Added to the
+  no-target match block and to the `jet` `usage()`.
+- **`syntax::JETPACK_VERBS`** gained `"enter"` (the unknown-command diagnostic
+  now lists it).
+- **Tests** (`tests/jetpack.rs`): `jetpack_enter_runs_command_in_project_env`
+  and `jet_dev_delegates_to_jetpack_enter` — both build a `core_hello_project`
+  helper (new) and run `enter`/`dev` `-- hello` offline with **no nix on PATH**,
+  asserting the first-party package landed on PATH and ran. The `jet` binary is
+  spawned via `env!("CARGO_BIN_EXE_jet")`. No new diagnostic (behavior only).
+
+Verified: `nix develop -c cargo test` fully green; `cargo test --test decisions`
+passes; `jet run examples/features/01_hello.jet` prints `hello, world`.
+
+## Prior chunk (2026-06-16): U10 Chunk 4 — `library` vs `executable` realize
 
 The `core` provider now keys its realize on the package **kind** read from the
 source repo's `payload.jet` `packages:` index — **completing the U10 4-chunk
@@ -308,42 +341,46 @@ Landed this run:
 
 ## Where we are (verified 2026-06-16)
 
-**U10 arc is COMPLETE.** Chunks 1–3 are **committed**; Chunk 4 is implemented,
-green, and **uncommitted** in the working tree (the only outstanding U10 commit).
+**U10 arc is COMPLETE and fully COMMITTED.** All four chunks are in `master`;
+Chunk 4 landed as `6bf54bc "Chunk 4 Complete"` (the doc previously called it
+uncommitted — that is now stale and corrected here).
 
 - **Committed:** `3fff80b "manifest rework"` landed **Chunks 1–3** (the
   `pack.jet`→`payload.jet`/`package:`→`payload:` rename across src + `tests/ui`,
   the `packages:` block parser, recursive package discovery, E1210–E1213).
-  `0e6312c "Misc"` carried follow-on doc/diagnostic edits. (Both bundled owner doc
+  `0e6312c "Misc"` carried follow-on doc/diagnostic edits. `6bf54bc "Chunk 4
+  Complete"` landed **Chunk 4** (the `library`/`executable` realize split +
+  retiring the `env.jet` `pkg.package(...)` index). (Commits bundled owner doc
   noise — epoch-2, decision-ballots — so the history is not a clean per-chunk arc,
   but the code is all in.)
-- **Uncommitted (Chunk 4):** the `library`/`executable` realize split + retiring
-  the `env.jet` `pkg.package(...)` index. See the "Latest chunk" section above for
-  the file-by-file record. The working-tree diff is exactly:
-  `src/jetpack/{cli,envfile,packmanifest,provider}.rs`, `src/syntax.rs`,
-  `tests/jetpack.rs`, `examples/jetpack/README.md`, deleted
-  `examples/jetpack/jet-pkgs/env.jet` (staged), added
-  `examples/jetpack/jet-pkgs/payload.jet` — **plus owner doc noise**
-  (`docs/spec/decision-ballots.md`, this file) that must stay unstaged.
 
-### ⚠ Committing Chunk 4
+- **Uncommitted (this session, gap #6 partial):** `jetpack enter` + `jet dev`.
+  See the "Latest chunk" section above for the file-by-file record. The
+  working-tree diff is exactly: `src/jetpack/cli.rs`, `src/syntax.rs`,
+  `src/main.rs`, `tests/jetpack.rs`, and this handoff doc — **plus pre-existing
+  owner doc noise** (`docs/spec/decision-ballots.md`,
+  `docs/spec/decision-ballots-owner.md`) that must stay unstaged.
 
-Stage **selectively** — never `git add -A`/`git add .`. Stage only the Chunk-4
-files listed above (and this handoff doc). Owner doc noise
-(`docs/spec/decision-ballots.md`, epoch-2, owner-todo) must stay unstaged — see
-the "Pre-existing working-tree noise" section below. Note
-`examples/jetpack/jet-pkgs/env.jet` is **deleted** (already staged) and
-`examples/jetpack/jet-pkgs/payload.jet` is **added** — stage both.
+### ⚠ Committing gap #6
 
-**Verified green (2026-06-16):** `nix develop -c cargo test` fully green
-(146 jetpack-suite + all golden/ui); `cargo test --test decisions` passes;
-`jet run examples/features/01_hello.jet` prints `hello, world`.
+Stage **selectively** — never `git add -A`/`git add .`. Stage only the files
+listed above (`src/jetpack/cli.rs`, `src/syntax.rs`, `src/main.rs`,
+`tests/jetpack.rs`, and this handoff doc). The decision-ballots edits are owner
+doc noise (see "Pre-existing working-tree noise" below) — leave them unstaged.
+
+**Verified green (2026-06-16):** `nix develop -c cargo test` fully green (jetpack
+suite 22 incl. the two new `enter`/`dev` tests + all golden/ui); `cargo test
+--test decisions` passes; `jet run examples/features/01_hello.jet` prints
+`hello, world`.
 
 U10 was **ratified** (`payload.jet` manifest + `packages:` model) in
 `docs/spec/syntax-decisions.md` + `src/syntax.rs` before implementation, and is
-enforced by `tests/decisions.rs`. **Next is gap #5/#4/#6** (see "Larger, later"
-and the gap list) — confirm the relevant decision is Ratified and write the
-failing test/example first.
+enforced by `tests/decisions.rs`. **Next is gap #5/#4** (see "Larger, later"
+and the gap list). ⚠ Both need **owner ratification of field-level syntax first**
+(System/Image fields like `services:`/`options:`/`set(…)`/`from:` and the
+`config.jet` surface appear only as examples in `unified-ecosystem.md`, not in
+the U-series) — follow the syntax-decision protocol (add an Open Decisions row,
+STOP) before any code, then write the failing test/example first.
 
 Recent arc: `pack.jet`→`env.jet` clean break + computed modules + manifest
 reshape (`98ff3be`) → U8 nested `sources:`/`imports:` parser → `modeval` wired
@@ -375,7 +412,7 @@ and remote (`github@`) repos.
 - Phase-1 `env.jet` directive surface (`import jetpack as pkg; pub fn shell() ->
   [JSON] { pkg.source/packages/prompt/package }`) — parsed structurally by
   `src/jetpack/envfile.rs`, loaded by `src/jetpack/cli.rs`. Commands:
-  `run/build/list/clean/add/remove`.
+  `run/enter/build/list/clean/add/remove` (plus `jet dev` → `jetpack enter`).
 - `core` provider (first-party Jet packages, no nix) + `nix` provider, realize
   into the hangar (`src/jetpack/provider.rs`). Offline e2e tests in
   `tests/jetpack.rs` (incl. `committed_example_builds_offline_end_to_end`).
@@ -411,8 +448,13 @@ test/example first.
    `src/jetos/`. Scale-3 (`jetos switch/build`).
 5. **`System`/`Image` semantics inert.** Parsed/validated syntactically but no
    field checking or runtime; only `env`/`Env` is meaningful today.
-6. **Scale-2 commands missing:** no `jet dev` / `jetpack enter`. jetpack CLI is
-   `run/build/list/clean/add/remove` only.
+6. **Scale-2 commands — `jet dev` / `jetpack enter` DONE (2026-06-16).**
+   `jetpack enter [-- cmd]` is the project-scoped env command (always loads the
+   project `env.jet`, never an explicit ref); `jet dev` is the front door that
+   delegates to it. jetpack CLI is now
+   `run/enter/build/list/clean/add/remove`. Remaining Scale-2 surface is just the
+   richer interactive-shell story, which already rides the shared `shell::enter`
+   path.
 
 ---
 
@@ -489,19 +531,13 @@ Entry points: `src/jetpack/{packmanifest,provider,modeval,envfile,cli}.rs`,
 
 ## Pre-existing working-tree noise (not part of the arc; leave unstaged)
 
-**⚠ Stage selectively — never `git add -A`/`git add .`.** The tree holds
-substantial **unrelated owner edits** alongside the arc work. The arc commits
-this session (U4 find, U9 docs, U9 impl) are already landed; leave everything
-below untouched and confirm with the owner before touching any of it:
+**⚠ Stage selectively — never `git add -A`/`git add .`.** As of this session the
+working tree holds only **owner in-progress doc edits** beside the gap-#6 code:
 
-- **Owner's own in-progress doc edits** (do not commit with the arc):
-  `docs/plans/epoch-2/*.md` (ratification annotations — m2…m11, README),
-  `docs/plans/owner-todo.md`, `docs/spec/decision-ballots.md`,
-  `docs/spec/decision-ballots.html`.
-- **Other noise:** `.claude/settings.local.json`, deleted
-  `.github/workflows/release.yml`, deleted `scripts/gen_errors.sh`, untracked
-  `docs/plans/{fan-out-and-fixed-size-lists,persona-examples}.md`.
+- **Owner doc noise (leave unstaged):** `docs/spec/decision-ballots.md`,
+  `docs/spec/decision-ballots-owner.md`.
 
-Note: `docs/spec/syntax-decisions.md` and
-`docs/plans/jetpack-jetos/unified-ecosystem.md` were part of the arc (U9 edits)
-and are already committed (`bf1c645`) — not noise.
+(The earlier large noise list — epoch-2 annotations, `owner-todo.md`, deleted
+`release.yml`/`gen_errors.sh`, untracked persona/fan-out drafts — is no longer in
+the tree; it was committed or cleaned. Confirm with the owner before touching any
+ballots edit.)

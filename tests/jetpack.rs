@@ -328,6 +328,86 @@ fn unknown_named_source_in_env_is_friendly() {
     );
 }
 
+/// Build a scratch project whose `env.jet` pulls a first-party `core` package
+/// (`hello`) from a local repo. Returns `(base, proj, root)` so a test can run
+/// a jetpack command in `proj` with `JETPACK_ROOT=root` and no nix on PATH.
+fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
+    let base = Scratch::new(tag);
+    let repo = base.join("jet-pkgs");
+    let proj = base.join("proj");
+    let root = base.join("root");
+    let hello_pkg = repo.join("pkgs/hello");
+    let hello_bin = hello_pkg.join("bin");
+    fs::create_dir_all(&hello_bin).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(hello_pkg.join("hello.jet"), "module hello { }\n").unwrap();
+    let greet = hello_bin.join("hello");
+    fs::write(&greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fs::write(
+        proj.join("env.jet"),
+        format!(
+            "import jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            repo.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    (base, proj, root)
+}
+
+#[test]
+fn jetpack_enter_runs_command_in_project_env() {
+    // Gap #6 / U §8 (Scale-2): `jetpack enter` is the project-env command — it
+    // never takes an explicit ref, it always composes the env declared by the
+    // project `env.jet`. The `-- cmd` form runs a one-off command in the
+    // realized env, which is how we prove `enter` put the package on PATH.
+    let (_base, proj, root) = core_hello_project("enter");
+    let output = jetpack()
+        .args(["enter", "--no-color", "--", "hello"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+}
+
+#[test]
+fn jet_dev_delegates_to_jetpack_enter() {
+    // Gap #6 / U §8: `jet dev` is the friendly Scale-2 front door — it delegates
+    // straight to `jetpack enter`, forwarding flags and the trailing `-- cmd`.
+    // Running through the `jet` binary must reach the same composed env.
+    let (_base, proj, root) = core_hello_project("jet-dev");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["dev", "--no-color", "--", "hello"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+}
+
 #[test]
 fn core_provider_runs_first_party_package_without_nix() {
     // R2/U10: a `core` named source realizes a first-party Jet package with no

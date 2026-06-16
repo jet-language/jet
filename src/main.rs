@@ -30,6 +30,8 @@ usage:
   {bin} test  <file|dir>            compile and run top-level test blocks
   {bin} new   <name>                create a new project folder with payload.jet
   {bin} new   <name> --annotated    same, with commented example deps
+  {bin} dev                         enter the project shell (delegates to `jetpack enter`)
+  {bin} dev   -- cmd                run a command in the project shell, then exit
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} lsp                         language server (stdio JSON-RPC)
@@ -135,6 +137,16 @@ fn main() {
         "gc" => {
             run_gc();
             return;
+        }
+        "dev" => {
+            // Scale-2 front door (U §8): `jet dev` delegates straight to
+            // `jetpack enter`, forwarding flags and any trailing `-- cmd`.
+            let mut fwd = raw.clone();
+            if let Some(pos) = fwd.iter().position(|a| a == "dev") {
+                fwd.remove(pos);
+            }
+            fwd.insert(0, "enter".to_string());
+            exit(jet::jetpack::run(fwd));
         }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");

@@ -409,7 +409,7 @@ pub const REF_SOURCE_GITHUB: &str = "github";
 pub const REF_SOURCE_PATH: &str = "path";
 
 /// D-JPK2/9: the Phase 1 verb set.
-pub const JETPACK_VERBS: &[&str] = &["run", "build", "list", "clean", "add", "remove"];
+pub const JETPACK_VERBS: &[&str] = &["run", "enter", "build", "list", "clean", "add", "remove"];
 
 /// D-JPK14: the default visible prompt label inside a Jetpack shell.
 pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
