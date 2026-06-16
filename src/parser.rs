@@ -2720,7 +2720,14 @@ impl<'a> Parser<'a> {
                     };
                 }
                 TokKind::LBrace => {
-                    let import_lit = if let Expr::Field(inner, type_name, _) = &expr {
+                    // In a control-flow header (`for … in expr {`, `if cond {`, …)
+                    // the `{` opens the body, never a struct literal — even after a
+                    // field chain like `recv.field`. Only treat `expr.Type { … }` as
+                    // an import-namespace struct literal when struct literals are
+                    // allowed in this position.
+                    let import_lit = if !allow_struct_lit {
+                        None
+                    } else if let Expr::Field(inner, type_name, _) = &expr {
                         if let Expr::Ident(alias, _) = inner.as_ref() {
                             Some((alias.clone(), type_name.clone()))
                         } else {

@@ -2369,7 +2369,7 @@ fn emit_if(
         let pat_str = emit_if_let_pattern(cx, pat);
         out.push_str(&format!("{}if let {} = {} {{\n", pad, pat_str, subj_expr));
         let mut body_env = env.clone();
-        add_pattern_bindings(pat, &mut body_env);
+        add_pattern_bindings(cx, pat, &mut body_env);
         emit_stmts(
             cx,
             &ifs.then_body,
@@ -2435,7 +2435,40 @@ fn if_pattern_test(cond: &Expr) -> Option<(&Pattern, &Expr)> {
     }
 }
 
-fn add_pattern_bindings(pattern: &Pattern, env: &mut HashMap<String, Slot>) {
+/// The payload types a variant binds, so destructured names carry their type
+/// into the body (needed so e.g. `.get` on a `Map` bound from `Object(root)`
+/// lowers to a map lookup, not list indexing — B3). Mirrors sema's
+/// `std_json_pattern_types` for the std `JSON` enum and reads `cx` for user
+/// enums. Returns `None` when the types aren't known (binding stays untyped).
+fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
+    if is_json_variant(variant) {
+        let json = Type::Named(syntax::TYPE_JSON.to_string());
+        return match variant {
+            "Null" => Some(Vec::new()),
+            "Boolean" => Some(vec![Type::Bool]),
+            "Number" => Some(vec![Type::Float]),
+            "Text" => Some(vec![Type::String]),
+            "Array" => Some(vec![Type::List(Box::new(json))]),
+            "Object" => Some(vec![Type::Map {
+                key: Box::new(Type::String),
+                value: Box::new(json),
+            }]),
+            _ => None,
+        };
+    }
+    let owner = cx.variant_owner.get(variant)?;
+    let variants = cx.enum_variants.get(owner)?;
+    let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
+    match payload {
+        VariantPayload::Unit => Some(Vec::new()),
+        VariantPayload::Single(t, _) => Some(vec![t.clone()]),
+        VariantPayload::Named(fields) => {
+            Some(fields.iter().map(|f| f.ty.clone()).collect())
+        }
+    }
+}
+
+fn add_pattern_bindings(cx: &Cx, pattern: &Pattern, env: &mut HashMap<String, Slot>) {
     match pattern {
         Pattern::Present { binding, .. } => {
             env.insert(
@@ -2447,14 +2480,18 @@ fn add_pattern_bindings(pattern: &Pattern, env: &mut HashMap<String, Slot>) {
                 },
             );
         }
-        Pattern::Variant { bindings, .. } => {
-            for b in bindings {
+        Pattern::Variant {
+            variant, bindings, ..
+        } => {
+            let tys = variant_binding_types(cx, variant);
+            for (i, b) in bindings.iter().enumerate() {
+                let jet_ty = tys.as_ref().and_then(|ts| ts.get(i).cloned());
                 env.insert(
                     b.clone(),
                     Slot {
                         rust_name: mangle(b),
                         deref: false,
-                        jet_ty: None,
+                        jet_ty,
                     },
                 );
             }
@@ -2793,6 +2830,11 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         Expr::Call(call) => emit_call(cx, call, env),
         Expr::Deref(inner, _) => format!("*{}", emit_expr(cx, inner, env)),
         Expr::Field(inner, member, _) => {
+            // Fields of a std struct (e.g. `ProcessResult.code`) are emitted by
+            // their plain Rust name, never `user_<name>` — the std structs in
+            // src/prelude/std.rs declare unprefixed fields (B2).
+            let field = std_struct_field_rust_name(cx, inner, member, env)
+                .unwrap_or_else(|| mangle(member));
             if member == "clone" {
                 format!("({}).clone()", emit_expr(cx, inner, env))
             } else if let Expr::Ident(alias, _) = &**inner {
@@ -2803,16 +2845,16 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                 } else if cx.enum_variants.contains_key(alias) {
                     format!("user_{}::{}", alias, mangle(member))
                 } else {
-                    format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
+                    format!("({}).{}", emit_expr(cx, inner, env), field)
                 }
             } else if let Expr::Ident(type_name, _) = &**inner {
                 if cx.enum_variants.contains_key(type_name) {
                     format!("user_{}::{}", type_name, mangle(member))
                 } else {
-                    format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
+                    format!("({}).{}", emit_expr(cx, inner, env), field)
                 }
             } else {
-                format!("({}).{}", emit_expr(cx, inner, env), mangle(member))
+                format!("({}).{}", emit_expr(cx, inner, env), field)
             }
         }
         Expr::OptField {
@@ -3153,6 +3195,41 @@ fn emit_enum_lit(
     format!("{} {{ {} }}", prefix, fields)
 }
 
+/// When `inner` has a known std-struct type and `member` is one of its fields,
+/// returns the field's plain Rust name (std structs use unprefixed fields, so
+/// emitting `user_<member>` would not compile — B2). Returns `None` otherwise,
+/// so user structs keep their mangled field names.
+fn std_struct_field_rust_name(
+    cx: &Cx,
+    inner: &Expr,
+    member: &str,
+    env: &HashMap<String, Slot>,
+) -> Option<String> {
+    let _ = cx;
+    let Type::Named(type_name) = expr_jet_ty(inner, env)? else {
+        return None;
+    };
+    let known = match type_name.as_str() {
+        "ProcessResult" => matches!(member, "code" | "output" | "errors"),
+        _ if is_json_error_type_name(&type_name) => matches!(member, "line" | "message"),
+        _ if is_utf8_error_type_name(&type_name) => member == "message",
+        _ => false,
+    };
+    if known {
+        Some(member.to_string())
+    } else {
+        None
+    }
+}
+
+fn is_json_error_type_name(name: &str) -> bool {
+    name == syntax::TYPE_JSON_ERROR || name == "JsonError"
+}
+
+fn is_utf8_error_type_name(name: &str) -> bool {
+    name == syntax::TYPE_UTF8_ERROR || name == "Utf8Error"
+}
+
 fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
     match expr {
         Expr::Ident(name, _) => env.get(name).and_then(|s| s.jet_ty.clone()),
@@ -3460,7 +3537,14 @@ fn emit_std_json_lit(
 ) -> String {
     let arg = |i: usize| {
         args.get(i)
-            .map(|a| emit_expr(cx, &a.expr, env))
+            .map(|a| {
+                let s = emit_expr(cx, &a.expr, env);
+                if a.flags.implicit_clone {
+                    format!("({}).clone()", s)
+                } else {
+                    s
+                }
+            })
             .unwrap_or_default()
     };
     let prefix = format!("{}jet_std::Json", cx.root_prefix);

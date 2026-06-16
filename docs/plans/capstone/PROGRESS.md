@@ -116,13 +116,20 @@ All commands below were run through `nix develop` with
   `take` when it's consumed, or `.clone()` when reading a non-`Copy` field out
   of a borrowed `self`. (Compiler-side this is arguably a P0, but out of scope
   for the capstone; the `take`/`clone` spelling is the idiomatic answer anyway.)
+  NOTE: the closely-related case of passing a borrowed `view` value into a std
+  constructor (`JSON.Text(x)` where `x` is a read param) is **FIXED (B1,
+  2026-06-16):** sema inserts an implicit clone (L0201 lint) instead of moving
+  out of the borrow. Regression:
+  `tests/ice_regressions.rs::b1_json_text_clones_borrowed_view_param`.
 - `jet test <file.jet>` runs a single file's test blocks; `jet test` with no arg
   in a project looks for `main.jet`. Test library packages by file path.
 - **JSON walking:** `.get(key)`/`["key"]` on a map bound directly from a
   `== Object(entries)` pattern mis-codegens as *list* indexing (rustc error).
-  Funnel the map through a function that **returns `Map<String,JSON>`** so the
-  binding is properly typed, then call `.get` on that typed value. Use `take`
-  at call sites the compiler flags (L0201 implicit-clone warning tells you).
+  ~~Funnel the map through a function that returns `Map<String,JSON>`~~.
+  **FIXED (B3, 2026-06-16):** `Object(root)` pattern bindings now carry their
+  `Map<String,JSON>` type into codegen (`add_pattern_bindings` →
+  `variant_binding_types`), so `root.get(k)` lowers to a map lookup. Regression:
+  `tests/ice_regressions.rs::b3_map_get_through_object_pattern`.
 - **`?`/inference fuel bug (compiler):** a `Map<String,JSON>` (or other
   non-trivial) binding borrowed ~5+ times via helper calls that use `?`
   degrades — the binding's type falls back to `Int` and `?` then errors with a
@@ -143,8 +150,12 @@ All commands below were run through `nix develop` with
 - **switch** on a named variable uses that variable's name in arms
   (`switch e { e == Variant(x) -> ...}`); on an expression uses `it`
   (`switch f() { it == ok(v) -> ...}`).
-- Don't write `for x in expr.field {` — the `{` is read as a struct literal.
-  Bind first: `val items = expr.field.clone(); for x in items {`.
+- ~~Don't write `for x in expr.field {` — the `{` is read as a struct literal.~~
+  **FIXED (B4, 2026-06-16):** the `for … in recv.field { body }` header now
+  parses `{ body }` as the loop body, not a struct literal (the `expr_postfix`
+  `LBrace` arm respects `allow_struct_lit`). Legitimate `Type { … }` and
+  `alias.Type { … }` literals in expression position are unaffected. Regression:
+  `tests/ice_regressions.rs::b4_for_in_field_subject_parses_body_not_struct_lit`.
 - **Cross-package access reaches `pub fn`s only, not types/static methods.**
   `otherpkg.SomeType` / `otherpkg.Type.static()` won't resolve from another
   package — expose free `pub fn`s for anything cross-package. (Single-file
@@ -162,13 +173,14 @@ All commands below were run through `nix develop` with
 - **Nested `switch`-on-expression collides on the implicit `it`.** Switch on
   named locals instead (`val r = f(); switch r { r == ok(v) -> ... }`), or split
   a level into its own function.
-- **`ProcessResult` field access is broken (compiler I2 bug):** `result.code` /
-  `.output` / `.errors` codegen to `user_code` etc., but the std Rust struct
-  uses unprefixed fields → rustc error. The `Expr::Field` node carries no type,
-  so there's no low-risk codegen fix. **Workaround used in nixbridge:** never
-  read `ProcessResult`; have the command redirect output to a temp file
-  (`bash -c "nix build --json X > f"`) and `fs.read` the file; detect success by
-  whether the file parses. Treat `process.run` as ok=spawned, err=not-found.
+- **`ProcessResult` field access** ~~is broken (compiler I2 bug)~~: `result.code`
+  / `.output` / `.errors` used to codegen to `user_code` etc. while the std Rust
+  struct uses unprefixed fields → rustc error. **FIXED (B2, 2026-06-16):**
+  `Expr::Field` codegen now consults the receiver's known std-struct type
+  (`std_struct_field_rust_name`) and emits the plain field name for
+  `ProcessResult` / `JSONError` / `UTF8Error`. The temp-file workaround in
+  nixbridge is no longer required. Regression:
+  `tests/ice_regressions.rs::b2_std_struct_field_uses_plain_name`.
 - The `jet run` launcher strips `--...` flags before the program sees them.
   Build Forge with `jet build main.jet`, then run `./build/main ... --no-color`
   when verifying Forge's own flags.

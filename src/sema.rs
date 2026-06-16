@@ -1316,6 +1316,17 @@ impl<'a> Checker<'a> {
         self.scopes.iter().rev().find_map(|s| s.get(name))
     }
 
+    /// A binding is borrowed (a `view`) when it is a `Read` parameter of a
+    /// non-scalar type — in v1 those lower to `&T`, so the value can't be moved
+    /// out of it. Used to decide where a consuming use must clone (B1).
+    fn is_borrowed_binding(&self, name: &str) -> bool {
+        self.lookup(name)
+            .map(|info| {
+                matches!(info.param_conv, Some(AccessConvention::Read)) && !info.ty.is_scalar()
+            })
+            .unwrap_or(false)
+    }
+
     fn declare(&mut self, name: &str, name_span: Span, info: LocalInfo) {
         if self.lookup(name).is_some() || self.consts.contains_key(name) {
             self.diags.push(already_defined(name, name_span));
@@ -6060,6 +6071,31 @@ impl<'a> Checker<'a> {
                     type_fix_hint(param_ty, &got),
                     Some(arg.expr.span()),
                 ));
+            }
+        }
+        // A std constructor that stores a non-scalar payload (e.g. `JSON.Text`
+        // owns its `String`) consumes the argument. When the value is read from
+        // a borrowed binding (a `view` parameter), moving it out would not
+        // compile — insert a clone, exactly as a consuming `fn` call does (B1).
+        if matches!(arg.convention, AccessConvention::Read)
+            && matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. })
+        {
+            if let Expr::Ident(name, ispan) = &arg.expr {
+                let name = name.clone();
+                let ispan = *ispan;
+                if self.is_borrowed_binding(&name) {
+                    arg.flags.implicit_clone = true;
+                    self.diags.push(Diagnostic::lint(
+                        "L0201",
+                        format!(
+                            "implicit clone of `{}`; this value is borrowed, so it is copied into the JSON value",
+                            name
+                        ),
+                        format!("`{}.{}` stores its own copy of this value", syntax::TYPE_JSON, call_name),
+                        format!("write `{} .clone()` to copy explicitly and silence this warning", name),
+                        Some(ispan),
+                    ));
+                }
             }
         }
     }
