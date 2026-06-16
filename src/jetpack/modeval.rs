@@ -19,9 +19,9 @@
 //! bodies meaning.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::ast::{Contribution, Expr, Func, Item, ModuleDecl, Namespace};
+use crate::ast::{Contribution, Expr, Func, Item, ModuleDecl, Namespace, StrPart};
 use crate::comptime;
 use crate::diag::{Diagnostic, Span};
 use crate::syntax;
@@ -41,16 +41,23 @@ pub struct EvaluatedModule {
 /// resolves `embed_file` inside contribution expressions, same as ordinary
 /// comptime evaluation.
 pub fn evaluate_source(src: &str, base_dir: &Path) -> Result<Vec<EvaluatedModule>, Diagnostic> {
+    let program = parse_program(src)?;
+    evaluate_modules(&program.items, src, base_dir)
+}
+
+/// Lex + parse `src` to a `Program`, collapsing any lex/parse failure to a
+/// single diagnostic. The module surface is evaluated, not type-checked, here,
+/// so the first error is enough to stop.
+fn parse_program(src: &str) -> Result<crate::ast::Program, Diagnostic> {
     let (toks, lex_diags) = crate::lexer::lex(src);
     if let Some(d) = lex_diags.into_iter().next() {
         return Err(d);
     }
-    let program = crate::parser::parse(&toks).map_err(|mut diags| {
-        diags
-            .pop()
-            .unwrap_or_else(|| Diagnostic::error("E0000", "parse failed".into(), String::new(), String::new(), None))
-    })?;
-    evaluate_modules(&program.items, src, base_dir)
+    crate::parser::parse(&toks).map_err(|mut diags| {
+        diags.pop().unwrap_or_else(|| {
+            Diagnostic::error("E0000", "parse failed".into(), String::new(), String::new(), None)
+        })
+    })
 }
 
 /// Evaluate every enabled `Item::Module` in `items` (already-parsed).
@@ -209,19 +216,29 @@ pub fn is_module_surface(src: &str) -> bool {
 /// scalar becomes the label. `imports: find(…)` is parsed but not yet walked
 /// (U4 discovery is a separate chunk).
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
-    let (toks, lex_diags) = crate::lexer::lex(src);
-    if let Some(d) = lex_diags.into_iter().next() {
-        return Err(d);
+    let program = parse_program(src)?;
+
+    // The root `env.jet` plus every file reachable through `imports: find(…)`
+    // (U4). Each unit owns its source text (spans index into it) and the dir its
+    // relative refs / `embed_file` resolve against.
+    let mut units = vec![EvalUnit {
+        items: program.items,
+        src: src.to_string(),
+        base_dir: base_dir.to_path_buf(),
+    }];
+    let discovered = discover_imports(&units[0], base_dir)?;
+    units.extend(discovered);
+
+    let table = build_source_table(&units)?;
+
+    // Evaluate every unit's modules (each against its own source + base dir),
+    // then merge all contributions through the §6 engine as one pass — so a
+    // discovered module's `env.dev` packages combine with the root's, and a
+    // cross-file source/scalar conflict still surfaces as E0967.
+    let mut modules = Vec::new();
+    for unit in &units {
+        modules.extend(evaluate_modules(&unit.items, &unit.src, &unit.base_dir)?);
     }
-    let program = crate::parser::parse(&toks).map_err(|mut diags| {
-        diags.pop().unwrap_or_else(|| {
-            Diagnostic::error("E0000", "parse failed".into(), String::new(), String::new(), None)
-        })
-    })?;
-
-    let table = build_source_table(&program.items, src)?;
-
-    let modules = evaluate_modules(&program.items, src, base_dir)?;
     let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
 
     // Collect the `env`-namespace contributions in a deterministic order so the
@@ -253,31 +270,130 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     })
 }
 
-/// Merge every enabled module's `sources:` block into one `(name → upstream)`
-/// table (U5: same name + different ref conflicts, E0967). Each `provider@target`
-/// ref (U6) is translated to the colon/flake upstream the providers realize
-/// (`github:owner/repo/rev`, `path:./local`, `nixpkgs:channel`).
-fn build_source_table(items: &[Item], src: &str) -> Result<SourceTable, Diagnostic> {
-    let mut maps: Vec<BTreeMap<String, String>> = Vec::new();
-    for item in items {
+/// One parsed `.jet` file contributing modules: the root `env.jet` and every
+/// file discovered through `imports: find(…)` (U4). Spans in `items` index into
+/// this unit's own `src`; `base_dir` is the dir the file's relative refs and
+/// `embed_file` calls resolve against.
+struct EvalUnit {
+    items: Vec<Item>,
+    src: String,
+    base_dir: PathBuf,
+}
+
+/// Walk every `imports: find("<dir>")` directive in the root unit's modules,
+/// returning one `EvalUnit` per discovered `*.jet` file (U4 import-tree
+/// discovery). Discovery is one level deep: a discovered file may not itself
+/// import (the liftability law — modules contribute to the merged whole, they
+/// don't import each other; violations are E0971).
+fn discover_imports(root: &EvalUnit, base_dir: &Path) -> Result<Vec<EvalUnit>, Diagnostic> {
+    let mut out = Vec::new();
+    for item in &root.items {
         let Item::Module(m) = item else { continue };
         if m.disabled {
             continue;
         }
-        let mut map = BTreeMap::new();
-        for s in &m.sources {
-            let ref_text = src[s.ref_span.start..s.ref_span.end].trim();
-            let pref = refspec::classify_provider_ref(ref_text)
-                .map_err(|_| bad_source_ref(ref_text, s.ref_span))?;
-            let upstream = format!(
-                "{}{}{}",
-                pref.provider.label(),
-                syntax::REF_SEPARATOR,
-                pref.target
-            );
-            map.insert(s.name.clone(), upstream);
+        for imp in &m.imports {
+            let rel = find_dir_arg(imp)?;
+            let dir = base_dir.join(&rel);
+            for file in list_jet_files(&dir, imp)? {
+                let file_src = std::fs::read_to_string(&file)
+                    .map_err(|_| find_dir_missing(&dir, imp.span()))?;
+                let prog = parse_program(&file_src)?;
+                // Liftability law (U4): a discovered module may not import.
+                for nested in &prog.items {
+                    if let Item::Module(nm) = nested {
+                        if !nm.imports.is_empty() {
+                            return Err(discovered_module_imports(&file));
+                        }
+                    }
+                }
+                let file_base = file
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| base_dir.to_path_buf());
+                out.push(EvalUnit {
+                    items: prog.items,
+                    src: file_src,
+                    base_dir: file_base,
+                });
+            }
         }
-        maps.push(map);
+    }
+    Ok(out)
+}
+
+/// Extract the literal directory path from an `imports: find("dir")` directive.
+/// Anything else — a non-`find` expression, the wrong arity, or a non-literal
+/// (interpolated) argument — is E0969.
+fn find_dir_arg(imp: &Expr) -> Result<String, Diagnostic> {
+    let Expr::Call(call) = imp else {
+        return Err(bad_import_directive(imp.span()));
+    };
+    if call.name != syntax::BUILTIN_FIND || call.args.len() != 1 {
+        return Err(bad_import_directive(imp.span()));
+    }
+    let Expr::Str(parts, _) = &call.args[0].expr else {
+        return Err(bad_import_directive(imp.span()));
+    };
+    let mut path = String::new();
+    for part in parts {
+        match part {
+            StrPart::Lit(s) => path.push_str(s),
+            StrPart::Interp(_) => return Err(bad_import_directive(imp.span())),
+        }
+    }
+    Ok(path)
+}
+
+/// List the `*.jet` files directly under `dir`, sorted for determinism. A
+/// missing/unreadable directory is E0970.
+fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
+    let entries = std::fs::read_dir(dir).map_err(|_| find_dir_missing(dir, imp.span()))?;
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some(syntax::FILE_EXT) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Merge every enabled module's `sources:` block — across the root and every
+/// discovered unit — into one `(name → upstream)` table (U5: same name +
+/// different ref conflicts, E0967). Each `provider@target` ref (U6) is translated
+/// to the colon/flake upstream the providers realize (`github:owner/repo/rev`,
+/// `path:./local`, `nixpkgs:channel`).
+fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
+    let mut maps: Vec<BTreeMap<String, String>> = Vec::new();
+    for (idx, unit) in units.iter().enumerate() {
+        // Spans index into each unit's own source, but the CLI renders against
+        // the root `env.jet`. Only the root unit (index 0) can safely carry a
+        // span; a discovered file's diagnostic is span-less so it never slices
+        // the wrong source.
+        let is_root = idx == 0;
+        for item in &unit.items {
+            let Item::Module(m) = item else { continue };
+            if m.disabled {
+                continue;
+            }
+            let mut map = BTreeMap::new();
+            for s in &m.sources {
+                let ref_text = unit.src[s.ref_span.start..s.ref_span.end].trim();
+                let span = if is_root { Some(s.ref_span) } else { None };
+                let pref = refspec::classify_provider_ref(ref_text)
+                    .map_err(|_| bad_source_ref(ref_text, span))?;
+                let upstream = format!(
+                    "{}{}{}",
+                    pref.provider.label(),
+                    syntax::REF_SEPARATOR,
+                    pref.target
+                );
+                map.insert(s.name.clone(), upstream);
+            }
+            maps.push(map);
+        }
     }
     let merged = merge::merge_sources(&maps).map_err(|e| merge_error_to_diagnostic(&e))?;
     Ok(SourceTable::from_decls(
@@ -298,13 +414,50 @@ fn pkg_ref(pkg: &merge::Pkg) -> String {
     format!("{}{}{}", source, syntax::REF_SEPARATOR, pkg.name)
 }
 
-fn bad_source_ref(ref_text: &str, span: Span) -> Diagnostic {
+fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E0968",
         format!("`{ref_text}` isn't a `provider@target` source ref"),
         "a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`".to_string(),
         "write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`".to_string(),
+        span,
+    )
+}
+
+/// E0969: an `imports:` directive must be `find("<dir>")` with a literal path.
+fn bad_import_directive(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0969",
+        "an `imports:` directive must be `find(\"<dir>\")`".to_string(),
+        "imports auto-discover a directory of modules (U4); the only directive is `find` with a single string-literal path, e.g. `find(\"./modules\")`".to_string(),
+        "write `imports: find(\"./modules\")`".to_string(),
         Some(span),
+    )
+}
+
+/// E0970: `imports: find("<dir>")` points at a directory that doesn't exist.
+fn find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0970",
+        format!("`find` can't read the directory `{}`", dir.display()),
+        "`imports: find(\"<dir>\")` walks that directory for `.jet` modules (U4); it must exist relative to this file".to_string(),
+        "create the directory, or fix the path so it points at your modules folder".to_string(),
+        Some(span),
+    )
+}
+
+/// E0971: a discovered module imports — forbidden by the liftability law (U4):
+/// modules contribute to the merged whole, they don't import each other.
+fn discovered_module_imports(file: &Path) -> Diagnostic {
+    Diagnostic::error(
+        "E0971",
+        format!(
+            "the discovered module `{}` has its own `imports:`",
+            file.display()
+        ),
+        "a module found by `find(…)` may not import (the liftability law, U4) — modules only contribute to the merged whole, they never import each other; nesting `find` would make composition explode".to_string(),
+        "remove the `imports:` from this module; declare all `find(…)` directives in the top-level env.jet".to_string(),
+        None,
     )
 }
 
@@ -442,12 +595,22 @@ module _gaming {
         );
     }
 
+    /// A fresh, empty directory under the system temp dir, unique per call.
+    fn fresh_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("modeval-{tag}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn evaluate_env_builds_plan_from_typed_surface() {
         let src = r#"
 module dev {
     sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
-    imports: find("./modules")
     env.dev: Env {
         packages: [default.[ripgrep, fd]],
         prompt: "wordstats",
@@ -556,5 +719,68 @@ module b {
             rendered,
             "Error [E0967]: `prompt` got conflicting values: one, two\n Why: scalar settings merge to one value; without a priority marker, modules contributing different values can't be reconciled\n Fix: make every module agree on this value, or remove the conflicting contribution\n"
         );
+    }
+
+    #[test]
+    fn find_discovers_modules_and_merges_their_packages() {
+        // U4: a `find("./modules")` import walks the dir, parses each `.jet`, and
+        // folds its modules into the same merge — the discovered `jq` joins the
+        // root's `ripgrep`, reusing the root-declared `default` source.
+        let dir = fresh_dir("find-discovers");
+        std::fs::create_dir_all(dir.join("modules")).unwrap();
+        std::fs::write(
+            dir.join("modules/tools.jet"),
+            "module tools { env.dev: Env { packages: [default.jq] } }",
+        )
+        .unwrap();
+        let src = "module dev {\n    sources: { default: nixpkgs@nixpkgs-unstable }\n    imports: find(\"./modules\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let plan = evaluate_env(src, &dir).unwrap();
+        assert_eq!(plan.package_refs, vec!["default:ripgrep", "default:jq"]);
+        assert_eq!(plan.table.upstream("default"), Some("nixpkgs:nixpkgs-unstable"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_missing_directory_is_a_pinned_diagnostic() {
+        let src = "\nmodule dev {\n    imports: find(\"./nope\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let dir = fresh_dir("find-missing");
+        let err = evaluate_env(src, &dir).unwrap_err();
+        assert_eq!(err.code, "E0970");
+        // The span points at the `find(…)` call in the root file.
+        let rendered = crate::diag::render_all("env.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("Error [E0970]:"), "{rendered}");
+        assert!(rendered.contains("3 |     imports: find(\"./nope\")"), "{rendered}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn non_find_import_directive_is_e0969() {
+        let src = "\nmodule dev {\n    imports: gather(\"./modules\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0969");
+        let rendered = crate::diag::render_all("env.jet", src, std::slice::from_ref(&err));
+        assert_eq!(
+            rendered,
+            "Error [E0969]: an `imports:` directive must be `find(\"<dir>\")`\n  --> env.jet:3:14\n    |\n  3 |     imports: gather(\"./modules\")\n    |              ^^^^^^\n Why: imports auto-discover a directory of modules (U4); the only directive is `find` with a single string-literal path, e.g. `find(\"./modules\")`\n Fix: write `imports: find(\"./modules\")`\n"
+        );
+    }
+
+    #[test]
+    fn discovered_module_that_imports_is_e0971() {
+        // Liftability law (U4): a discovered module may not itself import.
+        let dir = fresh_dir("find-liftability");
+        std::fs::create_dir_all(dir.join("modules")).unwrap();
+        std::fs::write(
+            dir.join("modules/nested.jet"),
+            "module nested {\n    imports: find(\"./more\")\n    env.dev: Env { packages: [default.jq] }\n}\n",
+        )
+        .unwrap();
+        let src = "module dev {\n    imports: find(\"./modules\")\n    env.dev: Env { packages: [default.ripgrep] }\n}\n";
+        let err = evaluate_env(src, &dir).unwrap_err();
+        assert_eq!(err.code, "E0971");
+        let rendered = crate::diag::render_all("env.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("Error [E0971]:"), "{rendered}");
+        assert!(rendered.contains("liftability law"), "{rendered}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

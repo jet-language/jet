@@ -1,0 +1,14 @@
+// modules/tools.jet — discovered by `imports: find("./modules")` in env.jet.
+//
+// Dropping this file under modules/ adds its packages to the dev env with no
+// edit to env.jet (U4 import-tree discovery). It contributes to the same
+// `env.dev` namespace as the root module, so its packages merge in, and it
+// reuses the root's `default` source — discovered modules don't redeclare it.
+//
+// A discovered module may not itself import (the liftability law): no `find(…)`
+// here. It only contributes to the merged whole.
+module tools {
+    env.dev: Env {
+        packages: [default.jq],
+    }
+}
