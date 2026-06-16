@@ -222,6 +222,12 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
                 collect_tuple_shapes_from_expr(&a.expr, out);
             }
         }
+        Expr::FanOut { callee, items, .. } => {
+            collect_tuple_shapes_from_expr(callee, out);
+            for item in items {
+                collect_tuple_shapes_from_expr(item, out);
+            }
+        }
     }
 }
 
@@ -559,6 +565,8 @@ impl Cx {
             Type::TraitObject(t) => format!("Box<dyn {}>", generics::user_trait_rust(t)),
             Type::Fn { params, ret } => self.rust_fn_trait(params, ret.as_deref(), false),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
+            // S76: [T#N] erases to Vec<T> at codegen (I3 — all size checks live in sema).
+            Type::FixedList { elem, .. } => format!("Vec<{}>", self.rust_type(elem)),
         }
     }
 
@@ -1030,6 +1038,7 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>) -> bool {
             .iter()
             .all(|(_, t)| field_type_cloneable(t, types)),
         Type::TraitObject(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => field_type_cloneable(elem, types),
     }
 }
 
@@ -1062,6 +1071,7 @@ fn field_type_comparable(ty: &Type, types: &HashSet<String>) -> bool {
             .iter()
             .all(|(_, t)| field_type_comparable(t, types)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => field_type_comparable(elem, types),
     }
 }
 
@@ -2912,6 +2922,16 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             let f = emit_expr(cx, callee, env);
             let arg_str = emit_call_args(cx, None, args, env);
             format!("({})({})", f, arg_str)
+        }
+        // S75/S76 codegen: fan-out lowers to a Vec built by calling the callee on each item.
+        // Sema erased [T#N] to the same Vec representation so this is straightforward.
+        Expr::FanOut { callee, items, .. } => {
+            let f = emit_expr(cx, callee, env);
+            let elems: Vec<String> = items
+                .iter()
+                .map(|item| format!("{}({}.clone())", f, emit_expr(cx, item, env)))
+                .collect();
+            format!("vec![{}]", elems.join(", "))
         }
     }
 }

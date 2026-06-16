@@ -1092,6 +1092,12 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
             collect_expr(then_value, mp, db);
             collect_expr(else_value, mp, db);
         }
+        ast::Expr::FanOut { callee, items, .. } => {
+            collect_expr(callee, mp, db);
+            for item in items {
+                collect_expr(item, mp, db);
+            }
+        }
         ast::Expr::Int(_, _)
         | ast::Expr::Float(_, _)
         | ast::Expr::Bool(_, _)

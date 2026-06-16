@@ -114,6 +114,8 @@ pub enum TokKind {
     CaretEq,
     ShlEq,
     ShrEq,
+    /// S76 (2026-06-16): `#` separates the element type and size in `[T#N]`.
+    Hash,
     /// S5: `//` through end of line (M6 fmt preserves these).
     LineComment(String),
     /// S5: `/* … */` block comment, nesting allowed (M6 fmt preserves these).
@@ -240,6 +242,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::CaretEq => "`^=`".to_string(),
         TokKind::ShlEq => "`<<=`".to_string(),
         TokKind::ShrEq => "`>>=`".to_string(),
+        TokKind::Hash => "`#`".to_string(),
         TokKind::LineComment(_) => "a comment".to_string(),
         TokKind::BlockComment(_) => "a comment".to_string(),
         TokKind::Eof => "the end of the file".to_string(),
@@ -436,6 +439,7 @@ impl<'a> Lexer<'a> {
                 ',' => toks.push(simple(self, TokKind::Comma, 1)),
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),
                 '@' => toks.push(simple(self, TokKind::At, 1)),
+                '#' => toks.push(simple(self, TokKind::Hash, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
                 '?' => toks.push(simple(self, TokKind::Question, 1)),

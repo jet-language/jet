@@ -52,6 +52,9 @@ pub enum Type {
     TraitObject(String),
     /// S73 (D-SG7): named tuple `(x: Int, y: Int)` — fields stored sorted by name.
     Tuple(Vec<(String, Box<Type>)>),
+    /// S76 (2026-06-16): fixed-size list `[T#N]` — a compile-time refinement of
+    /// `[T]` with a statically-known length. Erases to `Vec<T>` at codegen (I3).
+    FixedList { elem: Box<Type>, len: u64 },
 }
 
 /// S73: sort tuple fields by name so type identity ignores source order.
@@ -99,6 +102,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
+            Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
         }
     }
 
@@ -140,6 +144,7 @@ impl Type {
                     .join(", ");
                 format!("({parts})")
             }
+            Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
         }
     }
 
@@ -925,6 +930,14 @@ pub enum Expr {
         args: Vec<CallArg>,
         span: Span,
     },
+    /// S75 (2026-06-16): `callee.[item0, item1, …]` — fan-out, desugars to
+    /// `[callee(item0), callee(item1), …]`. Items are typed by `callee`'s
+    /// parameter type (expected-type elaboration). Result type is `[T#N]` (S76).
+    FanOut {
+        callee: Box<Expr>,
+        items: Vec<Expr>,
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -956,7 +969,8 @@ impl Expr {
             | Expr::OrFallback { span: s, .. }
             | Expr::PatternTest { span: s, .. }
             | Expr::If { span: s, .. }
-            | Expr::CallValue { span: s, .. } => *s,
+            | Expr::CallValue { span: s, .. }
+            | Expr::FanOut { span: s, .. } => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,
             Expr::MethodCall { method_span, .. } => *method_span,

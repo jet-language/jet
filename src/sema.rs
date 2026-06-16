@@ -258,6 +258,7 @@ fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Result { ok, err } => is_ffi_type(ok, registry) && is_ffi_type(err, registry),
         Type::Named(name) => ffi_named_type_ok(name, registry),
         Type::Apply { .. } | Type::TraitObject(_) | Type::Fn { .. } | Type::Tuple(_) => false,
+        Type::FixedList { elem, .. } => is_ffi_type(elem, registry),
     }
 }
 
@@ -3091,6 +3092,7 @@ impl<'a> Checker<'a> {
             Type::Tuple(fields) => fields.iter().find_map(|(_, t)| {
                 self.sendability_problem_inner(t, true, seen)
             }),
+            Type::FixedList { elem, .. } => self.sendability_problem_inner(elem, true, seen),
         }
     }
 
@@ -3653,6 +3655,9 @@ impl<'a> Checker<'a> {
                 self.check_lambda(lam, expected.as_ref())
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
+            Expr::FanOut { callee, items, span } => {
+                self.infer_fan_out(callee, items, *span)
+            }
         }
     }
 
@@ -4699,6 +4704,17 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
         Some(tuple_ty)
+    }
+
+    fn infer_fan_out(
+        &mut self,
+        _callee: &mut Box<Expr>,
+        _items: &mut Vec<Expr>,
+        _span: Span,
+    ) -> Option<Type> {
+        // Stage 2: fan-out sema (E0961/E0962). Currently a parse-only stub:
+        // sema does not yet resolve the callee or elaborate items.
+        None
     }
 
     fn infer_map_lit(&mut self, entries: &mut [(Expr, Expr)], span: Span) -> Option<Type> {
@@ -7806,6 +7822,7 @@ fn is_cloneable(
             .iter()
             .all(|(_, t)| is_cloneable(t, registry, structs)),
         Type::TraitObject(_) => false,
+        Type::FixedList { elem, .. } => is_cloneable(elem, registry, structs),
     }
 }
 
@@ -7987,6 +8004,12 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
             walk_stmts_for_const_refs(else_body, const_names, taken);
             walk_expr_for_const_refs(else_value, const_names, taken);
         }
+        Expr::FanOut { callee, items, .. } => {
+            walk_expr_for_const_refs(callee, const_names, taken);
+            for item in items {
+                walk_expr_for_const_refs(item, const_names, taken);
+            }
+        }
     }
 }
 
@@ -8153,6 +8176,7 @@ fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => is_printable(elem, registry),
     }
 }
 
@@ -8171,6 +8195,7 @@ fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
             .iter()
             .all(|(_, t)| types_comparable(t, registry)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => types_comparable(elem, registry),
     }
 }
 
@@ -9220,6 +9245,12 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
             collect_std_stmts(else_body, imports, used);
             collect_std_expr(else_value, imports, used);
         }
+        Expr::FanOut { callee, items, .. } => {
+            collect_std_expr(callee, imports, used);
+            for item in items {
+                collect_std_expr(item, imports, used);
+            }
+        }
         Expr::Int(_, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
@@ -9485,6 +9516,9 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
                 || expr_refs_name(else_value, name)
                 || then_body.iter().any(|s| stmt_refs_name(s, name))
                 || else_body.iter().any(|s| stmt_refs_name(s, name))
+        }
+        Expr::FanOut { callee, items, .. } => {
+            expr_refs_name(callee, name) || items.iter().any(|e| expr_refs_name(e, name))
         }
         Expr::Int(_, _)
         | Expr::Float(_, _)

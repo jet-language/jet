@@ -2631,6 +2631,33 @@ impl<'a> Parser<'a> {
         let mut expr = self.expr_primary(allow_struct_lit)?;
         loop {
             match &self.peek().kind {
+                TokKind::Dot if matches!(self.peek2().kind, TokKind::LBracket) => {
+                    // S75 (2026-06-16): `f.[a, b, c]` fan-out.
+                    let dot = self.bump().span; // consume `.`
+                    self.bump(); // consume `[`
+                    let mut items = Vec::new();
+                    if !matches!(self.peek().kind, TokKind::RBracket) {
+                        loop {
+                            items.push(self.expr()?);
+                            if matches!(self.peek().kind, TokKind::RBracket) {
+                                break;
+                            }
+                            // allow trailing comma
+                            self.expect(TokKind::Comma, "between fan-out items")?;
+                            if matches!(self.peek().kind, TokKind::RBracket) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(TokKind::RBracket, "to close the fan-out `.[`")?;
+                    let close = self.toks[self.pos - 1].span;
+                    let span = Span::new(dot.start, close.end);
+                    expr = Expr::FanOut {
+                        callee: Box::new(expr),
+                        items,
+                        span,
+                    };
+                }
                 TokKind::Dot => {
                     self.bump();
                     let (member, member_span) = self.expect_field_name()?;
@@ -3790,6 +3817,29 @@ impl<'a> Parser<'a> {
                         key: Box::new(first),
                         value: Box::new(value),
                     }
+                } else if matches!(self.peek().kind, TokKind::Hash) {
+                    // S76 (2026-06-16): `[T#N]` fixed-size list.
+                    self.bump(); // consume `#`
+                    let len = match &self.peek().kind {
+                        TokKind::Int(n) => {
+                            let n = *n;
+                            self.bump();
+                            n as u64
+                        }
+                        _ => {
+                            let sp = self.peek().span;
+                            self.diags.push(Diagnostic::error(
+                                "E0963",
+                                "expected a literal integer size after `#` in `[T#N]`".to_string(),
+                                "the size must be a non-negative integer literal".to_string(),
+                                "write `[T#4]` for a fixed-size list of 4 elements".to_string(),
+                                Some(sp),
+                            ));
+                            0
+                        }
+                    };
+                    self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
+                    Type::FixedList { elem: Box::new(first), len }
                 } else {
                     self.expect(TokKind::RBracket, "after the element type in `[T]`")?;
                     Type::List(Box::new(first))

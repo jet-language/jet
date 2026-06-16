@@ -899,6 +899,38 @@ literal of the wrong length is the compile error E0315 and a non-list value is
 E0313. The tuple form `val (x, y) = p;` binds named tuple members in
 canonical order (S73).
 
+**S75 — Fan-out operator `f.[ … ]`** *(ratified 2026-06-16; implemented)*:
+`f.[a, b, c]` desugars to `[f(a), f(b), f(c)]` — a postfix fan-out applying
+one callable to several typed inputs written inline. Grammar:
+`fanout = primary ".[" [ expr { "," expr } [","] ] "]"`. `.[` is a new
+parser-level adjacency of `.` and `[`; `#` does not collide with any current
+syntax. `f` must be callable with exactly one argument (user functions,
+sources, type/enum constructors). Items are typed by `f`'s parameter type
+(expected-type elaboration). The result is a `[T#N]` (S76). Splicing: a
+fan-out inside an enclosing list literal flattens. `f.[*xs]` spread is
+rejected in v1 — literal items only. Motivated by Blueprint north-star
+(type-directed authoring). Supersedes "Stage 1b = Pkg sugar":
+`default.[ripgrep, fd]` (U6) is one instance of the general fan-out.
+Diagnostics E0961 (callee not one-arg callable) and E0962 (item type mismatch).
+Rejected: a dedicated keyword, requiring parentheses around the bracket list.
+
+**S76 — Fixed-size list type `[T#N]`** *(ratified 2026-06-16; implemented)*:
+`[T#N]` is a compile-time refinement of `[T]` where `N` is a known constant
+length, e.g. `[Point#2]`, `[Int#3]`. Rules: (a) `val` + literal/fan-out ⇒
+`[T#N]` (length tracked); (b) `var` initialized from a literal/fan-out widens
+to `[T]` (growable intent); (c) `[T#N]` widens to `[T]` implicitly when passed
+to a `[T]` slot — one-way, safe; (d) `.map` preserves N: `[T#N].map → [U#N]`;
+(e) `.len` on `[T#N]` is a compile-time constant; (f) length-changing ops
+(`push`/`pop`/`insert`) are rejected on `[T#N]` with a teaching error pointing
+at `[T]`; (g) positional destructuring of a `[T#N]` is compile-time
+length-checked. `[T#N]` erases to `Vec<T>` at codegen (I3). `#` is the
+fixed-size separator — chosen because `#` appears nowhere else in Jet surface
+syntax (comments are `//`/`/* */`; Jetpack refs use `@`/`:`). Diagnostics
+E0963 (destructure length mismatch), E0964 (length-changing op on fixed list),
+E0965 (compile-time index out of range). Rejected: Rust `[T; N]` spelling
+(`;` clashes with S6 statement terminators), angle-bracket `[T<N>]` (already
+used for generics S33), keeping `[T]` for both sizes (loses static safety).
+
 ### Unified ecosystem — `jet` + `jetpack` + `jetos` (U-series)
 
 The owner-ratified design-of-record is
@@ -1156,3 +1188,5 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | U6  | source refs `provider@target`; package type `Pkg` + list sugar | owner |
 | 2026-06-16 | U7  | `jet run file.jet` stays zero-ceremony forever (reaffirms R9) | owner |
 | 2026-06-16 | S52 | amended: `pack.jet`/`.jet/lock` (U1/U2); hangar store `/etc/jet/hangar` | owner |
+| 2026-06-16 | S75 | fan-out operator `f.[ … ]`; `.[` adjacency; E0961/E0962        | owner |
+| 2026-06-16 | S76 | fixed-size list type `[T#N]`; `#` separator; erase to Vec; E0963–E0965 | owner |

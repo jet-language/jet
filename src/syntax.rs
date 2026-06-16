@@ -454,3 +454,15 @@ pub const UNIFIED_LOCK_FILE: &str = ".jet/lock";
 /// S52 (ratified M12; amended 2026-06-16, U2): the single shared, content-
 /// addressed store ("hangar"), global and never relocated.
 pub const HANGAR_DIR: &str = "/etc/jet/hangar";
+
+/// S75 (ratified 2026-06-16): the fan-out operator — `f.[a, b, c]` desugars to
+/// `[f(a), f(b), f(c)]`. `.[` is a parser-level adjacency of `.` and `[`;
+/// there is no dedicated two-character lexer token (the parser detects `.`
+/// immediately followed by `[`). This constant documents the user-visible sigil.
+pub const OP_FAN_OUT: &str = ".[";
+
+/// S76 (ratified 2026-06-16): the fixed-size separator in `[T#N]` type
+/// position, e.g. `[Int#3]`. `#` appears nowhere else in Jet surface syntax
+/// (comments are `//`/`/* */`; Jetpack refs use `@`/`:`), so it is a clean
+/// dedicated token for this type-level size annotation.
+pub const TYPE_FIXED_SIZE_SEP: &str = "#";

@@ -200,6 +200,11 @@ before continuing.
 | E0955 | sema  | `embed_file`: missing / unreadable / not UTF-8 |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
+| E0961 | sema  | fan-out callee is not callable with exactly one argument (S75) |
+| E0962 | sema  | fan-out item doesn't fit the parameter type (S75) |
+| E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
+| E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
+| E0965 | sema  | compile-time index out of range on `[T#N]` (S76) |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |

@@ -261,6 +261,7 @@ fn type_key(ty: &Type) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        Type::FixedList { elem, len } => format!("List<{}#{}>", type_key(elem), len),
     }
 }
 
@@ -383,6 +384,7 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         Type::Apply { .. } | Type::TraitObject(_) | Type::Tuple(_) => {
             "Box<dyn std::any::Any>".to_string()
         }
+        Type::FixedList { elem, .. } => format!("Vec<{}>", rust_type(elem, user_types)),
     }
 }
 

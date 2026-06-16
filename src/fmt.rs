@@ -1135,6 +1135,12 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
+            Type::FixedList { elem, len } => {
+                self.write("[");
+                self.fmt_type(elem);
+                self.write(&format!("#{}", len));
+                self.write("]");
+            }
         }
     }
 
@@ -1440,6 +1446,17 @@ impl<'a> Fmt<'a> {
                 if prec > Prec::Postfix {
                     self.write(")");
                 }
+            }
+            Expr::FanOut { callee, items, .. } => {
+                self.fmt_expr(callee, Prec::Postfix);
+                self.write(".[");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_expr(item, Prec::OrFallback);
+                }
+                self.write("]");
             }
         }
     }
