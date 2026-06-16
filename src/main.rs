@@ -32,7 +32,7 @@ mod exit_code {
 /// typo like `jet fecth` lands on `fetch`.
 const KNOWN_COMMANDS: &[&str] = &[
     "check", "build", "run", "test", "new", "dev", "fmt", "fix", "bind", "lsp", "explain",
-    "version", "help", "upgrade", "add", "remove", "fetch", "update", "store", "gc",
+    "doctor", "version", "help", "upgrade", "add", "remove", "fetch", "update", "store", "gc",
     // `install` is a known-but-redirected verb: it has its own teaching error
     // (E0043 → use `jet fetch`), so it must pass the E2101 gate to reach it.
     "install",
@@ -56,6 +56,11 @@ const KNOWN_FLAGS: &[&str] = &[
     "--rev",
     "--pkg",
     "--out",
+    // `jet doctor` flags (E2-M3, D-DX2 / D-BUILD1).
+    "--online",
+    "--network",
+    "--plain",
+    "--fix",
 ];
 
 /// Levenshtein edit distance (same algorithm sema.rs uses for "did you mean").
@@ -173,6 +178,8 @@ usage:
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} bind  <header.h> --pkg <lib>   generate a C binding cache (S59)
   {bin} lsp                         language server (stdio JSON-RPC)
+  {bin} doctor                      diagnose your environment (rustc, cache, PATH, FFI)
+  {bin} doctor --fix                same, applying safe auto-fixes
   {bin} lsp doctor                  health-check the language server
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
   {bin} version                     print compiler version
@@ -381,6 +388,19 @@ fn main() {
         "gc" => {
             run_gc();
             return;
+        }
+        "doctor" => {
+            // E2-M3 / D-DX2 / D-BUILD1: environment self-diagnosis. Offline by
+            // default; `--online`/`--network` enables the registry probe,
+            // `--fix` applies conservative auto-fixes, `--plain` is the
+            // deterministic test mode. Color is gated on stdout's TTY since the
+            // report goes to stdout (it is a normal command result, not an error).
+            let online = raw.iter().any(|a| a == "--online" || a == "--network");
+            let do_fix = raw.iter().any(|a| a == "--fix");
+            let plain = raw.iter().any(|a| a == "--plain");
+            let color = use_color(color_choice(&raw), std::io::stdout().is_terminal());
+            let opts = jet::doctor::Options { online, fix: do_fix, plain, color };
+            exit(jet::doctor::run(&opts));
         }
         "bind" => {
             // S59 / E2-M14 Phase 4 (D-CBIND2): generate (or refresh) a C binding

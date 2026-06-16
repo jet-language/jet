@@ -328,6 +328,24 @@ command/flag is within edit distance 2. Their golden transcripts live in
 | E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a command like `run`, `check`, or `new`. | Did you mean `jet {closest}`? Run `jet help` to see them all. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 
+### `jet doctor` advisories
+
+`jet doctor` (decision **D-DX2**, ratified 2026-06-16 — health checks *and*
+auto-fix) self-diagnoses the environment Jet hides: the rustc backend, the
+build cache and package store, PATH, the language server, and the C-FFI/cargo
+bridge (the FFI section is decision **D-BUILD1**). It runs **offline by
+default** — only `--online`/`--network` lets it probe the registry. Each
+problem prints a single advisory line tagged **L2101** with the concrete fix.
+Safely auto-fixable problems (a missing cache or store directory) are applied
+under `jet doctor --fix`; doctor never modifies user source or package
+manifests. Exit code is 0 when every check is healthy or only advisories
+remain, and 1 when a hard problem (no rustc, an unwritable store) blocks normal
+use.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| L2101 | `jet doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet doctor --fix`. |
+
 ## Machine-readable diagnostics (`--json`)
 
 Passing `--json` to `jet check`, `jet build`, or `jet test` makes the

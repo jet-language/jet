@@ -259,6 +259,56 @@ fn check_json(name: &str, args: &[&str]) {
     }
 }
 
+/// `jet doctor --plain`: environment self-diagnosis (D-DX2). The healthy nix
+/// dev shell must exit 0. The transcript is made DETERMINISTIC by `--plain`:
+/// it redacts volatile values (rustc/cc versions become `<version>`, absolute
+/// store/cache/PATH locations become `<path>`) and uses plain ASCII status
+/// words (`[ ok ]` / `[fail]` / `[warn]`) instead of color/glyphs, so the bytes
+/// are identical across machines and reproducible in CI. We also pin the
+/// store/cache dirs to temp paths so the cache/store section is healthy and
+/// stable regardless of the developer's `~/.jet`.
+#[test]
+fn doctor_ok() {
+    let tmp = std::env::temp_dir().join(format!("jet-doctor-test-{}", std::process::id()));
+    let store = tmp.join("store");
+    let cache = tmp.join("cache");
+    fs::create_dir_all(&store).unwrap();
+    fs::create_dir_all(&cache).unwrap();
+    let out = Command::new(jet_bin())
+        .args(["doctor", "--plain"])
+        .env("NO_COLOR", "1")
+        .env_remove("FORCE_COLOR")
+        .env("JET_STORE_DIR", &store)
+        .env("JET_CACHE_DIR", &cache)
+        .output()
+        .expect("run jet doctor");
+    let mut actual = String::new();
+    actual.push_str("$ jet doctor --plain\n");
+    actual.push_str(&format!("[exit: {}]\n", out.status.code().unwrap_or(-1)));
+    actual.push_str("--- stdout ---\n");
+    actual.push_str(&String::from_utf8_lossy(&out.stdout));
+    actual.push_str("--- stderr ---\n");
+    actual.push_str(&String::from_utf8_lossy(&out.stderr));
+    let _ = fs::remove_dir_all(&tmp);
+
+    assert!(
+        !actual.contains('\x1b'),
+        "doctor --plain output must be ANSI-free, found an escape byte:\n{}",
+        actual
+    );
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli/doctor_ok.txt");
+    if std::env::var("UPDATE_EXPECT").is_ok() {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &actual).unwrap();
+    } else {
+        let expected = fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            actual, expected,
+            "\ndoctor transcript mismatch for tests/cli/doctor_ok.txt\n(if intentional, run: UPDATE_EXPECT=1 cargo test --test cli)\n"
+        );
+    }
+}
+
 /// `jet check --json`: a teaching error (E0037) serializes with a populated
 /// `suggestions` array (the machine-applicable quick-fix the fix engine/LSP
 /// will apply).

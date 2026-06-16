@@ -13,6 +13,7 @@ pub mod collections;
 pub mod comptime;
 pub mod diag;
 pub mod diagjson;
+pub mod doctor;
 pub mod explain;
 pub mod fetch;
 pub mod ffi;
