@@ -380,6 +380,68 @@ fn core_provider_runs_first_party_package_without_nix() {
 }
 
 #[test]
+fn typed_core_source_inferred_from_pack_jet() {
+    // U9: a typed `module { … }` env declares `sources: { mine: path@<dir> }`
+    // with no provider marker. The kind is *inferred* from the resolved target —
+    // the target has a `pack.jet`, so it realizes through the first-party `core`
+    // provider with no nix anywhere (we strip nix from PATH to prove it). This is
+    // the typed-surface mirror of `core_provider_runs_first_party_package_without_nix`.
+    let base = Scratch::new("typed-core");
+    let repo = base.join("jet-pkgs");
+    let proj = base.join("proj");
+    let root = base.join("root");
+    let hello_bin = repo.join("pkgs/hello/bin");
+    fs::create_dir_all(&hello_bin).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    // `pack.jet` is the U9 marker that makes this a Jet package repo (→ core).
+    fs::write(
+        repo.join("pack.jet"),
+        "package: {\n    name: \"jet-pkgs\",\n    edition: \"2026\",\n}\n",
+    )
+    .unwrap();
+    // `env.jet` is still the core provider's package index (pkg.package → subpath).
+    fs::write(
+        repo.join("env.jet"),
+        "pkg.package(\"hello\", \"./pkgs/hello\");\n",
+    )
+    .unwrap();
+    let greet = hello_bin.join("hello");
+    fs::write(&greet, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // The typed env declares the source with no `via`/`core` marker — just
+    // `provider@target`. `mine.hello` is the Pkg sugar → `mine:hello`.
+    fs::write(
+        proj.join("env.jet"),
+        format!(
+            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env {{\n        packages: [mine.hello],\n    }}\n}}\n",
+            repo.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args(["run", "--no-color", "--", "hello"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+}
+
+#[test]
 fn committed_example_builds_offline_end_to_end() {
     // I5: the committed `examples/jetpack/` project is the executable spec for
     // a real env.jet. `jetpack build` with no ref reads env.jet and realizes

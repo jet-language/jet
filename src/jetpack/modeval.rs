@@ -367,6 +367,11 @@ fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
 /// `path:./local`, `nixpkgs:channel`).
 fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
     let mut maps: Vec<BTreeMap<String, String>> = Vec::new();
+    // U9: the provider kind is *inferred*, never declared. We record each
+    // source's kind here, keyed by name, as we resolve its target. The §6 merge
+    // guarantees a given name resolves to one upstream (else E0967), so the
+    // probe result is consistent across units.
+    let mut kinds: BTreeMap<String, ProviderKind> = BTreeMap::new();
     for (idx, unit) in units.iter().enumerate() {
         // Spans index into each unit's own source, but the CLI renders against
         // the root `env.jet`. Only the root unit (index 0) can safely carry a
@@ -390,17 +395,54 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                     syntax::REF_SEPARATOR,
                     pref.target
                 );
+                // Probe the resolved target against the *declaring file's* dir,
+                // so a `path@./local` relative resolves where it was written.
+                kinds.insert(s.name.clone(), infer_provider_kind(&pref, &unit.base_dir));
                 map.insert(s.name.clone(), upstream);
             }
             maps.push(map);
         }
     }
     let merged = merge::merge_sources(&maps).map_err(|e| merge_error_to_diagnostic(&e))?;
-    Ok(SourceTable::from_decls(
-        merged
-            .into_iter()
-            .map(|(name, upstream)| (name, upstream, ProviderKind::Nix)),
-    ))
+    Ok(SourceTable::from_decls(merged.into_iter().map(|(name, upstream)| {
+        let via = kinds.get(&name).copied().unwrap_or_default();
+        (name, upstream, via)
+    })))
+}
+
+/// U9: infer whether a source is realized by the first-party `core` provider or
+/// the `nix` compatibility provider from its *resolved target* — no marker is
+/// declared. The rule (see syntax-decisions.md U9, unified-ecosystem.md §6): a
+/// target carrying a `pack.jet` is a Jet package repo (→ `core`); otherwise it
+/// is a nix flake (→ `nix`).
+///
+/// The probe must never clone a nixpkgs-sized repo just to classify it:
+/// - `path@…` stats the directory locally (offline, free);
+/// - `nixpkgs@…` is unconditionally `nix` — never probed;
+/// - `github@…` / git URLs are `nix` for now. *Follow-up:* peek at **only**
+///   `pack.jet` over the network (GitHub raw / shallow `git archive`) before any
+///   full fetch. That probe needs the realize-time `Ctx` (offline flag, cache),
+///   so it lands with the remote-core chunk; until then a typed `core` source
+///   must be `path@…` (the common monorepo case).
+fn infer_provider_kind(pref: &refspec::ProviderRef, base_dir: &Path) -> ProviderKind {
+    use super::refspec::Source;
+    match pref.provider {
+        Source::Path => {
+            let target = Path::new(&pref.target);
+            let dir = if target.is_absolute() {
+                target.to_path_buf()
+            } else {
+                base_dir.join(target)
+            };
+            if dir.join(syntax::PACK_FILE).is_file() {
+                ProviderKind::Core
+            } else {
+                ProviderKind::Nix
+            }
+        }
+        // `nixpkgs@` is always the nix collection; `github@`/git not yet probed.
+        _ => ProviderKind::Nix,
+    }
 }
 
 /// Render one merged `Pkg` as a `<source>:<package>` ref. A bare package (the

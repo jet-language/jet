@@ -14,7 +14,8 @@ design-of-record** for the `jet` + `jetpack` + `jetos` ecosystem. It is the
 TARGET surface; it explicitly says Phase-1 directive scanning is the shippable
 bootstrap that evolves into the typed surface. Do **not** treat ratified
 (U1–U9) as implemented — see the gap list below (e.g. U9 inferred provider kind
-is ratified but not built; `System`/`Image` types parse but are inert).
+is built for `path@…` but the `github@…`/git remote probe is still a follow-up;
+`System`/`Image` types parse but are inert).
 
 Supporting design docs (own their detail):
 - `docs/plans/jetpack-jetos/README.md` — sequencing + D-JPK gates (§3.3 surface superseded by unified-ecosystem.md)
@@ -42,7 +43,41 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U4 `find(…)` import-tree discovery
+## Latest chunk (2026-06-16): U9 infer the source provider kind
+
+A typed `sources: { name: provider@target }` source now realizes through the
+right backend with **no marker** — the kind is inferred from the resolved
+target (U9). Today `path@…` is fully wired; `github@…`/git remote probing is the
+one remaining follow-up (see Next up).
+
+Landed this run:
+- `modeval::build_source_table` no longer hard-codes `ProviderKind::Nix`. New
+  `infer_provider_kind(pref, base_dir)`: a `path@…` target with a **`pack.jet`**
+  → **core**; `nixpkgs@…` → **nix** (never probed); `github@…`/git → **nix** for
+  now. The probe resolves `path@./local` against the **declaring file's**
+  `base_dir` (so a discovered module's relative source resolves where it was
+  written), and stats locally — offline, no clone. Kinds are recorded per source
+  name and threaded into `SourceTable::from_decls`; the §6 merge still
+  guarantees one upstream per name (E0967), so the kind is consistent.
+- The provider boundary was already kind-aware: `provider::provider_for` /
+  `uses_nix_provider` read `table.provider(name)`, so once the table carries
+  `Core` the typed surface picks `CoreProvider` with no further change.
+- **Marker reconciliation (U9 step 3):** discovery keys on **`pack.jet`** (the
+  ratified marker), but `CoreProvider` still reads the source repo's **`env.jet`**
+  `pkg.package(...)` index to map a package name → subpath. A typed `core` repo
+  therefore carries both today. *Follow-up:* converge so the core provider reads
+  `pack.jet`'s `exports:` and the dual marker retires.
+- Test-first e2e: `tests/jetpack.rs::typed_core_source_inferred_from_pack_jet` —
+  a typed `module dev { sources: { mine: path@<dir> } env.dev: Env { packages:
+  [mine.hello] } }` whose target has a `pack.jet`, run with **no nix on PATH**,
+  realizes the first-party `hello` and prints its output. The nix fallback stays
+  proven by `typed_module_example_builds_offline_end_to_end`.
+
+**Still open:** the `github@…`/git remote `pack.jet` peek (needs realize-time
+`Ctx`; see Next up); `config.jet`/jetos tier (gap #4); `System`/`Image`
+semantics (gap #5); `jet dev`/`jetpack enter` (gap #6).
+
+## Prior chunk (2026-06-16): U4 `find(…)` import-tree discovery
 
 `imports: find("./modules")` now **walks the tree and merges** — the headline
 "drop a file in `modules/` and it joins the env" feature. Closes gap #2.
@@ -132,30 +167,21 @@ reads the Phase-1 `pkg.*` scanner. That is the next chunk (see Next up).
 
 ## Where we are (verified 2026-06-16)
 
-Last **committed**: **`11e7df8`** ("Wire modeval into jetpack: typed env.jet
-build/run end-to-end").
+Last **committed**: the U9 implementation chunk (`build_source_table` infers the
+kind; `tests/jetpack.rs::typed_core_source_inferred_from_pack_jet`). Preceding
+arc commits this session: the **U4 `find(…)` chunk** (`4054b2b`) and the **U9
+docs** (`bf1c645`), both on top of the owner's `fec9230` "Planning" commit.
 
-**⚠ Uncommitted in the working tree (this session — intended, ready to commit):**
-1. The **U4 `find(…)` chunk** — `src/jetpack/modeval.rs`, `tests/jetpack.rs`,
-   `docs/spec/diagnostics.md` (E0969–E0971), and new example files
-   (`examples/jetpack-typed/modules/tools.jet`, `fixtures/default-jq.json`,
-   edited `env.jet`).
-2. The **U9 decision** (docs only, no code): `docs/spec/syntax-decisions.md`
-   (U9 entry + ledger), `docs/plans/jetpack-jetos/unified-ecosystem.md` §6, and
-   this file.
-
-A fresh agent should **commit these first** (the find chunk as one commit, the
-U9 docs as another) before starting the U9 implementation chunk. Full `nix
-develop -c cargo test` was green after the find chunk; the edits since are
-markdown-only (re-running `cargo test --test decisions` stays green). `jet run
-examples/features/01_hello.jet` prints `hello, world`.
+**⚠ Working tree:** only owner noise remains uncommitted (see the noise section
+below) — leave it. Full `nix develop -c cargo test` is green (0 failed across
+the suite); `jet run examples/features/01_hello.jet` prints `hello, world`.
 
 Recent arc: `pack.jet`→`env.jet` clean break + computed modules + manifest
 reshape (`98ff3be`) → U8 nested `sources:`/`imports:` parser → `modeval` wired
-into the CLI (`11e7df8`) → **U4 `find(…)` discovery (uncommitted)** → **U9
-inferred provider kind ratified (uncommitted; not yet built)**. The typed
+into the CLI (`11e7df8`) → U4 `find(…)` discovery (`4054b2b`) → U9 docs
+(`bf1c645`) → **U9 inferred provider kind for `path@…` (this chunk).** The typed
 `module { … }` `env.jet` surface builds and realizes end-to-end, including
-`find(…)` import-tree discovery.
+`find(…)` import-tree discovery and first-party `core` sources.
 
 ### Implemented & shipping (Phase-1 bootstrap)
 - Two binaries: `jet`, `jetpack` (Cargo.toml `[[bin]]`).
@@ -198,9 +224,11 @@ test/example first.
    `*.jet`, and folds its modules into the same `evaluate_env` merge. Liftability
    enforced (E0971); bad/missing `find` is E0969/E0970.
 3. **Typed `env.jet` surface loaded by the CLI — DONE for
-   `sources:`/`imports:`/`env.*` (2026-06-16).** `module dev { sources: {…}
-   imports: find(…) env.dev: Env { … } }` now builds and realizes, including
-   discovered modules. Remaining: `config.jet`/`system`/`image` (gaps #4/#5).
+   `sources:`/`imports:`/`env.*` (2026-06-16), incl. U9 inferred provider kind
+   for `path@…` core sources.** `module dev { sources: {…} imports: find(…)
+   env.dev: Env { … } }` builds and realizes, including discovered modules and
+   first-party `core` sources. Remaining: U9 `github@…`/git remote probe (see
+   Next up); `config.jet`/`system`/`image` (gaps #4/#5).
 4. **`config.jet` + the entire `jetos` tier — not implemented.** `CONFIG_FILE`
    constant only (`src/syntax.rs:438`); never loaded; no `jetos` binary, no
    `src/jetos/`. Scale-3 (`jetos switch/build`).
@@ -211,43 +239,36 @@ test/example first.
 
 ---
 
-## Next up — START HERE: U9, infer the source provider kind
+## Next up — START HERE: U9 remote probe (`github@…`/git core sources)
 
-**Now ratified (U9, 2026-06-16) — no syntax gate.** The owner dissolved the old
-`via: core` blocker by deciding the kind is **inferred, never declared**: a
-source stays `name: provider@target` with no marker, and core-vs-nix is
-discovered from the target. This is the last gap between the typed and directive
-source surfaces. Today `modeval::build_source_table` hard-codes
-`ProviderKind::Nix`, so a typed env can't realize a first-party `core` source.
+U9 for `path@…` shipped this chunk (kind inferred from a local `pack.jet`). The
+one remaining piece of the same rule: a `github@…`/git source whose target is a
+Jet package repo should also realize as **core**. Today `infer_provider_kind`
+returns `Nix` for every non-`path@` provider, so a typed `github@owner/jet-pkgs`
+source can't be first-party.
 
-**The rule (U9; see syntax-decisions.md + unified-ecosystem.md §6):** for a
-source's resolved target — target has a **`pack.jet`** → **core**; else → **nix
-flake**. The probe must not clone a nixpkgs-sized repo: `path@…` stats the dir
-locally; `nixpkgs@…` is unconditionally nix (never probed); `github@…`/git URLs
-peek at **only** `pack.jet` (GitHub raw / shallow `git archive`) before any full
-fetch.
+**The rule is unchanged (U9; syntax-decisions.md + unified-ecosystem.md §6):**
+peek at **only** `pack.jet` over the network (GitHub raw, e.g.
+`https://raw.githubusercontent.com/<owner>/<repo>/<rev>/pack.jet`, or a shallow
+`git archive`) — never clone a nixpkgs-sized repo — and choose `Core`/`Nix` from
+whether that file exists. `nixpkgs@…` stays unconditionally nix.
 
-**Concrete plan (test-first, one chunk):**
-1. **Failing e2e first** (`tests/jetpack.rs`): a typed `examples/jetpack-typed/`
-   variant (or a scratch project) whose `sources:` includes a `path@./jet-pkgs`
-   target containing a `pack.jet` → assert it realizes a first-party package with
-   **no nix** (mirror `core_provider_runs_first_party_package_without_nix`, but
-   through the typed surface). Keep a nix-backed source alongside to prove the
-   fallback still works.
-2. **Stop hard-coding the kind.** `build_source_table` currently passes
-   `ProviderKind::Nix` for every decl. Replace with a probe: resolve the target,
-   detect `pack.jet`, choose `Core`/`Nix`. Decide eager (at table build) vs lazy
-   (at realize, in `provider::pick`/`source_repo`) — lazy is cheaper (only probes
-   sources actually used) and co-locates with the fetch the core provider already
-   does. Entry points: `src/jetpack/modeval.rs::build_source_table`,
-   `src/jetpack/refspec.rs` (`ProviderKind`, `classify_provider_ref`,
-   `SourceTable::provider`), `src/jetpack/provider.rs` (`source_repo`, `pick`).
-3. **Probe guardrails:** `nixpkgs@` short-circuits to nix; the `github@`/git
-   manifest peek fetches only `pack.jet`. Reconcile the marker: the core provider
-   today reads the source repo's **`env.jet`** `pkg.package(...)` index, but U9
-   keys discovery on **`pack.jet`** — pin which file marks a Jet package repo and
-   note any follow-up if they must converge.
-4. Update this doc; unified-ecosystem.md §6 already carries the rule.
+**Why it's a separate chunk:** the probe needs realize-time context the pure
+`modeval` evaluation doesn't have — the `--offline` flag (offline must not hit
+the network; fall back to a cached checkout or default to nix) and the source
+cache dir. So this likely moves the kind decision **lazy**, into
+`provider::provider_for`/`uses_nix_provider` (which already take the
+`SourceTable` and run where `Ctx` is available), or threads a probe result from
+`source_repo`'s fetch. Entry points: `src/jetpack/provider.rs`
+(`provider_for`, `uses_nix_provider`, `source_repo`, `fetch_remote_repo`),
+`src/jetpack/modeval.rs::infer_provider_kind` (today's local path probe).
+
+**Also reconcile the marker (carried over from U9 step 3):** discovery keys on
+**`pack.jet`** but `CoreProvider::realize` still reads the repo's **`env.jet`**
+`pkg.package(...)` index to map package → subpath, so a core repo carries both.
+Converge them — have the core provider read `pack.jet`'s `exports:` — so a Jet
+package repo needs only `pack.jet`. This pairs naturally with the remote chunk
+(the remote peek already fetches `pack.jet`).
 
 **Larger, later (gaps #4/#5/#6), each its own multi-chunk arc:**
 - #5 `System`/`Image` semantics — parsed/validated but inert; only `Env` means
@@ -261,9 +282,9 @@ fetch.
 ## Pre-existing working-tree noise (not part of the arc; leave unstaged)
 
 **⚠ Stage selectively — never `git add -A`/`git add .`.** The tree holds
-substantial **unrelated owner edits** alongside the arc work. Commit only the
-files listed under "Where we are" (the U4 find chunk, then the U9 docs); leave
-everything below untouched and confirm with the owner before touching any of it:
+substantial **unrelated owner edits** alongside the arc work. The arc commits
+this session (U4 find, U9 docs, U9 impl) are already landed; leave everything
+below untouched and confirm with the owner before touching any of it:
 
 - **Owner's own in-progress doc edits** (do not commit with the arc):
   `docs/plans/epoch-2/*.md` (ratification annotations — m2…m11, README),
@@ -274,5 +295,5 @@ everything below untouched and confirm with the owner before touching any of it:
   `docs/plans/{fan-out-and-fixed-size-lists,persona-examples}.md`.
 
 Note: `docs/spec/syntax-decisions.md` and
-`docs/plans/jetpack-jetos/unified-ecosystem.md` **are** part of the arc (U9
-edits) — those go in the U9-docs commit, not the noise pile.
+`docs/plans/jetpack-jetos/unified-ecosystem.md` were part of the arc (U9 edits)
+and are already committed (`bf1c645`) — not noise.
