@@ -238,6 +238,10 @@ before continuing.
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | L1101 | sema  | Task value dropped without `.join()`       |
+| E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
+| E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
+| E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |
+| L2301 | sema  | this return borrows; here is its source (advisory, E2-M5) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -300,6 +304,24 @@ CLI.
 | L1101 | A `Task` is dropped without `.join()`. | The program may end before that task finishes. | Call `.join()` on the task before it goes out of scope. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
+
+## Tier-2 reference diagnostics (E2-M5, S10 `view`/`ref`)
+
+These harden the ownership checker around borrowed returns and stored
+references. They never mention lifetimes; they speak in Jet words — *what
+owns this* and *how long can this view live*. E2301/E2302 supplement the
+tier-1 reference codes (E0206 bare-local `view` return, E0207 unlabeled
+`ref` fields); they do not replace them. E2303 is the reference-specific
+name for the task/channel rule — that situation is **reported once, as
+E1102** (a `view`/`ref` value is unsendable); E2303 exists so `jet explain
+E2303` points there and the soundness matrix has a named cell.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2301 | A `-> view` function returns a view into a field of a value this function owns. | The owning local is made inside the call and freed when it returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at. | Return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it. |
+| E2302 | A `ref` field is filled from a value that won't outlive the struct. | A `ref` field stores a view, not its own copy, so its source must outlive the struct; a local or a fresh literal lives only as long as the call. | Store an owned value (drop `ref` so the struct keeps its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning. |
+| E2303 | A `view` borrow or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A borrowed value points into something another scope owns; a task or channel moves owned data between threads, so a borrow can't go with it. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the borrowed field before crossing, or rebuild the value as an owned copy. |
+| L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
 
 ## C FFI diagnostics (E2-M14, S59)
 

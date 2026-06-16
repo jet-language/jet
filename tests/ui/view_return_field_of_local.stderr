@@ -1,0 +1,7 @@
+Error [E2301]: this view points into `local`, which this function owns
+  --> tests/ui/view_return_field_of_local.jet:7:18
+    |
+  7 |     return local.name;
+    |                  ^^^^
+ Why: `local` is made here and freed when the function returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at
+ Fix: return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it

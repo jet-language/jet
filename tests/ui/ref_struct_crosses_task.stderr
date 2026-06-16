@@ -1,0 +1,7 @@
+Error [E1102]: this task returns `Holder`, which isn't sendable
+  --> tests/ui/ref_struct_crosses_task.jet:12:25
+    |
+ 12 |     val t = tasks.spawn(() => make("hi"));
+    |                         ^^^^^^^^^^
+ Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
+ Fix: give the task plain owned data, or remove the borrowed field before spawning

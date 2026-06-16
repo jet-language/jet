@@ -2074,13 +2074,33 @@ impl<'a> Checker<'a> {
                             }
                         }
                         if self.view_return && !self.expr_ok_for_view_return(e) {
-                            self.diags.push(Diagnostic::error(
-                                "E0206",
-                                "this value can't be handed back as a shared view".to_string(),
-                                "a `view` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here".to_string(),
-                                "return a parameter or const, copy with `.clone()` into an owned return type, or change `-> view` to `->`".to_string(),
-                                Some(e.span()),
-                            ));
+                            // E2301 (tier-2 references, E2-M5): a `view` return that
+                            // points into a *field of a local* names the owner that
+                            // dies at the closing brace ("what owns this?"). The bare
+                            // local case stays E0206. Only one diagnostic fires.
+                            if let Some(owner) = self.view_return_local_owner(e) {
+                                self.diags.push(Diagnostic::error(
+                                    "E2301",
+                                    format!(
+                                        "this view points into `{}`, which this function owns",
+                                        owner
+                                    ),
+                                    format!(
+                                        "`{}` is made here and freed when the function returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at",
+                                        owner
+                                    ),
+                                    "return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it".to_string(),
+                                    Some(e.span()),
+                                ));
+                            } else {
+                                self.diags.push(Diagnostic::error(
+                                    "E0206",
+                                    "this value can't be handed back as a shared view".to_string(),
+                                    "a `view` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here".to_string(),
+                                    "return a parameter or const, copy with `.clone()` into an owned return type, or change `-> view` to `->`".to_string(),
+                                    Some(e.span()),
+                                ));
+                            }
                         }
                         self.note_move_if_direct_ident(e);
                         if let Some(et) = et {
@@ -2702,6 +2722,12 @@ impl<'a> Checker<'a> {
         self.lambda_binding = saved_bind;
         self.expected_type = saved_expected;
 
+        // E2302 (tier-2 references, E2-M5): a `ref` field stored from a value
+        // that won't outlive the struct would dangle ("how long can this view
+        // live?"). Inspected here at the binding site, read-only — the struct
+        // literal itself is elaborated by check_struct_lit.
+        self.check_stored_ref_fields(&b.init);
+
         if let Expr::Lambda(lam) = &b.init {
             if lam.meta.escapes {
                 for name in &lam.meta.mut_captures {
@@ -3102,6 +3128,115 @@ impl<'a> Checker<'a> {
                 false
             }
             _ => false,
+        }
+    }
+
+    /// If `e` reads into a *field* (or index/slice) of a function-local value,
+    /// return the owning local's name. A view into that field would outlive the
+    /// owner — the E2301 ("what owns this?") case. Returns `None` when the root
+    /// is a parameter or const (the caller owns it; that source outlives the
+    /// call) or when `e` isn't a field/index access at all.
+    fn view_return_local_owner(&self, e: &Expr) -> Option<String> {
+        // Only field / index / slice access can borrow *into* an owner.
+        if !matches!(
+            e,
+            Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }
+        ) {
+            return None;
+        }
+        let root = expr_root_ident(e)?;
+        if self.consts.contains_key(root) {
+            return None;
+        }
+        let info = self.lookup(root)?;
+        // Parameters are owned by the caller and outlive the call.
+        if info.param_conv.is_some() {
+            return None;
+        }
+        Some(root.to_string())
+    }
+
+    /// E2302: a struct literal that fills a `ref` field from a source that
+    /// won't outlive the struct stores a view that would dangle. Read-only —
+    /// `check_struct_lit` owns the literal's own elaboration; this only
+    /// inspects the already-inferred init expression at its binding site.
+    fn check_stored_ref_fields(&mut self, init: &Expr) {
+        let Expr::StructLit {
+            type_name,
+            import_ns,
+            fields,
+            ..
+        } = init
+        else {
+            return;
+        };
+        let Some(owner_mod) = self.struct_owner_module(type_name, import_ns.as_deref()) else {
+            return;
+        };
+        let ref_fields: Vec<String> = match self.struct_fields_of(owner_mod, type_name) {
+            Some(defs) => defs
+                .iter()
+                .filter(|(_, _, _, is_ref, _)| *is_ref)
+                .map(|(n, ..)| n.clone())
+                .collect(),
+            None => return,
+        };
+        if ref_fields.is_empty() {
+            return;
+        }
+        for (fname, fspan, fexpr) in fields {
+            if !ref_fields.contains(fname) {
+                continue;
+            }
+            if let Some(why_short) = self.ref_source_dangles(fexpr) {
+                self.diags.push(Diagnostic::error(
+                    "E2302",
+                    format!(
+                        "the `ref` field `{}` would point at something that dies first",
+                        fname
+                    ),
+                    format!(
+                        "a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but {} can live only as long as this function call",
+                        why_short
+                    ),
+                    "store an owned value (drop `ref` and let the struct keep its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning".to_string(),
+                    Some(*fspan),
+                ));
+            }
+        }
+    }
+
+    /// If the expression filling a `ref` field won't outlive the struct, return
+    /// a short noun phrase describing the dangling source (for the E2302 *why*).
+    /// `None` means the source proves it outlives (a parameter or const).
+    fn ref_source_dangles(&self, e: &Expr) -> Option<String> {
+        match e {
+            // A fresh literal has no owner that outlives the struct.
+            Expr::Str(..) => Some("freshly made text".to_string()),
+            Expr::Ident(name, _) => {
+                if self.consts.contains_key(name) {
+                    return None;
+                }
+                let info = self.lookup(name)?;
+                if info.param_conv.is_some() {
+                    None
+                } else {
+                    Some(format!("the local `{}`", name))
+                }
+            }
+            Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. } => {
+                let root = expr_root_ident(e)?;
+                if self.consts.contains_key(root) {
+                    return None;
+                }
+                let info = self.lookup(root)?;
+                if info.param_conv.is_some() {
+                    None
+                } else {
+                    Some(format!("the local `{}`", root))
+                }
+            }
+            _ => None,
         }
     }
 
