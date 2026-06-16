@@ -28,40 +28,24 @@ mod exit_code {
 }
 
 /// Every subcommand the driver dispatches, for `jet` help and the E2101
-/// "did you mean" suggester. The package-management verbs live here too so a
-/// typo like `jet fecth` lands on `fetch`.
-const KNOWN_COMMANDS: &[&str] = &[
-    "check", "build", "run", "test", "new", "dev", "fmt", "fix", "bind", "lsp", "explain",
-    "doctor", "version", "help", "upgrade", "add", "remove", "fetch", "update", "store", "gc",
-    // `install` is a known-but-redirected verb: it has its own teaching error
-    // (E0043 → use `jet fetch`), so it must pass the E2101 gate to reach it.
-    "install",
-];
+/// "did you mean" suggester — generated from the single-source command table in
+/// `cli_spec` so completions, the man page, and this suggester can never drift.
+/// The package-management verbs and the known-but-redirected `install`
+/// (E0043 → `jet fetch`) all live in that table, so a typo like `jet fecth`
+/// still lands on `fetch`.
+fn known_commands() -> Vec<&'static str> {
+    jet::cli_spec::command_names()
+}
 
-/// Known long flags, for the E2102 unknown-flag suggester.
-const KNOWN_FLAGS: &[&str] = &[
-    "--version",
-    "--emit-rust",
-    "--check",
-    "--small",
-    "--locked",
-    "--annotated",
-    "--bench",
-    "--color",
-    "--json",
-    "--path",
-    "--git",
-    "--tag",
-    "--branch",
-    "--rev",
-    "--pkg",
-    "--out",
-    // `jet doctor` flags (E2-M3, D-DX2 / D-BUILD1).
-    "--online",
-    "--network",
-    "--plain",
-    "--fix",
-];
+/// Known long flags (with `--`), for the E2102 unknown-flag suggester. Derived
+/// from the same `cli_spec` tables (global flags + every per-command flag), so a
+/// flag added to a command automatically passes the E2102 gate.
+fn known_flags() -> Vec<String> {
+    jet::cli_spec::flag_names()
+        .iter()
+        .map(|f| format!("--{}", f))
+        .collect()
+}
 
 /// Levenshtein edit distance (same algorithm sema.rs uses for "did you mean").
 /// Kept local to the driver because the sema copy is private and the CLI does
@@ -91,6 +75,59 @@ fn closest<'a>(word: &str, candidates: &[&'a str]) -> Option<&'a str> {
         }
     }
     best.map(|(c, _)| c)
+}
+
+/// D-DX5 external subcommand discovery (cargo-style). Given a word that is NOT a
+/// built-in, return the path to an executable `jet-<word>` on `PATH`, or `None`.
+/// The caller orders this AFTER the built-in check and BEFORE the E2101 typo
+/// path, so a genuine typo of a built-in still teaches and only a real binary
+/// shadows it.
+fn resolve_external(cmd: &str) -> Option<PathBuf> {
+    // Reject anything that isn't a plain subcommand word (no path separators,
+    // no flags) so `jet ./foo` or `jet --x` can never exec an arbitrary file.
+    if cmd.is_empty()
+        || cmd.starts_with('-')
+        || cmd.contains('/')
+        || cmd.contains('\\')
+    {
+        return None;
+    }
+    let exe = format!("{}-{}", jet::syntax::BINARY_NAME, cmd);
+    find_on_path(&exe)
+}
+
+/// Search `PATH` for an executable file named `exe`. std-only (I6); honours the
+/// platform separator. Returns the first match.
+fn find_on_path(exe: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let cand = dir.join(exe);
+        if is_executable_file(&cand) {
+            return Some(cand);
+        }
+    }
+    None
+}
+
+/// True if `p` is a regular file the OS would treat as executable. On Unix we
+/// check the owner/group/other execute bits; elsewhere existence is enough.
+fn is_executable_file(p: &Path) -> bool {
+    let meta = match fs::metadata(p) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// When color is allowed (E2-M3 TTY-aware presentation). Precedence:
@@ -180,6 +217,8 @@ usage:
   {bin} lsp                         language server (stdio JSON-RPC)
   {bin} doctor                      diagnose your environment (rustc, cache, PATH, FFI)
   {bin} doctor --fix                same, applying safe auto-fixes
+  {bin} completions <shell>         print a completion script (bash|zsh|fish)
+  {bin} man [<command>]             print the manual page (roff)
   {bin} lsp doctor                  health-check the language server
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
   {bin} version                     print compiler version
@@ -240,7 +279,7 @@ fn unknown_subcommand(cmd: &str, color: bool) -> ! {
         "{red}Error{reset} [E2101]: {bold}`{cmd}` isn't a {bin} command.{reset}"
     );
     eprintln!(" Why: every {bin} run starts with a command like `run`, `check`, or `new`.");
-    match closest(cmd, KNOWN_COMMANDS) {
+    match closest(cmd, &known_commands()) {
         Some(s) => eprintln!(" Fix: did you mean `{bin} {s}`? Run `{bin} help` to see them all."),
         None => eprintln!(" Fix: run `{bin} help` to see every command."),
     }
@@ -257,7 +296,9 @@ fn unknown_flag(flag: &str, color: bool) -> ! {
         "{red}Error{reset} [E2102]: {bold}`{flag}` isn't a flag {bin} understands.{reset}"
     );
     eprintln!(" Why: {bin} ignores no flags silently, so a typo can't quietly change a build.");
-    match closest(head, KNOWN_FLAGS) {
+    let flags = known_flags();
+    let flag_refs: Vec<&str> = flags.iter().map(|s| s.as_str()).collect();
+    match closest(head, &flag_refs) {
         Some(s) => eprintln!(" Fix: did you mean `{s}`? Run `{bin} help` to see the flags."),
         None => eprintln!(" Fix: run `{bin} help` to see the flags {bin} accepts."),
     }
@@ -301,10 +342,11 @@ fn main() {
         .map(|s| s.as_str());
     let forwards_flags = matches!(first_word, Some("dev") | Some("bind"));
     if !forwards_flags {
+        let flags = known_flags();
         if let Some(bad) = raw.iter().find(|a| {
             a.starts_with("--")
                 && a.as_str() != "--"
-                && !KNOWN_FLAGS.contains(&a.split('=').next().unwrap_or(a.as_str()))
+                && !flags.iter().any(|k| k == a.split('=').next().unwrap_or(a.as_str()))
         }) {
             unknown_flag(bad, stderr_color(&raw));
         }
@@ -351,10 +393,29 @@ fn main() {
         }
     };
 
-    // E2101: reject a typo'd subcommand here, before it is mistaken for a file
-    // to compile. `lsp` is dispatched above and never reaches this point.
-    if !KNOWN_COMMANDS.contains(&cmd) {
-        unknown_subcommand(cmd, stderr_color(&raw));
+    // E2101 / D-DX5: a word that isn't a built-in is resolved here, before it is
+    // mistaken for a file to compile. `lsp` is dispatched above and never
+    // reaches this point. Resolution order (see `resolve_external`):
+    //   1. built-in command  → fall through to dispatch below
+    //   2. external `jet-<cmd>` on PATH → exec it with the remaining args
+    //   3. neither           → E2101 "did you mean" (typos still teach)
+    if !known_commands().contains(&cmd) {
+        match resolve_external(cmd) {
+            Some(prog) => {
+                // cargo-style: forward everything after the subcommand word.
+                let pos = raw.iter().position(|a| a == cmd).unwrap_or(0);
+                let fwd: Vec<&String> = raw.iter().skip(pos + 1).collect();
+                let status = Command::new(&prog)
+                    .args(fwd.iter().map(|s| s.as_str()))
+                    .status()
+                    .unwrap_or_else(|e| {
+                        eprintln!("error: couldn't run `{}`: {}", prog.display(), e);
+                        exit(exit_code::USER_ERROR);
+                    });
+                exit(status.code().unwrap_or(exit_code::USER_ERROR));
+            }
+            None => unknown_subcommand(cmd, stderr_color(&raw)),
+        }
     }
 
     // Commands with no required positional target.
@@ -374,6 +435,15 @@ fn main() {
         "explain" => {
             let code = args.get(1).map(|s| s.as_str());
             run_explain(code, stderr_color(&raw));
+            return;
+        }
+        "completions" => {
+            run_completions(args.get(1).map(|s| s.as_str()), stderr_color(&raw));
+            return;
+        }
+        "man" => {
+            // `jet man` (whole surface) or `jet man <subcommand>` (focused page).
+            print!("{}", jet::cli_spec::man(args.get(1).map(|s| s.as_str())));
             return;
         }
         "fetch" => {
@@ -554,6 +624,34 @@ fn run_explain(code: Option<&str>, color: bool) {
                 Some(s) => eprintln!(" Fix: did you mean `{bin} explain {s}`?"),
                 None => eprintln!(" Fix: copy the `E####` code from an error message and pass it to `{bin} explain`."),
             }
+            exit(exit_code::USAGE);
+        }
+    }
+}
+
+/// `jet completions <bash|zsh|fish>` (E2-M3, D-DX4): print a shell completion
+/// script generated from the single-source `cli_spec` tables, so it can never
+/// drift from the real command/flag surface. An unknown or missing shell teaches
+/// the three supported shells and exits 2 — never a panic.
+fn run_completions(shell: Option<&str>, color: bool) {
+    let bin = jet::syntax::BINARY_NAME;
+    let shell = match shell {
+        Some(s) => s,
+        None => {
+            let (red, bold, _gray, reset) = palette(color);
+            eprintln!("{red}Error{reset}: {bold}`{bin} completions` needs a shell name.{reset}");
+            eprintln!(" Why: the script differs per shell (bash, zsh, fish).");
+            eprintln!(" Fix: try `{bin} completions bash` (or zsh, or fish).");
+            exit(exit_code::USAGE);
+        }
+    };
+    match jet::cli_spec::completions(shell) {
+        Some(script) => print!("{}", script),
+        None => {
+            let (red, bold, _gray, reset) = palette(color);
+            eprintln!("{red}Error{reset}: {bold}`{shell}` isn't a shell {bin} can generate completions for.{reset}");
+            eprintln!(" Why: completions are hand-written per shell; only bash, zsh, and fish are supported.");
+            eprintln!(" Fix: try `{bin} completions bash`, `{bin} completions zsh`, or `{bin} completions fish`.");
             exit(exit_code::USAGE);
         }
     }

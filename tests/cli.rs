@@ -309,6 +309,193 @@ fn doctor_ok() {
     }
 }
 
+// ── Completions + man pages from one source (D-DX4) ──────────────────────────
+
+/// `jet completions bash`: a working bash completion script generated from the
+/// single-source command tables.
+#[test]
+fn completions_bash() {
+    check("completions_bash", &["completions", "bash"]);
+}
+
+/// `jet completions zsh`.
+#[test]
+fn completions_zsh() {
+    check("completions_zsh", &["completions", "zsh"]);
+}
+
+/// `jet completions fish`.
+#[test]
+fn completions_fish() {
+    check("completions_fish", &["completions", "fish"]);
+}
+
+/// An unknown shell teaches the supported ones and exits 2 (never a panic).
+#[test]
+fn completions_unknown_shell() {
+    check("completions_unknown", &["completions", "tcsh"]);
+}
+
+/// `jet man`: the full manual page (roff), from the same tables as `--help`.
+#[test]
+fn man_full() {
+    check("man_full", &["man"]);
+}
+
+/// `jet man run`: a focused page for one subcommand.
+#[test]
+fn man_subcommand() {
+    check("man_run", &["man", "run"]);
+}
+
+/// Drift guard: every built-in subcommand in the single-source `cli_spec` table
+/// MUST appear in each completion script and in the man page. This is what makes
+/// "one source of truth" enforceable — adding a command without it showing up in
+/// completions/man fails here.
+#[test]
+fn completions_and_man_mention_every_command() {
+    let bash = jet::cli_spec::completions_bash();
+    let zsh = jet::cli_spec::completions_zsh();
+    let fish = jet::cli_spec::completions_fish();
+    let man = jet::cli_spec::man(None);
+    for name in jet::cli_spec::command_names() {
+        assert!(bash.contains(name), "bash completion is missing subcommand `{}`", name);
+        assert!(zsh.contains(name), "zsh completion is missing subcommand `{}`", name);
+        assert!(fish.contains(name), "fish completion is missing subcommand `{}`", name);
+        assert!(man.contains(name), "man page is missing subcommand `{}`", name);
+    }
+}
+
+/// Completion scripts and the man page carry no ANSI (they are scripts/markup).
+#[test]
+fn completions_and_man_are_ansi_free() {
+    for o in [
+        transcript(&["completions", "bash"]),
+        transcript(&["completions", "zsh"]),
+        transcript(&["completions", "fish"]),
+        transcript(&["man"]),
+    ] {
+        assert!(!o.contains('\x1b'), "completion/man output must be ANSI-free:\n{}", o);
+    }
+}
+
+// ── External subcommand discovery (D-DX5) ────────────────────────────────────
+
+/// A real `jet-<x>` executable on a temp PATH is invoked as `jet <x>`, cargo
+/// style, with the remaining args forwarded. We also assert that a genuine typo
+/// of a built-in still routes to E2101 (no `jet-biuld` binary exists), proving
+/// the ordering built-in → external → typo.
+#[test]
+#[cfg(unix)]
+fn external_subcommand_is_execed() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = std::env::temp_dir().join(format!("jet-ext-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+    // A tiny `jet-greet` that echoes its args, so we can prove forwarding.
+    let script = tmp.join("jet-greet");
+    {
+        let mut f = fs::File::create(&script).unwrap();
+        writeln!(f, "#!/bin/sh\necho \"greet got: $*\"").unwrap();
+    }
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Prepend our temp dir so `jet-greet` resolves; keep the real PATH too.
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", tmp.display(), old_path);
+
+    let out = Command::new(jet_bin())
+        .args(["greet", "alice", "bob"])
+        .env("PATH", &new_path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet greet");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("greet got: alice bob"),
+        "expected jet to exec jet-greet with forwarded args, got stdout:\n{}\nstderr:\n{}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0));
+
+    // A typo of a built-in (no `jet-biuld` exists) must still be E2101, exit 2.
+    let typo = Command::new(jet_bin())
+        .args(["biuld", "x.jet"])
+        .env("PATH", &new_path)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet biuld");
+    assert_eq!(typo.status.code(), Some(2), "a built-in typo must stay E2101 (exit 2)");
+    assert!(
+        String::from_utf8_lossy(&typo.stderr).contains("E2101"),
+        "a built-in typo must teach E2101, not fall through to an external"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+// ── OSC-8 terminal hyperlinks (D-DX6) ────────────────────────────────────────
+
+/// Capture stderr bytes of `jet ARGS...` under a chosen color regime.
+fn stderr_under(args: &[&str], force_color: bool) -> Vec<u8> {
+    let mut cmd = Command::new(jet_bin());
+    cmd.args(args);
+    if force_color {
+        cmd.env("FORCE_COLOR", "1").env_remove("NO_COLOR");
+    } else {
+        cmd.env("NO_COLOR", "1").env_remove("FORCE_COLOR");
+    }
+    cmd.output().expect("run jet").stderr
+}
+
+/// D-DX6: when color/links are on (`FORCE_COLOR`), a check error's location and
+/// code render as OSC-8 hyperlinks (the `ESC ] 8 ; ;` introducer appears). When
+/// piped / `NO_COLOR`, the bytes are identical to the plain renderer — no escape
+/// of any kind — so scripts and existing goldens are untouched.
+#[test]
+fn osc8_links_present_with_color_absent_when_piped() {
+    let args = ["check", "tests/cli/json_check.jet"];
+
+    let colored = stderr_under(&args, true);
+    let colored_s = String::from_utf8_lossy(&colored);
+    // OSC-8 introducer: ESC ] 8 ; ;
+    assert!(
+        colored_s.contains("\x1b]8;;"),
+        "expected OSC-8 hyperlinks under FORCE_COLOR, got:\n{}",
+        colored_s
+    );
+    // The code link points at a `jet explain` affordance URI.
+    assert!(
+        colored_s.contains("\x1b]8;;jet:E"),
+        "expected the error code to be hyperlinked to a jet explain URI"
+    );
+
+    let plain = stderr_under(&args, false);
+    let plain_s = String::from_utf8_lossy(&plain);
+    assert!(
+        !plain_s.contains('\x1b'),
+        "piped/NO_COLOR output must be byte-identical plain text (no ANSI/OSC), got:\n{}",
+        plain_s
+    );
+
+    // The NO_HYPERLINKS kill switch turns links off while keeping color on.
+    let no_links = Command::new(jet_bin())
+        .args(args)
+        .env("FORCE_COLOR", "1")
+        .env_remove("NO_COLOR")
+        .env("NO_HYPERLINKS", "1")
+        .output()
+        .expect("run jet")
+        .stderr;
+    assert!(
+        !String::from_utf8_lossy(&no_links).contains("\x1b]8;;"),
+        "NO_HYPERLINKS must suppress OSC-8 links"
+    );
+}
+
 /// `jet check --json`: a teaching error (E0037) serializes with a populated
 /// `suggestions` array (the machine-applicable quick-fix the fix engine/LSP
 /// will apply).

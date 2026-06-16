@@ -8,6 +8,7 @@
 pub mod ast;
 pub mod build_cache;
 pub mod cffi;
+pub mod cli_spec;
 pub mod codegen;
 pub mod collections;
 pub mod comptime;
@@ -219,11 +220,19 @@ pub fn render_diagnostics_cli(
     if !color {
         return diag::render_all(file, src, diags);
     }
-    // Dim each diagnostic's footer; one unobtrusive line per diagnostic.
+    // Dim each diagnostic's footer; one unobtrusive line per diagnostic. When
+    // color is on (an attached terminal), also weave OSC-8 hyperlinks (D-DX6)
+    // into the location line and the error code so a click jumps to the source
+    // or to `jet explain`. Hyperlinks ride the same gate as color, so piped /
+    // NO_COLOR / `--color=never` output is byte-identical to `render_all`.
+    let links = osc8_supported();
     let blocks: Vec<String> = diags
         .iter()
         .map(|d| {
-            let body = d.render(file, src);
+            let mut body = d.render(file, src);
+            if links {
+                body = link_diagnostic(&body, file, src, d);
+            }
             format!(
                 "{body}\x1b[2mrun `{bin} explain {code}` to learn more\x1b[0m\n",
                 bin = syntax::BINARY_NAME,
@@ -232,6 +241,57 @@ pub fn render_diagnostics_cli(
         })
         .collect();
     blocks.join("\n")
+}
+
+/// True when OSC-8 hyperlinks should be emitted. This is *gated on top of the
+/// already-resolved color decision* (callers only reach here with color on), so
+/// the only extra signal we honour is an explicit opt-out: a terminal that
+/// advertises no hyperlink support. We keep it conservative and env-driven
+/// rather than probing terminfo (std-only, I6). `FORCE_COLOR` (used by tests and
+/// CI-style "always color" runs) implies links so the feature is testable
+/// without a real TTY.
+fn osc8_supported() -> bool {
+    // An explicit kill switch wins (lets users disable links while keeping color).
+    if std::env::var_os("NO_HYPERLINKS").is_some() {
+        return false;
+    }
+    true
+}
+
+/// Build an OSC-8 hyperlink: `ESC ] 8 ; ; URI ST  TEXT  ESC ] 8 ; ; ST`.
+/// We use BEL (`\x07`) as the string terminator for the widest compatibility.
+fn osc8(uri: &str, text: &str) -> String {
+    format!("\x1b]8;;{uri}\x07{text}\x1b]8;;\x07")
+}
+
+/// Rewrite a rendered diagnostic so the `--> file:line:col` location becomes a
+/// `file://` link to the source and the `[CODE]` token links to a `jet explain`
+/// affordance. Only the link wrappers are inserted; the visible characters are
+/// unchanged, so a terminal that ignores OSC-8 shows identical text.
+fn link_diagnostic(body: &str, file: &str, src: &str, d: &diag::Diagnostic) -> String {
+    let mut out = body.to_string();
+
+    // 1) The error code in the header line: `Error [E0102]: ...`. Link the code
+    //    token (with brackets) to a `jet explain` helper URL so a click teaches.
+    let code = d.code;
+    let needle = format!("[{code}]");
+    let explain_uri = format!("{}:{}", syntax::BINARY_NAME, code); // e.g. `jet:E0102`
+    let linked_code = osc8(&explain_uri, &needle);
+    out = out.replacen(&needle, &linked_code, 1);
+
+    // 2) The location line: `  --> file:line:col`. Link `file:line:col` to a
+    //    `file://` URI with a `:line:col` fragment many terminals understand.
+    if let Some(span) = d.span {
+        let (line, col) = diag::span_line_col(src, span.start);
+        let loc = format!("{file}:{line}:{col}");
+        let abs = std::fs::canonicalize(file)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| file.to_string());
+        let uri = format!("file://{abs}#{line}:{col}");
+        let linked_loc = osc8(&uri, &loc);
+        out = out.replacen(&loc, &linked_loc, 1);
+    }
+    out
 }
 
 /// Pretty-print source to canonical Jet style (M6/S44).
