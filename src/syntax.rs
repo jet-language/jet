@@ -463,6 +463,41 @@ pub const TYPE_ENV: &str = "Env";
 pub const TYPE_SYSTEM: &str = "System";
 pub const TYPE_IMAGE: &str = "Image";
 
+/// U12 (ratified 2026-06-16): the element type of a `System`'s `services:` map.
+/// `Service` is not a top-level namespace (it never appears as `service.<name>:`);
+/// it is the inferred type of each bare `{ … }` record written under `services:`.
+pub const TYPE_SERVICE: &str = "Service";
+
+/// U11 (ratified 2026-06-16): a `System`'s four fields —
+/// `target` / `packages` / `services` / `options`. Anything else is unknown.
+pub const SYSTEM_FIELD_TARGET: &str = "target";
+pub const SYSTEM_FIELD_PACKAGES: &str = "packages";
+pub const SYSTEM_FIELD_SERVICES: &str = "services";
+pub const SYSTEM_FIELD_OPTIONS: &str = "options";
+
+/// U12 (ratified 2026-06-16): the required first field of every `Service` record.
+pub const SERVICE_FIELD_ENABLE: &str = "enable";
+
+/// U13 (ratified 2026-06-16): the typed platform values a `System.target` (and a
+/// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written
+/// as a dotted typed value (an OS namespace `.` an arch), never a quoted string.
+pub const PLATFORM_OS_LINUX: &str = "linux";
+pub const PLATFORM_ARCH_X64: &str = "x64";
+pub const PLATFORM_ARCH_ARM64: &str = "arm64";
+
+/// U14 (ratified 2026-06-16): an `Image`'s fields — required `from: system.<name>`
+/// and optional `format:` (default `iso`). `target`/`packages`/`services`/
+/// `options` are inherited from the referenced `System`, never restated (the lone
+/// exception is an explicit cross-compile `target:`).
+pub const IMAGE_FIELD_FROM: &str = "from";
+pub const IMAGE_FIELD_FORMAT: &str = "format";
+
+/// U14 (ratified 2026-06-16): the disk-image formats — `iso` (default) / `qcow` /
+/// `raw`.
+pub const IMAGE_FORMAT_ISO: &str = "iso";
+pub const IMAGE_FORMAT_QCOW: &str = "qcow";
+pub const IMAGE_FORMAT_RAW: &str = "raw";
+
 /// U3 (ratified 2026-06-16): project environment file (`env` namespace) and the
 /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
 pub const ENV_FILE: &str = "env.jet";

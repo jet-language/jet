@@ -21,7 +21,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Contribution, Expr, Func, Item, ModuleDecl, Namespace, StrPart};
+use crate::ast::{
+    Contribution, ContribValue, Expr, Func, ImageFieldValue, ImageLit, Item, ModuleDecl, Namespace,
+    ServiceEntry, StrPart, SystemFieldValue, SystemLit,
+};
 use crate::comptime;
 use crate::diag::{Diagnostic, Span};
 use crate::syntax;
@@ -35,6 +38,62 @@ use super::refspec::{self, ProviderKind, SourceTable};
 pub struct EvaluatedModule {
     pub name: String,
     pub entries: Vec<((Namespace, String), EntryContribution)>,
+    /// U11: `system.<name>:` contributions, captured for the jetos tier (gap #4
+    /// realizes them; gap #5 only field-checks + captures).
+    pub systems: Vec<SystemPlan>,
+    /// U14: `image.<name>:` contributions, captured for the jetos tier.
+    pub images: Vec<ImagePlan>,
+}
+
+/// U11: a field-checked `system.<name>: { … }` contribution, captured so the
+/// jetos tier (gap #4) can realize it. Pure data — no realize logic here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemPlan {
+    /// The contribution path — the `<name>` in `system.<name>`.
+    pub name: String,
+    /// U13: the typed target platform, e.g. `linux.x64`.
+    pub target: String,
+    /// U6: the packages to install, as `Pkg`s (source-qualified).
+    pub packages: Vec<merge::Pkg>,
+    /// U12: the enabled/typed services, in source order.
+    pub services: Vec<ServicePlan>,
+    /// U13: the ordered option entries (`net.hostName: laptop`), in source order.
+    pub options: Vec<OptionPlan>,
+}
+
+/// U12: one captured `Service` record under a `System`'s `services:` map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServicePlan {
+    /// The service name (the map key), e.g. `openssh`.
+    pub name: String,
+    /// The required `enable` flag (U12).
+    pub enable: bool,
+    /// Any further open-record fields, rendered to display strings, in source
+    /// order. (e.g. `ports: [22]`.)
+    pub extra: Vec<(String, String)>,
+}
+
+/// U13: one captured `options:` entry — a dotted key path and its value, rendered
+/// to a display string.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionPlan {
+    pub key: String,
+    pub value: String,
+}
+
+/// U14: a field-checked `image.<name>: { … }` contribution, captured for the
+/// jetos tier. `target`/`packages`/`services`/`options` are inherited from the
+/// referenced `System` at realize time (gap #4), so they are not stored here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImagePlan {
+    /// The contribution path — the `<name>` in `image.<name>`.
+    pub name: String,
+    /// U14: the source system this image is built from (`from: system.<name>`).
+    pub from: String,
+    /// U14: the disk-image format (`iso` default / `qcow` / `raw`).
+    pub format: String,
+    /// U14: an explicit cross-compile target, if any (else inherited from system).
+    pub target: Option<String>,
 }
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
@@ -95,13 +154,30 @@ fn evaluate_module<'a>(
     funcs: &HashMap<String, &'a Func>,
 ) -> Result<EvaluatedModule, Diagnostic> {
     let mut entries = Vec::new();
+    let mut systems = Vec::new();
+    let mut images = Vec::new();
     for c in &m.contributions {
-        let entry = evaluate_contribution(c, src, base_dir, funcs)?;
-        entries.push(((c.namespace, c.path.clone()), entry));
+        match (&c.namespace, &c.value) {
+            (Namespace::Env, ContribValue::Expr(_)) => {
+                let entry = evaluate_env_contribution(c, src, base_dir, funcs)?;
+                entries.push(((c.namespace, c.path.clone()), entry));
+            }
+            (Namespace::System, ContribValue::System(lit)) => {
+                systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
+            }
+            (Namespace::Image, ContribValue::Image(lit)) => {
+                images.push(evaluate_image(&c.path, lit)?);
+            }
+            // Namespace/value-shape mismatches can't occur: the parser pairs each
+            // namespace with its dedicated value parser (see `contribution`).
+            _ => unreachable!("contribution namespace/value shape mismatch"),
+        }
     }
     Ok(EvaluatedModule {
         name: m.name.clone(),
         entries,
+        systems,
+        images,
     })
 }
 
@@ -113,28 +189,34 @@ fn namespace_type(ns: Namespace) -> &'static str {
     }
 }
 
-fn evaluate_contribution(
+fn evaluate_env_contribution(
     c: &Contribution,
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
 ) -> Result<EntryContribution, Diagnostic> {
     let expected = namespace_type(c.namespace);
+    let ContribValue::Expr(value) = &c.value else {
+        unreachable!("evaluate_env_contribution called on a non-env contribution")
+    };
+    // U18: a bare `{ … }` elaborates to the namespace type; an explicit
+    // `Env { … }` stays legal. A non-record value (or the wrong type name) is
+    // E0966.
     let Expr::StructLit {
         type_name, fields, ..
-    } = &c.value
+    } = value
     else {
-        return Err(not_a_namespace_literal(expected, c.value.span()));
+        return Err(not_a_namespace_literal(expected, value.span()));
     };
-    if type_name != expected {
-        return Err(wrong_namespace_type(expected, type_name, c.value.span()));
+    if !type_name.is_empty() && type_name != expected {
+        return Err(wrong_namespace_type(expected, type_name, value.span()));
     }
 
     let mut entry = EntryContribution::default();
     let extern_names = HashSet::new();
     let globals = HashMap::new();
     for (name, _span, value) in fields {
-        if name == "packages" {
+        if name == syntax::SYSTEM_FIELD_PACKAGES {
             entry.packages.extend(extract_packages(value, src)?);
         } else {
             let v = comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
@@ -146,6 +228,147 @@ fn evaluate_contribution(
         }
     }
     Ok(entry)
+}
+
+/// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
+/// a `SystemPlan`. Validates that every field is one of the four known `System`
+/// fields, that `target` names a known platform, that `services` records carry a
+/// `Bool` `enable`, and that `options` is a list of `key: value` entries.
+fn evaluate_system(
+    path: &str,
+    lit: &SystemLit,
+    src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<SystemPlan, Diagnostic> {
+    let mut target = None;
+    let mut packages = Vec::new();
+    let mut services = Vec::new();
+    let mut options = Vec::new();
+    for field in &lit.fields {
+        match &field.value {
+            SystemFieldValue::Platform { os, arch, span } => {
+                target = Some(check_platform(os, arch, *span)?);
+            }
+            SystemFieldValue::Packages(value) => {
+                packages.extend(extract_packages(value, src)?);
+            }
+            SystemFieldValue::Services(entries) => {
+                for e in entries {
+                    services.push(evaluate_service(e, base_dir, funcs)?);
+                }
+            }
+            SystemFieldValue::Options(entries) => {
+                // U13: option values are typed values / identifiers (`halcyon`,
+                // `default.fish`) or free-form quoted strings — not computed
+                // expressions. Capture the written value by slicing its source
+                // span, the same technique `sources:`/`packages:` use.
+                for e in entries {
+                    let span = e.value_span;
+                    options.push(OptionPlan {
+                        key: e.key.clone(),
+                        value: src[span.start..span.end].trim().to_string(),
+                    });
+                }
+            }
+            SystemFieldValue::Other(_) => {
+                return Err(unknown_record_field(
+                    syntax::TYPE_SYSTEM,
+                    &field.name,
+                    "`target`, `packages`, `services`, `options`",
+                    field.name_span,
+                ));
+            }
+        }
+    }
+    let target = target.ok_or_else(|| missing_system_target(lit.span))?;
+    Ok(SystemPlan {
+        name: path.to_string(),
+        target,
+        packages,
+        services,
+        options,
+    })
+}
+
+/// U13: a `target`/cross-compile platform must name a known OS+arch pair.
+fn check_platform(os: &str, arch: &str, span: Span) -> Result<String, Diagnostic> {
+    let known_arch =
+        matches!(arch, _ if arch == syntax::PLATFORM_ARCH_X64 || arch == syntax::PLATFORM_ARCH_ARM64);
+    if os == syntax::PLATFORM_OS_LINUX && known_arch {
+        Ok(format!("{os}.{arch}"))
+    } else {
+        Err(unknown_platform(os, arch, span))
+    }
+}
+
+/// U12: field-check one `Service` record (open record; requires a `Bool`
+/// `enable`) and capture it as a `ServicePlan`.
+fn evaluate_service(
+    entry: &ServiceEntry,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<ServicePlan, Diagnostic> {
+    let mut enable = None;
+    let mut extra = Vec::new();
+    for (name, span, value) in &entry.fields {
+        let v = comptime::evaluate(value, funcs, &HashSet::new(), base_dir, &HashMap::new())?;
+        if name == syntax::SERVICE_FIELD_ENABLE {
+            match v {
+                comptime::CtValue::Bool(b) => enable = Some(b),
+                _ => return Err(service_enable_not_bool(*span)),
+            }
+        } else {
+            extra.push((name.clone(), v.jet_show()));
+        }
+    }
+    let enable = enable.ok_or_else(|| service_missing_enable(&entry.name, entry.span))?;
+    Ok(ServicePlan {
+        name: entry.name.clone(),
+        enable,
+        extra,
+    })
+}
+
+/// U14/U18: field-check an `image.<name>: { … }` record and capture it as an
+/// `ImagePlan`. Requires `from: system.<name>`; `format` defaults to `iso` and
+/// must be one of the three known formats; only `target:` may be restated (for
+/// cross-compile) — every other inherited field is rejected.
+fn evaluate_image(path: &str, lit: &ImageLit) -> Result<ImagePlan, Diagnostic> {
+    let mut from = None;
+    let mut format = None;
+    let mut target = None;
+    for field in &lit.fields {
+        match &field.value {
+            ImageFieldValue::From { system, .. } => from = Some(system.clone()),
+            ImageFieldValue::Format { word, span } => format = Some(check_format(word, *span)?),
+            ImageFieldValue::Platform { os, arch, span } => {
+                target = Some(check_platform(os, arch, *span)?);
+            }
+            ImageFieldValue::Other(_) => {
+                return Err(image_restated_field(&field.name, field.name_span));
+            }
+        }
+    }
+    let from = from.ok_or_else(|| image_missing_from(lit.span))?;
+    Ok(ImagePlan {
+        name: path.to_string(),
+        from,
+        format: format.unwrap_or_else(|| syntax::IMAGE_FORMAT_ISO.to_string()),
+        target,
+    })
+}
+
+/// U14: an image `format:` must be one of `iso` / `qcow` / `raw`.
+fn check_format(word: &str, span: Span) -> Result<String, Diagnostic> {
+    if word == syntax::IMAGE_FORMAT_ISO
+        || word == syntax::IMAGE_FORMAT_QCOW
+        || word == syntax::IMAGE_FORMAT_RAW
+    {
+        Ok(word.to_string())
+    } else {
+        Err(image_bad_format(word, span))
+    }
 }
 
 /// Pull the package list out of a `packages: [ … ]` field by slicing its
@@ -189,6 +412,11 @@ pub struct EnvPlan {
     pub table: SourceTable,
     pub package_refs: Vec<String>,
     pub prompt: Option<String>,
+    /// U11: every captured `System` across all evaluated modules, in source order.
+    /// The jetos tier (gap #4) realizes these; the dev-shell path ignores them.
+    pub systems: Vec<SystemPlan>,
+    /// U14: every captured `Image`, validated so each `from` names a known system.
+    pub images: Vec<ImagePlan>,
 }
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
@@ -239,6 +467,26 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     for unit in &units {
         modules.extend(evaluate_modules(&unit.items, &unit.src, &unit.base_dir)?);
     }
+
+    // U11/U14: collect every captured System/Image across all modules (source
+    // order), then cross-check each image's `from:` against the known systems.
+    let mut systems: Vec<SystemPlan> = Vec::new();
+    let mut images: Vec<ImagePlan> = Vec::new();
+    for module in &modules {
+        systems.extend(module.systems.iter().cloned());
+        images.extend(module.images.iter().cloned());
+    }
+    let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
+    for image in &images {
+        if !system_names.contains(&image.from) {
+            return Err(image_from_unknown_system(
+                &image.name,
+                &image.from,
+                &system_names,
+            ));
+        }
+    }
+
     let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
 
     // Collect the `env`-namespace contributions in a deterministic order so the
@@ -267,6 +515,8 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         table,
         package_refs,
         prompt,
+        systems,
+        images,
     })
 }
 
@@ -537,6 +787,110 @@ fn packages_not_a_list(span: Span) -> Diagnostic {
             .to_string(),
         "write `packages: [ … ]`".to_string(),
         Some(span),
+    )
+}
+
+/// E0972: an unknown field on a `System` / `Image` / `Service` record (U11/U14).
+fn unknown_record_field(ty: &str, field: &str, known: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0972",
+        format!("`{field}` isn't a field of `{ty}`"),
+        format!("a `{ty}` has a fixed set of fields: {known}"),
+        format!("remove `{field}`, or use one of {known}"),
+        Some(span),
+    )
+}
+
+/// E0973: a `target:` (or cross-compile platform) names an unknown platform (U13).
+fn unknown_platform(os: &str, arch: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0973",
+        format!("`{os}.{arch}` isn't a platform Jet knows"),
+        "U13: a `target` is a typed platform value, not a piece of quoted text — it must be `linux.x64` or `linux.arm64`".to_string(),
+        "write `target: linux.x64` or `target: linux.arm64`".to_string(),
+        Some(span),
+    )
+}
+
+/// E0974: a `System` with no `target` field (U11).
+fn missing_system_target(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0974",
+        "this `System` has no `target`".to_string(),
+        "U11: every machine names the platform it runs on with a typed `target` value".to_string(),
+        "add `target: linux.x64` (or `linux.arm64`)".to_string(),
+        Some(span),
+    )
+}
+
+/// E0975: a `Service` record's `enable` field is not a yes/no value (U12).
+fn service_enable_not_bool(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0975",
+        "a service's `enable` must be `true` or `false`".to_string(),
+        "U12: a `Service` turns on or off with a yes/no `enable` flag".to_string(),
+        "write `enable: true` or `enable: false`".to_string(),
+        Some(span),
+    )
+}
+
+/// E0975: a `Service` record with no `enable` field (U12).
+fn service_missing_enable(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0975",
+        format!("the service `{name}` has no `enable`"),
+        "U12: every `Service` says whether it is on with a required `enable` flag, then any further settings".to_string(),
+        format!("add `enable: true` (or `false`) to `{name}`"),
+        Some(span),
+    )
+}
+
+/// E0976: an `Image` `format:` that isn't `iso` / `qcow` / `raw` (U14).
+fn image_bad_format(word: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0976",
+        format!("`{word}` isn't a disk-image format"),
+        "U14: an image is built as one of three formats — `iso`, `qcow`, or `raw`".to_string(),
+        "write `format: iso`, `format: qcow`, or `format: raw`".to_string(),
+        Some(span),
+    )
+}
+
+/// E0977: an `Image` with no `from:` field (U14).
+fn image_missing_from(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0977",
+        "this `Image` has no `from`".to_string(),
+        "U14: an image is built from a system — `from: system.<name>` names which one".to_string(),
+        "add `from: system.<name>`, e.g. `from: system.halcyon`".to_string(),
+        Some(span),
+    )
+}
+
+/// E0977: an `Image` restates a field it inherits from its system (U14).
+fn image_restated_field(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0977",
+        format!("an image doesn't restate `{field}`"),
+        "U14: `packages`, `services`, and `options` are inherited from the system the image is built from — they are written once on the system, never on the image".to_string(),
+        format!("remove `{field}` from the image; set it on the system instead. (Only an explicit `target:` may be restated, for cross-compiling.)"),
+        Some(span),
+    )
+}
+
+/// E0978: an `Image` `from:` references a system that no contribution defines (U14).
+fn image_from_unknown_system(image: &str, system: &str, known: &[String]) -> Diagnostic {
+    let hint = if known.is_empty() {
+        "no `system.<name>:` contribution is defined".to_string()
+    } else {
+        format!("known systems: {}", known.join(", "))
+    };
+    Diagnostic::error(
+        "E0978",
+        format!("the image `{image}` is built from an unknown system `{system}`"),
+        "U14: `from: system.<name>` must name a `System` defined by some module contribution; the image inherits that system's target, packages, services, and options".to_string(),
+        format!("define `system.{system}: {{ … }}`, or point `from:` at an existing system ({hint})"),
+        None,
     )
 }
 
@@ -837,6 +1191,186 @@ module b {
             rendered,
             "Error [E0969]: an `imports:` directive must be `find(\"<dir>\")`\n  --> env.jet:3:14\n    |\n  3 |     imports: gather(\"./modules\")\n    |              ^^^^^^\n Why: imports auto-discover a directory of modules (U4); the only directive is `find` with a single string-literal path, e.g. `find(\"./modules\")`\n Fix: write `imports: find(\"./modules\")`\n"
         );
+    }
+
+    // ── gap #5: System / Service / Image (U11–U14, U18) ──────────────────
+
+    /// The brief's worked example parses, elaborates (U18 bare `{ … }`), and
+    /// field-checks clean, capturing a `SystemPlan` + `ImagePlan` (not discarded).
+    #[test]
+    fn worked_example_captures_system_and_image() {
+        let src = r#"
+module halcyon {
+    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    system.halcyon: {
+        target: linux.x64,
+        packages: [default.[firefox, btop, ripgrep]],
+        services: {
+            pipewire: { enable: true },
+            openssh: { enable: true, ports: [22] },
+        },
+        options: [
+            net.hostName: halcyon,
+            time.timeZone: "Europe/London",
+            users.nate.shell: default.fish,
+        ],
+    }
+}
+module installer {
+    image.halcyon_iso: { from: system.halcyon, format: iso }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.systems.len(), 1);
+        let sys = &plan.systems[0];
+        assert_eq!(sys.name, "halcyon");
+        assert_eq!(sys.target, "linux.x64");
+        assert_eq!(
+            sys.packages,
+            vec![
+                merge::Pkg::new("default", "firefox"),
+                merge::Pkg::new("default", "btop"),
+                merge::Pkg::new("default", "ripgrep"),
+            ]
+        );
+        assert_eq!(sys.services.len(), 2);
+        assert_eq!(sys.services[0].name, "pipewire");
+        assert!(sys.services[0].enable);
+        assert_eq!(sys.services[1].name, "openssh");
+        assert_eq!(sys.services[1].extra, vec![("ports".to_string(), "[22]".to_string())]);
+        assert_eq!(
+            sys.options,
+            vec![
+                OptionPlan { key: "net.hostName".into(), value: "halcyon".into() },
+                OptionPlan { key: "time.timeZone".into(), value: "\"Europe/London\"".into() },
+                OptionPlan { key: "users.nate.shell".into(), value: "default.fish".into() },
+            ]
+        );
+        assert_eq!(plan.images.len(), 1);
+        assert_eq!(plan.images[0].name, "halcyon_iso");
+        assert_eq!(plan.images[0].from, "halcyon");
+        assert_eq!(plan.images[0].format, "iso");
+        assert_eq!(plan.images[0].target, None);
+    }
+
+    /// I5: the committed `examples/jetpack-typed/system.jet` is the executable
+    /// spec for the typed jetos surface — it must field-check clean and capture a
+    /// system + image.
+    #[test]
+    fn committed_system_example_field_checks_clean() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/jetpack-typed/system.jet");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let dir = path.parent().unwrap();
+        let plan = evaluate_env(&src, dir).unwrap();
+        assert_eq!(plan.systems.len(), 1);
+        assert_eq!(plan.systems[0].name, "halcyon");
+        assert_eq!(plan.images.len(), 1);
+        assert_eq!(plan.images[0].from, "halcyon");
+    }
+
+    /// U18: an explicit `System { … }` / `Service { … }` / `Image { … }` is still
+    /// legal alongside the inferred bare form.
+    #[test]
+    fn explicit_type_names_still_parse() {
+        let src = r#"
+module m {
+    system.box: System {
+        target: linux.arm64,
+        services: { sshd: Service { enable: false } },
+    }
+    image.box_iso: Image { from: system.box }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.systems[0].target, "linux.arm64");
+        assert!(!plan.systems[0].services[0].enable);
+        assert_eq!(plan.images[0].format, "iso");
+    }
+
+    #[test]
+    fn unknown_system_field_is_e0972() {
+        let src = "module m { system.s: { target: linux.x64, gpu: true } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0972");
+        let rendered = crate::diag::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert_eq!(
+            rendered,
+            "Error [E0972]: `gpu` isn't a field of `System`\n  --> config.jet:1:43\n    |\n  1 | module m { system.s: { target: linux.x64, gpu: true } }\n    |                                           ^^^\n Why: a `System` has a fixed set of fields: `target`, `packages`, `services`, `options`\n Fix: remove `gpu`, or use one of `target`, `packages`, `services`, `options`\n"
+        );
+    }
+
+    #[test]
+    fn unknown_platform_target_is_e0973() {
+        let src = "module m { system.s: { target: windows.x64 } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0973");
+        let rendered = crate::diag::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("`windows.x64` isn't a platform"), "{rendered}");
+    }
+
+    #[test]
+    fn system_without_target_is_e0974() {
+        let src = "module m { system.s: { packages: [default.fd] } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0974");
+    }
+
+    #[test]
+    fn service_without_enable_is_e0975() {
+        let src = "module m { system.s: { target: linux.x64, services: { ssh: { ports: [22] } } } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0975");
+        let rendered = crate::diag::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("`ssh` has no `enable`"), "{rendered}");
+    }
+
+    #[test]
+    fn service_enable_not_bool_is_e0975() {
+        let src = "module m { system.s: { target: linux.x64, services: { ssh: { enable: 1 } } } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0975");
+    }
+
+    #[test]
+    fn bad_image_format_is_e0976() {
+        let src = "module m { system.s: { target: linux.x64 } image.i: { from: system.s, format: dmg } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0976");
+        let rendered = crate::diag::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("`dmg` isn't a disk-image format"), "{rendered}");
+    }
+
+    #[test]
+    fn image_without_from_is_e0977() {
+        let src = "module m { image.i: { format: iso } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0977");
+    }
+
+    #[test]
+    fn image_restating_inherited_field_is_e0977() {
+        let src = "module m { system.s: { target: linux.x64 } image.i: { from: system.s, packages: [default.fd] } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0977");
+        let rendered = crate::diag::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("doesn't restate `packages`"), "{rendered}");
+    }
+
+    #[test]
+    fn image_cross_compile_target_is_allowed() {
+        let src = "module m { system.s: { target: linux.x64 } image.i: { from: system.s, target: linux.arm64 } }";
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.images[0].target.as_deref(), Some("linux.arm64"));
+    }
+
+    #[test]
+    fn image_from_unknown_system_is_e0978() {
+        let src = "module m { image.i: { from: system.nope } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0978");
+        let rendered = crate::diag::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("unknown system `nope`"), "{rendered}");
     }
 
     #[test]

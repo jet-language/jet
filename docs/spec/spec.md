@@ -457,14 +457,65 @@ namespace   = "env" | "system" | "image" ;
 - **Reserved namespaces** are `env` → `Env` (dev environment), `system` →
   `System` (whole machine), `image` → `Image` (disk image). Any other namespace
   is **E0960** (parse).
-- **Contribution values reuse the ordinary expression parser** — a contribution
-  value is any `expr`, typically a struct literal (`Env { packages: […],
-  prompt: "…" }`), so struct literals, lists, and strings work with no new
-  grammar.
+- **`env.<name>:` values reuse the ordinary expression parser** — typically a
+  struct literal (`Env { packages: […], prompt: "…" }`), so lists and strings
+  work with no new grammar.
+- **`system.<name>:` and `image.<name>:` values use dedicated typed parsers**
+  (U11/U13/U14) — the `options` list (`net.hostName: laptop`), the typed
+  `target` value (`linux.x64`), and the `Service` map don't fit the ordinary
+  expression grammar.
 
-Stage 1a is parser-only: modules are accepted into the AST (`Item::Module`) but
-not yet type-checked or evaluated. The U5 merge engine and the pure-eval
-pipeline (computed contributions) consume them in later stages.
+Stage 1a is parser-only for the AST shape; the jetpack module evaluator
+(`src/jetpack/modeval.rs`) gives these contributions meaning (field-checking +
+capture into a plan model). The U5 merge engine consumes `env` contributions.
+
+### `System` / `Service` / `Image` (U11–U14, U18; modeval field-check + capture)
+
+```ebnf
+system_lit  = [ "System" ] "{" system_field { "," system_field } [ "," ] "}" ;
+system_field = "target"   ":" platform
+             | "packages" ":" list
+             | "services" ":" service_map
+             | "options"  ":" option_list ;
+platform    = ident "." ident ;                    (* U13: linux.x64 / linux.arm64 *)
+service_map = "{" { ident ":" service_rec [ "," ] } "}" ;
+service_rec = [ "Service" ] "{" { ident ":" expr [ "," ] } "}" ;
+option_list = "[" { dotted_key ":" expr [ "," ] } "]" ;
+dotted_key  = ident { "." ident } ;
+image_lit   = [ "Image" ] "{" image_field { "," image_field } [ "," ] "}" ;
+image_field = "from"   ":" "system" "." ident      (* U14: required *)
+            | "format" ":" ident                   (* U14: iso | qcow | raw, default iso *)
+            | "target" ":" platform ;              (* U14: cross-compile only *)
+```
+
+- **U11 — `System` fields.** A `System` has exactly four fields: `target` (a
+  typed platform value, required), `packages` (a `Pkg` list, U6 sugar applies),
+  `services` (a keyed `Service` map), and `options` (an ordered key/value list).
+  Any other field is **E0972**; a missing `target` is **E0974**.
+- **U13 — `target` & `options`.** `target` is a typed platform value
+  (`linux.x64` / `linux.arm64`), never a quoted string — an unknown platform is
+  **E0973**. `options:` is an ordered **list** of dotted-key `key: value` entries
+  (`net.hostName: laptop`, `time.timeZone: "Europe/London"`) — no `set(…)`
+  wrapper. Values that are jet identifiers or typed values are written bare; only
+  free-form strings (timezones, paths) keep quotes.
+- **U12 — `Service` is an open record.** Each service under `services:` is a bare
+  `{ … }` (type inferred, U18) whose first field is `enable: Bool` (required —
+  missing is **E0975**, non-Bool is **E0975**); any further fields are allowed.
+- **U14 — `Image` derives from a `System`.** An `Image` has `from: system.<name>`
+  (required — missing is **E0977**; an unknown system is **E0978**) and an
+  optional `format:` ∈ {`iso`, `qcow`, `raw`}, default `iso` (anything else is
+  **E0976**). `packages`/`services`/`options` are inherited from the system and
+  must not be restated (**E0977**); only `target:` may be restated, for
+  cross-compiling.
+- **U18 — inferred constructors.** Under a typed namespace (`system.<name>:`,
+  `image.<name>:`, `env.<name>:`) or a typed field (`services:` holds `Service`s)
+  the type name is optional: a bare `{ … }` elaborates to it. The explicit
+  `System { … }` / `Image { … }` / `Service { … }` / `Env { … }` form stays legal.
+
+The evaluator captures each `system.<name>:` into a `SystemPlan` and each
+`image.<name>:` into an `ImagePlan` (`src/jetpack/modeval.rs`), carried on
+`EnvPlan` so the jetos realize tier can consume them; the dev-shell path ignores
+them. Realize/activation is a separate chunk.
 
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 

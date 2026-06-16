@@ -219,6 +219,13 @@ before continuing.
 | E0969 | jetpack | an `imports:` directive isn't `find("<dir>")` with a literal path (U4) |
 | E0970 | jetpack | `imports: find("<dir>")` points at a directory that doesn't exist (U4) |
 | E0971 | jetpack | a discovered module has its own `imports:` (liftability law, U4) |
+| E0972 | jetpack | unknown field on a `System` / `Image` / `Service` record (U11/U14) |
+| E0973 | jetpack | `target` (or cross-compile platform) isn't a known platform value (U13) |
+| E0974 | jetpack | a `System` has no `target` (U11) |
+| E0975 | jetpack | a `Service` has no `enable`, or `enable` isn't `true`/`false` (U12) |
+| E0976 | jetpack | an `Image` `format:` isn't `iso` / `qcow` / `raw` (U14) |
+| E0977 | jetpack | an `Image` has no `from`, or restates an inherited field (U14) |
+| E0978 | jetpack | an `Image` `from:` references an unknown `System` (U14) |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
@@ -266,6 +273,13 @@ CLI.
 | E0969 | An `imports:` directive isn't `find("<dir>")` with a single literal path. | Imports auto-discover a directory of modules (U4); the only directive is `find` with one string-literal path, so a non-`find` call or an interpolated/missing argument can't be walked. | Write `imports: find("./modules")`. |
 | E0970 | `imports: find("<dir>")` points at a directory that doesn't exist. | `find` walks that directory for `.jet` modules (U4); it must exist relative to the file that declares it, or there is nothing to discover. | Create the directory, or fix the path so it points at your modules folder. |
 | E0971 | A module discovered by `find(…)` has its own `imports:`. | The liftability law (U4): modules contribute to the merged whole, they never import each other — nesting `find` would make composition explode and break "drop a file in." | Remove the `imports:` from the discovered module; declare all `find(…)` directives in the top-level env.jet. |
+| E0972 | A `System` / `Image` / `Service` record has a field it doesn't define. | Each of these records has a fixed set of fields (U11/U14); an unknown field is usually a typo or a value that belongs elsewhere. | Remove the field, or use one of the known fields named in the error. |
+| E0973 | A `target` (or cross-compile platform) names a platform Jet doesn't know. | U13: a `target` is a typed platform value, not quoted text — it must be `linux.x64` or `linux.arm64`, so it type-checks and LSP-completes. | Write `target: linux.x64` or `target: linux.arm64`. |
+| E0974 | A `System` has no `target`. | U11: every machine names the platform it runs on with a typed `target`. | Add `target: linux.x64` (or `linux.arm64`). |
+| E0975 | A `Service` has no `enable`, or its `enable` isn't a yes/no value. | U12: every `Service` is an open record whose required first field is `enable: Bool`. | Add `enable: true` (or `false`) to the service. |
+| E0976 | An `Image` `format:` isn't one of the three disk-image formats. | U14: an image is built as `iso`, `qcow`, or `raw` (default `iso`). | Write `format: iso`, `format: qcow`, or `format: raw`. |
+| E0977 | An `Image` has no `from`, or restates a field it inherits from its system. | U14: an image is built `from: system.<name>` and inherits that system's `packages`/`services`/`options` — they are written once on the system. | Add `from: system.<name>`, or remove the inherited field (only an explicit `target:` may be restated, for cross-compiling). |
+| E0978 | An `Image` `from:` references a system no contribution defines. | U14: `from: system.<name>` must name a `System` defined by some module, because the image inherits its target, packages, services, and options. | Define `system.<name>: { … }`, or point `from:` at an existing system. |
 
 ## Concurrency diagnostics
 

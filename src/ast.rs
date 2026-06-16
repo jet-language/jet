@@ -289,8 +289,136 @@ pub struct Contribution {
     pub namespace: Namespace,
     pub path: String,
     pub path_span: Span,
-    pub value: Expr,
+    pub value: ContribValue,
     pub span: Span,
+}
+
+/// U11/U12/U14/U18: the value of a typed contribution. `env.<name>:` reuses the
+/// ordinary expression parser (a struct literal), while `system.<name>:` and
+/// `image.<name>:` parse into dedicated typed literals so the U13 `options` list
+/// (`net.hostName: laptop`), the U13 typed `target` value (`linux.x64`), the U12
+/// `Service` map, and U18 bare-`{ … }` records all have a home — none of which fit
+/// the ordinary expression grammar.
+#[derive(Debug)]
+pub enum ContribValue {
+    /// `env.<name>:` — any expression, typically `Env { … }` (or a bare `{ … }`,
+    /// U18). modeval field-checks it.
+    Expr(Expr),
+    /// `system.<name>:` — a `System` record (U11).
+    System(SystemLit),
+    /// `image.<name>:` — an `Image` record (U14).
+    Image(ImageLit),
+}
+
+impl ContribValue {
+    pub fn span(&self) -> Span {
+        match self {
+            ContribValue::Expr(e) => e.span(),
+            ContribValue::System(s) => s.span,
+            ContribValue::Image(i) => i.span,
+        }
+    }
+}
+
+/// U11/U18: a `System { target, packages, services, options }` record. The
+/// outer type name is optional (U18 inferred constructor): `explicit_type` is
+/// `Some(span)` when the author wrote `System { … }`, `None` for a bare `{ … }`.
+/// Field-checking (which fields are known, that `target` is a known platform, etc.)
+/// lives in modeval, not the parser.
+#[derive(Debug)]
+pub struct SystemLit {
+    pub explicit_type: Option<Span>,
+    pub fields: Vec<SystemField>,
+    pub span: Span,
+}
+
+/// One `name: value` field inside a `System { … }` record. The value's shape
+/// depends on the field; modeval validates it against U11.
+#[derive(Debug)]
+pub struct SystemField {
+    pub name: String,
+    pub name_span: Span,
+    pub value: SystemFieldValue,
+    pub span: Span,
+}
+
+/// The parsed value of one `System` field (U11/U12/U13).
+#[derive(Debug)]
+pub enum SystemFieldValue {
+    /// `target: linux.x64` — a dotted typed platform value (U13). Stores the two
+    /// dotted segments (`os`, `arch`) and the whole value's span.
+    Platform { os: String, arch: String, span: Span },
+    /// `packages: [ … ]` — a `ListLit` whose Pkg sugar modeval slices from source.
+    Packages(Expr),
+    /// `services: { name: { … }, … }` — a keyed map of bare `Service` records (U12).
+    Services(Vec<ServiceEntry>),
+    /// `options: [ net.hostName: laptop, … ]` — an ordered list of dotted-key /
+    /// value entries (U13).
+    Options(Vec<OptionEntry>),
+    /// Any other field — captured as an expression so modeval can report it as an
+    /// unknown `System` field with a span.
+    Other(Expr),
+}
+
+/// U12: one `name: { … }` entry in a `services:` map. The record is an inferred
+/// `Service` (U18); `explicit_type` is `Some(span)` if the author wrote
+/// `Service { … }`. Fields are arbitrary (open record); modeval requires `enable`.
+#[derive(Debug)]
+pub struct ServiceEntry {
+    pub name: String,
+    pub name_span: Span,
+    pub explicit_type: Option<Span>,
+    pub fields: Vec<(String, Span, Expr)>,
+    pub span: Span,
+}
+
+/// U13: one `dotted.key: value` entry in an `options:` list. `key` is the dotted
+/// path text (`net.hostName`); `value` is any expression (bare identifier, dotted
+/// typed value, list, or quoted free-form string).
+#[derive(Debug)]
+pub struct OptionEntry {
+    pub key: String,
+    pub key_span: Span,
+    pub value: Expr,
+    /// The full source span of the written value (`default.fish`), recorded
+    /// directly so modeval can slice the typed value text without depending on
+    /// each `Expr` variant's span covering its whole written form.
+    pub value_span: Span,
+    pub span: Span,
+}
+
+/// U14/U18: an `Image { from: system.<name>, format: iso }` record. `explicit_type`
+/// mirrors `SystemLit`. `from`/`format`/`target` and any stray field are captured;
+/// modeval validates them (U14: `from` required and references a known `System`;
+/// `format` ∈ {iso, qcow, raw}; only `target:` may be restated, for cross-compile).
+#[derive(Debug)]
+pub struct ImageLit {
+    pub explicit_type: Option<Span>,
+    pub fields: Vec<ImageField>,
+    pub span: Span,
+}
+
+/// One `name: value` field inside an `Image { … }` record.
+#[derive(Debug)]
+pub struct ImageField {
+    pub name: String,
+    pub name_span: Span,
+    pub value: ImageFieldValue,
+    pub span: Span,
+}
+
+/// The parsed value of one `Image` field (U14).
+#[derive(Debug)]
+pub enum ImageFieldValue {
+    /// `from: system.<name>` — references a `System` by name. Stores the name and
+    /// the whole value span.
+    From { system: String, span: Span },
+    /// `format: iso` — a bare format keyword. Stores the word and its span.
+    Format { word: String, span: Span },
+    /// `target: linux.x64` — an explicit cross-compile platform (U14).
+    Platform { os: String, arch: String, span: Span },
+    /// Any other field — captured so modeval can reject restated inherited fields.
+    Other(Expr),
 }
 
 /// U3 (unified-ecosystem §5): the reserved namespaces a module may contribute

@@ -292,6 +292,11 @@ impl<'a> Parser<'a> {
         &self.toks[(self.pos + 1).min(self.toks.len() - 1)]
     }
 
+    /// End byte of the most recently consumed token (the one before the cursor).
+    fn prev_end(&self) -> usize {
+        self.toks[self.pos.saturating_sub(1)].span.end
+    }
+
     fn bump(&mut self) -> Token {
         let t = self.peek().clone();
         if self.pos < self.toks.len() - 1 {
@@ -3385,7 +3390,15 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Dot, "after the namespace name")?;
         let (path, path_span) = self.expect_ident("for the contribution name")?;
         self.expect(TokKind::Colon, "after the contribution name")?;
-        let value = self.expr()?;
+        // U11/U14/U18: `system.<name>:` and `image.<name>:` parse into dedicated
+        // typed literals (the U13 `options` list, the typed `target` value, the
+        // U12 `Service` map, and U18 bare `{ … }` don't fit the ordinary
+        // expression grammar). `env.<name>:` keeps the ordinary expression parser.
+        let value = match namespace {
+            Namespace::Env => crate::ast::ContribValue::Expr(self.expr()?),
+            Namespace::System => crate::ast::ContribValue::System(self.system_lit()?),
+            Namespace::Image => crate::ast::ContribValue::Image(self.image_lit()?),
+        };
         let end = value.span().end;
         if matches!(self.peek().kind, TokKind::Comma) {
             self.bump();
@@ -3396,6 +3409,214 @@ impl<'a> Parser<'a> {
             path_span,
             value,
             span: Span::new(ns_span.start, end),
+        })
+    }
+
+    /// U11/U18: parse a `System { … }` or bare `{ … }` record. The type name
+    /// `System` is optional (U18 inferred constructor); when present it is
+    /// recorded so modeval can keep allowing the explicit form (S29).
+    fn system_lit(&mut self) -> Result<crate::ast::SystemLit, Diagnostic> {
+        let start = self.peek().span.start;
+        let explicit_type = self.opt_record_type(syntax::TYPE_SYSTEM)?;
+        self.expect(TokKind::LBrace, "to open a `System` record")?;
+        let mut fields = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            fields.push(self.system_field()?);
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close a `System` record")?;
+        Ok(crate::ast::SystemLit {
+            explicit_type,
+            fields,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// U18: an optional record type name before `{`. Returns its span when the
+    /// author wrote it (`System { … }` / `Image { … }` / `Service { … }`), `None`
+    /// for a bare `{ … }`. A type name other than `expected` is left for `{` to
+    /// reject, so the message stays about the record shape.
+    fn opt_record_type(&mut self, expected: &str) -> Result<Option<Span>, Diagnostic> {
+        if self.peek_is_ident(expected) && matches!(self.peek2().kind, TokKind::LBrace) {
+            Ok(Some(self.bump().span))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// U11/U12/U13: one field inside a `System { … }` record.
+    fn system_field(&mut self) -> Result<crate::ast::SystemField, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for a `System` field name")?;
+        self.expect(TokKind::Colon, "after a `System` field name")?;
+        let value = match name.as_str() {
+            syntax::SYSTEM_FIELD_TARGET => {
+                let (os, arch, span) = self.platform_value()?;
+                crate::ast::SystemFieldValue::Platform { os, arch, span }
+            }
+            syntax::SYSTEM_FIELD_PACKAGES => {
+                crate::ast::SystemFieldValue::Packages(self.expr()?)
+            }
+            syntax::SYSTEM_FIELD_SERVICES => {
+                crate::ast::SystemFieldValue::Services(self.services_map()?)
+            }
+            syntax::SYSTEM_FIELD_OPTIONS => {
+                crate::ast::SystemFieldValue::Options(self.options_list()?)
+            }
+            _ => crate::ast::SystemFieldValue::Other(self.expr()?),
+        };
+        let end = value_end_system(&value);
+        Ok(crate::ast::SystemField {
+            name,
+            name_span,
+            value,
+            span: Span::new(name_span.start, end),
+        })
+    }
+
+    /// U13: a dotted typed platform value — `linux.x64`. Two name segments joined
+    /// by `.`; modeval checks they name a known platform.
+    fn platform_value(&mut self) -> Result<(String, String, Span), Diagnostic> {
+        let (os, os_span) = self.expect_ident("for a platform, e.g. `linux`")?;
+        self.expect(TokKind::Dot, "between the platform and its architecture")?;
+        let (arch, arch_span) = self.expect_ident("for an architecture, e.g. `x64`")?;
+        Ok((os, arch, Span::new(os_span.start, arch_span.end)))
+    }
+
+    /// U12/U18: a `services: { name: { … }, … }` map — each entry is a service
+    /// name and an inferred (or explicit) `Service` record.
+    fn services_map(&mut self) -> Result<Vec<crate::ast::ServiceEntry>, Diagnostic> {
+        self.expect(TokKind::LBrace, "to open the `services` map")?;
+        let mut out = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            let (name, name_span) = self.expect_ident("for a service name")?;
+            self.expect(TokKind::Colon, "after a service name")?;
+            let explicit_type = self.opt_record_type(syntax::TYPE_SERVICE)?;
+            self.expect(TokKind::LBrace, "to open a `Service` record")?;
+            let mut fields = Vec::new();
+            while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                let (field, field_span) = self.expect_ident("for a `Service` field name")?;
+                self.expect(TokKind::Colon, "after a `Service` field name")?;
+                let value = self.expr()?;
+                fields.push((field, field_span, value));
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                }
+            }
+            let rec_end = self.peek().span.end;
+            self.expect(TokKind::RBrace, "to close a `Service` record")?;
+            out.push(crate::ast::ServiceEntry {
+                name,
+                name_span,
+                explicit_type,
+                fields,
+                span: Span::new(name_span.start, rec_end),
+            });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the `services` map")?;
+        Ok(out)
+    }
+
+    /// U13: an `options: [ dotted.key: value, … ]` ordered list. Each entry is a
+    /// dotted key path and a value expression (bare identifier, dotted typed
+    /// value, list, or quoted free-form string).
+    fn options_list(&mut self) -> Result<Vec<crate::ast::OptionEntry>, Diagnostic> {
+        self.expect(TokKind::LBracket, "to open the `options` list")?;
+        let mut out = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
+            let (mut key, key_start) = self.expect_ident("for an option key, e.g. `net.hostName`")?;
+            let mut key_end = key_start.end;
+            while matches!(self.peek().kind, TokKind::Dot) {
+                self.bump();
+                let (seg, seg_span) = self.expect_ident("for the next part of the option key")?;
+                key.push('.');
+                key.push_str(&seg);
+                key_end = seg_span.end;
+            }
+            let key_span = Span::new(key_start.start, key_end);
+            self.expect(TokKind::Colon, "after an option key")?;
+            let value_start = self.peek().span.start;
+            let value = self.expr()?;
+            // Record the value's full written span from the first token of the
+            // value to the last token consumed (the token before the cursor) —
+            // robust for dotted typed values like `default.fish` whose `Expr`
+            // span covers only the final member.
+            let value_end = self.prev_end();
+            out.push(crate::ast::OptionEntry {
+                key,
+                key_span,
+                value,
+                value_span: Span::new(value_start, value_end),
+                span: Span::new(key_start.start, value_end),
+            });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBracket, "to close the `options` list")?;
+        Ok(out)
+    }
+
+    /// U14/U18: parse an `Image { … }` or bare `{ … }` record.
+    fn image_lit(&mut self) -> Result<crate::ast::ImageLit, Diagnostic> {
+        let start = self.peek().span.start;
+        let explicit_type = self.opt_record_type(syntax::TYPE_IMAGE)?;
+        self.expect(TokKind::LBrace, "to open an `Image` record")?;
+        let mut fields = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            fields.push(self.image_field()?);
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close an `Image` record")?;
+        Ok(crate::ast::ImageLit {
+            explicit_type,
+            fields,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// U14: one field inside an `Image { … }` record.
+    fn image_field(&mut self) -> Result<crate::ast::ImageField, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for an `Image` field name")?;
+        self.expect(TokKind::Colon, "after an `Image` field name")?;
+        let value = match name.as_str() {
+            syntax::IMAGE_FIELD_FROM => {
+                // `from: system.<name>` — the `system` keyword then the name.
+                let (kw, kw_span) = self.expect_ident("for `system`, e.g. `system.halcyon`")?;
+                if kw != syntax::NS_SYSTEM {
+                    return Err(image_from_not_system(kw_span));
+                }
+                self.expect(TokKind::Dot, "after `system`")?;
+                let (sys, sys_span) = self.expect_ident("for the system name")?;
+                crate::ast::ImageFieldValue::From {
+                    system: sys,
+                    span: Span::new(kw_span.start, sys_span.end),
+                }
+            }
+            syntax::IMAGE_FIELD_FORMAT => {
+                let (word, span) = self.expect_ident("for a format, e.g. `iso`")?;
+                crate::ast::ImageFieldValue::Format { word, span }
+            }
+            syntax::SYSTEM_FIELD_TARGET => {
+                let (os, arch, span) = self.platform_value()?;
+                crate::ast::ImageFieldValue::Platform { os, arch, span }
+            }
+            _ => crate::ast::ImageFieldValue::Other(self.expr()?),
+        };
+        let end = value_end_image(&value);
+        Ok(crate::ast::ImageField {
+            name,
+            name_span,
+            value,
+            span: Span::new(name_span.start, end),
         })
     }
 
@@ -4220,6 +4441,37 @@ impl<'a> Parser<'a> {
             )),
         }
     }
+}
+
+/// End byte of a parsed `System` field value, for the field's span.
+fn value_end_system(v: &crate::ast::SystemFieldValue) -> usize {
+    use crate::ast::SystemFieldValue::*;
+    match v {
+        Platform { span, .. } => span.end,
+        Packages(e) | Other(e) => e.span().end,
+        Services(entries) => entries.last().map(|s| s.span.end).unwrap_or(0),
+        Options(entries) => entries.last().map(|o| o.span.end).unwrap_or(0),
+    }
+}
+
+/// End byte of a parsed `Image` field value, for the field's span.
+fn value_end_image(v: &crate::ast::ImageFieldValue) -> usize {
+    use crate::ast::ImageFieldValue::*;
+    match v {
+        From { span, .. } | Format { span, .. } | Platform { span, .. } => span.end,
+        Other(e) => e.span().end,
+    }
+}
+
+/// U14: `from:` must be written `system.<name>`.
+fn image_from_not_system(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0003",
+        "an image's `from:` must name a system".to_string(),
+        "U14: an `Image` is built from a `System`, written `from: system.<name>`".to_string(),
+        "write `from: system.<name>`, e.g. `from: system.halcyon`".to_string(),
+        Some(span),
+    )
 }
 
 fn binding_why() -> String {

@@ -105,7 +105,7 @@ fn leading_underscore_disables_module() {
     let src = r#"
 module _gaming {
     system.gaming: System {
-        target: "x86_64-linux",
+        target: linux.x64,
     }
 }
 "#;
@@ -122,10 +122,10 @@ module _gaming {
 fn many_modules_per_file() {
     let src = r#"
 module laptop {
-    system.laptop: System { target: "x86_64-linux" }
+    system.laptop: System { target: linux.x64 }
 }
 module installer {
-    image.installer: Image { target: "x86_64-linux" }
+    image.installer: Image { from: system.laptop, target: linux.arm64 }
 }
 "#;
     let items = parse_items(src);

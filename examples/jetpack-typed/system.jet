@@ -1,0 +1,36 @@
+// system.jet — the typed jetos surface (U11–U14, U18), the executable spec for
+// `System` / `Service` / `Image` field-checking and capture.
+//
+// A `System` is a whole machine: a typed `target` platform, a `packages` list
+// (U6 Pkg sugar), a keyed `services` map of open `Service` records (U12), and an
+// ordered `options` list of dotted key/value entries (U13 — no `set(…)` wrapper;
+// bare typed values, quotes only for free-form strings). An `Image` is built
+// `from` a system and inherits its packages/services/options (U14).
+//
+// Constructors are inferred from the expected type (U18): `system.halcyon: { … }`
+// elaborates to `System { … }`; each service `{ enable: true }` to `Service { … }`.
+//
+// This file is field-checked by the jetpack module evaluator; realize/activation
+// (`jetpack os switch`) is a later chunk (gap #4).
+module halcyon {
+    sources: {
+        default: github@NixOS/nixpkgs/nixos-24.05,
+    }
+    system.halcyon: {
+        target: linux.x64,
+        packages: [default.[firefox, btop, ripgrep]],
+        services: {
+            pipewire: { enable: true },
+            openssh: { enable: true, ports: [22] },
+        },
+        options: [
+            net.hostName: halcyon,
+            time.timeZone: "Europe/London",
+            users.nate.shell: default.fish,
+        ],
+    }
+}
+
+module installer {
+    image.halcyon_iso: { from: system.halcyon, format: iso }
+}
