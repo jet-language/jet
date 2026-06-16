@@ -205,6 +205,8 @@ before continuing.
 | E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
 | E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
 | E0965 | sema  | compile-time index out of range on `[T#N]` (S76) |
+| E0966 | jetpack | module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`) |
+| E0967 | jetpack | §6 merge conflict: a named source or scalar setting got irreconcilable values |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
@@ -230,6 +232,20 @@ before continuing.
 | E0963 | A positional destructure pattern has a different count than the fixed-size list's known length. | `[T#N]` has exactly N elements at compile time; the pattern must name exactly N bindings or the binding would leave elements unnamed. | Match the number of names in the pattern to the size N shown in the error. |
 | E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, widen the binding: `var r: [T] = ...`. |
 | E0965 | A literal index is out of range for a `[T#N]` at compile time. | The valid indexes for `[T#N]` are 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, or check at runtime with a condition. |
+
+## Module evaluation diagnostics (jetpack)
+
+These come from the jetpack module evaluator (`src/jetpack/modeval.rs`,
+computed-modules arc), which gives `module name { … }` contributions meaning
+by reducing them via pure-eval (M9.5) and feeding them through the §6 merge
+table. Not (yet) reachable through `jet build`/`jet run` — `Item::Module` is a
+deliberate parse-time no-op there until env.jet/config.jet are wired into the
+CLI.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0966 | A module contribution's value isn't a struct literal of its namespace's type. | `env.dev: Env { … }` ties a namespace to its matching type so the merge engine knows what it's combining. | Wrap the value in the matching type, e.g. `Env { … }`. |
+| E0967 | Two modules contributed irreconcilable values to the same source name or scalar setting. | §6: sources merge by name (refs must agree) and scalar settings merge to one value; without a priority marker, differing contributions can't be reconciled automatically. | Make every contribution agree, or remove the conflicting one. |
 
 ## Concurrency diagnostics
 

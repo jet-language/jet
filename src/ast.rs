@@ -275,7 +275,7 @@ pub struct Contribution {
 
 /// U3 (unified-ecosystem §5): the reserved namespaces a module may contribute
 /// to, each with a matching type (`Env`/`System`/`Image`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Namespace {
     /// `env` → `Env`: a development environment / shell.
     Env,

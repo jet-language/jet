@@ -780,8 +780,71 @@ impl<'a> Interp<'a> {
                 args,
                 ..
             } => self.eval_method(receiver, method, *method_span, args, scope),
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
+                let c = self.eval(cond, scope)?;
+                if as_bool(&c, cond.span())? {
+                    match self.exec_block(then_body, scope)? {
+                        Flow::Return(v) => Ok(v),
+                        _ => self.eval(then_value, scope),
+                    }
+                } else {
+                    match self.exec_block(else_body, scope)? {
+                        Flow::Return(v) => Ok(v),
+                        _ => self.eval(else_value, scope),
+                    }
+                }
+            }
+            Expr::FanOut { callee, items, span } => self.eval_fan_out(callee, items, *span, scope),
             other => Err(unsupported_expr(other)),
         }
+    }
+
+    /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
+    /// docs/plans/fan-out-and-fixed-size-lists.md §2). Comptime only supports
+    /// the named-one-arg-function callee case; sources/type-constructor
+    /// callees are jetpack-module-specific sugar handled structurally by the
+    /// jetpack module evaluator (src/jetpack/modeval.rs), not here.
+    fn eval_fan_out(
+        &mut self,
+        callee: &Expr,
+        items: &[Expr],
+        span: Span,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let Expr::Ident(name, _) = callee else {
+            return Err(unsupported("this fan-out callee", callee.span()));
+        };
+        let func = self
+            .funcs
+            .get(name.as_str())
+            .copied()
+            .ok_or_else(|| unsupported(&format!("calling `{}`", name), span))?;
+        if func.params.len() != 1 {
+            return Err(unsupported(
+                &format!("`{}` (fan-out needs a one-argument function)", name),
+                span,
+            ));
+        }
+        let param_name = func.params[0].name.clone();
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let arg = self.eval(item, scope)?;
+            let mut frame = HashMap::new();
+            frame.insert(param_name.clone(), arg);
+            let v = match self.exec_block(&func.body, &mut frame)? {
+                Flow::Return(v) => v,
+                _ => CtValue::Unit,
+            };
+            out.push(v);
+        }
+        Ok(CtValue::List(out))
     }
 
     fn eval_call(

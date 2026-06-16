@@ -10,10 +10,11 @@
 //! consolidated plan lives in `docs/plans/jetpack-jetos/README.md`.
 
 pub mod cli;
+pub mod envfile;
 pub mod json;
 pub mod merge;
+pub mod modeval;
 pub mod output;
-pub mod envfile;
 pub mod packmanifest;
 pub mod provider;
 pub mod refspec;

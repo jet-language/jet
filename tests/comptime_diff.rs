@@ -181,6 +181,49 @@ fn main() {
     );
 }
 
+#[test]
+fn if_expr_comptime_matches_runtime() {
+    let stdout = compile_and_run(
+        r#"
+comptime C = if 3 > 2 { 10 } else { 20 };
+comptime D = if 1 > 2 { 10 } else { 20 };
+
+fn main() {
+    val c = if 3 > 2 { 10 } else { 20 };
+    val d = if 1 > 2 { 10 } else { 20 };
+    print("{C}");
+    print("{c}");
+    print("{D}");
+    print("{d}");
+}
+"#,
+    );
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), vec!["10", "10", "20", "20"]);
+}
+
+#[test]
+fn fan_out_comptime_matches_runtime() {
+    let stdout = compile_and_run(
+        r#"
+fn double(x: Int) -> Int {
+    return x * 2;
+}
+
+comptime C = double.[1, 2, 3];
+
+fn main() {
+    val c = double.[1, 2, 3];
+    print("{C}");
+    print("{c}");
+}
+"#,
+    );
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        vec!["[2, 4, 6]", "[2, 4, 6]"]
+    );
+}
+
 fn compile_and_run(src: &str) -> String {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
