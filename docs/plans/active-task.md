@@ -106,64 +106,23 @@ Landed this run:
   typed_module_example_builds_offline_end_to_end` now asserts **"built 3
   package(s)"** incl. `jq`.
 
-**Still open:** typed `core` sources — now **ratified as U9** (kind inferred from
-the target's `pack.jet`, no marker) and queued as the next chunk (see Next up),
-**not** blocked anymore; `config.jet`/jetos tier (gap #4); `System`/`Image`
-semantics (gap #5); `jet dev`/`jetpack enter` (gap #6).
+**Followed by:** typed `core` sources — **ratified and built as U9** for
+`path@…` (kind inferred from the target's `pack.jet`, no marker; the chunk above).
 
-## Prior chunk (2026-06-16): wire `modeval` into the `jetpack` CLI
+## Earlier committed chunks (history; full detail in git)
 
-The typed `module { … }` env surface is now **evaluated and realized** end to
-end, not just unit-tested. Closes gap #1; gap #3 (typed surface loaded by the
-CLI) is now true for `env.jet` `build`/`run`.
-
-Landed this run:
-- `modeval::evaluate_env(src, base_dir) -> EnvPlan` (`{ table, package_refs,
-  prompt }`): builds the §6-merged `SourceTable` from every module's `sources:`
-  (each `provider@target` ref sliced from `SourceDecl.ref_span`, translated
-  at-form→colon-form, U6), merges all `env.*` contributions, expands `Pkg` sugar
-  to `<source>:<package>` refs (bare/`default` → the `default` source), and
-  takes the merged `prompt` as the label. Source conflicts surface as **E0967**
-  (U5); a non-`provider@target` source ref is the new **E0968**.
-- `modeval::is_module_surface(src)` — the CLI routes on it: a file that parses
-  with ≥1 `module` decl goes through `evaluate_env`; everything else falls back
-  to the tolerant Phase-1 `pkg.*` directive scanner.
-- `src/jetpack/cli.rs::load_project_plan` reads `env.jet` text once and branches
-  (typed via `typed_plan` → modeval; else `envfile::parse`). Shared
-  `classify_all` helper.
-- Diagnostic **E0968** added to `docs/spec/diagnostics.md` (index + detail).
-- Example + offline e2e: `examples/jetpack-typed/env.jet` (+ `fixtures/`) and
-  `tests/jetpack.rs::typed_module_example_builds_offline_end_to_end` mirror the
-  directive `committed_example_builds_offline_end_to_end`.
-
-**Still open:** `imports: find(…)` parses but is **not walked** (gap #2) — kept
-separate per the note below. `System`/`Image` namespaces still inert (gap #5).
-The typed surface lacks a `via: core` source marker (the directive surface has
-one); core-provider sources in a typed `env.jet` need an owner syntax decision
-before they work — deferred. *(Superseded 2026-06-16: resolved as **U9** — the
-kind is inferred from the target's `pack.jet`, no marker; see Next up.)*
-
-## Earlier chunk (2026-06-16): U8 — nested `sources:`/`imports:` (parser layer)
-
-Owner decided `module` stays the single outermost construct: `sources:` and
-`imports:` **nest inside the module body** as siblings of the `env.dev: Env { … }`
-contribution (NOT file top-level fields — the parser rejects those, E0003). This
-dissolved the blocker that the typed `env.jet` surface needed a top-level-field
-grammar. Ratified as **U8** (amends U4).
-
-Landed this run (parser foundation only):
-- `ModuleDecl.sources: Vec<SourceDecl>` + `ModuleDecl.imports: Vec<Expr>`
-  (`src/ast.rs`). `SourceDecl` records the `provider@target` ref as a **span**
-  (the ref isn't a single token); modeval will slice + `classify_provider_ref`.
-- Parser dispatch in `module_decl` (`src/parser.rs`): `sources`/`imports` field
-  parsers; `imports: find("./modules")` parses as an ordinary call expr.
-- `syntax::MODULE_FIELD_SOURCES`/`MODULE_FIELD_IMPORTS` (U8, I7).
-- U8 ratified in `docs/spec/syntax-decisions.md` + ledger; unified-ecosystem
-  §2.2/§2.3/§11 amended to show the nesting. `tests/decisions.rs` green.
-- Tests: `tests/modules.rs::parses_nested_sources_and_imports` (+ empty-fields).
-
-**Not yet wired:** `modeval` still ignores `sources`/`imports`; the CLI still
-reads the Phase-1 `pkg.*` scanner. That is the next chunk (see Next up).
+- **`11e7df8` — wire `modeval` into the `jetpack` CLI.** `modeval::evaluate_env`
+  → `EnvPlan { table, package_refs, prompt }`; `is_module_surface` routes a
+  `module`-bearing `env.jet` through it (else the Phase-1 `pkg.*` scanner).
+  `cli.rs::load_project_plan` branches on it. Diagnostics **E0967** (source
+  conflict, U5), **E0968** (non-`provider@target` source ref). Closed gap #1.
+- **`29ca551` — U8 nested `sources:`/`imports:` (parser layer).** Owner kept
+  `module` as the single outermost construct: `sources:`/`imports:` nest **inside**
+  the body (top-level fields are rejected, E0003). `ModuleDecl.sources` /
+  `ModuleDecl.imports` in `src/ast.rs`; `syntax::MODULE_FIELD_SOURCES`/`_IMPORTS`.
+  Ratified as U8 (amends U4).
+- **`98ff3be` and earlier** — `pack.jet`→`env.jet` clean break, computed
+  modules, manifest reshape (S52/U1), `pack.jet` as the compiler manifest.
 
 ## Where we are (verified 2026-06-16)
 
