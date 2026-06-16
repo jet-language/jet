@@ -456,6 +456,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     }
                 }
             }
+            // Stage 1a: modules are parsed but not yet type-checked; the U5
+            // merge / eval pipeline consumes them. No runtime contribution.
+            Item::Module(_) => {}
         }
     }
 
@@ -671,7 +674,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 ));
                 t.body = synthetic.body;
             }
-            Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) => {}
+            Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) | Item::Module(_) => {}
         }
     }
 
@@ -794,7 +797,7 @@ fn comptime_context_from_items(
                     externs.insert(ef.name.clone());
                 }
             }
-            Item::Test(_) | Item::Const(_) | Item::Trait(_) => {}
+            Item::Test(_) | Item::Const(_) | Item::Trait(_) | Item::Module(_) => {}
         }
     }
     (funcs, externs, globals)
@@ -8717,6 +8720,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                     }
                 }
                 Item::Trait(_) => {}
+                Item::Module(_) => {}
             }
         }
         register_type_methods(&module.items, &mut st.registry, &mut diags);
@@ -8855,7 +8859,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 Item::Test(t) => {
                     walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
                 }
-                Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) => {}
+                Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) | Item::Module(_) => {}
             }
         }
         for item in &mut module.items {
@@ -8996,7 +9000,7 @@ fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -> HashSet<S
                 }
                 Item::Test(t) => collect_std_stmts(&t.body, imports, &mut used),
                 Item::Const(c) => collect_std_expr(&c.value, imports, &mut used),
-                Item::Trait(_) | Item::ExternRust(_) => {}
+                Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) => {}
             }
         }
     }

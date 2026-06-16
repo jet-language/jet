@@ -239,6 +239,45 @@ pub enum Item {
     Test(TestDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
     ExternRust(ExternRustBlock),
+    /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
+    /// declaration contributing typed values to reserved namespaces.
+    Module(ModuleDecl),
+}
+
+/// U3 (unified-ecosystem §4): `module name { contributions… }`. Many modules
+/// may share a file; a leading-`_` name disables one (not discovered/merged).
+#[derive(Debug)]
+pub struct ModuleDecl {
+    pub name: String,
+    pub name_span: Span,
+    /// True when `name` begins with `_` (U3 one-character disable).
+    pub disabled: bool,
+    pub contributions: Vec<Contribution>,
+    pub span: Span,
+}
+
+/// U3 (unified-ecosystem §5): one typed namespace contribution inside a module,
+/// e.g. `env.dev: Env { … }`. The value reuses the struct-literal expression
+/// parser; the namespace and path locate it in the merged whole.
+#[derive(Debug)]
+pub struct Contribution {
+    pub namespace: Namespace,
+    pub path: String,
+    pub path_span: Span,
+    pub value: Expr,
+    pub span: Span,
+}
+
+/// U3 (unified-ecosystem §5): the reserved namespaces a module may contribute
+/// to, each with a matching type (`Env`/`System`/`Image`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Namespace {
+    /// `env` → `Env`: a development environment / shell.
+    Env,
+    /// `system` → `System`: a whole machine (jetos).
+    System,
+    /// `image` → `Image`: an ISO / VM / disk image (jetos).
+    Image,
 }
 
 /// S45 (M9): type parameter with optional trait bounds.

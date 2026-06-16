@@ -147,6 +147,9 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             .rfind(syntax::KW_EXTERN)
             .unwrap_or(b.span.start),
         Item::Trait(t) => type_decl_start(t.is_pub, t.name_span.start, "trait", src),
+        Item::Module(m) => src[..m.name_span.start]
+            .rfind(syntax::KW_MODULE)
+            .unwrap_or(m.span.start),
     }
 }
 
@@ -198,6 +201,7 @@ fn item_span_end(item: &Item) -> usize {
             .last()
             .map(|m| m.span.end)
             .unwrap_or(t.name_span.end),
+        Item::Module(m) => m.span.end,
     }
 }
 
@@ -364,6 +368,12 @@ impl<'a> Fmt<'a> {
             Item::Test(t) => self.fmt_test(t),
             Item::ExternRust(b) => self.fmt_extern_rust(b),
             Item::Trait(t) => self.fmt_trait(t),
+            // Stage 1a: modules are emitted verbatim (non-destructive). A
+            // canonical module formatter lands with the eval pipeline.
+            Item::Module(m) => {
+                let text = self.src[m.span.start..m.span.end].to_string();
+                self.write(&text);
+            }
         }
     }
 

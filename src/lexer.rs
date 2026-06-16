@@ -53,6 +53,7 @@ pub enum TokKind {
     KwUnsafe,
     KwImport,
     KwExtern,
+    KwModule,
     KwTest,
     Ident(String),
     Str(Vec<StrTokPart>),
@@ -185,6 +186,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwUnsafe => format!("the keyword `{}`", syntax::KW_UNSAFE),
         TokKind::KwImport => format!("the keyword `{}`", syntax::KW_IMPORT),
         TokKind::KwExtern => format!("the keyword `{}`", syntax::KW_EXTERN),
+        TokKind::KwModule => format!("the keyword `{}`", syntax::KW_MODULE),
         TokKind::KwTest => format!("the keyword `{}`", syntax::KW_TEST),
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
@@ -302,6 +304,7 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == syntax::KW_UNSAFE => Some(TokKind::KwUnsafe),
         s if s == syntax::KW_IMPORT => Some(TokKind::KwImport),
         s if s == syntax::KW_EXTERN => Some(TokKind::KwExtern),
+        s if s == syntax::KW_MODULE => Some(TokKind::KwModule),
         s if s == syntax::KW_TEST => Some(TokKind::KwTest),
         _ => None,
     }

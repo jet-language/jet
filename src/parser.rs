@@ -9,8 +9,9 @@
 
 use crate::ast::{
     AccessConvention, BinOp, Binding, BindName, BindPattern, Call, CallArg, ConstAttr, ConstDef,
-    ElseBranch, EnumDef,
+    Contribution, ElseBranch, EnumDef,
     EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
+    ModuleDecl, Namespace,
     LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
     SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam, UnOp, Variant,
     VariantField, VariantPayload,
@@ -514,6 +515,7 @@ impl<'a> Parser<'a> {
                     _ => self.func().map(Item::Func),
                 },
                 TokKind::KwTest => self.test_def().map(Item::Test),
+                TokKind::KwModule => self.module_decl().map(Item::Module),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
@@ -3207,6 +3209,72 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::RBracket, "to close the list literal")?;
         let close = self.toks[self.pos - 1].span;
         Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
+    }
+
+    /// U3 (unified-ecosystem §4): `module name { contributions… }`. Many
+    /// modules may share a file; a leading-`_` name disables one. The body is a
+    /// list of typed namespace contributions (`env.dev: Env { … }`).
+    fn module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
+        let start = self.bump().span; // `module`
+        let (name, name_span) = self.expect_ident("for the module name")?;
+        let disabled = name.starts_with('_');
+        self.expect(TokKind::LBrace, "to open the module body")?;
+        let mut contributions = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            contributions.push(self.contribution()?);
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close the module body")?;
+        Ok(ModuleDecl {
+            name,
+            name_span,
+            disabled,
+            contributions,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    /// U3 (unified-ecosystem §5): one typed namespace contribution,
+    /// `namespace.path: Value`, e.g. `env.dev: Env { … }`. The value reuses the
+    /// ordinary expression parser (struct literals, lists, strings).
+    fn contribution(&mut self) -> Result<Contribution, Diagnostic> {
+        let (ns_name, ns_span) =
+            self.expect_ident("for a namespace (`env`, `system`, or `image`)")?;
+        let namespace = match ns_name.as_str() {
+            syntax::NS_ENV => Namespace::Env,
+            syntax::NS_SYSTEM => Namespace::System,
+            syntax::NS_IMAGE => Namespace::Image,
+            _ => {
+                return Err(Diagnostic::error(
+                    "E0960",
+                    format!("`{}` is not a module namespace", ns_name),
+                    format!(
+                        "a module contributes to exactly three reserved namespaces: `{}` (a dev environment), `{}` (a whole machine), and `{}` (a disk image)",
+                        syntax::NS_ENV, syntax::NS_SYSTEM, syntax::NS_IMAGE
+                    ),
+                    format!(
+                        "begin the contribution with `{}`, `{}`, or `{}`",
+                        syntax::NS_ENV, syntax::NS_SYSTEM, syntax::NS_IMAGE
+                    ),
+                    Some(ns_span),
+                ));
+            }
+        };
+        self.expect(TokKind::Dot, "after the namespace name")?;
+        let (path, path_span) = self.expect_ident("for the contribution name")?;
+        self.expect(TokKind::Colon, "after the contribution name")?;
+        let value = self.expr()?;
+        let end = value.span().end;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            self.bump();
+        }
+        Ok(Contribution {
+            namespace,
+            path,
+            path_span,
+            value,
+            span: Span::new(ns_span.start, end),
+        })
     }
 
     fn struct_lit_after_name(

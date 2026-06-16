@@ -414,6 +414,32 @@ must be sendable (**E1102**).
 Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
 **E0041** points `Mutex`/`lock` users at channels.
 
+## Modules — `module name { … }` (U3, unified-ecosystem §4–5; parser, Stage 1a)
+
+A module is a named, composable top-level declaration that contributes typed
+values to reserved namespaces. Many modules may share a file.
+
+```ebnf
+module      = "module" ident "{" contribution* "}" ;
+contribution = namespace "." ident ":" expr [","] ;
+namespace   = "env" | "system" | "image" ;
+```
+
+- **Disable with a leading underscore:** `module _name { … }` parses with
+  `disabled = true` (the name begins with `_`); it is not discovered or merged
+  (U3, one-character reversible toggle).
+- **Reserved namespaces** are `env` → `Env` (dev environment), `system` →
+  `System` (whole machine), `image` → `Image` (disk image). Any other namespace
+  is **E0960** (parse).
+- **Contribution values reuse the ordinary expression parser** — a contribution
+  value is any `expr`, typically a struct literal (`Env { packages: […],
+  prompt: "…" }`), so struct literals, lists, and strings work with no new
+  grammar.
+
+Stage 1a is parser-only: modules are accepted into the AST (`Item::Module`) but
+not yet type-checked or evaluated. The U5 merge engine and the pure-eval
+pipeline (computed contributions) consume them in later stages.
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

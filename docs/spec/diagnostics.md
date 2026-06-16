@@ -199,6 +199,7 @@ before continuing.
 | E0954 | parse | teaching: `comptime val`/`comptime var`/`const` → `comptime x = …` |
 | E0955 | sema  | `embed_file`: missing / unreadable / not UTF-8 |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
+| E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |

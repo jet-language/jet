@@ -363,7 +363,7 @@ fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>>
                     collect_tuple_shapes_from_stmt(s, &mut out);
                 }
             }
-            Item::Trait(_) | Item::ExternRust(_) => {}
+            Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) => {}
         }
     }
     out
@@ -652,7 +652,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_) => {}
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
+            | Item::Module(_) => {}
         }
     }
 
@@ -723,7 +724,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_) => {}
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
+            | Item::Module(_) => {}
         }
     }
 
@@ -934,7 +936,7 @@ fn build_cx_items(
             Item::Trait(t) => {
                 cx.trait_names.insert(t.name.clone());
             }
-            Item::Impl(_) | Item::Test(_) => {}
+            Item::Impl(_) | Item::Test(_) | Item::Module(_) => {}
         }
     }
 
@@ -3713,7 +3715,8 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
-            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_) => {}
+            Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
+            | Item::Module(_) => {}
         }
     }
     for item in items {

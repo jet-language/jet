@@ -724,6 +724,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
             collect_stmts(&t.body, mp, module, db);
         }
         Item::ExternRust(_) => {}
+        // Stage 1a: modules aren't yet indexed for symbols/hover.
+        Item::Module(_) => {}
     }
 }
 
