@@ -8,7 +8,7 @@
 //! sound without surfacing Rust concepts to users.
 
 use crate::ast::{
-    AccessConvention, BinOp, BindPattern, Binding, Call, ConstAttr, ElseBranch, EnumDef, EnumLitArg,
+    AccessConvention, BinOp, BindPattern, Binding, Call, CModule, ConstAttr, ElseBranch, EnumDef, EnumLitArg,
     Expr,
     ExternFn, ExternRustBlock, ForKind, Func, IfStmt, ImportKind, IndexKind, Item, LValue, Lambda, LambdaBody,
     OrFallback, Pattern, Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, Type,
@@ -226,6 +226,107 @@ fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mut Vec<Diagn
                 ef.name_span,
             ));
             ok = false;
+        }
+    }
+    ok
+}
+
+/// S59 (E2-M14): type rules at the **C** boundary. Stricter than Rust FFI: only
+/// scalars, `Char`, and `String` (D-CBIND5) cross by value, plus structs/enums
+/// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `T?`, `T ? E`) have
+/// no stable C ABI and are rejected (E3203). Pointers belong to the E2-M13 gated
+/// tier (E3202) — they cannot be written today (no `Ptr<T>` type), so E3202 is
+/// registered but unreachable from real source until that tier lands.
+fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
+        Type::Named(name) => c_named_type_ok(name, registry),
+        // No stable C ABI for these by value:
+        Type::List(_)
+        | Type::Map { .. }
+        | Type::Option(_)
+        | Type::Result { .. }
+        | Type::Shared(_)
+        | Type::Apply { .. }
+        | Type::TraitObject(_)
+        | Type::Fn { .. }
+        | Type::Tuple(_)
+        | Type::FixedList { .. } => false,
+    }
+}
+
+fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
+    match registry.types.get(name) {
+        Some(TypeDef::Struct { fields, .. }) => fields
+            .iter()
+            .all(|(_, _, ty, _, _)| is_c_abi_type(ty, registry)),
+        Some(TypeDef::Enum { variants, .. }) => variants.values().all(|(_, payload)| match payload {
+            VariantPayload::Unit => true,
+            VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
+            VariantPayload::Named(fs) => fs.iter().all(|f| is_c_abi_type(&f.ty, registry)),
+        }),
+        None => false,
+    }
+}
+
+/// E3203 — a non-C-ABI type appears by value in a C FFI signature.
+fn e3203(ty: &Type, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3203",
+        format!("`{}` is not a C-compatible type for a foreign function parameter or return.", ty.name()),
+        format!(
+            "`@{}` / `@{}` functions must use types with a stable C ABI at the edge.",
+            syntax::ATTR_EXTERN_MODULE, syntax::ATTR_BINDGEN,
+        ),
+        "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.".to_string(),
+        Some(span),
+    )
+}
+
+/// E3202 — a pointer or other gated type crosses the C boundary outside an
+/// `@unsafe` / `core.mem` region. The pointer tier (E2-M13) is not implemented,
+/// so no real source can reach this yet; the constructor is registered (I4) and
+/// snapshot-tested so the diagnostic exists the moment that tier lands.
+pub fn e3202(ty: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3202",
+        format!("Type `{}` cannot cross the C boundary here.", ty),
+        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58)."
+            .to_string(),
+        "Move the call inside `@unsafe`, or change the type to a C-safe value type.".to_string(),
+        Some(span),
+    )
+}
+
+/// Validate one C FFI module's signatures (E3203/E3202). Registers nothing; the
+/// caller registers the functions after a clean check.
+fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut Vec<Diagnostic>) -> bool {
+    let mut ok = true;
+    for ef in &cm.functions {
+        if ef.is_view_return {
+            diags.push(e3203(&Type::Named("view".to_string()), ef.name_span));
+            ok = false;
+        }
+        for p in &ef.params {
+            if p.convention != AccessConvention::Read {
+                diags.push(ffi_type_error(
+                    &format!("`{}` can't use `{}` at the C boundary", p.name, access_keyword(p.convention)),
+                    "C functions take values by copy — `mut`, `take`, and `view` aren't allowed here",
+                    "remove the access keyword and pass by value",
+                    p.name_span,
+                ));
+                ok = false;
+            }
+            if !is_c_abi_type(&p.ty, registry) {
+                diags.push(e3203(&p.ty, p.ty_span));
+                ok = false;
+            }
+        }
+        if let Some(rt) = &ef.return_type {
+            if !is_c_abi_type(rt, registry) {
+                diags.push(e3203(rt, ef.name_span));
+                ok = false;
+            }
         }
     }
     ok
@@ -460,6 +561,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             // Stage 1a: modules are parsed but not yet type-checked; the U5
             // merge / eval pipeline consumes them. No runtime contribution.
             Item::Module(_) => {}
+            // S59: C FFI modules are folded by cffi::assemble before the
+            // bundle path runs; this legacy single-Program path ignores them.
+            Item::CModule(_) => {}
         }
     }
 
@@ -675,7 +779,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 ));
                 t.body = synthetic.body;
             }
-            Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) | Item::Module(_) => {}
+            Item::Const(_)
+            | Item::ExternRust(_)
+            | Item::Trait(_)
+            | Item::Module(_)
+            | Item::CModule(_) => {}
         }
     }
 
@@ -798,7 +906,11 @@ fn comptime_context_from_items(
                     externs.insert(ef.name.clone());
                 }
             }
-            Item::Test(_) | Item::Const(_) | Item::Trait(_) | Item::Module(_) => {}
+            Item::Test(_)
+            | Item::Const(_)
+            | Item::Trait(_)
+            | Item::Module(_)
+            | Item::CModule(_) => {}
         }
     }
     (funcs, externs, globals)
@@ -8935,6 +9047,22 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                         }
                     }
                 }
+                Item::CModule(cm) => {
+                    if check_c_module(cm, &st.registry, &mut diags) {
+                        for ef in &cm.functions {
+                            register_extern_fn(
+                                ef,
+                                &mut st.funcs,
+                                &st.registry,
+                                &st.consts,
+                                &mut diags,
+                            );
+                            // C FFI functions are callable across the `use c.<lib>`
+                            // alias — expose them like any pub item.
+                            st.func_pub.insert(ef.name.clone(), true);
+                        }
+                    }
+                }
                 Item::Trait(_) => {}
                 Item::Module(_) => {}
             }
@@ -9015,6 +9143,14 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 st.std_imports.insert(alias, module);
                 continue;
             }
+            // S59 (E2-M14): C `use` forms bind to a synthetic merged module
+            // resolved by `cffi::assemble` (E3204 already reported there).
+            if crate::cffi::is_c_import(imp) {
+                if let Some(target) = bundle.cffi.target_for(idx, &alias) {
+                    st.imports.insert(alias, target);
+                }
+                continue;
+            }
             match loader::resolve_import_target(bundle, idx, imp) {
                 Ok(target) => {
                     st.imports.insert(alias, target);
@@ -9091,7 +9227,11 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 Item::Test(t) => {
                     walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
                 }
-                Item::Const(_) | Item::ExternRust(_) | Item::Trait(_) | Item::Module(_) => {}
+                Item::Const(_)
+            | Item::ExternRust(_)
+            | Item::Trait(_)
+            | Item::Module(_)
+            | Item::CModule(_) => {}
             }
         }
         for item in &mut module.items {
@@ -9232,7 +9372,10 @@ fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -> HashSet<S
                 }
                 Item::Test(t) => collect_std_stmts(&t.body, imports, &mut used),
                 Item::Const(c) => collect_std_expr(&c.value, imports, &mut used),
-                Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) => {}
+                Item::Trait(_)
+                | Item::ExternRust(_)
+                | Item::Module(_)
+                | Item::CModule(_) => {}
             }
         }
     }

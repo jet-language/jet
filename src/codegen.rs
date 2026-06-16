@@ -369,7 +369,7 @@ fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>>
                     collect_tuple_shapes_from_stmt(s, &mut out);
                 }
             }
-            Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) => {}
+            Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_) => {}
         }
     }
     out
@@ -660,6 +660,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
+            Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
             | Item::Module(_) => {}
         }
@@ -732,6 +733,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
+            Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
             | Item::Module(_) => {}
         }
@@ -805,6 +807,120 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
     out
+}
+
+/// S59 (E2-M14): emit one merged C FFI module — an `extern "C"` declaration of
+/// every symbol plus a safe wrapper per Jet function. The wrapper signature
+/// matches what cross-module call sites pass (Read convention: scalars by value,
+/// `String`/`Char` by shared reference), converts to the C ABI, and calls the
+/// symbol inside a contained `unsafe` (the vetted FFI boundary; I1/S58 amendment
+/// — generated `unsafe` only in compiler-emitted boundary shims).
+fn emit_c_module(cm: &crate::ast::CModule, out: &mut String) {
+    if cm.functions.is_empty() {
+        return;
+    }
+    out.push_str("#[allow(non_snake_case)]\nextern \"C\" {\n");
+    for ef in &cm.functions {
+        let params: Vec<String> = ef
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("a{i}: {}", c_abi_rust_type(&p.ty)))
+            .collect();
+        let ret = ef
+            .return_type
+            .as_ref()
+            .map(|t| format!(" -> {}", c_abi_rust_type(t)))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "    fn {}({}){};\n",
+            ef.rust_path,
+            params.join(", "),
+            ret
+        ));
+    }
+    out.push_str("}\n\n");
+
+    for ef in &cm.functions {
+        let mut sig_params = Vec::new();
+        let mut conv_lines = Vec::new();
+        let mut call_args = Vec::new();
+        for (i, p) in ef.params.iter().enumerate() {
+            sig_params.push(format!("a{i}: {}", c_wrapper_param_type(&p.ty)));
+            match &p.ty {
+                Type::String => {
+                    conv_lines.push(format!(
+                        "    let c{i} = std::ffi::CString::new(a{i}.as_str()).unwrap_or_default();"
+                    ));
+                    call_args.push(format!("c{i}.as_ptr()"));
+                }
+                Type::Char => call_args.push(format!("(*a{i} as u32)")),
+                _ => call_args.push(format!("a{i}")),
+            }
+        }
+        let ret = ef
+            .return_type
+            .as_ref()
+            .map(|t| format!(" -> {}", c_wrapper_ret_type(t)))
+            .unwrap_or_default();
+        let call = format!("{}({})", ef.rust_path, call_args.join(", "));
+        let body = match &ef.return_type {
+            None => format!("    unsafe {{ {}; }}", call),
+            Some(Type::String) => format!(
+                "    let p = unsafe {{ {} }};\n    if p.is_null() {{ return String::new(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(p) }}.to_string_lossy().into_owned()",
+                call
+            ),
+            Some(Type::Char) => format!(
+                "    let v = unsafe {{ {} }};\n    char::from_u32(v).unwrap_or('\\u{{0}}')",
+                call
+            ),
+            Some(_) => format!("    unsafe {{ {} }}", call),
+        };
+        out.push_str(&format!(
+            "pub fn {}({}){} {{\n{}\n}}\n\n",
+            mangle(&ef.name),
+            sig_params.join(", "),
+            ret,
+            body
+        ));
+    }
+}
+
+/// The C-ABI Rust type used in the `extern "C"` declaration.
+fn c_abi_rust_type(ty: &Type) -> String {
+    match ty {
+        Type::Int => "std::os::raw::c_longlong".to_string(),
+        Type::Float => "f64".to_string(),
+        Type::Bool => "bool".to_string(),
+        Type::Char => "u32".to_string(),
+        Type::String => "*const std::os::raw::c_char".to_string(),
+        // Sema (E3203) rejects anything else at the C boundary.
+        other => format!("/* unsupported: {} */ ()", other.name()),
+    }
+}
+
+/// The Rust type the safe wrapper accepts, matching cross-module call sites
+/// (Read convention: scalars by value, `String`/`Char` by shared reference).
+fn c_wrapper_param_type(ty: &Type) -> String {
+    match ty {
+        Type::Int => "i64".to_string(),
+        Type::Float => "f64".to_string(),
+        Type::Bool => "bool".to_string(),
+        Type::Char => "&char".to_string(),
+        Type::String => "&String".to_string(),
+        other => format!("/* unsupported: {} */ ()", other.name()),
+    }
+}
+
+fn c_wrapper_ret_type(ty: &Type) -> String {
+    match ty {
+        Type::Int => "i64".to_string(),
+        Type::Float => "f64".to_string(),
+        Type::Bool => "bool".to_string(),
+        Type::Char => "char".to_string(),
+        Type::String => "String".to_string(),
+        other => format!("/* unsupported: {} */ ()", other.name()),
+    }
 }
 
 fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
@@ -932,6 +1048,19 @@ fn build_cx_items(
             }
             Item::ExternRust(block) => {
                 for ef in &block.functions {
+                    cx.sigs.insert(
+                        ef.name.clone(),
+                        ef.params
+                            .iter()
+                            .map(|p| (p.convention, p.ty.clone()))
+                            .collect(),
+                    );
+                }
+            }
+            Item::CModule(cm) => {
+                // S59: C boundary functions register like extern rust so that
+                // cross-module call sites resolve argument conventions.
+                for ef in &cm.functions {
                     cx.sigs.insert(
                         ef.name.clone(),
                         ef.params
@@ -3779,6 +3908,14 @@ fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, 
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
         let alias = loader::import_alias(imp);
+        // S59: C `use` forms target a synthetic merged module by alias.
+        if crate::cffi::is_c_import(imp) {
+            if let Some(target) = bundle.cffi.target_for(module_idx, &alias) {
+                let stem = &bundle.modules[target].alias;
+                map.insert(alias, format!("user_{}", stem));
+            }
+            continue;
+        }
         if let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) {
             let stem = &bundle.modules[target].alias;
             map.insert(alias, format!("user_{}", stem));
@@ -3806,12 +3943,21 @@ fn import_sig_map(
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
         let alias = loader::import_alias(imp);
-        let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) else {
-            continue;
+        // S59: C `use` forms — pull boundary fn sigs from the synthetic module.
+        let target = if crate::cffi::is_c_import(imp) {
+            match bundle.cffi.target_for(module_idx, &alias) {
+                Some(t) => t,
+                None => continue,
+            }
+        } else {
+            match loader::resolve_import_target(bundle, module_idx, imp) {
+                Ok(t) => t,
+                Err(_) => continue,
+            }
         };
         for item in &bundle.modules[target].items {
-            if let Item::Func(f) = item {
-                if f.is_pub {
+            match item {
+                Item::Func(f) if f.is_pub => {
                     map.insert(
                         (alias.clone(), f.name.clone()),
                         f.params
@@ -3820,6 +3966,18 @@ fn import_sig_map(
                             .collect(),
                     );
                 }
+                Item::CModule(cm) => {
+                    for ef in &cm.functions {
+                        map.insert(
+                            (alias.clone(), ef.name.clone()),
+                            ef.params
+                                .iter()
+                                .map(|p| (p.convention, p.ty.clone()))
+                                .collect(),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -3835,6 +3993,7 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
+            Item::CModule(cm) => emit_c_module(cm, out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
             | Item::Module(_) => {}
         }

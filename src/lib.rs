@@ -7,6 +7,7 @@
 
 pub mod ast;
 pub mod build_cache;
+pub mod cffi;
 pub mod codegen;
 pub mod collections;
 pub mod comptime;
@@ -37,6 +38,8 @@ pub struct CompileOutput {
     pub lints: Vec<Diagnostic>,
     /// Built FFI bridge when the program declares `extern rust` (M7).
     pub ffi: Option<ffi::FfiLink>,
+    /// Native C-library linker args (S59 / E2-M14), ready for `rustc`.
+    pub clinks: Vec<String>,
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -88,7 +91,23 @@ fn compile_bundle_path(
         rust: codegen::emit_bundle(&bundle, mode, ffi.as_ref()),
         lints,
         ffi,
+        // Native C link flags are resolved separately at build time (so that
+        // codegen / front-end checks never depend on system link discovery);
+        // see `resolve_c_links`.
+        clinks: Vec::new(),
     })
+}
+
+/// Resolve native C-library link args for a built program (S59 / E2-M14),
+/// surfacing E3201 when a library cannot be located via hangar or pkg-config.
+/// Build/run paths call this AFTER a successful compile; codegen and front-end
+/// checks do not, keeping link discovery out of semantic checking (I3).
+pub fn resolve_c_links(file: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
+    let bundle = loader::load_entry_with_overlay(file, None, false)?;
+    if !bundle.cffi.links_c() {
+        return Ok(Vec::new());
+    }
+    bundle.cffi.rustc_link_args(&bundle.project_root)
 }
 
 /// Compile for `jet test`: optional `main`, at least one test block required.
@@ -125,19 +144,7 @@ fn compile_with_mode(
         return Err(lex_diags);
     }
     let mut prog = parser::parse(&toks)?;
-    let diags = sema::check_with_mode(&mut prog, mode);
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
-    for d in diags {
-        match d.severity {
-            Severity::Error => errors.push(d),
-            Severity::Lint => lints.push(d),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let bundle = ast::ProgramBundle {
+    let mut bundle = ast::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::from("."),
         modules: vec![ast::LoadedModule {
@@ -150,7 +157,25 @@ fn compile_with_mode(
         }],
         parse_teaching: Vec::new(),
         used_std: std::collections::HashSet::new(),
+        cffi: cffi::CFfi::default(),
     };
+    // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.
+    bundle.cffi = match cffi::assemble(&mut bundle) {
+        Ok(c) => c,
+        Err(diags) => return Err(diags),
+    };
+    let diags = sema::check_bundle(&mut bundle, mode);
+    let mut errors = Vec::new();
+    let mut lints = Vec::new();
+    for d in diags {
+        match d.severity {
+            Severity::Error => errors.push(d),
+            Severity::Lint => lints.push(d),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
     let ffi = match ffi::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
@@ -159,6 +184,7 @@ fn compile_with_mode(
         rust: codegen::emit_bundle(&bundle, mode, ffi.as_ref()),
         lints,
         ffi,
+        clinks: Vec::new(),
     })
 }
 

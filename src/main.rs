@@ -34,6 +34,7 @@ usage:
   {bin} dev   -- cmd                run a command in the project shell, then exit
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
+  {bin} bind  <header.h> --pkg <lib>   generate a C binding cache (S59)
   {bin} lsp                         language server (stdio JSON-RPC)
   {bin} lsp doctor                  health-check the language server
   {bin} lsp --bench                 latency benchmark (CI: must pass in <200ms/round)
@@ -136,6 +137,18 @@ fn main() {
         }
         "gc" => {
             run_gc();
+            return;
+        }
+        "bind" => {
+            // S59 / E2-M14 Phase 4 (D-CBIND2): generate (or refresh) a C binding
+            // cache from a header. Shares the bind backend with compile-time
+            // auto-bind. The backend (D-CBIND3 bindgen helper) is not wired in
+            // this build, so this reports E3208 honestly rather than faking a
+            // translation.
+            // Use the unfiltered argv: `bind` takes `--pkg`/`-o` flags that the
+            // global `args` filter would otherwise strip.
+            let bind_args: Vec<&String> = raw.iter().skip(1).collect();
+            run_bind(&bind_args);
             return;
         }
         "dev" => {
@@ -282,7 +295,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
         return;
     }
 
-    let (rust_code, ffi_link) = match jet::compile_with_path(&src, file) {
+    let (rust_code, ffi_link, clinks) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
                 eprint!("{}", jet::render_diagnostics(file, &src, &out.lints));
@@ -293,7 +306,18 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
                     if n == 1 { "" } else { "s" }
                 );
             }
-            (out.rust, out.ffi)
+            // S59 (E2-M14): resolve native C link flags at build time; E3201
+            // (unresolved C lib) surfaces here, not during front-end checking.
+            let clinks = match jet::resolve_c_links(file) {
+                Ok(args) => args,
+                Err(diags) => {
+                    eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+                    let n = diags.len();
+                    eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+                    exit(1);
+                }
+            };
+            (out.rust, out.ffi, clinks)
         }
         Err(diags) => {
             eprint!("{}", jet::render_diagnostics(file, &src, &diags));
@@ -309,12 +333,12 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
 
     match cmd {
         "build" => {
-            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref());
+            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks);
             println!("built: {}", bin_path(file).display());
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref());
+            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks);
             let mut run_cmd = Command::new(&out);
             for arg in program_args {
                 run_cmd.arg(arg.as_str());
@@ -514,6 +538,63 @@ fn run_remove(dep_name: &str) {
     do_fetch(&root, false);
 }
 
+/// `jet bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
+///
+/// Generates a `@bindgen module c.<lib>.__bindgen__` cache from a C header,
+/// the same backend the compiler invokes on a cache miss. The header→Jet
+/// translator (D-CBIND3 bindgen helper) is not built into this binary yet, so
+/// this surfaces **E3208** with the workaround (hand-write `@extern module`).
+fn run_bind(args: &[&String]) {
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
+        eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::syntax::BINARY_NAME);
+        eprintln!();
+        eprintln!("Generate a C binding cache from a header (S59). The output is");
+        eprintln!("an `@bindgen module c.<lib>.__bindgen__` file, by default written");
+        eprintln!("to .jet/bindings/c/<lib>.jet. The compiler also runs this");
+        eprintln!("automatically on a cache miss; `bind` is the manual refresh.");
+        exit(if args.is_empty() { 2 } else { 0 });
+    }
+
+    let header = args[0].as_str();
+    let mut pkg: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pkg" => {
+                pkg = args.get(i + 1).map(|s| s.to_string());
+                i += 2;
+            }
+            "-o" | "--out" => {
+                out = args.get(i + 1).map(|s| s.to_string());
+                i += 2;
+            }
+            other => {
+                eprintln!("error: unknown `bind` flag `{}`", other);
+                eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::syntax::BINARY_NAME);
+                exit(2);
+            }
+        }
+    }
+
+    // Link key: --pkg if given, else the header basename (header→lib rule).
+    let lib = pkg.unwrap_or_else(|| {
+        let base = header.rsplit('/').next().unwrap_or(header);
+        base.strip_suffix(".h").unwrap_or(base).to_string()
+    });
+    let _ = out;
+
+    // The bind backend (header parse + translate) is not wired in this build.
+    // Report E3208 honestly with the documented workaround.
+    eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
+    eprintln!(" Why: the header-to-Jet bind backend is not built into this `{}`; the bindgen helper (D-CBIND3) ships in a later milestone.", jet::syntax::BINARY_NAME);
+    eprintln!(
+        " Fix: hand-write `@extern module c.{} {{ … }}`, or place a generated cache at .jet/bindings/c/{}.{}.",
+        lib, lib, jet::syntax::FILE_EXT
+    );
+    exit(1);
+}
+
 fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
@@ -702,6 +783,7 @@ fn run_test_file(path: &Path) -> bool {
         bin.clone(),
         BuildProfile::Default,
         ffi_link.as_ref(),
+        &[],
     );
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
@@ -764,6 +846,7 @@ fn build(
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::ffi::FfiLink>,
+    clinks: &[String],
 ) {
     fs::create_dir_all("build").unwrap_or_else(|e| {
         eprintln!("error: couldn't create the build/ folder: {}", e);
@@ -776,7 +859,9 @@ fn build(
     });
 
     let small = matches!(profile, BuildProfile::Small);
-    let use_cache = ffi.is_none();
+    // C-linked builds depend on system/hangar link paths not captured by the
+    // source hash, so they bypass the binary cache (S59).
+    let use_cache = ffi.is_none() && clinks.is_empty();
     let cache_key = if use_cache {
         Some(jet::build_cache::cache_key(rust_code, small))
     } else {
@@ -818,6 +903,10 @@ fn build(
             cmd.arg("-L")
                 .arg(format!("dependency={}", link.deps_dir.display()));
         }
+    }
+    // S59 (E2-M14): native C library link flags (`-L native=…`, `-l <name>`).
+    for arg in clinks {
+        cmd.arg(arg);
     }
 
     let out = match cmd.output() {

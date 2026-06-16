@@ -292,6 +292,10 @@ impl<'a> Parser<'a> {
         &self.toks[(self.pos + 1).min(self.toks.len() - 1)]
     }
 
+    fn peek3(&self) -> &Token {
+        &self.toks[(self.pos + 2).min(self.toks.len() - 1)]
+    }
+
     /// End byte of the most recently consumed token (the one before the cursor).
     fn prev_end(&self) -> usize {
         self.toks[self.pos.saturating_sub(1)].span.end
@@ -525,6 +529,7 @@ impl<'a> Parser<'a> {
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwImpl => self.impl_def().map(Item::Impl),
+                TokKind::At if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
                 TokKind::KwComptime => self.comptime_def().map(Item::Const),
                 TokKind::Ident(name) if name == syntax::FOREIGN_CLASS => {
@@ -808,6 +813,145 @@ impl<'a> Parser<'a> {
             rust_path,
             rust_path_span,
             span: Span::new(fn_start, end),
+        })
+    }
+
+    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `@extern
+    /// module …` or `@bindgen module …`? (Distinguishes from `@static const`,
+    /// and from bare `extern rust`.)
+    fn at_c_module(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::At) {
+            return false;
+        }
+        let intro_is_c = match &self.peek2().kind {
+            TokKind::KwExtern => true,
+            TokKind::Ident(n) => n == syntax::ATTR_BINDGEN,
+            _ => false,
+        };
+        intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
+    }
+
+    /// S59 (E2-M14): parse `@extern module c.<lib> { … }` (overlay) or
+    /// `@bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
+    /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
+    fn c_module(&mut self) -> Result<crate::ast::CModule, Diagnostic> {
+        use crate::ast::CModuleKind;
+        let start = self.bump().span; // `@`
+        let kind = match &self.peek().kind {
+            TokKind::KwExtern => {
+                self.bump();
+                CModuleKind::Extern
+            }
+            TokKind::Ident(n) if n == syntax::ATTR_BINDGEN => {
+                self.bump();
+                CModuleKind::Bindgen
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected `{}` or `{}` after `@`, found {}",
+                        syntax::ATTR_EXTERN_MODULE,
+                        syntax::ATTR_BINDGEN,
+                        describe(other)
+                    ),
+                    "a C FFI module begins with `@extern module c.<lib>` or `@bindgen module c.<lib>.__bindgen__`".to_string(),
+                    "write: @extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        self.expect_kw(TokKind::KwModule, "to declare a C FFI module")?;
+
+        // Parse the dotted module path: `c` `.` `<lib>` [ `.` `__bindgen__` ].
+        let path_start = self.peek().span;
+        let (root, _) = self.expect_ident("after `module`")?;
+        if root != syntax::C_MODULE_ROOT {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "a C FFI module path starts with `{}.`, found `{}`",
+                    syntax::C_MODULE_ROOT, root
+                ),
+                "C libraries live under the `c.` module root — `c.raylib`, `c.sqlite3`".to_string(),
+                format!("write: {} module {}.<lib> {{ … }}",
+                    match kind { CModuleKind::Extern => "@extern", CModuleKind::Bindgen => "@bindgen" },
+                    syntax::C_MODULE_ROOT),
+                Some(path_start),
+            ));
+        }
+        self.expect(TokKind::Dot, "after `c` in a C FFI module path")?;
+        let (lib, lib_span) = self.expect_ident("for the C library name")?;
+        let mut has_bindgen_seg = false;
+        let mut path_end = lib_span.end;
+        if matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (seg, seg_span) = self.expect_ident("after `.` in a C FFI module path")?;
+            path_end = seg_span.end;
+            if seg == syntax::C_BINDGEN_SEGMENT {
+                has_bindgen_seg = true;
+            } else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("a C FFI module path can't have a `.{}` segment", seg),
+                    "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
+                    format!("write: @extern module {}.{} {{ … }}", syntax::C_MODULE_ROOT, lib),
+                    Some(seg_span),
+                ));
+            }
+        }
+        let path_span = Span::new(path_start.start, path_end);
+
+        // E3206: a user overlay must not name the reserved `__bindgen__` segment.
+        if kind == CModuleKind::Extern && has_bindgen_seg {
+            return Err(Diagnostic::error(
+                "E3206",
+                format!(
+                    "module path `{}.{}.{}` uses the reserved segment `{}`",
+                    syntax::C_MODULE_ROOT, lib, syntax::C_BINDGEN_SEGMENT, syntax::C_BINDGEN_SEGMENT
+                ),
+                format!(
+                    "autogen lives in `{}.<lib>.{}`; users declare overlays as `@{} module {}.<lib>` only",
+                    syntax::C_MODULE_ROOT, syntax::C_BINDGEN_SEGMENT, syntax::ATTR_EXTERN_MODULE, syntax::C_MODULE_ROOT
+                ),
+                format!(
+                    "drop `{}` from your module path, or use `@{} module {}.{} {{ … }}`",
+                    syntax::C_BINDGEN_SEGMENT, syntax::ATTR_EXTERN_MODULE, syntax::C_MODULE_ROOT, lib
+                ),
+                Some(path_span),
+            ));
+        }
+        // A `@bindgen` module must carry the `__bindgen__` segment (it is the
+        // generated surface). Without it the path is malformed.
+        if kind == CModuleKind::Bindgen && !has_bindgen_seg {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "a `@bindgen` module path must end in `.{}`",
+                    syntax::C_BINDGEN_SEGMENT
+                ),
+                "the compiler generates `@bindgen module c.<lib>.__bindgen__` cache files".to_string(),
+                format!(
+                    "write: @bindgen module {}.{}.{} {{ … }}",
+                    syntax::C_MODULE_ROOT, lib, syntax::C_BINDGEN_SEGMENT
+                ),
+                Some(path_span),
+            ));
+        }
+
+        self.expect(TokKind::LBrace, "to open the C FFI module body")?;
+        let mut functions = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            functions.push(self.extern_fn()?);
+        }
+        self.expect(TokKind::RBrace, "to close the C FFI module body")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::ast::CModule {
+            kind,
+            lib,
+            path_span,
+            functions,
+            span: Span::new(start.start, end),
         })
     }
 

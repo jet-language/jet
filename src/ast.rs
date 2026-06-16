@@ -217,6 +217,9 @@ pub struct ProgramBundle {
     /// M10: std helper names proven reachable by sema. Codegen emits only
     /// these helpers (SL9).
     pub used_std: std::collections::HashSet<String>,
+    /// S59 (E2-M14): C-FFI artifacts produced by `cffi::assemble` after loading
+    /// — per-file `use c.<lib>` bindings and the libraries to link against.
+    pub cffi: crate::cffi::CFfi,
 }
 
 #[derive(Debug)]
@@ -247,6 +250,32 @@ pub enum Item {
     /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
     /// declaration contributing typed values to reserved namespaces.
     Module(ModuleDecl),
+    /// S59 (E2-M14): `@extern module c.<lib> { … }` (user overlay) or
+    /// `@bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
+    CModule(CModule),
+}
+
+/// S59 (E2-M14): which attribute introduced a C FFI module — the user-written
+/// overlay (`@extern`) or the generated cache surface (`@bindgen`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CModuleKind {
+    /// `@extern module c.<lib> { … }` — user overlay, allowed anywhere.
+    Extern,
+    /// `@bindgen module c.<lib>.__bindgen__ { … }` — generated, cache files only.
+    Bindgen,
+}
+
+/// S59 (E2-M14): one `@extern`/`@bindgen module c.<lib>[.__bindgen__] { … }` block.
+#[derive(Debug, Clone)]
+pub struct CModule {
+    pub kind: CModuleKind,
+    /// The library link key — last `c.<lib>` segment (e.g. `raylib`).
+    pub lib: String,
+    /// Span of the whole dotted module path (`c.raylib` / `c.raylib.__bindgen__`).
+    pub path_span: Span,
+    /// Foreign functions declared in the body (same shape as `extern rust`).
+    pub functions: Vec<ExternFn>,
+    pub span: Span,
 }
 
 /// U3 (unified-ecosystem §4): `module name { contributions… }`. Many modules

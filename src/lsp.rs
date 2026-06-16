@@ -726,6 +726,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::ExternRust(_) => {}
         // Stage 1a: modules aren't yet indexed for symbols/hover.
         Item::Module(_) => {}
+        // S59: C FFI boundary modules aren't yet indexed for symbols/hover.
+        Item::CModule(_) => {}
     }
 }
 

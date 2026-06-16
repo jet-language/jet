@@ -150,6 +150,8 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Module(m) => src[..m.name_span.start]
             .rfind(syntax::KW_MODULE)
             .unwrap_or(m.span.start),
+        // S59: the `@extern`/`@bindgen` attribute precedes the span start.
+        Item::CModule(cm) => cm.span.start,
     }
 }
 
@@ -202,6 +204,7 @@ fn item_span_end(item: &Item) -> usize {
             .map(|m| m.span.end)
             .unwrap_or(t.name_span.end),
         Item::Module(m) => m.span.end,
+        Item::CModule(cm) => cm.span.end,
     }
 }
 
@@ -372,6 +375,12 @@ impl<'a> Fmt<'a> {
             // canonical module formatter lands with the eval pipeline.
             Item::Module(m) => {
                 let text = self.src[m.span.start..m.span.end].to_string();
+                self.write(&text);
+            }
+            // S59: C FFI modules are emitted verbatim (non-destructive). A
+            // canonical formatter can land alongside the bind backend.
+            Item::CModule(cm) => {
+                let text = self.src[cm.span.start..cm.span.end].to_string();
                 self.write(&text);
             }
         }

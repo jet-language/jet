@@ -282,7 +282,7 @@ Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**)
 Example: `examples/features/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
 Integration: `tests/ffi.rs` (gated on `cargo`).
 
-## E2-M14 — C FFI (planned)
+## E2-M14 — C FFI (implemented: overlay + merge + link; bind backend deferred)
 
 **S59** — C import with auto-generated bindings (default) and optional user
 overlay. Spec: [`docs/plans/epoch-2/m14-c-ffi.md`](../plans/epoch-2/m14-c-ffi.md).
@@ -293,13 +293,33 @@ overlay. Spec: [`docs/plans/epoch-2/m14-c-ffi.md`](../plans/epoch-2/m14-c-ffi.md
 | Overlay | `@extern module c.<lib> { … }` — empty `{ }` = no overrides |
 | Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
 
-Effective module = bindgen ∪ overlay; overlay wins on name clash. Link key =
-last segment `<lib>`: hangar dep if declared → else `pkg-config <lib>` →
-**E3201**. By-value scalars/`String` at the edge; pointers require
-`use core.mem` + `@unsafe` (E2-M13). Rust FFI (S50) unchanged.
+Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) =
+"InitWindow";` (the string is the C linker symbol). On any C `use`, the compiler
+loads the bindgen cache at `.jet/bindings/c/<lib>.jet` (when present), merges the
+user overlay over it (**effective module = bindgen ∪ overlay; overlay wins**;
+incompatible re-declaration → **E3205**), and materializes one synthetic module
+so calls resolve like any namespaced module call. Codegen emits an `extern "C"`
+block plus small per-function wrappers (the only place compiler-vetted `unsafe`
+is emitted, S58); `String`↔`*const c_char` and `Char`↔`u32` convert at the edge.
 
-Example (planned): `examples/features/49_cffi.jet` (raylib pong). Diagnostics:
-**E3201–E3208** (register in diagnostics.md before ship).
+Link key = last segment `<lib>`: hangar dep (`[dependencies:c]` in `payload.jet`)
+if declared → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
+`-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
+threaded into the `rustc` link line. By-value scalars/`String`/C-layout
+structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**;
+pointers require `use core.mem` + `@unsafe` (E2-M13) → **E3202** (registered;
+unreachable until the pointer tier lands). `@bindgen` is legal only inside a
+generated cache file (**E3207**); users may not name the reserved `__bindgen__`
+segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
+
+`jet bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
+shares the compile-time auto-bind backend. The header→Jet translator (D-CBIND3
+bindgen helper) is not built into this binary yet, so both auto-bind and
+`jet bind` report **E3208** with the hand-written-overlay workaround; ship a
+hand-written `@bindgen` cache or `@extern module` in the meantime. Rust FFI
+(S50) is unchanged. Diagnostics: **E3201–E3208** in diagnostics.md with
+snapshots (front-end ones under `tests/ui/cffi_*`; link-time/gated ones pinned in
+`tests/cffi.rs`).
 
 ## M6 phase 3 — multi-file imports (done)
 

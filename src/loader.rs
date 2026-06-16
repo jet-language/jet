@@ -236,13 +236,18 @@ pub fn load_entry_with_overlay(
         }
     }
 
-    Ok(ProgramBundle {
+    let mut bundle = ProgramBundle {
         entry: entry_idx,
         project_root,
         modules,
         parse_teaching,
         used_std: HashSet::new(),
-    })
+        cffi: crate::cffi::CFfi::default(),
+    };
+    // S59 (E2-M14): fold every `@extern`/`@bindgen module c.<lib>` into merged
+    // synthetic modules and resolve C `use` forms before sema sees the tree.
+    bundle.cffi = crate::cffi::assemble(&mut bundle)?;
+    Ok(bundle)
 }
 
 /// Walk upward from `start` to find the nearest directory containing `payload.jet`.
@@ -444,11 +449,20 @@ fn load_file(
     });
 
     for imp in &imports {
+        // S59: C `use` forms use the reserved `c.` root legitimately.
+        if crate::cffi::is_c_import(imp) {
+            continue;
+        }
         if let Err(d) = check_reserved_import(imp) {
             stack.pop();
             return Err(vec![d]);
         }
         if std_module_path(imp).is_some() {
+            continue;
+        }
+        // S59 (E2-M14): C `use` forms (`use c.<lib>` / `use "<header>.h"`) do
+        // not load `.jet` files — `cffi::assemble` materializes their modules.
+        if crate::cffi::is_c_import(imp) {
             continue;
         }
         let target = match resolve_import(imp, path, project_root, pkg_dep_dirs, pkg_resolution) {
