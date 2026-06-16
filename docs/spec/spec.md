@@ -321,6 +321,21 @@ Diagnostics: **E0602** path escapes the project · **E0603** missing import ·
 Example: `examples/features/21_imports/` (three files; file import + `as alias`). UI
 fixtures under `tests/ui/import_{escape,missing,cycle,private,private_field,ambiguous}/`.
 
+**Library packages resolve through the same `use` (U17, D-LIB-USE A).** One
+import concept covers files, modules, **and `library` packages**: once a
+`library` package (U10) is realized — its source staged in the shared hangar
+store by the `core` provider — `use <pkg>;` resolves to that staged tree and its
+`pub` items are usable as `pkg.item` (S18). A realized library is simply found by
+the same module resolver, with the hangar staging dir added as an extra search
+root (the staged tree is searched exactly like the project tree or a path dep).
+No new keyword, no `..` import, no special call form — it is an ordinary module
+on the search path. An **`executable`** package goes on PATH, not `use`: naming
+one in `use` is **E0982**. A `library` dependency the project declares but hasn't
+realized yet is **E0983** (run `jetpack build`) — `jet build`/`run` never realize
+on demand, keeping them offline and deterministic, the same flow as pre-fetched
+deps. Resolver: `src/loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
+(offline realize → `use` → call) and `tests/ui/use_unrealized_library/`.
+
 ## M6 phase 4 — `--small` + LSP v0 (done)
 
 **`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.

@@ -229,6 +229,8 @@ before continuing.
 | E0979 | jetpack | a `jetpack os` target has no `@host` selector (U16) |
 | E0980 | jetpack | a `jetpack os` `@host` names a `System` the config doesn't define (U16) |
 | E0981 | jetpack | a `jetpack os` config file doesn't exist (U16) |
+| E0982 | jetpack | `use <pkg>` names an `executable` package — executables go on PATH, not `use` (U17) |
+| E0983 | jetpack | `use <pkg>` names a declared `library` dependency that hasn't been realized yet (U17) |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
@@ -286,6 +288,8 @@ CLI.
 | E0979 | A `jetpack os` target was given with no `@host` selector. | U16: `jetpack os <verb>` takes `[<config-path>]@<host>`; the `@host` segment selects which `System` in the config to apply, and it is required. | Write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`. |
 | E0980 | A `jetpack os` `@host` selector names a system the config doesn't define. | U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
 | E0981 | The `jetpack os` config file (named, or the default `~/.jet/config.jet`) doesn't exist. | U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/config.jet`. | Create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`. |
+| E0982 | `use <pkg>` named a package that is realized as an `executable`. | U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code. | Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `payload.jet`. |
+| E0983 | `use <pkg>` named a `library` dependency the project declares but that hasn't been realized (its source isn't staged in the shared hangar store, and isn't on disk as a path dep). | U17: a `library` is consumed with the ordinary `use` form only after it is realized — `jet build`/`run` never realize on demand, keeping them offline and deterministic (the same flow as pre-fetched deps). | Run `jetpack build` to realize the library into the hangar, then `use <pkg>;` resolves it. |
 
 ## Concurrency diagnostics
 

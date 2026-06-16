@@ -15,6 +15,76 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// What the project's manifest + the shared hangar tell the module resolver
+/// about consuming packages with `use <pkg>` (U17).
+///
+/// One import concept (S16) covers files, modules, and `library` packages: once
+/// a `library` is realized (its source staged in the hangar), `use <pkg>`
+/// resolves to that staged tree — it is just an extra module search root. An
+/// `executable` named in `use` is a teaching error (executables go on PATH,
+/// E0982); a declared-but-unrealized `library` dependency points the user at
+/// `jetpack build` (E0983).
+#[derive(Default)]
+pub struct PkgResolution {
+    /// Realized `library` packages → their staged source dir in the hangar
+    /// (an extra module search root). The hangar is authoritative for the
+    /// realized kind: an empty-`bin` entry is a library (U10).
+    realized_libs: HashMap<String, PathBuf>,
+    /// Realized `executable` packages (non-empty `bin`) by name — naming one in
+    /// `use` is E0982.
+    realized_exes: HashSet<String>,
+    /// Names this project declares as dependencies (`deps:`). A declared dep
+    /// that isn't realized yet is E0983 rather than an unknown-module error.
+    declared_deps: HashSet<String>,
+}
+
+impl PkgResolution {
+    fn is_empty(&self) -> bool {
+        self.realized_libs.is_empty()
+            && self.realized_exes.is_empty()
+            && self.declared_deps.is_empty()
+    }
+}
+
+/// Build the U17 package resolution from a project's `payload.jet` text and the
+/// shared hangar store.
+///
+/// Reading the hangar is a *pure lookup*: the compiler never realizes on demand
+/// (that is `jetpack build`'s job). This keeps `jet build`/`run` offline and
+/// deterministic, exactly like the existing pre-fetched-dependency flow
+/// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
+/// the separate realize step). So a declared-but-unbuilt library is a friendly
+/// "run `jetpack build`" (E0983), never a silent network fetch.
+fn collect_pkg_resolution(raw: &str) -> PkgResolution {
+    let mut declared_deps = HashSet::new();
+    if let Ok(pm) = crate::jetpack::packmanifest::parse(raw) {
+        for dep in &pm.deps {
+            declared_deps.insert(dep.name.clone());
+        }
+    }
+
+    let mut realized_libs = HashMap::new();
+    let mut realized_exes = HashSet::new();
+    let roots = crate::jetpack::store::resolve();
+    for entry in crate::jetpack::store::list(&roots) {
+        if entry.bin.is_empty() {
+            // A realized `library` stages source with an empty `bin` (U10).
+            let out = PathBuf::from(&entry.out);
+            if out.is_dir() {
+                realized_libs.entry(entry.name.clone()).or_insert(out);
+            }
+        } else {
+            realized_exes.insert(entry.name.clone());
+        }
+    }
+
+    PkgResolution {
+        realized_libs,
+        realized_exes,
+        declared_deps,
+    }
+}
+
 pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
     load_entry_with_overlay(entry_path, None, false)
 }
@@ -42,7 +112,9 @@ pub fn load_entry_with_overlay(
         .parent()
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
-    let (project_root, pkg_dep_dirs) = if let Some(manifest_dir) = find_manifest_root(&entry_dir) {
+    let (project_root, pkg_dep_dirs, pkg_resolution) = if let Some(manifest_dir) =
+        find_manifest_root(&entry_dir)
+    {
         // Found a payload.jet — validate it and collect dep source paths.
         let pack_path = manifest_dir.join(syntax::PAYLOAD_FILE);
         let raw = fs::read_to_string(&pack_path).unwrap_or_default();
@@ -112,12 +184,14 @@ pub fn load_entry_with_overlay(
 
                 // Collect package dep source directories for module search.
                 let dep_dirs = collect_dep_dirs(&mf, &manifest_dir);
-                (manifest_dir, dep_dirs)
+                // U17: declared package kinds + realized library staging dirs.
+                let resolution = collect_pkg_resolution(&raw);
+                (manifest_dir, dep_dirs, resolution)
             }
         }
     } else {
         // R9: no manifest — single-file mode, project root is the entry dir.
-        (entry_dir, HashMap::new())
+        (entry_dir, HashMap::new(), PkgResolution::default())
     };
 
     let mut modules = Vec::new();
@@ -130,6 +204,7 @@ pub fn load_entry_with_overlay(
         entry_path,
         &project_root,
         &pkg_dep_dirs,
+        &pkg_resolution,
         &mut modules,
         &mut path_to_idx,
         &mut stack,
@@ -270,11 +345,26 @@ fn collect_dep_dirs(mf: &manifest::Manifest, project_root: &Path) -> HashMap<Str
     dirs
 }
 
+/// Rebuild a project's dependency source dirs (M12.1) and U17 package
+/// resolution from its `payload.jet`, for callers that only have the project
+/// root (e.g. `resolve_import_target`, run after the bundle is loaded). Returns
+/// empty maps when there is no manifest (R9 single-file mode).
+fn project_resolution(project_root: &Path) -> (HashMap<String, PathBuf>, PkgResolution) {
+    let pack_path = project_root.join(syntax::PAYLOAD_FILE);
+    let Some(Ok(mf)) = manifest::load(project_root) else {
+        return (HashMap::new(), PkgResolution::default());
+    };
+    let dep_dirs = collect_dep_dirs(&mf, project_root);
+    let raw = fs::read_to_string(&pack_path).unwrap_or_default();
+    (dep_dirs, collect_pkg_resolution(&raw))
+}
+
 fn load_file(
     path: &Path,
     display: &str,
     project_root: &Path,
     pkg_dep_dirs: &HashMap<String, PathBuf>,
+    pkg_resolution: &PkgResolution,
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
@@ -361,7 +451,7 @@ fn load_file(
         if std_module_path(imp).is_some() {
             continue;
         }
-        let target = match resolve_import(imp, path, project_root, pkg_dep_dirs) {
+        let target = match resolve_import(imp, path, project_root, pkg_dep_dirs, pkg_resolution) {
             Ok(p) => p,
             Err(d) => {
                 stack.pop();
@@ -374,6 +464,7 @@ fn load_file(
             &child_display,
             project_root,
             pkg_dep_dirs,
+            pkg_resolution,
             modules,
             path_to_idx,
             stack,
@@ -395,13 +486,14 @@ fn resolve_import(
     importing: &Path,
     project_root: &Path,
     pkg_dep_dirs: &HashMap<String, PathBuf>,
+    pkg_resolution: &PkgResolution,
 ) -> Result<PathBuf, Diagnostic> {
     match &imp.kind {
         ImportKind::File(path_str, span) => {
             resolve_file_import(importing, path_str, project_root, *span)
         }
         ImportKind::Module(name, span) => {
-            resolve_module_import(name, project_root, pkg_dep_dirs, *span)
+            resolve_module_import(name, project_root, pkg_dep_dirs, pkg_resolution, *span)
         }
     }
 }
@@ -550,6 +642,7 @@ fn resolve_module_import(
     name: &str,
     project_root: &Path,
     pkg_dep_dirs: &HashMap<String, PathBuf>,
+    pkg_resolution: &PkgResolution,
     span: Span,
 ) -> Result<PathBuf, Diagnostic> {
     // M12.1: check package dep dirs first.
@@ -566,6 +659,34 @@ fn resolve_module_import(
         let main_jet = dep_root.join(format!("main.{}", syntax::FILE_EXT));
         if main_jet.is_file() && name == first_segment {
             return Ok(normalize_path(&main_jet));
+        }
+    }
+
+    // U17: a `library` package is brought into code with the ordinary
+    // `use <pkg>` form — once realized, its staged source in the shared hangar
+    // is just an extra module search root. The hangar is authoritative for the
+    // realized kind (empty `bin` = library, U10).
+    if !pkg_resolution.is_empty() {
+        // Realized library → resolve through its staged source tree.
+        if let Some(staged) = pkg_resolution.realized_libs.get(first_segment) {
+            let lib_matches = find_module_files(name, staged);
+            if !lib_matches.is_empty() {
+                return Ok(lib_matches[0].clone());
+            }
+            // Realized, but the named submodule isn't in the staged tree — fall
+            // through to the normal not-found report below.
+        }
+        // Realized executable named in `use` → executables go on PATH (E0982).
+        if pkg_resolution.realized_exes.contains(first_segment) {
+            return Err(e0982_executable_use(first_segment, span));
+        }
+        // Declared as a dependency but not realized yet → run `jetpack build`
+        // (E0983), rather than a generic unknown-module error.
+        if pkg_resolution.declared_deps.contains(first_segment)
+            && find_module_files(name, project_root).is_empty()
+            && !pkg_dep_dirs.contains_key(first_segment)
+        {
+            return Err(e0983_unrealized_library(first_segment, span));
         }
     }
 
@@ -717,11 +838,20 @@ pub fn resolve_import_target(
         ));
     }
     let importing = &bundle.modules[importing_idx];
-    let target_path =
-        match resolve_import(imp, &importing.path, &bundle.project_root, &HashMap::new()) {
-            Ok(p) => normalize_path(&p),
-            Err(d) => return Err(d),
-        };
+    // Rebuild the same dep-source dirs (M12.1) and U17 package resolution
+    // (realized library staging dirs) the loader used, so a `use <pkg>`
+    // re-resolves to the exact file already pulled into the bundle.
+    let (pkg_dep_dirs, pkg_resolution) = project_resolution(&bundle.project_root);
+    let target_path = match resolve_import(
+        imp,
+        &importing.path,
+        &bundle.project_root,
+        &pkg_dep_dirs,
+        &pkg_resolution,
+    ) {
+        Ok(p) => normalize_path(&p),
+        Err(d) => return Err(d),
+    };
     for (i, m) in bundle.modules.iter().enumerate() {
         if normalize_path(&m.path) == target_path {
             return Ok(i);
@@ -742,6 +872,38 @@ pub fn import_alias(imp: &ImportDecl) -> String {
     } else {
         imp.alias.clone()
     }
+}
+
+/// E0982 (U17): `use <pkg>` named a package declared `executable` in the
+/// manifest. Executables go on PATH (you run them), not into code.
+fn e0982_executable_use(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0982",
+        format!("`{}` is an executable package, so it can't be used with `{}`", name, syntax::KW_USE),
+        "an `executable` package installs a binary on your PATH — you run it, you don't import its code; only a `library` package is brought into code with `use` (U17)"
+            .to_string(),
+        format!(
+            "remove `{} {};` and run the `{}` binary instead, or change `{}` to `library` in `{}` if you meant to import its code",
+            syntax::KW_USE, name, name, name, syntax::PAYLOAD_FILE
+        ),
+        Some(span),
+    )
+}
+
+/// E0983 (U17): `use <pkg>` named a `library` package that the manifest
+/// declares but that hasn't been realized (no staged source in the hangar).
+fn e0983_unrealized_library(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0983",
+        format!("the library package `{}` hasn't been built yet", name),
+        "a `library` package must be realized — its source staged in the shared store (hangar) — before `use` can find it (U17)"
+            .to_string(),
+        format!(
+            "run `jetpack build` to realize `{}`, then `{} {};` will resolve it",
+            name, syntax::KW_USE, name
+        ),
+        Some(span),
+    )
 }
 
 fn e0602(span: Span) -> Diagnostic {
