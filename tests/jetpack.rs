@@ -383,7 +383,7 @@ fn core_provider_runs_first_party_package_without_nix() {
 fn typed_core_source_inferred_from_pack_jet() {
     // U9: a typed `module { … }` env declares `sources: { mine: path@<dir> }`
     // with no provider marker. The kind is *inferred* from the resolved target —
-    // the target has a `pack.jet`, so it realizes through the first-party `core`
+    // the target has a `payload.jet`, so it realizes through the first-party `core`
     // provider with no nix anywhere (we strip nix from PATH to prove it). This is
     // the typed-surface mirror of `core_provider_runs_first_party_package_without_nix`.
     let base = Scratch::new("typed-core");
@@ -393,10 +393,10 @@ fn typed_core_source_inferred_from_pack_jet() {
     let hello_bin = repo.join("pkgs/hello/bin");
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    // `pack.jet` is the U9 marker that makes this a Jet package repo (→ core).
+    // `payload.jet` is the U9 marker that makes this a Jet package repo (→ core).
     fs::write(
-        repo.join("pack.jet"),
-        "package: {\n    name: \"jet-pkgs\",\n    edition: \"2026\",\n}\n",
+        repo.join("payload.jet"),
+        "payload: {\n    name: \"jet-pkgs\",\n    edition: \"2026\",\n}\n",
     )
     .unwrap();
     // `env.jet` is still the core provider's package index (pkg.package → subpath).

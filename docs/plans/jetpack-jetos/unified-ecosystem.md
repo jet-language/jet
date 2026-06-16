@@ -32,19 +32,21 @@ namespace / `find` / merge machinery; only the *fields* differ.
 
 | File | Tier | Analogy | Lives | Holds |
 |---|---|---|---|---|
-| **`pack.jet`** | package | `Cargo.toml` | project root | package identity + Jet library deps (+ exported modules) |
+| **`payload.jet`** | package | `Cargo.toml` | project root | payload identity + Jet library deps (+ exported modules) |
 | **`env.jet`** | project environment | `devenv.nix` | project root | dev shells, tools, project module tree (`env` namespace) |
 | **`config.jet`** | system | `configuration.nix` | `~/.jet/` (default) | whole-machine config (`system`/`image` namespaces) |
 
-A repo can have `pack.jet` + `env.jet` together. `config.jet` is the jetos tier
-and normally lives on its own in `~/.jet/`.
+A repo can have `payload.jet` + `env.jet` together. `config.jet` is the jetos
+tier and normally lives on its own in `~/.jet/`.
 
-### 2.1 `pack.jet` — the package manifest (Cargo.toml analog)
+### 2.1 `payload.jet` — the package manifest (Cargo.toml analog)
 
 Jet syntax, not TOML — one language everywhere. Replaces the old `jet.toml`.
+The manifest is `payload.jet` and its identity block is `payload: { … }` (U10,
+renamed from `pack.jet`/`package:` — a clean break, no alias).
 
 ```jet
-package: {
+payload: {
     name:    "wordstats",
     version: "0.1.0",
     edition: "2026",
@@ -116,7 +118,7 @@ module installer {
 ```
 # A project (commits cleanly to GitHub):
 wordstats/
-  pack.jet  env.jet
+  payload.jet  env.jet
   modules/tools/lint.jet        # auto-discovered by find()
   src/ main.jet
   .jet/
@@ -165,13 +167,13 @@ the escape hatch for refs the sugar doesn't cover.
 
 **Provider kind is inferred, not declared (U9).** A source is *only* ever
 `name: provider@target` — there is no `via:`/kind marker. How a source realizes
-is discovered from its target: a target carrying a **`pack.jet`** is a Jet
+is discovered from its target: a target carrying a **`payload.jet`** is a Jet
 package repo and realizes through the first-party **core** provider (no nix);
 any other target **falls back to a nix flake**. So core is the default *when the
 target is one of ours*, and the entire nixpkgs ecosystem comes for free as the
 fallback. The probe never clones a nixpkgs-sized repo: `path@…` stats the dir,
 `nixpkgs@…` is unconditionally nix (never probed), and `github@…`/git URLs peek
-at **only** `pack.jet` (raw fetch / shallow `git archive`) before deciding
+at **only** `payload.jet` (raw fetch / shallow `git archive`) before deciding
 whether to do a full fetch.
 
 ## 6. Merge rules (canonical — one table for all tiers)
@@ -210,8 +212,8 @@ Reconciles jetos-design §5.4 and the former pack-abi table into one referee:
 | Scale | You write | Tool |
 |---|---|---|
 | 0 — script | nothing — just `app.jet` | `jet run app.jet` |
-| 1 — package | `pack.jet` | `jet build` / `jetpack` |
-| 2 — project env | `pack.jet` + `env.jet` (+ `modules/`) | `jet dev` / `jetpack enter` |
+| 1 — package | `payload.jet` | `jet build` / `jetpack` |
+| 2 — project env | `payload.jet` + `env.jet` (+ `modules/`) | `jet dev` / `jetpack enter` |
 | 3 — system | `config.jet` (+ `modules/`) in `~/.jet/` | `jetos switch` / `build` |
 
 Scale 0 never needs a manifest, `.jet/`, or anything — the hard line that keeps
@@ -230,7 +232,7 @@ jet a beginner's first compiled language.
 
 | Thing | Name |
 |---|---|
-| package manifest | `pack.jet` (Jet syntax; replaces `jet.toml`) |
+| package manifest | `payload.jet` (Jet syntax; replaces `jet.toml`; U10, was `pack.jet`) |
 | project environment file | `env.jet` |
 | master system config | `config.jet` (default dir `~/.jet/`) |
 | module keyword | `module`; disable = leading `_` |

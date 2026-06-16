@@ -209,7 +209,7 @@ pub enum ImportKind {
 pub struct ProgramBundle {
     /// Index into `modules` for the entry file.
     pub entry: usize,
-    /// Directory containing the entry file (project root until M12 `pack.jet`).
+    /// Directory containing the entry file (project root until M12 `payload.jet`).
     pub project_root: std::path::PathBuf,
     pub modules: Vec<LoadedModule>,
     /// S14 teaching diagnostics collected during a lenient parse (LSP check).

@@ -413,7 +413,7 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
 /// U9: infer whether a source is realized by the first-party `core` provider or
 /// the `nix` compatibility provider from its *resolved target* — no marker is
 /// declared. The rule (see syntax-decisions.md U9, unified-ecosystem.md §6): a
-/// target carrying a `pack.jet` is a Jet package repo (→ `core`); otherwise it
+/// target carrying a `payload.jet` is a Jet package repo (→ `core`); otherwise it
 /// is a nix flake (→ `nix`).
 ///
 /// The probe must never clone a nixpkgs-sized repo just to classify it:
@@ -421,7 +421,7 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
 ///   concrete `Core`/`Nix`;
 /// - `nixpkgs@…` is unconditionally `nix` — never probed;
 /// - `github@…` is left **`Infer`**: its kind depends on whether the remote
-///   repo carries a `pack.jet`, which only a realize-time probe can answer
+///   repo carries a `payload.jet`, which only a realize-time probe can answer
 ///   (this pure pass has no offline flag or source cache). `provider::
 ///   resolve_kind` does the lightweight git peek when realization runs.
 fn infer_provider_kind(pref: &refspec::ProviderRef, base_dir: &Path) -> ProviderKind {
@@ -434,14 +434,14 @@ fn infer_provider_kind(pref: &refspec::ProviderRef, base_dir: &Path) -> Provider
             } else {
                 base_dir.join(target)
             };
-            if dir.join(syntax::PACK_FILE).is_file() {
+            if dir.join(syntax::PAYLOAD_FILE).is_file() {
                 ProviderKind::Core
             } else {
                 ProviderKind::Nix
             }
         }
         // `github@` can't be classified offline-and-free; defer to a realize-time
-        // `pack.jet` peek (U9).
+        // `payload.jet` peek (U9).
         Source::Github => ProviderKind::Infer,
         // `nixpkgs@` is always the nix collection; never probed. (`Named` can't
         // appear in a `provider@target` ref.)
@@ -677,7 +677,7 @@ module dev {
     #[test]
     fn github_source_kind_is_left_to_inference() {
         // U9: a `github@…` source can't be classified core-vs-nix at pure
-        // evaluation time (it depends on a remote `pack.jet` peek), so the table
+        // evaluation time (it depends on a remote `payload.jet` peek), so the table
         // records `Infer`; `provider::resolve_kind` decides at realize time.
         let src = r#"
 module dev {

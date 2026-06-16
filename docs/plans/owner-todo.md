@@ -62,6 +62,7 @@ Done means each step: `nix develop -c cargo test` green, docs updated to match b
 - Support for labeled loop "blocks"?
 - Ensure we support multiple constructor types
 - Relook module implementation & pack.jet @docs/plans/jetpack-jetos/unified-ecosystem.md
+- Support H file imports for c ffi
 - Named + default arguments: Swift, Kotlin, Gleam (labels), Python, C#, Ruby. Big readability/beginner win. (§23)
 - REPL Support
 - Pipelines (|>): F#, Elixir, Gleam, Elm, OCaml, Julia. (§15)

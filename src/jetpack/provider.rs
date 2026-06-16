@@ -446,7 +446,7 @@ pub fn resolve_kind(
     match table.provider(name) {
         ProviderKind::Core => ProviderKind::Core,
         ProviderKind::Nix => ProviderKind::Nix,
-        // U9: peek the remote's `pack.jet` to choose core vs nix.
+        // U9: peek the remote's `payload.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
             Some(upstream) => infer_remote_kind(upstream, offline, cache_dir),
             None => ProviderKind::Nix,
@@ -473,7 +473,7 @@ pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realize
 }
 
 /// U9 remote probe: classify a `github@…`/git upstream as `Core` (it carries a
-/// `pack.jet`) or `Nix` (it does not), peeking **only** `pack.jet` — never
+/// `payload.jet`) or `Nix` (it does not), peeking **only** `payload.jet` — never
 /// cloning a nixpkgs-sized repo just to classify it.
 ///
 /// Resolution order:
@@ -482,7 +482,7 @@ pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realize
 /// 2. Offline with no cache: we can't probe, so default to `nix`.
 /// 3. Online: a lightweight `git` peek — a partial, no-checkout, depth-1 clone
 ///    (`--filter=tree:0`, so blobs/subtrees are never downloaded) into a temp
-///    dir, then `git ls-tree <rev> pack.jet`. Present → `Core`; absent or any
+///    dir, then `git ls-tree <rev> payload.jet`. Present → `Core`; absent or any
 ///    peek failure → `Nix` (the safe default; a github flake still realizes
 ///    through nix).
 fn infer_remote_kind(upstream: &str, offline: bool, cache_dir: &Path) -> ProviderKind {
@@ -492,7 +492,7 @@ fn infer_remote_kind(upstream: &str, offline: bool, cache_dir: &Path) -> Provide
     // (1) Reuse a prior fetch.
     let cache = source_cache_dir(cache_dir, &remote);
     if cache.is_dir() {
-        return pack_kind(cache.join(crate::syntax::PACK_FILE).is_file());
+        return pack_kind(cache.join(crate::syntax::PAYLOAD_FILE).is_file());
     }
     // (2) Offline can't reach the network; a remote we haven't cached stays nix.
     if offline {
@@ -510,15 +510,15 @@ fn pack_kind(has_pack: bool) -> ProviderKind {
     }
 }
 
-/// Peek whether `remote` has a `pack.jet` at its root, without a full clone.
+/// Peek whether `remote` has a `payload.jet` at its root, without a full clone.
 ///
 /// Fetches **only the named rev** into a throwaway repo, shallow (`--depth 1`)
 /// and partial (`--filter=tree:0`, so trees/blobs are deferred), then reads the
 /// root tree with `git ls-tree FETCH_HEAD`. Even a nixpkgs-sized repo transfers
 /// just the one commit object plus the lazily-fetched root tree. `git fetch`
 /// resolves a branch, tag, **or** commit SHA uniformly, so the rev's exact
-/// `pack.jet` is peeked regardless of how it was pinned. Any failure (no `git`,
-/// network error, unfetchable rev) is treated as "no pack.jet" by the caller
+/// `payload.jet` is peeked regardless of how it was pinned. Any failure (no `git`,
+/// network error, unfetchable rev) is treated as "no payload.jet" by the caller
 /// (→ nix), the safe default.
 fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     if Command::new("git").arg("--version").output().is_err() {
@@ -563,7 +563,7 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
         && Command::new("git")
             .arg("-C")
             .arg(&tmp)
-            .args(["ls-tree", "FETCH_HEAD", crate::syntax::PACK_FILE])
+            .args(["ls-tree", "FETCH_HEAD", crate::syntax::PAYLOAD_FILE])
             .output()
             .map(|o| o.status.success() && !o.stdout.is_empty())
             .unwrap_or(false);
@@ -873,11 +873,11 @@ mod tests {
         let store = base.join("store");
         std::fs::create_dir_all(&store).unwrap();
 
-        // A repo carrying `pack.jet` is a Jet package source → core.
+        // A repo carrying `payload.jet` is a Jet package source → core.
         let with = base.join("with-pack");
         if !init_git_repo(
             &with,
-            &[("pack.jet", "package: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
         ) {
             eprintln!("note: skipping remote probe test (git not found)");
             return;
@@ -891,10 +891,10 @@ mod tests {
         assert_eq!(
             resolve_kind(&with_spec, &with_table, false, &store),
             ProviderKind::Core,
-            "a remote carrying pack.jet must infer core"
+            "a remote carrying payload.jet must infer core"
         );
 
-        // A repo with no `pack.jet` is a plain (nix) flake/source → nix.
+        // A repo with no `payload.jet` is a plain (nix) flake/source → nix.
         let without = base.join("no-pack");
         init_git_repo(&without, &[("flake.nix", "{}\n")]);
         let without_table = SourceTable::from_decls([(
@@ -906,11 +906,11 @@ mod tests {
         assert_eq!(
             resolve_kind(&without_spec, &without_table, false, &store),
             ProviderKind::Nix,
-            "a remote with no pack.jet must infer nix"
+            "a remote with no payload.jet must infer nix"
         );
 
         // Offline with no cached checkout can't probe → defaults to nix even for
-        // the pack.jet-bearing repo.
+        // the payload.jet-bearing repo.
         let cold = base.join("cold-store");
         std::fs::create_dir_all(&cold).unwrap();
         assert_eq!(
@@ -934,7 +934,7 @@ mod tests {
         let repo = base.join("repo");
         if !init_git_repo(
             &repo,
-            &[("pack.jet", "package: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
         ) {
             eprintln!("note: skipping commit-sha probe test (git not found)");
             return;
@@ -958,7 +958,7 @@ mod tests {
         assert_eq!(
             resolve_kind(&spec, &table, false, &store),
             ProviderKind::Core,
-            "a commit-SHA-pinned remote with pack.jet must infer core"
+            "a commit-SHA-pinned remote with payload.jet must infer core"
         );
         std::fs::remove_dir_all(&base).ok();
     }
@@ -966,7 +966,7 @@ mod tests {
     #[test]
     fn realize_resolves_inferred_remote_to_core() {
         // U9 end-to-end at the realize boundary: an `Infer` source — the kind a
-        // typed `github@…` source carries — whose remote has a `pack.jet`
+        // typed `github@…` source carries — whose remote has a `payload.jet`
         // resolves to the `core` provider and builds the first-party package,
         // with no nix and no declared marker.
         use super::super::refspec::{classify_in, ProviderKind, SourceTable};
@@ -977,7 +977,7 @@ mod tests {
         if !init_git_repo(
             &repo,
             &[
-                ("pack.jet", "package: { name: \"p\", version: \"0.1.0\" }\n"),
+                ("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n"),
                 ("env.jet", "pkg.package(\"hello\", \"./pkgs/hello\");\n"),
                 ("pkgs/hello/bin/hello", "#!/bin/sh\necho hi-infer\n"),
             ],

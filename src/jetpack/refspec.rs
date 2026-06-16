@@ -58,7 +58,7 @@ impl Source {
 ///
 /// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
 /// `github@…` source's kind can't be known during pure `evaluate_env`
-/// evaluation — it depends on whether the remote repo carries a `pack.jet`,
+/// evaluation — it depends on whether the remote repo carries a `payload.jet`,
 /// which only a realize-time probe (with the offline flag + source cache) can
 /// answer. `provider::resolve_kind` turns `Infer` into a concrete `Nix`/`Core`
 /// when realization runs; it never reaches a provider.
@@ -68,7 +68,7 @@ pub enum ProviderKind {
     Nix,
     Core,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
-    /// `pack.jet` (U9). Only the typed `github@…` surface produces this.
+    /// `payload.jet` (U9). Only the typed `github@…` surface produces this.
     Infer,
 }
 
@@ -214,7 +214,7 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
 // ──────────────────────────────────────────────
 // `provider@target` source refs (U6, was D-JPK18).
 //
-// The typed authoring surface (env.jet/pack.jet `sources:`/`packages:`) writes source
+// The typed authoring surface (env.jet/payload.jet `sources:`/`packages:`) writes source
 // refs as `provider@target` — `github@owner/repo/rev`, `path@../local`,
 // `nixpkgs@channel`. This is distinct from the Phase-1 command-line
 // `source:package` form above (D-JPK18 keeps the colon classifier for

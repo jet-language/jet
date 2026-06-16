@@ -351,8 +351,9 @@ pub const FOREIGN_MUTEX: &str = "Mutex";
 pub const FOREIGN_LOCK: &str = "lock";
 
 // S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the
-// manifest reshape chunk (U1/U2): the manifest is now `PACK_FILE` (`pack.jet`)
-// and the lockfile is `UNIFIED_LOCK_FILE` (`.jet/lock`). Clean break — no alias.
+// manifest reshape chunk (U1/U2): the manifest is now `PAYLOAD_FILE`
+// (`payload.jet`, U10 — was `pack.jet`/`PACK_FILE`) and the lockfile is
+// `UNIFIED_LOCK_FILE` (`.jet/lock`). Clean break — no alias.
 
 /// S52 (ratified M12): package source root directory inside a project.
 pub const SOURCE_ROOT_DIR: &str = ".jet";
@@ -372,9 +373,10 @@ pub const DEP_TABLE_C: &str = "dependencies:c";
 /// D-JPK1/9: the Jetpack package-manager binary name.
 pub const JETPACK_BINARY_NAME: &str = "jetpack";
 
-/// U1 (D-JPK20): `pack.jet` is the Jet **package manifest** (Cargo.toml analog;
-/// replaces `jet.toml`). `PACK_LOCK_FILE` is superseded by `.jet/lock` (U2/S52).
-pub const PACK_FILE: &str = "pack.jet";
+/// U1 (D-JPK20) / U10: the Jet **package manifest** is `payload.jet`
+/// (`PAYLOAD_FILE`; Cargo.toml analog, replaces `jet.toml`). The old
+/// `pack.jet`/`PACK_FILE` spelling was retired in the U10 rename (clean break,
+/// no alias). `PACK_LOCK_FILE` is superseded by `.jet/lock` (U2/S52).
 pub const PACK_LOCK_FILE: &str = "pack.lock";
 
 /// D-JPK7/15: the `<source>:<package/path>` ref separator. Users never type
@@ -461,6 +463,30 @@ pub const ENV_FIELD_PROMPT: &str = "prompt";
 /// Provider names reuse REF_SOURCE_* (github / path / nixpkgs).
 pub const TYPE_PKG: &str = "Pkg";
 pub const REF_PROVIDER_AT: &str = "@";
+
+/// U10 (ratified 2026-06-16; amends U1): the package manifest is `payload.jet`
+/// (renamed from `pack.jet`/`PACK_FILE` — a clean break, no alias). A payload is
+/// a collection of packages; its identity block is `payload: { … }`.
+pub const PAYLOAD_FILE: &str = "payload.jet";
+
+/// U10 (ratified 2026-06-16): manifest identity block keyword — `payload: { name,
+/// version, … }` (was `package:`).
+pub const MANIFEST_BLOCK_PAYLOAD: &str = "payload";
+
+/// U10 (ratified 2026-06-16): the block listing a payload's packages —
+/// `packages: { name: kind }`. Each `name` is a top-level `module` (the package),
+/// discovered by name in the tree; the old `exports: [module …]` folds into this.
+pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
+
+/// U10 (ratified 2026-06-16): a package's kind. `library` is imported for its
+/// code; `executable` installs a binary on PATH (the devshell case). Written as a
+/// bare keyword (`deploy: executable`) or inside a `{ kind: … }` block.
+pub const PACKAGE_KIND_LIBRARY: &str = "library";
+pub const PACKAGE_KIND_EXECUTABLE: &str = "executable";
+
+/// U10 (ratified 2026-06-16): the per-package block field naming its kind —
+/// `deploy: { kind: executable, … }`.
+pub const PACKAGE_FIELD_KIND: &str = "kind";
 
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
 /// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`

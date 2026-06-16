@@ -256,8 +256,14 @@ unit variant with the same spelling, qualify it (e.g. `Light.Red`).
 **Nested patterns (amended 2026-06-16, D-PAT1):** a pattern may appear inside a
 payload slot — `r == ok(Rect(w, h))`, `x == ok(value(n))` — binding the inner
 names; nesting composes to any depth, so `when`/`if` arms can destructure a
-result and its contents in one test. Rejected: `is` keyword, Rust `match`,
-accessor-only extraction.
+result and its contents in one test.
+**Guards (amended 2026-06-16, D-PAT2):** a name bound by a pattern test is in
+scope for the rest of the **same** condition, so a guard is just `&&` —
+`when r { r == ok(Code(n)) && n >= 500 -> { … }; }` matches a 5xx error. No
+dedicated guard keyword is added: S24 arms are already full `Bool` conditions, so
+"…but only if" composes from `&&` and the freshly-bound name. Rejected: a
+separate guard keyword (would need a new word now that `when` is taken).
+Rejected: `is` keyword, Rust `match`, accessor-only extraction.
 
 **S32 — Absence / Option (M3)** *(ratified 2026-06-11)*: `**T?`** marks
 an optional value; `**value(expr)**` when present, bare `**null**` when
@@ -898,8 +904,11 @@ Zig `\\` line prefix.
 **S71 — Optional chaining and `??` default** *(ratified 2026-06-15, D-SG6
 option C; `??` fallback + retired-`or` teaching error **implemented**; `?.`
 **field** chaining **implemented** (`a?.b?.c` → `T?`, flattening nested
-optionals; non-optional left side is E0047); `?.` through a **method** is E0046
-for now; supersedes S35's `or`)*: `**?.`** optional
+optionals; non-optional left side is E0047); **amended 2026-06-16 (D-SUGAR6):
+`?.` extends to method calls** — `user?.display_name()` calls the method only
+when the receiver is present and yields a `T?`, the natural completion of field
+chaining; the former E0046 "no `?.` through methods" restriction is lifted (E0046
+is retired); supersedes S35's `or`)*: `**?.`** optional
 chaining — `user?.address?.city` yields a `T?` and short-circuits to `null` on
 the first absent link. `**??`** is the **single fallback spelling for both**
 optionals (`T?`) and fallible values (`T ? E`): `x ?? default`, `x ?? return`,
@@ -961,12 +970,29 @@ to a `[T]` slot — one-way, safe; (d) `.map` preserves N: `[T#N].map → [U#N]`
 (`push`/`pop`/`insert`) are rejected on `[T#N]` with a teaching error pointing
 at `[T]`; (g) positional destructuring of a `[T#N]` is compile-time
 length-checked. `[T#N]` erases to `Vec<T>` at codegen (I3). `#` is the
-fixed-size separator — chosen because `#` appears nowhere else in Jet surface
-syntax (comments are `//`/`/* */`; Jetpack refs use `@`/`:`). Diagnostics
+fixed-size separator. Diagnostics
 E0963 (destructure length mismatch), E0964 (length-changing op on fixed list),
 E0965 (compile-time index out of range). Rejected: Rust `[T; N]` spelling
 (`;` clashes with S6 statement terminators), angle-bracket `[T<N>]` (already
 used for generics S33), keeping `[T]` for both sizes (loses static safety).
+**Amended 2026-06-16 (VERSION-#, owner option 1):** `#` no longer "appears
+nowhere else" — its unifying role is now **"`#` introduces a pinned number."**
+That covers a list length (`[T#N]`) and a **package version** (`pkg#version`);
+see the version-pin entry below.
+
+**VERSION-# — `#` introduces a pinned number (version pins)** *(ratified
+2026-06-16, owner option 1)*: a package version is pinned with `#` —
+`textkit#1.2.0`, `github@acme/parsekit#v0.4.1`. The **source** selector stays
+`:` / `@` (`nixpkgs:fastfetch`, `github@owner/repo`; D-JPK7/15 unchanged — we
+still don't write Nix's `nixpkgs#fastfetch` for *sources*); `#` attaches the
+*version number* on the end. This is thematically consistent with S76, where `#`
+already reads as "a specific count/number": `[Point#2]` = "2 points",
+`parsekit#1.2.0` = "version 1.2.0". The richer inline-struct dep form
+(D-JPK23, `{ git: "…", tag: "…" }`) remains for git deps needing branch/rev
+selectors; `pkg#version` is the terse pin for simple semver. Rejected: option 2
+(version only inside the dep struct, no `#`), option 3 (push `#` onto the source
+selector too — discards the deliberate "don't look like Nix" rule and overloads
+`#` ambiguously).
 
 **S77 — Struct field punning** *(ratified 2026-06-16; milestone pending)*: in a
 struct literal `Type { … }` (S29), a bare field name is shorthand for
@@ -1029,11 +1055,13 @@ The owner-ratified design-of-record is
 These records establish the authoring-surface tokens; behavior lands in the
 Jetpack/Jetos implementation chunks (no syntax is invented beyond this).
 
-**U1 — Package manifest is `pack.jet`** *(ratified 2026-06-16)*: the package
-manifest is `pack.jet`, written in **Jet syntax** (not TOML), holding package
-identity + Jet library deps (+ optional exported modules). It **replaces**
-`jet.toml`. **Amends S52.** Rejected: keeping a separate TOML manifest beside a
-Jet pack file (two manifest languages).
+**U1 — Package manifest is `pack.jet`** *(ratified 2026-06-16; **amended by
+U10** — renamed `payload.jet`, identity block `payload:`, `packages:` model)*:
+the package manifest is written in **Jet syntax** (not TOML), holding package
+identity + Jet library deps (+ exported packages). It **replaces** `jet.toml`.
+**Amends S52.** Rejected: keeping a separate TOML manifest beside a Jet pack file
+(two manifest languages). *(The filename `pack.jet` and `package:` identity block
+named here are superseded by U10's `payload.jet` / `payload:`.)*
 
 **U2 — Single lockfile `.jet/lock` and the `.jet/` managed folder**
 *(ratified 2026-06-16)*: one lockfile, `.jet/lock`, **replaces** both `jet.lock`
@@ -1111,6 +1139,39 @@ full fetch. **core-by-default with a safe nix fallback** keeps the syntax clean
 and gives every env the whole nixpkgs repo for free. See unified-ecosystem.md §6.
 Rejected: a per-source `via: core` field, an inline `via` keyword, and a `core@…`
 provider prefix (all add ceremony to express what the target already tells us).
+
+**U10 — Manifest is `payload.jet`; payload → packages → modules** *(ratified
+2026-06-16; amends U1)*: the package manifest is renamed **`payload.jet`** (was
+`pack.jet`) and its identity block is **`payload: { name, version, … }`** (was
+`package:`). A **payload** is a collection of **packages**; a **package is a
+top-level `module`** — the unit a dev exports — which may contain public/private
+submodules (scoping is the module system's job). A payload lists its packages in
+a **`packages: { … }`** block whose entries are `name: kind`, where *name* is a
+top-level module name and *kind* is **`library`** (consumers *import* it for its
+code — the build-graph axis) or **`executable`** (consumers *install* it as a
+binary on PATH — the nix-flake devshell case). The value is either a **bare
+keyword** (`deploy: executable`, defaults assumed) or a **block** (`deploy: {
+kind: executable, … }`) — the block is the extension point for advanced
+per-package config (a `bin` name, an explicit entry module, a per-package
+version), each new field gated by this protocol. A package's **module name is its
+identity** (robust to file moves; renaming the module is the real breaking
+change); its file is **discovered** by recursively walking the payload tree
+(sorted + bounded — skip `.jet/`, hidden, and build dirs) for the `module <name>`
+declaration. Each name must resolve to **exactly one** module — zero matches or
+an ambiguous duplicate is a diagnostic. `jet new`/`jet init` always scaffolds
+`packages:` (explicit-by-default; the user edits it only to add/remove). This
+`packages:` index is what the **core** provider reads to resolve a requested
+package → its source, **replacing** the misplaced `env.jet` `pkg.package(...)`
+index (this completes the U9 marker convergence): `env.jet` stays purely the
+dev-shell (devenv) descriptor and is **never** read by the provider. The old
+`exports: [module …]` list (U1) folds into `packages:`. **Realize timing:** no
+Jet→binary compiler exists yet — today `library` packages stage their module
+source and `executable` packages stage a prebuilt `bin/`; the native compiler
+slots into the same realize boundary later (manifest is designed for the
+end-state now). **Amends U1** (manifest filename + identity block). Rejected: a
+`package:`-singular manifest with hand-written package *paths* (fragile to file
+moves); a separate `via:`/path index; and reusing `env.jet` as a package index
+(category error — a dev shell is not an export list).
 
 ## Enforcement
 
@@ -1305,6 +1366,7 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | U7  | `jet run file.jet` stays zero-ceremony forever (reaffirms R9) | owner |
 | 2026-06-16 | U8  | `sources:`/`imports:` nest inside `module {}` (siblings of contributions), not file top-level; amends U4 | owner |
 | 2026-06-16 | U9  | source provider kind inferred (`pack.jet` → core, else nix flake); no `via:` marker; manifest-only remote probe | owner |
+| 2026-06-16 | U10 | manifest renamed `payload.jet`; `payload:` identity block; `packages: { name: library\|executable }` (bare or block); package = top-level module discovered by name; replaces `env.jet` pkg index (completes U9); amends U1 | owner |
 | 2026-06-16 | S52 | amended: `pack.jet`/`.jet/lock` (U1/U2); hangar store `/etc/jet/hangar` | owner |
 | 2026-06-16 | S75 | fan-out operator `f.[ … ]`; `.[` adjacency; E0961/E0962        | owner |
 | 2026-06-16 | S76 | fixed-size list type `[T#N]`; `#` separator; erase to Vec; E0963–E0965 | owner |
@@ -1318,3 +1380,11 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | S74 | amended: refutable bind requires `??` fallback (D-PAT3) | owner |
 | 2026-06-16 | D-SUGAR2 | pipe `\|>` declined for now; dot-chains (S69) cover it | owner |
 | 2026-06-16 | D-SUGAR4 | newtype keyword declined; one-field struct covers it | owner |
+| 2026-06-16 | S31 | amended: `&&`-guards reuse pattern-bound names; no guard keyword (D-PAT2) | owner |
+| 2026-06-16 | S71 | amended: `?.` extends to method calls; E0046 retired (D-SUGAR6) | owner |
+| 2026-06-16 | S76 | amended: `#` = "pinned number" role; adds `pkg#version` (VERSION-#) | owner |
+| 2026-06-16 | VERSION-# | version pins use `#` (`pkg#version`); source selector stays `:`/`@` | owner |
+| 2026-06-16 | D-SUGAR3 | transparent type alias declined for now (use newtype/struct) | owner |
+| 2026-06-16 | D-SUGAR5 | `defer` keyword declined; RAII (S63) is the cleanup story | owner |
+| 2026-06-16 | D-FP6 | list spread `[...xs, y]` deferred; use `.concat`/`.with` for now | owner |
+| 2026-06-16 | D-PAT6 | parameter destructuring deferred; unpack on first body line | owner |

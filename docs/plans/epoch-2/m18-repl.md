@@ -1,9 +1,10 @@
 # E2-M18 — Interactive REPL (`jet repl`)
 
-**Status:** draft — **blocked on owner decisions D-REPL1…D-REPL21** (Group 12 in
-docs/spec/decision-ballots.md). No implementation until every listed
-decision is ratified in docs/spec/syntax-decisions.md or explicitly
-deferred with a recorded default.
+**Status:** **all owner decisions D-REPL1…D-REPL21 ratified 2026-06-16** (see
+the decision tables below; routed from docs/spec/decision-ballots-owner.md).
+Ready for the detailed implementation pass when E2-M18 is scheduled — the M4
+interpreter (D-REPL4=A backend) must be green first. D-REPL14 carries an owner
+refinement (prompt-based compile-or-file fallback) — see its row.
 
 **Depends on:** E2-M4 (`jet dev` interpreter — whole-program tree-walker
 extended from M9.5 comptime), E2-M3 (CLI polish, `--json` patterns). Soft
@@ -55,7 +56,7 @@ picks another option.
 
 | ID | Question | Options | Rec | Ratified |
 |---|---|---|---|---|
-| D-REPL3 | How users start a session | **A** — explicit `jet repl` only · **B** — also `jet` with no args in a TTY (like `python`) · **C** — `jet repl` plus `jet repl <file.jet>` to seed a session from a file | **A** | OPEN — needs owner |
+| D-REPL3 | How users start a session | **A** — explicit `jet repl` only · **B** — also `jet` with no args in a TTY (like `python`) · **C** — `jet repl` plus `jet repl <file.jet>` to seed a session from a file | **A** | ✅ ratified 2026-06-16 — A |
 | D-REPL12 | Relation to `jet eval --pure` (S60) | **A** — separate commands; REPL is impure-by-default · **B** — `jet repl --pure` runs a restricted pure subset · **C** — no REPL; only `jet eval --pure` for config (E2-M16) | **A** | ✅ ratified 2026-06-16 — A&B |
 | D-REPL13 | Relation to `jet dev` | **A** — independent processes; share interpreter library only · **B** — `jet dev --repl` flag in the watch server · **C** — REPL is a mode inside the dev server (one long-lived binary) | **A** | ✅ ratified 2026-06-16 — A |
 
@@ -63,16 +64,16 @@ picks another option.
 
 | ID | Question | Options | Rec | Ratified |
 |---|---|---|---|---|
-| D-REPL4 | Execution backend | **A** — interpreter only (E2-M4); plain message when unsupported · **B** — compile+run each input via rustc (slow, full semantics) · **C** — hybrid: interpreter first, auto-fallback compile with user-visible warning | **A** | OPEN — needs owner |
-| D-REPL5 | What users can type | **A** — expressions and top-level statements (`val`, `var`, `print`, control flow) · **B** — also item declarations (`fn`, `struct`, `enum`, `trait`) · **C** — expressions only (everything else is `:load`) | **A** | OPEN — needs owner |
-| D-REPL6 | Hard rejects (must fail with a teaching message + workaround) | **A** — FFI, tasks/channels, `unsafe`/low-level gates, and anything M4 marks native-only · **B** — same as A plus package imports from `jet.toml` until resolver story is clear · **C** — allow imports/deps; REPL is a full project shell | **A** | OPEN — needs owner |
-| D-REPL14 | If a snippet needs native code | **A** — reject with "run `jet run` / `jet build` instead" · **B** — offer one-shot compile-and-run of the current session module to a temp binary | **A** | OPEN — needs owner |
+| D-REPL4 | Execution backend | **A** — interpreter only (E2-M4); plain message when unsupported · **B** — compile+run each input via rustc (slow, full semantics) · **C** — hybrid: interpreter first, auto-fallback compile with user-visible warning | **A** | ✅ ratified 2026-06-16 — A |
+| D-REPL5 | What users can type | **A** — expressions and top-level statements (`val`, `var`, `print`, control flow) · **B** — also item declarations (`fn`, `struct`, `enum`, `trait`) · **C** — expressions only (everything else is `:load`) | **A** | ✅ ratified 2026-06-16 — A |
+| D-REPL6 | Hard rejects (must fail with a teaching message + workaround) | **A** — FFI, tasks/channels, `unsafe`/low-level gates, and anything M4 marks native-only · **B** — same as A plus package imports from `jet.toml` until resolver story is clear · **C** — allow imports/deps; REPL is a full project shell | **A** | ✅ ratified 2026-06-16 — A |
+| D-REPL14 | If a snippet needs native code | **A** — reject with "run `jet run` / `jet build` instead" · **B** — offer one-shot compile-and-run of the current session module to a temp binary | **A** | ✅ ratified 2026-06-16 — **owner refinement (prompt-based):** the REPL *prompts* the user — offer to compile & run the snippet (B's magic); if they decline, reject it and write it to a file, then point at `jet run` (A's safety + teaches the file→`jet run` path). REPL-I4 still holds (no release artifacts; temp/working-dir file only). |
 
 ### Session and ownership
 
 | ID | Question | Options | Rec | Ratified |
 |---|---|---|---|---|
-| D-REPL7 | Session persistence model | **A** — one accumulating module; later inputs see earlier bindings · **B** — notebook cells (`:cell`); each cell isolated unless wired · **C** — A default, optional `:cell` mode | **C** | OPEN — needs owner |
+| D-REPL7 | Session persistence model | **A** — one accumulating module; later inputs see earlier bindings · **B** — notebook cells (`:cell`); each cell isolated unless wired · **C** — A default, optional `:cell` mode | **C** | ✅ ratified 2026-06-16 — C |
 | D-REPL8 | Ownership across inputs | **A** — real move semantics; moved-from bindings error on reuse with E02xx voice · **B** — REPL auto-clones on move to keep bindings usable (differs from batch compiler) · **C** — reject moves in REPL; only `view`/`ref` borrows cross-line | **A** | ✅ ratified 2026-06-16 — A |
 | D-REPL9 | Multi-line input | **A** — brace/paren/bracket counting + `...` secondary prompt until balanced · **B** — require `;` to submit every fragment (no implicit blocks) · **C** — single-line only; paste multi-line as one submission | **A** | ✅ ratified 2026-06-16 — A |
 
@@ -102,7 +103,7 @@ picks another option.
 
 | ID | Question | Options | Rec | Ratified |
 |---|---|---|---|---|
-| D-REPL20 | CI testing | **A** — transcript fixtures (`tests/repl/*.txt` → expected stdout/stderr) · **B** — A + scriptedPTY integration tests · **C** — manual smoke only (not acceptable for merge) | **A** | OPEN — needs owner |
+| D-REPL20 | CI testing | **A** — transcript fixtures (`tests/repl/*.txt` → expected stdout/stderr) · **B** — A + scriptedPTY integration tests · **C** — manual smoke only (not acceptable for merge) | **A** | ✅ ratified 2026-06-16 — A |
 
 ---
 

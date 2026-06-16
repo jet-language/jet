@@ -15,7 +15,7 @@ TARGET surface; it explicitly says Phase-1 directive scanning is the shippable
 bootstrap that evolves into the typed surface. Do **not** treat ratified
 (U1–U9) as implemented — see the gap list below (e.g. U9 inferred provider kind
 is fully built for both `path@…` and `github@…`, but a `core` source still
-carries the dual `pack.jet`+`env.jet` marker; `System`/`Image` types parse but
+carries the dual `payload.jet`+`env.jet` marker; `System`/`Image` types parse but
 are inert).
 
 Supporting design docs (own their detail):
@@ -44,7 +44,45 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U9 remote probe (`github@…` core sources)
+## Latest chunk (2026-06-16): U10 Chunk 1 — rename the manifest (`pack.jet` → `payload.jet`)
+
+The package manifest is now **`payload.jet`** and its identity block is
+**`payload: { … }`** — a clean break off `pack.jet`/`package:`, no alias (mirrors
+the `jet.toml`→`pack.jet` migration). This is Chunk 1 of the U10 4-chunk arc; the
+`packages:` block, recursive discovery, and `library`/`executable` realize
+(Chunks 2–4) are untouched and remain next.
+
+Landed this run:
+- **`src/syntax.rs`:** retired the `PACK_FILE` constant entirely; all code reads
+  `PAYLOAD_FILE` (`"payload.jet"`). `PACK_LOCK_FILE` (`pack.lock`, already
+  superseded by `.jet/lock`) left alone — out of scope.
+- **Parser (`src/jetpack/packmanifest.rs`):** the identity block is parsed via
+  `syntax::MANIFEST_BLOCK_PAYLOAD` (`"payload"`); the `MissingPackage` error
+  variant → **`MissingPayload`**; `new_template` emits `payload: {`. The struct
+  type `PackageMeta` and the `PackManifest.package` field keep their internal
+  names (not user-facing); only the on-disk keyword + filename changed.
+- **Compiler manifest (`src/manifest.rs`):** `E1206`/`E1208` copy now says
+  `payload`/`payload.jet` ("no `payload: { … }` block", "the `jet` field in
+  `payload`", etc.). `loader.rs`/`fetch.rs`/`lock.rs`/`main.rs` read
+  `PAYLOAD_FILE` (incl. user-facing "no `payload.jet` found" messages and the
+  `jet new` scaffold, which now writes `payload.jet`).
+- **U9 probe stays correct:** `modeval::infer_provider_kind` and
+  `provider::remote_has_pack_jet` peek `syntax::PAYLOAD_FILE`; the offline
+  `provider.rs` probe tests now seed `payload.jet` fixtures with `payload:`
+  content (they would silently mis-classify against the old name).
+- **Tests/examples:** all on-disk + inline `pack.jet`/`package:` fixtures in
+  `tests/{pkg,ffi,jetpack}.rs` and the orphan `tests/ui/manifest_*/` dirs renamed
+  to `payload.jet`/`payload:`; the manifest `tests/ui/*/stderr` snapshots
+  re-blessed to the new copy. (The `tests/ui/manifest_*` dirs are not run by
+  `tests/ui.rs` — it only loads dirs with a `main.jet` — but were updated for
+  consistency.) No new diagnostic (rename only).
+- **Docs:** `unified-ecosystem.md` §2.1 + file/scale/ledger tables → `payload.jet`
+  (U1/S52 decision-log lines kept historical); `diagnostics.md` E1208 row.
+
+Verified: `nix develop -c cargo test` fully green; `cargo test --test decisions`
+passes; `jet run examples/features/01_hello.jet` prints `hello, world`.
+
+## Prior chunk (2026-06-16): U9 remote probe (`github@…` core sources)
 
 A typed `github@…` source now realizes as **core** when its remote repo carries
 a `pack.jet` — completing the U9 rule for the remote case (the `path@…` local
@@ -82,10 +120,10 @@ Landed this run:
   github_source_kind_is_left_to_inference` / `nixpkgs_source_kind_stays_nix`. No
   new diagnostic (behavior-only, like U9).
 
-**Still open (the marker reconciliation, now the headline Next up):** a remote
-`core` repo still needs **both** `pack.jet` (for the probe) and `env.jet` (the
-`pkg.package(...)` index `CoreProvider` reads) — the dual marker. Converging
-these has an unresolved manifest-design question (see Next up).
+**The marker reconciliation is now RATIFIED as U10** (see Next up): the manifest
+becomes `payload.jet` with a `packages: { name: library|executable }` block;
+packages are top-level modules discovered by name; `CoreProvider` reads that
+index, not `env.jet`. Retires the dual marker.
 
 ## Prior chunk (2026-06-16): U9 infer the source provider kind (`path@…`)
 
@@ -170,34 +208,38 @@ Landed this run:
 
 ## Where we are (verified 2026-06-16)
 
-Last **landed** (working tree, **not yet committed** — commit it first): the U9
-**remote probe** — `ProviderKind::Infer` (`refspec.rs`) +
-`provider::{resolve_kind, infer_remote_kind, remote_has_pack_jet}`, dispatch
-rewired (`provider_for(kind)`, `uses_nix_provider(…, offline, cache_dir)`,
-`cli.rs::realize_ref`). New tests: `provider::{resolve_kind_probes_remote_pack_jet,
-remote_probe_resolves_a_commit_sha_rev, realize_resolves_inferred_remote_to_core}`,
-`modeval::{github_source_kind_is_left_to_inference, nixpkgs_source_kind_stays_nix}`.
-Touched: `src/jetpack/{refspec,modeval,provider,cli}.rs` + this doc.
-Last **committed**: `9c29ef6` (handoff refresh) on top of the U9 `path@…`
-implementation (`4d5aca6`).
+Last **committed**: `819b756` ("Updating jetpack ecosystem") — the U9 **remote
+probe** (`ProviderKind::Infer` in `refspec.rs`; `provider::{resolve_kind,
+infer_remote_kind, remote_has_pack_jet}`; dispatch rewired to `provider_for(kind)`
+/ `uses_nix_provider(…, offline, cache_dir)` / `cli.rs::realize_ref`) landed
+**bundled with owner doc edits** (epoch-2, decision-ballots). U10 was then
+**ratified** (`payload.jet` manifest + `packages:` model) in
+`docs/spec/syntax-decisions.md` + `src/syntax.rs`. **This session implemented U10
+Chunk 1** (the `pack.jet`→`payload.jet` / `package:`→`payload:` rename — see the
+Latest chunk above). U10 Chunks 2–4 (`packages:` parser, recursive discovery,
+`library`/`executable` realize) are **not** started — START HERE in Next up.
 
-**⚠ Working tree:** the remote-probe arc edits above are ready to commit;
-everything else is owner noise (see the noise section) — stage selectively,
-never `git add -A`. Full `nix develop -c cargo test` is green (0 failed across
-the suite); `jet run examples/features/01_hello.jet` prints `hello, world`.
+**⚠ Working tree:** the U10 Chunk-1 rename is **uncommitted** (src + tests +
+`tests/ui/manifest_*` renames + `unified-ecosystem.md`/`diagnostics.md` doc
+edits). Full `nix develop -c cargo test` is green; `cargo test --test decisions`
+passes; `jet run examples/features/01_hello.jet` prints `hello, world`. When you
+commit, stage selectively — owner doc noise (epoch-2, decision-ballots,
+owner-todo) may reappear; never `git add -A` (see the noise section).
 
 Recent arc: `pack.jet`→`env.jet` clean break + computed modules + manifest
 reshape (`98ff3be`) → U8 nested `sources:`/`imports:` parser → `modeval` wired
 into the CLI (`11e7df8`) → U4 `find(…)` discovery (`4054b2b`) → U9 docs
-(`bf1c645`) → U9 inferred provider kind for `path@…` (`4d5aca6`) → **U9 remote
-probe for `github@…` (this chunk, uncommitted).** The typed `module { … }`
+(`bf1c645`) → U9 inferred provider kind for `path@…` (`4d5aca6`) → U9 remote
+probe for `github@…` (`819b756`) → U10 ratified (`payload.jet` + `packages:`) →
+**U10 Chunk 1 implemented: manifest renamed `pack.jet`→`payload.jet` (this
+session, uncommitted).** The typed `module { … }`
 `env.jet` surface builds and realizes end-to-end, including `find(…)`
 import-tree discovery and first-party `core` sources from both local (`path@`)
 and remote (`github@`) repos.
 
 ### Implemented & shipping (Phase-1 bootstrap)
 - Two binaries: `jet`, `jetpack` (Cargo.toml `[[bin]]`).
-- `pack.jet` manifest: `package:`/`deps:`/`exports: [module …]`/`edition`
+- `payload.jet` manifest: `payload:`/`deps:`/`exports: [module …]`/`edition`
   parsed in `src/jetpack/packmanifest.rs` (tested).
 - Hangar store `/etc/jet/hangar` (`syntax::HANGAR_DIR`); unified lockfile
   `.jet/lock` (`syntax::UNIFIED_LOCK_FILE`); `.jet/` managed folder via
@@ -252,37 +294,69 @@ test/example first.
 
 ---
 
-## Next up — START HERE: converge the `core` marker onto `pack.jet`
+## Next up — START HERE: U10 `payload.jet` arc (manifest rename + `packages:` model)
 
-The U9 remote probe shipped (chunk above). The remaining U9 loose end: a `core`
-source repo carries **two** markers — `pack.jet` (what the probe keys on) and
-`env.jet` (the `pkg.package("name", "./subpath")` index `CoreProvider::realize`
-reads to map a package name → its source subpath, via `envfile::provided`). A
-Jet package repo should need only `pack.jet`.
+**Ratified 2026-06-16 as U10** (`docs/spec/syntax-decisions.md`; tokens in
+`src/syntax.rs`: `PAYLOAD_FILE`, `MANIFEST_BLOCK_PAYLOAD`,
+`MANIFEST_BLOCK_PACKAGES`, `PACKAGE_KIND_LIBRARY`/`_EXECUTABLE`,
+`PACKAGE_FIELD_KIND`). Design is **frozen — do not re-litigate**; read U10 + the
+memory `payload-multi-package-core-source` before starting. This completes the
+U9 marker convergence and replaces the old "converge the core marker" next-up.
 
-**⚠ This chunk has an unresolved manifest-design question — STOP and ratify
-before coding (measure twice).** The naive "have the core provider read
-`pack.jet`'s `exports:`" doesn't type-check against the manifest as designed:
-- `pack.jet`'s `exports:` is `[module web, module cli]` — the *public modules of
-  one package* (`packmanifest.rs::parse_exports`).
-- `CoreProvider` needs a *package-name → source-subpath* map for a repo that
-  provides **many** packages (`hello` → `./pkgs/hello`).
-These are different shapes. A single-package `pack.jet` doesn't currently
-express "this repo is a multi-package `core` source." Options to put to the
-owner (none ratified): (a) a workspace-style `pack.jet` that lists member
-package dirs; (b) the core source *is* one package and `exports:`-modules map to
-bin subpaths; (c) keep a small index block in `pack.jet` mirroring
-`pkg.package(...)`. This is owner-facing manifest surface → syntax-decision
-protocol applies. Entry points once decided: `packmanifest.rs` (manifest shape),
-`provider.rs::CoreProvider::realize` + `source_repo` (read `pack.jet` instead of
-`env.jet`), `envfile.rs::provided` (the index it replaces).
+**The model:** payload → packages → modules. The manifest is renamed
+`pack.jet` → **`payload.jet`**; its identity block is `payload: { … }` (was
+`package:`). A **package is a top-level `module`** a dev exports; the manifest
+lists packages in a **`packages: { name: kind }`** block, where `name` is a
+top-level module name and `kind` is **`library`** (imported for code) or
+**`executable`** (installed as a binary on PATH — the devshell case). Value is a
+bare keyword *or* a `{ kind: …, … }` block (extension point). A package's
+**module name is its identity**; its file is **discovered** by recursively
+walking the tree for `module <name>`. This `packages:` index is what
+`CoreProvider` reads — **`env.jet` is never read by the provider** (it stays the
+dev-shell only). No Jet→binary compiler yet: `library` stages module source,
+`executable` stages a prebuilt `bin/` (compiler slots in later).
+
+**Do it as a 4-chunk arc (one chunk per run, test-first, stop and report):**
+
+- **Chunk 1 — rename the manifest. ✅ DONE (2026-06-16).** `pack.jet` →
+  `payload.jet`, `package:` → `payload:`; `PACK_FILE` retired onto `PAYLOAD_FILE`;
+  parser keys on `MANIFEST_BLOCK_PAYLOAD` (`MissingPackage`→`MissingPayload`);
+  E1206/E1208 copy + the U9 probe + all `tests/`/`tests/ui` fixtures + §2.1 docs
+  updated. Clean break, no alias. See the Latest chunk above.
+- **Chunk 2 — `packages:` block parser. ← START HERE.** Parse `packages: { name: <bare-kw |
+  { kind, … }> }` in `packmanifest.rs`; ratify-token spellings already in
+  `syntax.rs`. Fold the old `exports: [module …]` into `packages:` (remove
+  `parse_exports`/`exports` field or repoint it). Diagnostics for a bad kind /
+  malformed entry (new E-codes → `diagnostics.md` + `tests/ui` snapshot, I4).
+  *Exit:* manifest with a `packages:` block parses to a typed structure; bad
+  entries diagnose; snapshots blessed.
+- **Chunk 3 — recursive package discovery.** Resolve each `packages:` name → its
+  `module <name>` declaration by walking the source tree (sorted, bounded — skip
+  `.jet/`/hidden/build dirs). Exactly-one-or-error: **two new diagnostics** —
+  "package declared but no `module <name>`" and "ambiguous: `module <name>` in A
+  and B" (I4: code + what/why/fix + `tests/ui` snapshot each). Wire into
+  `CoreProvider::realize` to replace the `envfile::provided` lookup
+  (`provider.rs:160`). *Exit:* a typed `core` source resolves a package by module
+  name with **no `env.jet` index**; the dual marker is gone.
+- **Chunk 4 — `library` vs `executable` realize.** `executable` stages the
+  package dir's prebuilt `bin/` (today's behavior, now keyed by kind);
+  `library` stages module source for import. Retire the `env.jet`
+  `pkg.package(...)` index entirely (`PACK_DIRECTIVE_PACKAGE`, `envfile::provided`).
+  *Exit:* both kinds realize offline e2e (extend `tests/jetpack.rs`); example
+  updated as the executable spec (I5).
+
+Entry points: `src/jetpack/{packmanifest,provider,modeval,envfile,cli}.rs`,
+`src/syntax.rs`, `docs/spec/diagnostics.md`, `examples/jetpack-typed/`,
+`tests/jetpack.rs`. **Out of this arc** (separate, dependent): consumer-side
+`env.jet` "import a lib vs install an exec" syntax; the real Jet→binary compiler.
 
 **Larger, later (gaps #4/#5/#6), each its own multi-chunk arc:**
 - #5 `System`/`Image` semantics — parsed/validated but inert; only `Env` means
   anything. Needs field checking + a realize path.
 - #4 `config.jet` + the `jetos` tier — no loader, no `jetos` binary, no
   `src/jetos/`. Scale-3.
-- #6 Scale-2 commands — `jet dev` / `jetpack enter`.
+- #6 Scale-2 commands — `jet dev` / `jetpack enter` (the devshell `executable`
+  packages from U10 land here).
 
 ---
 

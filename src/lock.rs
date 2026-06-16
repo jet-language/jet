@@ -407,7 +407,7 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
         "the lock file is out of date".to_string(),
         format!(
             "`{}` changed since `{}` was last written",
-            syntax::PACK_FILE,
+            syntax::PAYLOAD_FILE,
             syntax::UNIFIED_LOCK_FILE
         ),
         format!("run `jet fetch` to update `{}`", syntax::UNIFIED_LOCK_FILE),

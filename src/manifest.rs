@@ -1,12 +1,12 @@
-//! `pack.jet` package-manifest loading (M12.1, S52, U1, D-JPK23).
+//! `payload.jet` package-manifest loading (M12.1, S52, U1/U10, D-JPK23).
 //!
 //! The on-disk format is Jet syntax, not TOML — `src/jetpack/packmanifest.rs`
-//! is the structural parser for `pack.jet`'s `package:`/`deps:`/`exports:`
+//! is the structural parser for `payload.jet`'s `payload:`/`deps:`/`exports:`
 //! shape; this module owns the compiler-facing `Manifest` type that
 //! `loader.rs`/`fetch.rs`/`lock.rs`/`store.rs` operate on, the toolchain
 //! check (E1208), and the comment-preserving `jet add`/`jet remove` edits.
-//! `pack.jet` replaces the old TOML `jet.toml` as a clean break (U1) — no
-//! back-compat alias.
+//! `payload.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
+//! no back-compat alias.
 
 use crate::diag::Diagnostic;
 use crate::jetpack::packmanifest::{self, ManifestError};
@@ -29,9 +29,9 @@ pub struct Manifest {
     /// Rust crate dependencies for `extern rust` blocks. Always empty today:
     /// `extern rust "crate@version" { … }` (S50) carries its own version
     /// pin in source, so nothing has ever read this map — kept for shape
-    /// stability, not parsed from `pack.jet`.
+    /// stability, not parsed from `payload.jet`.
     pub dependencies_rust: BTreeMap<String, String>,
-    /// Raw `pack.jet` text (preserved for comment-preserving edits).
+    /// Raw `payload.jet` text (preserved for comment-preserving edits).
     pub raw: String,
 }
 
@@ -78,15 +78,15 @@ impl GitSelector {
 // Parser
 // ──────────────────────────────────────────────
 
-/// Parse a `pack.jet` package manifest from its text.
+/// Parse a `payload.jet` package manifest from its text.
 pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     let pm = packmanifest::parse(raw).map_err(|e| to_diagnostic(path, &e))?;
     packmanifest::to_manifest(&pm, raw)
 }
 
-/// Load and parse the `pack.jet` manifest in a directory.
+/// Load and parse the `payload.jet` manifest in a directory.
 pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
-    let pack_path = dir.join(syntax::PACK_FILE);
+    let pack_path = dir.join(syntax::PAYLOAD_FILE);
     if !pack_path.is_file() {
         return None;
     }
@@ -95,14 +95,14 @@ pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
         Err(e) => {
             return Some(Err(e1206(
                 &pack_path.display().to_string(),
-                &format!("couldn't read {}: {}", syntax::PACK_FILE, e),
+                &format!("couldn't read {}: {}", syntax::PAYLOAD_FILE, e),
             )));
         }
     };
     Some(parse(&pack_path, &raw))
 }
 
-/// Validate the toolchain constraint from `package.jet`. Returns E1208 on mismatch.
+/// Validate the toolchain constraint from `payload.jet`. Returns E1208 on mismatch.
 pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
     let Some(constraint) = &manifest.package.jet_constraint else {
         return Ok(());
@@ -114,10 +114,10 @@ pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnosti
                 "this project requires Jet `{}` but this is Jet {}",
                 constraint, COMPILER_VERSION
             ),
-            "the `jet` field in `package` specifies a minimum toolchain version".to_string(),
+            "the `jet` field in `payload` specifies a minimum toolchain version".to_string(),
             format!(
                 "update Jet to a newer version, or change the `jet` field in `{}`",
-                syntax::PACK_FILE
+                syntax::PAYLOAD_FILE
             ),
             None,
         ));
@@ -158,7 +158,7 @@ fn version_ge(a: &str, b: &str) -> bool {
 // ──────────────────────────────────────────────
 
 /// Insert or update a dependency in the `deps: { … }` block, preserving
-/// comments and existing entries. Returns the updated `pack.jet` text.
+/// comments and existing entries. Returns the updated `payload.jet` text.
 pub fn add_dependency(raw: &str, name: &str, spec: &DepSpec) -> String {
     packmanifest::add_dep(raw, name, spec)
 }
@@ -168,7 +168,7 @@ pub fn remove_dependency(raw: &str, name: &str) -> String {
     packmanifest::remove_dep(raw, name)
 }
 
-/// Generate a `pack.jet` template for `jet new`.
+/// Generate a `payload.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
     packmanifest::new_template(name, annotated)
 }
@@ -180,9 +180,9 @@ pub fn new_template(name: &str, annotated: bool) -> String {
 fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
     let file = path.display().to_string();
     match err {
-        ManifestError::MissingPackage => e1206(&file, "no `package: { … }` block"),
+        ManifestError::MissingPayload => e1206(&file, "no `payload: { … }` block"),
         ManifestError::MissingField(field) => {
-            e1206(&file, &format!("`package` is missing required field `{field}`"))
+            e1206(&file, &format!("`payload` is missing required field `{field}`"))
         }
         ManifestError::BadDepValue { name, value } => e1206(
             &file,
@@ -206,9 +206,9 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
 fn e1206(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1206",
-        format!("`{}` has a shape error", syntax::PACK_FILE),
+        format!("`{}` has a shape error", syntax::PAYLOAD_FILE),
         detail.to_string(),
-        format!("check `{}` against docs/spec/syntax-decisions.md (U1)", syntax::PACK_FILE),
+        format!("check `{}` against docs/spec/syntax-decisions.md (U1)", syntax::PAYLOAD_FILE),
         None,
     )
 }
@@ -222,7 +222,7 @@ pub fn e1209(_file: &str, section: &str) -> Diagnostic {
         format!(
             "remove the `{}` block from `{}`, or leave it empty",
             section,
-            syntax::PACK_FILE
+            syntax::PAYLOAD_FILE
         ),
         None,
     )

@@ -28,7 +28,7 @@ usage:
   {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
   {bin} run   <file.{ext}> a b      extra words become program arguments
   {bin} test  <file|dir>            compile and run top-level test blocks
-  {bin} new   <name>                create a new project folder with pack.jet
+  {bin} new   <name>                create a new project folder with payload.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
@@ -175,7 +175,7 @@ fn main() {
                         }
                     }
                     eprintln!(
-                        "error: no file given and no `pack.jet` found in this directory or above"
+                        "error: no file given and no `payload.jet` found in this directory or above"
                     );
                     eprintln!(
                         " fix: run `jet {} <file.{}>` or cd into a project",
@@ -203,7 +203,7 @@ fn main() {
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
             eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pack.jet");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in payload.jet");
             exit(1);
         }
         _ => {
@@ -375,15 +375,15 @@ fn run_new(name: &str, annotated: bool) {
         eprintln!("error: `{}` already exists", name);
         exit(1);
     }
-    // Create: <name>/pack.jet, <name>/.jet/main.jet, <name>/.gitignore
+    // Create: <name>/payload.jet, <name>/.jet/main.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
         exit(1);
     });
     let manifest_text = jet::manifest::new_template(name, annotated);
-    fs::write(dir.join(jet::syntax::PACK_FILE), manifest_text).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::syntax::PACK_FILE, e);
+    fs::write(dir.join(jet::syntax::PAYLOAD_FILE), manifest_text).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
     let main_src = "fn main() {\n    print(\"hello, world\");\n}\n";
@@ -396,7 +396,7 @@ fn run_new(name: &str, annotated: bool) {
         exit(1);
     });
     println!("created {}/", name);
-    println!("  {}", jet::syntax::PACK_FILE);
+    println!("  {}", jet::syntax::PAYLOAD_FILE);
     println!("  .jet/main.jet");
     println!("  .gitignore");
     println!("next: cd {} && {} run", name, jet::syntax::BINARY_NAME);
@@ -409,7 +409,7 @@ fn run_new(name: &str, annotated: bool) {
 fn run_add(raw_args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pack.jet` found — run `jet add` inside a project");
+        eprintln!("error: no `payload.jet` found — run `jet add` inside a project");
         eprintln!(" fix: run `jet new <name>` to create a project first");
         exit(1);
     });
@@ -463,17 +463,17 @@ fn run_add(raw_args: &[String]) {
     };
 
     // Load the manifest, add the dep, write back.
-    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
     let updated = jet::manifest::add_dependency(&raw, dep_name, &spec);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::syntax::PACK_FILE, e);
+        eprintln!("error: couldn't write {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
-    println!("added `{}` to {}", dep_name, jet::syntax::PACK_FILE);
+    println!("added `{}` to {}", dep_name, jet::syntax::PAYLOAD_FILE);
 
     // Auto-fetch.
     do_fetch(&root, false);
@@ -482,21 +482,21 @@ fn run_add(raw_args: &[String]) {
 fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pack.jet` found");
+        eprintln!("error: no `payload.jet` found");
         exit(1);
     });
 
-    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
     let updated = jet::manifest::remove_dependency(&raw, dep_name);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", jet::syntax::PACK_FILE, e);
+        eprintln!("error: couldn't write {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
-    println!("removed `{}` from {}", dep_name, jet::syntax::PACK_FILE);
+    println!("removed `{}` from {}", dep_name, jet::syntax::PAYLOAD_FILE);
 
     // Re-fetch to update lock.
     do_fetch(&root, false);
@@ -505,7 +505,7 @@ fn run_remove(dep_name: &str) {
 fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pack.jet` found — run `jet fetch` inside a project");
+        eprintln!("error: no `payload.jet` found — run `jet fetch` inside a project");
         exit(1);
     });
     do_fetch(&root, locked);
@@ -514,13 +514,13 @@ fn run_fetch(locked: bool) {
 fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `pack.jet` found");
+        eprintln!("error: no `payload.jet` found");
         exit(1);
     });
 
-    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
     let mf = jet::manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -546,7 +546,7 @@ fn run_update(dep: Option<&str>) {
         }
         Err(diags) => {
             let src = String::new();
-            eprint!("{}", jet::render_diagnostics(jet::syntax::PACK_FILE, &src, &diags));
+            eprint!("{}", jet::render_diagnostics(jet::syntax::PAYLOAD_FILE, &src, &diags));
             exit(1);
         }
     }
@@ -592,9 +592,9 @@ fn run_gc() {
 }
 
 fn do_fetch(root: &Path, locked: bool) {
-    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
         exit(1);
     });
     let mf = jet::manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
@@ -619,7 +619,7 @@ fn do_fetch(root: &Path, locked: bool) {
             }
         }
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics(jet::syntax::PACK_FILE, &raw, &diags));
+            eprint!("{}", jet::render_diagnostics(jet::syntax::PAYLOAD_FILE, &raw, &diags));
             exit(1);
         }
     }

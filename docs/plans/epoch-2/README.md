@@ -638,13 +638,13 @@ approve or edit:
 ### Strategic vision (E2-V1…V12)
 
 - [x] E2-V1 primary GA audience. ✅ ratified 2026-06-16 — A&B: beginners AND small teams.
-- [ ] E2-V2 production-platform definition. (still OPEN — needs owner)
+- [x] E2-V2 production-platform definition. ✅ ratified 2026-06-16 — B: GA bar includes public-facing SaaS (not only internal services/CLIs); regulated/audit-heavy (C) stays post-GA.
 - [x] E2-V3 competitive set (primary + secondary). ✅ ratified 2026-06-16 — beat Python/Node/Go/Rust/Zig, ALL, non-negotiable.
 - [x] E2-V4 single-file vs package-first onboarding. ✅ ratified 2026-06-16 — A: single-file `jet run` stays sacred; packages optional.
 - [x] E2-V5 concurrency model lock. ✅ ratified 2026-06-16 — async reserved for Epoch 3; async-as-attribute tracked separately.
 - [x] E2-V6 expert/low-level appetite (M13–M15 in or out). ✅ ratified 2026-06-16 — full low-level capability, safe-by-default with expert opt-in.
-- [ ] E2-V7 networking/services ambition. (still OPEN — needs owner)
-- [ ] E2-V8 supply-chain minimum bar.
+- [x] E2-V7 networking/services ambition. ✅ ratified 2026-06-16 — B: also small public APIs with HTTPS/TLS (rustls per D-NET1), to beat Go on easy network services.
+- [x] E2-V8 supply-chain minimum bar. ✅ ratified 2026-06-16 — hash-locked hangar store (Nix-style content addressing, already the direction); enterprise support (vendoring/audit/SBOM/mirrors) in scope; **version pins use `package#version`** (VERSION-# option 1, ratified in syntax-decisions.md).
 - [x] E2-V9 editor priority (include Zed dev extension?). ✅ ratified 2026-06-16 — A&C: VS Code/Cursor + Zed + Neovim.
 - [x] E2-V10 public launch trigger. ✅ ratified 2026-06-16 — owner launches manually when happy.
 - [x] E2-V11 governance at launch. ✅ ratified 2026-06-16 — governance deferred to post-Epoch-2.
@@ -661,27 +661,29 @@ approve or edit:
 
 ### REPL (E2-M18 / D-REPL1…21)
 
-- [ ] D-REPL1 — ship terminal REPL in Epoch 2 (recommend A).
-- [ ] D-REPL2 — web playground scope for this milestone (recommend A: terminal only).
-- [ ] D-REPL3 — command entry (`jet repl` vs bare `jet` in TTY).
-- [ ] D-REPL4 — execution backend (interpreter vs compile vs hybrid).
-- [ ] D-REPL5 — input unit (expressions vs statements vs full decls).
-- [ ] D-REPL6 — hard rejects (FFI, tasks, packages).
-- [ ] D-REPL7 — session model (accumulating vs cells).
-- [ ] D-REPL8 — ownership across inputs (real moves vs auto-clone).
-- [ ] D-REPL9 — multi-line input strategy.
-- [ ] D-REPL10 — project/`jet.toml` context.
-- [ ] D-REPL11 — line editor tier (std vs rustyline vs completions).
-- [ ] D-REPL12 — relation to `jet eval --pure`.
-- [ ] D-REPL13 — relation to `jet dev`.
-- [ ] D-REPL14 — native-code fallback (reject vs temp compile).
-- [ ] D-REPL15 — meta-commands set.
-- [ ] D-REPL16 — result display (implicit echo vs explicit print).
-- [ ] D-REPL17 — diagnostic voice in REPL.
-- [ ] D-REPL18 — line-editing crate choice (if D-REPL11 ≠ A).
-- [ ] D-REPL19 — web playground architecture (if D-REPL2 ≠ A).
-- [ ] D-REPL20 — CI testing strategy.
-- [ ] D-REPL21 — milestone timing vs E2-M4.
+All REPL ballots ✅ ratified 2026-06-16 (see m18-repl.md owner-decisions).
+
+- [x] D-REPL1 — A: ship terminal REPL in Epoch 2.
+- [x] D-REPL2 — A: terminal only (web playground deferred).
+- [x] D-REPL3 — A: explicit `jet repl` (not bare `jet` in TTY — discoverable, no mystery prompt on a fat-finger).
+- [x] D-REPL4 — A: interpreter backend (instant, "magic"; M4 differential battery keeps it in lockstep with the compiler).
+- [x] D-REPL5 — A: statements + control flow (full decls a later upgrade).
+- [x] D-REPL6 — A: clean sandbox; opt in with `jet repl --project`.
+- [x] D-REPL7 — C: accumulating by default, optional `:cell` for isolated blocks.
+- [x] D-REPL8 — A: real move semantics across lines.
+- [x] D-REPL9 — A: brace-count multi-line prompt.
+- [x] D-REPL10 — A: sandbox (manifest is `pack.jet`, not `jet.toml`).
+- [x] D-REPL11 — C: line-editing crate + completion.
+- [x] D-REPL12 — A&B: REPL and `jet eval --pure` both.
+- [x] D-REPL13 — A: REPL shares its library with `jet dev` only.
+- [x] D-REPL14 — **prompt-the-user (owner refinement):** when a snippet can't be interpreted live (FFI/low-level/tasks), the REPL *offers* to compile & run it; if the user declines, it rejects the snippet and writes it to a file, then points at `jet run` — keeps the magic, stays safe, teaches the file→`jet run` path.
+- [x] D-REPL15 — B: meta-commands `:load` `:type` `:help` (+ `:cell` per D-REPL7).
+- [x] D-REPL16 — B (+`;` suppression): echo type+value; trailing `;` silences.
+- [x] D-REPL17 — A: identical diagnostics to batch.
+- [x] D-REPL18 — A: `rustyline` (needs the scoped I6 waiver).
+- [x] D-REPL19 — C: defer web playground.
+- [x] D-REPL20 — A: transcript fixtures for CI.
+- [x] D-REPL21 — A: separate E2-M18 milestone after E2-M4.
 
 After concurrence, create one detailed plan file per milestone using
 `docs/plans/README.md` protocol, starting with E2-M2 unless E2-M1 concurrency is

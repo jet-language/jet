@@ -1,12 +1,12 @@
-//! The Jet-syntax `pack.jet` package manifest (U1 — Cargo.toml analog).
+//! The Jet-syntax `payload.jet` package manifest (U1/U10 — Cargo.toml analog).
 //!
 //! Unified-ecosystem §2.1: the package tier. One language everywhere — the
-//! manifest is written in Jet syntax, not TOML. It holds package identity, Jet
-//! library dependencies, and the optional list of public modules the package
+//! manifest is written in Jet syntax, not TOML. It holds payload identity, Jet
+//! library dependencies, and the optional list of public modules the payload
 //! exports:
 //!
 //! ```jet
-//! package: {
+//! payload: {
 //!     name:    "wordstats",
 //!     version: "0.1.0",
 //!     edition: "2026",
@@ -33,7 +33,7 @@ use super::refspec::{self, RefError, Source};
 use crate::diag::Diagnostic;
 use crate::syntax;
 
-/// Package identity (the `package: { … }` block).
+/// Payload identity (the `payload: { … }` block, U10 — was `package:`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageMeta {
     pub name: String,
@@ -68,7 +68,7 @@ pub struct Dep {
     pub source: DepSource,
 }
 
-/// A parsed `pack.jet` package manifest.
+/// A parsed `payload.jet` package manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackManifest {
     pub package: PackageMeta,
@@ -78,14 +78,14 @@ pub struct PackManifest {
     pub exports: Vec<String>,
 }
 
-/// Why a `pack.jet` package manifest could not be parsed. These are internal
+/// Why a `payload.jet` package manifest could not be parsed. These are internal
 /// (typed) errors for now; they become I4 diagnostics when the parser is wired
 /// into the loader.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManifestError {
-    /// No `package: { … }` block at all.
-    MissingPackage,
-    /// `package` is missing a required `name` or `version`.
+    /// No `payload: { … }` block at all.
+    MissingPayload,
+    /// `payload` is missing a required `name` or `version`.
     MissingField(&'static str),
     /// A `deps` value is neither a quoted version nor a `provider@target` ref.
     BadDepValue { name: String, value: String },
@@ -109,7 +109,7 @@ const RESERVED_SECTIONS: &[&str] = &["dev_deps", "patch", "workspace"];
 impl PackManifest {
     /// The path to the package manifest in a project dir.
     pub fn path_in(dir: &std::path::Path) -> std::path::PathBuf {
-        dir.join(syntax::PACK_FILE)
+        dir.join(syntax::PAYLOAD_FILE)
     }
 
     /// Load and parse the package manifest in `dir`, if present.
@@ -119,13 +119,13 @@ impl PackManifest {
     }
 }
 
-/// Parse a `pack.jet` package manifest from its text (U1).
+/// Parse a `payload.jet` package manifest from its text (U1/U10).
 pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     let text = strip_line_comments(text);
 
-    let package = match block_body(&text, "package", '{', '}') {
+    let package = match block_body(&text, syntax::MANIFEST_BLOCK_PAYLOAD, '{', '}') {
         Some(body) => parse_package(&body)?,
-        None => return Err(ManifestError::MissingPackage),
+        None => return Err(ManifestError::MissingPayload),
     };
 
     let deps = match block_body(&text, "deps", '{', '}') {
@@ -155,7 +155,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
 
 /// Convert a parsed `PackManifest` into the compiler's `manifest::Manifest`
 /// — the type `loader.rs`/`fetch.rs`/`lock.rs` operate on. `raw` is the
-/// original `pack.jet` text (kept for comment-preserving `jet add`/`remove`
+/// original `payload.jet` text (kept for comment-preserving `jet add`/`remove`
 /// edits, mirroring the old `jet.toml` `Manifest::raw`).
 pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::manifest::Manifest, Diagnostic> {
     use crate::manifest::{DepSpec, GitSelector, Manifest, PackageMeta as MPackageMeta};
@@ -230,12 +230,12 @@ fn bad_dep_shape(name: &str, why: &str) -> Diagnostic {
     )
 }
 
-/// Generate a `pack.jet` template for `jet new`.
+/// Generate a `payload.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
     let ver = crate::manifest::COMPILER_VERSION;
     if annotated {
         format!(
-            r#"package: {{
+            r#"payload: {{
     name:    "{name}",
     version: "0.1.0",
     jet:     ">={ver}",
@@ -253,7 +253,7 @@ pub fn new_template(name: &str, annotated: bool) -> String {
         )
     } else {
         format!(
-            r#"package: {{
+            r#"payload: {{
     name:    "{name}",
     version: "0.1.0",
     jet:     ">={ver}",
@@ -269,7 +269,7 @@ deps: {{
     }
 }
 
-/// Render a compiler-side `DepSpec` back into `pack.jet` dep-value syntax.
+/// Render a compiler-side `DepSpec` back into `payload.jet` dep-value syntax.
 fn render_dep_spec(spec: &crate::manifest::DepSpec) -> String {
     use crate::manifest::{DepSpec, GitSelector};
     match spec {
@@ -288,7 +288,7 @@ fn render_dep_spec(spec: &crate::manifest::DepSpec) -> String {
 
 /// Insert or update a dependency in the `deps: { … }` block, preserving
 /// comments and existing entries. Creates the block if absent. Mirrors the
-/// old jet.toml `add_dependency`, but for Jet-syntax `deps:` blocks.
+/// old jet.toml `add_dependency`, but for Jet-syntax `deps:` blocks (U10).
 pub fn add_dep(raw: &str, name: &str, spec: &crate::manifest::DepSpec) -> String {
     let line = format!("    {name}: {},", render_dep_spec(spec));
     insert_or_replace_in_block(raw, "deps", name, &line)
@@ -660,7 +660,7 @@ mod tests {
     use super::*;
 
     const FULL: &str = r#"
-package: {
+payload: {
     name:    "wordstats",
     version: "0.1.0",
     edition: "2026",
@@ -706,7 +706,7 @@ exports: [module web, module cli]   // optional: public modules
 
     #[test]
     fn deps_and_exports_are_optional() {
-        let m = parse("package: { name: \"x\", version: \"0.0.1\" }").unwrap();
+        let m = parse("payload: { name: \"x\", version: \"0.0.1\" }").unwrap();
         assert!(m.deps.is_empty());
         assert!(m.exports.is_empty());
         assert_eq!(m.package.name, "x");
@@ -715,7 +715,7 @@ exports: [module web, module cli]   // optional: public modules
     #[test]
     fn github_provider_dep() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
 "#;
         let m = parse(src).unwrap();
@@ -730,17 +730,17 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
 
     #[test]
     fn missing_package_block_errors() {
-        assert_eq!(parse("deps: {}"), Err(ManifestError::MissingPackage));
+        assert_eq!(parse("deps: {}"), Err(ManifestError::MissingPayload));
     }
 
     #[test]
     fn missing_required_field_errors() {
         assert_eq!(
-            parse("package: { name: \"x\" }"),
+            parse("payload: { name: \"x\" }"),
             Err(ManifestError::MissingField("version"))
         );
         assert_eq!(
-            parse("package: { version: \"0.1.0\" }"),
+            parse("payload: { version: \"0.1.0\" }"),
             Err(ManifestError::MissingField("name"))
         );
     }
@@ -748,14 +748,14 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
     #[test]
     fn bad_dep_value_errors() {
         // A bare token with no `@` and no quotes is not a valid dep value.
-        let err = parse("package: { name: \"x\", version: \"1\" }\ndeps: { y: notaref }")
+        let err = parse("payload: { name: \"x\", version: \"1\" }\ndeps: { y: notaref }")
             .unwrap_err();
         assert!(matches!(err, ManifestError::BadDepValue { .. }));
     }
 
     #[test]
     fn bad_export_errors() {
-        let err = parse("package: { name: \"x\", version: \"1\" }\nexports: [web]").unwrap_err();
+        let err = parse("payload: { name: \"x\", version: \"1\" }\nexports: [web]").unwrap_err();
         assert!(matches!(err, ManifestError::BadExport(_)));
     }
 
@@ -763,7 +763,7 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
     fn comments_are_ignored() {
         let src = r#"
 // a leading comment
-package: {
+payload: {
     name: "x",      // inline comment
     version: "0.1.0",
 }
@@ -777,7 +777,7 @@ package: {
     fn deps_prefix_does_not_match_inside_word() {
         // `dependencies:` must not be picked up as the `deps:` block.
         let src = r#"
-package: { name: "x", version: "1" }
+payload: { name: "x", version: "1" }
 dependencies: { should_be_ignored: "9.9.9" }
 "#;
         let m = parse(src).unwrap();
@@ -789,7 +789,7 @@ dependencies: { should_be_ignored: "9.9.9" }
     #[test]
     fn git_dep_tag() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" } }
 "#;
         let m = parse(src).unwrap();
@@ -805,7 +805,7 @@ deps: { parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" } }
     #[test]
     fn git_dep_branch() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { nightly: { git: "https://github.com/acme/nightly", branch: "main" } }
 "#;
         let m = parse(src).unwrap();
@@ -821,7 +821,7 @@ deps: { nightly: { git: "https://github.com/acme/nightly", branch: "main" } }
     #[test]
     fn git_dep_rev_and_non_github_remote() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { selfhost: { git: "https://git.example.com/acme/thing", rev: "abc123" } }
 "#;
         let m = parse(src).unwrap();
@@ -837,7 +837,7 @@ deps: { selfhost: { git: "https://git.example.com/acme/thing", rev: "abc123" } }
     #[test]
     fn git_dep_missing_git_field_errors() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { bad: { tag: "v1.0.0" } }
 "#;
         let err = parse(src).unwrap_err();
@@ -847,7 +847,7 @@ deps: { bad: { tag: "v1.0.0" } }
     #[test]
     fn git_dep_missing_selector_errors() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { bad: { git: "https://example.com/x" } }
 "#;
         let err = parse(src).unwrap_err();
@@ -857,7 +857,7 @@ deps: { bad: { git: "https://example.com/x" } }
     #[test]
     fn git_dep_two_selectors_errors() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { bad: { git: "https://example.com/x", tag: "v1", branch: "main" } }
 "#;
         let err = parse(src).unwrap_err();
@@ -867,7 +867,7 @@ deps: { bad: { git: "https://example.com/x", tag: "v1", branch: "main" } }
     #[test]
     fn mixed_dep_kinds_in_one_block() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: {
     textkit:  "1.2.0",
     helpers:  path@../helpers,
@@ -884,7 +884,7 @@ deps: {
     #[test]
     fn reserved_section_nonempty_errors() {
         let src = r#"
-package: { name: "x", version: "1" }
+payload: { name: "x", version: "1" }
 workspace: { members: "foo" }
 "#;
         let err = parse(src).unwrap_err();
@@ -894,7 +894,7 @@ workspace: { members: "foo" }
     #[test]
     fn reserved_section_empty_is_fine() {
         let src = r#"
-package: { name: "x", version: "1" }
+payload: { name: "x", version: "1" }
 workspace: {}
 "#;
         assert!(parse(src).is_ok());
@@ -922,7 +922,7 @@ workspace: {}
     #[test]
     fn to_manifest_converts_inline_git_dep() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" } }
 "#;
         let m = parse(src).unwrap();
@@ -939,7 +939,7 @@ deps: { parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" } }
     #[test]
     fn to_manifest_converts_github_provider_ref_as_pinned_rev() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
 "#;
         let m = parse(src).unwrap();
@@ -956,7 +956,7 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
     #[test]
     fn to_manifest_rejects_nixpkgs_provider_dep() {
         let src = r#"
-package: { name: "p", version: "0.1.0" }
+payload: { name: "p", version: "0.1.0" }
 deps: { x: nixpkgs@fastfetch }
 "#;
         let m = parse(src).unwrap();
@@ -967,7 +967,7 @@ deps: { x: nixpkgs@fastfetch }
     #[test]
     fn to_manifest_carries_jet_constraint() {
         let src = r#"
-package: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
+payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
 "#;
         let m = parse(src).unwrap();
         let mf = to_manifest(&m, src).unwrap();
@@ -1015,7 +1015,7 @@ package: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
 
     #[test]
     fn add_dep_inserts_into_existing_block_and_replaces() {
-        let raw = "package: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: \"1.0.0\",\n}\n";
+        let raw = "payload: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: \"1.0.0\",\n}\n";
         let updated = add_dep(
             raw,
             "b",
@@ -1040,7 +1040,7 @@ package: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
 
     #[test]
     fn remove_dep_drops_only_named_entry() {
-        let raw = "package: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: \"1.0.0\",\n    b: \"2.0.0\",\n}\n";
+        let raw = "payload: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: \"1.0.0\",\n    b: \"2.0.0\",\n}\n";
         let updated = remove_dep(raw, "a");
         let m = parse(&updated).unwrap();
         assert_eq!(m.deps.len(), 1);
