@@ -79,6 +79,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "clean" => cmd_clean(&theme),
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
+        v if v == syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             0
@@ -186,7 +187,7 @@ fn realize_ref(
     }
 }
 
-fn report_provider_error(theme: &Theme, err: &ProviderError) {
+pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
     match err {
         ProviderError::NixMissing => theme.error(
             "couldn't run `nix`",
@@ -549,6 +550,19 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+/// `jetpack os <verb> [<config-path>]@<host>` (U15/U16) — the jetos tier: whole
+/// machine management as a subcommand group, not a separate binary. `<verb>` is
+/// the first positional (`switch`/`build`); the target is the second.
+fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
+    let verb = parsed.positional.first().map(String::as_str);
+    let target = parsed.positional.get(1).map(String::as_str);
+    let flags = super::jetos::OsFlags {
+        fixtures: parsed.flags.fixtures.clone(),
+        offline: parsed.flags.offline,
+    };
+    super::jetos::main(theme, verb, target, &flags)
+}
+
 fn usage() -> String {
     let bin = syntax::JETPACK_BINARY_NAME;
     format!(
@@ -566,6 +580,8 @@ usage:
   {bin} clean                          drop unused store records
   {bin} add    <source>:<package>      add a package to ./{pack}
   {bin} remove <source>:<package>      remove a package from ./{pack}
+  {bin} os switch [<config>]@<host>    build + activate a machine from a config.jet
+  {bin} os build  [<config>]@<host>    build a machine generation, don't activate
 
 refs:
   nixpkgs:fastfetch                    a package from nixpkgs

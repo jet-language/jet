@@ -701,7 +701,7 @@ fn infer_provider_kind(pref: &refspec::ProviderRef, base_dir: &Path) -> Provider
 
 /// Render one merged `Pkg` as a `<source>:<package>` ref. A bare package (the
 /// sugar's empty source) resolves against the conventional `default` source.
-fn pkg_ref(pkg: &merge::Pkg) -> String {
+pub fn pkg_ref(pkg: &merge::Pkg) -> String {
     let source = if pkg.source.is_empty() {
         syntax::DEFAULT_SOURCE
     } else {

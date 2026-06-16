@@ -729,6 +729,170 @@ fn core_provider_fetches_remote_git_package_from_env() {
     );
 }
 
+// ── gap #4: `jetpack os <verb> [<config-path>]@<host>` (U15/U16) ─────────
+
+/// The committed `examples/jetpack-config/` config dir.
+fn config_example_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack-config")
+}
+
+#[test]
+fn os_build_realizes_selected_system_offline() {
+    // I5/U15/U16: `jetpack os build <path>@<host>` loads the config, selects the
+    // System named <host>, and realizes its packages into a system generation —
+    // fully offline (the packages come from a first-party `core` source repo, so
+    // no nix). The store lives under a scratch JETPACK_ROOT.
+    let root = Scratch::new("os-build-root");
+    let config = config_example_dir().join("config.jet");
+    let out = jetpack()
+        .args([
+            "os",
+            "build",
+            &format!("{}@halcyon", config.to_string_lossy()),
+            "--no-color",
+            "--offline",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    for pkg in ["hello", "btop"] {
+        assert!(stderr.contains(pkg), "expected `{pkg}` in output: {stderr}");
+    }
+    assert!(stderr.contains("halcyon"), "stderr: {stderr}");
+    assert!(stderr.contains("generation"), "stderr: {stderr}");
+    // A generation directory was assembled under the managed system store.
+    assert!(
+        root.join("systems").is_dir(),
+        "expected a systems dir under the root"
+    );
+}
+
+#[test]
+fn os_switch_activates_and_sets_current() {
+    // U15: `switch` builds the generation, then activates it — flips a `current`
+    // pointer (and a boot `default`). The internal mechanic is a symlink in the
+    // managed system store; the user sees a clear "activated" line.
+    let root = Scratch::new("os-switch-root");
+    let config = config_example_dir().join("config.jet");
+    let out = jetpack()
+        .args([
+            "os",
+            "switch",
+            &format!("{}@halcyon", config.to_string_lossy()),
+            "--no-color",
+            "--offline",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("activated"), "stderr: {stderr}");
+    // The `current` pointer now exists.
+    let current = root.join("systems").join("current");
+    assert!(
+        current.exists(),
+        "expected a `current` generation pointer at {}",
+        current.display()
+    );
+}
+
+#[test]
+fn os_build_default_config_path_uses_home_dot_jet() {
+    // U16: with no path prefix (`jetpack os build @host`), the config defaults to
+    // `~/.jet/config.jet`. We point HOME at a scratch dir holding that file.
+    let home = Scratch::new("os-home");
+    let root = Scratch::new("os-default-root");
+    let jet_dir = home.join(".jet");
+    fs::create_dir_all(&jet_dir).unwrap();
+    // A minimal self-contained system (no packages → realizes trivially offline).
+    fs::write(
+        jet_dir.join("config.jet"),
+        "module box {\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jetpack()
+        .args(["os", "build", "@box", "--no-color", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("box"), "stderr: {stderr}");
+}
+
+#[test]
+fn os_missing_host_is_friendly_and_exits_2() {
+    let root = Scratch::new("os-no-host");
+    let out = jetpack()
+        .args(["os", "build", "./config.jet", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E0979"), "stderr: {stderr}");
+    assert!(stderr.contains("@host"), "stderr: {stderr}");
+}
+
+#[test]
+fn os_unknown_host_lists_available_systems() {
+    let root = Scratch::new("os-bad-host");
+    let config = config_example_dir().join("config.jet");
+    let out = jetpack()
+        .args([
+            "os",
+            "build",
+            &format!("{}@nope", config.to_string_lossy()),
+            "--no-color",
+            "--offline",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E0980"), "stderr: {stderr}");
+    assert!(stderr.contains("nope"), "stderr: {stderr}");
+    assert!(stderr.contains("halcyon"), "should list systems: {stderr}");
+}
+
+#[test]
+fn os_missing_config_file_is_friendly() {
+    let root = Scratch::new("os-no-config");
+    let out = jetpack()
+        .args([
+            "os",
+            "build",
+            "/definitely/not/here/config.jet@box",
+            "--no-color",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E0981"), "stderr: {stderr}");
+}
+
 #[test]
 fn offline_without_fixtures_errors() {
     let root = Scratch::new("root");

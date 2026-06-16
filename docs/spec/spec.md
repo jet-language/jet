@@ -515,7 +515,44 @@ image_field = "from"   ":" "system" "." ident      (* U14: required *)
 The evaluator captures each `system.<name>:` into a `SystemPlan` and each
 `image.<name>:` into an `ImagePlan` (`src/jetpack/modeval.rs`), carried on
 `EnvPlan` so the jetos realize tier can consume them; the dev-shell path ignores
-them. Realize/activation is a separate chunk.
+them.
+
+### `jetpack os <verb> [<config-path>]@<host>` — the jetos tier (U15/U16)
+
+Whole-machine management (the jetos tier) is a **subcommand group of `jetpack`**,
+not a separate `jetos` binary and not part of the `jet` tool (**U15**). Two verbs,
+mirroring `nixos-rebuild`:
+
+- `jetpack os build [<config-path>]@<host>` — realize the system into a generation.
+- `jetpack os switch [<config-path>]@<host>` — build, then **activate** it.
+
+```ebnf
+os_command = "jetpack" "os" os_verb os_target ;
+os_verb    = "switch" | "build" ;
+os_target  = [ config_path ] "@" host ;            (* U16; split on the FINAL @ *)
+```
+
+- **U16 — the `@host` target.** The target is `[<config-path>]@<host>`. Everything
+  after the **final** `@` is `<host>` (so a path may itself contain `@`); the
+  optional prefix names the config file. The `@host` selector picks which captured
+  `System` to apply and is **required** (no selector → **E0979**). An empty path
+  defaults to `~/.jet/config.jet`. A config file that doesn't exist → **E0981**; a
+  `<host>` no `system.<name>:` contribution defines → **E0980** (the error lists
+  the systems the config does define).
+
+The config is loaded through the **same** typed-module path as `env.jet`
+(`modeval::evaluate_env`), so `System` field-checking + capture is reused verbatim.
+
+**Activation model (internal mechanics, not user-facing syntax).** Each build
+realizes the selected system's packages through the existing provider boundary
+into the shared hangar (codegen/realize stays dumb, I3), then assembles a
+content-addressed **generation directory** under `<root>/systems/<host>-<fp>/`
+holding a `manifest.json` (target, realized packages, services, options).
+Services/options are recorded as **intent** — never started, there is no daemon
+yet (D-OS2..D-OS6 remain open). `switch` additionally flips two pointers under
+`<root>/systems/`: `current` (the active generation) and `default` (the boot
+default). Store layout and symlinks are internal mechanics, so they need no
+syntax ratification; boot/test verbs are a later chunk.
 
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 

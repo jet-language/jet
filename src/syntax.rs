@@ -422,7 +422,9 @@ pub const REF_SOURCE_GITHUB: &str = "github";
 pub const REF_SOURCE_PATH: &str = "path";
 
 /// D-JPK2/9: the Phase 1 verb set.
-pub const JETPACK_VERBS: &[&str] = &["run", "enter", "build", "list", "clean", "add", "remove"];
+pub const JETPACK_VERBS: &[&str] = &[
+    "run", "enter", "build", "list", "clean", "add", "remove", OS_SUBCOMMAND,
+];
 
 /// D-JPK14: the default visible prompt label inside a Jetpack shell.
 pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
@@ -502,6 +504,25 @@ pub const IMAGE_FORMAT_RAW: &str = "raw";
 /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
 pub const ENV_FILE: &str = "env.jet";
 pub const CONFIG_FILE: &str = "config.jet";
+
+/// U15 (ratified 2026-06-16): the jetos tier is the `jetpack os <verb>`
+/// subcommand group — not a separate `jetos` binary, not under `jet`.
+pub const OS_SUBCOMMAND: &str = "os";
+
+/// U15 (ratified 2026-06-16): the jetos verbs, mirroring `nixos-rebuild` —
+/// `switch` (build + activate + set boot default) and `build` (build only).
+/// `boot`/`test` may be added later under the same protocol.
+pub const OS_VERB_SWITCH: &str = "switch";
+pub const OS_VERB_BUILD: &str = "build";
+pub const OS_VERBS: &[&str] = &[OS_VERB_SWITCH, OS_VERB_BUILD];
+
+/// U16 (ratified 2026-06-16): the `@host` selector in a `jetpack os` target
+/// `[<config-path>]@<host>`. Reuses jet's `@` source-selector convention.
+pub const OS_HOST_SELECTOR: &str = "@";
+
+/// U16 (ratified 2026-06-16): the default config location when no explicit path
+/// prefix is given — `~/.jet/config.jet`.
+pub const CONFIG_DEFAULT_DIR: &str = ".jet";
 
 /// U4 (ratified 2026-06-16): import-tree discovery builtin — `find("./modules")`
 /// auto-discovers and merges every `.jet` module in the tree.

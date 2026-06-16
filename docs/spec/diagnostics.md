@@ -226,6 +226,9 @@ before continuing.
 | E0976 | jetpack | an `Image` `format:` isn't `iso` / `qcow` / `raw` (U14) |
 | E0977 | jetpack | an `Image` has no `from`, or restates an inherited field (U14) |
 | E0978 | jetpack | an `Image` `from:` references an unknown `System` (U14) |
+| E0979 | jetpack | a `jetpack os` target has no `@host` selector (U16) |
+| E0980 | jetpack | a `jetpack os` `@host` names a `System` the config doesn't define (U16) |
+| E0981 | jetpack | a `jetpack os` config file doesn't exist (U16) |
 | E1001 | jet   | unknown std module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
@@ -280,6 +283,9 @@ CLI.
 | E0976 | An `Image` `format:` isn't one of the three disk-image formats. | U14: an image is built as `iso`, `qcow`, or `raw` (default `iso`). | Write `format: iso`, `format: qcow`, or `format: raw`. |
 | E0977 | An `Image` has no `from`, or restates a field it inherits from its system. | U14: an image is built `from: system.<name>` and inherits that system's `packages`/`services`/`options` — they are written once on the system. | Add `from: system.<name>`, or remove the inherited field (only an explicit `target:` may be restated, for cross-compiling). |
 | E0978 | An `Image` `from:` references a system no contribution defines. | U14: `from: system.<name>` must name a `System` defined by some module, because the image inherits its target, packages, services, and options. | Define `system.<name>: { … }`, or point `from:` at an existing system. |
+| E0979 | A `jetpack os` target was given with no `@host` selector. | U16: `jetpack os <verb>` takes `[<config-path>]@<host>`; the `@host` segment selects which `System` in the config to apply, and it is required. | Write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`. |
+| E0980 | A `jetpack os` `@host` selector names a system the config doesn't define. | U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
+| E0981 | The `jetpack os` config file (named, or the default `~/.jet/config.jet`) doesn't exist. | U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/config.jet`. | Create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`. |
 
 ## Concurrency diagnostics
 

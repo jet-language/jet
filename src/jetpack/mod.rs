@@ -11,6 +11,7 @@
 
 pub mod cli;
 pub mod envfile;
+pub mod jetos;
 pub mod json;
 pub mod merge;
 pub mod modeval;

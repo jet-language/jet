@@ -1,0 +1,28 @@
+// config.jet — the jetos master config (U11–U16, U18), the executable spec for
+// `jetpack os build @host` / `jetpack os switch @host`.
+//
+// A `config.jet` declares one or more `System`s — whole machines, each a typed
+// `target` platform, a `packages` list (U6 Pkg sugar), a keyed `services` map of
+// open `Service` records (U12), and an ordered `options` list of dotted key/value
+// entries (U13). `jetpack os <verb> [<path>]@<host>` (U15/U16) selects the
+// `System` named `<host>` and realizes it into a system generation.
+//
+// Packages here come from a first-party `core` source (a local repo carrying a
+// `payload.jet`), so `jetpack os build @halcyon` realizes the whole machine
+// offline with no Nix.
+module halcyon {
+    sources: {
+        mine: path@./jet-pkgs,
+    }
+    system.halcyon: {
+        target: linux.x64,
+        packages: [mine.[hello, btop]],
+        services: {
+            openssh: { enable: true, ports: [22] },
+        },
+        options: [
+            net.hostName: halcyon,
+            time.timeZone: "Europe/London",
+        ],
+    }
+}
