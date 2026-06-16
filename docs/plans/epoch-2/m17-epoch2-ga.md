@@ -15,12 +15,12 @@ still sacred throughout (E2-V4).
 
 ## Owner decisions — ratify before declaring GA
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-GA1 | Mandatory showcase set | **A** — 4 showcases + `jet dev` demo (B = all 6 as stretch) | A |
-| D-GA2 | Perf/size budgets | **A** — record per-showcase, no hard CI fail | A |
-| D-GA3 | Beta period before GA tag | **A** — short public beta after audits | A |
-| D-GA4 = E2-D2 | Launch versioning | **C** — separate launch after GA hardening | C |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-GA1 | Mandatory showcase set | **A** — 4 showcases + `jet dev` demo (B = all 6 as stretch) | A | ✅ ratified 2026-06-16 — B: all 6 showcases mandatory (owner chose B against prior rec A) |
+| D-GA2 | Perf/size budgets | **A** — record per-showcase, no hard CI fail | A | ✅ ratified 2026-06-16 — B: hard CI perf/size gates (owner chose B against prior rec A) |
+| D-GA3 | Beta period before GA tag | **A** — short public beta after audits | A | ✅ ratified 2026-06-16 — no beta before GA |
+| D-GA4 = E2-D2 | Launch versioning | **C** — separate launch after GA hardening | C | ✅ ratified 2026-06-16 — normal SemVer (= E2-D2; see m2-release-policy) |
 
 ## Showcases (D-GA1)
 

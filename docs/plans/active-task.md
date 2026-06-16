@@ -14,8 +14,9 @@ design-of-record** for the `jet` + `jetpack` + `jetos` ecosystem. It is the
 TARGET surface; it explicitly says Phase-1 directive scanning is the shippable
 bootstrap that evolves into the typed surface. Do **not** treat ratified
 (U1–U9) as implemented — see the gap list below (e.g. U9 inferred provider kind
-is built for `path@…` but the `github@…`/git remote probe is still a follow-up;
-`System`/`Image` types parse but are inert).
+is fully built for both `path@…` and `github@…`, but a `core` source still
+carries the dual `pack.jet`+`env.jet` marker; `System`/`Image` types parse but
+are inert).
 
 Supporting design docs (own their detail):
 - `docs/plans/jetpack-jetos/README.md` — sequencing + D-JPK gates (§3.3 surface superseded by unified-ecosystem.md)
@@ -43,12 +44,54 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U9 infer the source provider kind
+## Latest chunk (2026-06-16): U9 remote probe (`github@…` core sources)
 
-A typed `sources: { name: provider@target }` source now realizes through the
+A typed `github@…` source now realizes as **core** when its remote repo carries
+a `pack.jet` — completing the U9 rule for the remote case (the `path@…` local
+case shipped the prior chunk). The kind is decided by a lightweight git peek at
+realize time, never cloning a nixpkgs-sized repo to classify it.
+
+Landed this run:
+- **New `ProviderKind::Infer`** (`refspec.rs`): a third, *unresolved* kind the
+  table records for `github@…` sources. `modeval::infer_provider_kind` now
+  returns `Infer` for `Source::Github` (was `Nix`) — its core-vs-nix kind can't
+  be known during pure `evaluate_env` (no offline flag / source cache there).
+  `path@…` stays resolved eagerly (local stat); `nixpkgs@…` stays `Nix`.
+- **Realize-time resolution** (`provider.rs`): `resolve_kind(spec, table,
+  offline, cache_dir)` turns `Infer` into a concrete `Core`/`Nix`; it never
+  reaches a provider. Order: (1) reuse a prior source-cache checkout (offline-
+  safe), (2) offline + no cache → `Nix` (never hits the network), (3) online →
+  `infer_remote_kind`/`remote_has_pack_jet`: `git init` a throwaway repo, add
+  `origin`, `git fetch --depth 1 --filter=tree:0 origin <rev>` (one commit
+  object; trees/blobs deferred), then `git ls-tree FETCH_HEAD pack.jet`. Present
+  → `Core`; absent or any peek failure → `Nix` (safe default — a github *flake*
+  still realizes through nix). `git fetch <rev>` resolves a branch, tag, **or**
+  commit SHA uniformly, so the rev's exact `pack.jet` is peeked no matter how it
+  was pinned — no nixpkgs-sized clone to classify.
+- **Dispatch threads the resolved kind**: `provider_for(kind)` (was
+  `provider_for(spec, table)`), `uses_nix_provider(spec, table, offline,
+  cache_dir)`, and `realize` resolves once from `ctx`. `cli.rs::realize_ref`
+  hoists `store_dir` above the fixtures check so the probe's cache lookup is
+  seeded; an inferred `core` source is no longer wrongly asked for nix fixtures.
+- **Tests** (offline; the typed `github@` CLI path can't be reached without
+  network, so the probe is proven at the library boundary with `file://` repos):
+  `provider::resolve_kind_probes_remote_pack_jet` (pack.jet → Core, none → Nix,
+  offline+no-cache → Nix), `provider::remote_probe_resolves_a_commit_sha_rev`
+  (SHA-pinned rev → Core), `provider::realize_resolves_inferred_remote_to_core`
+  (full Infer→CoreProvider→fetch→build), `modeval::
+  github_source_kind_is_left_to_inference` / `nixpkgs_source_kind_stays_nix`. No
+  new diagnostic (behavior-only, like U9).
+
+**Still open (the marker reconciliation, now the headline Next up):** a remote
+`core` repo still needs **both** `pack.jet` (for the probe) and `env.jet` (the
+`pkg.package(...)` index `CoreProvider` reads) — the dual marker. Converging
+these has an unresolved manifest-design question (see Next up).
+
+## Prior chunk (2026-06-16): U9 infer the source provider kind (`path@…`)
+
+A typed `sources: { name: provider@target }` source realizes through the
 right backend with **no marker** — the kind is inferred from the resolved
-target (U9). Today `path@…` is fully wired; `github@…`/git remote probing is the
-one remaining follow-up (see Next up).
+target (U9). `path@…` fully wired (kind from a local `pack.jet`).
 
 Landed this run:
 - `modeval::build_source_table` no longer hard-codes `ProviderKind::Nix`. New
@@ -73,9 +116,10 @@ Landed this run:
   realizes the first-party `hello` and prints its output. The nix fallback stays
   proven by `typed_module_example_builds_offline_end_to_end`.
 
-**Still open:** the `github@…`/git remote `pack.jet` peek (needs realize-time
-`Ctx`; see Next up); `config.jet`/jetos tier (gap #4); `System`/`Image`
-semantics (gap #5); `jet dev`/`jetpack enter` (gap #6).
+**Open at the time:** the `github@…` remote `pack.jet` peek — **since shipped**
+as the Latest chunk above. Still open beyond it: the dual marker (Next up);
+`config.jet`/jetos tier (gap #4); `System`/`Image` semantics (gap #5); `jet
+dev`/`jetpack enter` (gap #6).
 
 ## Prior chunk (2026-06-16): U4 `find(…)` import-tree discovery
 
@@ -126,21 +170,30 @@ Landed this run:
 
 ## Where we are (verified 2026-06-16)
 
-Last **committed**: the U9 implementation chunk (`build_source_table` infers the
-kind; `tests/jetpack.rs::typed_core_source_inferred_from_pack_jet`). Preceding
-arc commits this session: the **U4 `find(…)` chunk** (`4054b2b`) and the **U9
-docs** (`bf1c645`), both on top of the owner's `fec9230` "Planning" commit.
+Last **landed** (working tree, **not yet committed** — commit it first): the U9
+**remote probe** — `ProviderKind::Infer` (`refspec.rs`) +
+`provider::{resolve_kind, infer_remote_kind, remote_has_pack_jet}`, dispatch
+rewired (`provider_for(kind)`, `uses_nix_provider(…, offline, cache_dir)`,
+`cli.rs::realize_ref`). New tests: `provider::{resolve_kind_probes_remote_pack_jet,
+remote_probe_resolves_a_commit_sha_rev, realize_resolves_inferred_remote_to_core}`,
+`modeval::{github_source_kind_is_left_to_inference, nixpkgs_source_kind_stays_nix}`.
+Touched: `src/jetpack/{refspec,modeval,provider,cli}.rs` + this doc.
+Last **committed**: `9c29ef6` (handoff refresh) on top of the U9 `path@…`
+implementation (`4d5aca6`).
 
-**⚠ Working tree:** only owner noise remains uncommitted (see the noise section
-below) — leave it. Full `nix develop -c cargo test` is green (0 failed across
+**⚠ Working tree:** the remote-probe arc edits above are ready to commit;
+everything else is owner noise (see the noise section) — stage selectively,
+never `git add -A`. Full `nix develop -c cargo test` is green (0 failed across
 the suite); `jet run examples/features/01_hello.jet` prints `hello, world`.
 
 Recent arc: `pack.jet`→`env.jet` clean break + computed modules + manifest
 reshape (`98ff3be`) → U8 nested `sources:`/`imports:` parser → `modeval` wired
 into the CLI (`11e7df8`) → U4 `find(…)` discovery (`4054b2b`) → U9 docs
-(`bf1c645`) → **U9 inferred provider kind for `path@…` (this chunk).** The typed
-`module { … }` `env.jet` surface builds and realizes end-to-end, including
-`find(…)` import-tree discovery and first-party `core` sources.
+(`bf1c645`) → U9 inferred provider kind for `path@…` (`4d5aca6`) → **U9 remote
+probe for `github@…` (this chunk, uncommitted).** The typed `module { … }`
+`env.jet` surface builds and realizes end-to-end, including `find(…)`
+import-tree discovery and first-party `core` sources from both local (`path@`)
+and remote (`github@`) repos.
 
 ### Implemented & shipping (Phase-1 bootstrap)
 - Two binaries: `jet`, `jetpack` (Cargo.toml `[[bin]]`).
@@ -184,10 +237,11 @@ test/example first.
    enforced (E0971); bad/missing `find` is E0969/E0970.
 3. **Typed `env.jet` surface loaded by the CLI — DONE for
    `sources:`/`imports:`/`env.*` (2026-06-16), incl. U9 inferred provider kind
-   for `path@…` core sources.** `module dev { sources: {…} imports: find(…)
-   env.dev: Env { … } }` builds and realizes, including discovered modules and
-   first-party `core` sources. Remaining: U9 `github@…`/git remote probe (see
-   Next up); `config.jet`/`system`/`image` (gaps #4/#5).
+   for both `path@…` (local `pack.jet`) and `github@…` (realize-time git peek).**
+   `module dev { sources: {…} imports: find(…) env.dev: Env { … } }` builds and
+   realizes, including discovered modules and first-party `core` sources.
+   Remaining: converge the `core` marker onto `pack.jet` (see Next up — has an
+   open manifest-design question); `config.jet`/`system`/`image` (gaps #4/#5).
 4. **`config.jet` + the entire `jetos` tier — not implemented.** `CONFIG_FILE`
    constant only (`src/syntax.rs:438`); never loaded; no `jetos` binary, no
    `src/jetos/`. Scale-3 (`jetos switch/build`).
@@ -198,36 +252,30 @@ test/example first.
 
 ---
 
-## Next up — START HERE: U9 remote probe (`github@…`/git core sources)
+## Next up — START HERE: converge the `core` marker onto `pack.jet`
 
-U9 for `path@…` shipped this chunk (kind inferred from a local `pack.jet`). The
-one remaining piece of the same rule: a `github@…`/git source whose target is a
-Jet package repo should also realize as **core**. Today `infer_provider_kind`
-returns `Nix` for every non-`path@` provider, so a typed `github@owner/jet-pkgs`
-source can't be first-party.
+The U9 remote probe shipped (chunk above). The remaining U9 loose end: a `core`
+source repo carries **two** markers — `pack.jet` (what the probe keys on) and
+`env.jet` (the `pkg.package("name", "./subpath")` index `CoreProvider::realize`
+reads to map a package name → its source subpath, via `envfile::provided`). A
+Jet package repo should need only `pack.jet`.
 
-**The rule is unchanged (U9; syntax-decisions.md + unified-ecosystem.md §6):**
-peek at **only** `pack.jet` over the network (GitHub raw, e.g.
-`https://raw.githubusercontent.com/<owner>/<repo>/<rev>/pack.jet`, or a shallow
-`git archive`) — never clone a nixpkgs-sized repo — and choose `Core`/`Nix` from
-whether that file exists. `nixpkgs@…` stays unconditionally nix.
-
-**Why it's a separate chunk:** the probe needs realize-time context the pure
-`modeval` evaluation doesn't have — the `--offline` flag (offline must not hit
-the network; fall back to a cached checkout or default to nix) and the source
-cache dir. So this likely moves the kind decision **lazy**, into
-`provider::provider_for`/`uses_nix_provider` (which already take the
-`SourceTable` and run where `Ctx` is available), or threads a probe result from
-`source_repo`'s fetch. Entry points: `src/jetpack/provider.rs`
-(`provider_for`, `uses_nix_provider`, `source_repo`, `fetch_remote_repo`),
-`src/jetpack/modeval.rs::infer_provider_kind` (today's local path probe).
-
-**Also reconcile the marker (carried over from U9 step 3):** discovery keys on
-**`pack.jet`** but `CoreProvider::realize` still reads the repo's **`env.jet`**
-`pkg.package(...)` index to map package → subpath, so a core repo carries both.
-Converge them — have the core provider read `pack.jet`'s `exports:` — so a Jet
-package repo needs only `pack.jet`. This pairs naturally with the remote chunk
-(the remote peek already fetches `pack.jet`).
+**⚠ This chunk has an unresolved manifest-design question — STOP and ratify
+before coding (measure twice).** The naive "have the core provider read
+`pack.jet`'s `exports:`" doesn't type-check against the manifest as designed:
+- `pack.jet`'s `exports:` is `[module web, module cli]` — the *public modules of
+  one package* (`packmanifest.rs::parse_exports`).
+- `CoreProvider` needs a *package-name → source-subpath* map for a repo that
+  provides **many** packages (`hello` → `./pkgs/hello`).
+These are different shapes. A single-package `pack.jet` doesn't currently
+express "this repo is a multi-package `core` source." Options to put to the
+owner (none ratified): (a) a workspace-style `pack.jet` that lists member
+package dirs; (b) the core source *is* one package and `exports:`-modules map to
+bin subpaths; (c) keep a small index block in `pack.jet` mirroring
+`pkg.package(...)`. This is owner-facing manifest surface → syntax-decision
+protocol applies. Entry points once decided: `packmanifest.rs` (manifest shape),
+`provider.rs::CoreProvider::realize` + `source_repo` (read `pack.jet` instead of
+`env.jet`), `envfile.rs::provided` (the index it replaces).
 
 **Larger, later (gaps #4/#5/#6), each its own multi-chunk arc:**
 - #5 `System`/`Image` semantics — parsed/validated but inert; only `Env` means

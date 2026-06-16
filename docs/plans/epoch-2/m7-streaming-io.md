@@ -16,12 +16,13 @@ releases every resource on every exit path — including `?` early returns.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-IO1 | Path handling | **A** — `std.path` helper module (not a first-class `Path` type yet) | A |
-| D-IO2 | Cleanup surface | **A** — RAII handle types (S63), drop on scope exit | A |
-| D-IO3 | Keep whole-file `fs.read`/`fs.write` | **A** — keep as sugar over handles | A |
-| D-TXN1…3 (adjacent) | `transact` block | **A/A/A**, or defer | defer; RAII is the model |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-IO1 | Path handling | **A** — `std.path` helper module (not a first-class `Path` type yet) | A | ✅ ratified 2026-06-16 — A: `std.path` helper module (invest in ergonomics) |
+| D-IO2 | Cleanup surface | **A** — RAII handle types (S63), drop on scope exit | A | OPEN — pending confirm of RAII-A |
+| D-IO3 | Keep whole-file `fs.read`/`fs.write` | **A** — keep as sugar over handles | A | ✅ ratified 2026-06-16 — A: keep whole-file `fs.read`/`fs.write` helpers |
+| D-FS2 | Game-loop / input polling | — | — | ✅ ratified 2026-06-16 — A&B: ship game-loop example AND `poll_input` helper |
+| D-TXN1…3 (adjacent) | `transact` block | **A/A/A**, or defer | defer; RAII is the model | — |
 
 ## Surface
 

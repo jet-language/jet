@@ -55,11 +55,21 @@ impl Source {
 
 /// Which backend realizes a source: the `nix` compatibility provider or the
 /// first-party `core` provider (R2). Default is `nix` (R1 behavior).
+///
+/// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
+/// `github@…` source's kind can't be known during pure `evaluate_env`
+/// evaluation — it depends on whether the remote repo carries a `pack.jet`,
+/// which only a realize-time probe (with the offline flag + source cache) can
+/// answer. `provider::resolve_kind` turns `Infer` into a concrete `Nix`/`Core`
+/// when realization runs; it never reaches a provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProviderKind {
     #[default]
     Nix,
     Core,
+    /// Decide `Nix` vs `Core` at realize time by peeking the source's
+    /// `pack.jet` (U9). Only the typed `github@…` surface produces this.
+    Infer,
 }
 
 impl ProviderKind {
@@ -76,6 +86,8 @@ impl ProviderKind {
         match self {
             ProviderKind::Nix => "nix",
             ProviderKind::Core => "core",
+            // Never user-shown: resolved before any listing/diagnostic.
+            ProviderKind::Infer => "infer",
         }
     }
 }

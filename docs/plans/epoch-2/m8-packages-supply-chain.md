@@ -18,12 +18,12 @@ of this (E2-V4, I).
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-PKGS1 | Registry hosting model | **A** — append-only git registry | A |
-| D-PKGS2 | `jet.*` namespace policy | **A** — owner-held reserved namespace | A |
-| D-PKGS3 | Signing | **A** — signed metadata optional v1; design signed cache | A |
-| D-PKGS4 | Yank / immutability rules | **A** — immutable releases; yank hides from new solves | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-PKGS1 | Registry hosting model | **A** — append-only git registry | A | ✅ ratified 2026-06-16 — A: git registry now (hosted later) |
+| D-PKGS2 | `jet.*` namespace policy | **A** — owner-held reserved namespace | A | ✅ ratified 2026-06-16 — A: reserved `jet.*` namespace |
+| D-PKGS3 | Signing | **A** — signed metadata optional v1; design signed cache | A | ✅ ratified 2026-06-16 — A: optional signed metadata v1 |
+| D-PKGS4 | Yank / immutability rules | **A** — immutable releases; yank hides from new solves | A | OPEN — wants brief discussion |
 
 ## Scope
 

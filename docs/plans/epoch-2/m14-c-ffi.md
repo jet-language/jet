@@ -14,11 +14,11 @@ E2-M13 gates. Rust FFI (`extern rust`) is unchanged.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-CFFI1 | Jet-export to C in scope? | **A** — import-only first | A |
-| D-CFFI2 | Header/library discovery | **A** — pkg-config + classic flags from `[dependencies:c]` | A |
-| D-CFFI3 | C example to ship | **A** — one small C lib (e.g. a hash/compression lib) | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-CFFI1 | Jet-export to C in scope? | **A** — import-only first | A | ✅ ratified 2026-06-16 — A: import-only C FFI first, export-to-other-languages post-Epoch-2 |
+| D-CFFI2 | Header/library discovery | **A** — pkg-config + classic flags from `[dependencies:c]` | A | OPEN — needs owner |
+| D-CFFI3 | C example to ship | **A** — one small C lib (e.g. a hash/compression lib) | A | ✅ ratified 2026-06-16 — ship a raylib showcase |
 
 ## Scope (from S59)
 

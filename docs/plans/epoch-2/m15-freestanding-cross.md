@@ -14,11 +14,11 @@ the low-level tier stays gated and never leaks into normal Jet.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-CROSS1 | First non-host target | **A** — one CLI target (e.g. `aarch64-linux`) | A |
-| D-CROSS2 | Freestanding panic strategy | **A** — abort default | A |
-| D-CROSS3 | Embedded smoke | **A** — documented local harness minimum | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-CROSS1 | First non-host target | **A** — one CLI target (e.g. `aarch64-linux`) | A | ✅ ratified 2026-06-16 — A: first cross target = one CLI target (e.g. aarch64-linux) |
+| D-CROSS2 | Freestanding panic strategy | **A** — abort default | A | OPEN — needs owner |
+| D-CROSS3 | Embedded smoke | **A** — documented local harness minimum | A | OPEN — needs owner |
 
 ## Scope
 

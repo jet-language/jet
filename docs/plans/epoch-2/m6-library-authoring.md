@@ -17,13 +17,19 @@ same-error-type contortions.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-LIB1 | S61 (labels/defaults) + S62 (delegation) timing | **A** — both in M6 | A |
-| D-LIB2 | Generics step | **A** — associated types + default method bodies | A |
-| D-LIB3 = D-ERR2 | `?` error-conversion shape | **A** — `From`-style `IntoError` trait | trait, opt-in |
-| D-ERR1 | Grow `Error` carrier (msg + code + source) | **A** | A |
-| D-FP1 | Struct field punning | **A** — `Source { name, upstream }` | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-LIB1 | S61 (labels/defaults) + S62 (delegation) timing | **A** — both in M6 | A | OPEN — needs owner |
+| D-LIB2 | Generics step | **A** — associated types + default method bodies | A | OPEN — needs owner |
+| D-LIB3 = D-ERR2 | `?` error-conversion shape | **A** — `From`-style `IntoError` trait | trait, opt-in | OPEN — needs owner |
+| D-ERR1 | Grow `Error` carrier (msg + code + source) | **A** | A | — |
+| D-FP1 | Struct field punning | **A** — `Source { name, upstream }` | A | — |
+| D-FP3 | Core `module name {}` typed declaration | — | — | ✅ ratified 2026-06-16 — A: core `module name {}` typed declaration |
+| D-OWN1 | Implicit-clone lint | — | — | ✅ ratified 2026-06-16 — A: keep + strengthen implicit-clone lint |
+| D-OWN2 | Ownership mini-examples | — | — | ✅ ratified 2026-06-16 — A: add ownership mini-examples |
+| D-OWN3 | `take` suggestion site | — | — | ✅ ratified 2026-06-16 — A: suggest `take` at call site |
+| D-JSON1 | JSON decode strictness baseline | — | — | OPEN — needs owner |
+| D-JSON2 | Unknown JSON keys | — | — | ✅ ratified 2026-06-16 — A: ignore unknown JSON keys by default, opt-in strict |
 
 ## Surface (uses ratified S61/S62 + ballot recs)
 

@@ -15,11 +15,11 @@ an implementation detail for normal users).
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-OBS1 | DAP timing | **A** — ship for VS Code/Cursor in M12 (before GA) | A |
-| D-OBS2 | Panic local-value privacy | **A** — show *safe* locals only, dev mode only | A |
-| D-OBS3 | Metrics conventions | **A** — simple structured logs first; OTel-aligned metrics later | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-OBS1 | DAP timing | **A** — ship for VS Code/Cursor in M12 (before GA) | A | OPEN — needs owner |
+| D-OBS2 | Panic local-value privacy | **A** — show *safe* locals only, dev mode only | A | ✅ ratified 2026-06-16 — A: panic shows safe locals in dev mode only |
+| D-OBS3 | Metrics conventions | **A** — simple structured logs first; OTel-aligned metrics later | A | OPEN — needs owner |
 
 ## Scope
 

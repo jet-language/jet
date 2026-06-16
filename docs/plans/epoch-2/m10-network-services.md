@@ -16,11 +16,11 @@ not 100k-connection async workloads (E2-V5/V7).
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-NET1 | TLS/HTTP dependency | **A** — rustls-class via the FFI tier, never hand-rolled | A |
-| D-NET2 | Server concurrency story | **A** — blocking thread-per-task + channels | A |
-| D-NET3 | Service showcase backing store | **A** — sqlite-first | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-NET1 | TLS/HTTP dependency | **A** — rustls-class via the FFI tier, never hand-rolled | A | OPEN — needs owner |
+| D-NET2 | Server concurrency story | **A** — blocking thread-per-task + channels | A | OPEN — needs owner |
+| D-NET3 | Service showcase backing store | **A** — sqlite-first | A | ✅ ratified 2026-06-16 — A: sqlite-first service showcase |
 
 ## Scope
 

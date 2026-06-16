@@ -16,13 +16,13 @@ Epoch 2 builds the foundation; JetOS itself stays research (E2-V12).
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-PURE1 | Recipe scope | **A** — pure eval + sandboxed package recipes | A |
-| D-PURE2 | Sandbox guarantees | **A** — no ambient I/O or network during eval | A |
-| D-PURE3 | Signed cache / rollback | **A** — design now, ship later; record generations | A |
-| E2-V12 | JetOS / layer-3 boundary | **C** — JetOS research-only | C |
-| D-FP3 (Group 16) | Core `module name { … }` declaration | **A** — typed, lowers to a pure fragment | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-PURE1 | Recipe scope | **A** — pure eval + sandboxed package recipes | A | OPEN — needs owner |
+| D-PURE2 | Sandbox guarantees | **A** — no ambient I/O or network during eval | A | OPEN — needs owner |
+| D-PURE3 | Signed cache / rollback | **A** — design now, ship later; record generations | A | ✅ ratified 2026-06-16 — B: ship the signed cache in M16 (owner chose B against prior rec A) |
+| E2-V12 | JetOS / layer-3 boundary | **C** — JetOS research-only | C | ✅ ratified 2026-06-16 — redundant; resolved by D-PURE1/2 (see README E2-V12) |
+| D-FP3 (Group 16) | Core `module name { … }` declaration | **A** — typed, lowers to a pure fragment | A | ✅ ratified 2026-06-16 — A: core `module name {}` typed declaration (recorded in m6 D-FP3) |
 
 ## Scope (from S60 + M12 layer 3)
 

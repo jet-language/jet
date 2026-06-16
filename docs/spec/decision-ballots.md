@@ -1,720 +1,1002 @@
-# Decision ballots (owner's queue)
+# Decision ballots (owner's queue) — routed 2026-06-16
 
-Open decisions awaiting the owner. **Ratified choices live only in
-docs/spec/syntax-decisions.md** (and, for milestone-scoped IDs, in the relevant
-plan under docs/plans/) — when the owner decides, agents add the row there and
-remove it from this file. This file is the *pending queue only*; it never
-duplicates ratified content.
+This file has been **routed against the owner's responses**
+(`decision-ballots-owner.md`, 2026-06-16). Every ID now carries one of three
+statuses:
 
-Decide one group at a time. A group must be fully decided before its milestone
-starts (plans in docs/plans/ are blocked on these IDs).
+- **✅ Decided** — the owner picked an option. Recorded here with any caveat.
+  Genuine *syntax* decisions are staged for `docs/spec/syntax-decisions.md`;
+  milestone/strategy gates are staged for the relevant plan under
+  `docs/plans/`. See *Part 0 — ratification queue* for exactly what moves where.
+- **❓ Needs your input** — the owner wrote "I don't know what this means",
+  "need more info", "explain", etc. These are rewritten below in plain language
+  with a concrete example and a recommendation, so the call can be made from
+  real use, not jargon. **This is the part to read.**
+- **💬 Needs discussion** — decided in spirit but the owner wants to talk it
+  through or compare community practice first.
 
-## How to read this file
-
-- **Strategic (Part 1)** — product direction for all of Epoch 2. These set the
-  bar that every milestone plan is measured against. Decide these first; they
-  are cheap to answer and expensive to get wrong.
-- **Milestone gates (Part 2)** — the few CEO-level calls each detailed plan
-  needs before its agent starts. One compact table per milestone, each with a
-  recommendation and a *default if deferred* so work is never fully blocked.
-- **Feature ballots (Part 3)** — concrete syntax/semantics distilled from the
-  research folder (`docs/research/*`) and `docs/plans/owner-todo.md`. Each option
-  carries a worked example (Jet code, terminal output, or error text) so the
-  choice can be made from real use, not abstractions.
-- Every ID here is **pending**. Ratified items are listed only by reference at
-  the bottom. A `**Rec**` is the agents' recommendation, not a decision — agents
-  must not substitute a different option if you pick one.
+> **How to use this document.** Read **Part 1 (needs your input)** first — those
+> are the questions blocking nothing-can-proceed-without-them. Part 2 is a
+> reference list of what you already decided. Part 3 collects three cross-cutting
+> threads your answers opened up (the "attributes" list, the `#` version syntax,
+> and two things that turned out to be already done).
 
 Glossary: *epoch* = a large human-facing era (Epoch 1 = language core, Epoch 2 =
 production platform). *edition* = a per-project compatibility marker that lets
 old code keep compiling when syntax changes (Rust-style). *tier-2* = post-v1
 reference features (`view`/`ref`) for experts. *ring* = the first-party
-`jet.*` package set that ships beside the compiler.
+`jet.*` package set that ships beside the compiler. *RAII* = "cleanup happens
+automatically when a value goes out of scope" (you never write a `close`).
 
 ---
 
-# Part 1 — Epoch 2 product direction (CEO ballot)
+# Part 0 — Ratification queue (what moves where on your "go")
 
-These are whole-epoch choices. Agents should not finalize a milestone's scope
-until the strategy it depends on is set. Full narrative context lives in
-docs/plans/epoch-2/README.md; this is the decision surface.
+These are **✅ Decided** and ready to propagate. Nothing here is moved into the
+canonical files. The syntax decisions are now **officially ratified** into
+`docs/spec/syntax-decisions.md` (2026-06-16); the milestone/strategy gates are
+recorded into the matching `docs/plans/epoch-2/` plan files.
 
-## Group E2V — Strategic vision
+**✅ Ratified into `docs/spec/syntax-decisions.md` (2026-06-16):**
 
-| ID | Question | Options (one line each) | Rec |
-|---|---|---|---|
-| E2-V1 | Who is Epoch 2 GA *for*? | A: beginners + small-tool authors · B: small teams first · C: enterprise platform buyers first | **A** (with B as the proof) |
-| E2-V2 | What does "production platform" mean at GA? | A: credible for internal services + CLIs · B: also public-facing SaaS · C: also regulated/audit-heavy | **A** |
-| E2-V3 | Who must we beat convincingly? | A: Python/Node scripts · B: Go services · C: Rust small tools · D: Zig/C systems | **A primary, B secondary** |
-| E2-V4 | How sacred is single-file `jet run`? | A: forever default path · B: package-first for new users after tutorial · C: workspace-first for teams | **A** |
-| E2-V5 | Concurrency model lock for the epoch | A: tasks/channels only (S53) · B: reserve async syntax for Epoch 3 w/ public note · C: promote async inside Epoch 2 | **A** |
-| E2-V6 | Expert/low-level appetite | A: smoke demos only · B: credible for systems programmers, still gated · C: defer C FFI + freestanding to Epoch 3 | **B** |
-| E2-V7 | Networking/services ambition | A: internal HTTP/CLI services only · B: small public APIs with TLS · C: defer services to Epoch 3 | **B** |
-| E2-V8 | Supply-chain minimum bar | A: pub.dev-class (semver + lockfile) · B: enterprise-class (vendor, audit, SBOM, mirror) · C: air-gapped-first | **B** |
-| E2-V9 | Editor ecosystem priority | A: VS Code/Cursor + Zed dev extension · B: VS Code/Cursor only until GA · C: also Neovim in Epoch 2 | **A** |
-| E2-V10 | Public launch trigger | A: E2-M17 technical GA · B: separate launch milestone after audits · C: no encoded epoch ever | **B** |
-| E2-V11 | Governance at launch | A: OSS project, owner-led LTS · B: foundation prep in Epoch 2 · C: defer all governance messaging | **A** |
-| E2-V12 | JetOS / pure eval / layer-3 boundary | A: `pure fn` + `jet eval --pure` only (S60) · B: package recipes in Epoch 2 · C: JetOS research-only | **C** |
+| Ballot | Ratified as | Decision |
+|---|---|---|
+| D-FP1 | **S77** | struct field punning — `Source { name, upstream }` when a local has the field's name |
+| D-FP4 | **S78** | empty-list inference from expected type; explicit `[]: [T]` still allowed (your caveat) |
+| D-FP5 | **S79** | expressions in `for … in <expr>` heads (field access / calls / indexing / ranges) |
+| D-PAT1 | **S31 amended** | nested patterns in payload slots — `r == ok(Rect(w, h))` |
+| D-PAT3 | **S74 amended** | a refutable bind (`val value(n) = opt;`) requires `?? fallback` |
+| D-ERR1 | **S80** | `Error` carrier grows to message + optional code + optional source |
+| D-ERR3 | **S80** | `fn main() -> Unit ?` allowed; prints the `Error`, exits non-zero |
+| D-ERR4 | **S81** | `?continue` loop-skip added (you chose B over the "defer" rec) |
+| D-SUGAR2 | **S69 note** | pipe `\|>` declined for now (newline dot-chains cover it) |
+| D-SUGAR4 | **logged** | newtype keyword declined for now (one-field struct covers it) |
 
-### Worked context for the choices that benefit from it
+> **⚠ D-ERR2 NOT ratified — needs one tiny confirm.** You said "A but rename
+> the trait to `Error`." Problem: `Error` is already the *type* you return
+> (`-> T ?` == `T ? Error`), so a *trait* also named `Error` collides. I
+> recorded the conversion *mechanism* in S80 but left the **name** open — see
+> the 30-second decision in **Part 1L**.
 
-**E2-V1 / E2-V2 — audience and bar.** The audience decides the GA showcase set
-and the docs voice. Recommendation A keeps the beginner-first identity while
-using "a small team ships a real internal service" (B) as the *proof*, not the
-target market. Concretely, GA is "done" when this transcript is true on a
-teammate's laptop with zero Jet experience:
+> **Already covered — no new entry needed:** D-SUGAR1 (digit separators) is
+> already ratified as **S67**. D-SUGAR7 (keep semicolons required) is already
+> **S6**. Confirmed, not re-ratified.
 
-```
-$ jet run report.jet            # single file, no manifest — still works
-$ jet new service && cd service # opt-in to a project only when you want one
-$ jet test && jet dev           # instant feedback, real diagnostics
-```
+**✅ Recorded into the `docs/plans/epoch-2/` plan files (2026-06-16):**
+*(Each gate is marked ratified in its milestone plan's owner-decisions section.
+Items you left open — e.g. D-DX5, D-NET1/2, D-PURE1/2, D-LIB1/2 — were left as
+"needs owner" in the plans and appear in Part 1 here.)*
 
-**E2-V4 — single-file sacredness.** This gates how much package ceremony new
-users meet. Option A means the first program is always one file and `jet run`
-never asks for a manifest, workspace, or config — packages are something you
-*grow into*, surfaced only by `jet new`/`jet add`. This is load-bearing for the
-beginner identity and is the recommended hard line.
-
-**E2-V5 — concurrency lock.** Option A commits the whole epoch to tasks +
-channels (already ratified S53) and forbids async creep. The honest positioning
-to write into docs: *"Jet services scale like Go circa 2012 — thread-per-task is
-right for the broad internal-service case; 100k-connection async is not us
-yet."* Choosing A here lets E2-M10 size its performance claims truthfully.
-
-**E2-V7 — services ambition.** Option B (small public APIs with TLS via a vetted
-Rust library through the FFI tier) is the recommended ceiling. It rules out a
-large web framework before the lower-level story is proven, but lets the GA
-service showcase terminate TLS and call a real API.
-
-## Group E2D — External release & versioning policy *(needed by E2-M2)*
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| E2-D1 | External release policy | A · B · C below | **A** |
-| E2-D2 | What event flips on encoded Epoch SemVer, if ever? | A: never · B: at E2-M17 GA only · C: a separate launch after GA | **C** |
-
-**E2-D1 options, with what `jet --version` prints under each:**
-
-- **A — Normal SemVer until launch (Rec).** Compiler stays `0.x` → `1.x`; docs
-  use "Epoch 2" for storytelling only. Beginner-friendly, SemVer tooling works.
-
-  ```
-  $ jet --version
-  jet 0.9.0  (language epoch 2, edition 2026)
-  ```
-
-- **B — Adopt encoded Epoch SemVer now** (Anthony Fu's `EPOCH*1000+MAJOR`):
-
-  ```
-  $ jet --version
-  jet 2000.0.0   # "Epoch 2, major 0" — powerful signal, beginner-hostile
-  ```
-
-  Strong launch story, but `2000.0.0` on a teaching toolchain fights priority #2.
-
-- **C — Calendar/edition versioning for the *language*, SemVer for the *binary*.**
-  Viable but needs extra policy; not recommended over A for now.
+| Ballot(s) | Plan | Decision summary |
+|---|---|---|
+| E2-V1, V3, V4, V6, V9 | epoch-2/README | audience = beginners **and** small teams; beat Python/Node/Go/Rust/Zig (all, non-negotiable); single-file `jet run` sacred, packages optional; full low-level **but safe-by-default, expert opt-in**; ship VS Code/Cursor + Zed + Neovim |
+| E2-D1, E2-D2, D-REL1, D-REL2, D-GA4 | epoch-2/m2 | **normal SemVer forever**; no encoded "epoch" version, ever; you control version bumps manually |
+| D-REL3, D-REL4, D-REL5 | epoch-2/m2 | `edition` field (A); no LTS until GA (C); only owner-approved `jet fix` may migrate (A) |
+| D-DX1, D-DX2(+auto-fix), D-DX3, D-DX4, D-DX6 | epoch-2/m3 | stable `--json`; `jet doctor` health **and** auto-fix; Zed dev extension; ship completions+man pages; OSC-8 hyperlinks |
+| D-DEV1(+flag), D-DEV3 | epoch-2/m4 | interpret common programs, add an opt-in "try anyway" flag with no guarantees; <200 ms save-to-diagnostic budget |
+| D-REF1 | epoch-2/m5 | teach references after the beginner ownership chapter |
+| D-IO1(+ergonomics) | epoch-2/m7 | `std.path` helper module — but invest in ergonomics |
+| D-PKGS1, D-PKGS2, D-PKGS3 | epoch-2/m8 | git registry now (hosted later); reserved `jet.*` namespace; optional signed metadata v1 |
+| D-LR1, D-LR2, D-LR3, D-LR4 | epoch-2/m9 | ship **all** ring libs in Epoch 2; sqlite via C FFI now / pure-Jet later; crypto as broad as safely possible (vetted impls only); **add `jet.yaml` in wave 1** (you chose B) |
+| D-NET3 | epoch-2/m10 | sqlite-first service showcase |
+| D-TEST3(B-first), D-TEST4 | epoch-2/m11 | docs-guided learning first, `jet tour` later; doctests run under `jet test` |
+| D-OBS2 | epoch-2/m12 | panic shows safe locals in dev mode only |
+| D-LL1, D-LL3(+wider API) | epoch-2/m13 | amend I1 for user-gated `unsafe`; narrow `std.mem` core **plus** an opt-in wider expert API (name TBD) |
+| D-CFFI1(+export later), D-CFFI3 | epoch-2/m14 | import-only C FFI first, export-to-other-languages post-Epoch-2; **ship a raylib showcase** |
+| D-CROSS1 | epoch-2/m15 | first cross target = one CLI target (e.g. `aarch64-linux`) |
+| D-PURE3 | epoch-2/m16 | **ship the signed cache in M16** (you chose B over "design now, ship later") |
+| D-GA1, D-GA2, D-GA3 | epoch-2/m17 | **all 6 showcases mandatory** (B); **hard CI perf/size gates** (B); **no beta** before GA |
+| D-BUILD1, D-BUILD2 | epoch-2/m3 | `jet doctor` reports FFI/cargo health; `jet build -v` prints the bridge steps |
+| D-FP3 | epoch-2/m6 | core `module name { … }` typed declaration |
+| D-OWN1, D-OWN2, D-OWN3 | epoch-2/m6 | keep + strengthen the implicit-clone lint (see your perf question, answered in Part 1); add ownership mini-examples; suggest `take` at the call site |
+| D-JSON2 | epoch-2/m6 | JSON decode ignores unknown keys by default, opt-in strict |
+| D-FS2 | epoch-2/m7 | ship the game-loop example **and** the `poll_input` helper (A & B) |
+| D-TOOL1, D-TOOL3 | epoch-2/m3+m11 | doctests under `jet test`; ship gated `jet emit --rust` expert window |
+| D-PAT4 | post-v1 | list rest-spread `[h, ...t]` deferred (you asked where it's used — answered in Part 1) |
+| D-REPL* (the decided ones) | epoch-2/m18 | see Part 2 table |
 
 ---
 
-# Part 2 — Per-milestone owner gates
+# Part 1 — Needs your input (read this)
 
-Each detailed plan lists these IDs under "Owner decisions". Every gate has a
-*default if deferred* so an agent is never hard-blocked, but the owner should
-confirm the load-bearing ones. Examples are inline where the call is non-obvious.
+Each item: **what it actually means** in plain language, a **concrete example**,
+and **what I'd pick / what I need from you**. Grouped by theme.
 
-## Group M2 — Release policy & editions *(E2-M2)*
+## 1A — REPL (the interactive `jet` prompt)
 
-| ID | Question | Options | Rec / default-if-deferred |
-|---|---|---|---|
-| D-REL1 | Versioning policy | = E2-D1 | A (normal SemVer) |
-| D-REL2 | Epoch-SemVer flip | = E2-D2 | C (separate launch) |
-| D-REL3 | Project compatibility marker | A: `edition` field · B: `epoch` field · C: both · D: toolchain constraint only | **A — `edition`** |
-| D-REL4 | LTS window length | A: 1 yr · B: 2 yr · C: no LTS pre-GA | **C until GA** |
-| D-REL5 | Who may run migrations | A: owner-approved `jet fix` + edition upgrade only · B: any quick-fix may migrate · C: no auto-migration | **A** |
+A REPL is the prompt you get when you type `jet repl` — you type one line of Jet,
+it runs immediately and prints the result, and you keep going. Like the Python
+`>>>` prompt or a browser console. It's for quick experiments without making a
+file. Several of your "I don't know what this means" answers are about *how* that
+prompt should behave.
 
-Example for D-REL3 (what a manifest declares, and the diagnostic when a toolchain
-is too old):
+**D-REPL3 — How do you start it?** You asked "why not B?"
+- A (my rec): you type `jet repl` to start it.
+- B: you just type `jet` with no file, and if you're in a terminal it drops you
+  into the REPL.
+- **Why I lean A:** with B, a beginner who fat-fingers `jet` instead of
+  `jet run x.jet` lands in a mystery prompt with no idea how to leave. `jet repl`
+  is explicit and discoverable (`jet --help` lists it). B saves three keystrokes
+  at the cost of a confusing accident. If you'd rather optimize for "feels like
+  magic, zero ceremony", B is defensible — your call.
 
-```toml
-[package]
-edition = "2026"
+**D-REPL4 — What runs your code in the REPL?** ("more info, should feel like
+magic")
+- A: a small **interpreter** runs your lines directly. Starts instantly, feels
+  live, but is a separate engine from the real compiler.
+- B: each line is **compiled to a real binary** and run. Slower per line (compile
+  + link each time), but guarantees identical behavior to `jet run`.
+- C: **hybrid** — interpret for speed, fall back to compile for the hard cases.
+- **For "magic / low friction", A wins** — instant feedback is the magic. The
+  risk is the interpreter and the compiler disagreeing on a corner case; we
+  already plan a test battery (the M4 interpreter) to keep them in lockstep, so
+  A is safe. Recommend A.
+
+**D-REPL5 — What are you allowed to type?** ("explain tradeoffs")
+- A: statements + control flow (`val x = 1;`, `if`, `for`, function calls).
+- B: also full declarations (define a `struct`/`trait`/`fn` mid-session).
+- C: expressions only (`2 + 2`), no bindings.
+- **Tradeoff:** C is too weak to prototype with. B is the most powerful but
+  raises "what happens when you redefine a struct you already used?" edge cases.
+  A is the sweet spot for rapid prototyping and is what most REPLs start with;
+  we can grow into B. Recommend A, with B as a later upgrade.
+
+**D-REPL6 — Does the REPL see your project?** ("no jet.toml anymore, explain")
+Correct — there is no `jet.toml`; the manifest is now `pack.jet` (already done,
+see Part 3). The real question: when you open a REPL inside a project folder,
+should it automatically load that project's code and dependencies, or start
+clean?
+- A (rec): start in a **clean sandbox**; opt in with `jet repl --project` to load
+  the current `pack.jet`.
+- B: always auto-load the project.
+- **Why A:** a clean prompt always starts the same way and never fails because
+  the project doesn't build. `--project` is there the moment you want it.
+  Recommend A.
+
+**D-REPL7 — How does the session remember things?** ("don't know what this
+means") When you define `val x = 5;` on line 1, line 2 should still see `x`.
+- A: **accumulating module** — every line adds to one growing invisible file;
+  later lines see everything earlier. (How Python's `>>>` works.)
+- B: **cells** — independent blocks you can re-run out of order (like a Jupyter
+  notebook).
+- C (rec): accumulating by default, with an optional `:cell` command when you
+  want a fresh isolated block.
+- **Recommend C** — accumulating is the intuitive default; cells are a power
+  feature for the rare case. This is purely REPL-internal; no language syntax
+  rides on it.
+
+**D-REPL14 — Snippets the REPL can't run live.** ("which is more magic?") Some
+code can't be interpreted (FFI, low-level, tasks). Two options when you type one:
+- A: **reject it** with a message like "the REPL can't run FFI; put it in a file
+  and `jet run`."
+- B: **silently compile-and-run** just that snippet behind the scenes so it
+  appears to "just work."
+- **B feels more magic** (everything you type runs), but it's slow and
+  occasionally surprising (a one-liner pauses for a compile). A is honest and
+  fast. My lean is A for predictability, but if "magic" is the priority here,
+  B — tell me which value wins for you.
+
+**D-REPL20 — How do we test the REPL?** ("don't know what this means") Just an
+internal engineering choice, no user-facing effect:
+- A (rec): record **transcripts** (type these lines, expect this output) as test
+  fixtures.
+- B: also drive a real pseudo-terminal for arrow-keys/history testing.
+- **Recommend A**; it's the standard, cheap way. Not a decision you need to own
+  unless you care — safe to defer to engineering.
+
+## 1B — Pattern matching & functions
+
+**D-PAT2 — Guards (extra condition on a match arm).** ("don't know what this
+means") A *guard* is an extra "…but only if" test on a `when` arm. Note: we
+already renamed `switch` → `when` (S24 — Part 3).
+- A (rec): use `&&` and let the bound name flow into the test:
+  `when r { r == ok(Code(n)) && n >= 500 -> { … }; }` — match an error code
+  *and only if* it's ≥ 500.
+- B: add a dedicated `when`-style guard keyword (but we just *took* `when` for
+  the whole construct, so this would need a different word).
+- **Recommend A** — it reuses `&&`, which you already know, and needs no new
+  keyword. The example: "match a 5xx HTTP error" reads naturally.
+
+**D-PAT5 — Multiple function bodies by pattern.** ("more discussion") Some
+languages (Elixir, Haskell) let you write the same function several times, once
+per input shape:
 ```
+fn area(Circle(r)) = 3.14 * r * r;
+fn area(Rect(w, h)) = w * h;
 ```
-error[E2001]: this package needs a newer Jet
-  --> jet.toml:2:11
-   |
- 2 | edition = "2027"
-   |           ^^^^^^ your toolchain supports editions up to 2026
-help: upgrade with `jet upgrade`, or set edition = "2026"
+- A (rec): **decline** — write one `fn area` with a `when` inside. One obvious
+  way.
+- B: allow the multi-head form above.
+- **Recommend A.** B is elegant for math-heavy code but gives two ways to do the
+  same branching, and scatters one function across many definitions (harder for
+  beginners to follow). Worth discussing if you love the look; my vote is A.
+
+**D-PAT6 — Destructuring in parameters.** ("don't like B, show me real
+examples") Pulling a struct apart *in the parameter list* instead of the body:
 ```
-
-## Group M3 — Developer command UX *(E2-M3)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-DX1 | `--json` diagnostic schema stability | A: stable & versioned by M3 exit · B: unstable/experimental in M3 | **A** |
-| D-DX2 | `jet doctor` scope | A: rustc+cache+PATH+LSP+registry health · B: also auto-fix · C: minimal report-only | **A** |
-| D-DX3 | Zed dev extension in Epoch 2? | A: yes, dev-tier · B: VS Code/Cursor only until GA | **A** (=E2-V9) |
-| D-DX4 | Shell completions + man pages | A: ship in M3 from one source · B: defer to GA | **A** |
-| D-DX5 | External subcommands (`jet-foo` → `jet foo`) | A: PATH discovery, no plugin API · B: none · C: full plugin API | **A** |
-| D-DX6 | OSC 8 terminal hyperlinks on file:line / codes | A: when terminal supports it · B: never | **A** |
-
-D-DX5 example (zero-cost extensibility, keeps I8 intact):
-
+// B (the form you don't like):
+fn distance(Point { x, y }: Point) -> Float { … }   // x and y available directly
+// A (defer): take the whole value, unpack inside:
+fn distance(p: Point) -> Float { val x = p.x; val y = p.y; … }
 ```
-$ which jet-bench-compare        # any executable on PATH named jet-<x>
-/usr/local/bin/jet-bench-compare
-$ jet bench-compare old.json new.json   # dispatched to it, like cargo
+Where it's genuinely nice: small math/geometry functions, event handlers
+(`fn on(Click { x, y })`), and tuple returns. Where it hurts: the parameter line
+gets noisy, and the parameter has no name to refer to as a whole.
+- **Recommend A (defer).** It's a readability nicety, not a capability — you can
+  always unpack on the first line. Revisit if real Jet code shows the unpack
+  boilerplate is constant. (You asked for real examples — I can pull a dozen from
+  the showcases if you want to judge from those.)
+
+**D-PAT4 — List patterns like `[head, ...tail]`.** ("how common, where?") This
+splits a list into "first element" + "the rest":
 ```
-
-## Group M4 — `jet dev` *(E2-M4)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-DEV1 | Interpreter coverage boundary | A: common programs; native-only set explained · B: attempt everything · C: expressions only | **A** |
-| D-DEV2 | JIT in Epoch 2 | A: design-only note, no impl · B: implement (Cranelift, owner approval) · C: no JIT mention | **A** |
-| D-DEV3 | Save-to-diagnostic latency budget | A: <200ms target w/ test · B: <500ms · C: no budget | **A** |
-
-## Group M5 — Tier-2 references *(E2-M5)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-REF1 | Teaching order | A: after beginner ownership chapter · B: alongside ownership · C: appendix only | **A** |
-| D-REF2 | Ship arenas this milestone | A: only if the parser example needs them · B: always · C: never in Epoch 2 | **A** |
-| D-REF3 | Inlay-hint defaults beyond clone | A: borrowed-return + cleanup scopes on · B: clone only · C: all off by default | **A** |
-
-## Group M6 — Library authoring *(E2-M6)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-LIB1 | S61 (labels/defaults) + S62 (delegation) timing | A: both in M6 · B: labels only, delegation later · C: delegation only | **A** |
-| D-LIB2 | Generics step | A: associated types + default method bodies · B: also trait inheritance · C: also blanket impls | **A** |
-| D-LIB3 | `?` error-conversion shape | = D-ERR2 (Group 14) | From-style `IntoError` trait |
-
-## Group M7 — Streaming I/O & resources *(E2-M7)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-IO1 | Path handling | A: `std.path` helper module · B: first-class `Path` type · C: strings only | **A** |
-| D-IO2 | Resource cleanup surface | A: RAII handle types (S63), drop on scope exit · B: explicit `close` only · C: `defer` keyword | **A** |
-| D-IO3 | Keep whole-file `fs.read`/`fs.write` | A: keep as sugar over handles · B: deprecate · C: remove | **A** |
-
-D-IO2 example (cleanup is automatic on every exit path; see also D-TXN/Group 18
-and the `defer` discussion in D-SUGAR4):
-
-```jet
-fn copy(src: String, dst: String) -> Unit ? {
-    val input = files.open(src)?;     // RAII handle
-    val output = files.create(dst)?;  // both close on scope exit, even on `?`
-    input.stream_to(output)?;
-    ok(unit)
+when xs {
+    xs == [first, ...rest] -> { print("head {first}, {rest.len()} more"); };
+    xs == [] -> { print("empty"); };
 }
 ```
+**How common:** very common in functional languages (Elixir, Haskell, Rust
+slices) for recursive list processing — parsers, interpreters, anything that eats
+a list one item at a time. **Why we defer:** Jet's `List<T>` is a flat array, so
+"the rest" would copy the tail every time (slow and surprising). It's safe and
+fast once we have a slice/view design. Recommend A (defer) — it's a real feature,
+just blocked on the slice work, not declined.
 
-## Group M8 — Packages & supply chain *(E2-M8)*
+## 1C — Functions, sugar & readability
 
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-PKGS1 | Registry hosting model | A: append-only git registry · B: hosted service · C: both | **A** |
-| D-PKGS2 | `jet.*` namespace policy | A: owner-held reserved namespace · B: open · C: reserved + petition | **A** |
-| D-PKGS3 | Signing | A: signed metadata optional v1, design signed cache · B: required · C: none | **A** |
-| D-PKGS4 | Yank/immutability rules | A: immutable releases, yank hides from new solves · B: hard delete allowed · C: no yank | **A** |
-
-## Group M9 — First-party library ring *(E2-M9)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-LR1 | First wave order | A: csv/toml/log/time first, then regex/archive/db · B: regex first · C: db first | **A** |
-| D-LR2 | sqlite | A: via E2-M14 C FFI when ready · B: pure-Jet impl · C: defer db ring | **A** |
-| D-LR3 | crypto surface | A: vetted hashes/HMAC/RNG only · B: also symmetric ciphers · C: also TLS primitives | **A** |
-| D-LR4 | YAML in the ring | A: defer past first wave (m9 plan default) · B: add `jet.yaml` in wave 1 with toml · C: never | **A** |
-
-## Group M10 — Networking & services *(E2-M10)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-NET1 | TLS/HTTP dependency | A: rustls-class via FFI tier, never hand-rolled · B: openssl FFI · C: defer TLS | **A** |
-| D-NET2 | Concurrency story for servers | A: blocking thread-per-task + channels (E2-V5) · B: small async exception · C: thread pool | **A** |
-| D-NET3 | Service showcase backing store | A: sqlite-first · B: Postgres-first · C: file store | **A** |
-
-## Group M11 — Testing, docs, bench *(E2-M11)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-TEST1 | Property testing | A: in, if a small design exists · B: required · C: defer | **A** |
-| D-TEST2 | `todo` typed holes | = D-TOOL2 (Group 19) | defer unless small |
-| D-TEST3 | Guided learning | A: `jet tour`/`jet learn` w/ real compiler feedback · B: docs-only · C: separate site | **B first, A if cheap** |
-| D-TEST4 | Doctests run under `jet test` | = D-TOOL1 (Group 19) | **yes** |
-
-## Group M12 — Debug & observability *(E2-M12)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-OBS1 | DAP timing | A: ship for VS Code/Cursor in M12 (before GA) · B: GA · C: post-GA | **A** |
-| D-OBS2 | Panic local-value privacy | A: show safe locals only in dev mode · B: all locals · C: none | **A** |
-| D-OBS3 | Metrics conventions | A: simple structured logs first; metrics OTel-aligned later · B: full OTel now · C: logs only | **A** |
-
-## Group M13 — Expert low-level tier *(E2-M13)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-LL1 | I1 amendment wording | A: generated `unsafe` only inside user gates or vetted std internals · B: broader · C: no amendment (block M13) | **A** |
-| D-LL2 | `unsafe` audit story | A: structured audit comment + lint · B: attribute · C: external tool | **A** |
-| D-LL3 | `std.mem` API breadth | A: narrow (Ptr, alloc, layout, volatile) · B: wide · C: minimal Ptr only | **A** |
-
-## Group M14 — C FFI *(E2-M14)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-CFFI1 | Jet-export to C in scope? | A: import-only first · B: also export Jet fns to C · C: defer all FFI to Epoch 3 | **A** |
-| D-CFFI2 | Header/library discovery | A: pkg-config + classic flags from `[dependencies:c]` · B: bundled · C: manual paths only | **A** |
-| D-CFFI3 | C example to ship | A: one small C lib (e.g. a hashing or compression lib) · B: sqlite · C: none | **A** |
-
-(C-header auto-binding `jet bind` stays out — see docs/plans/post-epoch-2.)
-
-## Group M15 — Cross-compile & freestanding *(E2-M15)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-CROSS1 | First non-host target | A: one CLI target (e.g. `aarch64-linux`) · B: a matrix · C: defer | **A** |
-| D-CROSS2 | Freestanding panic strategy | A: abort default · B: custom handler hook · C: unwind | **A** |
-| D-CROSS3 | Embedded smoke | A: documented local harness minimum · B: CI hardware-in-loop · C: doc-only, no smoke | **A** |
-
-## Group M16 — Pure eval & layer 3 *(E2-M16)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-PURE1 | Recipe scope | A: pure eval + sandboxed package recipes · B: pure eval only · C: full JetOS | **A** |
-| D-PURE2 | Sandbox guarantees | A: no ambient I/O or network during eval · B: allowlist I/O · C: trust author | **A** |
-| D-PURE3 | Signed cache / rollback | A: design now, ship later; record generations · B: ship signed cache in M16 · C: none | **A** |
-
-## Group M17 — Epoch 2 GA *(E2-M17)*
-
-| ID | Question | Options | Rec / default |
-|---|---|---|---|
-| D-GA1 | Mandatory showcase set | A: 4 showcases + `jet dev` demo · B: all 6 (incl. C interop + freestanding) · C: 2 | **A, with B as stretch** |
-| D-GA2 | Perf/size budgets | A: record per-showcase budgets, no hard fail · B: hard CI gates · C: none | **A** |
-| D-GA3 | Beta period before GA tag | A: short public beta after audits · B: none · C: long beta | **A** |
-| D-GA4 | Launch versioning | = E2-D2 | C (separate launch) |
-
----
-
-# Part 3 — Feature ballots distilled from research
-
-These were distilled from prior research exploration (Odin error handling,
-Elixir pattern matching, the functional `pack.jet` debrief, and a CLI-tooling
-survey) plus `docs/plans/owner-todo.md`. Those research files have been removed
-now that their decisions live here; the Jetpack/JetOS design from the pack
-debrief was migrated to `docs/plans/jetpack-jetos/unified-ecosystem.md` (prior
-versions are in git history). Nothing here is built until ratified (I7, I8).
-Each option has a worked example.
-
-## Group 14 — Error-handling ergonomics *(needed by E2-M6; some E2-M7)*
-
-From the Odin case study. **Already ratified — do not re-ballot:** `T ? E`
-(S34), the `T ?` → `T ? Error` shorthand and default `Error` type (S34), the
-formatter rule `T?`→`T ?` with optional return `-> (T?)` (S34/spec.md), `?`
-propagation (S7), `??`/`?.` (S71), `switch`/`panic`/`require`. These decisions
-round out the *open* deltas only.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-ERR1 | Grow the `Error` carrier (today it is backed by `String`) | A: message + optional code + optional source · B: message only · C: keep `String`-only | **A** |
-| D-ERR2 | `?` cross-type conversion | A: opt-in `IntoError` trait; `String` + std errors convert by default · B: no conversion (manual wrap) · C: implicit any→any | **A** |
-| D-ERR3 | `fn main() -> Unit ?` (today `main` may not be fallible) | A: allow, print `Error`, exit 1 · B: keep `main` non-fallible · C: allow only `Unit ? Error` | **A** |
-| D-ERR4 | `or_continue`-style loop skip | A: defer · B: add `?continue` in loops · C: decline | **A (defer)** |
-
-**D-ERR1 example** — a richer carrier lets `?` keep context as errors travel up,
-while beginners still write `-> Config ?` and get the default type:
-
-```jet
-fn load_config(path: String) -> Config ? {          // == Config ? Error (S34)
-    val text = fs.read(path)?;
-    ok(parse_config(text)?)
-}
-// Error.message("…"), Error.code(2), Error.with_source(e) — open shape (D-ERR1)
+**D-FP2 — "Expression-body" functions, and your question: what's the difference
+between a named lambda and a quick function?** You picked C (defer). Here's the
+distinction:
 ```
+fn double(x: Int) -> Int = x * 2;        // expression-body FUNCTION (the proposal)
+val double = (x) => x * 2;               // a LAMBDA stored in a val
+```
+They behave almost identically. The differences:
+- A **function** (`fn`) is a top-level named thing other files can `import` and
+  call; it can be generic; it's the unit of documentation. A **lambda** is a
+  value you make on the fly, usually to pass to something (`xs.map((x) => x*2)`).
+- The expression-body form is just a shorthand so a one-line function doesn't
+  need `{ return …; }`. You already have lambdas, so the *only* thing it buys is
+  saving `{ return ; }` on tiny named functions.
+- **Defer (C) is reasonable** because lambdas + normal `fn` already cover the
+  ground. If you later find lots of `fn f(x) { return expr; }` one-liners in real
+  code, we add the `= expr;` form then. No urgency.
 
-**D-ERR2 example** — `?` converts lower-level errors into the function's error
-type through an explicit, opt-in trait, so the happy path stays readable but
-meaning is never erased silently:
+**D-FP6 — List spread `[...xs, y]`.** ("don't understand") This builds a new list
+by "pouring in" an existing one and adding items:
+```
+val more = [...names, "Zoe"];        // every name in `names`, then "Zoe"
+val joined = [...a, ...b];           // a's items followed by b's items
+```
+- A (rec): **defer** — for now use a library call like `names.concat(["Zoe"])`.
+- B: add the `...` spread syntax.
+- **Recommend A** — a `concat`/`with` method does the same job without new
+  syntax, and `...` spread interacts with ownership (does it copy or move `xs`?)
+  in ways worth settling carefully later. Plain explanation: it's a convenience
+  for "this list plus a few more"; deferring loses nothing but a little sugar.
 
-```jet
-impl FileError: IntoError {
-    fn into_error(self) -> Error { Error.message("file error: {self}") }
-}
+**D-SUGAR3 — Transparent type alias.** ("community tradeoffs") A *type alias*
+gives a second name to an existing type — purely cosmetic, no new type:
+```
+type UserId = Int;        // UserId is just Int, interchangeable everywhere
+fn ban(id: UserId) { … }  // documentation value only — an Int still fits
+```
+**Community split:** people like aliases for readability in signatures
+(`Headers` instead of `Map<String, String>`), but the classic complaint is they
+*hide* the real type and lull you into thinking `UserId` and `Int` are distinct
+when they're freely swappable (a real bug source). The stronger alternative is a
+**newtype** (D-SUGAR4) — a genuinely distinct one-field type the compiler keeps
+separate. My rec: defer the transparent alias; if you want "a distinct ID type",
+that's the newtype conversation. Tell me whether you value the cheap readability
+(alias) or the safety (newtype).
 
-fn load_profile(path: String) -> Profile ? {
-    val text = fs.read(path)?;     // FileError -> Error (via trait)
-    val data = parse_json(text)?;  // JsonError -> Error
-    ok(Profile.from_json(data)?)
+**D-SUGAR5 — `defer` cleanup keyword.** ("more info") `defer` schedules a bit of
+code to run when the current function exits, no matter how it exits:
+```
+fn write_report() {
+    val f = files.create("out.txt");
+    defer f.close();          // runs on every exit path, even on error
+    f.write(data)?;
 }
 ```
+The thing is, Jet already does this **automatically** via RAII (S63): the file
+closes itself when it goes out of scope — you never write `f.close()` at all. So
+`defer` would mostly duplicate something that's already free. Where `defer` still
+helps is *non-resource* actions (stop a timer, log "done"). My rec (A): rely on
+automatic cleanup, no `defer` keyword, and reopen only if real code shows a
+recurring need RAII can't cover. This ties into the broader safety-by-default
+theme you raised in D-IO2.
 
-Option C (any error converts to any error automatically) is rejected as too
-vague — it makes `?` convenient but erases which failure happened.
-
-## Group 15 — Pattern-matching ergonomics *(post-v1; candidate E2-M5/M6 window)*
-
-From the Elixir brief. **Already ratified — do not re-ballot:** `==` pattern
-tests that destructure and bind in `switch`/`if` (S31), standalone destructuring
-binds for struct/tuple/list with irrefutable struct + length-checked list (S74),
-named tuples (S73), `??`/`?.` fallback and chaining (S71). These decisions cover
-only the *open* deltas.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-PAT1 | Nested patterns in `switch`/`if` arms | A: allow patterns inside payload slots (`ok(Rect(w,h))`) · B: bare names only | **A** |
-| D-PAT2 | Guards | A: ratify `&&` binding-scope (bound names flow right + into the arm body) · B: add a `when` keyword · C: neither | **A** |
-| D-PAT3 | Refutable-bind policy (e.g. `val value(n) = opt;` that can be `null`) | A: reject, teach `switch`/`if` · B: require `??` fallback · C: runtime panic (Elixir) | **B (A as the no-`??` error)** |
-| D-PAT4 | List rest-spread patterns `[h, ...t]` (beyond S74 fixed-length) | A: defer (tail-copy perf mismatch on flat `List<T>`) · B: fixed-length stays the limit · C: full with slice design | **A** |
-| D-PAT5 | Multi-clause function heads | A: decline for v1 (one obvious way; `switch` covers it) · B: add | **A** |
-| D-PAT6 | Destructuring in *parameters* | A: defer (S74 bindings only for now) · B: also `fn f(Point { x, y }: Point)` | **A** |
-
-**D-PAT1/D-PAT2 example** (the high-value, low-conflict bundle, building on S74):
-
-```jet
-switch response {
-    response == ok(Response { status, body }) && status == 200
-        -> { print("body: {body}"); };          // D-PAT2 guard via && scope rule
-    response == ok(Response { status, body })    // D-PAT1 nested pattern
-        -> { print("unexpected status {status}"); };
-    response == err(e) -> { print("network error: {e}"); };
-}
+**D-SUGAR6 — `?.` through methods.** ("don't know what this means") You already
+have `?.` for *fields* — "reach into this only if it isn't empty":
 ```
-
-**D-PAT3 example** (refutable bind on an `Option` that might be `null` — note
-S74 already made *struct* destructuring irrefutable; this is the enum/option
-case):
-
-```jet
-val value(n) = maybe_port() ?? return;   // B: explicit failure path, reuses ??
-val value(n) = maybe_port();             // A's teaching error if no `??`:
-// error[E0xxx]: this binding can fail (the value might be null)
-// fix: add `?? <fallback>`, or use `switch`/`if` to handle the empty case
+val city = user?.profile?.city;       // works today — stops safely if user is null
 ```
-
-## Group 16 — Field punning & functional config *(core; supports Jetpack)*
-
-From the functional-pack debrief. These help all struct-heavy Jet, and unblock a
-better-than-Nix `pack.jet`. **Jetpack-only** package-ref sugar (`default.[ripgrep,
-fd]`, `github@…`, bare package names) stays in the jetpack-jetos track
-(D-JPK*) — do not generalize it to core Jet. Listed here only so the boundary is
-explicit.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-FP1 | Struct field punning | A: `Source { name, upstream, via: "nix" }` when a local has the field's name · B: keep explicit `name: name` | **A** |
-| D-FP2 | Expression-body functions | A: `fn f(x: T) -> U = expr;` · B: keep `{ return …; }` only · C: defer | **C (defer; lambdas already cover most)** |
-| D-FP3 | Core `module name { … }` declaration | A: typed top-level decl lowering to a pure exported fragment · B: keep Jetpack directive scanning · C: defer | **A (Jetpack-scoped types)** |
-| D-FP4 | Contextual empty-list inference | A: infer `[]` from expected/accumulator type in generic calls · B: require `[]: List<T>` | **A** |
-| D-FP5 | Arbitrary expressions in `for … in <expr>` heads | A: allow field access/calls/indexing/ranges · B: keep restricted | **A** |
-| D-FP6 | List spread `[...xs, y]` | A: defer (library `when`/`concat` first) · B: add general spread | **A (defer)** |
-| D-FP7 | Jetpack package-ref sugar | tracked as D-JPK* in jetpack-jetos plan, not core | n/a here |
-
-**D-FP1 example** (matches Nix `inherit`, with static field checking):
-
-```jet
-return Source { name, upstream, via: "nix" };   // not name: name, upstream: upstream
+The question is whether `?.` should also work before a **method call**:
 ```
-
-**D-FP3 example** (one declaration keyword; `Shell`/`Profile`/`System` stay
-ordinary types — LSP parses it with no Jetpack-only grammar):
-
-```jet
-module root {
-    sources: { default: github@NixOS/nixpkgs/nixos-24.05 },
-    shells: { dev: Shell { packages: [default.[ripgrep, fd, jq]] } },
-}
+val label = user?.display_name();     // call display_name() only if user isn't null
 ```
+Today that second line is an error (`?.` reaches fields but not methods). Option
+A extends it to methods too — same idea, no new symbol, just removes an
+arbitrary limitation. **Recommend A**; it's a natural completion of a feature you
+already shipped.
 
-## Group 17 — Readability sugar *(cross-milestone)*
+## 1D — Error handling, I/O & resources
 
-From `owner-todo.md` and the CLI-tooling survey. Small, mostly-free wins and two
-explicit declines. Extended 2026-06-16 from persona crosscheck
-(`docs/plans/persona-examples.md`).
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-SUGAR1 | Digit separators `1_000_000` | A: add (lexer-only, free readability) · B: skip | **A (E2-M3 era)** |
-| D-SUGAR2 | Pipe operator `\|>` | A: defer (S69 newline dot-chains cover it) · B: add · C: decline | **A** |
-| D-SUGAR3 | Transparent type alias `type X = …` | A: defer · B: add · C: decline | **A** |
-| D-SUGAR4 | Newtype (distinct single-field) | A: defer (one-field struct covers it) · B: dedicated keyword | **A** |
-| D-SUGAR5 | `defer`/`errdefer` cleanup keyword | A: none — RAII handles (S63/D-IO2) are the model · B: add `defer` · C: add both | **A** |
-| D-SUGAR6 | `?.` through **methods** (S71 field chaining shipped; E0046 today) | A: ship `obj?.method()` desugaring to optional call · B: keep fields-only · C: defer | **A** |
-| D-SUGAR7 | Optional semicolons | A: keep required (S6) · B: ASI like JS · C: newline-terminated stmts only | **A** |
-
-D-SUGAR1 example: `val budget = 1_000_000;` parses identically to `1000000`; the
-formatter never inserts or removes separators.
-
-D-SUGAR5 note: the owner-todo lists `defer/errdefer` as a recurring need. The
-recommendation is to satisfy it with RAII handle types (D-IO2) rather than a new
-keyword, keeping "one obvious way". Reopen as B only if RAII proves insufficient
-in E2-M7.
-
-**D-SUGAR6 example** — Elena chains optional profile fields; today this errors
-with E0046; option A completes S71 without new syntax:
-
-```jet
-val city = user?.profile?.city;           // field chain — works today
-val label = user?.display_name();         // A: optional method call → String?
-// B: error[E0046]: optional chaining `?.` only reaches fields, not methods
-```
-
-**D-SUGAR7 note** — Maria persona push factor. S6 is load-bearing for fmt and
-beginner statement boundaries. Reopen only with an edition bump (D-REL3).
-
-## Group 20 — Ownership teaching ergonomics *(persona-derived; E2-M6 window)*
-
-From `docs/plans/persona-examples.md` (Maria, Priya). Tier-1 ownership is
-correct; these decisions tune how beginners *meet* `mut`/`take` without changing
-the borrow checker.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-OWN1 | L0201 implicit-clone lint posture | A: keep lint, strengthen teaching text + quick-fix · B: silence lint for scalars · C: remove lint | **A** |
-| D-OWN2 | First ownership chapter examples | A: add "pass a score" + "rename files" mini-examples to guide · B: docs-only appendix · C: defer | **A** |
-| D-OWN3 | Call-site `take` hint for non-clonable params | A: diagnostic suggests `take` when move required (E0201 upgrade) · B: auto-insert `take` quick-fix only · C: neither | **A** |
-
-**D-OWN1 example** — Priya passes a path string twice; the lint is the teaching
-moment, not a punishment:
-
-```jet
-fn move_file(path: String, dest: String) { fs.rename(path, dest) ?? return; }
-fn main() {
-    val src = "/tmp/photo.jpg";
-    move_file(src, "/backup/photo.jpg");   // L0201: cloned `src` — still usable below
-    print(src);                            // intentional reuse → lint explains clone cost
-}
-```
-
-**D-OWN3 example** — when `take` is required and the user forgot it:
-
-```jet
-fn consume(take data: Buffer) { ... }
-fn main() {
-    val buf = read_bytes("fw.bin") ?? return;
-    consume(buf);
-// error[E0201]: `buf` must be moved here — the function takes ownership
-// fix: call `consume(take buf)` — after this call, `buf` is no longer available
-}
-```
-
-## Group 21 — Core `std.fs` / timing helpers *(persona-derived; E2-M7 / E2-M9)*
-
-Small std additions that remove copy-paste from showcases (jetgrep, wordfreq,
-roguelike). Not the `jet.*` ring — these live in core std because every CLI
-tool needs them.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-FS1 | Recursive directory walk | A: `fs.walk(path, recursive: Bool) -> [String] ? IOError` in core std · B: `jet.fs` ring package · C: defer, keep manual walk in examples | **A (E2-M7)** |
-| D-FS2 | Game-loop / poll-input packaging | A: `examples/features/44_game_loop.jet` + guide section only · B: `std.io.poll_input(timeout_ms)` helper · C: defer until TUI/FFI | **A first, B if roguelike example needs it** |
-
-**D-FS1 example** — replaces 30 lines copied from jetgrep in every tool:
-
-```jet
-import std.fs as fs;
-
-fn main() {
-    for path in fs.walk("logs", recursive: true) ?? return {
-        if path.ends_with(".log") { scan(path); }
+**D-IO2 / D-IO3 — Resource cleanup & whole-file helpers.** ("more discussion —
+everything should be safe by default" / "don't know what you're asking")
+These are two halves of one story:
+- **D-IO3** asks: keep the simple `fs.read("file")` / `fs.write("file", text)`
+  one-liners that read or write a whole file at once? (vs forcing everyone to
+  open a handle, loop, and close.) **Yes — keep them** as the easy default; they
+  are the safe, obvious tool for small files. This is the "works how you expect"
+  default you want.
+- **D-IO2** asks how cleanup works for the *bigger* case (streaming a large file,
+  a network socket) where you hold an open handle:
+  - A (rec): **automatic** — the handle closes itself when it goes out of scope,
+    on every path including errors (RAII, S63). You never forget to close.
+  - B: you must call `close()` yourself.
+  - C: a `defer` keyword (see D-SUGAR5).
+  - **A is exactly "safe by default, no footgun"** — forgetting to close is
+    impossible because there's nothing to forget. This is the recommendation and
+    it matches your stated principle. The example:
+    ```
+    fn copy(src: String, dst: String) -> Unit ? {
+        val input = files.open(src)?;     // both handles close automatically
+        val output = files.create(dst)?;  // on scope exit — even if `?` fails
+        input.stream_to(output)?;
+        ok(unit)
     }
+    ```
+  Let's confirm A; it's the no-footgun choice. The "more discussion" you wanted is
+  really about whether RAII alone is enough vs adding `defer` (D-SUGAR5) — and my
+  answer is RAII first, `defer` only if proven necessary.
+
+## 1E — Tooling, testing & build
+
+**D-DX5 — External subcommands (`jet-foo` → `jet foo`).** ("not clear") This lets
+anyone extend the `jet` CLI without us building a plugin system: if there's a
+program named `jet-bench` on your PATH, then typing `jet bench` just runs it.
+Exactly how `git` finds `git-lfs`.
+```
+$ which jet-bench-compare          # any executable named jet-<x>
+/usr/local/bin/jet-bench-compare
+$ jet bench-compare old.json new.json   # jet dispatches to it
+```
+- A (rec): support this PATH discovery, no formal plugin API.
+- B: don't.
+- C: a full plugin API.
+- **Recommend A** — zero cost, lets the community add commands, and keeps the
+  core small (no plugin framework to maintain). It's the cheapest possible
+  extensibility.
+
+**D-TEST1 — Property testing.** ("don't know what this means") Normal tests check
+one example ("`add(2, 3)` is `5`"). A *property* test checks a rule across
+*hundreds of random inputs* the framework generates for you:
+```
+test "reversing twice gives the original" {
+    for_all((xs: [Int]) => {
+        require(xs.reverse().reverse() == xs);   // tried on 100s of random lists
+    });
 }
 ```
+It's great at finding edge cases you'd never think to write by hand (empty list,
+huge numbers, weird Unicode). - A (rec): include it **if a small clean design
+exists**; B: require it; C: defer. **Recommend A** — it's a beloved feature, but
+only worth it if it stays simple. We design it small or skip it for now.
 
-**D-FS2 example** — Tom's roguelike without ncurses; option B only if the
-showcase needs non-blocking input before C FFI:
-
-```jet
-// A: guide shows while + io.input with documented blocking behavior
-// B: val key = io.poll_key(timeout_ms: 16) ?? null;  // null = no input this frame
+**D-TEST2 / D-TOOL2 — `todo` typed holes (and your "syntax for compiler-level
+things" idea).** ("don't know what this means") A *typed hole* lets you leave a
+blank that still compiles, so you can sketch a program top-down:
 ```
+fn parse(s: String) -> Config {
+    todo;        // compiles; if it ever runs, panics "not implemented: expected Config here"
+}
+```
+The compiler even tells you *what type* belongs in the hole. Great for
+"scaffold now, fill in later" without red squiggles everywhere. - Rec was defer
+(B) unless cheap. **Your bigger idea** — "a syntax for higher-level/compiler
+things with clean ergonomics" — is worth its own thread: `todo`, `derive`,
+`comptime`, `pure`, maybe `transact`/`async` are all "compiler-directed markers."
+That's the **attributes** discussion in Part 3; let's design their look together
+rather than piecemeal. Recommend: defer `todo` until we settle the attribute
+look.
 
-## Group 22 — JSON typed decode *(persona-derived; E2-M6 + ring)*
+**D-TOOL4 — Snapshot testing.** ("more info") A *snapshot* test captures a
+function's output once, saves it to a file, and on later runs flags any
+difference — you "bless" the new output with one keystroke when the change is
+intentional. (It's how this very compiler tests its error messages.) Great for
+testing anything with big text output (formatters, reports, error messages)
+without hand-writing the expected string.
+- A (rec): build it into `jet test` with one-key blessing.
+- B: defer.
+- **Recommend A** — it's a force-multiplier for testing CLIs and we already use
+  the pattern internally, so the design is proven.
 
-Elena persona: offline JSON works; analysts want struct-shaped data without hand
-mapping every field. Depends on **D-ERR2** (`IntoError`) for fallible decode.
+**D-TOOL5 — Build-time capability summary.** ("more info") This prints what
+*powers* a program uses, computed from its imports — an honesty feature so you
+can see at a glance "this CLI touches the network and the filesystem":
+```
+$ jet build report.jet --capabilities
+report.jet uses:  filesystem (read/write), network (http)   — no FFI, no unsafe
+```
+Like Deno's permission summary, but informational. - A (rec): **defer** — nice
+transparency, not blocking. B: add now. **Recommend A (defer).**
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-JSON1 | Typed decode surface | A: `json.decode<Profile>(text) -> Profile ? JSONError` (monomorphized fields) · B: runtime `Value` tree only (today) · C: defer schema macros to S56 layer 3 | **A** |
-| D-JSON2 | Unknown/extra fields policy | A: ignore unknown keys by default, opt-in strict · B: always strict · C: always ignore | **A** |
+## 1F — Expert / low-level, networking, FFI
 
-**D-JSON1 example** — after decode lands, Elena's pipeline stays one expression
-per step:
+**D-CFFI2 — How C libraries get found.** ("show me use cases") When you call into
+a C library (say raylib), the compiler needs to find its header file and the
+compiled `.so`/`.a` to link against. Two real-world scenarios:
+```
+// Scenario 1 — a system library installed via your package manager:
+extern c "raylib" { fn init_window(w: Int, h: Int, title: String) = "InitWindow"; }
+// A: jet asks `pkg-config raylib` for the include/link flags automatically.
 
+// Scenario 2 — a header sitting in your own repo:
+// C: you point jet at the paths yourself in pack.jet.
+```
+- A (rec): use **pkg-config + standard flags** (the Linux/Mac convention) read
+  from `pack.jet`; works out of the box for any properly installed lib like
+  raylib, sqlite, zlib.
+- B: bundle the library's source.
+- C: manual paths only.
+- **Recommend A** — it's how C/C++/Rust all locate system libs, so raylib "just
+  links". C is the fallback for odd cases. Since you picked raylib as the
+  showcase (D-CFFI3), A is what makes that demo painless.
+
+**D-NET1 — TLS/HTTPS.** ("don't know enough") To make an HTTPS request you need
+TLS (the encryption behind the padlock). Writing crypto yourself is famously
+dangerous, so the question is *whose* TLS we borrow:
+- A (rec): use **rustls** (a respected, audited Rust TLS library) through our FFI
+  layer — never hand-rolled.
+- B: use **openssl** (the C one — ubiquitous but a historical source of CVEs and
+  a build headache).
+- C: defer TLS to Epoch 3.
+- **Recommend A** — rustls is memory-safe (fits I1's spirit), pure-Rust (clean
+  builds), and well-audited. This is the safe-by-default choice; you don't need
+  to be a TLS expert to bless it.
+
+**D-NET2 — How servers handle many requests at once.** ("don't know the
+difference") When 100 people hit your service at once, how does it juggle them?
+- A (rec): **thread-per-task + channels** — each request gets its own worker;
+  they coordinate by passing messages, never by sharing memory (the ownership
+  model forbids the dangerous sharing). Simple to reason about; scales like Go
+  did early on — great for internal services, not for 100k simultaneous
+  connections.
+- B: a small **async** exception (more scalable, much more complex, and async is
+  reserved for later — see E2-V5).
+- C: a fixed thread pool.
+- **Recommend A.** It's the honest, safe model that matches our concurrency
+  story (S53) and is plenty for the services Epoch 2 targets. The tradeoff:
+  A is simpler and safer but tops out lower than async; we're explicitly fine
+  with that ceiling for now.
+
+**D-LL2 — How experts audit `unsafe` code (and the "attributes" idea you liked).**
+("I like the term attributes — track async, transact, etc.") When an expert uses
+`unsafe` (raw memory), we want a paper trail. Options: a structured audit comment
++ a lint (A), an **attribute** marker (B), or an external tool (C). You flagged
+that "attribute" is the right concept and should also cover `async`, `transact`,
+etc. — so I've pulled this into a dedicated **attributes thread (Part 3)**: let's
+list every "marker that changes how a function is treated" in one place and pick
+their shared look together, rather than deciding `unsafe`'s in isolation. Holding
+D-LL2 for that thread.
+
+## 1G — Pure eval, JetOS, cross-compile, observability
+
+**D-PURE1 / D-PURE2 — "Pure eval" and sandboxed package recipes.** ("discussion")
+"Pure eval" means running Jet code at build time that is **guaranteed to have no
+side effects** — it can't read the clock, hit the network, or touch random files;
+same inputs always give the same output. That guarantee is what lets a build be
+*reproducible* and *cacheable* (this is the Nix idea you like). "Recipes" =
+package build instructions written in this pure subset.
+- **D-PURE1:** A (rec) = pure eval **plus** sandboxed recipes; B = pure eval only;
+  C = full JetOS. Recommend A — recipes are the payoff (reproducible package
+  builds), and they're what connect to the Jetpack/hangar store.
+- **D-PURE2:** how strict is the sandbox? A (rec) = **no ambient I/O or network
+  at all** during eval; B = an allowlist; C = trust the author. Recommend A — the
+  whole value is the guarantee; an allowlist leaks it. This is the
+  "safe-by-default, reproducible like Nix" position. Worth a short discussion to
+  confirm scope, but the direction is clear.
+
+**E2-V12 — "JetOS / pure eval / layer-3 boundary."** ("what is this, doesn't make
+sense") Fair — it bundled three unrelated things. Untangled:
+- *Pure eval* (above) — build-time pure functions. Real, useful, near-term.
+- *Layer 3* — the most advanced compile-time feature (user-defined `derive`,
+  reflection); explicitly post-1.0.
+- *JetOS* — the long-horizon "Jet all the way down to the OS" vision.
+The original question was just "how far down this road do we commit in Epoch 2?"
+Given your other answers (pure eval yes via D-PURE; JetOS is a someday), the
+answer is effectively: **ship pure eval + recipes in Epoch 2, keep JetOS as
+research, defer layer-3.** I'd retire E2-V12 as redundant once D-PURE1/2 are
+settled — it's not a separate decision.
+
+**D-CROSS2 — Crash behavior on tiny targets.** ("discussion") When Jet runs on a
+microcontroller (no operating system), and something goes wrong (a `panic`), what
+should happen? On a normal computer it prints an error and exits. On bare metal
+there's nowhere to print and nothing to exit to.
+- A (rec): **abort** — just halt. Simple, predictable.
+- B: let the developer install a **custom handler** (blink an LED, reset).
+- C: full unwinding (heavy, usually unavailable on tiny chips).
+- **Recommend A** as the default with B as an opt-in hook later. Embedded folks
+  expect "halt on fault" as the baseline. Low urgency (this is the M15
+  freestanding milestone).
+
+**D-CROSS3 — Proving embedded actually works.** ("more info") How do we *test*
+that Jet runs on a microcontroller without buying a lab of hardware?
+- A (rec): a **documented local harness** — run the freestanding build under an
+  emulator (like QEMU) so CI can prove it boots, no physical board needed.
+- B: real hardware wired into CI (expensive, flaky).
+- C: docs only, no actual smoke test.
+- **Recommend A** — emulator-based smoke tests are the standard, cheap way to keep
+  the embedded target honest. Defer-friendly; it's an M15 detail.
+
+**D-DEV2 — JIT (just-in-time compilation) in `jet dev`.** ("more info") `jet dev`
+gives instant feedback while you edit. A *JIT* would make the running program
+itself faster by compiling hot code to machine code on the fly (what the JVM
+does). It's a big, optional engineering investment.
+- A (rec): **write a design note, build nothing** in Epoch 2.
+- B: actually implement one (using Cranelift) — large scope, needs your sign-off.
+- C: don't mention JIT at all.
+- **Recommend A** — keep the idea documented but don't spend the effort now;
+  `jet dev`'s interpreter is fast enough for the feedback loop. Revisit post-GA if
+  profiling shows a need.
+
+**D-OBS1 — Step debugger timing.** ("don't know what this means") A *debugger*
+lets you pause a running program, step line by line, and inspect variables — the
+red-dot-breakpoint experience in VS Code. "DAP" is the standard protocol that
+makes that work across editors. The only question is *when*:
+- A (rec): ship it for VS Code/Cursor in M12, **before** GA.
+- B: at GA. C: after GA.
+- **Recommend A** — a working debugger is table-stakes for "production platform"
+  and a huge credibility signal, so land it before launch.
+
+**D-OBS3 — Metrics conventions.** ("don't know what this means") When a service
+runs in production, ops people want numbers out of it — request counts,
+latencies, error rates ("metrics"). The question is how much of that we build in:
+- A (rec): start with **simple structured logs** (machine-readable log lines),
+  and align with the **OpenTelemetry** standard (the industry-standard metrics
+  format) later.
+- B: full OpenTelemetry now (heavy).
+- C: logs only, forever.
+- **Recommend A** — structured logs cover the common need immediately; we grow
+  into full metrics when there's demand, using the standard so it interoperates.
+
+## 1H — Strategy & supply chain
+
+**E2-V2 — What does "production platform" mean at GA?** ("not sure what the
+question is") When we declare Epoch 2 "done", how high is the bar?
+- A (rec): credible for **internal services and CLIs** (tools a company runs for
+  itself).
+- B: also **public-facing SaaS** (apps strangers on the internet use).
+- C: also **regulated/audit-heavy** industries (finance, healthcare compliance).
+Each step up adds years of hardening (B needs serious security review; C needs
+formal audit trails). Given your "be the endgame language eventually but I launch
+when *I'm* happy" stance (E2-V10), I'd set the *GA* bar at A — internal services
+and CLIs done excellently — and treat B/C as the road *after* GA. This isn't
+lowering ambition; it's picking what "version 1 of the platform" must nail. Your
+call on the bar.
+
+**E2-V5 — Concurrency, and your "function trait/feature" idea.** ("reserve for
+epoch 3, more discussion; may want this as a function attribute like transact")
+The question was whether to add `async`/`await` (a second, more complex way to do
+concurrency) in Epoch 2. You said reserve it for Epoch 3 — agreed and recorded.
+Your deeper note — that `async` might be a *function attribute* like `transact` —
+is exactly the **attributes thread (Part 3)**. So: `async` is **out of Epoch 2**
+(decided), and `async`-as-an-attribute goes on the attributes list for when we
+design that. Two clean outcomes from one question.
+
+**E2-V7 — Networking ambition.** ("don't know what this means; be better than Go")
+This just asks how far the *networking* story goes in Epoch 2:
+- A: internal HTTP services and CLIs only.
+- B (rec): also small **public** APIs with HTTPS/TLS.
+- C: defer networking to Epoch 3.
+Your "better than Go for tooling and libraries" goal points at B — Go's
+reputation is built on easy network services, so to beat it our showcase service
+must terminate TLS and serve a real API (which D-NET1's rustls choice enables).
+Recommend B. (The "better than Go" bar is captured under E2-V3, which you already
+set to "all, non-negotiable.")
+
+**E2-V8 — Supply chain, the Nix store idea, and `package#version`.** ("want
+nix-store-style hashes; change package syntax to `package#version`") Three
+things in your answer:
+1. **Hash-locked store like Nix** — yes, this is already the direction: the
+   Jetpack **hangar** store at `/etc/jet/hangar/` keys realized packages by
+   content hash, exactly like the Nix store (D-JPK12/16). Your instinct matches
+   the plan. ✅
+2. **Enterprise support (vendoring, audit, SBOM, mirrors)** — recorded as
+   in-scope (option B), since you said enterprise support matters. The
+   per-project-vs-store flexibility you mentioned (E2-V4) is honored: teams can
+   vendor if company policy demands it.
+3. **`package#version` syntax** — ⚠️ **this conflicts with an already-ratified
+   decision** and needs its own call. See the dedicated thread in **Part 3**,
+   because we previously *rejected* `#` for package refs (`nixpkgs:fastfetch`,
+   not `nixpkgs#fastfetch`). Your reasoning ("`#` means number") is reasonable
+   for the *version* slot specifically, so this is a live question, not a flat
+   no — Part 3 lays out the options.
+
+## 1I — Library authoring & references (jargon decoded)
+
+**D-LIB1 — Timing of two library features.** ("not clear") Two upgrades for
+people *writing reusable libraries*, and whether they land together in M6:
+- **S61 "labels & defaults":** call a function with `name: value` for clarity and
+  let parameters have default values — `schedule("backup", delay: 30)` where
+  `repeat` defaults to 1.
+- **S62 "delegation":** a one-line way to forward a capability to a field instead
+  of hand-writing wrapper methods.
+- A (rec): ship **both** in M6. B: labels only, delegation later. C: delegation
+  only.
+- **Recommend A** — both are already-designed (S61/S62), both make library code
+  cleaner, and they pair well. This is just "do the planned thing"; nothing exotic.
+
+**D-LIB2 — How far generics go.** ("don't know what this means") *Generics* =
+write a function/type once that works for many types (`Stack<T>` works for
+`Stack<Int>`, `Stack<String>`). The question is which advanced generic features
+M6 includes:
+- A (rec): **associated types + default method bodies** — enough to write rich
+  traits (e.g. an `Iterator` trait with a built-in `.map`).
+- B: also trait inheritance (one trait requires another).
+- C: also blanket impls (apply a trait to *every* type matching a bound).
+- **Recommend A** — it's the practical sweet spot; B and C add power but also the
+  kind of complexity that makes error messages worse. Start at A, grow later if
+  real libraries need it. (Jargon: "associated type" = a type that rides along
+  with a trait, like "the element type of this collection".)
+
+**D-LIB3 — Same as D-ERR2** (the `?` error-conversion trait). Decided as A with
+your "rename to `Error`" note — see Part 3.
+
+**D-REF2 — Arenas.** ("no idea what this is") An *arena* is an expert
+memory-management tool: instead of allocating and freeing a thousand small
+objects one by one, you grab one big block, allocate everything inside it
+super-cheaply, then throw the whole block away at once. It's a performance
+technique for things like parsers (allocate a whole syntax tree, free it in one
+shot). - A (rec): **only ship arenas if the parser example actually needs them**;
+B: always ship; C: never in Epoch 2. **Recommend A** — it's an expert
+optimization; we add it when a real showcase demands it, not speculatively. You
+never *need* to know arenas exist as a beginner.
+
+**D-REF3 — Inlay hints beyond clone.** ("more explanation") *Inlay hints* are the
+little grey annotations your editor draws *into* the code (not actual text) to
+show what's happening invisibly — e.g. showing where Jet auto-clones a value, or
+where a borrowed value is returned, or where cleanup runs. They teach the
+ownership model by making the invisible visible.
+- A (rec): turn on **borrowed-return + cleanup-scope** hints by default (plus the
+  clone hint we already have).
+- B: clone hint only. C: all hints off by default.
+- **Recommend A** — these hints are a core part of teaching ownership gently
+  (your "Blueprint-level friendliness" goal — show the wiring). They're
+  dismissible, so the cost is low.
+
+## 1J — Transactions (`transact`)
+
+**D-TXN1 / D-TXN2 / D-TXN3 — the `transact` feature.** ("collect attributes
+first" / "community perspective" / "discussion") `transact` wraps a block so that
+if anything inside fails partway, **all the in-memory changes are undone** — the
+program's state looks like the block never ran (borrowed from Verse). Example:
+```
+transact {
+    player.spend_stamina(10)?;   // changes player
+    player.step(target)?;        // if THIS fails, the stamina is refunded
+}
+```
+- **D-TXN1 (adopt it, and as what shape?)** — you want to first **list every
+  "attribute"-like marker** (`transact`, `async`, `pure`, `unsafe`, …) and pick
+  their shared syntax together. Agreed — that's the **attributes thread (Part 3)**.
+- **D-TXN2 (I/O inside a transaction?)** — the honest answer is I/O **can't** be
+  rolled back (you can't un-send a network packet). So the rec is: doing I/O
+  inside a `transact` is a **compile error** (A), which keeps the "everything
+  undone" promise truthful. The "community perspective" you asked for: every
+  serious implementation (databases, STM in Haskell/Clojure) draws exactly this
+  line — transactions roll back *memory*, never *the outside world*. So A is the
+  well-trodden, safe answer.
+- **D-TXN3 (cost)** — snapshotting state isn't free. Rec: snapshot **only the
+  bindings actually mutated**, and only when you opt in with `transact` — never a
+  cost on normal code (A). B (snapshot the whole scope) is simpler but wasteful.
+- **Net:** the feature is sound; the only open piece is its *spelling*, which
+  rides on the attributes thread. Semantics (A/A/A) are ready to confirm.
+
+## 1K — JSON typed decode (D-JSON1) — glaze-inspired options
+
+You asked me to study C++'s **glaze** library and translate its ergonomics into
+Jet. Here's what makes glaze pleasant, and three cohesive Jet surfaces built
+from pieces Jet *already has* (so this adds almost no new syntax).
+
+**What glaze does well** (from its docs): (1) **pure reflection** — an ordinary
+struct serializes to/from JSON with *zero* annotations or macros, computed at
+compile time; (2) **opt-in customization** — when you need to rename or skip a
+field, you specialize `glz::meta<T>` and *only* the keys you mention change, the
+rest stay automatic; (3) **automatic enums**; (4) it's one of the fastest
+libraries in the world because it maps straight onto the struct's memory.
+
+The Jet question (D-JSON1) is the *decode surface*: how does `text → Profile`
+look? Three options, in increasing "magic":
+
+**Option A — explicit `derive` (most cohesive with what's ratified).** Reuses
+S55 (`derive Serialize`) + generics (S33) + the rich `Error` (S80). You mark a
+struct serializable once; decode is a generic call:
 ```jet
-struct Profile { name: String, score: Int; }
+struct Profile {
+    name: String;
+    score: Int;
+    derive Serialize;          // S55 — the one opt-in line
+}
 
 fn load(path: String) -> Profile ? {
     val text = fs.read(path)?;
-    ok(json.decode<Profile>(text)?)    // field mismatch → JSONError with field name
+    ok(json.decode<Profile>(text)?)   // typed; field mismatch → JSONError w/ field name
 }
 ```
+Pro: explicit, consistent with S55's "Serialize is a deliberate opt-in" rule
+(a wire format is a semantic commitment). Con: one `derive` line per type —
+slightly less magic than glaze.
 
-```
-error[E2703]: JSON field `score` has the wrong type
- Why: `Profile.score` is `Int`, but the file has `"score": "high"`
- Fix: fix the file, or change the struct field type
-```
-
-## Group 23 — Build / FFI transparency *(persona-derived; E2-M3 / E2-M7)*
-
-Marcus and Priya persona: first FFI build pulls in a hidden cargo bridge; experts
-want predictable, explainable builds.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-BUILD1 | `jet doctor` FFI section | A: report cargo cache path, stale artifacts, missing system libs · B: minimal "FFI ok" only · C: defer | **A** (= D-DX2 scope) |
-| D-BUILD2 | `jet build -v` / `jet explain-build` | A: print bridge steps (emit Rust, cargo, link) on `-v` · B: `jet explain-build` subcommand · C: never show | **A** |
-
-**D-BUILD2 example** — Marcus debugging Raylib link flags after E2-M14:
-
-```
-$ jet build -v game.jet
-note: resolving extern c "raylib" via pkg-config
-note: emitting Rust to .jet/build/game/main.rs
-note: cargo build (cached bridge, fingerprint abc123)
-note: linking ./build/game
-```
-
-## Group 18 — Transactional rollback (`transact`) *(owner-flagged)*
-
-From `owner-todo.md` §0.1 (Verse-inspired). Owner has flagged interest. Strong
-philosophical fit ("leave the world consistent on error" becomes a language
-guarantee), real implementation cost. Needs its own decision before any code.
-
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-TXN1 | Adopt `transact` at all? | A: block form tied to `?` · B: `fn … transacts` modifier · C: decline | **A** |
-| D-TXN2 | I/O inside a transaction | A: compile error (only local owned mutation may roll back) · B: allow, document non-undoable I/O · C: warn | **A** |
-| D-TXN3 | Snapshot cost posture | A: snapshot only mutated bindings, opt-in, never default path · B: snapshot whole scope | **A** |
-
-**D-TXN1/2 example** — if any `?` inside the block short-circuits, every
-in-memory mutation is rolled back as if it never happened; doing I/O inside is a
-compile error so the guarantee stays honest:
-
+**Option B — glaze-style pure reflection (most magic).** *Any* struct decodes
+with no `derive` at all — `json.decode<Profile>(text)?` just works:
 ```jet
-fn try_move(player: mut Player, target: Point) -> Bool ? MoveError {
-    transact {
-        player.spend_stamina(10)?;   // mutates player
-        player.step(target)?;        // may fail → spend_stamina is undone
+struct Profile { name: String; score: Int; }   // no derive line
+val p = json.decode<Profile>(text)?;            // works anyway (reflection)
+```
+Pro: glaze's headline ergonomic — zero ceremony, matches your "feels like
+magic" instinct. **Con / tension:** it *contradicts* S55, which deliberately
+made `Serialize` an explicit opt-in because committing a public wire format
+silently is a footgun. Choosing B means amending S55 for JSON specifically.
+
+**Option C — A as the default, with glaze-style partial overrides for the 10%.**
+Ship A (explicit `derive`), and when you need to rename/skip a field, attach the
+mapping *inside* the derive — only the fields you name change, the rest stay
+automatic (exactly glaze's `glz::meta` "modify" model):
+```jet
+struct Profile {
+    name: String;
+    score: Int;
+    internal_id: String;
+    derive Serialize {
+        rename score -> "user_score";   // only this key changes
+        skip internal_id;               // never written/read
     }
-    ok(true)
 }
 ```
+Pro: covers the real-world need (snake_case APIs, hidden fields) the way glaze
+does, while keeping S55's explicit-opt-in safety. Con: a small amount of new
+syntax inside the `derive` block.
 
-## Group 19 — Tooling surfaces needing a decision *(E2-M3/M11)*
+**My recommendation: C** — it's the faithful glaze translation that *respects*
+your existing decisions: explicit opt-in (S55), one generic call to decode
+(S33), great field-level errors via the rich `Error` (S80), automatic enums
+(glaze-style), and the partial-override escape hatch for renames/skips. It only
+goes "full magic" (B) where you've already decided not to (silent wire formats).
+Pick **A** (minimal), **B** (full magic, amend S55), or **C** (recommended).
+Unknown-key policy is already decided — **D-JSON2 = ignore unknown keys by
+default, opt-in strict.**
 
-From the CLI-tooling survey. These each need a small owner call on the surface.
+## 1L — D-ERR2: name the error-conversion capability (30-second confirm)
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-TOOL1 | Doctests | A: examples in doc comments run under `jet test` (I5 for user code) · B: docs not tested | **A (E2-M11)** |
-| D-TOOL2 | `todo` typed-hole expression | A: compiles, panics at runtime, reports expected type · B: defer · C: decline | **B (defer unless small)** |
-| D-TOOL3 | `jet emit --rust` expert window | A: gated "show our generated Rust" (framed as *our* output, not rustc's, re I2) · B: never | **A (owner call)** |
-| D-TOOL4 | Snapshot testing in `jet test` | A: one-key bless like internal UPDATE_EXPECT · B: defer | **A (E2-M11)** |
-| D-TOOL5 | Build-time capability summary from std imports | A: defer (honesty feature, deno-style) · B: add | **A (defer)** |
-
-**D-TOOL3 tension to resolve (I2).** I2 says *rustc* never speaks to users.
-`jet emit --rust` shows *our* generated Rust, not rustc's diagnostics, so it is
-compatible — but it exposes the hidden backend. Recommendation A ships it as an
-explicit expert/curiosity flag with a banner ("this is generated code; it is not
-the language you write"). Owner confirms the framing.
+You chose A for `?` cross-type conversion and said "rename the trait to `Error`."
+The mechanism is ratified in **S80**; only the *name* is stuck, because `Error`
+is already the **type** you return. Three ways out:
+1. **Capability is `Error` (a trait); the concrete default carrier gets a new
+   name** (e.g. `Fault` / `Failure`). You'd write `impl FileError: Error { … }`,
+   and `-> T ?` boxes "some `Error`" (consistent with S48 trait-as-type). Most
+   Rust-like; needs a name for the concrete type (a quick naming menu from me).
+2. **Keep `Error` as the concrete type; name the conversion trait something
+   else** — e.g. `impl FileError: IntoError { … }` or `: AsError`. No type
+   rename; the trait reads as "can become an Error."
+3. **No trait at all** — `String` and std errors convert automatically; your own
+   error converts by implementing a method `to_error(self) -> Error`. Least
+   machinery, but no `impl … : …` capability to attach.
+**My recommendation: 1** (it's the glaze/Rust-idiomatic "`Error` is the
+capability" model and reads best), and I'll bring you a naming menu for the
+concrete carrier. Pick 1, 2, or 3.
 
 ---
 
-## Group 12 — E2-M18 REPL *(open — see docs/plans/epoch-2/m18-repl.md)*
+# Part 2 — Decided (for the record)
 
-Interactive `jet repl` is planned for Epoch 2 as **E2-M18**, after the E2-M4
-interpreter ships. No code until every ID below is ratified in
-docs/spec/syntax-decisions.md (or deferred with a recorded default in the
-plan). Recommendations are in the plan file.
+These are settled; listed so you can scan what you chose. Full caveats live in
+Part 0's ratification queue. ★ marks where you chose **against** the prior
+recommendation (so it's not lost).
 
-| ID | Question (one line) | Rec |
+| ID | Your decision | Note |
 |---|---|---|
-| D-REPL1 | Ship terminal REPL in Epoch 2? | **A** — E2-M18 after E2-M4 |
-| D-REPL2 | Web playground in this milestone? | **A** — terminal only |
-| D-REPL3 | Entry: `jet repl` only vs bare `jet` in TTY vs seed file | **A** — `jet repl` only |
-| D-REPL4 | Backend: interpreter vs compile-each vs hybrid | **A** — interpreter |
-| D-REPL5 | Input: stmts vs full decls vs expressions only | **A** — stmts + control flow |
-| D-REPL6 | Reject FFI/tasks/low-level vs also package imports | **A** — reject native-only set |
-| D-REPL7 | Session: accumulating module vs cells vs both | **C** — accumulating + optional `:cell` |
-| D-REPL8 | Ownership across lines: real moves vs auto-clone vs borrow-only | **A** — real move semantics |
-| D-REPL9 | Multi-line: brace-count prompt vs `;` submit vs single-line | **A** — brace-count + `...` |
-| D-REPL10 | Project context: sandbox vs auto `jet.toml` vs always sandbox | **A** — sandbox + `--project` |
-| D-REPL11 | Line editor: std-only vs crate vs crate+completion | **B** — line-editing crate |
-| D-REPL12 | vs `jet eval --pure`: separate vs `--pure` mode vs no REPL | **A** — separate commands |
-| D-REPL13 | vs `jet dev`: independent vs flag vs shared process | **A** — share library only |
-| D-REPL14 | Native snippet: reject vs temp compile-run | **A** — reject with workaround |
-| D-REPL15 | Meta-commands: minimal vs +load/type/help vs +doc/imports/emit | **B** — +`:load` `:type` `:help` |
-| D-REPL16 | Results: implicit echo vs type+value vs print-only | **A** — implicit echo, `;` suppresses |
-| D-REPL17 | Diagnostics: identical vs shorter vs session context | **A** — identical to batch |
-| D-REPL18 | Crate if D-REPL11≠A: rustyline vs reedline vs other | **A** — `rustyline` (I6) |
-| D-REPL19 | Playground arch (if D-REPL2≠A): external vs in-binary vs defer | **C** — defer |
-| D-REPL20 | Tests: transcripts vs +PTY vs manual only | **A** — transcript fixtures |
-| D-REPL21 | Timing: separate M18 vs thin REPL in M4 vs Epoch 3 | **A** — separate E2-M18 |
+| E2-V1 | A & B | beginners + small teams |
+| E2-V3 | **all of them** | beat Python/Node/Go/Rust/Zig — non-negotiable |
+| E2-V4 | A (+ optional packages) | single-file `jet run` stays sacred |
+| E2-V6 | full low-level, safe by default | expert opt-in for low-level |
+| E2-V9 | A & C | VS Code/Cursor + Zed + Neovim |
+| E2-V10 | manual launch | you launch when happy |
+| E2-V11 | post-Epoch-2 | governance deferred |
+| E2-D1 / E2-D2 | normal SemVer / never | no encoded epoch version ★(E2-D2 was rec C) |
+| D-REL1 | A | normal SemVer |
+| D-REL2 | manual | you control bumps |
+| D-REL3 | A | `edition` field |
+| D-REL4 | C | no LTS pre-GA |
+| D-REL5 | A | only `jet fix` + edition upgrade may migrate |
+| D-DX1 | A | stable `--json` schema |
+| D-DX2 | A & B | health checks **and** auto-fix |
+| D-DX3 | A | Zed dev extension |
+| D-DX4 | A | ship completions + man pages |
+| D-DX6 | A | OSC-8 terminal hyperlinks |
+| D-DEV1 | A (+try-anyway flag) | interpret common programs |
+| D-DEV3 | A | <200 ms diagnostic budget |
+| D-REF1 | A | references taught after ownership chapter |
+| D-LIB1 | (see Part 1I) | leaning A |
+| D-FP1 | A | field punning |
+| D-FP3 | A | core `module name { … }` |
+| D-FP4 | A (+explicit typing) | empty-list inference |
+| D-FP5 | A | expressions in `for` heads |
+| D-IO1 | A (+ergonomics) | `std.path` module |
+| D-PKGS1 | A (B later) | git registry now |
+| D-PKGS2 | A | reserved `jet.*` namespace |
+| D-PKGS3 | A | optional signed metadata v1 |
+| D-PKGS4 | A (probably) | immutable releases + yank — wants brief discussion |
+| D-LR1 | all in Epoch 2 | full ring this epoch |
+| D-LR2 | A (pure-Jet later) | sqlite via C FFI |
+| D-LR3 | broad as safe | crypto — vetted impls only |
+| D-LR4 | **B** | add `jet.yaml` in wave 1 ★(rec was A defer) |
+| D-NET3 | A | sqlite-first showcase |
+| D-TEST3 | **B** first | docs-led learning, `jet tour` later |
+| D-TEST4 | A | doctests under `jet test` |
+| D-OBS2 | A | safe locals in dev-mode panics |
+| D-LL1 | A | amend I1 for user-gated `unsafe` |
+| D-LL3 | A (+wider expert API) | `std.mem` narrow core + opt-in wide tier |
+| D-CFFI1 | A (+export later) | import-only C FFI first |
+| D-CFFI3 | raylib | ship a raylib showcase |
+| D-CROSS1 | A | one CLI cross target |
+| D-PURE3 | **B** | ship signed cache in M16 ★(rec was A) |
+| D-GA1 | **B** | all 6 showcases mandatory ★(rec was A) |
+| D-GA2 | **B** | hard CI perf/size gates ★(rec was A) |
+| D-GA3 | none | no beta before GA |
+| D-GA4 | normal SemVer | = E2-D2 |
+| D-ERR1 | A | grow the `Error` carrier |
+| D-ERR2 | A (rename to `Error`) | opt-in conversion trait |
+| D-ERR3 | A | fallible `main` allowed |
+| D-ERR4 | **B** | add `?continue` in loops ★(rec was A defer) |
+| D-PAT1 | A | nested patterns in `when` arms |
+| D-PAT3 | **B** | refutable bind requires `?? fallback` |
+| D-SUGAR1 | A | already S67 — no-op |
+| D-SUGAR2 | A | decline pipe `\|>` |
+| D-SUGAR4 | A | decline newtype keyword (but see D-SUGAR3) |
+| D-SUGAR7 | A | already S6 — no-op |
+| D-OWN1 | A | keep clone lint (your perf question answered in Part 1, below) |
+| D-OWN2 | A | ownership mini-examples |
+| D-OWN3 | A | suggest `take` at call site |
+| D-FS2 | A & B | game-loop example + `poll_input` helper |
+| D-JSON2 | A | JSON ignores unknown keys, opt-in strict |
+| D-TOOL1 | A | doctests run under `jet test` |
+| D-TOOL3 | A | gated `jet emit --rust` |
+| D-BUILD1 | A | `jet doctor` FFI section |
+| D-BUILD2 | A | `jet build -v` prints bridge steps |
+| D-REPL1 | A | ship terminal REPL in Epoch 2 |
+| D-REPL2 | A | terminal only (no web playground yet) |
+| D-REPL8 | A | real move semantics across lines |
+| D-REPL9 | A | brace-count multi-line prompt |
+| D-REPL10 | A | sandbox (no `jet.toml` — now `pack.jet`) |
+| D-REPL11 | C | line-editing crate + completion |
+| D-REPL12 | A & B | REPL and `jet eval --pure` both |
+| D-REPL13 | A | REPL shares library with `jet dev` only |
+| D-REPL15 | B | meta-commands `:load` `:type` `:help` |
+| D-REPL16 | B (+`;` suppression) | echo type+value; `;` silences |
+| D-REPL17 | A | identical diagnostics to batch |
+| D-REPL18 | A | `rustyline` (needs I6 waiver) |
+| D-REPL19 | C | defer web playground |
+| D-REPL21 | A | separate E2-M18 milestone |
 
-Open follow-ups (not ballot IDs yet): interpreter fuel/timeout per input,
-startup banner, color policy, implicit `import std` — see m18-repl.md § Open
-questions.
+**D-OWN1 — answering your performance question** ("how is cloning all the time
+good for performance?"). It isn't, and the lint is precisely how we stop it: the
+implicit-clone lint (L0201) **flags every place Jet inserts a clone** so you can
+see the cost and remove it (by passing ownership with `take`, or borrowing). The
+clone is a *beginner safety net* — your program is always correct — but the lint
+makes the cost **visible and removable**, so experts write zero-clone code. So
+"keep the lint" (A) is the pro-performance choice: it's the opposite of silent
+cloning. The alternative (B, silence it for scalars) would hide cheap clones; we
+keep it loud and teach the fix. Cloning is never forced — it's the safe default
+you can always opt out of.
 
 ---
 
-## Tally sheet (open only)
+# Part 3 — Cross-cutting threads your answers opened
 
-| Group | IDs | Needed by | Status |
-| --- | --- | --- | --- |
-| E2V — strategic vision | E2-V1…V12 | before milestone scoping | ☐ |
-| E2D — release/versioning | E2-D1, E2-D2 | E2-M2 | ☐ |
-| M2 — release policy | D-REL1…5 | E2-M2 | ☐ |
-| M3 — developer UX | D-DX1…6 | E2-M3 | ☐ |
-| M4 — jet dev | D-DEV1…3 | E2-M4 | ☐ |
-| M5 — references | D-REF1…3 | E2-M5 | ☐ |
-| M6 — library authoring | D-LIB1…3 | E2-M6 | ☐ |
-| M7 — streaming I/O | D-IO1…3 | E2-M7 | ☐ |
-| M8 — packages | D-PKGS1…4 | E2-M8 | ☐ |
-| M9 — library ring | D-LR1…4 | E2-M9 | ☐ |
-| M10 — networking | D-NET1…3 | E2-M10 | ☐ |
-| M11 — testing/docs/bench | D-TEST1…4 | E2-M11 | ☐ |
-| M12 — debug/observe | D-OBS1…3 | E2-M12 | ☐ |
-| M13 — low-level tier | D-LL1…3 | E2-M13 | ☐ |
-| M14 — C FFI | D-CFFI1…3 | E2-M14 | ☐ |
-| M15 — cross/freestanding | D-CROSS1…3 | E2-M15 | ☐ |
-| M16 — pure eval/layer 3 | D-PURE1…3 | E2-M16 | ☐ |
-| M17 — GA | D-GA1…4 | E2-M17 | ☐ |
-| 14 — error ergonomics | D-ERR1…4 | E2-M6 | ☐ |
-| 15 — pattern matching | D-PAT1…6 | E2-M5/M6 | ☐ |
-| 16 — punning/config | D-FP1…6 | E2-M6 | ☐ |
-| 17 — readability sugar | D-SUGAR1…7 | E2-M3+ | ☐ |
-| 18 — transact | D-TXN1…3 | E2-M7 window | ☐ |
-| 19 — tooling surfaces | D-TOOL1…5 | E2-M3/M11 | ☐ |
-| 20 — ownership teaching | D-OWN1…3 | E2-M6 | ☐ |
-| 21 — core std helpers | D-FS1, D-FS2 | E2-M7 / E2-M9 | ☐ |
-| 22 — JSON typed decode | D-JSON1…2 | E2-M6 + ring | ☐ |
-| 23 — build transparency | D-BUILD1…2 | E2-M3 / E2-M7 | ☐ |
-| 12 — E2-M18 REPL | D-REPL1…21 | E2-M18 | ☐ |
-| — (deferred) | S56 | post-1.0 | ☐ |
+## 3A — The "attributes" list (you asked to collect these first)
+
+You said (D-TXN1, D-LL2, E2-V5, D-TEST2): before picking syntax for `transact`,
+`async`, etc., gather **every marker that changes how a function or block is
+treated** into one place, then design their shared look once. Here is the full
+inventory to design against. (★ = already has a spelling; the rest are open.)
+
+| Marker | What it does | Status |
+|---|---|---|
+| `pure` ★ | function provably has no side effects | ratified S60 (`pure fn`) |
+| `comptime` ★ | binding/expr evaluated at compile time | ratified S57 |
+| `unsafe` ★ | block/fn may break memory safety; audit-gated | ratified S58 |
+| `derive` ★ | auto-generate a trait impl | ratified S55 (`derive Trait;`) |
+| `test` ★ | a test block | ratified S43 |
+| `transact` | roll back in-memory changes on failure | **open** (D-TXN) |
+| `async` | cooperative concurrency | **open, Epoch 3** (E2-V5) |
+| `todo` | typed hole / unimplemented stub | **open** (D-TEST2) |
+| `extern` ★ | foreign (Rust/C) function | ratified S50/S59 |
+
+**The design question to settle once:** these currently use *three* different
+shapes — a **prefix keyword** (`pure fn`, `unsafe fn`, `comptime x`), a **body
+line** (`derive Trait;`), and a **block** (`unsafe { }`, `transact { }`). Do we
+want one unifying look (e.g. all prefix keywords), or is "keyword for
+fn-modifiers, block for scoped effects" actually the right split? My
+recommendation: **keep the two natural shapes** — prefix keyword when it modifies
+a whole function (`pure`, `async`, `transact fn`), block when it scopes an effect
+to part of a function (`unsafe { }`, `transact { }`) — and *don't* invent a
+single `@attribute` sigil (it reads as noise and collides with nothing we
+currently have). But this is a syntax decision that's yours: I've put the
+inventory in one place so you can judge the whole set. **Nothing in this table
+gets built until you rule on the shared shape.**
+
+## 3B — `package#version` syntax (⚠️ conflicts with a ratified decision)
+
+You want package versions written `package#version` because "`#` means number".
+Two ratified facts collide with that:
+- **D-JPK7/D-JPK15** ratified that package *refs* use a colon —
+  `nixpkgs:fastfetch`, `github:owner/repo` — and **explicitly rejected `#`** (so
+  we don't look like Nix's `nixpkgs#fastfetch`).
+- **S76** (just ratified, fixed-size lists `[T#N]`) **already uses `#`** and its
+  text claims "`#` appears nowhere else in Jet surface syntax." So adding
+  `package#version` would make `#` mean two things.
+
+**But there's a silver lining that actually helps your idea:** in `[T#N]`, the
+`#` already reads as *"a specific count/number"* (`[Point#2]` = "2 points"). So
+`parsekit#1.2.0` (`#` = version number) is *thematically consistent* — `#`
+always introduces "a pinned number." That makes a unifying story possible rather
+than a clash. Three coherent ways forward:
+
+1. **`#` = "a pinned number" everywhere** — keep `:` for source, add `#` for
+   version: `github:acme/parsekit#1.2.0`, and amend S76's "appears nowhere else"
+   line to "`#` introduces a pinned number — a list length `[T#N]` or a package
+   version `pkg#ver`." Internally consistent, honors your instinct, doesn't
+   reopen the rejected source-`#`. **My recommendation if you want `#`.**
+2. **Keep the current ratified forms (status quo)** — version lives in the dep
+   struct (D-JPK23): `parsekit: { git: "…", tag: "v0.4.1" }`; simple pins are
+   `textkit: "1.2.0"`. No `#` for versions; S76 keeps `#` to itself.
+3. **Reopen and switch sources to `#` too** — `nixpkgs#fastfetch#1.2.0`. Advise
+   against — discards the deliberate "don't look like Nix" decision and `#` twice
+   is ambiguous.
+
+**What I need:** pick 1, 2, or 3. If 1, I'll amend D-JPK + S76 to reserve `#` for
+the "pinned number" role (list length *or* version) and ratify the
+`source:pkg#version` form. Genuine new syntax, so it stops here until you choose.
+
+## 3C — Two things you flagged that are already done ✅
+
+- **"We are changing to `when` from `switch`" (D-PAT1).** Already shipped —
+  `when` was ratified as **S24** on 2026-06-15; `switch` now only produces a
+  teaching error pointing at `when`. The pattern-matching examples in this file
+  already use `when`. Nothing to do.
+- **"There is no `jet.toml` anymore" (D-REPL6, D-REPL10).** Correct and already
+  done — the manifest is **`pack.jet`** and the single lockfile is **`.jet/lock`**
+  (S52 amended 2026-06-16); the old TOML constants were removed from
+  `src/syntax.rs`. All ballots have been updated to say `pack.jet`.
 
 ---
 
-## Already ratified (recorded elsewhere — do not re-list here)
+## Tally (open items only — what still needs you)
 
-Groups 1–11 and 13 are decided. Their content lives in the canonical sources,
-not in this queue:
+| Thread | IDs awaiting your input |
+|---|---|
+| REPL behavior | D-REPL3, 4, 5, 6, 7, 14, 20 |
+| Pattern/functions | D-PAT2, D-PAT5, D-PAT6, D-FP2 |
+| Sugar | D-SUGAR3, D-SUGAR5, D-SUGAR6, D-FP6 |
+| I/O & resources | D-IO2 (confirm A) |
+| Tooling/testing | D-DX5, D-TEST1, D-TEST2/D-TOOL2, D-TOOL4, D-TOOL5 |
+| Low-level/net/FFI | D-CFFI2, D-NET1, D-NET2, D-LL2 |
+| Pure eval / cross / obs | D-PURE1, D-PURE2, D-CROSS2, D-CROSS3, D-DEV2, D-OBS1, D-OBS3, E2-V12 |
+| Strategy / supply chain | E2-V2, E2-V5 (confirm), E2-V7, E2-V8 |
+| Library / references | D-LIB1, D-LIB2, D-REF2, D-REF3 |
+| Transactions | D-TXN1/2/3 (semantics ready; spelling → 3A) |
+| **Attributes shape** | **3A — design the shared look** |
+| **`#` version syntax** | **3B — pick option 1/2/3** |
+| Research-blocked | D-JSON1 (analyze glaze; offer: run a deep-research pass) |
 
-- **Groups 1–8** (S26–S64) — docs/spec/syntax-decisions.md.
-- **Group 9** — D-PM1…8 — docs/plans/epoch-1/m12-packages.md.
-- **Group 10** — D-LSP1…13 — docs/plans/epoch-1/m13-lsp.md.
-- **Group 11** — D-JPK1…17 — docs/spec/syntax-decisions.md (plan:
-  docs/plans/jetpack-jetos/README.md).
-- **Group 13** — D-SG1…9 (syntax gallery) — docs/spec/syntax-decisions.md
-  (S24/S22/S35/S42 amendments + S68–S74). Decided 2026-06-15.
+## Already ratified (do not re-ballot)
 
-Note: several research items are *already* ratified and must not be re-balloted
-here — concurrency model (S53), `pure fn` (S60), labels/defaults (S61),
-delegation (S62), RAII cleanup (S63), C FFI gate (S59). The ballots above decide
-only their *timing and surface details* inside Epoch 2.
+Groups 1–11, 13 are decided and live in their canonical homes
+(`docs/spec/syntax-decisions.md`; plans under `docs/plans/`). Concurrency (S53),
+`pure fn` (S60), labels/defaults (S61), delegation (S62), RAII cleanup (S63), C
+FFI gate (S59), `when` (S24), the `pack.jet`/`.jet/lock` manifest (S52 amended)
+are all ratified; the ballots above decide only their *timing and surface
+details* inside Epoch 2.

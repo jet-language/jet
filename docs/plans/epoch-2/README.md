@@ -637,18 +637,18 @@ approve or edit:
 
 ### Strategic vision (E2-V1…V12)
 
-- [ ] E2-V1 primary GA audience.
-- [ ] E2-V2 production-platform definition.
-- [ ] E2-V3 competitive set (primary + secondary).
-- [ ] E2-V4 single-file vs package-first onboarding.
-- [ ] E2-V5 concurrency model lock.
-- [ ] E2-V6 expert/low-level appetite (M13–M15 in or out).
-- [ ] E2-V7 networking/services ambition.
+- [x] E2-V1 primary GA audience. ✅ ratified 2026-06-16 — A&B: beginners AND small teams.
+- [ ] E2-V2 production-platform definition. (still OPEN — needs owner)
+- [x] E2-V3 competitive set (primary + secondary). ✅ ratified 2026-06-16 — beat Python/Node/Go/Rust/Zig, ALL, non-negotiable.
+- [x] E2-V4 single-file vs package-first onboarding. ✅ ratified 2026-06-16 — A: single-file `jet run` stays sacred; packages optional.
+- [x] E2-V5 concurrency model lock. ✅ ratified 2026-06-16 — async reserved for Epoch 3; async-as-attribute tracked separately.
+- [x] E2-V6 expert/low-level appetite (M13–M15 in or out). ✅ ratified 2026-06-16 — full low-level capability, safe-by-default with expert opt-in.
+- [ ] E2-V7 networking/services ambition. (still OPEN — needs owner)
 - [ ] E2-V8 supply-chain minimum bar.
-- [ ] E2-V9 editor priority (include Zed dev extension?).
-- [ ] E2-V10 public launch trigger.
-- [ ] E2-V11 governance at launch.
-- [ ] E2-V12 JetOS / pure eval / layer 3 boundary.
+- [x] E2-V9 editor priority (include Zed dev extension?). ✅ ratified 2026-06-16 — A&C: VS Code/Cursor + Zed + Neovim.
+- [x] E2-V10 public launch trigger. ✅ ratified 2026-06-16 — owner launches manually when happy.
+- [x] E2-V11 governance at launch. ✅ ratified 2026-06-16 — governance deferred to post-Epoch-2.
+- [x] E2-V12 JetOS / pure eval / layer 3 boundary. ✅ ratified 2026-06-16 — redundant; resolved by D-PURE1/2 (not a separate decision).
 
 ### Milestone order and scope
 

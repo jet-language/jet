@@ -130,10 +130,18 @@ fn realize_ref(
     spec: &RefSpec,
 ) -> Option<store::StoreEntry> {
     theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
+    // The provider writes store/source-cache records under the hangar (U2). The
+    // store dir also seeds the U9 remote probe's source-cache lookup, so it is
+    // resolved before the fixtures decision below.
+    let store_dir = roots.hangar_dir();
     // Fixtures are a testing/offline mechanism only. They never override real
     // resolution: a stray `JETPACK_FIXTURES` in the environment must not
-    // silently force fixture mode for an ordinary online run.
-    let fixtures = if flags.offline && provider::uses_nix_provider(spec, table) {
+    // silently force fixture mode for an ordinary online run. The provider check
+    // resolves an inferred `github@…` source's kind (U9) so a `core` source is
+    // not mistakenly asked for nix fixtures.
+    let fixtures = if flags.offline
+        && provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
+    {
         let fx = fixtures_for(flags);
         if fx.is_none() {
             theme.error(
@@ -149,8 +157,6 @@ fn realize_ref(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
-    // The provider writes store/source-cache records under the hangar (U2).
-    let store_dir = roots.hangar_dir();
     let ctx = provider::Ctx {
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,

@@ -62,9 +62,9 @@ Done means each step: `nix develop -c cargo test` green, docs updated to match b
 - Support for labeled loop "blocks"?
 - Ensure we support multiple constructor types
 - Relook module implementation & pack.jet @docs/plans/jetpack-jetos/unified-ecosystem.md
+- Named + default arguments: Swift, Kotlin, Gleam (labels), Python, C#, Ruby. Big readability/beginner win. (§23)
 - REPL Support
 - Pipelines (|>): F#, Elixir, Gleam, Elm, OCaml, Julia. (§15)
-- Named + default arguments: Swift, Kotlin, Gleam (labels), Python, C#, Ruby. Big readability/beginner win. (§23)
 - A cleanup primitive (defer/errdefer): Go, Zig, Odin, Swift, Nim, Hare. Recurs constantly; pairs naturally with transact. (§0.1)
 - Optional-chaining / unwrap ergonomics (?., ??, guard/if let): Swift, Kotlin, C#, Dart. Jet has T?/or; round it out. (§12)
 - Digit separators in numeric literals (1_000_000): Julia, Rust, Swift, Kotlin, Go, Ada, many. Free readability win. (§34)

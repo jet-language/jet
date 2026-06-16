@@ -417,13 +417,13 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
 /// is a nix flake (→ `nix`).
 ///
 /// The probe must never clone a nixpkgs-sized repo just to classify it:
-/// - `path@…` stats the directory locally (offline, free);
+/// - `path@…` stats the directory locally (offline, free) — resolved here to a
+///   concrete `Core`/`Nix`;
 /// - `nixpkgs@…` is unconditionally `nix` — never probed;
-/// - `github@…` / git URLs are `nix` for now. *Follow-up:* peek at **only**
-///   `pack.jet` over the network (GitHub raw / shallow `git archive`) before any
-///   full fetch. That probe needs the realize-time `Ctx` (offline flag, cache),
-///   so it lands with the remote-core chunk; until then a typed `core` source
-///   must be `path@…` (the common monorepo case).
+/// - `github@…` is left **`Infer`**: its kind depends on whether the remote
+///   repo carries a `pack.jet`, which only a realize-time probe can answer
+///   (this pure pass has no offline flag or source cache). `provider::
+///   resolve_kind` does the lightweight git peek when realization runs.
 fn infer_provider_kind(pref: &refspec::ProviderRef, base_dir: &Path) -> ProviderKind {
     use super::refspec::Source;
     match pref.provider {
@@ -440,7 +440,11 @@ fn infer_provider_kind(pref: &refspec::ProviderRef, base_dir: &Path) -> Provider
                 ProviderKind::Nix
             }
         }
-        // `nixpkgs@` is always the nix collection; `github@`/git not yet probed.
+        // `github@` can't be classified offline-and-free; defer to a realize-time
+        // `pack.jet` peek (U9).
+        Source::Github => ProviderKind::Infer,
+        // `nixpkgs@` is always the nix collection; never probed. (`Named` can't
+        // appear in a `provider@target` ref.)
         _ => ProviderKind::Nix,
     }
 }
@@ -668,6 +672,34 @@ module dev {
             plan.table.upstream("default"),
             Some("github:NixOS/nixpkgs/nixos-24.05")
         );
+    }
+
+    #[test]
+    fn github_source_kind_is_left_to_inference() {
+        // U9: a `github@…` source can't be classified core-vs-nix at pure
+        // evaluation time (it depends on a remote `pack.jet` peek), so the table
+        // records `Infer`; `provider::resolve_kind` decides at realize time.
+        let src = r#"
+module dev {
+    sources: { up: github@acme/jet-pkgs/v1 }
+    env.dev: Env { packages: [up.hello] }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.table.provider("up"), ProviderKind::Infer);
+        assert_eq!(plan.table.upstream("up"), Some("github:acme/jet-pkgs/v1"));
+    }
+
+    #[test]
+    fn nixpkgs_source_kind_stays_nix() {
+        let src = r#"
+module dev {
+    sources: { default: nixpkgs@nixpkgs-unstable }
+    env.dev: Env { packages: [default.fd] }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.table.provider("default"), ProviderKind::Nix);
     }
 
     #[test]

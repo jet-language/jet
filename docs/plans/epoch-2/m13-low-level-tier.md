@@ -15,11 +15,11 @@ systems programmers, still gated). Beginner docs never require this tier.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-LL1 | **I1 amendment wording** | **A** — generated `unsafe` only inside user-gated regions or vetted std/mem internals | A (else block M13) |
-| D-LL2 | `unsafe` audit story | **A** — structured audit comment + lint | A |
-| D-LL3 | `std.mem` API breadth | **A** — narrow: `Ptr<T>`, alloc, layout, volatile | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-LL1 | **I1 amendment wording** | **A** — generated `unsafe` only inside user-gated regions or vetted std/mem internals | A (else block M13) | ✅ ratified 2026-06-16 — A: amend I1 for user-gated `unsafe` |
+| D-LL2 | `unsafe` audit story | **A** — structured audit comment + lint | A | OPEN — tracked in the cross-cutting "attributes" thread |
+| D-LL3 | `std.mem` API breadth | **A** — narrow: `Ptr<T>`, alloc, layout, volatile | A | ✅ ratified 2026-06-16 — A: narrow `std.mem` core PLUS an opt-in wider expert API (name TBD) |
 
 **The I1 amendment (D-LL1) is the gating decision.** I1 today: *no `unsafe` in
 the language or generated code, ever (v1)*. The amendment: generated `unsafe`

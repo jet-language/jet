@@ -14,11 +14,12 @@ config rewrite, log processing, archive unpacking, hash verification.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-LR1 | First-wave order | **A** — csv/toml/log/time first, then regex/archive/db | A |
-| D-LR2 | sqlite | **A** — via E2-M14 C FFI when ready, else defer db ring | A |
-| D-LR3 | crypto surface | **A** — vetted hashes/HMAC/RNG only | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-LR1 | First-wave order | **A** — csv/toml/log/time first, then regex/archive/db | A | ✅ ratified 2026-06-16 — ship ALL ring libs in Epoch 2 |
+| D-LR2 | sqlite | **A** — via E2-M14 C FFI when ready, else defer db ring | A | ✅ ratified 2026-06-16 — A: sqlite via C FFI now / pure-Jet later |
+| D-LR3 | crypto surface | **A** — vetted hashes/HMAC/RNG only | A | ✅ ratified 2026-06-16 — crypto as broad as safely possible (vetted impls only) |
+| D-LR4 | YAML library | — | — | ✅ ratified 2026-06-16 — B: add `jet.yaml` in wave 1 (owner chose B against prior rec A) |
 
 ## First wave (order per D-LR1)
 

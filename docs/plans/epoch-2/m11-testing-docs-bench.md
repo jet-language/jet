@@ -15,13 +15,15 @@ separate tutorial language (see docs/spec/decision-ballots.md Group 19).
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-TEST1 | Property testing | **A** — in, if a small shrinking design exists | A |
-| D-TEST4 = D-TOOL1 | Doctests run under `jet test` | **A** — yes (I5 for user code) | A |
-| D-TOOL4 | Snapshot testing w/ one-key bless | **A** — yes | A |
-| D-TEST2 = D-TOOL2 | `todo` typed-hole expression | **B** — defer unless small | defer |
-| D-TEST3 | Guided learning (`jet tour`/`jet learn`) | **B** — docs-first; A if cheap | docs-first |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-TEST1 | Property testing | **A** — in, if a small shrinking design exists | A | OPEN — needs owner |
+| D-TEST4 = D-TOOL1 | Doctests run under `jet test` | **A** — yes (I5 for user code) | A | ✅ ratified 2026-06-16 — A: doctests run under `jet test` |
+| D-TOOL4 | Snapshot testing w/ one-key bless | **A** — yes | A | OPEN — needs owner |
+| D-TEST2 = D-TOOL2 | `todo` typed-hole expression | **B** — defer unless small | defer | OPEN — needs owner |
+| D-TEST3 | Guided learning (`jet tour`/`jet learn`) | **B** — docs-first; A if cheap | docs-first | ✅ ratified 2026-06-16 — B: docs-led learning first, `jet tour` later |
+| D-TOOL3 | `jet emit --rust` expert window | — | — | ✅ ratified 2026-06-16 — A: ship gated `jet emit --rust` expert window |
+| D-TOOL5 | Capability summary | — | — | OPEN — needs owner |
 
 ## Scope
 

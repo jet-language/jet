@@ -16,11 +16,11 @@ loop; release builds never touch it (I2/I3 intact).
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| D-DEV1 | Interpreter coverage boundary | **A** — common programs; native-only set explained | A |
-| D-DEV2 | JIT in Epoch 2 | **A** — design-only note, no impl (Cranelift later, owner approval) | A |
-| D-DEV3 | Save-to-diagnostic latency budget | **A** — <200ms target with a test | <200ms |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| D-DEV1 | Interpreter coverage boundary | **A** — common programs; native-only set explained | A | ✅ ratified 2026-06-16 — A: interpret common programs + opt-in "try anyway" flag (no guarantees) |
+| D-DEV2 | JIT in Epoch 2 | **A** — design-only note, no impl (Cranelift later, owner approval) | A | OPEN — needs owner |
+| D-DEV3 | Save-to-diagnostic latency budget | **A** — <200ms target with a test | <200ms | ✅ ratified 2026-06-16 — A: <200ms diagnostic budget |
 
 ## Scope
 

@@ -17,15 +17,17 @@ philosophy already commits to four; this milestone delivers the techniques.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec |
-|---|---|---|
-| D-DX1 | `--json` diagnostic schema stable + versioned by M3 exit | **A** — stable |
-| D-DX2 | `jet doctor` scope | **A** — rustc/cache/PATH/LSP/registry health |
-| D-DX3 | Zed dev extension this epoch (= E2-V9) | **A** — yes, dev-tier |
-| D-DX4 | Shell completions + man pages from one source | **A** — ship in M3 |
-| D-DX5 | External subcommands (`jet-foo` → `jet foo`) | **A** — PATH discovery, no plugin API |
-| D-DX6 | OSC 8 terminal hyperlinks on file:line / codes | **A** — when supported |
-| D-SUGAR1 | Digit separators `1_000_000` | **A** — lexer-only, free |
+| ID | Question | Rec | Ratified |
+|---|---|---|---|
+| D-DX1 | `--json` diagnostic schema stable + versioned by M3 exit | **A** — stable | ✅ ratified 2026-06-16 — A: stable `--json` |
+| D-DX2 | `jet doctor` scope | **A** — rustc/cache/PATH/LSP/registry health | ✅ ratified 2026-06-16 — A&B: health checks AND auto-fix |
+| D-DX3 | Zed dev extension this epoch (= E2-V9) | **A** — yes, dev-tier | ✅ ratified 2026-06-16 — A: Zed dev extension |
+| D-DX4 | Shell completions + man pages from one source | **A** — ship in M3 | ✅ ratified 2026-06-16 — A: ship completions + man pages |
+| D-DX5 | External subcommands (`jet-foo` → `jet foo`) | **A** — PATH discovery, no plugin API | OPEN — needs owner |
+| D-DX6 | OSC 8 terminal hyperlinks on file:line / codes | **A** — when supported | ✅ ratified 2026-06-16 — A: OSC-8 hyperlinks |
+| D-SUGAR1 | Digit separators `1_000_000` | **A** — lexer-only, free | — |
+| D-BUILD1 | `jet doctor` FFI section | — | ✅ ratified 2026-06-16 — A: `jet doctor` FFI section |
+| D-BUILD2 | `jet build -v` bridge steps | — | ✅ ratified 2026-06-16 — A: `jet build -v` prints bridge steps |
 
 ## Scope
 

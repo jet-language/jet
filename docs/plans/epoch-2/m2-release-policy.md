@@ -15,13 +15,13 @@ asks for a future the toolchain can't provide.
 
 ## Owner decisions — ratify before any code
 
-| ID | Question | Rec | Default if deferred |
-|---|---|---|---|
-| E2-D1 / D-REL1 | External versioning policy | **A** — normal SemVer until launch | A |
-| E2-D2 / D-REL2 | When (if ever) encoded Epoch SemVer flips on | **C** — separate launch after GA | C |
-| D-REL3 | Project compatibility marker | **A** — `[package].edition = "2026"` | `edition` field |
-| D-REL4 | LTS window length | **C** — no LTS pre-GA, set at GA | none yet |
-| D-REL5 | Who may run migrations | **A** — owner-approved `jet fix` + edition upgrade only | A |
+| ID | Question | Rec | Default if deferred | Ratified |
+|---|---|---|---|---|
+| E2-D1 / D-REL1 | External versioning policy | **A** — normal SemVer until launch | A | ✅ ratified 2026-06-16 — A: normal SemVer forever |
+| E2-D2 / D-REL2 | When (if ever) encoded Epoch SemVer flips on | **C** — separate launch after GA | C | ✅ ratified 2026-06-16 — never encode epoch version; owner controls version bumps manually |
+| D-REL3 | Project compatibility marker | **A** — `[package].edition = "2026"` | `edition` field | ✅ ratified 2026-06-16 — A: `edition` field |
+| D-REL4 | LTS window length | **C** — no LTS pre-GA, set at GA | none yet | ✅ ratified 2026-06-16 — C: no LTS pre-GA |
+| D-REL5 | Who may run migrations | **A** — owner-approved `jet fix` + edition upgrade only | A | ✅ ratified 2026-06-16 — A: only `jet fix` + edition upgrade may migrate |
 
 Substitute the owner's ratified option everywhere if it differs from the Rec.
 

@@ -45,64 +45,64 @@ picks another option.
 
 ### Product and placement
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL1 | Ship a terminal REPL in Epoch 2? | **A** — yes, E2-M18 after E2-M4 · **B** — defer entire REPL to Epoch 3 · **C** — no terminal REPL; web playground only (D-REPL19) | **A** |
-| D-REPL2 | Web playground in scope for this milestone? | **A** — terminal only; playground is a later milestone · **B** — design terminal REPL now, playground spec stub only · **C** — terminal + playground ship together | **A** |
-| D-REPL21 | Milestone timing vs E2-M4 | **A** — separate E2-M18 after M4 interpreter is green · **B** — thin `jet repl` (expressions only) ships inside M4; M18 expands · **C** — defer all REPL work to Epoch 3 | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL1 | Ship a terminal REPL in Epoch 2? | **A** — yes, E2-M18 after E2-M4 · **B** — defer entire REPL to Epoch 3 · **C** — no terminal REPL; web playground only (D-REPL19) | **A** | ✅ ratified 2026-06-16 — A |
+| D-REPL2 | Web playground in scope for this milestone? | **A** — terminal only; playground is a later milestone · **B** — design terminal REPL now, playground spec stub only · **C** — terminal + playground ship together | **A** | ✅ ratified 2026-06-16 — A |
+| D-REPL21 | Milestone timing vs E2-M4 | **A** — separate E2-M18 after M4 interpreter is green · **B** — thin `jet repl` (expressions only) ships inside M4; M18 expands · **C** — defer all REPL work to Epoch 3 | **A** | ✅ ratified 2026-06-16 — A |
 
 ### Command surface
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL3 | How users start a session | **A** — explicit `jet repl` only · **B** — also `jet` with no args in a TTY (like `python`) · **C** — `jet repl` plus `jet repl <file.jet>` to seed a session from a file | **A** |
-| D-REPL12 | Relation to `jet eval --pure` (S60) | **A** — separate commands; REPL is impure-by-default · **B** — `jet repl --pure` runs a restricted pure subset · **C** — no REPL; only `jet eval --pure` for config (E2-M16) | **A** |
-| D-REPL13 | Relation to `jet dev` | **A** — independent processes; share interpreter library only · **B** — `jet dev --repl` flag in the watch server · **C** — REPL is a mode inside the dev server (one long-lived binary) | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL3 | How users start a session | **A** — explicit `jet repl` only · **B** — also `jet` with no args in a TTY (like `python`) · **C** — `jet repl` plus `jet repl <file.jet>` to seed a session from a file | **A** | OPEN — needs owner |
+| D-REPL12 | Relation to `jet eval --pure` (S60) | **A** — separate commands; REPL is impure-by-default · **B** — `jet repl --pure` runs a restricted pure subset · **C** — no REPL; only `jet eval --pure` for config (E2-M16) | **A** | ✅ ratified 2026-06-16 — A&B |
+| D-REPL13 | Relation to `jet dev` | **A** — independent processes; share interpreter library only · **B** — `jet dev --repl` flag in the watch server · **C** — REPL is a mode inside the dev server (one long-lived binary) | **A** | ✅ ratified 2026-06-16 — A |
 
 ### Execution and semantics
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL4 | Execution backend | **A** — interpreter only (E2-M4); plain message when unsupported · **B** — compile+run each input via rustc (slow, full semantics) · **C** — hybrid: interpreter first, auto-fallback compile with user-visible warning | **A** |
-| D-REPL5 | What users can type | **A** — expressions and top-level statements (`val`, `var`, `print`, control flow) · **B** — also item declarations (`fn`, `struct`, `enum`, `trait`) · **C** — expressions only (everything else is `:load`) | **A** |
-| D-REPL6 | Hard rejects (must fail with a teaching message + workaround) | **A** — FFI, tasks/channels, `unsafe`/low-level gates, and anything M4 marks native-only · **B** — same as A plus package imports from `jet.toml` until resolver story is clear · **C** — allow imports/deps; REPL is a full project shell | **A** |
-| D-REPL14 | If a snippet needs native code | **A** — reject with "run `jet run` / `jet build` instead" · **B** — offer one-shot compile-and-run of the current session module to a temp binary | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL4 | Execution backend | **A** — interpreter only (E2-M4); plain message when unsupported · **B** — compile+run each input via rustc (slow, full semantics) · **C** — hybrid: interpreter first, auto-fallback compile with user-visible warning | **A** | OPEN — needs owner |
+| D-REPL5 | What users can type | **A** — expressions and top-level statements (`val`, `var`, `print`, control flow) · **B** — also item declarations (`fn`, `struct`, `enum`, `trait`) · **C** — expressions only (everything else is `:load`) | **A** | OPEN — needs owner |
+| D-REPL6 | Hard rejects (must fail with a teaching message + workaround) | **A** — FFI, tasks/channels, `unsafe`/low-level gates, and anything M4 marks native-only · **B** — same as A plus package imports from `jet.toml` until resolver story is clear · **C** — allow imports/deps; REPL is a full project shell | **A** | OPEN — needs owner |
+| D-REPL14 | If a snippet needs native code | **A** — reject with "run `jet run` / `jet build` instead" · **B** — offer one-shot compile-and-run of the current session module to a temp binary | **A** | OPEN — needs owner |
 
 ### Session and ownership
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL7 | Session persistence model | **A** — one accumulating module; later inputs see earlier bindings · **B** — notebook cells (`:cell`); each cell isolated unless wired · **C** — A default, optional `:cell` mode | **C** |
-| D-REPL8 | Ownership across inputs | **A** — real move semantics; moved-from bindings error on reuse with E02xx voice · **B** — REPL auto-clones on move to keep bindings usable (differs from batch compiler) · **C** — reject moves in REPL; only `view`/`ref` borrows cross-line | **A** |
-| D-REPL9 | Multi-line input | **A** — brace/paren/bracket counting + `...` secondary prompt until balanced · **B** — require `;` to submit every fragment (no implicit blocks) · **C** — single-line only; paste multi-line as one submission | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL7 | Session persistence model | **A** — one accumulating module; later inputs see earlier bindings · **B** — notebook cells (`:cell`); each cell isolated unless wired · **C** — A default, optional `:cell` mode | **C** | OPEN — needs owner |
+| D-REPL8 | Ownership across inputs | **A** — real move semantics; moved-from bindings error on reuse with E02xx voice · **B** — REPL auto-clones on move to keep bindings usable (differs from batch compiler) · **C** — reject moves in REPL; only `view`/`ref` borrows cross-line | **A** | ✅ ratified 2026-06-16 — A |
+| D-REPL9 | Multi-line input | **A** — brace/paren/bracket counting + `...` secondary prompt until balanced · **B** — require `;` to submit every fragment (no implicit blocks) · **C** — single-line only; paste multi-line as one submission | **A** | ✅ ratified 2026-06-16 — A |
 
 ### Project context
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL10 | `jet.toml` / working directory | **A** — sandboxed std-only unless `--project` points at a manifest · **B** — auto-detect `jet.toml` in cwd and load its import graph · **C** — always sandboxed; no project mode in v1 REPL | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL10 | `jet.toml` / working directory | **A** — sandboxed std-only unless `--project` points at a manifest · **B** — auto-detect `jet.toml` in cwd and load its import graph · **C** — always sandboxed; no project mode in v1 REPL | **A** | ✅ ratified 2026-06-16 — A (sandbox; note: no `jet.toml` — manifest is now `pack.jet`) |
 
 ### Terminal UX
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL11 | Line editor tier (I6) | **A** — std-only: minimal read loop, no history · **B** — owner-approved line-editing crate (history, basic editing) · **C** — B plus LSP-style completions from sema | **B** |
-| D-REPL18 | If D-REPL11 ≠ A: external crate | **A** — `rustyline` · **B** — `reedline` · **C** — other (owner names crate; needs I6 sign-off) | **A** |
-| D-REPL15 | Meta-commands (`:` commands) | **A** — `:quit` `:reset` only · **B** — A + `:load` `:type` `:help` · **C** — B + `:doc` `:imports` `:emit` (show generated Rust for session) | **B** |
-| D-REPL16 | Showing results | **A** — print value of last expression when it has a value; `;` suppresses · **B** — always print type + value (`x: Int = 3`) · **C** — only explicit `print` (no implicit echo) | **A** |
-| D-REPL17 | Diagnostic voice | **A** — byte-identical to batch compiler (I4) · **B** — shorter headers; same codes and fix lines · **C** — REPL adds extra "in this session" context line | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL11 | Line editor tier (I6) | **A** — std-only: minimal read loop, no history · **B** — owner-approved line-editing crate (history, basic editing) · **C** — B plus LSP-style completions from sema | **B** | ✅ ratified 2026-06-16 — C |
+| D-REPL18 | If D-REPL11 ≠ A: external crate | **A** — `rustyline` · **B** — `reedline` · **C** — other (owner names crate; needs I6 sign-off) | **A** | ✅ ratified 2026-06-16 — A (`rustyline`) |
+| D-REPL15 | Meta-commands (`:` commands) | **A** — `:quit` `:reset` only · **B** — A + `:load` `:type` `:help` · **C** — B + `:doc` `:imports` `:emit` (show generated Rust for session) | **B** | ✅ ratified 2026-06-16 — B |
+| D-REPL16 | Showing results | **A** — print value of last expression when it has a value; `;` suppresses · **B** — always print type + value (`x: Int = 3`) · **C** — only explicit `print` (no implicit echo) | **A** | ✅ ratified 2026-06-16 — B (with `;` suppression) |
+| D-REPL17 | Diagnostic voice | **A** — byte-identical to batch compiler (I4) · **B** — shorter headers; same codes and fix lines · **C** — REPL adds extra "in this session" context line | **A** | ✅ ratified 2026-06-16 — A |
 
 ### Web playground (if D-REPL2 ≠ A)
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL19 | Playground architecture | **A** — out of compiler repo; separate service using shared interpreter ABI · **B** — `jet playground serve` in compiler binary · **C** — defer playground indefinitely | **C** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL19 | Playground architecture | **A** — out of compiler repo; separate service using shared interpreter ABI · **B** — `jet playground serve` in compiler binary · **C** — defer playground indefinitely | **C** | ✅ ratified 2026-06-16 — C |
 
 ### Engineering and tests
 
-| ID | Question | Options | Rec |
-|---|---|---|---|
-| D-REPL20 | CI testing | **A** — transcript fixtures (`tests/repl/*.txt` → expected stdout/stderr) · **B** — A + scriptedPTY integration tests · **C** — manual smoke only (not acceptable for merge) | **A** |
+| ID | Question | Options | Rec | Ratified |
+|---|---|---|---|---|
+| D-REPL20 | CI testing | **A** — transcript fixtures (`tests/repl/*.txt` → expected stdout/stderr) · **B** — A + scriptedPTY integration tests · **C** — manual smoke only (not acceptable for merge) | **A** | OPEN — needs owner |
 
 ---
 
