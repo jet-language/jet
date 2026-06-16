@@ -40,6 +40,8 @@ pub fn builtin_method_return(
     }
     match recv_ty {
         Type::List(inner) => list_method_return(inner, method, arg_count),
+        // S76: [T#N] delegates to list methods; length-changing ops are blocked in sema (E0964).
+        Type::FixedList { elem, .. } => list_method_return(elem, method, arg_count),
         Type::Map { key, value } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
         Type::Named(n) if n == "U8" => u8_method_return(method, arg_count),

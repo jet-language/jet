@@ -2756,24 +2756,50 @@ impl<'a> Checker<'a> {
                 }
             }
             BindPattern::List { elems, span } => {
-                let Type::List(inner) = &it else {
-                    self.diags.push(Diagnostic::error(
-                        "E0313",
-                        format!(
-                            "`[ … ]` can only destructure a list, but this is {}",
-                            it.show()
-                        ),
-                        "destructuring with `[ ]` pulls elements out of a list value"
-                            .to_string(),
-                        "destructure a list, or bind the whole value with a name".to_string(),
-                        Some(*span),
-                    ));
-                    for n in pattern.names() {
-                        self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                let (elem_ty, fixed_len) = match &it {
+                    Type::List(inner) => ((**inner).clone(), None),
+                    // S76: [T#N] can be destructured; E0963 if count doesn't match.
+                    Type::FixedList { elem, len } => ((**elem).clone(), Some(*len)),
+                    _ => {
+                        self.diags.push(Diagnostic::error(
+                            "E0313",
+                            format!(
+                                "`[ … ]` can only destructure a list, but this is {}",
+                                it.show()
+                            ),
+                            "destructuring with `[ ]` pulls elements out of a list value"
+                                .to_string(),
+                            "destructure a list, or bind the whole value with a name".to_string(),
+                            Some(*span),
+                        ));
+                        for n in pattern.names() {
+                            self.declare_bound(&n.name, n.span, Type::Int, b.mutable);
+                        }
+                        return;
                     }
-                    return;
                 };
-                let elem_ty = (**inner).clone();
+                // E0963: destructure count must match the fixed-size length.
+                if let Some(fixed) = fixed_len {
+                    if elems.len() as u64 != fixed {
+                        self.diags.push(Diagnostic::error(
+                            "E0963",
+                            format!(
+                                "destructuring with {} name{}, but this fixed-size list has {} element{}",
+                                elems.len(),
+                                if elems.len() == 1 { "" } else { "s" },
+                                fixed,
+                                if fixed == 1 { "" } else { "s" }
+                            ),
+                            "a fixed-size list `[T#N]` has a known length — the pattern must match exactly".to_string(),
+                            format!(
+                                "use {} name{} in the pattern",
+                                fixed,
+                                if fixed == 1 { "" } else { "s" }
+                            ),
+                            Some(*span),
+                        ));
+                    }
+                }
                 // A list literal has a known length: a mismatch is a compile
                 // error rather than a runtime length failure.
                 if let Expr::ListLit(items, _) = &b.init {
@@ -4899,6 +4925,40 @@ impl<'a> Checker<'a> {
                 }
                 Some((**inner).clone())
             }
+            // S76: [T#N] supports indexing; E0965 if the index is a literal >= N.
+            Type::FixedList { elem, len } => {
+                *kind = IndexKind::List;
+                if idx_ty != Type::Int {
+                    self.diags.push(Diagnostic::error(
+                        "E0505",
+                        format!(
+                            "list indexes must be {}, not {}",
+                            Type::Int.show(),
+                            idx_ty.show()
+                        ),
+                        "count positions with a whole number starting at 0".to_string(),
+                        "use an Int index, like `items[0]`".to_string(),
+                        Some(index.span()),
+                    ));
+                } else if let Expr::Int(n, _) = index.as_ref() {
+                    // E0965: compile-time out-of-bounds index.
+                    if *n < 0 || *n as u64 >= *len {
+                        self.diags.push(Diagnostic::error(
+                            "E0965",
+                            format!(
+                                "index {} is out of range for a fixed-size list of {} element{}",
+                                n,
+                                len,
+                                if *len == 1 { "" } else { "s" }
+                            ),
+                            "the valid indexes for `[T#N]` are 0 through N-1".to_string(),
+                            format!("use an index between 0 and {}", len - 1),
+                            Some(index.span()),
+                        ));
+                    }
+                }
+                Some((**elem).clone())
+            }
             Type::Map { key, value } => {
                 *kind = IndexKind::Map;
                 if idx_ty != **key {
@@ -5201,6 +5261,26 @@ impl<'a> Checker<'a> {
         }
         self.borrow_ctx = true;
         let recv_ty = self.infer(receiver)?;
+        // E0964: length-changing methods are forbidden on a fixed-size [T#N].
+        if let Type::FixedList { .. } = &recv_ty {
+            if matches!(method, "push" | "pop" | "insert" | "remove" | "clear") {
+                self.diags.push(Diagnostic::error(
+                    "E0964",
+                    format!(
+                        "`{}` changes a list's length, but this is a fixed-size {}",
+                        method,
+                        recv_ty.show()
+                    ),
+                    "the length of `[T#N]` is fixed at compile time and cannot change".to_string(),
+                    "widen to `var r: [T] = ...` if you need a growable list".to_string(),
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return None;
+            }
+        }
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
                 for (trait_name, info) in &self.m9.traits {
