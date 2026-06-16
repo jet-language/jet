@@ -253,7 +253,11 @@ sema checks exhaustiveness and `else` may be omitted; mixed arms keep
 S24's mandatory `else`. Otherwise `==` is ordinary value equality (S13).
 A bare name on the right is a variable when one is in scope; to test a
 unit variant with the same spelling, qualify it (e.g. `Light.Red`).
-Rejected: `is` keyword, Rust `match`, accessor-only extraction.
+**Nested patterns (amended 2026-06-16, D-PAT1):** a pattern may appear inside a
+payload slot — `r == ok(Rect(w, h))`, `x == ok(value(n))` — binding the inner
+names; nesting composes to any depth, so `when`/`if` arms can destructure a
+result and its contents in one test. Rejected: `is` keyword, Rust `match`,
+accessor-only extraction.
 
 **S32 — Absence / Option (M3)** *(ratified 2026-06-11)*: `**T?`** marks
 an optional value; `**value(expr)**` when present, bare `**null**` when
@@ -284,6 +288,9 @@ enum, struct, `String`, or the default `Error` type. In a function return,
 it to `T ?`. Codegen lowers to Rust `Result<T, E>`, but `Result<T, E>` is not
 Jet surface syntax. Rejected: `Result<T, E>` as canonical surface syntax,
 `T or E` in type position (A), Zig `!T` with inferred error sets (C).
+**Amended 2026-06-16 (S80):** the default `Error` is now a rich carrier
+(message + optional code + optional source) and `fn main()` may be fallible —
+see S80.
 
 **S45 — Generic function/type syntax (M9)** *(ratified 2026-06-12)*:
 angle brackets for type parameters — `fn largest<T: Comparable>(…)`,
@@ -873,8 +880,9 @@ comment), so steps can be commented individually:
 statements end at `;` (S6). Jet is not newline-sensitive, so breaks already
 parse; `jet fmt` preserves author-placed chain breaks (each step on its own line,
 one space then `// comment`) and the final step's trailing comment stays after
-the `;`. See `examples/features/38_method_chain.jet`. The pipe operator `|>`
-remains separately **undecided** (not disallowed).
+the `;`. See `examples/features/38_method_chain.jet`. The pipe operator `|>` is
+**declined for now** (D-SUGAR2, 2026-06-16): S69 newline dot-chains cover the
+readability need; revisit post-1.0 only with concrete evidence.
 
 **S70 — Multi-line strings** *(ratified 2026-06-15, D-SG5; implemented)*:
 `**"""…"""`** triple-quoted strings span multiple lines; escapes (S20) and
@@ -922,7 +930,11 @@ and an unknown field is E0302; a non-struct value is E0313. List destructuring
 binds each element by position, guarded by a runtime length check; a list
 literal of the wrong length is the compile error E0315 and a non-list value is
 E0313. The tuple form `val (x, y) = p;` binds named tuple members in
-canonical order (S73).
+canonical order (S73). **Refutable binds (amended 2026-06-16, D-PAT3):** a
+standalone bind whose pattern *can fail to match* — an enum variant, or
+`value(n)` on a `T?` that might be `null` — must supply a `??` fallback
+(`val value(n) = maybe_port() ?? return;`). Without the fallback the bind is a
+compile error teaching `??` (or `when`/`if` to handle the empty case).
 
 **S75 — Fan-out operator `f.[ … ]`** *(ratified 2026-06-16; implemented)*:
 `f.[a, b, c]` desugars to `[f(a), f(b), f(c)]` — a postfix fan-out applying
@@ -955,6 +967,59 @@ E0963 (destructure length mismatch), E0964 (length-changing op on fixed list),
 E0965 (compile-time index out of range). Rejected: Rust `[T; N]` spelling
 (`;` clashes with S6 statement terminators), angle-bracket `[T<N>]` (already
 used for generics S33), keeping `[T]` for both sizes (loses static safety).
+
+**S77 — Struct field punning** *(ratified 2026-06-16; milestone pending)*: in a
+struct literal `Type { … }` (S29), a bare field name is shorthand for
+`name: name` when a binding of that name is in scope —
+`Source { name, upstream, via: "nix" }` ≡
+`Source { name: name, upstream: upstream, via: "nix" }`. Matches Rust
+field-init shorthand and Nix `inherit`. Field checking is unchanged (S29):
+every field still required exactly once; punned and explicit fields mix freely.
+An unknown punned name is the ordinary "no such binding" error. Rejected:
+JS-style `{ name }` object shorthand outside struct literals, punning with no
+matching binding.
+
+**S78 — Contextual empty-list inference** *(ratified 2026-06-16; milestone
+pending)*: a bare `[]` (S37) infers its element type from the expected type at
+its use site — a generic call argument, an accumulator/return type, or an
+annotated binding — so `fold(xs, [])` and a `-> [Int]` body that returns `[]`
+need no annotation. When no expected type is available, the explicit form
+`[]: List<T>` / `[]: [T]` (S65) is still required and **always accepted**
+(owner: keep explicit typing available). Mirrors `null` and empty-map `[:]`
+inference (S32/S38). Rejected: defaulting `[]` to a placeholder element type,
+requiring an annotation in every position.
+
+**S79 — Expressions in `for … in <expr>` heads** *(ratified 2026-06-16;
+milestone pending)*: the iterable in `for x in <expr> { … }` (S19) may be any
+expression yielding an iterable — field access, method/function calls,
+indexing, ranges — e.g. `for p in shape.points()`, `for c in row[i].chars()`,
+`for n in lo..hi`. The head expression is evaluated once before the loop.
+Rejected: restricting the head to a bare name or literal range.
+
+**S80 — Error carrier & fallible `main`** *(ratified 2026-06-16; amends
+S34/S12; milestone pending)*: the default `Error` type (S34) grows from a
+`String` wrapper to a structured carrier — a **message**, an **optional code**,
+and an **optional source** (the lower-level error it wrapped) — so context
+survives as an error travels up through `?`. Beginners still write
+`-> Config ?` and get the default `Error`; the richer fields are
+constructors/accessors used only when wanted (`Error.message("…")`,
+`Error.code(n)`, `Error.with_source(e)` — exact shape settled with the carrier
+work). **Fallible `main`:** `fn main() -> Unit ?` is allowed (amends S12); a
+returned `Error` is printed in the standard diagnostic voice and the process
+exits non-zero. Rejected: message-only carrier, keeping `String`-only, a
+non-fallible `main` as the only form. *Still open (decision-ballots.md
+D-ERR2):* the spelling of the opt-in cross-type `?` conversion — the owner
+asked to name the conversion capability `Error`, which collides with the
+`Error` type, so the name is pending one confirmation.
+
+**S81 — `?continue` loop skip** *(ratified 2026-06-16; milestone pending)*:
+inside a `for`/`while` body, postfix **`?continue`** on a fallible or optional
+value skips to the next iteration when the value is failed/empty and binds the
+success value otherwise — `val line = next()?continue;` reads "take the next
+line, or skip this turn". A loop-scoped sibling of `?` propagation (S7) and
+`??` fallback (S71); legal only inside a loop (outside → teaching error).
+`?break` is **not** added in v1 (write `?? break`). Rejected: deferring the
+feature (owner chose to add it), a method `.or_continue()` form.
 
 ### Unified ecosystem — `jet` + `jetpack` + `jetos` (U-series)
 
@@ -1032,6 +1097,20 @@ example previously showed `imports:` at file top level) and supersedes the
 top-level `sources:`/`imports:` shape sketched in unified-ecosystem.md §2.2.
 Rejected: file top-level manifest fields (would make a second top-level construct
 beside `module`, and require a bespoke env-file parser à la `pack.jet`).
+
+**U9 — A source's provider kind is *inferred*, never declared** *(ratified
+2026-06-16)*: a named source is always just `name: provider@target` — there is
+**no `via:`/kind marker** in the surface (this dissolves the former open
+question). Whether a source realizes through the first-party **core** provider
+or falls back to a **nix** flake is discovered from its target: a target that
+has a **`pack.jet`** is a Jet package repo → core; otherwise → nix flake. The
+probe is cheap and never clones a nixpkgs-sized repo: `path@…` stats locally,
+`nixpkgs@…` is unconditionally nix (never probed), and `github@…`/git URLs peek
+at **only** `pack.jet` (raw fetch / shallow `git archive`) before committing to a
+full fetch. **core-by-default with a safe nix fallback** keeps the syntax clean
+and gives every env the whole nixpkgs repo for free. See unified-ecosystem.md §6.
+Rejected: a per-source `via: core` field, an inline `via` keyword, and a `core@…`
+provider prefix (all add ceremony to express what the target already tells us).
 
 ## Enforcement
 
@@ -1225,7 +1304,17 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | U6  | source refs `provider@target`; package type `Pkg` + list sugar | owner |
 | 2026-06-16 | U7  | `jet run file.jet` stays zero-ceremony forever (reaffirms R9) | owner |
 | 2026-06-16 | U8  | `sources:`/`imports:` nest inside `module {}` (siblings of contributions), not file top-level; amends U4 | owner |
+| 2026-06-16 | U9  | source provider kind inferred (`pack.jet` → core, else nix flake); no `via:` marker; manifest-only remote probe | owner |
 | 2026-06-16 | S52 | amended: `pack.jet`/`.jet/lock` (U1/U2); hangar store `/etc/jet/hangar` | owner |
 | 2026-06-16 | S75 | fan-out operator `f.[ … ]`; `.[` adjacency; E0961/E0962        | owner |
 | 2026-06-16 | S76 | fixed-size list type `[T#N]`; `#` separator; erase to Vec; E0963–E0965 | owner |
 | 2026-06-16 | D-JPK23 | git deps in `pack.jet` `deps:` are inline structs `{ git: "...", tag/branch/rev: "..." }`; any remote, not just GitHub | owner |
+| 2026-06-16 | S77 | struct field punning `Type { name }` (D-FP1)         | owner |
+| 2026-06-16 | S78 | contextual empty-list inference; explicit `[]: [T]` kept (D-FP4) | owner |
+| 2026-06-16 | S79 | expressions allowed in `for … in <expr>` heads (D-FP5) | owner |
+| 2026-06-16 | S80 | rich `Error` carrier (msg+code+source); fallible `main` (D-ERR1/D-ERR3) | owner |
+| 2026-06-16 | S81 | `?continue` loop skip (D-ERR4)                       | owner |
+| 2026-06-16 | S31 | amended: nested patterns in payload slots (D-PAT1)   | owner |
+| 2026-06-16 | S74 | amended: refutable bind requires `??` fallback (D-PAT3) | owner |
+| 2026-06-16 | D-SUGAR2 | pipe `\|>` declined for now; dot-chains (S69) cover it | owner |
+| 2026-06-16 | D-SUGAR4 | newtype keyword declined; one-field struct covers it | owner |

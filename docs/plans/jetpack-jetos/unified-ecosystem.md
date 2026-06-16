@@ -163,6 +163,17 @@ Packages are values of type **`Pkg`**. Source refs are `provider@target`:
 `default.[ripgrep, fd]`, and `unstable.neovim`. Strings (`"mine@hello"`) remain
 the escape hatch for refs the sugar doesn't cover.
 
+**Provider kind is inferred, not declared (U9).** A source is *only* ever
+`name: provider@target` — there is no `via:`/kind marker. How a source realizes
+is discovered from its target: a target carrying a **`pack.jet`** is a Jet
+package repo and realizes through the first-party **core** provider (no nix);
+any other target **falls back to a nix flake**. So core is the default *when the
+target is one of ours*, and the entire nixpkgs ecosystem comes for free as the
+fallback. The probe never clones a nixpkgs-sized repo: `path@…` stats the dir,
+`nixpkgs@…` is unconditionally nix (never probed), and `github@…`/git URLs peek
+at **only** `pack.jet` (raw fetch / shallow `git archive`) before deciding
+whether to do a full fetch.
+
 ## 6. Merge rules (canonical — one table for all tiers)
 
 Reconciles jetos-design §5.4 and the former pack-abi table into one referee:
