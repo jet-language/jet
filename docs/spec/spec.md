@@ -440,6 +440,49 @@ Stage 1a is parser-only: modules are accepted into the AST (`Item::Module`) but
 not yet type-checked or evaluated. The U5 merge engine and the pure-eval
 pipeline (computed contributions) consume them in later stages.
 
+## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
+
+### Fan-out `f.[a, b, c]`
+
+`f.[a, b, c]` is syntactic sugar that expands to `[f(a), f(b), f(c)]`. The
+callee `f` must be a one-argument function; each item is type-checked against
+`f`'s parameter type. The result type is `[R#N]` where `R` is `f`'s return
+type and `N` is the number of items.
+
+```ebnf
+fan_out = expr ".[" [ expr { "," expr } [ "," ] ] "]" ;
+```
+
+```jet
+fn double(n: Int) -> Int { return n * 2; }
+
+val doubled = double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
+```
+
+Errors: **E0961** if the callee is not a one-argument function; **E0962** if an
+item's type doesn't match the parameter type.
+
+### Fixed-size list `[T#N]`
+
+`[T#N]` is a type refinement meaning "a list of exactly N elements of type T."
+It is produced by fan-out and can be destructured with an exact-count pattern.
+At codegen it erases to `Vec<T>` (same as plain `[T]`).
+
+```ebnf
+type_fixed_list = "[" type "#" int_literal "]" ;
+```
+
+```jet
+val result: [Int#3] = double.[1, 2, 3];
+val [a, b, c] = result;   // OK — 3 names for 3 elements
+```
+
+- Destructuring a `[T#N]` with the wrong number of names is **E0963**.
+- Calling `push`, `pop`, `insert`, `remove`, or `clear` on a `[T#N]` is **E0964**.
+- A literal index outside `0..N-1` on a `[T#N]` is **E0965** (compile-time check).
+- `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
+  length information is erased at that point.
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

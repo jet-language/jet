@@ -221,6 +221,16 @@ before continuing.
 | E1208 | jet   | toolchain `[package].jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
 
+## Fan-out and fixed-size list diagnostics
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0961 | The callee of a fan-out `.[` is not a one-argument function. | `f.[a, b, c]` expands to `[f(a), f(b), f(c)]` — `f` must accept exactly one argument so each item can be passed to it. | Use a one-argument function or lambda as the fan-out callee. |
+| E0962 | A fan-out item has the wrong type for the callee's parameter. | Each item in `f.[a, b, c]` is passed to `f`; they must match `f`'s parameter type. | Change the item to match the parameter type, or adjust the function. |
+| E0963 | A positional destructure pattern has a different count than the fixed-size list's known length. | `[T#N]` has exactly N elements at compile time; the pattern must name exactly N bindings or the binding would leave elements unnamed. | Match the number of names in the pattern to the size N shown in the error. |
+| E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, widen the binding: `var r: [T] = ...`. |
+| E0965 | A literal index is out of range for a `[T#N]` at compile time. | The valid indexes for `[T#N]` are 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, or check at runtime with a condition. |
+
 ## Concurrency diagnostics
 
 | Code | What | Why | Fix |
