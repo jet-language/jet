@@ -34,6 +34,84 @@ impl Pkg {
     }
 }
 
+/// Parse a `packages:` list body (the text inside `[ … ]`) into `Pkg`s,
+/// expanding the type-directed sugar (U6 / D-JPK19):
+///
+/// - `default.ripgrep`      → `Pkg{ default, ripgrep }`
+/// - `default.[ripgrep, fd]`→ `Pkg{ default, ripgrep }`, `Pkg{ default, fd }`
+/// - `unstable.neovim`      → `Pkg{ unstable, neovim }`
+/// - `"mine@hello"`         → escape-hatch string; source left empty for the
+///   resolver to interpret
+/// - bare `ripgrep`         → `Pkg{ "", ripgrep }` (source filled in later from
+///   the default source)
+///
+/// std-only and lenient: empty items are skipped. The scoped form's inner commas
+/// are respected (the split is bracket-aware).
+pub fn parse_package_list(body: &str) -> Vec<Pkg> {
+    let mut out = Vec::new();
+    for item in split_top_level(body) {
+        out.extend(parse_package_item(item.trim()));
+    }
+    out
+}
+
+fn parse_package_item(item: &str) -> Vec<Pkg> {
+    if item.is_empty() {
+        return Vec::new();
+    }
+    // Escape-hatch quoted string: keep verbatim, source unresolved.
+    if item.starts_with('"') {
+        let inner = item.trim_matches('"');
+        if inner.is_empty() {
+            return Vec::new();
+        }
+        return vec![Pkg::new("", inner)];
+    }
+    // Scoped list: `source.[a, b, c]`.
+    if let Some(dot_bracket) = item.find(".[") {
+        let source = &item[..dot_bracket];
+        let rest = &item[dot_bracket + 2..];
+        let inside = rest.strip_suffix(']').unwrap_or(rest);
+        return inside
+            .split(',')
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(|n| Pkg::new(source, n))
+            .collect();
+    }
+    // Dotted single: `source.name`.
+    if let Some((source, name)) = item.split_once('.') {
+        if !name.is_empty() {
+            return vec![Pkg::new(source, name)];
+        }
+    }
+    // Bare name: source resolved from the default later.
+    vec![Pkg::new("", item)]
+}
+
+/// Split on commas not nested inside `()`/`[]`/`{}` (so `source.[a, b]` is one
+/// item). Returns the raw (untrimmed) slices.
+fn split_top_level(body: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in body.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&body[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < body.len() {
+        out.push(&body[start..]);
+    }
+    out
+}
+
 /// The explicit priority a scalar setting may carry (§6). A bare value is
 /// `Normal`; `default` is the overridable fallback; `force` overrides everything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,6 +284,63 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    // ── Pkg sugar (U6 / D-JPK19) ──
+
+    #[test]
+    fn sugar_dotted_single() {
+        assert_eq!(
+            parse_package_list("default.ripgrep"),
+            vec![Pkg::new("default", "ripgrep")]
+        );
+    }
+
+    #[test]
+    fn sugar_scoped_list_keeps_inner_commas() {
+        assert_eq!(
+            parse_package_list("default.[ripgrep, fd, jq]"),
+            vec![
+                Pkg::new("default", "ripgrep"),
+                Pkg::new("default", "fd"),
+                Pkg::new("default", "jq"),
+            ]
+        );
+    }
+
+    #[test]
+    fn sugar_mixed_sources_in_one_list() {
+        // The example from unified-ecosystem §5.
+        assert_eq!(
+            parse_package_list("default.[ripgrep, fd], unstable.neovim"),
+            vec![
+                Pkg::new("default", "ripgrep"),
+                Pkg::new("default", "fd"),
+                Pkg::new("unstable", "neovim"),
+            ]
+        );
+    }
+
+    #[test]
+    fn sugar_escape_hatch_string() {
+        assert_eq!(
+            parse_package_list("\"mine@hello\""),
+            vec![Pkg::new("", "mine@hello")]
+        );
+    }
+
+    #[test]
+    fn sugar_bare_name_has_empty_source() {
+        assert_eq!(parse_package_list("ripgrep"), vec![Pkg::new("", "ripgrep")]);
+    }
+
+    #[test]
+    fn sugar_empty_and_whitespace_skipped() {
+        assert!(parse_package_list("   ").is_empty());
+        assert_eq!(
+            parse_package_list("default.fd, , default.rg"),
+            vec![Pkg::new("default", "fd"), Pkg::new("default", "rg")]
+        );
     }
 
     // ── sources ──
