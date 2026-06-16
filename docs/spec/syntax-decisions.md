@@ -657,6 +657,14 @@ examples. Optional `.jet/` directory is the source root when present;
 `jet.toml` stays at project root. Single-file `jet run file.jet` stays
 manifest-free forever (R9). Rejected: JSON manifest; v1 manifest written
 in Jet (build.zig style); `[rust-dependencies]` as a separate table name.
+**Amended (owner, 2026-06-16, unified ecosystem U1/U2):** the package manifest
+becomes **`pack.jet`** (Jet syntax, replacing `jet.toml`) and the lockfile
+becomes the single **`.jet/lock`** (replacing `jet.lock` and `pack.lock`) inside
+the already-ratified `.jet/` managed folder; realized packages live in the
+shared **hangar** store at **`/etc/jet/hangar/`**. The TOML constants
+(`jet.toml` / `jet.lock`) remain in `src/syntax.rs` only until the manifest
+reshape chunk migrates the paths; the unified records above are the
+authoritative target. See `docs/plans/jetpack-jetos/unified-ecosystem.md`.
 
 **S53 — Concurrency surface** *(ratified 2026-06-12; deferred past v1.0)*:
 **deferred to v2** — no tasks, channels, or `std/tasks` in v1. When
@@ -891,6 +899,71 @@ literal of the wrong length is the compile error E0315 and a non-list value is
 E0313. The tuple form `val (x, y) = p;` binds named tuple members in
 canonical order (S73).
 
+### Unified ecosystem — `jet` + `jetpack` + `jetos` (U-series)
+
+The owner-ratified design-of-record is
+`docs/plans/jetpack-jetos/unified-ecosystem.md` (status: owner-ratified,
+2026-06-16). Its naming ledger (§10) and the U-series below are **ratified**.
+These records establish the authoring-surface tokens; behavior lands in the
+Jetpack/Jetos implementation chunks (no syntax is invented beyond this).
+
+**U1 — Package manifest is `pack.jet`** *(ratified 2026-06-16)*: the package
+manifest is `pack.jet`, written in **Jet syntax** (not TOML), holding package
+identity + Jet library deps (+ optional exported modules). It **replaces**
+`jet.toml`. **Amends S52.** Rejected: keeping a separate TOML manifest beside a
+Jet pack file (two manifest languages).
+
+**U2 — Single lockfile `.jet/lock` and the `.jet/` managed folder**
+*(ratified 2026-06-16)*: one lockfile, `.jet/lock`, **replaces** both `jet.lock`
+and `pack.lock`. The project-local `.jet/` folder is the managed area (lockfile,
+caches, GC roots), never hand-edited; realized packages live in the shared store,
+not here. **Amends S52.** Rejected: per-tool lockfiles (`jet.lock` +
+`pack.lock`) that drift.
+
+**U3 — Modules: `module name {}` + leading-`_` disable; `env`/`system`/`image`
+namespaces with `Env`/`System`/`Image`** *(ratified 2026-06-16)*: a module is an
+explicit named declaration `module name { … }`; multiple modules may share a
+file. A **leading underscore** (`module _name { … }`) disables a module — it is
+not discovered or merged (one character, reversible). Modules may not import each
+other (liftability law); they only contribute to the merged whole. Reserved
+namespaces any module may contribute to: **`env`** (type `Env`, a dev
+environment / shell), **`system`** (type `System`, a whole machine, jetos), and
+**`image`** (type `Image`, an ISO / VM / disk image, jetos). The project
+environment file is `env.jet`; the master system config is `config.jet` (default
+dir `~/.jet/`). **Supersedes jetos D-OS1** (file-is-module). Rejected:
+file-is-module, `import = [ … ]` manual lists, cross-module imports.
+
+**U4 — Import-tree discovery via `find("./path")`** *(ratified 2026-06-16)*:
+`imports: find("./modules")` auto-discovers every `.jet` file in the tree and
+merges each module's typed contributions — no manual import list
+(flake-parts / import-tree by default). **Generalizes jetos D-OS7.** Rejected:
+hand-maintained import lists as the default surface.
+
+**U5 — One canonical merge table for all tiers** *(ratified 2026-06-16)*: the
+merge rules in unified-ecosystem.md §6 are the single referee across `env` /
+`system` / `image`: `sources` merge by key (duplicate names with different refs
+conflict unless overridden); `packages` concatenate, de-duplicate, preserve
+source identity; namespace entries merge by key with package lists combining;
+scalar conflicts are diagnostics unless priority-marked (`default`/`force`).
+**Replaces** jetos §5.4 + the former pack-abi merge table. Rejected: divergent
+per-tier merge semantics.
+
+**U6 — Source refs `provider@target`; package type `Pkg` + sugar**
+*(ratified 2026-06-16)*: source refs are `provider@target` —
+`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`. Packages are values of
+type **`Pkg`**; in `packages:` lists the type-directed sugar applies
+(`default.ripgrep`, `default.[ripgrep, fd]`, `unstable.neovim`), with strings
+(`"mine@hello"`) as the escape hatch. (Carries forward the former D-JPK18/19
+intent into the unified surface; the `<source>:<package>` Phase-1 command-line
+ref form, D-JPK7/15, is unchanged for `jetpack run` arguments.) Rejected:
+untyped string-only refs as the primary surface.
+
+**U7 — `jet run file.jet` stays zero-ceremony forever** *(ratified 2026-06-16;
+reaffirms R9)*: a single `.jet` file is a complete program; `jet run app.jet`
+never needs a manifest, `.jet/`, or any ecosystem file. This is the hard line
+that keeps jet usable on its own (the one-way arrow `jetos → jetpack → jet`).
+Rejected: requiring any manifest for single-file runs.
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -1075,3 +1148,11 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-15 | D-JPK13 | `pack.jet` + `pack.lock` ("Jet packs") | owner |
 | 2026-06-15 | D-JPK17 | named sources declared in pack.jet, used inline `name:pkg` | owner |
 | 2026-06-15 | D-JPK16 | core resolver + providers; tvix shim for no-installed-nix (R3), I6 waiver scoped to jetpack | owner |
+| 2026-06-16 | U1  | package manifest `pack.jet` (Jet syntax) replaces `jet.toml`; amends S52 | owner |
+| 2026-06-16 | U2  | single `.jet/lock` replaces `jet.lock`/`pack.lock`; `.jet/` managed folder; amends S52 | owner |
+| 2026-06-16 | U3  | `module name {}` + leading-`_` disable; `env`/`system`/`image` ns; `Env`/`System`/`Image`; supersedes D-OS1 | owner |
+| 2026-06-16 | U4  | `find("./path")` import-tree discovery as default; generalizes D-OS7 | owner |
+| 2026-06-16 | U5  | one canonical merge table (unified-ecosystem §6) across all tiers | owner |
+| 2026-06-16 | U6  | source refs `provider@target`; package type `Pkg` + list sugar | owner |
+| 2026-06-16 | U7  | `jet run file.jet` stays zero-ceremony forever (reaffirms R9) | owner |
+| 2026-06-16 | S52 | amended: `pack.jet`/`.jet/lock` (U1/U2); hangar store `/etc/jet/hangar` | owner |

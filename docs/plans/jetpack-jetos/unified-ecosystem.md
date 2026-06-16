@@ -228,19 +228,22 @@ jet a beginner's first compiled language.
 | project-managed folder | `.jet/` · lockfile `.jet/lock` (replaces `pack.lock`/`jet.lock`) |
 | source refs | `provider@target` (`github@owner/repo/rev`, `path@…`) |
 
-## 11. Open decisions (U-series) + downstream edits
+## 11. Decisions (U-series — RATIFIED 2026-06-16) + downstream edits
 
-| ID | Question | Rec |
+U1–U7 are **ratified** and recorded in `docs/spec/syntax-decisions.md` (Ratified
+section + decision log) and `src/syntax.rs`; `tests/decisions.rs` enforces them.
+
+| ID | Decision | Status |
 |---|---|---|
-| U1 | Retire `jet.toml` → `pack.jet` (Jet syntax) as the package manifest; amend ratified **S52** | yes |
-| U2 | Unify `jet.lock` + `pack.lock` → single `.jet/lock` (amend S52) | yes |
-| U3 | Adopt explicit `module name {}` + `_` disable everywhere; **supersede jetos D-OS1** (file-is-module) | yes |
-| U4 | `find(...)` auto-discovery as the default import surface (generalize jetos D-OS7) | yes |
-| U5 | Adopt the §6 canonical merge table across all tiers (replaces jetos §5.4 + pack-abi) | yes |
-| U6 | Confirm `provider@target` source refs (was D-JPK18) + `Pkg` sugar (was D-JPK19) | yes |
-| U7 | Keep `jet run file.jet` zero-ceremony forever | reaffirm |
+| U1 | Retire `jet.toml` → `pack.jet` (Jet syntax) as the package manifest; amends ratified **S52** | ratified |
+| U2 | Unify `jet.lock` + `pack.lock` → single `.jet/lock` (amends S52) | ratified |
+| U3 | Explicit `module name {}` + `_` disable everywhere; **supersedes jetos D-OS1** (file-is-module) | ratified |
+| U4 | `find(...)` auto-discovery as the default import surface (generalizes jetos D-OS7) | ratified |
+| U5 | The §6 canonical merge table across all tiers (replaces jetos §5.4 + pack-abi) | ratified |
+| U6 | `provider@target` source refs (was D-JPK18) + `Pkg` sugar (was D-JPK19) | ratified |
+| U7 | `jet run file.jet` stays zero-ceremony forever | ratified |
 
-**Downstream edits to make once U1–U7 are confirmed:**
+**Downstream edits (now that U1–U7 are confirmed; tracked, applied per chunk):**
 
 - **S52 (jet manifest):** amend — `pack.jet` replaces `jet.toml`; `.jet/lock`
   replaces `jet.lock`; `.jet/` folder already ratified (S52 amendment 2026-06-13).

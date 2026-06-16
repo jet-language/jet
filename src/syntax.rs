@@ -404,3 +404,53 @@ pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 /// D-JPK16 (R2): a first-party Jet package a repo's `pack.jet` provides, for
 /// the `core` provider to build: `pkg.package("<name>", "<source-subpath>")`.
 pub const PACK_DIRECTIVE_PACKAGE: &str = "pkg.package";
+
+// ──────────────────────────────────────────────
+// Unified ecosystem (jet + jetpack + jetos) — user-typeable surface (I7).
+// Owner-ratified design-of-record: docs/plans/jetpack-jetos/unified-ecosystem.md
+// (U1–U7, ratified 2026-06-16). These IDs start with `U`, enforced by
+// tests/decisions.rs alongside the S/N decisions. Tokens are recorded here;
+// behavior lands in the Jetpack/Jetos implementation chunks (no syntax beyond
+// what is ratified). The S52 amendment names (U1/U2) live with the S52 block.
+// ──────────────────────────────────────────────
+
+/// U3 (ratified 2026-06-16): module declaration keyword — `module name { … }`.
+pub const KW_MODULE: &str = "module";
+
+/// U3 (ratified 2026-06-16): a leading underscore on a module name disables it
+/// (`module _name { … }` is not discovered or merged). One char, reversible.
+pub const MODULE_DISABLE_PREFIX: &str = "_";
+
+/// U3 (ratified 2026-06-16): reserved namespaces any module may contribute to.
+pub const NS_ENV: &str = "env";
+pub const NS_SYSTEM: &str = "system";
+pub const NS_IMAGE: &str = "image";
+
+/// U3 (ratified 2026-06-16): the type matching each reserved namespace.
+pub const TYPE_ENV: &str = "Env";
+pub const TYPE_SYSTEM: &str = "System";
+pub const TYPE_IMAGE: &str = "Image";
+
+/// U3 (ratified 2026-06-16): project environment file (`env` namespace) and the
+/// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
+pub const ENV_FILE: &str = "env.jet";
+pub const CONFIG_FILE: &str = "config.jet";
+
+/// U4 (ratified 2026-06-16): import-tree discovery builtin — `find("./modules")`
+/// auto-discovers and merges every `.jet` module in the tree.
+pub const BUILTIN_FIND: &str = "find";
+
+/// U6 (ratified 2026-06-16): package value type, and the `provider@target`
+/// source-ref separator (`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`).
+/// Provider names reuse REF_SOURCE_* (github / path / nixpkgs).
+pub const TYPE_PKG: &str = "Pkg";
+pub const REF_PROVIDER_AT: &str = "@";
+
+/// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
+/// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`
+/// (and `pack.lock`); the manifest reshape chunk migrates the old paths.
+pub const UNIFIED_LOCK_FILE: &str = ".jet/lock";
+
+/// S52 (ratified M12; amended 2026-06-16, U2): the single shared, content-
+/// addressed store ("hangar"), global and never relocated.
+pub const HANGAR_DIR: &str = "/etc/jet/hangar";

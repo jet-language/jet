@@ -209,7 +209,11 @@ fn line_id(line: &str) -> Option<String> {
     let rest = &line[2..];
     let end = rest.find(' ').or_else(|| rest.find('—'))?;
     let id = &rest[..end];
-    if (id.starts_with('S') || id.starts_with('N')) && id[1..].chars().all(|c| c.is_ascii_digit()) {
+    // S/N decisions (language surface) and U decisions (unified ecosystem,
+    // U1–U7) are enforced. D-JPK* IDs start with `D` and are left alone.
+    if (id.starts_with('S') || id.starts_with('N') || id.starts_with('U'))
+        && id[1..].chars().all(|c| c.is_ascii_digit())
+    {
         Some(id.to_string())
     } else {
         None
@@ -224,7 +228,7 @@ fn parse_syntax_rs_status(syntax: &str) -> BTreeMap<String, String> {
             continue;
         }
         let rest = line.trim_start_matches('/').trim();
-        if !rest.starts_with('S') && !rest.starts_with('N') {
+        if !rest.starts_with('S') && !rest.starts_with('N') && !rest.starts_with('U') {
             continue;
         }
         let id_end = rest
