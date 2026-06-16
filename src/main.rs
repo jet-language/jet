@@ -28,7 +28,7 @@ usage:
   {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
   {bin} run   <file.{ext}> a b      extra words become program arguments
   {bin} test  <file|dir>            compile and run top-level test blocks
-  {bin} new   <name>                create a new project folder with jet.toml
+  {bin} new   <name>                create a new project folder with pack.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
@@ -175,7 +175,7 @@ fn main() {
                         }
                     }
                     eprintln!(
-                        "error: no file given and no `jet.toml` found in this directory or above"
+                        "error: no file given and no `pack.jet` found in this directory or above"
                     );
                     eprintln!(
                         " fix: run `jet {} <file.{}>` or cd into a project",
@@ -203,7 +203,7 @@ fn main() {
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
             eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in jet.toml");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pack.jet");
             exit(1);
         }
         _ => {
@@ -375,15 +375,15 @@ fn run_new(name: &str, annotated: bool) {
         eprintln!("error: `{}` already exists", name);
         exit(1);
     }
-    // Create: <name>/jet.toml, <name>/.jet/main.jet, <name>/.gitignore
+    // Create: <name>/pack.jet, <name>/.jet/main.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
         exit(1);
     });
     let manifest_text = jet::manifest::new_template(name, annotated);
-    fs::write(dir.join("jet.toml"), manifest_text).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write jet.toml: {}", e);
+    fs::write(dir.join(jet::syntax::PACK_FILE), manifest_text).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
     let main_src = "fn main() {\n    print(\"hello, world\");\n}\n";
@@ -396,7 +396,7 @@ fn run_new(name: &str, annotated: bool) {
         exit(1);
     });
     println!("created {}/", name);
-    println!("  jet.toml");
+    println!("  {}", jet::syntax::PACK_FILE);
     println!("  .jet/main.jet");
     println!("  .gitignore");
     println!("next: cd {} && {} run", name, jet::syntax::BINARY_NAME);
@@ -409,7 +409,7 @@ fn run_new(name: &str, annotated: bool) {
 fn run_add(raw_args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `jet.toml` found — run `jet add` inside a project");
+        eprintln!("error: no `pack.jet` found — run `jet add` inside a project");
         eprintln!(" fix: run `jet new <name>` to create a project first");
         exit(1);
     });
@@ -463,17 +463,17 @@ fn run_add(raw_args: &[String]) {
     };
 
     // Load the manifest, add the dep, write back.
-    let toml_path = root.join("jet.toml");
-    let raw = fs::read_to_string(&toml_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read jet.toml: {}", e);
+    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
     let updated = jet::manifest::add_dependency(&raw, dep_name, &spec);
-    fs::write(&toml_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write jet.toml: {}", e);
+    fs::write(&pack_path, updated).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
-    println!("added `{}` to jet.toml", dep_name);
+    println!("added `{}` to {}", dep_name, jet::syntax::PACK_FILE);
 
     // Auto-fetch.
     do_fetch(&root, false);
@@ -482,21 +482,21 @@ fn run_add(raw_args: &[String]) {
 fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `jet.toml` found");
+        eprintln!("error: no `pack.jet` found");
         exit(1);
     });
 
-    let toml_path = root.join("jet.toml");
-    let raw = fs::read_to_string(&toml_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read jet.toml: {}", e);
+    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
     let updated = jet::manifest::remove_dependency(&raw, dep_name);
-    fs::write(&toml_path, updated).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write jet.toml: {}", e);
+    fs::write(&pack_path, updated).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
-    println!("removed `{}` from jet.toml", dep_name);
+    println!("removed `{}` from {}", dep_name, jet::syntax::PACK_FILE);
 
     // Re-fetch to update lock.
     do_fetch(&root, false);
@@ -505,7 +505,7 @@ fn run_remove(dep_name: &str) {
 fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `jet.toml` found — run `jet fetch` inside a project");
+        eprintln!("error: no `pack.jet` found — run `jet fetch` inside a project");
         exit(1);
     });
     do_fetch(&root, locked);
@@ -514,19 +514,19 @@ fn run_fetch(locked: bool) {
 fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `jet.toml` found");
+        eprintln!("error: no `pack.jet` found");
         exit(1);
     });
 
-    let toml_path = root.join("jet.toml");
-    let raw = fs::read_to_string(&toml_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read jet.toml: {}", e);
+    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
-    let mf = jet::manifest::parse(&toml_path, &raw).unwrap_or_else(|d| {
+    let mf = jet::manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
         eprintln!(
             "{}",
-            jet::render_diagnostics(&toml_path.display().to_string(), &raw, &[d])
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
         );
         exit(1);
     });
@@ -546,7 +546,7 @@ fn run_update(dep: Option<&str>) {
         }
         Err(diags) => {
             let src = String::new();
-            eprint!("{}", jet::render_diagnostics("jet.toml", &src, &diags));
+            eprint!("{}", jet::render_diagnostics(jet::syntax::PACK_FILE, &src, &diags));
             exit(1);
         }
     }
@@ -592,15 +592,15 @@ fn run_gc() {
 }
 
 fn do_fetch(root: &Path, locked: bool) {
-    let toml_path = root.join("jet.toml");
-    let raw = fs::read_to_string(&toml_path).unwrap_or_else(|e| {
-        eprintln!("error: couldn't read jet.toml: {}", e);
+    let pack_path = root.join(jet::syntax::PACK_FILE);
+    let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read {}: {}", jet::syntax::PACK_FILE, e);
         exit(1);
     });
-    let mf = jet::manifest::parse(&toml_path, &raw).unwrap_or_else(|d| {
+    let mf = jet::manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
         eprint!(
             "{}",
-            jet::render_diagnostics(&toml_path.display().to_string(), &raw, &[d])
+            jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
         );
         exit(1);
     });
@@ -619,7 +619,7 @@ fn do_fetch(root: &Path, locked: bool) {
             }
         }
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics("jet.toml", &raw, &diags));
+            eprint!("{}", jet::render_diagnostics(jet::syntax::PACK_FILE, &raw, &diags));
             exit(1);
         }
     }

@@ -350,9 +350,9 @@ pub const FOREIGN_AWAIT: &str = "await";
 pub const FOREIGN_MUTEX: &str = "Mutex";
 pub const FOREIGN_LOCK: &str = "lock";
 
-/// S52 (ratified M12): package manifest filename and lock filename.
-pub const MANIFEST_FILE: &str = "jet.toml";
-pub const LOCK_FILE: &str = "jet.lock";
+// S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the
+// manifest reshape chunk (U1/U2): the manifest is now `PACK_FILE` (`pack.jet`)
+// and the lockfile is `UNIFIED_LOCK_FILE` (`.jet/lock`). Clean break — no alias.
 
 /// S52 (ratified M12): package source root directory inside a project.
 pub const SOURCE_ROOT_DIR: &str = ".jet";

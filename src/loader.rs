@@ -2,7 +2,7 @@
 //!
 //! Resolves the import graph from an entry `.jet` file, detects cycles and
 //! ambiguous module names, and returns a `ProgramBundle` for sema/codegen.
-//! When a `jet.toml` is found in the project root (walked upward from entry),
+//! When a `pack.jet` is found in the project root (walked upward from entry),
 //! validates the manifest and wires package dep paths into module search (M12.1).
 
 use crate::ast::{ImportDecl, ImportKind, LoadedModule, ProgramBundle};
@@ -35,7 +35,7 @@ pub fn load_entry_with_overlay(
     };
     let entry_abs = normalize_path(&entry_abs);
 
-    // M12.1: walk upward from the entry file's directory to find jet.toml.
+    // M12.1: walk upward from the entry file's directory to find pack.jet.
     // If found, use that directory as project_root and validate the manifest.
     // If none found, fall back to the entry file's directory (R9 — single-file mode).
     let entry_dir = entry_abs
@@ -43,14 +43,14 @@ pub fn load_entry_with_overlay(
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
     let (project_root, pkg_dep_dirs) = if let Some(manifest_dir) = find_manifest_root(&entry_dir) {
-        // Found a jet.toml — validate it and collect dep source paths.
-        let toml_path = manifest_dir.join("jet.toml");
-        let raw = fs::read_to_string(&toml_path).unwrap_or_default();
-        match manifest::parse(&toml_path, &raw) {
+        // Found a pack.jet — validate it and collect dep source paths.
+        let pack_path = manifest_dir.join(syntax::PACK_FILE);
+        let raw = fs::read_to_string(&pack_path).unwrap_or_default();
+        match manifest::parse(&pack_path, &raw) {
             Err(d) => return Err(vec![d]),
             Ok(mf) => {
                 // Check toolchain constraint (E1208).
-                if let Err(d) = manifest::check_toolchain(&mf, &toml_path.display().to_string()) {
+                if let Err(d) = manifest::check_toolchain(&mf, &pack_path.display().to_string()) {
                     return Err(vec![d]);
                 }
 
@@ -139,11 +139,11 @@ pub fn load_entry_with_overlay(
     })
 }
 
-/// Walk upward from `start` to find the nearest directory containing `jet.toml`.
+/// Walk upward from `start` to find the nearest directory containing `pack.jet`.
 pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join("jet.toml").is_file() {
+        if dir.join(syntax::PACK_FILE).is_file() {
             return Some(dir);
         }
         match dir.parent() {

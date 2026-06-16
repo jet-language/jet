@@ -37,7 +37,7 @@ pub fn fetch(
     opts: &FetchOptions,
 ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
     // Validate toolchain constraint.
-    let manifest_path = project_root.join("jet.toml").display().to_string();
+    let manifest_path = project_root.join(syntax::PACK_FILE).display().to_string();
     if let Err(d) = check_toolchain(manifest, &manifest_path) {
         return Err(vec![d]);
     }
@@ -408,9 +408,9 @@ impl<'a> Resolver<'a> {
         match result {
             None => Err(vec![Diagnostic::error(
                 "E1206",
-                format!("dependency `{}` has no `jet.toml`", dep_name),
-                "every Jet package must have a `jet.toml` manifest".to_string(),
-                format!("add a `jet.toml` to `{}`", dir.display()),
+                format!("dependency `{}` has no `{}`", dep_name, crate::syntax::PACK_FILE),
+                format!("every Jet package must have a `{}` manifest", crate::syntax::PACK_FILE),
+                format!("add a `{}` to `{}`", crate::syntax::PACK_FILE, dir.display()),
                 None,
             )]),
             Some(Err(d)) => Err(vec![d]),
@@ -537,7 +537,7 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
             "E1203",
             format!("couldn't resolve git ref `{}` at `{}`", refname, url),
             "the git ref may not exist or the URL may be unreachable".to_string(),
-            "check the URL and ref name in jet.toml".to_string(),
+            format!("check the URL and ref name in {}", crate::syntax::PACK_FILE),
             None,
         ));
     }
@@ -548,7 +548,7 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
             "E1203",
             format!("git ref `{}` not found at `{}`", refname, url),
             "the tag or branch name must exist in the remote repository".to_string(),
-            "check the ref spelling in jet.toml".to_string(),
+            format!("check the ref spelling in {}", crate::syntax::PACK_FILE),
             None,
         ));
     }

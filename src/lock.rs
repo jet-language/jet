@@ -406,7 +406,8 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
         "E1202",
         "the lock file is out of date".to_string(),
         format!(
-            "`jet.toml` changed since `{}` was last written",
+            "`{}` changed since `{}` was last written",
+            syntax::PACK_FILE,
             syntax::UNIFIED_LOCK_FILE
         ),
         format!("run `jet fetch` to update `{}`", syntax::UNIFIED_LOCK_FILE),

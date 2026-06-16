@@ -74,8 +74,8 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     ));
     fs::create_dir_all(&root).unwrap();
     fs::write(
-        root.join("jet.toml"),
-        "[package]\nname = \"ffi_app\"\nversion = \"0.1.0\"\n",
+        root.join("pack.jet"),
+        "package: {\n    name: \"ffi_app\",\n    version: \"0.1.0\",\n}\n",
     )
     .unwrap();
     let path = root.join("main.jet");
@@ -85,7 +85,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     let shown = path.to_string_lossy();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
         panic!(
-            "inline FFI pin should work even when jet.toml exists:\n{}",
+            "inline FFI pin should work even when pack.jet exists:\n{}",
             jet::render_diagnostics(&shown, src, &diags)
         );
     });

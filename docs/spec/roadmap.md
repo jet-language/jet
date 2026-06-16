@@ -268,7 +268,7 @@ before work starts. None of these may compromise the v1 milestones.
 
 **Reconciled (manifest + architecture, amended 2026-06-15):**
 docs/plans/epoch-1/m12-packages.md is the single source of truth for v1
-Jet source-library package management (`jet add`, `jet.toml`, `jet.lock`).
+Jet source-library package management (`jet add`, `pack.jet`, `.jet/lock`).
 The binary/environment package-manager and OS track lives in
 docs/plans/jetpack-jetos/README.md: Phase 1 is independent
 `jetpack run/build/list/clean/add/remove`; Phase 2 is jetos on top of jetpack,

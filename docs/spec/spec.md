@@ -254,7 +254,7 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 **`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
 entry is a normal Jet signature plus **`= "rust::path"`** naming the target
 item. This source-level declaration is sufficient even inside a project with
-`jet.toml`; users do not need the package manager just to call a foreign
+`pack.jet`; users do not need the package manager just to call a foreign
 function. **`extern rust "std" { … }`** works for standard-library items with
 no extra dependency. Non-`std` crates require an exact version pin (**E0701**).
 

@@ -220,7 +220,7 @@ before continuing.
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
 | E1207 | jet   | registry dependency not yet supported (M12.2) |
-| E1208 | jet   | toolchain `[package].jet` incompatible (M12.1) |
+| E1208 | jet   | toolchain `package.jet` field incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
 
 ## Fan-out and fixed-size list diagnostics

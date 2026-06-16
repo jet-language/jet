@@ -210,7 +210,7 @@ import scoring as gradebook;          // same module, namespace gradebook
   for a module named after the **first** segment: either `name.jet` anywhere
   under the root, or a directory `name/` containing `name.jet` or `main.jet`.
   Skips `build/`, `target/`, and dot-directories. **Project root** = the
-  directory containing `jet.toml` when a manifest exists (M12); otherwise
+  directory containing `pack.jet` when a manifest exists (M12, U1); otherwise
   the directory of the **entry** `.jet` file. Ambiguous duplicate matches →
   **E0606** (lists every path found).
 
@@ -661,10 +661,11 @@ in Jet (build.zig style); `[rust-dependencies]` as a separate table name.
 becomes **`pack.jet`** (Jet syntax, replacing `jet.toml`) and the lockfile
 becomes the single **`.jet/lock`** (replacing `jet.lock` and `pack.lock`) inside
 the already-ratified `.jet/` managed folder; realized packages live in the
-shared **hangar** store at **`/etc/jet/hangar/`**. The TOML constants
-(`jet.toml` / `jet.lock`) remain in `src/syntax.rs` only until the manifest
-reshape chunk migrates the paths; the unified records above are the
-authoritative target. See `docs/plans/jetpack-jetos/unified-ecosystem.md`.
+shared **hangar** store at **`/etc/jet/hangar/`**. The manifest reshape chunk
+has since retired the old TOML constants (`jet.toml` / `jet.lock`) from
+`src/syntax.rs` — a clean break, no alias; `PACK_FILE` (`pack.jet`) and
+`UNIFIED_LOCK_FILE` (`.jet/lock`) are the only manifest/lock paths the compiler
+knows. See `docs/plans/jetpack-jetos/unified-ecosystem.md`.
 
 **S53 — Concurrency surface** *(ratified 2026-06-12; deferred past v1.0)*:
 **deferred to v2** — no tasks, channels, or `std/tasks` in v1. When
@@ -804,6 +805,30 @@ unknown source name is a friendly error listing the built-ins plus any declared
 names. Design + worked examples: `docs/plans/jetpack-jetos/native-resolver.md`.
 Rejected: a separate `packages_from("name", [...])` grouping (introduces a second
 way to attach a source; the inline `<source>:<package>` form is preferred).
+
+**D-JPK23 — git-dependency selector spelling in `pack.jet`'s `deps:` block**
+*(ratified 2026-06-16)*: a git dependency is an inline struct value reusing
+the struct-literal grammar `pack.jet` already has for `package:`/`deps:`:
+`name: { git: "<url>", tag: "<tag>" }`, `{ git: "<url>", branch: "<branch>" }`,
+or `{ git: "<url>", rev: "<rev>" }` — exactly one of `tag`/`branch`/`rev`.
+This generalizes to **any** git remote (not just GitHub), closing the gap
+where the `provider@target` grammar (`github@owner/repo/rev`) only covers
+github.com and carries one ambiguous trailing segment. `provider@target`
+stays the spelling for path/github/nixpkgs deps that don't need a selector;
+the inline-struct form is only for git deps that do. Rejected: B (query-style
+suffix on `provider@target`, e.g. `github@owner/repo?branch=main`) — a new
+`?key=value` sigil with no precedent elsewhere in Jet syntax; C (drop
+non-GitHub remotes and branch/tag tracking, rev-pin only) — a real capability
+regression from the `jet.toml` baseline. Worked example:
+```jet
+deps: {
+    textkit:  "1.2.0",
+    helpers:  path@../helpers,
+    parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
+    nightly:  { git: "https://github.com/acme/nightly", branch: "main" },
+    selfhost: { git: "https://git.example.com/acme/thing", rev: "abc123" },
+}
+```
 
 **D-JPK16 — Native-resolver posture & Nix-eval engine** *(ratified 2026-06-15)*:
 Jetpack's first-party **core** resolver owns realization; backends are providers
@@ -1043,45 +1068,6 @@ implementation milestone is pending.
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives (deferred) | post-1.0  |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
-| D-JPK23 | `pack.jet` git-dependency selector spelling (see note below) | blocks retiring `jet.toml`/`jet.lock` into `pack.jet`/`.jet/lock` (Step 3 of the jetpack build) |
-
-> **D-JPK23 — git-dependency selector spelling in `pack.jet`'s `deps:` block.**
-> The current `jet.toml` manifest (`manifest::DepSpec::Git`) supports an
-> arbitrary git remote URL plus an explicit selector kind: `{ git = "...",
-> tag = "v0.4.1" }`, `{ git = "...", branch = "main" }`, or `{ git = "...",
-> rev = "..." }` (tests/pkg.rs: `manifest_parse_dep_git_tag`,
-> `git_dep_branch_update_rewrites_lock`). The ratified U6 `provider@target`
-> ref grammar (`github@owner/repo/rev`) only covers **github.com** repos and
-> only carries one trailing path segment, with no way to say whether that
-> segment is a tag, a branch, or a commit rev — `github@NixOS/nixpkgs/nixos-24.05`
-> works today only because call sites treat the third segment positionally.
-> Wiring `pack.jet` in as the *sole* package manifest (retiring `jet.toml`)
-> needs this gap closed first, or git dependencies silently lose the
-> branch/tag distinction (a real regression, not a wording nit). Options:
->
-> 1. **Extend `provider@target` with a query-style suffix**: `github@owner/repo?branch=main`,
->    `github@owner/repo?tag=v0.4.1`, `github@owner/repo?rev=abc123` (bare
->    `owner/repo/rev` stays a shorthand for a pinned rev). Keeps everything as
->    one ref string; cost is a new `?key=value` sigil with no precedent
->    elsewhere in Jet syntax.
-> 2. **Generalize the provider to arbitrary git remotes**: add a `git`
->    provider alongside `github`/`path`/`nixpkgs` so non-GitHub remotes work
->    too, spelled `git@<url>#<selector-kind>=<value>` or as an inline struct
->    value (`helpers: { git: "https://...", branch: "main" }`, reusing the
->    Jet struct-literal grammar already used for `package:`/`deps:` blocks).
->    Inline-struct keeps the selector-kind keys self-explanatory; cost is two
->    different dep-value shapes (bare ref vs. struct) in one block.
-> 3. **Drop arbitrary git-remote support; GitHub-only, rev-only** — accept
->    the regression, require pinned commit revs for non-GitHub or
->    branch/tag-tracking dependencies. Simplest, but a real capability loss
->    for any project currently tracking a branch.
->
-> Recommendation: **option 2** (inline-struct git deps) — it reuses syntax
-> the manifest grammar already has (struct literals), keeps `provider@target`
-> clean for the common case, and loses nothing from the current `jet.toml`
-> capability set. Not implemented pending owner ratification; `packmanifest.rs`
-> currently only supports options whose `deps:` values map cleanly
-> (`"1.2.0"` registry versions, `path@../local`) — see its module doc.
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the
@@ -1229,3 +1215,4 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | S52 | amended: `pack.jet`/`.jet/lock` (U1/U2); hangar store `/etc/jet/hangar` | owner |
 | 2026-06-16 | S75 | fan-out operator `f.[ … ]`; `.[` adjacency; E0961/E0962        | owner |
 | 2026-06-16 | S76 | fixed-size list type `[T#N]`; `#` separator; erase to Vec; E0963–E0965 | owner |
+| 2026-06-16 | D-JPK23 | git deps in `pack.jet` `deps:` are inline structs `{ git: "...", tag/branch/rev: "..." }`; any remote, not just GitHub | owner |

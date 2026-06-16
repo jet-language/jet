@@ -360,7 +360,7 @@ decidable at a glance (owner decision-doc style).
 | **D-JPK20** | File roles & names | **Ratified 2026-06-16:** `pack.jet` (package), `env.jet` (project env), `config.jet` (system; default `~/.jet/`). Revises D-JPK8/13. | **Ratified** |
 | **D-JPK21** | Module shape & disable | **Ratified 2026-06-16:** explicit `module name {}`, multiple per file; disable via leading `_`. Supersedes jetos D-OS1. | **Ratified** |
 | **D-JPK22** | Import tree + store | **Ratified 2026-06-16:** `find("./modules")` auto-discovery; one global **hangar** store `/etc/jet/hangar/`; `.jet/` managed folder; `.jet/lock`. | **Ratified** |
-| **D-JPK23** | git-dependency selector spelling in `pack.jet`'s `deps:` block (tag/branch/rev; current `jet.toml` supports arbitrary git remotes, U6 `provider@target` only covers github.com with one ambiguous trailing segment) | Open — see docs/spec/syntax-decisions.md; blocks retiring `jet.toml`/`jet.lock` into `pack.jet`/`.jet/lock` (rec: inline-struct git deps, option 2) | **Open — owner input needed** |
+| **D-JPK23** | git-dependency selector spelling in `pack.jet`'s `deps:` block | **Ratified 2026-06-16:** inline struct, any git remote — `name: { git: "<url>", tag/branch/rev: "<value>" }`. See docs/spec/syntax-decisions.md for the worked example. | **Ratified** |
 
 The authoring surface, namespaces (`env`/`system`/`image`), types
 (`Env`/`System`/`Image`/`Pkg`), merge rules, and filesystem model are the
