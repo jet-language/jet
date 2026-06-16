@@ -1,6 +1,6 @@
-// functional-pack.jet
+// functional-env.jet
 //
-// A runnable sketch of a future `pack.jet` that is deliberately functional:
+// A runnable sketch of a future `env.jet` that is deliberately functional:
 // data in, transformed data out. There are no builder objects, methods, or
 // mutable shared config; each function returns a new value.
 import std.json as json;
@@ -99,7 +99,7 @@ fn prompt_json(take label: String) -> JSON {
     return JSON.Object(m);
 }
 pub fn shell() -> [JSON] {
-    val pack = Pack {sources: [nix_source("stable", "github:NixOS/nixpkgs/nixos-24.05"), nix_source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable"), core_source("mine", "path:../jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"};
+    val pack = Pack {sources: [nix_source("stable", "github:NixOS/nixpkgs/nixos-24.05"), nix_source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable"), core_source("mine", "path:./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"};
     var directives = source_directives(pack.sources.clone());
     directives.push(packages_json(pack.clone()));
     directives.push(prompt_json(pack.prompt.clone()));

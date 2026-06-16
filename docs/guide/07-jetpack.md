@@ -45,25 +45,25 @@ Every package is named `<source>:<package/path>`. You never type Nix's `#`.
 ```
 jetpack run   <source>:<package>        enter a temporary shell with that package
 jetpack run   <source>:<package> -- cmd run a command in that env, then exit
-jetpack run                            enter the shell described by ./pack.jet
+jetpack run                            enter the shell described by ./env.jet
 jetpack build [<source>:<package>]     realize a package/environment, don't enter
 jetpack list                           show realized packages
 jetpack clean                          drop unused store records
-jetpack add    <source>:<package>      add a package to ./pack.jet
-jetpack remove <source>:<package>      remove a package from ./pack.jet
+jetpack add    <source>:<package>      add a package to ./env.jet
+jetpack remove <source>:<package>      remove a package from ./env.jet
 ```
 
 `jetpack run <ref> -- cmd…` is the one-shot form: it runs `cmd` inside the
 environment and exits with the command's status, never opening a shell.
 
-## The pack file (`pack.jet`)
+## The env file (`env.jet`)
 
-A project directory can describe its environment in `pack.jet` — Jet's
+A project directory can describe its environment in `env.jet` — Jet's
 equivalent of `flake.nix`. `jetpack run` with no ref enters the shell it
 describes; `jetpack add/remove` edit it.
 
 ```jet
-// pack.jet — a Jetpack dev environment (Jet's flake equivalent)
+// env.jet — a Jetpack dev environment (Jet's flake equivalent)
 import jetpack as pkg;
 
 pub fn shell() -> [JSON] {
@@ -75,7 +75,7 @@ pub fn shell() -> [JSON] {
 }
 ```
 
-When `pack.jet` exists it takes priority over a `flake.nix`; a `flake.nix`
+When `env.jet` exists it takes priority over a `flake.nix`; a `flake.nix`
 fallback is translated by Jetpack.
 
 ### Named sources
@@ -115,10 +115,10 @@ pkg.source("mine", "path:../jet-pkgs", "core");
 pkg.packages(["mine:hello"]);
 ```
 
-The repo at that path has its own `pack.jet` declaring what it provides:
+The repo at that path has its own `env.jet` declaring what it provides:
 
 ```jet
-// jet-pkgs/pack.jet
+// jet-pkgs/env.jet
 pkg.package("hello", "./pkgs/hello");   // name → source subpath
 ```
 

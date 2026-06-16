@@ -52,6 +52,11 @@ fn example_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack/fixtures")
 }
 
+/// The committed example project dir (`env.jet` + `jet-pkgs/`).
+fn example_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/jetpack")
+}
+
 /// Write a provider fixture whose `out` points at a real dir we control, so a
 /// `-- cmd` invocation can actually execute a binary from the realized env.
 fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
@@ -371,6 +376,41 @@ fn core_provider_runs_first_party_package_without_nix() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
         "hello from jet-pkgs"
+    );
+}
+
+#[test]
+fn committed_example_builds_offline_end_to_end() {
+    // I5: the committed `examples/jetpack/` project is the executable spec for
+    // a real env.jet. `jetpack build` with no ref reads env.jet and realizes
+    // everything it declares — nix-backed named sources (`stable:ripgrep`,
+    // `unstable:neovim`) resolved from the committed fixtures, plus a
+    // first-party `mine:hello` realized through the `core` provider with no
+    // nix. The whole thing runs fully offline. The store lives under a scratch
+    // JETPACK_ROOT, so nothing is written back into the example dir.
+    let root = Scratch::new("example-e2e");
+    let output = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for pkg in ["ripgrep", "neovim", "hello"] {
+        assert!(
+            stderr.contains(pkg),
+            "expected `{pkg}` in build output: {stderr}"
+        );
+    }
+    assert!(
+        stderr.contains("built 3 package(s)"),
+        "stderr: {stderr}"
     );
 }
 
