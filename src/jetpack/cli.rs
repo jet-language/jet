@@ -149,7 +149,8 @@ fn realize_ref(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
-    let store_dir = roots.store_dir();
+    // The provider writes store/source-cache records under the hangar (U2).
+    let store_dir = roots.hangar_dir();
     let ctx = provider::Ctx {
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,

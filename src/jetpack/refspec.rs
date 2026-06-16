@@ -199,6 +199,59 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
     })
 }
 
+// ──────────────────────────────────────────────
+// `provider@target` source refs (U6, was D-JPK18).
+//
+// The typed authoring surface (pack.jet `sources:`/`packages:`) writes source
+// refs as `provider@target` — `github@owner/repo/rev`, `path@../local`,
+// `nixpkgs@channel`. This is distinct from the Phase-1 command-line
+// `source:package` form above (D-JPK18 keeps the colon classifier for
+// compatibility): a provider ref names *where a source comes from*, while a
+// `source:package` ref names *which package within a source*.
+//
+// This is the foundational classifier (JPK-0 / Chunk 1). Pack-file parsing and
+// the user-facing diagnostics that render these errors land with the manifest
+// reshape + module surface chunks; until then the typed `RefError` is internal.
+// ──────────────────────────────────────────────
+
+/// A classified `provider@target` source ref. `provider` is a built-in source
+/// (github / path / nixpkgs); `target` is the upstream locator the provider
+/// understands (a repo+rev, a local path, a channel/pin).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRef {
+    pub provider: Source,
+    pub target: String,
+    pub raw: String,
+}
+
+/// Classify a `provider@target` source ref against the built-in providers.
+/// The split is on the *first* `@` so a target may itself contain `@`.
+pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
+    let raw = raw.trim();
+    let (provider, target) = match raw.split_once(syntax::REF_PROVIDER_AT) {
+        Some(parts) => parts,
+        None => return Err(RefError::MissingSeparator(raw.to_string())),
+    };
+    if provider.is_empty() || target.is_empty() {
+        return Err(RefError::EmptyHalf(raw.to_string()));
+    }
+    let provider = match Source::builtin(provider) {
+        Some(b) => b,
+        None => {
+            return Err(RefError::UnknownSource {
+                source: provider.to_string(),
+                raw: raw.to_string(),
+                declared: Vec::new(),
+            })
+        }
+    };
+    Ok(ProviderRef {
+        provider,
+        target: target.to_string(),
+        raw: raw.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +346,65 @@ mod tests {
         assert!(classify_in("nixpkgs:fd", &table).is_ok());
         assert!(Source::is_builtin("nixpkgs"));
         assert!(!Source::is_builtin("stable"));
+    }
+
+    // ── provider@target source refs (U6) ──
+
+    #[test]
+    fn provider_ref_github_with_rev() {
+        let r = classify_provider_ref("github@NixOS/nixpkgs/nixos-24.05").unwrap();
+        assert_eq!(r.provider, Source::Github);
+        assert_eq!(r.target, "NixOS/nixpkgs/nixos-24.05");
+    }
+
+    #[test]
+    fn provider_ref_local_path() {
+        let r = classify_provider_ref("path@../helpers").unwrap();
+        assert_eq!(r.provider, Source::Path);
+        assert_eq!(r.target, "../helpers");
+    }
+
+    #[test]
+    fn provider_ref_nixpkgs_channel() {
+        let r = classify_provider_ref("nixpkgs@nixpkgs-unstable").unwrap();
+        assert_eq!(r.provider, Source::Nixpkgs);
+        assert_eq!(r.target, "nixpkgs-unstable");
+    }
+
+    #[test]
+    fn provider_ref_splits_on_first_at() {
+        // A target may contain `@` (e.g. a future user@host form); only the
+        // first `@` separates provider from target.
+        let r = classify_provider_ref("path@a@b").unwrap();
+        assert_eq!(r.provider, Source::Path);
+        assert_eq!(r.target, "a@b");
+    }
+
+    #[test]
+    fn provider_ref_rejects_missing_at() {
+        assert!(matches!(
+            classify_provider_ref("github/NixOS/nixpkgs"),
+            Err(RefError::MissingSeparator(_))
+        ));
+    }
+
+    #[test]
+    fn provider_ref_rejects_empty_halves() {
+        assert!(matches!(
+            classify_provider_ref("@target"),
+            Err(RefError::EmptyHalf(_))
+        ));
+        assert!(matches!(
+            classify_provider_ref("github@"),
+            Err(RefError::EmptyHalf(_))
+        ));
+    }
+
+    #[test]
+    fn provider_ref_rejects_unknown_provider() {
+        match classify_provider_ref("gitlab@owner/repo") {
+            Err(RefError::UnknownSource { source, .. }) => assert_eq!(source, "gitlab"),
+            other => panic!("expected UnknownSource, got {other:?}"),
+        }
     }
 }

@@ -1,9 +1,15 @@
-//! Jetpack state + store roots (D-JPK12).
+//! Jetpack state + store roots (D-JPK12; hangar per unified ecosystem U2).
 //!
-//! End-state roots are system-scoped: `/etc/jet/` for config/state and
-//! `/etc/jet/store/` for the store. Jetpack *owns* the lifecycle even when the
-//! Nix provider realizes bytes into `/nix/store` — a Jetpack store entry is a
-//! small metadata record under our root that points at the realized output.
+//! End-state roots are system-scoped: `/etc/jet/` for config/state and the one
+//! global, content-addressed store — the **hangar** — at `/etc/jet/hangar/`
+//! (`syntax::HANGAR_DIR`). Jetpack *owns* the lifecycle even when the Nix
+//! provider realizes bytes into `/nix/store` — a Jetpack hangar entry is a small
+//! metadata record under our root that points at the realized output.
+//!
+//! A project also has a project-local **`.jet/` managed folder**
+//! (`syntax::SOURCE_ROOT_DIR`) holding the single lockfile (`.jet/lock`),
+//! caches, and GC roots — never the realized packages, which live in the shared
+//! hangar.
 //!
 //! Permissions: `/etc/jet` is usually not writable by a normal user, so the
 //! root resolves with a dev-mode fallback. `JETPACK_ROOT` overrides everything
@@ -11,8 +17,12 @@
 
 use super::json::{self, Json};
 use crate::sha256;
+use std::path::{Path, PathBuf};
 use std::fs;
-use std::path::PathBuf;
+
+/// The subdir of the resolved root that holds the content-addressed store.
+/// Mirrors the trailing segment of `syntax::HANGAR_DIR` (`/etc/jet/hangar`).
+const HANGAR_SUBDIR: &str = "hangar";
 
 /// The resolved root, plus whether we fell back out of `/etc/jet`.
 pub struct Roots {
@@ -21,9 +31,21 @@ pub struct Roots {
 }
 
 impl Roots {
-    pub fn store_dir(&self) -> PathBuf {
-        self.root.join("store")
+    /// The global content-addressed store (hangar) under this root.
+    pub fn hangar_dir(&self) -> PathBuf {
+        self.root.join(HANGAR_SUBDIR)
     }
+}
+
+/// The project-local `.jet/` managed folder for `project` (lockfile, caches,
+/// GC roots). Never holds realized packages — those live in the shared hangar.
+pub fn managed_dir(project: &Path) -> PathBuf {
+    project.join(crate::syntax::SOURCE_ROOT_DIR)
+}
+
+/// The single unified lockfile path for `project` (`.jet/lock`, U2).
+pub fn lock_path(project: &Path) -> PathBuf {
+    managed_dir(project).join("lock")
 }
 
 const SYSTEM_ROOT: &str = "/etc/jet";
@@ -67,9 +89,9 @@ fn dev_root() -> PathBuf {
 fn can_write(dir: &std::path::Path) -> bool {
     if dir.exists() {
         // Probe by trying to create the store subdir.
-        fs::create_dir_all(dir.join("store")).is_ok()
+        fs::create_dir_all(dir.join(HANGAR_SUBDIR)).is_ok()
     } else {
-        fs::create_dir_all(dir.join("store")).is_ok()
+        fs::create_dir_all(dir.join(HANGAR_SUBDIR)).is_ok()
     }
 }
 
@@ -120,7 +142,7 @@ pub fn record(
         out: out.to_string(),
         bin: bin.to_string(),
     };
-    let dir = roots.store_dir().join(&id);
+    let dir = roots.hangar_dir().join(&id);
     fs::create_dir_all(&dir)?;
     fs::write(dir.join("meta.json"), entry.meta_json())?;
     Ok(entry)
@@ -129,7 +151,7 @@ pub fn record(
 /// Read all recorded store entries (skipping malformed ones quietly).
 pub fn list(roots: &Roots) -> Vec<StoreEntry> {
     let mut out = Vec::new();
-    let store = roots.store_dir();
+    let store = roots.hangar_dir();
     let Ok(rd) = fs::read_dir(&store) else {
         return out;
     };
@@ -162,7 +184,7 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
 /// recorded entry. The realized Nix outputs themselves live in `/nix/store`
 /// and are reclaimed by `nix store gc`; Jetpack only drops its own records.
 pub fn clean(roots: &Roots) -> std::io::Result<usize> {
-    let store = roots.store_dir();
+    let store = roots.hangar_dir();
     let mut removed = 0;
     if let Ok(rd) = fs::read_dir(&store) {
         for ent in rd.flatten() {
