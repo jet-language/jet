@@ -314,6 +314,20 @@ CLI.
 | E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
 | E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
 
+## CLI diagnostics (E2-M3 developer command UX)
+
+These are produced by the `jet` driver itself, not by checking a `.jet`
+file, so they have no source span. They use the same what/why/fix voice
+and exit with code **2** (usage error — see "Exit codes" in
+docs/spec/architecture.md). Both carry a "did you mean" when a known
+command/flag is within edit distance 2. Their golden transcripts live in
+`tests/cli/` (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a command like `run`, `check`, or `new`. | Did you mean `jet {closest}`? Run `jet help` to see them all. |
+| E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
+
 ## Process for a new diagnostic
 
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.

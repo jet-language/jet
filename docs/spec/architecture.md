@@ -76,6 +76,27 @@
   helper templates. A program that imports every std module but calls none
   should stay in hello-world size territory.
 
+## Exit codes (stable contract)
+
+The `jet` driver returns one of a small, stable set of exit codes so
+scripts and CI can branch on the outcome without parsing output. This
+table is pinned by the `tests/cli/` transcripts and is part of the public
+contract — codes are never repurposed.
+
+| Code | Meaning | Who produces it |
+|------|---------|-----------------|
+| `0`   | Success. (Includes the no-args greeting — orientation, not an error.) | driver |
+| `1`   | User error: a reported diagnostic, a failed `check`, a missing file, a failed `test`. | driver |
+| `2`   | Usage error: unknown subcommand (E2101), unknown/ambiguous flag (E2102), or a missing required argument. | driver |
+| `70`  | A built program panicked at runtime (`panic`/`require`, S36). Forwarded through by `jet run`. | the user's program |
+| `101` | Internal compiler error (I2/R5): rustc rejected generated code. A P0 bug, never the user's fault. | driver |
+
+Presentation is TTY-aware (E2-M3): color and progress appear only when
+the relevant stream is a terminal. `NO_COLOR` and `--color=never` force
+plain output; `FORCE_COLOR` and `--color=always` force color; `--color=auto`
+(the default) defers to TTY detection. Piped or CI output is always plain,
+deterministic, ANSI-free bytes — scripts never parse escape sequences.
+
 ## Testing strategy
 
 1. **ui snapshots** (tests/ui.rs): every diagnostic's exact text, pinned.

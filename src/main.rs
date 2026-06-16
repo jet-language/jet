@@ -6,8 +6,136 @@
 //! as an internal compiler error in jet.
 
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+
+/// Stable CLI exit codes (E2-M3, docs/spec/architecture.md "Exit codes").
+/// Scripts depend on these; treat them as a contract.
+mod exit_code {
+    /// Everything went fine.
+    pub const OK: i32 = 0;
+    /// The user's program or input had a problem we reported (E-codes, failed
+    /// checks, missing files, failed tests).
+    pub const USER_ERROR: i32 = 1;
+    /// The command line itself was wrong (unknown subcommand/flag, missing
+    /// argument). The greeting is NOT this — running `jet` bare is fine.
+    pub const USAGE: i32 = 2;
+    // 70 — a built program panicked at runtime (S36); produced by the program,
+    //      not the driver, and forwarded through by `jet run`.
+    // 101 — internal compiler error (I2): rustc rejected generated code. Set in
+    //       `build()` when the backend fails.
+}
+
+/// Every subcommand the driver dispatches, for `jet` help and the E2101
+/// "did you mean" suggester. The package-management verbs live here too so a
+/// typo like `jet fecth` lands on `fetch`.
+const KNOWN_COMMANDS: &[&str] = &[
+    "check", "build", "run", "test", "new", "dev", "fmt", "fix", "bind", "lsp", "version", "help",
+    "upgrade", "add", "remove", "fetch", "update", "store", "gc",
+    // `install` is a known-but-redirected verb: it has its own teaching error
+    // (E0043 → use `jet fetch`), so it must pass the E2101 gate to reach it.
+    "install",
+];
+
+/// Known long flags, for the E2102 unknown-flag suggester.
+const KNOWN_FLAGS: &[&str] = &[
+    "--version",
+    "--emit-rust",
+    "--check",
+    "--small",
+    "--locked",
+    "--annotated",
+    "--bench",
+    "--color",
+    "--path",
+    "--git",
+    "--tag",
+    "--branch",
+    "--rev",
+    "--pkg",
+    "--out",
+];
+
+/// Levenshtein edit distance (same algorithm sema.rs uses for "did you mean").
+/// Kept local to the driver because the sema copy is private and the CLI does
+/// not render through the `Diagnostic` type.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i];
+        for j in 1..=b.len() {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost));
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// Closest candidate within edit distance 2 (the diagnostics.md threshold).
+fn closest<'a>(word: &str, candidates: &[&'a str]) -> Option<&'a str> {
+    let mut best: Option<(&str, usize)> = None;
+    for &cand in candidates {
+        let d = edit_distance(word, cand);
+        if d <= 2 && best.map_or(true, |(_, bd)| d < bd) {
+            best = Some((cand, d));
+        }
+    }
+    best.map(|(c, _)| c)
+}
+
+/// When color is allowed (E2-M3 TTY-aware presentation). Precedence:
+/// `--color=never`/`NO_COLOR` force off, `--color=always`/`FORCE_COLOR` force
+/// on, otherwise color only when the stream is a real terminal. Scripts (piped
+/// or in CI) get plain deterministic bytes and never have to parse ANSI.
+#[derive(Clone, Copy)]
+enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
+
+fn color_choice(raw: &[String]) -> ColorChoice {
+    // Last `--color=...` (or bare `--color`) on the line wins.
+    let mut choice = None;
+    for a in raw {
+        if a == "--color" {
+            choice = Some(ColorChoice::Auto);
+        } else if let Some(v) = a.strip_prefix("--color=") {
+            choice = Some(match v {
+                "always" => ColorChoice::Always,
+                "never" => ColorChoice::Never,
+                _ => ColorChoice::Auto,
+            });
+        }
+    }
+    choice.unwrap_or(ColorChoice::Auto)
+}
+
+fn use_color(choice: ColorChoice, stream_is_tty: bool) -> bool {
+    match choice {
+        ColorChoice::Never => false,
+        ColorChoice::Always => true,
+        ColorChoice::Auto => {
+            if std::env::var_os("NO_COLOR").is_some() {
+                false
+            } else if std::env::var_os("FORCE_COLOR").is_some() {
+                true
+            } else {
+                stream_is_tty
+            }
+        }
+    }
+}
+
+/// True when the driver may color stderr (where diagnostics and the greeting
+/// go). Resolved once from argv + environment + TTY state.
+fn stderr_color(raw: &[String]) -> bool {
+    use_color(color_choice(raw), std::io::stderr().is_terminal())
+}
 
 #[derive(Clone, Copy)]
 enum BuildProfile {
@@ -66,12 +194,104 @@ flags:
     )
 }
 
+/// E2-M3 examples-first front door: `jet` with no args greets and shows the
+/// few commands that matter, then exits 0. Not a usage error — orientation.
+fn greeting() -> String {
+    format!(
+        "\
+Welcome to {lang}! (v{ver})
+
+Get started:
+  {bin} new   <name>           create a new project
+  {bin} run   <file.{ext}>         build and run a file (or a project)
+  {bin} check <file.{ext}>         look for problems, build nothing
+
+  {bin} help                   see every command
+",
+        bin = jet::syntax::BINARY_NAME,
+        lang = jet::syntax::LANG_NAME,
+        ver = env!("CARGO_PKG_VERSION"),
+        ext = jet::syntax::FILE_EXT,
+    )
+}
+
+/// E2101 — an unknown subcommand, with a "did you mean" when one is close.
+/// Renders in the diagnostics.md what/why/fix voice and exits 2 (usage).
+fn unknown_subcommand(cmd: &str, color: bool) -> ! {
+    let (red, bold, gray, reset) = palette(color);
+    let bin = jet::syntax::BINARY_NAME;
+    eprintln!(
+        "{red}Error{reset} [E2101]: {bold}`{cmd}` isn't a {bin} command.{reset}"
+    );
+    eprintln!(" Why: every {bin} run starts with a command like `run`, `check`, or `new`.");
+    match closest(cmd, KNOWN_COMMANDS) {
+        Some(s) => eprintln!(" Fix: did you mean `{bin} {s}`? Run `{bin} help` to see them all."),
+        None => eprintln!(" Fix: run `{bin} help` to see every command."),
+    }
+    let _ = gray;
+    exit(exit_code::USAGE);
+}
+
+/// E2102 — an unknown (or ambiguous) flag, with a suggestion when one is close.
+fn unknown_flag(flag: &str, color: bool) -> ! {
+    let (red, bold, gray, reset) = palette(color);
+    let bin = jet::syntax::BINARY_NAME;
+    let head = flag.split('=').next().unwrap_or(flag);
+    eprintln!(
+        "{red}Error{reset} [E2102]: {bold}`{flag}` isn't a flag {bin} understands.{reset}"
+    );
+    eprintln!(" Why: {bin} ignores no flags silently, so a typo can't quietly change a build.");
+    match closest(head, KNOWN_FLAGS) {
+        Some(s) => eprintln!(" Fix: did you mean `{s}`? Run `{bin} help` to see the flags."),
+        None => eprintln!(" Fix: run `{bin} help` to see the flags {bin} accepts."),
+    }
+    let _ = gray;
+    exit(exit_code::USAGE);
+}
+
+/// Minimal ANSI palette for driver-level diagnostics. Empty strings when color
+/// is off, so piped/CI output is plain deterministic bytes (E2-M3).
+fn palette(color: bool) -> (&'static str, &'static str, &'static str, &'static str) {
+    if color {
+        ("\x1b[31m", "\x1b[1m", "\x1b[90m", "\x1b[0m")
+    } else {
+        ("", "", "", "")
+    }
+}
+
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+
+    // E2-M3: a bare `jet` greets and orients. This is NOT a usage error — it is
+    // the front door, so it exits 0. (A genuine usage problem still exits 2.)
+    if raw.is_empty() {
+        print!("{}", greeting());
+        exit(exit_code::OK);
+    }
 
     if raw.iter().any(|a| a == "--version") {
         run_version();
         return;
+    }
+
+    // E2102: validate long flags up front so a typo'd flag teaches instead of
+    // being silently dropped by the positional filter below. `--color[=...]` is
+    // the presentation flag; it is known and consumed here. Commands that own
+    // their own flag universe (`dev` → jetpack, `bind`) are exempt: they parse
+    // and validate flags themselves further down.
+    let first_word = raw
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(|s| s.as_str());
+    let forwards_flags = matches!(first_word, Some("dev") | Some("bind"));
+    if !forwards_flags {
+        if let Some(bad) = raw.iter().find(|a| {
+            a.starts_with("--")
+                && a.as_str() != "--"
+                && !KNOWN_FLAGS.contains(&a.split('=').next().unwrap_or(a.as_str()))
+        }) {
+            unknown_flag(bad, stderr_color(&raw));
+        }
     }
 
     let emit_rust = raw.iter().any(|a| a == "--emit-rust");
@@ -107,10 +327,18 @@ fn main() {
     let cmd = match args.first() {
         Some(c) => c.as_str(),
         None => {
-            eprint!("{}", usage());
-            exit(2);
+            // Only flags were given (e.g. `jet --color=always`). Greet rather
+            // than error — there is no subcommand to be wrong about.
+            print!("{}", greeting());
+            exit(exit_code::OK);
         }
     };
+
+    // E2101: reject a typo'd subcommand here, before it is mistaken for a file
+    // to compile. `lsp` is dispatched above and never reaches this point.
+    if !KNOWN_COMMANDS.contains(&cmd) {
+        unknown_subcommand(cmd, stderr_color(&raw));
+    }
 
     // Commands with no required positional target.
     match cmd {
