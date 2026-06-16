@@ -18,6 +18,7 @@ pub mod doctor;
 pub mod explain;
 pub mod fetch;
 pub mod ffi;
+pub mod fixengine;
 pub mod fmt;
 pub mod generics;
 pub mod jetpack;

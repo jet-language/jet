@@ -552,7 +552,13 @@ fn main() {
 
     match cmd {
         "fmt" => run_fmt(target, fmt_check),
-        "fix" => run_fix(target),
+        "fix" => {
+            let write = raw.iter().any(|a| a == "--write" || a == "--apply");
+            // The preview goes to stdout (a normal command result), so color is
+            // gated on stdout's TTY, matching `doctor`.
+            let color = use_color(color_choice(&raw), std::io::stdout().is_terminal());
+            run_fix(target, write, color);
+        }
         "new" => run_new(target, annotated),
         "test" => run_test(target, json),
         "add" => run_add(&raw),
@@ -782,9 +788,17 @@ fn run_compile_cmd(
     }
 }
 
-/// Apply all auto-fixable diagnostics in a source file in place (D-LSP7 / M13).
-/// Uses the same `edit` engine as LSP code actions.
-fn run_fix(file: &str) {
+/// `jet fix` (E2-M3, D-REL5): the sanctioned code-migration tool. Runs the front
+/// end on `file`, collects the machine-applicable `edit`s its diagnostics carry
+/// (the S14 teaching autocorrects), and applies them through the unified fix
+/// engine (`jet::fixengine`) — the exact same applier the LSP code-action path
+/// builds its edits on.
+///
+/// Safety model: **dry-run by default**. Without `--write`/`--apply` it prints a
+/// unified-diff-style preview of what would change and exits 0, touching nothing
+/// on disk. With `write`, it writes the rewritten file back. It only ever
+/// touches the file it was handed; it never reaches into jetpack manifests.
+fn run_fix(file: &str, write: bool, color: bool) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -794,31 +808,77 @@ fn run_fix(file: &str) {
         }
     };
     let diags = jet::lsp::check_document(file, &src);
-    let mut edits: Vec<_> = diags.iter().filter_map(|d| d.edit.clone()).collect();
+    let edits: Vec<_> = diags.iter().filter_map(|d| d.edit.clone()).collect();
     if edits.is_empty() {
         println!("{}: no auto-fixable problems found", file);
         return;
     }
-    // Apply edits from highest offset to lowest to avoid span invalidation.
-    edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
-    let mut fixed = src.clone();
-    for edit in &edits {
-        fixed = jet::lsp::apply_edit(&fixed, edit);
-    }
+    let fixed = match jet::fixengine::apply_edits(&src, &edits) {
+        Ok(f) => f,
+        Err(jet::fixengine::ApplyError::Overlap { first, second }) => {
+            // Two fixes contend for the same bytes; refuse rather than guess.
+            eprintln!(
+                "{}: two auto-fixes overlap (bytes {}..{} and {}..{})",
+                file, first.0, first.1, second.0, second.1
+            );
+            eprintln!(" why: applying both would be ambiguous, so `jet fix` won't.");
+            eprintln!(" fix: fix one problem by hand, then re-run `jet fix`.");
+            exit(1);
+        }
+    };
     if fixed == src {
         println!("{}: no changes made", file);
         return;
     }
-    fs::write(file, &fixed).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", file, e);
-        exit(1);
-    });
-    println!(
-        "{}: applied {} fix{}",
-        file,
-        edits.len(),
-        if edits.len() == 1 { "" } else { "es" }
-    );
+
+    let n = edits.len();
+    let plural = if n == 1 { "" } else { "es" };
+
+    if write {
+        fs::write(file, &fixed).unwrap_or_else(|e| {
+            eprintln!("error: couldn't write {}: {}", file, e);
+            exit(1);
+        });
+        println!("{}: applied {} fix{}", file, n, plural);
+        println!("{} fix{} in 1 file", n, plural);
+    } else {
+        // Dry-run: show a unified-diff-style preview and change nothing.
+        print!("{}", unified_diff(file, &src, &fixed, color));
+        println!(
+            "{}: {} fix{} available — run `jet fix --write {}` to apply",
+            file, n, plural, file
+        );
+        println!("{} fix{} in 1 file (preview; nothing written)", n, plural);
+    }
+}
+
+/// Render a minimal unified-diff-style preview of a whole-file rewrite. Every
+/// changed line is shown as a `-`/`+` pair; unchanged lines are elided. This is
+/// presentation only (the engine already produced `new`), so it is free to be
+/// line-granular rather than byte-exact. Color is TTY-gated by the caller.
+fn unified_diff(file: &str, old: &str, new: &str, color: bool) -> String {
+    let (red, _bold, gray, reset) = palette(color);
+    let green = if color { "\x1b[32m" } else { "" };
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let mut out = String::new();
+    out.push_str(&format!("{gray}--- {file}{reset}\n"));
+    out.push_str(&format!("{gray}+++ {file} (fixed){reset}\n"));
+    let max = old_lines.len().max(new_lines.len());
+    for i in 0..max {
+        let o = old_lines.get(i).copied();
+        let nw = new_lines.get(i).copied();
+        if o == nw {
+            continue;
+        }
+        if let Some(o) = o {
+            out.push_str(&format!("{red}-{:>4} | {}{reset}\n", i + 1, o));
+        }
+        if let Some(nw) = nw {
+            out.push_str(&format!("{green}+{:>4} | {}{reset}\n", i + 1, nw));
+        }
+    }
+    out
 }
 
 fn run_new(name: &str, annotated: bool) {

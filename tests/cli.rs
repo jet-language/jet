@@ -517,3 +517,82 @@ fn json_build() {
 fn json_test() {
     check_json("json_test", &["test", "tests/cli/json_test.jet", "--json"]);
 }
+
+// ── jet fix (unified fix engine, E2-M3 / D-REL5) ────────────────────────────
+
+/// `jet fix` is **dry-run by default**: it previews the unified diff, writes
+/// nothing, and exits 0. `jet fix --write` applies the fixes through the shared
+/// `fixengine::apply_edits` and the result must compile (round-trip).
+#[test]
+fn fix_round_trip() {
+    // Work on a throwaway copy so the committed fixture stays pristine.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli/fix_let.jet");
+    let expected_fixed = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli/fix_let.fixed.jet"),
+    )
+    .expect("read .fixed companion");
+    let original = fs::read_to_string(&fixture).expect("read fixture");
+
+    let dir = std::env::temp_dir().join(format!("jet_fix_rt_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let work = dir.join("fix_let.jet");
+    fs::write(&work, &original).unwrap();
+    let work_str = work.to_string_lossy().to_string();
+
+    // 1. Dry-run: exit 0, nothing written, preview shows the change.
+    let dry = Command::new(jet_bin())
+        .args(["fix", &work_str])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet fix");
+    assert_eq!(dry.status.code(), Some(0), "dry-run exits 0");
+    assert_eq!(
+        fs::read_to_string(&work).unwrap(),
+        original,
+        "dry-run must not modify the file"
+    );
+    let dry_out = String::from_utf8_lossy(&dry.stdout);
+    assert!(
+        dry_out.contains("nothing written") && dry_out.contains("val x = 1"),
+        "dry-run should preview the +val line, got:\n{}",
+        dry_out
+    );
+
+    // 2. --write: applies, file now matches the expected fixed companion.
+    let written = Command::new(jet_bin())
+        .args(["fix", "--write", &work_str])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet fix --write");
+    assert_eq!(written.status.code(), Some(0), "--write exits 0");
+    assert_eq!(
+        fs::read_to_string(&work).unwrap(),
+        expected_fixed,
+        "after --write the file must equal the .fixed companion"
+    );
+
+    // 3. The fixed result must actually compile (the whole point). Compile the
+    // file that `--write` produced, at its real path, so the module loader can
+    // resolve it.
+    let written_src = fs::read_to_string(&work).unwrap();
+    jet::compile_with_path(&written_src, &work_str).expect("fixed file must compile");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// `jet fix` on a clean file reports honestly and exits 0 without writing.
+#[test]
+fn fix_clean_file_noop() {
+    let dir = std::env::temp_dir().join(format!("jet_fix_clean_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let work = dir.join("clean.jet");
+    fs::write(&work, "fn main() {\n    print(\"hi\");\n}\n").unwrap();
+    let out = Command::new(jet_bin())
+        .args(["fix", &work.to_string_lossy()])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run jet fix");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("no auto-fixable problems"));
+    let _ = fs::remove_dir_all(&dir);
+}

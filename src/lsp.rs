@@ -2764,13 +2764,14 @@ pub fn check_document_with_bundle(
     }
 }
 
-/// Apply a teaching edit to source text (for scripted LSP tests).
+/// Apply a single teaching edit to source text (for scripted LSP tests and the
+/// LSP's own preview). Delegates to the unified fix engine so the offset/splice
+/// math lives in exactly one place (`fixengine::apply_edits`), shared with the
+/// CLI `jet fix`. A lone edit can never overlap itself, so the `Result` is
+/// always `Ok` here; we unwrap defensively rather than propagate.
 pub fn apply_edit(src: &str, edit: &TextEdit) -> String {
-    let mut out = String::new();
-    out.push_str(&src[..edit.span.start.min(src.len())]);
-    out.push_str(&edit.new_text);
-    out.push_str(&src[edit.span.end.min(src.len())..]);
-    out
+    crate::fixengine::apply_edits(src, std::slice::from_ref(edit))
+        .unwrap_or_else(|_| src.to_string())
 }
 
 // ── Doctor ────────────────────────────────────────────────────────────────────
