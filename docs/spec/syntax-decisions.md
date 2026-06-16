@@ -1477,6 +1477,7 @@ implementation milestone is pending.
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
+| S61 | hyphens in contribution / package / image names (see note below) | jetos polish |
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the
@@ -1500,6 +1501,26 @@ implementation milestone is pending.
 > struct/enum literals, and what a *mistake* looks like under each — before
 > choosing. Build the side-by-side example set first; do not re-litigate
 > S6's text until then.
+
+> **S61 — Hyphens in contribution / package / image names (open).** The
+> ratified worked `config.jet` in `decision-ballots.md` writes
+> `image.halcyon-iso`, but contribution/module path segments today go through
+> `expect_ident`, and `-` is not an identifier character — so `image.halcyon-iso`
+> does not lex (gap #5 shipped with `halcyon_iso`). Finalists:
+>
+> 1. **Underscores only (status quo)** — names are plain identifiers
+>    (`halcyon_iso`). Zero parser change; consistent with every other Jet name;
+>    cost is the ratified example must be corrected to underscores.
+> 2. **Allow hyphens in these name positions** — treat contribution/package/
+>    image names as a dashed-name token (kebab-case), matching nixpkgs/npm
+>    package-name convention. Beginner-familiar for package names; cost is a
+>    lexer/parser special-case and a `a - b` vs `a-b` ambiguity to settle in
+>    these positions.
+>
+> **Recommendation: (2)** for package/image *names* specifically (they mirror
+> external package identifiers users already know), scoped so it cannot bleed
+> into expression context. Until ratified, S61 stays at finalist (1): names are
+> underscored identifiers.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified

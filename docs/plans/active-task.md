@@ -76,6 +76,32 @@ is built and green today:
 - **Ratified & enforced:** U1–U10 + S16/D-S16-USE in `docs/spec/syntax-decisions.md`,
   guarded by `tests/decisions.rs`.
 
+**Landed in the `jetos-ratified-arc` pass (2026-06-16):**
+- **gap #5 — `System`/`Image`/`Service` are live** (U11–U14, U13, U18). They
+  parse → elaborate (bare `{…}` inferred constructors) → field-check → are
+  captured into `EnvPlan.systems`/`.images` (`SystemPlan`/`ServicePlan`/
+  `OptionPlan`/`ImagePlan` in `modeval.rs`). Diagnostics E0972–E0978.
+- **gap #4 — `jetpack os build/switch [<config>]@<host>`** (U15/U16). `config.jet`
+  loader reuses `modeval`; `@host` selects the `System`; default path
+  `~/.jet/config.jet`. Realizes packages into the hangar, assembles a
+  content-addressed generation dir + `manifest.json`, flips `current`/boot
+  `default` symlinks. `src/jetpack/jetos.rs`. Diagnostics E0979–E0981.
+- **U17 — `library` packages consumed with `use`.** A realized library is an
+  extra search root in the `use <pkg>` resolver (`src/loader.rs`); executables
+  stay on PATH. Diagnostics E0982 (exe-not-importable), E0983 (unrealized lib).
+- **B1–B4 ICE bugs fixed** (I2/I3): JSON view-param move (clone + L0201), std-
+  struct field-name mangling, `Map.get` lowering via `Object(root)` pattern, and
+  the `for … in recv.field { }` struct-literal misparse. Locked by
+  `tests/ice_regressions.rs`.
+- **E2-M14 C FFI (Phases 1–2 + compile-time hook).** `@extern`/`@bindgen module
+  c.<lib>`, bindgen∪overlay merge (overlay wins), `use c.<lib>` / `use "hdr.h"`,
+  hangar/pkg-config link discovery, `jet bind` CLI. `src/cffi.rs`. Diagnostics
+  E3201–E3208. **WAIVED/STUBBED** (honest): real bind backend (no bindgen crate
+  added per I6) → `jet bind`/auto-bind report E3208 with a hand-overlay
+  workaround; Phase-3 cache hash-regen; E3202 registered but unreachable until
+  **E2-M13** (pointer/`@unsafe` tier) lands; raylib pong replaced by a
+  deterministic small-C-lib e2e in `tests/cffi.rs`.
+
 Offline e2e coverage in `tests/jetpack.rs` (incl.
 `committed_example_builds_offline_end_to_end`, the typed-module example, and the
 `enter`/`dev` tests). `jet run examples/features/01_hello.jet` prints
@@ -89,38 +115,18 @@ Ordered roughly by leverage. Each is its own multi-chunk arc. **Confirm the
 relevant decision is Ratified before coding, and write the failing test/example
 first.**
 
-### A. Ratified, ready to implement (test-first; syntax now settled)
+### A. Ratified arc — DONE (see "Landed in the `jetos-ratified-arc` pass" above)
 
-The jetpack/jetos surface decisions are **all ratified** as **U11–U18** in
-`docs/spec/syntax-decisions.md` (owner picks in `decision-ballots-owner.md`,
-2026-06-16). End-state worked `config.jet` is in `decision-ballots.md` (§ "gaps
-#4/#5 — ratified surface"). Per the workflow loop: write the failing ui
-fixture/example first, spec it, then parser → sema → codegen. Note **U18 (inferred
-constructors)** and **U13 (typed `target` / bare-vs-quoted option values)** touch
-the record-literal path broadly — land them deliberately.
+gap #5, gap #4, U17, and E2-M14 C FFI (Phases 1–2 + hook) all shipped on
+`jetos-ratified-arc`. What remains under the C FFI banner is its **waived tail**,
+gated on an external prerequisite, not on owner syntax:
 
-1. **gap #5 — `System` / `Image` / `Service` semantics.** Today both types parse
-   but are **inert** (no field checking, no realize). Implement per **U11**
-   (`System` = `target`/`packages`/`services`/`options`), **U12** (`Service` open
-   record), **U13** (`options:` ordered `key: value` list, no `set()`; typed
-   `target` platform value; bare words vs quoted free-form strings), **U14**
-   (`Image { from: system.X, format: }`, target/packages inherited from the
-   system), and **U18** (bare `{…}` elaborates to the expected type). Do gap #5
-   first — gap #4 sits on top.
-2. **gap #4 — `config.jet` + the `jetos` tier (Scale-3).** `CONFIG_FILE` is a
-   `src/syntax.rs` constant only — never loaded. Implement per **U15** (`jetpack os
-   <verb>` subcommand group — switch/build — **not** a separate binary, **not**
-   under `jet`) and **U16** (positional `[<config-path>]@<host>`, path defaults
-   `~/.jet/config.jet`, `@host` selects the `System`). Then the loader + activate.
-3. **E2-M14 — C FFI implementation.** Surface syntax ratified (**D-CFFI2-SYN-1…4**,
-   **S59**); bind engine picks ratified (**D-CBIND2/3/5/6**); **`use`** keyword
-   ratified (**D-S16-USE**); **`@audit("…")`** required (**D-LL2**). Agent spec:
-   [`docs/plans/epoch-2/m14-c-ffi.md`](epoch-2/m14-c-ffi.md). No owner ballot
-   blockers remain — implement parser/sema/codegen + `jet bind`.
-4. **Consumer-side library import.** A `library` package realizes (staged source)
-   but **nothing consumes it yet**. Implement per **U17**: a realized `library` is
-   brought in with the ordinary `use <pkg>` form (reuse S16/D-S16-USE);
-   `executable` packages still go on PATH.
+1. **E2-M14 tail — real bind backend + E2-M13.** Wire the actual C-header→Jet
+   translation (D-CBIND3 bindgen helper — needs an owner-approved crate added to
+   `Cargo.toml`, currently NOT added per I6) so `jet bind`/auto-bind stop
+   reporting E3208; add Phase-3 cache hash-invalidation/regen. Separately,
+   **E2-M13** (pointer / `@unsafe` / `core.mem` tier, S58) must land before
+   E3202 is reachable from real source. Both are their own arcs.
 
 ### B. Buildable without new syntax
 
@@ -131,24 +137,14 @@ the record-literal path broadly — land them deliberately.
 6. **The real Jet→binary compiler.** Both package kinds stage source / prebuilt
    bytes today; there is no compile step. Large; needs its own design pass
    (no ratified syntax dependency, but a major architecture arc).
-7. **Verify/fix the compiler bugs found during the jetpack/config bring-up**
-   (carried over from the retired `jetpack-config-brief.md`; confirm each is
-   still open before fixing — the typed `module {}` surface may already have
-   worked around or fixed some). Each is an I2/I3 violation (rustc ICE instead of
-   a sema diagnostic) with a one-line repro:
-   - **B1** — `JSON.Text(x)` where `x` is a *view* param moves it → rustc ICE.
-     Sema should insert a clone or reject; never ICE.
-   - **B2** — field access on a **std** struct mangles the name
-     (`result.code` → `user_code`) → rustc ICE. Tracked also in
-     `docs/plans/capstone/PROGRESS.md` (`ProcessResult`).
-   - **B3** — `.get(k)` on a `Map` bound via an `Object(root)` pattern lowers to
-     **list indexing** (`"k".to_string() as usize`) → rustc ICE.
-   - **B4** — `for k, v in recv.field { … }` parses `recv.field {` as a **struct
-     literal**; ending the subject in `()` disambiguates.
+7. **B1–B4 ICE bugs — DONE** (fixed on `jetos-ratified-arc`, locked by
+   `tests/ice_regressions.rs`). What remains from this cluster:
    - **Cross-file language walls** (v1, may want lifting): a module file cannot
      (1) name another file's struct type in a signature, (2) call another file's
      methods on an imported value, or (3) `use`-import with `..`. These are why
      the legacy Phase-1 surface funneled everything through `[JSON]` directives.
+     (U17 library import did **not** hit these — a realized library is found by
+     the ordinary resolver — but they remain open for general cross-file code.)
 
 Entry points for the jetpack side: `src/jetpack/{packmanifest,provider,modeval,
 envfile,cli}.rs`, `src/syntax.rs`, `docs/spec/diagnostics.md`,
@@ -158,11 +154,17 @@ envfile,cli}.rs`, `src/syntax.rs`, `docs/spec/diagnostics.md`,
 
 ## Working-tree state (2026-06-16)
 
-`master` head: the **D-S16-USE `import → use` rename is COMMITTED** as `380b6a5`
-(72 files; full `nix develop -c cargo test` green, `tests/decisions.rs` green).
-Handoff-doc commits: `59b81ee` + `f546444`.
+Branch **`jetos-ratified-arc`** (off `master` @ `3e6be24`) holds the ratified-arc
+pass — five commits, full `nix develop -c cargo test` green (348 passed, 0 failed),
+`tests/decisions.rs` green:
 
-**Still uncommitted (owner's in-flight doc sync — leave for the owner; ⚠ never `git add -A`):**
-C-FFI / decision-ballot doc updates may remain on disk from this session; C FFI
-surface + CBIND + LL2 + S16-USE are **ratified** in `syntax-decisions.md` and
-[`m14-c-ffi.md`](epoch-2/m14-c-ffi.md).
+- `4e44146` gap #5 — System/Image/Service live
+- `be82d01` gap #4 — `jetpack os build/switch …@host`
+- `d885585` U17 — library consumed with `use`
+- `c4fff23` B1–B4 ICE fixes
+- `cec262a` E2-M14 C FFI (Phases 1–2 + hook)
+
+Not yet merged to `master` (awaiting owner review/merge). New **open decision
+S61** (hyphens in contribution/package/image names) added to `syntax-decisions.md`
+— `image.halcyon-iso` does not lex today; gap #5 used `halcyon_iso`. Recommendation
+is to allow hyphens in name positions; until ratified, names stay underscored.
