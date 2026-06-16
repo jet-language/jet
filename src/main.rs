@@ -31,8 +31,8 @@ mod exit_code {
 /// "did you mean" suggester. The package-management verbs live here too so a
 /// typo like `jet fecth` lands on `fetch`.
 const KNOWN_COMMANDS: &[&str] = &[
-    "check", "build", "run", "test", "new", "dev", "fmt", "fix", "bind", "lsp", "version", "help",
-    "upgrade", "add", "remove", "fetch", "update", "store", "gc",
+    "check", "build", "run", "test", "new", "dev", "fmt", "fix", "bind", "lsp", "explain",
+    "version", "help", "upgrade", "add", "remove", "fetch", "update", "store", "gc",
     // `install` is a known-but-redirected verb: it has its own teaching error
     // (E0043 → use `jet fetch`), so it must pass the E2101 gate to reach it.
     "install",
@@ -135,6 +135,14 @@ fn use_color(choice: ColorChoice, stream_is_tty: bool) -> bool {
 /// go). Resolved once from argv + environment + TTY state.
 fn stderr_color(raw: &[String]) -> bool {
     use_color(color_choice(raw), std::io::stderr().is_terminal())
+}
+
+/// Same as `stderr_color`, re-reading argv so deep command handlers (which do
+/// not carry `raw`) can decide whether to attach the dim `jet explain` footer.
+/// Honours `--color`, `NO_COLOR`, `FORCE_COLOR`, and the stderr TTY state.
+fn stderr_color_now() -> bool {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    stderr_color(&raw)
 }
 
 #[derive(Clone, Copy)]
@@ -354,6 +362,11 @@ fn main() {
             run_upgrade();
             return;
         }
+        "explain" => {
+            let code = args.get(1).map(|s| s.as_str());
+            run_explain(code, stderr_color(&raw));
+            return;
+        }
         "fetch" => {
             run_fetch(locked);
             return;
@@ -489,6 +502,41 @@ fn run_upgrade() {
     println!("  https://github.com/jet-lang/jet/releases");
 }
 
+/// `jet explain <code>` (E2-M3): print an offline essay for a diagnostic code,
+/// sourced from docs/spec/diagnostics.md. Unknown/missing codes fail cleanly
+/// with the what/why/fix voice and exit 2 (usage) — never a panic.
+fn run_explain(code: Option<&str>, color: bool) {
+    let bin = jet::syntax::BINARY_NAME;
+    let code = match code {
+        Some(c) => c,
+        None => {
+            let (red, bold, _gray, reset) = palette(color);
+            eprintln!("{red}Error{reset}: {bold}`{bin} explain` needs a diagnostic code.{reset}");
+            eprintln!(" Why: it prints the offline essay for one error or warning code.");
+            eprintln!(" Fix: try `{bin} explain E0102` (any code from an error message).");
+            exit(exit_code::USAGE);
+        }
+    };
+    match jet::explain::lookup(code) {
+        Some(entry) => {
+            print!("{}", entry.essay());
+        }
+        None => {
+            let (red, bold, _gray, reset) = palette(color);
+            eprintln!("{red}Error{reset}: {bold}`{code}` isn't a diagnostic code {bin} knows.{reset}");
+            eprintln!(" Why: every code {bin} reports is one of the `E####`/`L####` codes in its diagnostics reference.");
+            // Suggest a close known code, like the subcommand suggester.
+            let codes = jet::explain::live_codes();
+            let cand: Vec<&str> = codes.iter().map(|s| s.as_str()).collect();
+            match closest(&code.to_ascii_uppercase(), &cand) {
+                Some(s) => eprintln!(" Fix: did you mean `{bin} explain {s}`?"),
+                None => eprintln!(" Fix: copy the `E####` code from an error message and pass it to `{bin} explain`."),
+            }
+            exit(exit_code::USAGE);
+        }
+    }
+}
+
 fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_args: &[&String]) {
     let profile = if small {
         BuildProfile::Small
@@ -514,7 +562,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
             .filter(|d| matches!(d.severity, jet::diag::Severity::Error))
             .collect();
         if !diags.is_empty() {
-            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+            eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
             let n = diags.len();
             eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
             exit(1);
@@ -526,7 +574,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
     let (rust_code, ffi_link, clinks) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
-                eprint!("{}", jet::render_diagnostics(file, &src, &out.lints));
+                eprint!("{}", jet::render_diagnostics_cli(file, &src, &out.lints, stderr_color_now()));
                 let n = out.lints.len();
                 eprintln!(
                     "\n{} warning{} emitted (compilation continues)",
@@ -539,7 +587,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
             let clinks = match jet::resolve_c_links(file) {
                 Ok(args) => args,
                 Err(diags) => {
-                    eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+                    eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
                     let n = diags.len();
                     eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
                     exit(1);
@@ -548,7 +596,7 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
             (out.rust, out.ffi, clinks)
         }
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+            eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
             let n = diags.len();
             eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
             exit(1);

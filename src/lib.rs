@@ -12,6 +12,7 @@ pub mod codegen;
 pub mod collections;
 pub mod comptime;
 pub mod diag;
+pub mod explain;
 pub mod fetch;
 pub mod ffi;
 pub mod fmt;
@@ -194,6 +195,37 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
 }
 
 pub use diag::render_all as render_diagnostics;
+
+/// Render diagnostics for the CLI, with the E2-M3 "learn more" footer.
+///
+/// When `color` is true (an attached terminal, not piped/NO_COLOR — see
+/// `stderr_color` in the driver), each rendered diagnostic gains one dim
+/// trailing line pointing at `jet explain <code>`. When `color` is false the
+/// output is byte-for-byte `render_diagnostics`, so piped/CI/golden output is
+/// unchanged and existing snapshots stay green.
+pub fn render_diagnostics_cli(
+    file: &str,
+    src: &str,
+    diags: &[Diagnostic],
+    color: bool,
+) -> String {
+    if !color {
+        return diag::render_all(file, src, diags);
+    }
+    // Dim each diagnostic's footer; one unobtrusive line per diagnostic.
+    let blocks: Vec<String> = diags
+        .iter()
+        .map(|d| {
+            let body = d.render(file, src);
+            format!(
+                "{body}\x1b[2mrun `{bin} explain {code}` to learn more\x1b[0m\n",
+                bin = syntax::BINARY_NAME,
+                code = d.code,
+            )
+        })
+        .collect();
+    blocks.join("\n")
+}
 
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {

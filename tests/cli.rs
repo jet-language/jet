@@ -75,6 +75,63 @@ fn unknown_flag() {
     check("unknown_flag", &["check", "--colour", "x.jet"]);
 }
 
+/// `jet explain E2101`: an offline essay sourced from docs/spec/diagnostics.md.
+#[test]
+fn explain_e2101() {
+    check("explain_E2101", &["explain", "E2101"]);
+}
+
+/// `jet explain E0102`: a second, unrelated code proves the index is general.
+#[test]
+fn explain_e0102() {
+    check("explain_E0102", &["explain", "E0102"]);
+}
+
+/// `jet explain` is case-insensitive on the code.
+#[test]
+fn explain_lowercase() {
+    check("explain_lowercase", &["explain", "e2101"]);
+}
+
+/// An unknown code fails cleanly (exit 2, no panic) with a helpful message.
+#[test]
+fn explain_unknown_code() {
+    check("explain_unknown", &["explain", "BOGUS"]);
+}
+
+/// `jet explain` with no code teaches what it wants and exits 2.
+#[test]
+fn explain_missing_code() {
+    check("explain_missing", &["explain"]);
+}
+
+/// Index obligation (I4 spirit): every diagnostic code registered in
+/// docs/spec/diagnostics.md must round-trip through `jet explain` — the explain
+/// index can never silently drift from the registry. Retired rows excluded.
+#[test]
+fn every_registered_code_is_explainable() {
+    let codes = jet::explain::live_codes();
+    assert!(
+        codes.len() > 100,
+        "expected the full diagnostics registry to be indexed, got {}",
+        codes.len()
+    );
+    for code in &codes {
+        let entry = jet::explain::lookup(code).unwrap_or_else(|| {
+            panic!(
+                "code `{}` is registered in docs/spec/diagnostics.md but `jet explain {}` finds nothing",
+                code, code
+            )
+        });
+        let essay = entry.essay();
+        assert!(
+            essay.contains(code) && essay.contains("What this means:"),
+            "essay for `{}` is missing its code or a 'What this means:' section",
+            code
+        );
+    }
+}
+
 /// The scriptable-output contract: under `NO_COLOR` (and when piped, as the
 /// captured pipe here is not a TTY), output carries no ANSI escape bytes.
 #[test]
