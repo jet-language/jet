@@ -2926,10 +2926,26 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         // S75/S76 codegen: fan-out lowers to a Vec built by calling the callee on each item.
         // Sema erased [T#N] to the same Vec representation so this is straightforward.
         Expr::FanOut { callee, items, .. } => {
-            let f = emit_expr(cx, callee, env);
+            // For a named function callee, generate direct calls to avoid
+            // the boxed-lambda form that can't be called after a cast.
+            let caller: Box<dyn Fn(&str) -> String> = if let Expr::Ident(name, _) = callee.as_ref() {
+                if cx.sigs.contains_key(name.as_str()) {
+                    let fn_name = cx.mangle_name(name);
+                    Box::new(move |arg| format!("{}({})", fn_name, arg))
+                } else {
+                    let f = emit_expr(cx, callee, env);
+                    Box::new(move |arg| format!("({})({})", f, arg))
+                }
+            } else {
+                let f = emit_expr(cx, callee, env);
+                Box::new(move |arg| format!("({})({})", f, arg))
+            };
             let elems: Vec<String> = items
                 .iter()
-                .map(|item| format!("{}({}.clone())", f, emit_expr(cx, item, env)))
+                .map(|item| {
+                    let arg = emit_expr(cx, item, env);
+                    caller(&arg)
+                })
                 .collect();
             format!("vec![{}]", elems.join(", "))
         }
