@@ -11,6 +11,7 @@
 
 pub mod cli;
 pub mod json;
+pub mod merge;
 pub mod output;
 pub mod packfile;
 pub mod packmanifest;
