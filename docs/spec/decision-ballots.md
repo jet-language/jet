@@ -15,7 +15,7 @@ Write owner picks in `docs/spec/decision-ballots-owner.md`.
 
 **Interactive copy:** open [`decision-ballots.html`](decision-ballots.html) in a browser — card **D-CFFI2-SYN** under *C FFI syntax*.
 
-**Worked examples:** [`docs/plans/epoch-2/c-ffi-syntax-examples.md`](../plans/epoch-2/c-ffi-syntax-examples.md) (raylib user stories per option).
+**Worked examples:** [`docs/plans/epoch-2/c-ffi-syntax-examples.md`](../plans/epoch-2/c-ffi-syntax-examples.md) (raylib per option) · **feel-test user stories:** [User story gallery](#user-story-gallery-feel-test) below (E, G, E+G, H, J).
 
 ---
 
@@ -253,6 +253,302 @@ Same resolution as **A**; quotes mark the name as a **foreign link id** (like `e
 
 ---
 
+### User story gallery (feel test)
+
+Same Sam story in each box: build **pong** with raylib — once as a **single-file script**
+(fresh laptop, `pkg-config raylib`), once as a **Jetpack team project** (hangar-pinned dep).
+Read top-to-bottom in each column; ignore resolution mechanics (identical everywhere).
+
+---
+
+#### E — `c.<lib>` module path *(mirrors `core.fs`)*
+
+**Sam — one file, no Jetpack**
+
+```jet
+// pong.jet
+extern c.raylib {
+    fn init_window(w: Int, h: Int, title: String) = "InitWindow";
+    fn close_window() = "CloseWindow";
+    fn window_should_close() -> Bool = "WindowShouldClose";
+    fn begin_drawing() = "BeginDrawing";
+    fn end_drawing() = "EndDrawing";
+    fn clear_background(color: Color) = "ClearBackground";
+    fn draw_text(text: String, x: Int, y: Int, size: Int, color: Color) = "DrawText";
+}
+
+struct Color { r: Int, g: Int, b: Int, a: Int }
+
+fn main() {
+    import c.raylib as rl;
+    val white = Color { r: 255, g: 255, b: 255, a: 255 };
+    val dark = Color { r: 20, g: 20, b: 30, a: 255 };
+
+    rl.init_window(800, 600, "pong");
+    while !rl.window_should_close() {
+        rl.begin_drawing();
+        rl.clear_background(dark);
+        rl.draw_text("pong", 360, 280, 32, white);
+        rl.end_drawing();
+    }
+    rl.close_window();
+}
+```
+
+```bash
+$ jet run pong.jet
+# → pkg-config raylib (missing → E3201)
+```
+
+**Sam — team repo** *(same source; only manifest adds the pin)*
+
+```jet
+// payload.jet
+deps: { raylib: nixpkgs:raylib#5.5.0 }
+
+// src/pong.jet — identical to above
+import c.raylib as rl;
+// …
+```
+
+**Feel:** `import c.raylib as rl` reads like `import core.fs as fs`. The `c.` prefix
+screams “foreign C ABI” before you open the file. Declarations and game logic can
+share one file for scripts; you still **import** to call (no bare `init_window` in
+file scope).
+
+---
+
+#### G — manifest owns the link; bindings live in their own module
+
+**Alex — Jetpack game crate** *(bindings file is the natural home for future `jet bind` output)*
+
+```jet
+// payload.jet
+[dependencies:c]
+raylib = "nixpkgs:raylib#5.5.0"
+
+// src/bindings/raylib.jet   — checked in today; generated tomorrow
+extern c.raylib {
+    fn init_window(w: Int, h: Int, title: String) = "InitWindow";
+    fn close_window() = "CloseWindow";
+    fn window_should_close() -> Bool = "WindowShouldClose";
+    fn begin_drawing() = "BeginDrawing";
+    fn end_drawing() = "EndDrawing";
+    fn clear_background(color: Color) = "ClearBackground";
+    fn draw_text(text: String, x: Int, y: Int, size: Int, color: Color) = "DrawText";
+}
+
+struct Color { r: Int, g: Int, b: Int, a: Int }
+
+// src/pong.jet — no `extern` noise; reads like any other Jet module
+import c.raylib as rl;
+import bindings.raylib;   // re-exports c.raylib + Color
+
+fn main() {
+    val white = Color { r: 255, g: 255, b: 255, a: 255 };
+    val dark = Color { r: 20, g: 20, b: 30, a: 255 };
+
+    rl.init_window(800, 600, "pong");
+    while !rl.window_should_close() {
+        rl.begin_drawing();
+        rl.clear_background(dark);
+        rl.draw_text("pong", 360, 280, 32, white);
+        rl.end_drawing();
+    }
+    rl.close_window();
+}
+```
+
+**Sam — single-file script** *(G’s layout collapsed — still works, just thicker)*
+
+```jet
+// pong.jet — inline block because there is no bindings/ tree yet
+extern c.raylib { /* same fns as bindings/raylib.jet */ }
+
+fn main() {
+    import c.raylib as rl;
+    // … same loop …
+}
+```
+
+**Feel:** Opening `pong.jet` you see **imports and game logic only** — deps and FFI
+declarations are “someone else’s problem” (manifest + bindings module). Best when
+the project outgrows one file; single-file scripts pay an extra block unless you
+split later.
+
+---
+
+#### E + G — module paths **and** manifest-first layout *(recommended hybrid)*
+
+**Rule of thumb:** **E** defines call-site shape (`import c.raylib as rl`); **G** defines
+where declarations live (bindings module + `[dependencies:c]`). Same module path either way.
+
+**Alex — team repo** *(canonical hybrid)*
+
+```jet
+// payload.jet
+[dependencies:c]
+raylib = "nixpkgs:raylib#5.5.0"
+
+// src/c/raylib.jet          ← only file with `extern c.raylib { … }`
+extern c.raylib {
+    fn init_window(w: Int, h: Int, title: String) = "InitWindow";
+    fn close_window() = "CloseWindow";
+    fn window_should_close() -> Bool = "WindowShouldClose";
+    // …
+}
+
+// src/pong.jet
+import c.raylib as rl;
+
+fn main() {
+    rl.init_window(800, 600, "pong");
+    while !rl.window_should_close() { /* draw */ }
+    rl.close_window();
+}
+```
+
+**Sam — one-file script** *(E call shape; no manifest section)*
+
+```jet
+extern c.raylib { /* fns */ }
+
+fn main() {
+    import c.raylib as rl;
+    rl.init_window(800, 600, "pong");
+    // …
+}
+```
+
+**Feel:** Team projects look like normal Jet packages (`import c.raylib` beside
+`import core.fs`). Scripts stay one file but still use the **`c.*` import rule** —
+no special “script mode” call syntax. Overrides stay dotted: `extern c.system.raylib`,
+`extern c.hangar.raylib`.
+
+---
+
+#### H — Nim-style header import + per-fn `@extern`
+
+**Sam — header-shaped mental model** *(C programmers who think in `#include`)*
+
+```jet
+// pong.jet
+import c "raylib.h" as rl;
+
+@extern(c, link = "raylib", name = "InitWindow")
+fn rl.init_window(w: Int, h: Int, title: String);
+
+@extern(c, link = "raylib", name = "CloseWindow")
+fn rl.close_window();
+
+@extern(c, link = "raylib", name = "WindowShouldClose")
+fn rl.window_should_close() -> Bool;
+
+@extern(c, link = "raylib", name = "BeginDrawing")
+fn rl.begin_drawing();
+
+@extern(c, link = "raylib", name = "EndDrawing")
+fn rl.end_drawing();
+
+@extern(c, link = "raylib", name = "ClearBackground")
+fn rl.clear_background(color: Color);
+
+@extern(c, link = "raylib", name = "DrawText")
+fn rl.draw_text(text: String, x: Int, y: Int, size: Int, color: Color);
+
+struct Color { r: Int, g: Int, b: Int, a: Int }
+
+fn main() {
+    val white = Color { r: 255, g: 255, b: 255, a: 255 };
+    val dark = Color { r: 20, g: 20, b: 30, a: 255 };
+
+    rl.init_window(800, 600, "pong");
+    while !rl.window_should_close() {
+        rl.begin_drawing();
+        rl.clear_background(dark);
+        rl.draw_text("pong", 360, 280, 32, white);
+        rl.end_drawing();
+    }
+    rl.close_window();
+}
+```
+
+**Team variant** — header import maps to hangar include root when dep exists; link
+key still **`raylib`** (not the `.h` path).
+
+**Feel:** Every foreign fn carries its own metadata line — explicit, grep-friendly,
+noisy. Header string helps when the lib *is* header-centric; awkward when hangar
+ships a `.so` + pkg-config name with no single public header.
+
+---
+
+#### J — `@extern` attribute replaces the `extern c` **keyword** *(S82-native)*
+
+No `extern c { … }` block. A **module-level** `@extern(c.<lib>)` (or per-item
+`@extern(c, link = …, name = …)`) carries ABI + link; symbols still import as **`c.<lib>`**
+like **E**.
+
+**Alex — attribute on a bindings module** *(pairs naturally with **G** layout)*
+
+```jet
+// payload.jet
+[dependencies:c]
+raylib = "nixpkgs:raylib#5.5.0"
+
+// src/c/raylib.jet
+@extern(c.raylib)                    // link key = last segment `raylib`
+module raylib {
+    fn init_window(w: Int, h: Int, title: String) = "InitWindow";
+    fn close_window() = "CloseWindow";
+    fn window_should_close() -> Bool = "WindowShouldClose";
+    fn begin_drawing() = "BeginDrawing";
+    fn end_drawing() = "EndDrawing";
+    fn clear_background(color: Color) = "ClearBackground";
+    fn draw_text(text: String, x: Int, y: Int, size: Int, color: Color) = "DrawText";
+}
+
+struct Color { r: Int, g: Int, b: Int, a: Int }
+
+// src/pong.jet
+import c.raylib as rl;
+
+fn main() {
+    val white = Color { r: 255, g: 255, b: 255, a: 255 };
+    rl.init_window(800, 600, "pong");
+    while !rl.window_should_close() { /* draw via rl.* */ }
+    rl.close_window();
+}
+```
+
+**Sam — single-file, attribute on each declaration** *(no block keyword at all)*
+
+```jet
+// pong.jet
+@extern(c.raylib, name = "InitWindow")
+fn init_window(w: Int, h: Int, title: String);
+
+@extern(c.raylib, name = "CloseWindow")
+fn close_window();
+
+@extern(c.raylib, name = "WindowShouldClose")
+fn window_should_close() -> Bool;
+
+// … one @extern line per import …
+
+fn main() {
+    import c.raylib as rl;
+    rl.init_window(800, 600, "pong");
+    // …
+}
+```
+
+**Feel:** **`extern` is an attribute, not a keyword** — consistent with `@link`, `@unsafe`,
+future `@pure`. Module-level `@extern(c.raylib)` is the block-shaped sweet spot; per-fn
+attributes without a module wrapper drift toward **H** verbosity. Overrides:
+`@extern(c.system.raylib)` · `@extern(c.hangar.raylib)`.
+
+---
+
 ### Leans
 
 | | |
@@ -261,7 +557,7 @@ Same resolution as **A**; quotes mark the name as a **foreign link id** (like `e
 | **Beginner lean** | **E** — same rule as `import core.fs as fs`; one prefix tells you "foreign C". **A** reads shortest but hides where symbols live. **G** is clearest once projects grow past one file. |
 | **Prior rec (pre–owner review)** | **A** — recorded in S59. Owner flagged dissatisfaction → **re-open**. |
 
-**Agent recommendation (2026-06-16):** **E** for call-site clarity + consistency with **`core.*`**; pair with **G** long-term (bindings live in their own module, main file only `import c.raylib as rl`). If you want maximum script brevity, **A** or **I** with mandatory `import c.raylib as rl` re-export is a hybrid worth spelling out in comments when you pick.
+**Agent recommendation (2026-06-16):** **E** for call-site clarity + consistency with **`core.*`**; pair with **G** long-term (bindings live in their own module, main file only `import c.raylib as rl`). **J** if you want `extern` to live entirely in the **`@` attribute** layer (S82) instead of a keyword. If you want maximum script brevity, **A** or **I** with mandatory `import c.raylib as rl` re-export is a hybrid worth spelling out in comments when you pick.
 
 ---
 
@@ -273,7 +569,8 @@ Reply in `decision-ballots-owner.md`:
 | D-CFFI2-SYN | **E** (+ optional: overrides `c.system` / `c.hangar`) |
 ```
 
-Or mix: **G + E**, **A but require import alias**, etc.
+Or mix: **G + E**, **E + G + J** (`@extern(c.raylib)` module), **A but require import alias**, etc.
+See [User story gallery](#user-story-gallery-feel-test) for side-by-side pong examples.
 
 ---
 

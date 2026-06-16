@@ -40,8 +40,9 @@ pub struct NamedSource {
 /// (`pkg.source("stable", "github:…")`, D-JPK17). Package entries are written
 /// either bare (resolved against the default source) or `name:package`.
 ///
-/// A first-party package *repo*'s env file also declares the packages it
-/// provides via `pkg.package(...)` (R2), read into `provides`.
+/// `env.jet` is **purely** the dev-shell descriptor (U10): the package index
+/// that maps a package name → its source lives in the source repo's
+/// `payload.jet` `packages:` block, read by the `core` provider — never here.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EnvFile {
     /// The default source for bare package entries (from a one-arg `pkg.source`).
@@ -50,8 +51,6 @@ pub struct EnvFile {
     pub named: Vec<NamedSource>,
     pub packages: Vec<String>,
     pub prompt: Option<String>,
-    /// First-party packages this repo provides: `(name, source-subpath)` (R2).
-    pub provides: Vec<(String, String)>,
 }
 
 impl EnvFile {
@@ -79,14 +78,6 @@ impl EnvFile {
                 .unwrap_or_default();
             (s.name.clone(), s.upstream.clone(), via)
         }))
-    }
-
-    /// The source-subpath a provided package maps to (R2), if declared.
-    pub fn provided(&self, name: &str) -> Option<&str> {
-        self.provides
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, sub)| sub.as_str())
     }
 
     /// Resolve one package entry to a full `<source>:<package>` ref: entries
@@ -122,9 +113,6 @@ impl EnvFile {
         }
         if let Some(default) = &self.default_source {
             lines.push(format!("        pkg.source(\"{default}\");"));
-        }
-        for (name, sub) in &self.provides {
-            lines.push(format!("        pkg.package(\"{name}\", \"{sub}\");"));
         }
         let pkgs = self
             .packages
@@ -183,18 +171,11 @@ pub fn parse(text: &str) -> EnvFile {
             _ => {}
         }
     }
-    let mut provides = Vec::new();
-    for call in all_call_args(text, syntax::PACK_DIRECTIVE_PACKAGE) {
-        if let [name, sub, ..] = quoted_strings(&call).as_slice() {
-            provides.push((name.clone(), sub.clone()));
-        }
-    }
     EnvFile {
         default_source,
         named,
         packages: list_arg(text, syntax::PACK_DIRECTIVE_PACKAGES),
         prompt: string_arg(text, syntax::PACK_DIRECTIVE_PROMPT),
-        provides,
     }
 }
 
@@ -399,13 +380,15 @@ pub fn shell() -> [JSON] {
     }
 
     #[test]
-    fn parses_core_source_and_provides() {
+    fn parses_core_source() {
+        // U10: `env.jet` is purely the dev-shell descriptor. A `core` named
+        // source still declares its provider via the `via` marker; the
+        // name→source package index lives in the repo's `payload.jet`, not here.
         let repo = r#"
 import jetpack as pkg;
 pub fn shell() -> [JSON] {
     return [
         pkg.source("mine", "path:./jet-pkgs", "core");
-        pkg.package("hello", "./pkgs/hello");
         pkg.packages(["mine:hello"]);
     ];
 }
@@ -413,13 +396,11 @@ pub fn shell() -> [JSON] {
         let ef = parse(repo);
         assert_eq!(ef.named.len(), 1);
         assert_eq!(ef.named[0].via.as_deref(), Some("core"));
-        assert_eq!(ef.provided("hello"), Some("./pkgs/hello"));
         // The `core` provider is selected for the named source.
         assert_eq!(
             ef.source_table().provider("mine"),
             super::super::refspec::ProviderKind::Core
         );
-        // `pkg.package` is not confused with `pkg.packages`.
         assert_eq!(ef.packages, vec!["mine:hello"]);
     }
 

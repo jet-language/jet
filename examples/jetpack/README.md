@@ -8,8 +8,10 @@ fixtures so the commands run without Nix or a network.
 
 - `env.jet` — the environment (Jet's `flake.nix` equivalent), using named
   sources `stable`, `unstable`, and a first-party `core` repo `mine`.
-- `jet-pkgs/` — a first-party Jet package repo (no Nix) whose own `env.jet`
-  declares the `hello` package that `mine:hello` resolves to.
+- `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `payload.jet`
+  `packages:` block declares the `hello` package (an `executable`) that
+  `mine:hello` resolves to; the package is the `module hello` discovered by name
+  in its source tree (U10).
 - `functional-env.jet` — an alternative, fully functional sketch of the same
   environment (a runnable Jet program that prints the directive list).
 - `fixtures/*.json` — captured `nix build --json` output, used by `--offline`.

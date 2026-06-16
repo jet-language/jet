@@ -16,7 +16,9 @@ use crate::sha256;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// A realized package: where its bytes are and what to put on PATH.
+/// A realized package: where its bytes are and what to put on PATH. `bin` is
+/// the directory to prepend to PATH, or **empty** for a `library` package (U10),
+/// which is staged for import and contributes nothing to PATH.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Realized {
     pub name: String,
@@ -129,10 +131,12 @@ impl Provider for NixProvider {
     }
 }
 
-/// The first-party Jet package provider (R2). Realizes a Jet package with no
-/// Nix at all: it reads the source repo's `env.jet`, finds the package's
-/// `pkg.package(...)` declaration, and materializes that source tree into the
-/// Jetpack store. R2 supports local and git-backed remote source repos.
+/// The first-party Jet package provider (R2/U10). Realizes a Jet package with
+/// no Nix at all: it discovers the package's `module <name>` in the source repo
+/// (Chunk 3), reads the repo's `payload.jet` `packages:` index for the package's
+/// kind (Chunk 4), and materializes that source tree into the Jetpack store —
+/// staging a `bin/` for an `executable`, source-only for a `library`. R2
+/// supports local and git-backed remote source repos.
 pub struct CoreProvider;
 
 impl Provider for CoreProvider {
@@ -188,12 +192,27 @@ impl Provider for CoreProvider {
             copy_tree(&src_dir, &out_dir)
                 .map_err(|e| ProviderError::CoreBuild(format!("could not place package: {e}")))?;
         }
-        let bin = out_dir.join("bin");
+        // U10 Chunk 4: the repo's `payload.jet` `packages:` index decides what
+        // goes on PATH. `executable` stages the prebuilt `bin/` (the devshell
+        // case); `library` stages module source for import and contributes no
+        // PATH entry (an empty `bin`). With no manifest entry — a bare `core`
+        // source declared by marker, no `payload.jet` — we default to
+        // `executable`, today's behavior.
+        let kind = packmanifest::PackManifest::load(&repo)
+            .and_then(|r| r.ok())
+            .and_then(|pm| pm.package_kind(&spec.package))
+            .unwrap_or(packmanifest::PackageKind::Executable);
+        let bin = match kind {
+            packmanifest::PackageKind::Executable => {
+                out_dir.join("bin").to_string_lossy().into_owned()
+            }
+            packmanifest::PackageKind::Library => String::new(),
+        };
         Ok(Realized {
             name: spec.package.clone(),
             reference: spec.raw.clone(),
             out: out_dir.to_string_lossy().into_owned(),
-            bin: bin.to_string_lossy().into_owned(),
+            bin,
         })
     }
 }
@@ -766,6 +785,56 @@ mod tests {
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
         assert!(std::path::Path::new(&r.bin).join("hello").is_file());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn core_provider_kind_decides_path_entry() {
+        // U10 Chunk 4: the repo's `payload.jet` `packages:` index decides what a
+        // realized `core` package puts on PATH. `executable` → a `bin/` dir;
+        // `library` → no bin (staged source only). Both stage the tree.
+        use super::super::refspec::{classify_in, ProviderKind, SourceTable};
+        let base = unique_dir("jpk-core-kind");
+        let repo = base.join("jet-pkgs");
+        let store = base.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(
+            repo.join("payload.jet"),
+            "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { hello: executable, mathlib: library }\n",
+        )
+        .unwrap();
+        // executable: has a prebuilt bin/.
+        let hello_bin = repo.join("pkgs/hello/bin");
+        std::fs::create_dir_all(&hello_bin).unwrap();
+        std::fs::write(repo.join("pkgs/hello/hello.jet"), "module hello { }\n").unwrap();
+        std::fs::write(hello_bin.join("hello"), "#!/bin/sh\necho hi\n").unwrap();
+        // library: module source, no bin/.
+        let lib = repo.join("lib/mathlib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(lib.join("mathlib.jet"), "module mathlib { }\n").unwrap();
+
+        let upstream = format!("path:{}", repo.to_string_lossy());
+        let table =
+            SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+        };
+
+        let exe = realize(&classify_in("mine:hello", &table).unwrap(), &table, &ctx).unwrap();
+        assert!(
+            !exe.bin.is_empty() && std::path::Path::new(&exe.bin).join("hello").is_file(),
+            "executable must stage a bin/ on PATH: {exe:?}"
+        );
+
+        let lib = realize(&classify_in("mine:mathlib", &table).unwrap(), &table, &ctx).unwrap();
+        assert!(lib.bin.is_empty(), "library must contribute no PATH entry: {lib:?}");
+        assert!(
+            std::path::Path::new(&lib.out).join("mathlib.jet").is_file(),
+            "library must stage its module source: {lib:?}"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 

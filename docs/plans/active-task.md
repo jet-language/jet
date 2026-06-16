@@ -43,7 +43,42 @@ Supporting design docs (own their detail):
 
 ---
 
-## Latest chunk (2026-06-16): U10 Chunk 3 — recursive package discovery
+## Latest chunk (2026-06-16): U10 Chunk 4 — `library` vs `executable` realize
+
+The `core` provider now keys its realize on the package **kind** read from the
+source repo's `payload.jet` `packages:` index — **completing the U10 4-chunk
+arc**. `executable` stages the prebuilt `bin/` (today's behavior); `library`
+stages module source for import and contributes **no** PATH entry. The misplaced
+`env.jet` `pkg.package(...)` index is **fully retired**.
+
+Landed this run:
+- **`packmanifest::PackManifest::package_kind(name) -> Option<PackageKind>`**:
+  looks a package up in the parsed `packages:` block.
+- **`CoreProvider::realize`** (`provider.rs`): after discovering `src_dir`, loads
+  the repo's `payload.jet` and resolves the package's kind. `Executable` →
+  `bin = out_dir/bin`; `Library` → `bin = ""` (empty). No manifest / no entry →
+  defaults to `Executable` (preserves the marker-only `pkg.source(…, "core")`
+  path that carries no `payload.jet`). `Realized.bin` doc notes the empty case.
+- **`cli.rs::cmd_run`**: skips empty `bin` dirs when composing PATH, so a
+  `library` never injects an empty PATH segment.
+- **Retired the `env.jet` package index entirely (U10):** `envfile.rs` lost the
+  `provides` field, the `provided()` method, the `pkg.package` parse/render, and
+  the test assertions; `syntax::PACK_DIRECTIVE_PACKAGE` removed. `env.jet` is now
+  purely the dev-shell descriptor (struct doc updated). `parses_core_source_and_provides`
+  → `parses_core_source`.
+- **Tests:** `provider::core_provider_kind_decides_path_entry` (executable → bin
+  on PATH; library → empty bin + staged source); `tests/jetpack.rs::
+  core_provider_builds_library_package_without_nix` (typed env, `library` package
+  inferred-core, `jetpack build` succeeds offline, no nix). No new diagnostic
+  (behavior + retirement only).
+- **Example (I5):** `examples/jetpack/jet-pkgs/env.jet` (the vestigial index)
+  **deleted**; replaced with `jet-pkgs/payload.jet` declaring
+  `packages: { hello: executable }`. README updated to describe the U10 model.
+
+Verified: `nix develop -c cargo test` fully green; `cargo test --test decisions`
+passes; `jet run examples/features/01_hello.jet` prints `hello, world`.
+
+## Prior chunk (2026-06-16): U10 Chunk 3 — recursive package discovery
 
 `CoreProvider::realize` now discovers a package's source directory by walking
 the source tree for `module <name>` — no `env.jet` index needed. The dual
@@ -273,48 +308,60 @@ Landed this run:
 
 ## Where we are (verified 2026-06-16)
 
-Last **committed**: `819b756` (U9 remote probe); **U10 Chunks 1–3 are uncommitted**
-in the working tree. See ⚠ note below.
+**U10 arc is COMPLETE.** Chunks 1–3 are **committed**; Chunk 4 is implemented,
+green, and **uncommitted** in the working tree (the only outstanding U10 commit).
 
-### ⚠ Working tree: U10 Chunks 1–3 uncommitted
+- **Committed:** `3fff80b "manifest rework"` landed **Chunks 1–3** (the
+  `pack.jet`→`payload.jet`/`package:`→`payload:` rename across src + `tests/ui`,
+  the `packages:` block parser, recursive package discovery, E1210–E1213).
+  `0e6312c "Misc"` carried follow-on doc/diagnostic edits. (Both bundled owner doc
+  noise — epoch-2, decision-ballots — so the history is not a clean per-chunk arc,
+  but the code is all in.)
+- **Uncommitted (Chunk 4):** the `library`/`executable` realize split + retiring
+  the `env.jet` `pkg.package(...)` index. See the "Latest chunk" section above for
+  the file-by-file record. The working-tree diff is exactly:
+  `src/jetpack/{cli,envfile,packmanifest,provider}.rs`, `src/syntax.rs`,
+  `tests/jetpack.rs`, `examples/jetpack/README.md`, deleted
+  `examples/jetpack/jet-pkgs/env.jet` (staged), added
+  `examples/jetpack/jet-pkgs/payload.jet` — **plus owner doc noise**
+  (`docs/spec/decision-ballots.md`, this file) that must stay unstaged.
 
-All three chunks are implemented and green but not yet committed. When committing,
-stage selectively — owner doc noise (epoch-2, decision-ballots, owner-todo) must
-stay unstaged. See the "Pre-existing working-tree noise" section below.
+### ⚠ Committing Chunk 4
 
-Last **committed-before-this-session**: `819b756` ("Updating jetpack ecosystem") — the U9 **remote
-probe** (`ProviderKind::Infer` in `refspec.rs`; `provider::{resolve_kind,
-infer_remote_kind, remote_has_pack_jet}`; dispatch rewired to `provider_for(kind)`
-/ `uses_nix_provider(…, offline, cache_dir)` / `cli.rs::realize_ref`) landed
-**bundled with owner doc edits** (epoch-2, decision-ballots). U10 was then
-**ratified** (`payload.jet` manifest + `packages:` model) in
-`docs/spec/syntax-decisions.md` + `src/syntax.rs`. **This session implemented U10
-Chunk 1** (the `pack.jet`→`payload.jet` / `package:`→`payload:` rename — see the
-Latest chunk above). U10 Chunks 2–4 (`packages:` parser, recursive discovery,
-`library`/`executable` realize) are **not** started — START HERE in Next up.
+Stage **selectively** — never `git add -A`/`git add .`. Stage only the Chunk-4
+files listed above (and this handoff doc). Owner doc noise
+(`docs/spec/decision-ballots.md`, epoch-2, owner-todo) must stay unstaged — see
+the "Pre-existing working-tree noise" section below. Note
+`examples/jetpack/jet-pkgs/env.jet` is **deleted** (already staged) and
+`examples/jetpack/jet-pkgs/payload.jet` is **added** — stage both.
 
-**⚠ Working tree:** the U10 Chunk-1 rename is **uncommitted** (src + tests +
-`tests/ui/manifest_*` renames + `unified-ecosystem.md`/`diagnostics.md` doc
-edits). Full `nix develop -c cargo test` is green; `cargo test --test decisions`
-passes; `jet run examples/features/01_hello.jet` prints `hello, world`. When you
-commit, stage selectively — owner doc noise (epoch-2, decision-ballots,
-owner-todo) may reappear; never `git add -A` (see the noise section).
+**Verified green (2026-06-16):** `nix develop -c cargo test` fully green
+(146 jetpack-suite + all golden/ui); `cargo test --test decisions` passes;
+`jet run examples/features/01_hello.jet` prints `hello, world`.
+
+U10 was **ratified** (`payload.jet` manifest + `packages:` model) in
+`docs/spec/syntax-decisions.md` + `src/syntax.rs` before implementation, and is
+enforced by `tests/decisions.rs`. **Next is gap #5/#4/#6** (see "Larger, later"
+and the gap list) — confirm the relevant decision is Ratified and write the
+failing test/example first.
 
 Recent arc: `pack.jet`→`env.jet` clean break + computed modules + manifest
 reshape (`98ff3be`) → U8 nested `sources:`/`imports:` parser → `modeval` wired
 into the CLI (`11e7df8`) → U4 `find(…)` discovery (`4054b2b`) → U9 docs
 (`bf1c645`) → U9 inferred provider kind for `path@…` (`4d5aca6`) → U9 remote
 probe for `github@…` (`819b756`) → U10 ratified (`payload.jet` + `packages:`) →
-**U10 Chunk 1 implemented: manifest renamed `pack.jet`→`payload.jet` (this
-session, uncommitted).** The typed `module { … }`
+U10 Chunks 1–3 committed (`3fff80b`/`0e6312c`) → **U10 Chunk 4 implemented:
+`library`/`executable` realize split + retired the `env.jet` pkg index (green,
+uncommitted in the working tree).** The typed `module { … }`
 `env.jet` surface builds and realizes end-to-end, including `find(…)`
 import-tree discovery and first-party `core` sources from both local (`path@`)
 and remote (`github@`) repos.
 
 ### Implemented & shipping (Phase-1 bootstrap)
 - Two binaries: `jet`, `jetpack` (Cargo.toml `[[bin]]`).
-- `payload.jet` manifest: `payload:`/`deps:`/`exports: [module …]`/`edition`
-  parsed in `src/jetpack/packmanifest.rs` (tested).
+- `payload.jet` manifest: `payload:`/`deps:`/`packages: { name: library|executable }`/
+  `edition` parsed in `src/jetpack/packmanifest.rs` (tested); packages discovered
+  by `module <name>` and realized by kind (the `core` provider reads this index).
 - Hangar store `/etc/jet/hangar` (`syntax::HANGAR_DIR`); unified lockfile
   `.jet/lock` (`syntax::UNIFIED_LOCK_FILE`); `.jet/` managed folder via
   `src/jetpack/store.rs`.
@@ -356,8 +403,9 @@ test/example first.
    for both `path@…` (local `pack.jet`) and `github@…` (realize-time git peek).**
    `module dev { sources: {…} imports: find(…) env.dev: Env { … } }` builds and
    realizes, including discovered modules and first-party `core` sources.
-   Remaining: converge the `core` marker onto `pack.jet` (see Next up — has an
-   open manifest-design question); `config.jet`/`system`/`image` (gaps #4/#5).
+   The `core` marker convergence is **DONE** (U10 arc complete: the provider
+   reads `payload.jet`'s `packages:` index, never `env.jet`). Remaining:
+   `config.jet`/`system`/`image` (gaps #4/#5).
 4. **`config.jet` + the entire `jetos` tier — not implemented.** `CONFIG_FILE`
    constant only (`src/syntax.rs:438`); never loaded; no `jetos` binary, no
    `src/jetos/`. Scale-3 (`jetos switch/build`).
@@ -368,7 +416,11 @@ test/example first.
 
 ---
 
-## Next up — START HERE: U10 `payload.jet` arc (manifest rename + `packages:` model)
+## U10 `payload.jet` arc (manifest rename + `packages:` model) — ✅ COMPLETE
+
+All four chunks landed (2026-06-16). **For the next chunk, jump to "Larger,
+later" below (gaps #5/#4/#6)** — this arc is finished; the four-chunk record
+here is kept for context.
 
 **Ratified 2026-06-16 as U10** (`docs/spec/syntax-decisions.md`; tokens in
 `src/syntax.rs`: `PAYLOAD_FILE`, `MANIFEST_BLOCK_PAYLOAD`,
@@ -404,12 +456,21 @@ dev-shell only). No Jet→binary compiler yet: `library` stages module source,
   walks the source tree for `module <name>`; `CoreProvider::realize` uses it;
   E1212/E1213 cover not-found and ambiguous; UI snapshots blessed; dual `env.jet`
   marker retired. See Latest chunk above.
-- **Chunk 4 — `library` vs `executable` realize.** `executable` stages the
-  package dir's prebuilt `bin/` (today's behavior, now keyed by kind);
-  `library` stages module source for import. Retire the `env.jet`
-  `pkg.package(...)` index entirely (`PACK_DIRECTIVE_PACKAGE`, `envfile::provided`).
-  *Exit:* both kinds realize offline e2e (extend `tests/jetpack.rs`); example
-  updated as the executable spec (I5).
+- **Chunk 4 — `library` vs `executable` realize. ✅ DONE (2026-06-16).** Realize
+  keys on the kind from the repo's `payload.jet` `packages:` index: `executable`
+  stages `bin/`, `library` stages source-only (empty `bin`, no PATH entry). The
+  `env.jet` `pkg.package(...)` index (`PACK_DIRECTIVE_PACKAGE`, `envfile::provides/
+  provided`) is fully retired. Both kinds realize offline e2e; example updated to
+  the U10 `payload.jet` model. See the Latest chunk above.
+
+**⇒ The U10 4-chunk arc is COMPLETE.** START HERE next: gap #5 (`System`/`Image`
+semantics) or gap #6 (`jet dev`/`jetpack enter`) — see "Larger, later" below and
+the gap list. Confirm the relevant decision is Ratified and write the failing
+test/example first. **Out of the (now-closed) U10 arc**, separately: consumer-side
+`env.jet` "import a lib vs install an exec" syntax (a `library` realizes today but
+nothing consumes its staged source yet — there is no import-a-Jet-library path);
+and the real Jet→binary compiler (both kinds stage source/prebuilt bytes; no
+compile step exists).
 
 Entry points: `src/jetpack/{packmanifest,provider,modeval,envfile,cli}.rs`,
 `src/syntax.rs`, `docs/spec/diagnostics.md`, `examples/jetpack-typed/`,

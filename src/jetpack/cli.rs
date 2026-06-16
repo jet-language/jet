@@ -336,7 +336,11 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         let Some(entry) = realize_ref(theme, &roots, &parsed.flags, &plan.table, spec) else {
             return 1;
         };
-        bin_dirs.push(entry.bin);
+        // A `library` package realizes with an empty `bin` (U10) — it stages
+        // source for import and contributes nothing to PATH.
+        if !entry.bin.is_empty() {
+            bin_dirs.push(entry.bin);
+        }
         realized_refs.push(entry.reference);
     }
     let label = plan.label;

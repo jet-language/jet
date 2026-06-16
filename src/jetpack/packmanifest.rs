@@ -138,6 +138,14 @@ impl PackManifest {
         let text = std::fs::read_to_string(Self::path_in(dir)).ok()?;
         Some(parse(&text))
     }
+
+    /// The declared kind of package `name`, if listed in `packages:` (U10).
+    pub fn package_kind(&self, name: &str) -> Option<PackageKind> {
+        self.packages
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.kind.clone())
+    }
 }
 
 /// Parse a `payload.jet` package manifest from its text (U1/U10).

@@ -1,0 +1,19 @@
+// jet-pkgs/payload.jet — a first-party Jet package repo (R2/U10).
+//
+// A package repo declares the packages it ships in the `packages:` block. Each
+// entry is `name: kind`, where `name` is a top-level `module` discovered by
+// name in the source tree (here `module hello` in pkgs/hello/hello.jet) and
+// `kind` is `executable` (installed on PATH — the devshell case) or `library`
+// (staged as source for import). The `core` provider reads this index to
+// resolve a requested package → its source. No Nix is involved.
+//
+// Consume it from another project's env.jet:
+//   pkg.source("mine", "path:../jet-pkgs", "core");
+//   pkg.packages(["mine:hello"]);
+payload: {
+    name:    "jet-pkgs",
+    version: "0.1.0",
+}
+packages: {
+    hello: executable,
+}

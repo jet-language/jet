@@ -424,10 +424,6 @@ pub const PACK_DIRECTIVE_SOURCE: &str = "pkg.source";
 pub const PACK_DIRECTIVE_PACKAGES: &str = "pkg.packages";
 pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 
-/// D-JPK16 (R2): a first-party Jet package a repo's `env.jet` provides, for
-/// the `core` provider to build: `pkg.package("<name>", "<source-subpath>")`.
-pub const PACK_DIRECTIVE_PACKAGE: &str = "pkg.package";
-
 // ──────────────────────────────────────────────
 // Unified ecosystem (jet + jetpack + jetos) — user-typeable surface (I7).
 // Owner-ratified design-of-record: docs/plans/jetpack-jetos/unified-ecosystem.md

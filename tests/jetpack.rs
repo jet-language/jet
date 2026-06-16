@@ -437,6 +437,62 @@ fn typed_core_source_inferred_from_pack_jet() {
 }
 
 #[test]
+fn core_provider_builds_library_package_without_nix() {
+    // U10 Chunk 4: a `library` package realizes through the `core` provider
+    // (no nix), staging its module source. Unlike an `executable`, it puts no
+    // `bin/` on PATH — but `jetpack build` realizes it just the same. The kind
+    // comes from the repo's `payload.jet` `packages:` index.
+    let base = Scratch::new("core-library");
+    let repo = base.join("jet-pkgs");
+    let proj = base.join("proj");
+    let root = base.join("root");
+    let lib_pkg = repo.join("lib/mathlib");
+    fs::create_dir_all(&lib_pkg).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    // `payload.jet` declares the package as a `library` (the kind index).
+    fs::write(
+        repo.join("payload.jet"),
+        "payload: {\n    name: \"jet-pkgs\",\n    version: \"0.1.0\",\n}\npackages: {\n    mathlib: library,\n}\n",
+    )
+    .unwrap();
+    // The library's source: a `module mathlib` discovered by name (Chunk 3),
+    // with no `bin/` — it is imported for its code, not installed on PATH.
+    fs::write(
+        lib_pkg.join("mathlib.jet"),
+        "module mathlib {\n    pub fn add(a: Int, b: Int) -> Int { return a + b }\n}\n",
+    )
+    .unwrap();
+    // A typed env references the library package; the source kind is inferred
+    // from `payload.jet` → core.
+    fs::write(
+        proj.join("env.jet"),
+        format!(
+            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env {{\n        packages: [mine.mathlib],\n    }}\n}}\n",
+            repo.to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin") // no nix on PATH
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("built 1 package(s)"),
+        "expected build success status, got: {stderr}"
+    );
+}
+
+#[test]
 fn committed_example_builds_offline_end_to_end() {
     // I5: the committed `examples/jetpack/` project is the executable spec for
     // a real env.jet. `jetpack build` with no ref reads env.jet and realizes
