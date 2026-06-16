@@ -1,0 +1,252 @@
+# The Jet ecosystem — unified design-of-record
+
+**Status:** owner-ratified vision, 2026-06-16. This is the **canonical
+authoring-surface and filesystem model** for `jet` + `jetpack` + `jetos`. It
+**supersedes** the pack-file surface in this folder's `README.md` (§3.3) and the
+earlier `pack-abi.md`, **revises** D-JPK3/8/13 (file roles/names), and
+**influences** `jetos-design.md` (module shape) and the Jet package manifest
+(S52). Phase-1 directive scanning stays as the shippable bootstrap; this is the
+target surface it evolves into.
+
+All names below are **ratified** (see the Naming ledger). Open items are the
+**U-series** at the end.
+
+---
+
+## 1. The three tools — roles and the one-way arrow
+
+| Tool | What it is | Standalone? |
+|---|---|---|
+| **jet** | the language + compiler. Runs code. *A file is a complete program.* Knows nothing about jetpack. | ✅ fully usable alone |
+| **jetpack** | the declarative **engine**: reads the manifests, resolves sources, realizes the **hangar** store, discovers + merges the module tree, builds environments. It *evaluates* Jet files via pure eval. | needs jet |
+| **jetos** | a **consumer** of jetpack: adds whole-machine module namespaces (`system`/`image`) + activation/generations. | needs jetpack |
+
+**Dependency arrow is strictly one-way: `jetos → jetpack → jet`.** jet never
+depends on jetpack; jetpack never depends on jetos. This is what keeps "jet
+usable on its own" true forever.
+
+## 2. The three files — one mental model, three tiers
+
+You write only the tier you need. All three share the **same** module /
+namespace / `find` / merge machinery; only the *fields* differ.
+
+| File | Tier | Analogy | Lives | Holds |
+|---|---|---|---|---|
+| **`pack.jet`** | package | `Cargo.toml` | project root | package identity + Jet library deps (+ exported modules) |
+| **`env.jet`** | project environment | `devenv.nix` | project root | dev shells, tools, project module tree (`env` namespace) |
+| **`config.jet`** | system | `configuration.nix` | `~/.jet/` (default) | whole-machine config (`system`/`image` namespaces) |
+
+A repo can have `pack.jet` + `env.jet` together. `config.jet` is the jetos tier
+and normally lives on its own in `~/.jet/`.
+
+### 2.1 `pack.jet` — the package manifest (Cargo.toml analog)
+
+Jet syntax, not TOML — one language everywhere. Replaces the old `jet.toml`.
+
+```jet
+package: {
+    name:    "wordstats",
+    version: "0.1.0",
+    edition: "2026",
+    license: "MIT OR Apache-2.0",
+}
+deps: {
+    textkit: "1.2.0",
+    helpers: path@../helpers,
+}
+exports: [module web, module cli]   // optional: public modules this package ships
+```
+
+### 2.2 `env.jet` — the project environment (devenv analog)
+
+```jet
+sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+imports: find("./modules")          // flake-parts-style auto-discovery
+
+module dev {
+    env.dev: Env {
+        packages: [default.[ripgrep, fd, jq, sqlite]],
+        vars:     [var("RUST_LOG", "debug")],
+        prompt:   "wordstats",
+    }
+}
+```
+`jet dev` / `jetpack enter dev` uses it. Drop a file in `modules/` and it merges
+automatically — no edit here.
+
+### 2.3 `config.jet` — the master jetos config (configuration.nix analog)
+
+```jet
+sources: {
+    default:  github@NixOS/nixpkgs/nixos-24.05,
+    unstable: github@NixOS/nixpkgs/nixpkgs-unstable,
+}
+imports: find("./modules")
+
+module laptop {
+    system.laptop: System {
+        target:   "x86_64-linux",
+        packages: [default.[firefox, btop], unstable.neovim],
+        services: { pipewire: Service { enable: true } },
+        options:  [ set("net.hostName", "laptop") ],
+    }
+}
+
+module installer {
+    image.installer: Image { target: "x86_64-linux", from: system.laptop }
+}
+
+// module _gaming { … }   // disabled: leading underscore → not discovered
+```
+
+## 3. Filesystem & store — tidy by default, one store, never relocated
+
+- **One global store: `/etc/jet/hangar/`.** No per-user store. Content-addressed,
+  deduplicated, and a clean backup target.
+- **Your config is never force-moved.** Unlike NixOS's `/etc/nixos/`, the
+  authored files live wherever you keep them — a project repo, or `~/.jet/` for
+  the system tier (the default, also just a normal git repo you back up to
+  GitHub). jetpack/jetos *point at* a config path; they never relocate it.
+- **`.jet/` is the project-local managed folder** — lockfile, caches, GC roots.
+  Never hand-edited. The realized packages are **not** here; they live in the
+  shared hangar.
+
+```
+# A project (commits cleanly to GitHub):
+wordstats/
+  pack.jet  env.jet
+  modules/tools/lint.jet        # auto-discovered by find()
+  src/ main.jet
+  .jet/
+    lock                        # the ONLY lockfile
+    cache/  gcroots/
+
+# The machine config (default ~/.jet/, also a git repo you back up):
+~/.jet/
+  config.jet
+  modules/{apps,hosts,services}/
+  .jet/lock
+
+# The one shared store (backup target):
+/etc/jet/hangar/
+```
+
+## 4. Modules — explicit, composable, one-character disable
+
+- **A module is an explicit named declaration:** `module name { … }`. Multiple
+  modules may live in one file, so you can group and toggle them independently.
+- **Disable with a leading underscore:** `module _name { … }` is **not
+  discovered or merged**. One character, reversible, obvious at a glance. (This
+  supersedes jetos D-OS1's "the file is the module".)
+- **Auto-discovery by convention:** `imports: find("./modules")` discovers every
+  `.jet` file in the tree and merges each module's typed contributions — no
+  manual `imports = [ … ]` list (flake-parts / import-tree, by default).
+- **Liftability law (from jetos-design §5.5, generalized):** modules may **not**
+  import each other. They only contribute to the merged whole. This is what
+  makes "drop a file in" safe and keeps composition from exploding.
+
+## 5. Namespaces & types
+
+Reserved namespaces any module may contribute to, each with a matching type:
+
+| Namespace | Type | Configures | Example |
+|---|---|---|---|
+| `env` | `Env` | a development environment / shell | `env.dev: Env { … }` |
+| `system` | `System` | a whole machine (jetos) | `system.laptop: System { … }` |
+| `image` | `Image` | an ISO / VM / disk image (jetos) | `image.installer: Image { … }` |
+
+Packages are values of type **`Pkg`**. Source refs are `provider@target`:
+`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`. In `packages:` lists
+(item type `Pkg`), the type-directed sugar applies: `default.ripgrep`,
+`default.[ripgrep, fd]`, and `unstable.neovim`. Strings (`"mine@hello"`) remain
+the escape hatch for refs the sugar doesn't cover.
+
+## 6. Merge rules (canonical — one table for all tiers)
+
+Reconciles jetos-design §5.4 and the former pack-abi table into one referee:
+
+| Field | Rule |
+|---|---|
+| `sources` | merge by key; duplicate names with different refs **conflict** unless explicitly overridden |
+| `packages` | concatenate, de-duplicate, preserve source identity |
+| `env.*` / `system.*` / `image.*` | merge by namespace key; package lists combine; scalar fields conflict unless priority-marked |
+| `services` / `options` | merge by key; scalar conflicts are diagnostics unless `default`/`force`-marked |
+| scalar settings | one value wins only by explicit priority (`default`/`force`) |
+
+## 7. Why this is genuinely better than Nix
+
+1. **One real language for code *and* config** — same syntax, LSP, formatter,
+   and diagnostics. Nix config is a separate untyped language.
+2. **Typed by default** — a bad package ref or unknown option is a *local
+   diagnostic at edit time* with "did you mean", not an evaluator stack trace.
+3. **Import-tree by default (`find`)** — no `inputs`/`outputs`/`system`/`mkShell`
+   boilerplate; convention discovers modules.
+4. **Tidy by default** — all machinery in `.jet/`; one shared hangar store; no
+   `flake.lock`/`result` symlinks scattered in your repo.
+5. **One coherent scale** — the same module/merge model carries you from dev
+   shell → whole machine → ISO. Nix needs flakes + home-manager + NixOS modules
+   + flake-parts glued together.
+6. **No footguns** — no `with`, no `rec`, no lazy infinite recursion, no
+   stringly-typed paths; explicit typed refs and a one-char module disable.
+7. **Honest sandboxed eval** (pure `fn`, S60) — deterministic, with call-trace
+   diagnostics when something sneaks in I/O.
+8. **One store, one lockfile, reproducible, air-gappable, backup-friendly.**
+
+## 8. Scales — progressive disclosure (jet stays sacred)
+
+| Scale | You write | Tool |
+|---|---|---|
+| 0 — script | nothing — just `app.jet` | `jet run app.jet` |
+| 1 — package | `pack.jet` | `jet build` / `jetpack` |
+| 2 — project env | `pack.jet` + `env.jet` (+ `modules/`) | `jet dev` / `jetpack enter` |
+| 3 — system | `config.jet` (+ `modules/`) in `~/.jet/` | `jetos switch` / `build` |
+
+Scale 0 never needs a manifest, `.jet/`, or anything — the hard line that keeps
+jet a beginner's first compiled language.
+
+## 9. Future development (out of scope now, designed-for)
+
+- **Imperative operations.** Ad-hoc `jetpack install/remove` against the shared
+  hangar (à la `nix profile`), reconciled with the declarative config — either
+  recorded back into a module or tracked in a separate imperative profile.
+  Designed against the same store; not v1.
+- **Multi-machine / fleet** config from one `config.jet`.
+- **Signed hangar + generations/rollback** (ties to E2-M16 layer 3, S60).
+
+## 10. Ratified naming ledger (2026-06-16)
+
+| Thing | Name |
+|---|---|
+| package manifest | `pack.jet` (Jet syntax; replaces `jet.toml`) |
+| project environment file | `env.jet` |
+| master system config | `config.jet` (default dir `~/.jet/`) |
+| module keyword | `module`; disable = leading `_` |
+| reserved namespaces | `env` · `system` · `image` |
+| namespace types | `Env` · `System` · `Image`; package = `Pkg` |
+| import-tree fn | `find("./path")` |
+| shared store | **hangar**, at `/etc/jet/hangar/` (single, global) |
+| project-managed folder | `.jet/` · lockfile `.jet/lock` (replaces `pack.lock`/`jet.lock`) |
+| source refs | `provider@target` (`github@owner/repo/rev`, `path@…`) |
+
+## 11. Open decisions (U-series) + downstream edits
+
+| ID | Question | Rec |
+|---|---|---|
+| U1 | Retire `jet.toml` → `pack.jet` (Jet syntax) as the package manifest; amend ratified **S52** | yes |
+| U2 | Unify `jet.lock` + `pack.lock` → single `.jet/lock` (amend S52) | yes |
+| U3 | Adopt explicit `module name {}` + `_` disable everywhere; **supersede jetos D-OS1** (file-is-module) | yes |
+| U4 | `find(...)` auto-discovery as the default import surface (generalize jetos D-OS7) | yes |
+| U5 | Adopt the §6 canonical merge table across all tiers (replaces jetos §5.4 + pack-abi) | yes |
+| U6 | Confirm `provider@target` source refs (was D-JPK18) + `Pkg` sugar (was D-JPK19) | yes |
+| U7 | Keep `jet run file.jet` zero-ceremony forever | reaffirm |
+
+**Downstream edits to make once U1–U7 are confirmed:**
+
+- **S52 (jet manifest):** amend — `pack.jet` replaces `jet.toml`; `.jet/lock`
+  replaces `jet.lock`; `.jet/` folder already ratified (S52 amendment 2026-06-13).
+- **jetpack README:** §3.3 pack-file surface superseded by this doc; D-JPK8/13
+  file roles revised (`pack.jet` = package, not "everything"); `pack.lock` →
+  `.jet/lock`.
+- **jetos-design.md:** D-OS1 (file-is-module) superseded by U3; default config
+  location `~/.jet/config.jet`; namespaces/types adopt `env/system/image` +
+  `Env/System/Image`; merge table points here.

@@ -5,6 +5,16 @@
 > caches) on the same store as docs/plans/epoch-1/m12-packages.md. No decision
 > in this file (D-OS1…7, D-NX1…6) is ratified. Agents: do not implement.
 >
+> **⚠ Reconciled by `unified-ecosystem.md` (2026-06-16, owner-ratified).** The
+> authoring surface is now: explicit **`module name {}`** with **`_`-prefix
+> disable** (supersedes **D-OS1** "the file is the module"); reserved namespaces
+> **`env`/`system`/`image`** with types `Env`/`System`/`Image` and packages
+> `Pkg`; **`find("./modules")`** auto-discovery (generalizes D-OS7); the master
+> config is **`config.jet`**, default location **`~/.jet/`** (not `/etc/…`); the
+> single store is the **hangar** at `/etc/jet/hangar/`; the merge table lives in
+> unified-ecosystem.md §6. The option/guard syntax (D-OS2/3/4) and the rest of
+> this file stand until separately revised.
+>
 > This is the **detailed Phase 2 design** the consolidated plan
 > (docs/plans/jetpack-jetos/README.md) sequences and references. Read the
 > README first for phase order and owner decision gates, then this file for the

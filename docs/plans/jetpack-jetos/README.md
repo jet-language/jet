@@ -1,6 +1,18 @@
 # jetpack & jetos — consolidated plan (owner concurrence)
 
 **Status:** draft for owner concurrence, 2026-06-15.
+
+> **⚠ Superseded authoring surface (2026-06-16).** The pack-file/authoring
+> surface and filesystem model are now defined by
+> [`unified-ecosystem.md`](unified-ecosystem.md) (owner-ratified). Key changes:
+> three files — **`pack.jet`** (package, Cargo.toml-like), **`env.jet`** (project
+> dev environment), **`config.jet`** (master jetos config, default `~/.jet/`);
+> explicit **`module name {}`** with **`_`-prefix disable**; **`find(...)`**
+> import-tree; reserved namespaces **`env`/`system`/`image`** (types
+> `Env`/`System`/`Image`, packages `Pkg`); one global **hangar** store at
+> `/etc/jet/hangar/`; lockfile **`.jet/lock`** (replaces `pack.lock`). §3.3 and
+> D-JPK8/13 below are revised by that doc; Phase-1 directive scanning remains the
+> shippable bootstrap.
 **Owner direction (2026-06-15):** make **jetpack** a real package manager and,
 while building it, treat it as independent from the `jet` binary. The headline
 feature is a Nix-`shell`/`devenv`-class **temporary environment** —
@@ -343,15 +355,18 @@ decidable at a glance (owner decision-doc style).
 | **D-JPK14** | Shell prompt support | **Ratified:** bash/fish/zsh; default visible prompt label is `jetpack`; prompt style/options supported. | **Ratified 2026-06-15** |
 | **D-JPK15** | Nix compatibility syntax | **Ratified:** support flakes and nixpkgs attrs through `<source>:<package/path>`; users should not type `#`. | **Ratified 2026-06-15** |
 | **D-JPK13** | Pack file and lockfile naming | **Ratified A:** `pack.jet` + `pack.lock` ("Jet packs"; avoids repeating `jet`). | **Ratified 2026-06-15** |
-| **D-JPK18** | Source ref spelling for the typed authoring surface | **Open** — `provider@target` (e.g. `github@NixOS/nixpkgs/nixos-24.05`) vs colon URI vs string-only. Revises D-JPK7/15 for the *next* surface; keep colon classifier for Phase 1. Examples + table: `pack-abi.md`. | **Rec: `provider@target`** |
-| **D-JPK19** | Package-ref sugar in typed `packages:` lists | **Open** — dot refs (`default.ripgrep`) + scoped lists (`default.[ripgrep, fd]`) + default-source bare names, Jetpack-context only. Extends D-JPK17. Examples + table: `pack-abi.md`. | **Rec: dot refs + scoped lists** |
+| **D-JPK18** | Source ref spelling for the typed authoring surface | **Ratified 2026-06-16:** `provider@target` (e.g. `github@NixOS/nixpkgs/nixos-24.05`). Revises D-JPK7/15 for the new surface; keep colon classifier for Phase 1 compatibility. | **Ratified (U6)** |
+| **D-JPK19** | Package-ref sugar in typed `packages:` lists | **Ratified 2026-06-16:** dot refs (`default.ripgrep`) + scoped lists (`default.[ripgrep, fd]`), type-directed (`Pkg`), Jetpack-context only. Extends D-JPK17. | **Ratified (U6)** |
+| **D-JPK20** | File roles & names | **Ratified 2026-06-16:** `pack.jet` (package), `env.jet` (project env), `config.jet` (system; default `~/.jet/`). Revises D-JPK8/13. | **Ratified** |
+| **D-JPK21** | Module shape & disable | **Ratified 2026-06-16:** explicit `module name {}`, multiple per file; disable via leading `_`. Supersedes jetos D-OS1. | **Ratified** |
+| **D-JPK22** | Import tree + store | **Ratified 2026-06-16:** `find("./modules")` auto-discovery; one global **hangar** store `/etc/jet/hangar/`; `.jet/` managed folder; `.jet/lock`. | **Ratified** |
 
-The **typed pack ABI** (module declarations, `Shell`/`Source`/`PackageRef`
-types, dispersed-file merge rules, and the three use-case categories) is the
-fluent surface D-JPK3 defers to; its design-of-record is
-[`pack-abi.md`](pack-abi.md). The **core-language** features it needs (field
-punning, `module` declarations, list-inference) are balloted as Group 16
-(D-FP1…6) in docs/spec/decision-ballots.md.
+The authoring surface, namespaces (`env`/`system`/`image`), types
+(`Env`/`System`/`Image`/`Pkg`), merge rules, and filesystem model are the
+design-of-record in [`unified-ecosystem.md`](unified-ecosystem.md). The
+**core-language** features it needs (field punning, `module` declarations,
+list-inference) are balloted as Group 16 (D-FP1…6) in
+docs/spec/decision-ballots.md.
 
 Background decisions already recorded and still in force: jetos.md D-OS1..7,
 D-NX1..6; jetpack-config.md D-JP1..5. This file supersedes their *sequencing*

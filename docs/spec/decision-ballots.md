@@ -306,9 +306,9 @@ These were distilled from prior research exploration (Odin error handling,
 Elixir pattern matching, the functional `pack.jet` debrief, and a CLI-tooling
 survey) plus `docs/plans/owner-todo.md`. Those research files have been removed
 now that their decisions live here; the Jetpack/JetOS design from the pack
-debrief was migrated to `docs/plans/jetpack-jetos/pack-abi.md` (prior versions
-are in git history). Nothing here is built until ratified (I7, I8). Each option
-has a worked example.
+debrief was migrated to `docs/plans/jetpack-jetos/unified-ecosystem.md` (prior
+versions are in git history). Nothing here is built until ratified (I7, I8).
+Each option has a worked example.
 
 ## Group 14 — Error-handling ergonomics *(needed by E2-M6; some E2-M7)*
 

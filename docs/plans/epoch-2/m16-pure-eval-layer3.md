@@ -11,7 +11,7 @@ Provides the foundation for the jetpack-jetos track Phase 2.
 
 Make purity a product feature and lay the groundwork for declarative
 configuration/package recipes — Nix's best property (declarative, function-shaped
-config) without Nix's evaluator mystique (design: docs/plans/jetpack-jetos/pack-abi.md).
+config) without Nix's evaluator mystique (design: docs/plans/jetpack-jetos/unified-ecosystem.md).
 Epoch 2 builds the foundation; JetOS itself stays research (E2-V12).
 
 ## Owner decisions — ratify before any code
