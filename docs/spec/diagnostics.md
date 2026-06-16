@@ -328,6 +328,68 @@ command/flag is within edit distance 2. Their golden transcripts live in
 | E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a command like `run`, `check`, or `new`. | Did you mean `jet {closest}`? Run `jet help` to see them all. |
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 
+## Machine-readable diagnostics (`--json`)
+
+Passing `--json` to `jet check`, `jet build`, or `jet test` makes the
+driver emit diagnostics as **data** instead of prose, for scripts, CI,
+and editors. This is decision **D-DX1** (ratified 2026-06-16): a single,
+**stable, versioned** schema, shared by the `--json` CLI flag, the future
+`jet fix` engine, and the LSP. The serializer lives in `src/diagjson.rs`
+(`to_json` / `render_all_json`); this section is its single source of
+truth. Adding a field is allowed any time; **removing or repurposing one
+requires bumping `schema_version`.**
+
+**Shape — JSON Lines.** One self-contained JSON object per diagnostic,
+each terminated by `\n`, matching `cargo --message-format=json`. A run
+with N diagnostics prints N lines on **stdout**; a clean run prints
+nothing on stdout. Human prose and the `jet explain` footer still go to
+**stderr** in the non-`--json` path, and `--json` emits **no ANSI ever**
+(scripts must never parse ANSI). Field order is fixed and numbers are
+integers, so the bytes are deterministic and snapshot-pinnable.
+
+**Fields (schema_version 1):**
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `schema_version` | integer | Schema version; `1` today. Bumped only for breaking changes. |
+| `code` | string | The diagnostic code, e.g. `"E0037"`. Pairs with `jet explain`. |
+| `severity` | string | `"error"` or `"warning"`. |
+| `message` | string | The one-line *what* (same text as the human `Error [...]:` line). |
+| `why` | string | The *why* — the rule behind the diagnostic. |
+| `fix` | string | The *fix* — the concrete next step (human text). |
+| `file` | string | Path of the source file the diagnostic is about. |
+| `span` | object \| null | Source location, or `null` for whole-file diagnostics. |
+| `suggestions` | array | Machine-applicable fixes (possibly empty). |
+| `detail` | string \| null | Extra indented detail (e.g. tool output), or `null`. |
+
+A **`span`** object carries both human and machine coordinates:
+`start_byte`, `end_byte` (byte offsets into the file, the range a fix
+slices), and 1-based `start_line` / `start_col` / `end_line` / `end_col`.
+
+A **`suggestions`** entry is `{ "message", "replacements": [...] }`, where
+each replacement is `{ "file", "span", "new_text" }` — apply `new_text`
+over the byte range `[start_byte, end_byte)` in `file`. This is the
+contract the future `jet fix` engine and LSP code actions consume; today
+it is populated from the S14 teaching auto-corrects (e.g. E0037 "replace
+`println` with `print`"). Diagnostics with no mechanical fix emit
+`"suggestions": []` — the field is always present so consumers never
+special-case its absence.
+
+Example (`jet check`, one teaching error, wrapped for readability —
+the real output is one line):
+
+```json
+{"schema_version":1,"code":"E0037","severity":"error",
+ "message":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`",
+ "file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},
+ "suggestions":[{"message":"replace `println` with `print`",
+   "replacements":[{"file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},"new_text":"print"}]}],
+ "detail":null}
+```
+
+The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
+(blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
+
 ## Process for a new diagnostic
 
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.

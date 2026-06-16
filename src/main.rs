@@ -48,6 +48,7 @@ const KNOWN_FLAGS: &[&str] = &[
     "--annotated",
     "--bench",
     "--color",
+    "--json",
     "--path",
     "--git",
     "--tag",
@@ -304,6 +305,7 @@ fn main() {
 
     let emit_rust = raw.iter().any(|a| a == "--emit-rust");
     let fmt_check = raw.iter().any(|a| a == "--check");
+    let json = raw.iter().any(|a| a == "--json");
     let small = raw.iter().any(|a| a == "--small");
     let locked = raw.iter().any(|a| a == "--locked");
     let annotated = raw.iter().any(|a| a == "--annotated");
@@ -429,13 +431,13 @@ fn main() {
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
-                                run_test(&entry_str);
+                                run_test(&entry_str, json);
                                 return;
                             }
                             _ => {
                                 let program_args: Vec<&String> =
                                     args.iter().skip(1).copied().collect();
-                                run_compile_cmd(cmd, &entry_str, emit_rust, small, &program_args);
+                                run_compile_cmd(cmd, &entry_str, emit_rust, small, json, &program_args);
                                 return;
                             }
                         }
@@ -462,7 +464,7 @@ fn main() {
         "fmt" => run_fmt(target, fmt_check),
         "fix" => run_fix(target),
         "new" => run_new(target, annotated),
-        "test" => run_test(target),
+        "test" => run_test(target, json),
         "add" => run_add(&raw),
         "remove" => run_remove(target),
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
@@ -474,7 +476,7 @@ fn main() {
         }
         _ => {
             let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
-            run_compile_cmd(cmd, target, emit_rust, small, &program_args);
+            run_compile_cmd(cmd, target, emit_rust, small, json, &program_args);
         }
     }
 }
@@ -537,7 +539,14 @@ fn run_explain(code: Option<&str>, color: bool) {
     }
 }
 
-fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_args: &[&String]) {
+fn run_compile_cmd(
+    cmd: &str,
+    file: &str,
+    emit_rust: bool,
+    small: bool,
+    json: bool,
+    program_args: &[&String],
+) {
     let profile = if small {
         BuildProfile::Small
     } else {
@@ -562,43 +571,61 @@ fn run_compile_cmd(cmd: &str, file: &str, emit_rust: bool, small: bool, program_
             .filter(|d| matches!(d.severity, jet::diag::Severity::Error))
             .collect();
         if !diags.is_empty() {
-            eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
-            let n = diags.len();
-            eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+            if json {
+                print!("{}", jet::render_diagnostics_json(file, &src, &diags));
+            } else {
+                eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
+                let n = diags.len();
+                eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+            }
             exit(1);
         }
-        println!("ok: `{}` has no problems", file);
+        if !json {
+            println!("ok: `{}` has no problems", file);
+        }
         return;
     }
 
     let (rust_code, ffi_link, clinks) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
-                eprint!("{}", jet::render_diagnostics_cli(file, &src, &out.lints, stderr_color_now()));
-                let n = out.lints.len();
-                eprintln!(
-                    "\n{} warning{} emitted (compilation continues)",
-                    n,
-                    if n == 1 { "" } else { "s" }
-                );
+                if json {
+                    print!("{}", jet::render_diagnostics_json(file, &src, &out.lints));
+                } else {
+                    eprint!("{}", jet::render_diagnostics_cli(file, &src, &out.lints, stderr_color_now()));
+                    let n = out.lints.len();
+                    eprintln!(
+                        "\n{} warning{} emitted (compilation continues)",
+                        n,
+                        if n == 1 { "" } else { "s" }
+                    );
+                }
             }
             // S59 (E2-M14): resolve native C link flags at build time; E3201
             // (unresolved C lib) surfaces here, not during front-end checking.
             let clinks = match jet::resolve_c_links(file) {
                 Ok(args) => args,
                 Err(diags) => {
-                    eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
-                    let n = diags.len();
-                    eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+                    if json {
+                        print!("{}", jet::render_diagnostics_json(file, &src, &diags));
+                    } else {
+                        eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
+                        let n = diags.len();
+                        eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+                    }
                     exit(1);
                 }
             };
             (out.rust, out.ffi, clinks)
         }
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
-            let n = diags.len();
-            eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+            if json {
+                print!("{}", jet::render_diagnostics_json(file, &src, &diags));
+            } else {
+                eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
+                let n = diags.len();
+                eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+            }
             exit(1);
         }
     };
@@ -1004,7 +1031,7 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     None
 }
 
-fn run_test(path: &str) {
+fn run_test(path: &str, json: bool) {
     let p = Path::new(path);
     if !p.exists() {
         eprintln!("error: can't find `{}`", path);
@@ -1027,16 +1054,16 @@ fn run_test(path: &str) {
         }
         let mut any_fail = false;
         for f in files {
-            if !run_test_file(&f) {
+            if !run_test_file(&f, json) {
                 any_fail = true;
             }
         }
         exit(if any_fail { 1 } else { 0 });
     }
-    exit(if run_test_file(p) { 0 } else { 1 });
+    exit(if run_test_file(p, json) { 0 } else { 1 });
 }
 
-fn run_test_file(path: &Path) -> bool {
+fn run_test_file(path: &Path, json: bool) -> bool {
     let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -1048,7 +1075,11 @@ fn run_test_file(path: &Path) -> bool {
     let (rust_code, ffi_link) = match jet::compile_tests_with_path(&src, &shown) {
         Ok(r) => r,
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics(&shown, &src, &diags));
+            if json {
+                print!("{}", jet::render_diagnostics_json(&shown, &src, &diags));
+            } else {
+                eprint!("{}", jet::render_diagnostics(&shown, &src, &diags));
+            }
             return false;
         }
     };

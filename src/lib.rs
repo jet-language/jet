@@ -12,6 +12,7 @@ pub mod codegen;
 pub mod collections;
 pub mod comptime;
 pub mod diag;
+pub mod diagjson;
 pub mod explain;
 pub mod fetch;
 pub mod ffi;
@@ -195,6 +196,11 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
 }
 
 pub use diag::render_all as render_diagnostics;
+
+/// Render diagnostics as machine-readable JSON Lines (D-DX1, E2-M3): one
+/// versioned JSON object per diagnostic, never any ANSI. The shared serializer
+/// lives in `diagjson` so `jet fix` and the LSP reuse the exact same schema.
+pub use diagjson::render_all_json as render_diagnostics_json;
 
 /// Render diagnostics for the CLI, with the E2-M3 "learn more" footer.
 ///

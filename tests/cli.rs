@@ -149,3 +149,134 @@ fn output_is_ansi_free_when_piped() {
         );
     }
 }
+
+// ── `--json` machine-readable diagnostics (D-DX1, E2-M3) ─────────────────────
+//
+// The `--json` flag emits one versioned JSON object per diagnostic to STDOUT
+// (the machine stream), never any human prose or ANSI. The schema is documented
+// in docs/spec/diagnostics.md ("Machine-readable diagnostics (`--json`)") and is
+// the single source of truth shared by the future `jet fix` and the LSP.
+
+/// Capture only the raw stdout bytes of `jet ARGS...` (where `--json` writes),
+/// under a deterministic, ANSI-free environment.
+fn json_stdout(args: &[&str]) -> String {
+    let out = Command::new(jet_bin())
+        .args(args)
+        .env("NO_COLOR", "1")
+        .env_remove("FORCE_COLOR")
+        .output()
+        .expect("run jet");
+    String::from_utf8(out.stdout).expect("jet --json stdout must be UTF-8")
+}
+
+/// A deliberately tiny, dependency-free JSON validator (I6: std-only): it walks
+/// the bytes tracking string/escape state and bracket/brace nesting, and rejects
+/// anything structurally unbalanced. Enough to prove the emitter produced
+/// well-formed JSON without pulling in serde.
+fn is_valid_json(s: &str) -> bool {
+    let mut depth: i32 = 0;
+    let mut in_str = false;
+    let mut escaped = false;
+    let mut saw_value = false;
+    for c in s.chars() {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_str = true;
+                saw_value = true;
+            }
+            '{' | '[' => {
+                depth += 1;
+                saw_value = true;
+            }
+            '}' | ']' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            c if !c.is_whitespace() => saw_value = true,
+            _ => {}
+        }
+    }
+    depth == 0 && !in_str && saw_value
+}
+
+/// Pin the exact `--json` stdout bytes for `name`, and on every run assert the
+/// output is ANSI-free and that each non-empty line is structurally valid JSON
+/// carrying the versioned schema key. JSON Lines: one object per line.
+fn check_json(name: &str, args: &[&str]) {
+    let actual = json_stdout(args);
+
+    // Scriptable-output contract: the JSON stream never carries ANSI.
+    assert!(
+        !actual.contains('\x1b'),
+        "`{}` --json stdout must be ANSI-free, found an escape byte:\n{}",
+        name,
+        actual
+    );
+    // JSON Lines: every non-empty line is one valid, versioned diagnostic object.
+    assert!(
+        actual.lines().any(|l| !l.trim().is_empty()),
+        "`{}` --json should emit at least one diagnostic line",
+        name
+    );
+    for line in actual.lines().filter(|l| !l.trim().is_empty()) {
+        assert!(
+            is_valid_json(line),
+            "`{}` --json emitted a structurally invalid JSON line:\n{}",
+            name,
+            line
+        );
+        assert!(
+            line.starts_with("{\"schema_version\":1,"),
+            "`{}` --json line must start with the versioned schema header:\n{}",
+            name,
+            line
+        );
+    }
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/cli/{}.txt", name));
+    if std::env::var("UPDATE_EXPECT").is_ok() {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &actual).unwrap();
+    } else {
+        let expected = fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            actual, expected,
+            "\n--json stdout mismatch for tests/cli/{}.txt\n(if intentional and matching docs/spec/diagnostics.md, run: UPDATE_EXPECT=1 cargo test --test cli)\n",
+            name
+        );
+    }
+}
+
+/// `jet check --json`: a teaching error (E0037) serializes with a populated
+/// `suggestions` array (the machine-applicable quick-fix the fix engine/LSP
+/// will apply).
+#[test]
+fn json_check() {
+    check_json("json_check", &["check", "tests/cli/json_check.jet", "--json"]);
+}
+
+/// `jet build --json`: a sema error (E0111) serializes; no mechanical fix, so
+/// `suggestions` is an empty array (always present, never null).
+#[test]
+fn json_build() {
+    check_json("json_build", &["build", "tests/cli/json_build.jet", "--json"]);
+}
+
+/// `jet test --json`: a sema error inside a `test` block serializes through the
+/// same shared emitter.
+#[test]
+fn json_test() {
+    check_json("json_test", &["test", "tests/cli/json_test.jet", "--json"]);
+}
