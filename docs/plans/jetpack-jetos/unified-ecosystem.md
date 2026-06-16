@@ -60,10 +60,9 @@ exports: [module web, module cli]   // optional: public modules this package shi
 ### 2.2 `env.jet` — the project environment (devenv analog)
 
 ```jet
-sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
-imports: find("./modules")          // flake-parts-style auto-discovery
-
 module dev {
+    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    imports: find("./modules")          // flake-parts-style auto-discovery
     env.dev: Env {
         packages: [default.[ripgrep, fd, jq, sqlite]],
         vars:     [var("RUST_LOG", "debug")],
@@ -71,19 +70,22 @@ module dev {
     }
 }
 ```
+`module` is the single outermost construct (U8): `sources:` and `imports:` nest
+inside the body as siblings of the `env.dev: Env { … }` contribution — like a
+flake's one `{}` holding both inputs and outputs. Sources merge by key across
+modules (§6).
 `jet dev` / `jetpack enter dev` uses it. Drop a file in `modules/` and it merges
 automatically — no edit here.
 
 ### 2.3 `config.jet` — the master jetos config (configuration.nix analog)
 
 ```jet
-sources: {
-    default:  github@NixOS/nixpkgs/nixos-24.05,
-    unstable: github@NixOS/nixpkgs/nixpkgs-unstable,
-}
-imports: find("./modules")
-
 module laptop {
+    sources: {
+        default:  github@NixOS/nixpkgs/nixos-24.05,
+        unstable: github@NixOS/nixpkgs/nixpkgs-unstable,
+    }
+    imports: find("./modules")
     system.laptop: System {
         target:   "x86_64-linux",
         packages: [default.[firefox, btop], unstable.neovim],
@@ -242,6 +244,7 @@ section + decision log) and `src/syntax.rs`; `tests/decisions.rs` enforces them.
 | U5 | The §6 canonical merge table across all tiers (replaces jetos §5.4 + pack-abi) | ratified |
 | U6 | `provider@target` source refs (was D-JPK18) + `Pkg` sugar (was D-JPK19) | ratified |
 | U7 | `jet run file.jet` stays zero-ceremony forever | ratified |
+| U8 | `sources:`/`imports:` nest inside `module {}` (siblings of contributions), not file top-level; amends U4 | ratified |
 
 **Downstream edits (now that U1–U7 are confirmed; tracked, applied per chunk):**
 

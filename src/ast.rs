@@ -257,7 +257,27 @@ pub struct ModuleDecl {
     pub name_span: Span,
     /// True when `name` begins with `_` (U3 one-character disable).
     pub disabled: bool,
+    /// U8 (unified-ecosystem §2.2): named `sources:` declared inside the module
+    /// body, siblings of the contributions. Merged by key across modules (U5).
+    pub sources: Vec<SourceDecl>,
+    /// U8: `imports: find("./modules")` import-tree directives, parsed as
+    /// ordinary call expressions; the `find` walk lands with U4 discovery.
+    pub imports: Vec<Expr>,
     pub contributions: Vec<Contribution>,
+    pub span: Span,
+}
+
+/// U8 (unified-ecosystem §2.2): one `name: provider@target` entry in a module's
+/// `sources:` block, e.g. `default: github@NixOS/nixpkgs/nixos-24.05`. The ref
+/// is not a single token (it contains `@`, `/`, `-`, `.`), so the parser records
+/// its source span; modeval slices the source and validates it via
+/// `classify_provider_ref`.
+#[derive(Debug)]
+pub struct SourceDecl {
+    pub name: String,
+    pub name_span: Span,
+    /// Span of the raw `provider@target` ref text in the source.
+    pub ref_span: Span,
     pub span: Span,
 }
 

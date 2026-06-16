@@ -3257,9 +3257,29 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident("for the module name")?;
         let disabled = name.starts_with('_');
         self.expect(TokKind::LBrace, "to open the module body")?;
+        let mut sources = Vec::new();
+        let mut imports = Vec::new();
         let mut contributions = Vec::new();
+        // A module body holds three kinds of entry (U3/U8): `sources:` and
+        // `imports:` fields, and typed `namespace.path: Value` contributions.
+        // The first two are distinguished by their reserved name followed by
+        // `:`; contributions begin with a namespace name followed by `.`.
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            contributions.push(self.contribution()?);
+            match &self.peek().kind {
+                TokKind::Ident(n)
+                    if n == syntax::MODULE_FIELD_SOURCES
+                        && matches!(self.peek2().kind, TokKind::Colon) =>
+                {
+                    sources.extend(self.module_sources()?);
+                }
+                TokKind::Ident(n)
+                    if n == syntax::MODULE_FIELD_IMPORTS
+                        && matches!(self.peek2().kind, TokKind::Colon) =>
+                {
+                    imports.push(self.module_import()?);
+                }
+                _ => contributions.push(self.contribution()?),
+            }
         }
         let end = self.peek().span.end;
         self.expect(TokKind::RBrace, "to close the module body")?;
@@ -3267,9 +3287,72 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             disabled,
+            sources,
+            imports,
             contributions,
             span: Span::new(start.start, end),
         })
+    }
+
+    /// U8: a module's `sources: { name: provider@target, … }` block. Each ref is
+    /// not a single token (it carries `@`, `/`, `-`, `.`), so we record its
+    /// source span and leave validation to modeval (`classify_provider_ref`).
+    fn module_sources(&mut self) -> Result<Vec<crate::ast::SourceDecl>, Diagnostic> {
+        self.bump(); // `sources`
+        self.expect(TokKind::Colon, "after `sources`")?;
+        self.expect(TokKind::LBrace, "to open the sources block")?;
+        let mut out = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            let (name, name_span) = self.expect_ident("for a source name")?;
+            self.expect(TokKind::Colon, "after a source name")?;
+            // Consume the `provider@target` ref tokens up to the next `,`/`}`;
+            // the recovered span slices back to the exact written text.
+            let ref_start = self.peek().span;
+            let mut ref_end = ref_start.end;
+            if matches!(self.peek().kind, TokKind::Comma | TokKind::RBrace | TokKind::Eof) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "a source needs a `provider@target` ref".to_string(),
+                    "every named source resolves to an upstream, e.g. `default: github@NixOS/nixpkgs/nixos-24.05`"
+                        .to_string(),
+                    "write the ref after the `:`".to_string(),
+                    Some(ref_start),
+                ));
+            }
+            while !matches!(
+                self.peek().kind,
+                TokKind::Comma | TokKind::RBrace | TokKind::Eof
+            ) {
+                ref_end = self.peek().span.end;
+                self.bump();
+            }
+            out.push(crate::ast::SourceDecl {
+                name,
+                name_span,
+                ref_span: Span::new(ref_start.start, ref_end),
+                span: Span::new(name_span.start, ref_end),
+            });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the sources block")?;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            self.bump();
+        }
+        Ok(out)
+    }
+
+    /// U8: a module's `imports: find("./modules")` directive. The value is an
+    /// ordinary call expression; the `find` walk itself lands with U4 discovery.
+    fn module_import(&mut self) -> Result<Expr, Diagnostic> {
+        self.bump(); // `imports`
+        self.expect(TokKind::Colon, "after `imports`")?;
+        let value = self.expr()?;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            self.bump();
+        }
+        Ok(value)
     }
 
     /// U3 (unified-ecosystem §5): one typed namespace contribution,

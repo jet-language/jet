@@ -1021,6 +1021,18 @@ never needs a manifest, `.jet/`, or any ecosystem file. This is the hard line
 that keeps jet usable on its own (the one-way arrow `jetos → jetpack → jet`).
 Rejected: requiring any manifest for single-file runs.
 
+**U8 — `sources:`/`imports:` nest inside the module body** *(ratified
+2026-06-16; amends U4)*: a module's `sources:` and `imports:` are fields **inside
+`module name { … }`**, siblings of the typed contributions (`env.dev: Env { … }`)
+— not file top-level fields. `module` stays the single outermost construct (like
+a flake's one `{}` holding both inputs and outputs). `sources:` holds
+`name: provider@target` entries (merged by key across modules per U5);
+`imports:` holds `find(…)` directives (the U4 discovery walk). **Amends U4** (its
+example previously showed `imports:` at file top level) and supersedes the
+top-level `sources:`/`imports:` shape sketched in unified-ecosystem.md §2.2.
+Rejected: file top-level manifest fields (would make a second top-level construct
+beside `module`, and require a bespoke env-file parser à la `pack.jet`).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -1212,6 +1224,7 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | U5  | one canonical merge table (unified-ecosystem §6) across all tiers | owner |
 | 2026-06-16 | U6  | source refs `provider@target`; package type `Pkg` + list sugar | owner |
 | 2026-06-16 | U7  | `jet run file.jet` stays zero-ceremony forever (reaffirms R9) | owner |
+| 2026-06-16 | U8  | `sources:`/`imports:` nest inside `module {}` (siblings of contributions), not file top-level; amends U4 | owner |
 | 2026-06-16 | S52 | amended: `pack.jet`/`.jet/lock` (U1/U2); hangar store `/etc/jet/hangar` | owner |
 | 2026-06-16 | S75 | fan-out operator `f.[ … ]`; `.[` adjacency; E0961/E0962        | owner |
 | 2026-06-16 | S76 | fixed-size list type `[T#N]`; `#` separator; erase to Vec; E0963–E0965 | owner |

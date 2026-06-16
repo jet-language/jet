@@ -441,6 +441,13 @@ pub const CONFIG_FILE: &str = "config.jet";
 /// auto-discovers and merges every `.jet` module in the tree.
 pub const BUILTIN_FIND: &str = "find";
 
+/// U8 (ratified 2026-06-16): `sources:` and `imports:` are module-body fields,
+/// nested inside `module name { … }` as siblings of the typed contributions
+/// (`env.dev: Env { … }`) — not file top-level fields. Amends U4. `sources:`
+/// holds `name: provider@target` entries; `imports:` holds `find(…)` directives.
+pub const MODULE_FIELD_SOURCES: &str = "sources";
+pub const MODULE_FIELD_IMPORTS: &str = "imports";
+
 /// U6 (ratified 2026-06-16): package value type, and the `provider@target`
 /// source-ref separator (`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`).
 /// Provider names reuse REF_SOURCE_* (github / path / nixpkgs).
