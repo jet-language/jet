@@ -13,6 +13,7 @@ pub mod cli;
 pub mod json;
 pub mod output;
 pub mod packfile;
+pub mod packmanifest;
 pub mod provider;
 pub mod refspec;
 pub mod shell;
