@@ -8,7 +8,7 @@ use super::provider::{self, ProviderError};
 use super::refspec::{self, RefSpec};
 use super::shell::{self, Env, ShellKind};
 use super::store::{self, Roots};
-use super::{packfile, refspec::RefError};
+use super::{envfile, refspec::RefError};
 use crate::syntax;
 use std::path::PathBuf;
 
@@ -102,16 +102,16 @@ fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     provider::fixtures_from_env(flags.fixtures.clone())
 }
 
-/// The named-source table declared by the current project's pack file (empty
+/// The named-source table declared by the current project's env file (empty
 /// when there is none). Used so explicit CLI refs are project-aware.
 fn cwd_table() -> refspec::SourceTable {
-    packfile::load(&std::env::current_dir().unwrap_or_default())
-        .map(|pf| pf.source_table())
+    envfile::load(&std::env::current_dir().unwrap_or_default())
+        .map(|ef| ef.source_table())
         .unwrap_or_else(refspec::SourceTable::empty)
 }
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
-/// current project's pack file so `jetpack run stable:ripgrep` works there.
+/// current project's env file so `jetpack run stable:ripgrep` works there.
 /// Prints the diagnostic on failure.
 fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec, RefError> {
     refspec::classify_in(raw, &cwd_table()).map_err(|e| {
@@ -209,7 +209,7 @@ fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::CoreBuild(reason) => theme.error(
             "couldn't build that Jet package",
             reason,
-            "check the package name and that its source repo has a pack.jet.",
+            "check the package name and that its source repo has an env.jet.",
         ),
     }
 }
@@ -222,23 +222,23 @@ struct RunPlan {
     label: String,
 }
 
-/// Build a plan from the project `pack.jet` (the no-explicit-ref path). `Err`
+/// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
 /// carries the exit code to return.
 fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
-    let Some(pf) = packfile::load(&std::env::current_dir().unwrap_or_default()) else {
+    let Some(ef) = envfile::load(&std::env::current_dir().unwrap_or_default()) else {
         theme.error(
             "nothing to do",
             &format!(
                 "no ref was given and there is no {} here.",
-                syntax::PACK_FILE
+                syntax::ENV_FILE
             ),
             "try `jetpack run nixpkgs:fastfetch`, or `jetpack add <ref>` first.",
         );
         return Err(2);
     };
-    let table = pf.source_table();
+    let table = ef.source_table();
     let mut refs = Vec::new();
-    for r in pf.refs() {
+    for r in ef.refs() {
         match refspec::classify_in(&r, &table) {
             Ok(s) => refs.push(s),
             Err(e) => {
@@ -250,7 +250,7 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     Ok(RunPlan {
         refs,
         table,
-        label: pf.prompt_label(),
+        label: ef.prompt_label(),
     })
 }
 
@@ -371,7 +371,7 @@ fn cmd_clean(theme: &Theme) -> i32 {
     }
 }
 
-/// `jetpack add <ref>` — edit the project pack file.
+/// `jetpack add <ref>` — edit the project env file.
 fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.first() else {
         theme.error(
@@ -382,10 +382,10 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     };
     let dir = std::env::current_dir().unwrap_or_default();
-    // Classify against the pack's declared sources so `add unstable:fd` works
+    // Classify against the env's declared sources so `add unstable:fd` works
     // when `unstable` is already declared.
-    let table = packfile::load(&dir)
-        .map(|pf| pf.source_table())
+    let table = envfile::load(&dir)
+        .map(|ef| ef.source_table())
         .unwrap_or_else(refspec::SourceTable::empty);
     let spec = match refspec::classify_in(raw, &table) {
         Ok(s) => s,
@@ -394,19 +394,19 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     };
-    match packfile::add(&dir, &spec) {
-        Ok(pf) => {
+    match envfile::add(&dir, &spec) {
+        Ok(ef) => {
             theme.ok(&format!(
                 "added {} to {}",
                 theme.bold(&spec.package),
-                syntax::PACK_FILE
+                syntax::ENV_FILE
             ));
-            theme.detail(&theme.gray(&format!("now: {}", pf.packages.join(", "))));
+            theme.detail(&theme.gray(&format!("now: {}", ef.packages.join(", "))));
             0
         }
         Err(e) => {
             theme.error(
-                "could not edit the pack file",
+                "could not edit the env file",
                 &format!("{e}"),
                 "check write permissions here.",
             );
@@ -415,7 +415,7 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-/// `jetpack remove <ref>` — edit the project pack file.
+/// `jetpack remove <ref>` — edit the project env file.
 fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.first() else {
         theme.error(
@@ -426,8 +426,8 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     };
     let dir = std::env::current_dir().unwrap_or_default();
-    let table = packfile::load(&dir)
-        .map(|pf| pf.source_table())
+    let table = envfile::load(&dir)
+        .map(|ef| ef.source_table())
         .unwrap_or_else(refspec::SourceTable::empty);
     let spec = match refspec::classify_in(raw, &table) {
         Ok(s) => s,
@@ -436,26 +436,26 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     };
-    match packfile::remove(&dir, &spec) {
-        Ok((_pf, true)) => {
+    match envfile::remove(&dir, &spec) {
+        Ok((_ef, true)) => {
             theme.ok(&format!(
                 "removed {} from {}",
                 theme.bold(&spec.package),
-                syntax::PACK_FILE
+                syntax::ENV_FILE
             ));
             0
         }
-        Ok((_pf, false)) => {
+        Ok((_ef, false)) => {
             theme.status(&format!(
                 "{} was not in {}.",
                 spec.package,
-                syntax::PACK_FILE
+                syntax::ENV_FILE
             ));
             0
         }
         Err(e) => {
             theme.error(
-                "could not edit the pack file",
+                "could not edit the env file",
                 &format!("{e}"),
                 "check write permissions here.",
             );
@@ -491,7 +491,7 @@ flags:
   --fixtures <dir>                     read provider output from captured fixtures
 ",
         bin = bin,
-        pack = syntax::PACK_FILE,
+        pack = syntax::ENV_FILE,
     )
 }
 

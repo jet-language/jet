@@ -21,10 +21,8 @@
 //!
 //! This module is the structural parser for that shape (U1). It is std-only (I6)
 //! and isolated: it does not yet replace the compiler's `jet.toml` path
-//! (`manifest.rs`) — that migration follows the `env.jet` rename, because the
-//! `pack.jet` filename is presently the jetpack *environment* directive file
-//! (`packfile.rs`). User-facing diagnostics (I4) land when the parser is wired
-//! into the loader. Dependency values are either a registry version string
+//! (`manifest.rs`) — that wiring follows as Step 3 of the jetpack build.
+//! User-facing diagnostics (I4) land when the parser is wired into the loader. Dependency values are either a registry version string
 //! (`"1.2.0"`) or a `provider@target` source ref (`path@../local`,
 //! `github@owner/repo/rev`), classified through `refspec::classify_provider_ref`
 //! (U6).

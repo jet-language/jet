@@ -372,7 +372,8 @@ pub const DEP_TABLE_C: &str = "dependencies:c";
 /// D-JPK1/9: the Jetpack package-manager binary name.
 pub const JETPACK_BINARY_NAME: &str = "jetpack";
 
-/// D-JPK13/8: the root Jet pack file and its lockfile.
+/// U1 (D-JPK20): `pack.jet` is the Jet **package manifest** (Cargo.toml analog;
+/// replaces `jet.toml`). `PACK_LOCK_FILE` is superseded by `.jet/lock` (U2/S52).
 pub const PACK_FILE: &str = "pack.jet";
 pub const PACK_LOCK_FILE: &str = "pack.lock";
 
@@ -394,14 +395,14 @@ pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
 /// D-JPK14: shell marker env var set inside a Jetpack shell.
 pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";
 
-/// D-JPK3/17: the directive calls a `pack.jet` author writes. `pkg.source`
+/// D-JPK3/17: the directive calls an `env.jet` author writes. `pkg.source`
 /// takes one arg (default built-in source) or two (named source + upstream/pin,
 /// D-JPK17). Packages reference named sources inline via `<name>:<package>`.
 pub const PACK_DIRECTIVE_SOURCE: &str = "pkg.source";
 pub const PACK_DIRECTIVE_PACKAGES: &str = "pkg.packages";
 pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 
-/// D-JPK16 (R2): a first-party Jet package a repo's `pack.jet` provides, for
+/// D-JPK16 (R2): a first-party Jet package a repo's `env.jet` provides, for
 /// the `core` provider to build: `pkg.package("<name>", "<source-subpath>")`.
 pub const PACK_DIRECTIVE_PACKAGE: &str = "pkg.package";
 

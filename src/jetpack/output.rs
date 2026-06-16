@@ -111,12 +111,12 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
         } => {
             let known = if declared.is_empty() {
                 "Sources are the built-ins `nixpkgs`, `github`, and `path`, or names you \
-                 declare in pack.jet with `pkg.source(...)`."
+                 declare in env.jet with `pkg.source(...)`."
                     .to_string()
             } else {
                 format!(
                     "Sources are the built-ins `nixpkgs`, `github`, `path`, or names declared \
-                     in pack.jet. This pack declares: {}.",
+                     in env.jet. This env declares: {}.",
                     declared.join(", ")
                 )
             };

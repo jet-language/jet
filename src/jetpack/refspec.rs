@@ -11,13 +11,13 @@ use crate::syntax;
 use std::collections::BTreeMap;
 
 /// Where a ref is resolved from. The three built-in sources need no
-/// declaration; `Named` is a source declared in a `pack.jet` (D-JPK17) that
+/// declaration; `Named` is a source declared in an `env.jet` (D-JPK17) that
 /// resolves to an upstream/pin via a `SourceTable`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     /// The nixpkgs collection, realized through the Nix provider.
     Nixpkgs,
-    /// A GitHub repo holding a `pack.jet` (or a translatable `flake.nix`).
+    /// A GitHub repo holding an `env.jet` (or a translatable `flake.nix`).
     Github,
     /// A local directory holding a pack file or used as a flake fallback.
     Path,
@@ -86,7 +86,7 @@ struct SourceEntry {
     via: ProviderKind,
 }
 
-/// The named sources a `pack.jet` declares (D-JPK17): name → upstream/pin and
+/// The named sources an `env.jet` declares (D-JPK17): name → upstream/pin and
 /// the provider that realizes it. Built-in sources are always resolvable and
 /// are not stored here.
 #[derive(Debug, Clone, Default)]
@@ -202,7 +202,7 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
 // ──────────────────────────────────────────────
 // `provider@target` source refs (U6, was D-JPK18).
 //
-// The typed authoring surface (pack.jet `sources:`/`packages:`) writes source
+// The typed authoring surface (env.jet/pack.jet `sources:`/`packages:`) writes source
 // refs as `provider@target` — `github@owner/repo/rev`, `path@../local`,
 // `nixpkgs@channel`. This is distinct from the Phase-1 command-line
 // `source:package` form above (D-JPK18 keeps the colon classifier for

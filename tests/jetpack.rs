@@ -8,7 +8,7 @@
 //!   * `-- cmd` runs in the composed env and returns the child's status
 //!   * the parent environment is unchanged afterwards
 //!   * a bad ref produces a friendly diagnostic and exit 2
-//!   * add/remove edit `pack.jet`
+//!   * add/remove edit `env.jet`
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -218,7 +218,7 @@ fn unknown_source_is_friendly() {
 }
 
 #[test]
-fn add_then_remove_edits_pack_file() {
+fn add_then_remove_edits_env_file() {
     let proj = Scratch::new("proj");
     let add = jetpack()
         .args(["add", "nixpkgs:ripgrep", "--no-color"])
@@ -226,9 +226,9 @@ fn add_then_remove_edits_pack_file() {
         .output()
         .unwrap();
     assert!(add.status.success());
-    let pack = fs::read_to_string(proj.join("pack.jet")).unwrap();
-    assert!(pack.contains("ripgrep"), "pack.jet: {pack}");
-    assert!(pack.contains("pkg.packages"), "pack.jet: {pack}");
+    let env = fs::read_to_string(proj.join("env.jet")).unwrap();
+    assert!(env.contains("ripgrep"), "env.jet: {env}");
+    assert!(env.contains("pkg.packages"), "env.jet: {env}");
 
     let remove = jetpack()
         .args(["remove", "nixpkgs:ripgrep", "--no-color"])
@@ -236,20 +236,20 @@ fn add_then_remove_edits_pack_file() {
         .output()
         .unwrap();
     assert!(remove.status.success());
-    let pack = fs::read_to_string(proj.join("pack.jet")).unwrap();
+    let env = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
-        !pack.contains("\"ripgrep\""),
-        "pack.jet still has ripgrep: {pack}"
+        !env.contains("\"ripgrep\""),
+        "env.jet still has ripgrep: {env}"
     );
 }
 
 #[test]
-fn run_with_project_pack_file_resolves_declared_packages() {
+fn run_with_project_env_file_resolves_declared_packages() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
-    // Declare one package, then run with no ref → it resolves from pack.jet.
+    // Declare one package, then run with no ref → it resolves from env.jet.
     fs::write(
-        proj.join("pack.jet"),
+        proj.join("env.jet"),
         "import jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"nixpkgs\");\n        pkg.packages([\"fastfetch\"]);\n    ];\n}\n",
     )
     .unwrap();
@@ -270,14 +270,14 @@ fn run_with_project_pack_file_resolves_declared_packages() {
 }
 
 #[test]
-fn named_source_pack_resolves_with_pin() {
-    // A pack that declares a named source `stable` and references it inline as
+fn named_source_env_resolves_with_pin() {
+    // An env that declares a named source `stable` and references it inline as
     // `stable:ripgrep` resolves via the nix provider against the pin. The
     // fixture is keyed by the source name (`stable-ripgrep.json`).
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
     fs::write(
-        proj.join("pack.jet"),
+        proj.join("env.jet"),
         "import jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"stable:ripgrep\"]);\n    ];\n}\n",
     )
     .unwrap();
@@ -298,12 +298,12 @@ fn named_source_pack_resolves_with_pin() {
 }
 
 #[test]
-fn unknown_named_source_in_pack_is_friendly() {
+fn unknown_named_source_in_env_is_friendly() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
     // References `beta:neovim` but only declares `stable`.
     fs::write(
-        proj.join("pack.jet"),
+        proj.join("env.jet"),
         "import jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"beta:neovim\"]);\n    ];\n}\n",
     )
     .unwrap();
@@ -335,7 +335,7 @@ fn core_provider_runs_first_party_package_without_nix() {
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
     fs::write(
-        repo.join("pack.jet"),
+        repo.join("env.jet"),
         "pkg.package(\"hello\", \"./pkgs/hello\");\n",
     )
     .unwrap();
@@ -348,7 +348,7 @@ fn core_provider_runs_first_party_package_without_nix() {
     }
     // The project declares a `core` named source pointing at the local repo.
     fs::write(
-        proj.join("pack.jet"),
+        proj.join("env.jet"),
         format!(
             "import jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
@@ -375,7 +375,7 @@ fn core_provider_runs_first_party_package_without_nix() {
 }
 
 #[test]
-fn core_provider_fetches_remote_git_package_from_pack() {
+fn core_provider_fetches_remote_git_package_from_env() {
     if Command::new("git").arg("--version").output().is_err() {
         eprintln!("note: skipping remote core provider integration test (git not found)");
         return;
@@ -389,7 +389,7 @@ fn core_provider_fetches_remote_git_package_from_pack() {
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
     fs::write(
-        repo.join("pack.jet"),
+        repo.join("env.jet"),
         "pkg.package(\"hello\", \"./pkgs/hello\");\n",
     )
     .unwrap();
@@ -421,7 +421,7 @@ fn core_provider_fetches_remote_git_package_from_pack() {
     }
 
     fs::write(
-        proj.join("pack.jet"),
+        proj.join("env.jet"),
         format!(
             "import jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
             repo.to_string_lossy()

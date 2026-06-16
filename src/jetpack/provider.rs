@@ -10,7 +10,7 @@
 //! instead of shelling out — exactly the Forge fixture pattern.
 
 use super::json;
-use super::packfile;
+use super::envfile;
 use super::refspec::{ProviderKind, RefSpec, Source, SourceTable};
 use crate::sha256;
 use std::path::{Path, PathBuf};
@@ -130,7 +130,7 @@ impl Provider for NixProvider {
 }
 
 /// The first-party Jet package provider (R2). Realizes a Jet package with no
-/// Nix at all: it reads the source repo's `pack.jet`, finds the package's
+/// Nix at all: it reads the source repo's `env.jet`, finds the package's
 /// `pkg.package(...)` declaration, and materializes that source tree into the
 /// Jetpack store. R2 supports local and git-backed remote source repos.
 pub struct CoreProvider;
@@ -150,14 +150,14 @@ impl Provider for CoreProvider {
             ProviderError::CoreBuild(format!("source `{source_name}` has no upstream"))
         })?;
         let repo = source_repo(upstream, ctx)?;
-        let pf = packfile::load(&repo).ok_or_else(|| {
+        let ef = envfile::load(&repo).ok_or_else(|| {
             ProviderError::CoreBuild(format!(
                 "the source repo at {} has no {}",
                 repo.display(),
-                crate::syntax::PACK_FILE
+                crate::syntax::ENV_FILE
             ))
         })?;
-        let subpath = pf.provided(&spec.package).ok_or_else(|| {
+        let subpath = ef.provided(&spec.package).ok_or_else(|| {
             ProviderError::CoreBuild(format!(
                 "repo `{source_name}` does not provide a package named `{}`",
                 spec.package
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn core_provider_builds_local_package() {
         use super::super::refspec::{classify_in, ProviderKind, SourceTable};
-        // Build a throwaway repo: pack.jet declaring a `hello` package whose
+        // Build a throwaway repo: env.jet declaring a `hello` package whose
         // source tree has a runnable bin/hello.
         let base = unique_dir("jpk-core");
         let repo = base.join("jet-pkgs");
@@ -605,7 +605,7 @@ mod tests {
         let hello_bin = repo.join("pkgs/hello/bin");
         std::fs::create_dir_all(&hello_bin).unwrap();
         std::fs::write(
-            repo.join("pack.jet"),
+            repo.join("env.jet"),
             "pkg.package(\"hello\", \"./pkgs/hello\");\n",
         )
         .unwrap();
@@ -648,7 +648,7 @@ mod tests {
         std::fs::create_dir_all(&hello_bin).unwrap();
         std::fs::create_dir_all(&store).unwrap();
         std::fs::write(
-            repo.join("pack.jet"),
+            repo.join("env.jet"),
             "pkg.package(\"hello\", \"./pkgs/hello\");\n",
         )
         .unwrap();
