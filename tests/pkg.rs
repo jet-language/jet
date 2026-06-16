@@ -521,7 +521,7 @@ fn path_dep_compiles_ok() {
     let entry = tmp.join("main.jet");
     fs::write(
         &entry,
-        "import greeter;\nfn main() { print(greeter.greet()); }\n",
+        "use greeter;\nfn main() { print(greeter.greet()); }\n",
     )
     .unwrap();
 

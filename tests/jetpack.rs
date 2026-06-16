@@ -255,7 +255,7 @@ fn run_with_project_env_file_resolves_declared_packages() {
     // Declare one package, then run with no ref → it resolves from env.jet.
     fs::write(
         proj.join("env.jet"),
-        "import jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"nixpkgs\");\n        pkg.packages([\"fastfetch\"]);\n    ];\n}\n",
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"nixpkgs\");\n        pkg.packages([\"fastfetch\"]);\n    ];\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -283,7 +283,7 @@ fn named_source_env_resolves_with_pin() {
     let root = Scratch::new("root");
     fs::write(
         proj.join("env.jet"),
-        "import jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"stable:ripgrep\"]);\n    ];\n}\n",
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"stable:ripgrep\"]);\n    ];\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -309,7 +309,7 @@ fn unknown_named_source_in_env_is_friendly() {
     // References `beta:neovim` but only declares `stable`.
     fs::write(
         proj.join("env.jet"),
-        "import jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"beta:neovim\"]);\n    ];\n}\n",
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"beta:neovim\"]);\n    ];\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -351,7 +351,7 @@ fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "import jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -432,7 +432,7 @@ fn core_provider_runs_first_party_package_without_nix() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "import jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -689,7 +689,7 @@ fn core_provider_fetches_remote_git_package_from_env() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "import jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )

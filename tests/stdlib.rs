@@ -88,8 +88,8 @@ fn canonical_and_short_std_imports_resolve() {
     let out = compile_temp(
         "std_imports.jet",
         r#"
-import core.fs as fs;
-import jet.core.fs as files;
+use core.fs as fs;
+use jet.core.fs as files;
 
 fn main() {
     print(fs.exists("/tmp"));
@@ -105,14 +105,14 @@ fn importing_std_without_calls_is_free_in_codegen() {
     let out = compile_temp(
         "std_import_only.jet",
         r#"
-import core.fs as fs;
-import core.io as io;
-import core.env as env;
-import core.process as process;
-import core.math as math;
-import core.random as random;
-import core.time as time;
-import core.json as json;
+use core.fs as fs;
+use core.io as io;
+use core.env as env;
+use core.process as process;
+use core.math as math;
+use core.random as random;
+use core.time as time;
+use core.json as json;
 
 fn main() {
     print("ok");
@@ -138,7 +138,7 @@ fn io_input_reads_a_line_from_stdin() {
         &dir,
         "input_demo",
         r#"
-import core.io as io;
+use core.io as io;
 
 fn main() {
     val name = io.input("name? ") ?? panic("read failed");
@@ -170,8 +170,8 @@ fn random_and_time_output_pins_with_seed_and_epoch() {
         &dir,
         "time_random",
         r#"
-import core.random as random;
-import core.time as time;
+use core.random as random;
+use core.time as time;
 
 fn main() {
     random.seed(42);
@@ -194,7 +194,7 @@ fn importing_all_std_modules_without_calls_stays_hello_world_sized() {
     let jet = jet_bin();
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc || !jet.exists() {
-        eprintln!("note: skipping std import size test (need jet + rustc)");
+        eprintln!("note: skipping std use size test (need jet + rustc)");
         return;
     }
 
@@ -211,14 +211,14 @@ fn importing_all_std_modules_without_calls_stays_hello_world_sized() {
     fs::write(
         dir.join("std_import_only.jet"),
         r#"
-import core.fs as fs;
-import core.io as io;
-import core.env as env;
-import core.process as process;
-import core.math as math;
-import core.random as random;
-import core.time as time;
-import core.json as json;
+use core.fs as fs;
+use core.io as io;
+use core.env as env;
+use core.process as process;
+use core.math as math;
+use core.random as random;
+use core.time as time;
+use core.json as json;
 
 fn main() {
     print("ok");
@@ -267,7 +267,7 @@ fn channel_stress_1000_messages() {
         &dir,
         "channel_stress",
         r#"
-import core.tasks as tasks;
+use core.tasks as tasks;
 
 fn main() {
     val ch: Channel<Int> = tasks.channel();

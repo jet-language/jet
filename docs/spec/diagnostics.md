@@ -76,7 +76,7 @@ before continuing.
 | E0012 | parse | teaching: `and`/`not` → `&&`/`!` |
 | E0013 | parse | teaching: `Text` → `String`               |
 | E0014 | parse | teaching: `try` → `?` (M4 — real feature)   |
-| E0015 | parse | teaching: `use` → `import` (M6)           |
+| E0015 | parse | teaching: `import` → `use` (S16, D-S16-USE) |
 | E0016 | parse | teaching: `match` → `when` (S24)          |
 | E0017 | parse | teaching: `read` → default parameter access (S10) |
 | E0018 | parse | teaching: `write` → `mut` (S10)          |
@@ -169,9 +169,9 @@ before continuing.
 | E0507 | sema  | collection changed while `for` reads it   |
 | L0501 | sema  | slice copy inside a loop (lint)           |
 | E0601 | sema  | `test` block in wrong position / none found |
-| E0602 | jet   | import path escapes the project (`..` or outside entry tree) |
-| E0603 | jet   | imported file / module not found |
-| E0604 | jet   | import cycle (lists the loop) |
+| E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
+| E0603 | jet   | `use` target file / module not found |
+| E0604 | jet   | `use` cycle (lists the loop) |
 | E0605 | sema  | item exists in another file but is private |
 | E0606 | jet   | ambiguous module name (lists every matching path) |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
@@ -179,6 +179,14 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
+| E3202 | sema  | pointer/gated type crosses C boundary outside `@unsafe` / `core.mem` |
+| E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
+| E3204 | sema  | two C `use` forms for the same lib in one file |
+| E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
+| E3206 | parse | user declared reserved `__bindgen__` segment |
+| E3207 | parse | `@bindgen` outside generated `.jet/bindings/c/` file |
+| E3208 | jet   | `jet bind` / header translation failed |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -266,8 +274,21 @@ CLI.
 | E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
 | E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; `view` borrows, `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the borrowed field, or hand a closure over with `take`. |
 | L1101 | A `Task` is dropped without `.join()`. | The program may end before that task finishes. | Call `.join()` on the task before it goes out of scope. |
-| E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Import `std.tasks as tasks` and call `tasks.spawn(() => work())`. |
+| E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
+
+## C FFI diagnostics (E2-M14, S59)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E3201 | C library `{lib}` was not found. | Jet tried the hangar dep keyed `{lib}` in `payload.jet` / `pack.jet`, then `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or add `{lib}` under `[dependencies:c]` with a pinned hangar ref. |
+| E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58). | Move the call inside `@unsafe`, or change the type to a C-safe value type. |
+| E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `@extern` / `@bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
+| E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |
+| E3205 | Overlay `{name}` disagrees with the generated binding. | User `@extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
+| E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `@extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `@extern module c.{lib} { … }`. |
+| E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
+| E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
 
 ## Process for a new diagnostic
 

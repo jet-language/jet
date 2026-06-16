@@ -31,15 +31,15 @@ module.exports = grammar({
         $.impl_block,
         $.trait_def,
         $.const_def,
-        $.import_stmt,
+        $.use_stmt,
         $.extern_block,
         $.test_block
       ),
 
-    // ── Imports (S16) ──────────────────────────────────────────────────────
-    import_stmt: ($) =>
+    // ── Use (S16) ─────────────────────────────────────────────────────────
+    use_stmt: ($) =>
       seq(
-        "import",
+        "use",
         field("path", $.string_literal),
         optional(seq("as", field("alias", $.identifier))),
         ";"

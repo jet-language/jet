@@ -1804,7 +1804,7 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwDerive
         | TokKind::KwConst
         | TokKind::KwComptime
-        | TokKind::KwImport
+        | TokKind::KwUse
         | TokKind::KwExtern
         | TokKind::KwTest
         | TokKind::KwLoop

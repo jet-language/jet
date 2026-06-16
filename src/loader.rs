@@ -468,7 +468,7 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
                 format!("there is no core module `{}`", module),
                 "`core` is compiler-known in M10, and only the frozen core modules exist"
                     .to_string(),
-                format!("import one of: {}", std_modules_list()),
+                format!("use one of: {}", std_modules_list()),
                 Some(span),
             ));
         }
@@ -483,7 +483,7 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
             "`core`, `jet`, and the first-party ring names can't be used for local modules"
                 .to_string(),
             format!(
-                "rename the module or import it with `{} other_name`",
+                "rename the module or use it with `{} other_name`",
                 syntax::KW_AS
             ),
             Some(imp.alias_span),
@@ -537,7 +537,7 @@ fn resolve_file_import(
                 "create `{}.{}`, or fix the path in `{} \"{}\"`",
                 path_str,
                 syntax::FILE_EXT,
-                syntax::KW_IMPORT,
+                syntax::KW_USE,
                 path_str
             ),
             Some(span),
@@ -588,7 +588,7 @@ fn resolve_module_import(
                 "add `{}.{}` under this project, or fix the `{}` name",
                 name,
                 syntax::FILE_EXT,
-                syntax::KW_IMPORT
+                syntax::KW_USE
             ),
             Some(span),
         )),

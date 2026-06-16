@@ -87,7 +87,7 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
             "E0003",
             "an import path must be one piece of quoted text".to_string(),
             "file paths can't contain `{ }` interpolation".to_string(),
-            format!("write: {} \"path/to/file\";", syntax::KW_IMPORT),
+            format!("write: {} \"path/to/file\";", syntax::KW_USE),
             None,
         ));
     }
@@ -97,7 +97,7 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
             "E0003",
             "an import path can't contain `{ }` interpolation".to_string(),
             "file paths are fixed strings".to_string(),
-            format!("write: {} \"path/to/file\";", syntax::KW_IMPORT),
+            format!("write: {} \"path/to/file\";", syntax::KW_USE),
             None,
         )),
     }
@@ -401,18 +401,18 @@ impl<'a> Parser<'a> {
                     "E0003",
                     format!(
                         "expected a file path in quotes or a module name after `{}`, found {}",
-                        syntax::KW_IMPORT,
+                        syntax::KW_USE,
                         describe(other)
                     ),
                     format!(
                         "write `{} \"path/to/file\";` or `{} module_name;`",
-                        syntax::KW_IMPORT,
-                        syntax::KW_IMPORT
+                        syntax::KW_USE,
+                        syntax::KW_USE
                     ),
                     format!(
                         "e.g. `{} \"util/helpers\";` or `{} scoring;`",
-                        syntax::KW_IMPORT,
-                        syntax::KW_IMPORT
+                        syntax::KW_USE,
+                        syntax::KW_USE
                     ),
                     Some(self.peek().span),
                 ));
@@ -424,7 +424,7 @@ impl<'a> Parser<'a> {
                 "selective imports aren't part of Jet".to_string(),
                 "modules keep their namespace so call sites show where a library function comes from"
                     .to_string(),
-                "import the module with `as`, then call items through the alias: `import core.math as math; math.clamp(x, lo, hi);`"
+                "import the module with `as`, then call items through the alias: `use core.math as math; math.clamp(x, lo, hi);`"
                     .to_string(),
                 Some(self.peek().span),
             ));
@@ -469,7 +469,7 @@ impl<'a> Parser<'a> {
         loop {
             let r = match &self.peek().kind {
                 TokKind::Eof => break,
-                TokKind::KwImport => match self.import_decl() {
+                TokKind::KwUse => match self.import_decl() {
                     Ok(imp) => {
                         imports.push(imp);
                         continue;
@@ -592,25 +592,26 @@ impl<'a> Parser<'a> {
                     ));
                     self.func_after_fn(false).map(Item::Func)
                 }
-                TokKind::Ident(name) if name == syntax::FOREIGN_USE => {
+                TokKind::Ident(name) if name == syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0015",
                         format!(
-                            "{} does not use `{}`",
+                            "{} uses `{}`, not `{}`",
                             syntax::LANG_NAME,
-                            syntax::FOREIGN_USE
+                            syntax::KW_USE,
+                            syntax::FOREIGN_IMPORT
                         ),
                         format!(
                             "other files are brought in with `{} \"path\"` or `{} name` (S16; M6)",
-                            syntax::KW_IMPORT,
-                            syntax::KW_IMPORT
+                            syntax::KW_USE,
+                            syntax::KW_USE
                         ),
                         format!(
                             "replace with `{} \"path\";`, `{} name;`, or `{} \"path\" {} alias;`",
-                            syntax::KW_IMPORT,
-                            syntax::KW_IMPORT,
-                            syntax::KW_IMPORT,
+                            syntax::KW_USE,
+                            syntax::KW_USE,
+                            syntax::KW_USE,
                             syntax::KW_AS
                         ),
                         Some(t.span),

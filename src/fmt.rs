@@ -711,7 +711,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_import(&mut self, imp: &ImportDecl) {
-        self.write(syntax::KW_IMPORT);
+        self.write(syntax::KW_USE);
         self.write(" ");
         match &imp.kind {
             ImportKind::File(path, _) => {

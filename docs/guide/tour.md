@@ -165,7 +165,7 @@ Import core modules by name. Both `core.fs` and `jet.core.fs` mean the same
 thing. Quoted paths like `import "helper"` load `.jet` files from your project.
 
 ```jet
-import core.io as io;
+use core.io as io;
 
 fn main() {
     val args = io.args();
@@ -179,8 +179,8 @@ The core library is built in. Fallible calls return `T ? E` — handle them
 with `??`, `?`, or `when`.
 
 ```jet
-import core.fs as fs;
-import core.io as io;
+use core.fs as fs;
+use core.io as io;
 
 fn main() {
     val path = "/tmp/jet_tour.txt";

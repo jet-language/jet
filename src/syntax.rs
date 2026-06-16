@@ -20,7 +20,7 @@ pub const FILE_EXT: &str = "jet";
 /// S1 (ratified): keyword that starts a function definition.
 pub const KW_FN: &str = "fn";
 
-/// S18 (ratified): marks an item as visible to other files (via import).
+/// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
 /// S2 (ratified): introduces an immutable binding.
@@ -211,8 +211,8 @@ pub const FOREIGN_AND: &str = "and";
 pub const FOREIGN_OR: &str = "or";
 pub const FOREIGN_NOT: &str = "not";
 
-/// S16 (ratified M6): file path or module name import; optional `as`.
-pub const KW_IMPORT: &str = "import";
+/// S16 (ratified M6; amended 2026-06-16, D-S16-USE): file path or module `use`; optional `as`.
+pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
 /// S51 (ratified M10; amended 2026-06-16): compiler-known **core** library roots.
@@ -226,12 +226,23 @@ pub const LEGACY_STD_CANONICAL: &str = "jet.std";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "core", "jet", "http", "regex", "csv", "toml", "crypto", "archive",
+    "core", "jet", "c", "http", "regex", "csv", "toml", "crypto", "archive",
 ];
 
 /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
 pub const KW_EXTERN: &str = "extern"; // S50
 pub const KW_RUST: &str = "rust"; // S50
+
+/// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.
+pub const C_MODULE_ROOT: &str = "c"; // S59
+/// S59: reserved final segment for compiler-generated bindgen modules.
+pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
+/// S59 (S82): attribute on generated C binding modules — `@bindgen module c.….__bindgen__`.
+pub const ATTR_BINDGEN: &str = "bindgen"; // S59
+/// S59 (S82): attribute on user C overlay modules — `@extern module c.…`.
+pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `@extern module`, not `extern rust`
+/// S59: cache directory segment under `.jet/` for generated C bindings.
+pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 
 /// S14: foreign forms recognized only for teaching errors.
 pub const FOREIGN_TRY: &str = "try";
@@ -240,7 +251,7 @@ pub const FOREIGN_LET_MUT: &str = "let mut";
 pub const FOREIGN_SET: &str = "set";
 pub const FOREIGN_FUNC: &str = "func";
 pub const FOREIGN_DEF: &str = "def";
-pub const FOREIGN_USE: &str = "use";
+pub const FOREIGN_IMPORT: &str = "import";
 pub const FOREIGN_PRINTLN: &str = "println";
 pub const FOREIGN_TEXT: &str = "Text";
 

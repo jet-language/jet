@@ -4,7 +4,7 @@
 //!
 //! ```jet
 //! // env.jet — a Jetpack project environment (dev-shell descriptor)
-//! import jetpack as pkg;
+//! use jetpack as pkg;
 //!
 //! pub fn shell() -> [JSON] {
 //!     return [
@@ -124,7 +124,7 @@ impl EnvFile {
         lines.push(format!("        pkg.prompt(\"{prompt}\");"));
         format!(
             "// {file} — a Jetpack project environment\n\
-             import jetpack as pkg;\n\
+             use jetpack as pkg;\n\
              \n\
              pub fn shell() -> [JSON] {{\n\
              \x20   return [\n\
@@ -328,7 +328,7 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = r#"
-import jetpack as pkg;
+use jetpack as pkg;
 pub fn shell() -> [JSON] {
     return [
         pkg.source("nixpkgs");
@@ -339,7 +339,7 @@ pub fn shell() -> [JSON] {
 "#;
 
     const NAMED: &str = r#"
-import jetpack as pkg;
+use jetpack as pkg;
 pub fn shell() -> [JSON] {
     return [
         pkg.source("stable", "github:NixOS/nixpkgs/nixos-24.05");
@@ -385,7 +385,7 @@ pub fn shell() -> [JSON] {
         // source still declares its provider via the `via` marker; the
         // name→source package index lives in the repo's `payload.jet`, not here.
         let repo = r#"
-import jetpack as pkg;
+use jetpack as pkg;
 pub fn shell() -> [JSON] {
     return [
         pkg.source("mine", "path:./jet-pkgs", "core");

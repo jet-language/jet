@@ -184,41 +184,42 @@ test harnesses and task `join`). `**jet build --small`** (M6) uses
 `opt-level="z"`, full LTO, and `**panic=abort**`. Rejected: abort as the
 only mode.
 
-**S16 — Imports (M6+)** *(ratified 2026-06-11; amended 2026-06-12)*:
-**quotes mean a file path; no quotes mean a module.** Two forms; `**as alias`
+**S16 — `use` (M6+)** *(ratified 2026-06-11; amended 2026-06-12, **2026-06-16 D-S16-USE**)*:
+**quotes mean a file path; no quotes mean a module.** Two forms; **`as alias`
 is optional** in both. When omitted, the default namespace is the module
-name (see below).
+name (see below). Keyword is **`use`**; **`import`** is a teaching error (E0015).
 
 ```
-import "./lib";                       // file path → namespace lib
-import "grades/scoring" as g;         // file path, namespace g
-import scoring;                       // module by name → namespace scoring
-import scoring as gradebook;          // same module, namespace gradebook
+use "./lib";                          // file path → namespace lib
+use "grades/scoring" as g;            // file path, namespace g
+use scoring;                          // module by name → namespace scoring
+use scoring as gradebook;             // same module, namespace gradebook
 ```
 
-1. **File import** — `import "<path>" [as alias];`
-  The quotes are required — they mark a **path to a `.jet` file**, not a
-  logical module name. `<path>` is relative to the **importing file's
-   directory**, using `/` (no `.jet` suffix; the compiler appends it).
-   Same-directory files use an explicit `./` prefix (`"./lib"`). Subdirs
-   use relative paths (`"util/text"`). Default namespace: the **last
-   path segment** (`"grades/scoring"` → `scoring.letter(…)`).
-2. **Module import** — `import <module-path> [as alias];`
+1. **File use** — `use "<path>" [as alias];`
+  The quotes are required — they mark a **path to a `.jet` file** or (C FFI,
+  S59) a **header path** for auto-binding, not a logical module name. `<path>`
+  is relative to the **using file's directory**, using `/` (no `.jet` suffix
+  for Jet files; the compiler appends it). Same-directory files use an explicit
+  `./` prefix (`"./lib"`). Subdirs use relative paths (`"util/text"`). Default
+  namespace: the **last path segment** (`"grades/scoring"` → `scoring.letter(…)`).
+2. **Module use** — `use <module-path> [as alias];`
   No quotes — the compiler resolves a **logical module**, not a filesystem
-  path. `<module-path>` is a dot-separated name (`scoring`, `std.fs`; see
-  S51 for `std`). The compiler searches **recursively from the project root**
-  for a module named after the **first** segment: either `name.jet` anywhere
-  under the root, or a directory `name/` containing `name.jet` or `main.jet`.
-  Skips `build/`, `target/`, and dot-directories. **Project root** = the
-  directory containing `pack.jet` when a manifest exists (M12, U1); otherwise
-  the directory of the **entry** `.jet` file. Ambiguous duplicate matches →
-  **E0606** (lists every path found).
+  path. `<module-path>` is a dot-separated name (`scoring`, `core.fs`; see
+  S51). The compiler searches **recursively from the project root** for a module
+  named after the **first** segment: either `name.jet` anywhere under the root,
+  or a directory `name/` containing `name.jet` or `main.jet`. Skips `build/`,
+  `target/`, and dot-directories. **Project root** = the directory containing
+  `pack.jet` when a manifest exists (M12, U1); otherwise the directory of the
+  **entry** `.jet` file. Ambiguous duplicate matches → **E0606** (lists every
+  path found).
 
 Cross-file access uses `namespace.item` for every `pub` item (S18).
-Rejected: Rust `use a::b`, unquoted file paths (`import lib` when you mean
-`"./lib.jet"`), quoted module names (`import "std/fs"`), bare `import;`
-with no path or name (teaching error only per S14), required `as`,
-selective imports (`import module { item }`, `from module import item`).
+Rejected: Rust `use a::b` re-export chains, unquoted file paths (`use lib`
+when you mean `"./lib.jet"`), quoted module names (`use "core/fs"`), bare
+`use;` with no path or name (teaching error only per S14), required `as`,
+selective uses (`use module { item }`, `from module use item`). Former
+**`import`** spelling → teaching error E0015 (D-S16-USE).
 
 **S29 — Struct construction (M3)** *(ratified 2026-06-11)*:
 `**Type { field: expr, … }`** — Rust-style struct literals. Every field
@@ -644,25 +645,25 @@ actions (timers, logging) — owner-gated, and never required for
 correctness. Rejected: `defer`-as-primary (leak-by-omission, Go's
 perennial bug class), `with`-blocks (nesting pyramids).
 
-**S51 — Core library import (M10)** *(ratified 2026-06-12; amended
+**S51 — Core library (M10)** *(ratified 2026-06-12; amended
 2026-06-13, **renamed `std` → `core` 2026-06-16**)*: the core library is
-**exported as the `core` module** — a module import (S16 form 2, no quotes), not
+**exported as the `core` module** — a module `use` (S16 form 2, no quotes), not
 a file path. `core` is the reserved short spelling for canonical package
 `jet.core`; both spellings are valid. Dot paths select submodules:
 
 ```
-import core;                    // whole core → namespace core
-import jet.core as core;        // explicit canonical spelling
-import core.fs as fs;           // submodule, optional alias
-import core.io;                  // default namespace io
+use core;                         // whole core → namespace core
+use jet.core as core;             // explicit canonical spelling
+use core.fs as fs;                // submodule, optional alias
+use core.io;                      // default namespace io
 ```
 
 `core` and `jet.core` are compiler-reserved module roots; `core.<module>` and
 `jet.core.<module>` select compiler-known submodules (`fs`, `io`, `json`,
-…). Optional `as alias` works like S16. Core is never imported via a quoted
-path — `import "core/fs"` is wrong because `"core/fs"` is file-path syntax;
-use `import core.fs`. The former spellings `import std` / `import jet.std` /
-`import std.fs` emit a teaching error pointing at `core` (S14). Rejected:
+…). Optional `as alias` works like S16. Core is never used via a quoted
+path — `use "core/fs"` is wrong because `"core/fs"` is file-path syntax;
+use `use core.fs`. The former spellings `import std` / `use std` /
+`use std.fs` emit a teaching error pointing at `core` (S14). Rejected:
 quoted core paths, separate `use core::` syntax, keeping the `std` module name.
 
 **S54 — Naming convention** *(ratified 2026-06-12; **amended 2026-06-16**)*:
@@ -713,54 +714,57 @@ implemented, the planned surface is ballot option A: `tasks.spawn(closure)
 rejects it). Rejected for v1: `go`-style `spawn { }` fire-and-forget,
 shipping concurrency in v1.
 
-**S59 — C FFI** *(ratified 2026-06-12; **amended 2026-06-16, D-CFFI2**)*:
-Epoch 2 (E2-M14) ships manual C import. **`extern c <link-name> { … }`** blocks
-mirror `extern rust` shape — one FFI idiom, two backends; by-value boundary
-first, pointers only inside the S58 tier.
+**S59 — C FFI** *(ratified 2026-06-12; **amended 2026-06-16, D-CFFI2 + D-CFFI2-SYN**)*:
+Epoch 2 (E2-M14) ships C import with **auto-generated bindings** (default) and
+optional **user overlay** modules. By-value boundary first; pointers only inside
+the S58 tier.
 
 **Link resolution (D-CFFI2, ratified):**
 
 1. **Jetpack project** — if `payload.jet` declares a matching dep (content-hash
-   pinned in hangar), use hangar include/lib paths. No system install required.
-2. **Otherwise** — `pkg-config <link-name>` (or platform equivalent) for
-   include/link flags on the **system** install.
-3. **Missing** — one Jet diagnostic naming both paths: add a hangar dep *or*
-   install the system package.
+   pinned in hangar), use hangar include/lib paths.
+2. **Otherwise** — `pkg-config <link-name>`.
+3. **Missing** — **E3201** naming both fixes.
 
-**Recommended surface (D-CFFI2-SYN, owner lean):**
+**Surface (D-CFFI2-SYN, ratified 2026-06-16):**
+
+| Layer | Shape |
+|---|---|
+| Autogen (compiler) | `@bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
+| User overlay | `@extern module c.<lib> { … }` — empty `{ }` = no overrides yet |
+| Call site | **`use … as alias`** (S16) — one form per lib per file |
+| Script | `use "raylib.h" as rl` — compile-time bind on cache miss |
+| Project | `use c.raylib as rl` — merged **bindgen ∪ overlay**; overlay wins on clash |
+
+Link key = last segment **`<lib>`** (e.g. `raylib`). Reserved segment
+**`__bindgen__`** — users cannot declare it; avoids namespace collision with
+overlay modules.
 
 ```jet
-extern c raylib {
+// .jet/bindings/c/raylib.jet (generated — do not edit)
+@bindgen module c.raylib.__bindgen__ {
     fn init_window(w: Int, h: Int, title: String) = "InitWindow";
-    fn close_window() = "CloseWindow";
+}
+
+// src/c/raylib.jet (optional overlay)
+@extern module c.raylib {
+    fn draw_text(text: String, x: Int, y: Int, size: Int, color: Color) = "DrawText";
+}
+
+// src/pong.jet
+use c.raylib as rl;
+
+fn main() {
+    rl.init_window(800, 600, "pong");
 }
 ```
 
-`<link-name>` is an identifier (preferred) or quoted string. **Auto** mode above.
-Explicit overrides when both exist:
+**Bind timing (D-CFFI2-SYN-3):** compile-time check of `.jet/bindings/c/` + header
+hash; invoke `jet bind` on cache miss/stale. Optional `jet bind` CLI for refresh.
 
-```jet
-extern c system raylib { … }              // force pkg-config / system lib
-extern c hangar raylib { … }              // force hangar dep (error if missing)
-```
-
-**Alternatives considered (not default):**
-
-| Variant | Shape | Tradeoff |
-|---|---|---|
-| **Quoted string only** | `extern c "raylib" { … }` | familiar from S59 draft; less D-like |
-| **Separate `link c`** | `link c raylib;` + `extern c { fn … = "raylib::InitWindow"; }` | two statements; explicit but noisy |
-| **Header path in block** | `extern c "raylib.h" from hangar { … }` | C-header-shaped; hangar deps aren't always headers |
-| **E — `c.<lib>` namespace** | `extern c.raylib { … }` · `import c.raylib as rl` | ballot **E**; mirrors `core.fs` — see **D-CFFI2-SYN** |
-
-**Open (D-CFFI2-SYN):** link resolution is ratified; **surface syntax** is owner
-re-review. Provisional spelling below is variant **A** until **`decision-ballots.md`**
-option A–I is ratified. See also [`c-ffi-syntax-examples.md`](../plans/epoch-2/c-ffi-syntax-examples.md).
-
-Rejected: requiring Jetpack to declare any `extern c`; silent fallback when hangar
-and system versions differ (must pin hash in hangar). Optional header tooling
-(`jet bind`) → Epoch 3 [`docs/plans/epoch-3/c-header-bindings.md`](../plans/epoch-3/c-header-bindings.md).
-Rust FFI (S50) unchanged.
+Rejected: bare `extern c raylib { }` globals (S59 provisional A); shadow-only
+override (overlay must merge with bindgen); two `use` forms for the same C lib
+in one file. Rust FFI (S50) unchanged. See [`decision-ballots.md`](decision-ballots.md).
 
 **S60 — Pure-function marking** *(ratified 2026-06-12; post-1.0 milestone
 pending)*: `**pure fn name(…)**` — a checked modifier; purity is part of
@@ -1370,7 +1374,6 @@ implementation milestone is pending.
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
-| D-CFFI2-SYN | C FFI surface syntax (options A–I; other-language comparisons) — [`decision-ballots.md`](decision-ballots.md) | E2-M14 |
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the
@@ -1401,9 +1404,9 @@ implementation milestone is pending.
 
 
 Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) and Group 7 (S51–S54, S52)
-are fully ratified above. S53 (concurrency) and S59 (C FFI) are ratified
-as deferred past v1.0. S60 is ratified post-1.0. S56 (user derives via
-typed reflection) is deferred past v1.0 by S26's ratified layering.
+are fully ratified above. **S59 (C FFI)** ships in **Epoch 2** (E2-M14). **S53**
+(concurrency) is ratified as deferred past v1.0. S60 is ratified post-1.0. S56
+(user derives via typed reflection) is deferred past v1.0 by S26's ratified layering.
 
 ## Decision log
 
@@ -1491,7 +1494,7 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-12 | S52 | `jet.toml` manifest; `jet.lock`; jet add/fetch | owner |
 | 2026-06-13 | S52 | amended: `[dependencies:*]` colon tables, lock graph, `@latest`, `.jet/` folder, useful `jet new` template | owner |
 | 2026-06-12 | S53 | concurrency deferred to v2; option A when built | owner |
-| 2026-06-12 | S59 | C FFI deferred to v2; `extern c` when built  | owner |
+| 2026-06-16 | S59 | amended: E2-M14 ships C FFI (`@bindgen`/`@extern module`, `use c.<lib>`); no longer deferred past v1 | owner |
 | 2026-06-12 | S60 | `pure fn` checked purity modifier            | owner |
 | 2026-06-15 | D-JPK1 | build `jetpack` independently first; `jet` plumbing later | owner |
 | 2026-06-15 | D-JPK2 | `jetpack run/build/list/clean/add/remove` Phase 1 | owner |
@@ -1536,7 +1539,17 @@ typed reflection) is deferred past v1.0 by S26's ratified layering.
 | 2026-06-16 | D-PURE1 | pure eval + sandboxed package build blocks in Epoch 2 | owner |
 | 2026-06-16 | D-PURE2 | no ambient I/O/network in pure eval; `embed_file` only | owner |
 | 2026-06-16 | D-TOOL4 | snapshot testing; `-u` / `--update-snapshots` | owner |
-| 2026-06-16 | D-CFFI2 | hangar-if-dep else pkg-config; `extern c raylib { }` auto (S59) | owner |
+| 2026-06-16 | D-S16-USE | S16 amended: **`import` → `use`**; E0015 teaches `import` | owner |
+| 2026-06-16 | D-CFFI2-SYN | `@extern module c.<lib>` overlay + `@bindgen module c.<lib>.__bindgen__`; `use` at call site | owner |
+| 2026-06-16 | D-CFFI2-SYN-1 | one C `use` form per lib per file | owner |
+| 2026-06-16 | D-CFFI2-SYN-2 | empty overlay = no overrides; `__bindgen__` reserved for autogen | owner |
+| 2026-06-16 | D-CFFI2-SYN-3 | compile-time bind on cache miss; `.jet/bindings/c/` | owner |
+| 2026-06-16 | D-CBIND1 | tool-generated `.jet` in cache (S59 default) | spec |
+| 2026-06-16 | D-CBIND4 | `Ptr<T>` for C pointers (S58) | spec |
+| 2026-06-16 | D-CBIND7 | cache dir `.jet/bindings/c/` (D-CFFI2-SYN-3) | spec |
+| 2026-06-16 | D-CBIND8 | encourage curated registry packages | spec |
+| 2026-06-16 | D-CFFI2-SYN-4 | merge bindgen ∪ overlay; overlay wins on clash | owner |
+| 2026-06-16 | D-CFFI2 | hangar-if-dep else pkg-config (S59 link resolution) | owner |
 | 2026-06-16 | D-NET2 | Go-scale async/concurrency → Epoch 3 pillar | owner |
 | 2026-06-16 | E2-V12 | retired — split across D-PURE + Epoch 3 pillars | owner |
 | 2026-06-16 | S56 | user derives / typed reflection → Epoch 3 (layer 3) | owner |

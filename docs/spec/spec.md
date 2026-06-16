@@ -282,13 +282,32 @@ Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**)
 Example: `examples/features/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
 Integration: `tests/ffi.rs` (gated on `cargo`).
 
+## E2-M14 — C FFI (planned)
+
+**S59** — C import with auto-generated bindings (default) and optional user
+overlay. Spec: [`docs/plans/epoch-2/m14-c-ffi.md`](../plans/epoch-2/m14-c-ffi.md).
+
+| Layer | Shape |
+|---|---|
+| Autogen | `@bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
+| Overlay | `@extern module c.<lib> { … }` — empty `{ }` = no overrides |
+| Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
+
+Effective module = bindgen ∪ overlay; overlay wins on name clash. Link key =
+last segment `<lib>`: hangar dep if declared → else `pkg-config <lib>` →
+**E3201**. By-value scalars/`String` at the edge; pointers require
+`use core.mem` + `@unsafe` (E2-M13). Rust FFI (S50) unchanged.
+
+Example (planned): `examples/features/49_cffi.jet` (raylib pong). Diagnostics:
+**E3201–E3208** (register in diagnostics.md before ship).
+
 ## M6 phase 3 — multi-file imports (done)
 
-Two import forms (S16): **quotes = file path, no quotes = module.**
-**`import "path/to/file";`** — quoted path to a `.jet` file, relative to
-the importing file's directory (`import "./lib";` for a sibling file;
-default namespace = last path segment). **`import name;`** or
-**`import core.fs;`** — unquoted module name (searches recursively from
+Two use forms (S16): **quotes = file path, no quotes = module.**
+**`use "path/to/file";`** — quoted path to a `.jet` file, relative to
+the using file's directory (`use "./lib";` for a sibling file;
+default namespace = last path segment). **`use name;`** or
+**`use core.fs;`** — unquoted module name (searches recursively from
 the project root for `name.jet` or `name/{name,main}.jet`; `core` is a
 compiler-exported module per S51). Optional **`as alias`** in both forms.
 
@@ -359,8 +378,8 @@ helpers in the generated prelude. Import the short `core` spelling or the
 canonical `jet.core` spelling:
 
 ```
-import core.fs as fs;
-import jet.core.json as json;
+use core.fs as fs;
+use jet.core.json as json;
 ```
 
 Implemented modules: `std.fs`, `std.io`, `std.env`, `std.process`,
@@ -396,7 +415,7 @@ and M10 teaching errors **E0037**–**E0039**.
 std module:
 
 ```jet
-import core.tasks as tasks;
+use core.tasks as tasks;
 ```
 
 `tasks.spawn(() => work()) -> Task<T>` starts a task from a zero-parameter

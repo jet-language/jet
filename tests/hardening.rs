@@ -411,7 +411,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "import \"my-utils\" as util;\nfn main() {\n    print(util.helper());\n}\n",
+        "use \"my-utils\" as util;\nfn main() {\n    print(util.helper());\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -432,7 +432,7 @@ fn imported_struct_constructs_and_reads_fields() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "import \"shapes\";\nfn main() {\n    val p = shapes.Point { x: 1, y: 2 };\n    print(p.x);\n}\n",
+        "use \"shapes\";\nfn main() {\n    val p = shapes.Point { x: 1, y: 2 };\n    print(p.x);\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -464,7 +464,7 @@ fn duplicate_file_stems_get_unique_module_names() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "import \"a/util\" as autil;\nimport \"b/util\" as butil;\nfn main() {\n    print(autil.one());\n    print(butil.two());\n}\n",
+        "use \"a/util\" as autil;\nuse \"b/util\" as butil;\nfn main() {\n    print(autil.one());\n    print(butil.two());\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
