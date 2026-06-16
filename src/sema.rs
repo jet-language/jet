@@ -4708,13 +4708,88 @@ impl<'a> Checker<'a> {
 
     fn infer_fan_out(
         &mut self,
-        _callee: &mut Box<Expr>,
-        _items: &mut Vec<Expr>,
-        _span: Span,
+        callee: &mut Box<Expr>,
+        items: &mut Vec<Expr>,
+        span: Span,
     ) -> Option<Type> {
-        // Stage 2: fan-out sema (E0961/E0962). Currently a parse-only stub:
-        // sema does not yet resolve the callee or elaborate items.
-        None
+        let callee_span = callee.span();
+        let callee_ty = self.infer(callee);
+
+        // E0961: callee must be a one-argument function.
+        let (param_ty, ret_ty) = match callee_ty {
+            None => {
+                for item in items.iter_mut() {
+                    self.infer(item);
+                }
+                return None;
+            }
+            Some(Type::Fn { ref params, ref ret }) if params.len() == 1 => {
+                (params[0].clone(), ret.as_ref().map(|r| *r.clone()))
+            }
+            Some(ref other) => {
+                let msg = if let Type::Fn { params, .. } = other {
+                    format!(
+                        "fan-out `.[` needs a one-argument function, but this one takes {} argument{}",
+                        params.len(),
+                        if params.len() == 1 { "" } else { "s" }
+                    )
+                } else {
+                    format!(
+                        "fan-out `.[` needs a one-argument function, but this is {}",
+                        other.show()
+                    )
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0961",
+                    msg,
+                    "`f.[a, b, c]` expands to `[f(a), f(b), f(c)]` — `f` must accept exactly one argument".to_string(),
+                    "use a one-argument function as the fan-out callee".to_string(),
+                    Some(callee_span),
+                ));
+                for item in items.iter_mut() {
+                    self.infer(item);
+                }
+                return None;
+            }
+        };
+
+        // E0962: each item must match the parameter type.
+        let mut had_error = false;
+        for (i, item) in items.iter_mut().enumerate() {
+            let saved = self.expected_type.clone();
+            self.expected_type = Some(param_ty.clone());
+            let item_ty = self.infer(item);
+            self.expected_type = saved;
+            if let Some(got) = item_ty {
+                if got != param_ty {
+                    had_error = true;
+                    self.diags.push(Diagnostic::error(
+                        "E0962",
+                        format!(
+                            "fan-out item {} is {}, but the function expects {}",
+                            i + 1,
+                            got.show(),
+                            param_ty.show()
+                        ),
+                        "each item in `f.[a, b, c]` is passed as the argument to `f`".to_string(),
+                        type_fix_hint(&param_ty, &got),
+                        Some(item.span()),
+                    ));
+                }
+            }
+        }
+
+        if had_error {
+            return None;
+        }
+
+        let elem = ret_ty.unwrap_or(param_ty); // fall back to param type for void callees
+        let len = items.len() as u64;
+        if len == 0 {
+            Some(Type::List(Box::new(elem)))
+        } else {
+            Some(Type::FixedList { elem: Box::new(elem), len })
+        }
     }
 
     fn infer_map_lit(&mut self, entries: &mut [(Expr, Expr)], span: Span) -> Option<Type> {
