@@ -2631,35 +2631,13 @@ impl<'a> Parser<'a> {
         let mut expr = self.expr_primary(allow_struct_lit)?;
         loop {
             match &self.peek().kind {
-                TokKind::Dot if matches!(self.peek2().kind, TokKind::LBracket) => {
-                    // S75 (2026-06-16): `f.[a, b, c]` fan-out.
-                    let dot = self.bump().span; // consume `.`
-                    self.bump(); // consume `[`
-                    let mut items = Vec::new();
-                    if !matches!(self.peek().kind, TokKind::RBracket) {
-                        loop {
-                            items.push(self.expr()?);
-                            if matches!(self.peek().kind, TokKind::RBracket) {
-                                break;
-                            }
-                            // allow trailing comma
-                            self.expect(TokKind::Comma, "between fan-out items")?;
-                            if matches!(self.peek().kind, TokKind::RBracket) {
-                                break;
-                            }
-                        }
-                    }
-                    self.expect(TokKind::RBracket, "to close the fan-out `.[`")?;
-                    let close = self.toks[self.pos - 1].span;
-                    let span = Span::new(dot.start, close.end);
-                    expr = Expr::FanOut {
-                        callee: Box::new(expr),
-                        items,
-                        span,
-                    };
-                }
                 TokKind::Dot => {
-                    self.bump();
+                    let dot = self.bump().span;
+                    // S75 (2026-06-16): `f.[a, b, c]` fan-out — `.` immediately followed by `[`
+                    if matches!(self.peek().kind, TokKind::LBracket) {
+                        expr = self.parse_fan_out_bracket(Box::new(expr), dot)?;
+                        continue;
+                    }
                     let (member, member_span) = self.expect_field_name()?;
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
@@ -2783,6 +2761,34 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(expr)
+    }
+
+    /// S75 (2026-06-16): parse `.[item, …]` after the `.` has already been consumed.
+    /// `dot_span` is the span of the consumed `.`. Called from both `expr_primary`
+    /// (for `ident.[…]`) and `expr_postfix` (for chained `expr.[…]`).
+    fn parse_fan_out_bracket(
+        &mut self,
+        callee: Box<Expr>,
+        dot_span: Span,
+    ) -> Result<Expr, Diagnostic> {
+        self.bump(); // consume `[`
+        let mut items = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RBracket) {
+            loop {
+                items.push(self.expr()?);
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between fan-out items")?;
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    break; // trailing comma
+                }
+            }
+        }
+        self.expect(TokKind::RBracket, "to close the fan-out `.[`")?;
+        let close = self.toks[self.pos - 1].span;
+        let span = Span::new(dot_span.start, close.end);
+        Ok(Expr::FanOut { callee, items, span })
     }
 
     fn expr_to_lvalue(&mut self, expr: Expr) -> Result<LValue, Diagnostic> {
@@ -3147,7 +3153,12 @@ impl<'a> Parser<'a> {
                     return self.struct_lit_after_name(type_name, type_args, span);
                 }
                 if matches!(self.peek().kind, TokKind::Dot) {
-                    self.bump();
+                    let dot_span = self.bump().span;
+                    // S75 (2026-06-16): `ident.[a, b, c]` fan-out
+                    if matches!(self.peek().kind, TokKind::LBracket) {
+                        let callee = Box::new(Expr::Ident(type_name, span));
+                        return self.parse_fan_out_bracket(callee, dot_span);
+                    }
                     let (member, member_span) = self.expect_field_name()?;
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
