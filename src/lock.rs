@@ -1,9 +1,13 @@
-//! `jet.lock` schema v1 — lockfile read/write and `--locked` verification
-//! (M12.1, D-PM1/3; no external TOML crate — I6).
+//! `.jet/lock` schema v1 — lockfile read/write and `--locked` verification
+//! (M12.1, D-PM1/3; no external TOML crate — I6). Lives at
+//! `syntax::UNIFIED_LOCK_FILE` inside the project's `.jet/` managed folder
+//! (U2, amends S52) — the single lockfile, replacing the old root-level
+//! `jet.lock`/`pack.lock`.
 
 use crate::diag::Diagnostic;
 use crate::manifest::{DepSpec, GitSelector, Manifest};
 use crate::sha256::sha256_hex;
+use crate::syntax;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -296,7 +300,7 @@ fn kv_field(inline: &str, key: &str) -> Option<String> {
 // ──────────────────────────────────────────────
 
 pub fn load(project_root: &Path) -> Option<LockFile> {
-    let path = project_root.join("jet.lock");
+    let path = project_root.join(syntax::UNIFIED_LOCK_FILE);
     let raw = std::fs::read_to_string(&path).ok()?;
     parse(&raw).ok()
 }
@@ -313,7 +317,7 @@ pub fn verify_lock_matches_manifest(
     for (dep_name, _spec) in &manifest.dependencies {
         // Root package deps must appear in the lock.
         if !lock.root_dependencies.contains(dep_name) && !locked_names.contains(dep_name.as_str()) {
-            return Err(e1202("jet.lock"));
+            return Err(e1202(syntax::UNIFIED_LOCK_FILE));
         }
     }
     Ok(())
@@ -401,8 +405,11 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
     Diagnostic::error(
         "E1202",
         "the lock file is out of date".to_string(),
-        "`jet.toml` changed since `jet.lock` was last written".to_string(),
-        "run `jet fetch` to update `jet.lock`".to_string(),
+        format!(
+            "`jet.toml` changed since `{}` was last written",
+            syntax::UNIFIED_LOCK_FILE
+        ),
+        format!("run `jet fetch` to update `{}`", syntax::UNIFIED_LOCK_FILE),
         None,
     )
 }

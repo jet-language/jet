@@ -1043,6 +1043,45 @@ implementation milestone is pending.
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives (deferred) | post-1.0  |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
+| D-JPK23 | `pack.jet` git-dependency selector spelling (see note below) | blocks retiring `jet.toml`/`jet.lock` into `pack.jet`/`.jet/lock` (Step 3 of the jetpack build) |
+
+> **D-JPK23 — git-dependency selector spelling in `pack.jet`'s `deps:` block.**
+> The current `jet.toml` manifest (`manifest::DepSpec::Git`) supports an
+> arbitrary git remote URL plus an explicit selector kind: `{ git = "...",
+> tag = "v0.4.1" }`, `{ git = "...", branch = "main" }`, or `{ git = "...",
+> rev = "..." }` (tests/pkg.rs: `manifest_parse_dep_git_tag`,
+> `git_dep_branch_update_rewrites_lock`). The ratified U6 `provider@target`
+> ref grammar (`github@owner/repo/rev`) only covers **github.com** repos and
+> only carries one trailing path segment, with no way to say whether that
+> segment is a tag, a branch, or a commit rev — `github@NixOS/nixpkgs/nixos-24.05`
+> works today only because call sites treat the third segment positionally.
+> Wiring `pack.jet` in as the *sole* package manifest (retiring `jet.toml`)
+> needs this gap closed first, or git dependencies silently lose the
+> branch/tag distinction (a real regression, not a wording nit). Options:
+>
+> 1. **Extend `provider@target` with a query-style suffix**: `github@owner/repo?branch=main`,
+>    `github@owner/repo?tag=v0.4.1`, `github@owner/repo?rev=abc123` (bare
+>    `owner/repo/rev` stays a shorthand for a pinned rev). Keeps everything as
+>    one ref string; cost is a new `?key=value` sigil with no precedent
+>    elsewhere in Jet syntax.
+> 2. **Generalize the provider to arbitrary git remotes**: add a `git`
+>    provider alongside `github`/`path`/`nixpkgs` so non-GitHub remotes work
+>    too, spelled `git@<url>#<selector-kind>=<value>` or as an inline struct
+>    value (`helpers: { git: "https://...", branch: "main" }`, reusing the
+>    Jet struct-literal grammar already used for `package:`/`deps:` blocks).
+>    Inline-struct keeps the selector-kind keys self-explanatory; cost is two
+>    different dep-value shapes (bare ref vs. struct) in one block.
+> 3. **Drop arbitrary git-remote support; GitHub-only, rev-only** — accept
+>    the regression, require pinned commit revs for non-GitHub or
+>    branch/tag-tracking dependencies. Simplest, but a real capability loss
+>    for any project currently tracking a branch.
+>
+> Recommendation: **option 2** (inline-struct git deps) — it reuses syntax
+> the manifest grammar already has (struct literals), keeps `provider@target`
+> clean for the common case, and loses nothing from the current `jet.toml`
+> capability set. Not implemented pending owner ratification; `packmanifest.rs`
+> currently only supports options whose `deps:` values map cleanly
+> (`"1.2.0"` registry versions, `path@../local`) — see its module doc.
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the

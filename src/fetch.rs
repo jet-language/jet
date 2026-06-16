@@ -9,6 +9,7 @@ use crate::lock::{self, LockFile, LockSource, LockedPackage, LockedRevision};
 use crate::manifest::{check_toolchain, DepSpec, GitSelector, Manifest};
 use crate::sha256::tree_hash;
 use crate::store;
+use crate::syntax;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -45,13 +46,13 @@ pub fn fetch(
     if opts.locked {
         let lock = existing_lock.ok_or_else(|| {
             vec![lock::e1202(
-                &project_root.join("jet.lock").display().to_string(),
+                &project_root.join(syntax::UNIFIED_LOCK_FILE).display().to_string(),
             )]
         })?;
         if let Err(d) = lock::verify_lock_matches_manifest(
             lock,
             manifest,
-            &project_root.join("jet.lock").display().to_string(),
+            &project_root.join(syntax::UNIFIED_LOCK_FILE).display().to_string(),
         ) {
             return Err(vec![d]);
         }
@@ -63,12 +64,24 @@ pub fn fetch(
     let mut resolver = Resolver::new(project_root, existing_lock, opts);
     let (new_lock, dep_dirs) = resolver.resolve_manifest(manifest)?;
 
-    // Write the lock file.
+    // Write the lock file, inside the project's `.jet/` managed folder (U2).
+    let lock_path = project_root.join(syntax::UNIFIED_LOCK_FILE);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            vec![Diagnostic::error(
+                "E1206",
+                format!("couldn't create {}", parent.display()),
+                "the lock file lives inside the project's `.jet/` managed folder".to_string(),
+                format!("check write permissions: {}", e),
+                None,
+            )]
+        })?;
+    }
     let lock_str = lock::write(&new_lock);
-    std::fs::write(project_root.join("jet.lock"), &lock_str).map_err(|e| {
+    std::fs::write(&lock_path, &lock_str).map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
-            "couldn't write jet.lock".to_string(),
+            format!("couldn't write {}", syntax::UNIFIED_LOCK_FILE),
             "the lock file records exact package versions".to_string(),
             format!("check write permissions: {}", e),
             None,

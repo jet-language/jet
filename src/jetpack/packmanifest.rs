@@ -21,11 +21,18 @@
 //!
 //! This module is the structural parser for that shape (U1). It is std-only (I6)
 //! and isolated: it does not yet replace the compiler's `jet.toml` path
-//! (`manifest.rs`) — that wiring follows as Step 3 of the jetpack build.
-//! User-facing diagnostics (I4) land when the parser is wired into the loader. Dependency values are either a registry version string
-//! (`"1.2.0"`) or a `provider@target` source ref (`path@../local`,
-//! `github@owner/repo/rev`), classified through `refspec::classify_provider_ref`
-//! (U6).
+//! (`manifest.rs`) — full wiring is blocked on **D-JPK23** (open decision,
+//! docs/spec/syntax-decisions.md): the `jet.toml` git-dependency shape
+//! (`{ git = "...", tag = "..." }` / `branch` / `rev`) has no equivalent yet
+//! in the `provider@target` grammar, which only covers github.com refs with
+//! one ambiguous trailing segment. Dependency values this parser *does*
+//! support map cleanly: a registry version string (`"1.2.0"`) or a
+//! `provider@target` source ref (`path@../local`, `github@owner/repo/rev`),
+//! classified through `refspec::classify_provider_ref` (U6). The lockfile
+//! side of Step 3 (unifying `jet.lock`/`pack.lock` into `.jet/lock`, U2) is
+//! done — see `lock.rs`/`fetch.rs`/`loader.rs`, all reading/writing
+//! `syntax::UNIFIED_LOCK_FILE`. User-facing diagnostics (I4) for this parser
+//! land when D-JPK23 is ratified and the parser is wired into the loader.
 
 use super::refspec::{self, RefError, Source};
 use crate::syntax;

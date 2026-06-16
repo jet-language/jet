@@ -573,7 +573,7 @@ fn stale_lock_emits_e1202() {
     // Lock exists but lists no dependencies — stale.
     write(
         &tmp,
-        "jet.lock",
+        ".jet/lock",
         "version = 1\n\n[[package]]\nname = \"app\"\nsource = { root = \".\" }\n\n[root]\ndependencies = []\n",
     );
 
@@ -846,7 +846,7 @@ fn git_dep_branch_update_rewrites_lock() {
     );
 
     // Capture the initial rev from the lock file.
-    let lock_raw = fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist");
+    let lock_raw = fs::read_to_string(tmp.join(".jet/lock")).expect(".jet/lock must exist");
     let initial_rev = extract_rev_from_lock(&lock_raw);
     assert!(
         !initial_rev.is_empty(),
@@ -876,7 +876,7 @@ fn git_dep_branch_update_rewrites_lock() {
         .unwrap();
 
     // Re-fetch with update = true — should re-resolve the branch and update the lock.
-    let lock_str = fs::read_to_string(tmp.join("jet.lock")).unwrap();
+    let lock_str = fs::read_to_string(tmp.join(".jet/lock")).unwrap();
     let existing_lock = jet::lock::parse(&lock_str).expect("initial lock must parse");
     let update_opts = jet::fetch::FetchOptions {
         locked: false,
@@ -894,7 +894,7 @@ fn git_dep_branch_update_rewrites_lock() {
 
     // Capture the new rev from the lock file.
     let lock_raw2 =
-        fs::read_to_string(tmp.join("jet.lock")).expect("jet.lock must exist after update");
+        fs::read_to_string(tmp.join(".jet/lock")).expect(".jet/lock must exist after update");
     let new_rev = extract_rev_from_lock(&lock_raw2);
     assert!(
         !new_rev.is_empty(),

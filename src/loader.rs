@@ -58,7 +58,7 @@ pub fn load_entry_with_overlay(
                 // dry-resolve path dep graph to catch version conflicts (E1201).
                 if !mf.dependencies.is_empty() {
                     // E1202: lock must exist and include all manifest deps.
-                    let lock_path = manifest_dir.join("jet.lock");
+                    let lock_path = manifest_dir.join(syntax::UNIFIED_LOCK_FILE);
                     if lock_path.is_file() {
                         let lock_raw = fs::read_to_string(&lock_path).unwrap_or_default();
                         if let Ok(lock) = crate::lock::parse(&lock_raw) {

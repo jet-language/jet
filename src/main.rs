@@ -582,7 +582,7 @@ fn run_store_verify() {
 
 fn run_gc() {
     // Without a global registry of in-use locks, we print a stub message.
-    // Full gc would walk all jet.lock files; M12.1 ships the infrastructure.
+    // Full gc would walk all .jet/lock files; M12.1 ships the infrastructure.
     let entries = jet::store::list_entries();
     println!(
         "store has {} entries; use `jet store verify` to check hashes",

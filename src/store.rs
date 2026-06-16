@@ -8,6 +8,7 @@
 
 use crate::diag::Diagnostic;
 use crate::sha256::tree_hash;
+use crate::syntax;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -99,8 +100,10 @@ pub fn verify_entry(
         return Err(Diagnostic::error(
             "E1204",
             format!("the store entry for `{}` has been modified", pkg_name),
-            "the content hash of the stored source tree doesn't match the fingerprint in jet.lock"
-                .to_string(),
+            format!(
+                "the content hash of the stored source tree doesn't match the fingerprint in {}",
+                syntax::UNIFIED_LOCK_FILE
+            ),
             "run `jet fetch` to re-download the package, or run `jet store verify` to check all entries"
                 .to_string(),
             None,
