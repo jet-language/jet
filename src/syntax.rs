@@ -455,7 +455,7 @@ pub const KW_MODULE: &str = "module";
 /// (`module _name { … }` is not discovered or merged). One char, reversible.
 pub const MODULE_DISABLE_PREFIX: &str = "_";
 
-/// S61 (ratified 2026-06-16): *dashed names* — the kebab-case naming rule for
+/// S84 (ratified 2026-06-16): *dashed names* — the kebab-case naming rule for
 /// package / module / system / image / env **names** (and `from: system.<name>`
 /// references). The grammar is `ident (-ident)*`: a `-` joins two segments only
 /// when it is span-adjacent to both (no surrounding whitespace), matching
