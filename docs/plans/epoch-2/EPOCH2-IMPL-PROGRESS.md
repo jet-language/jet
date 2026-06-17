@@ -32,8 +32,8 @@ M3 and M5 touch disjoint regions and go first.
 | Order | Milestone | Plan | Status |
 |---|---|---|---|
 | 1 | E2-M3 DX CLI (explain/doctor/--json) | `m3-dx-cli.md` | ✅ DONE (chunks 1–6, all exit criteria met) |
-| 2 | E2-M5 tier-2 references | `m5-references.md` | NEXT |
-| 3 | E2-M2 release policy/editions | `m2-release-policy.md` | DEFERRED — do docs/policy + `jet --version` banner anytime; defer edition-in-manifest until pack.jet migration settles |
+| 2 | E2-M5 tier-2 references | `m5-references.md` | ✅ DONE (chunks A–B, matrix complete, soundness fuzz green) |
+| 3 | E2-M2 release policy/editions | `m2-release-policy.md` | NEXT (collision-free parts) — policy docs + `jet --version` banner anytime; defer edition-in-manifest until pack.jet migration settles |
 
 Deferred (collision/dependency): E2-M14 (jetpack owns — already committed),
 E2-M4 (`jet dev`, rides LSP foundation; revisit after M3/M5).
@@ -68,18 +68,54 @@ codegen/CLI → `nix develop -c cargo test` green → `tests/decisions.rs` green
 docs updated → commit on `epoch-2-impl`. Validate the FULL suite before each
 commit; never start a milestone on a red baseline.
 
+### E2-M5 completion record (branch `epoch-2-impl`)
+
+Commits `3e4db31` (chunk A) + `fd02646` (chunk B). Exit criteria met:
+- ✅ soundness matrix COMPLETE — every cell allowed-with-proof (positive fixture)
+  or rejected-with-diagnostic+fixture; table filled in `m5-references.md`.
+- ✅ no user-written lifetime names anywhere; diagnostics speak Jet words.
+- ✅ `examples/features/35_zerocopy.jet` runs, golden-pinned, contrasts a
+  borrowed (no-copy, lowers to `&String`) path vs a clone-heavy one.
+- ✅ L2301 inlay hints wired in `src/lsp.rs` (D-REF3), tested.
+- ✅ soundness fuzz target `tests/ref_soundness_fuzz.rs` (sema-accepted ⇒
+  rustc-accepted, no ICE, no `unsafe`) green — found+closed a real chunk-A hole.
+- ✅ full `nix develop -c cargo test` green (34 binaries).
+
+Codes: E2301 (returned view outlives owner), E2302 (stored `ref` dangle —
+**tightened**: a `ref` field has no sound v1 source except a `'static` const,
+so non-const sources are now rejected, closing an ICE), E2303 (delegates to
+E1102), **E2304** (view into an index/slice of a param — the helper copies),
+L2301 (borrow advisory/inlay). Key allow: `view` into a **field of a parameter**
+(incl. through a generic `Wrap<T>` param) — the zero-copy primitive.
+
 ## Resume pointer
 
-**Current state:** E2-M3 fully implemented + validated (full suite green) on
-branch `epoch-2-impl`, commits `5050565`→`44dc85f`. **Next: E2-M5 tier-2
-references** (`m5-references.md`) — harden `view` returns / `ref` fields
-soundness matrix, register E23xx codes, add LSP inlay hints (D-REF3); D-REF2
-(arenas) is OPEN/optional, not a blocker. Touch only the view/ref region of
-`src/sema.rs` + `src/lsp.rs` + E23xx in `docs/spec/diagnostics.md` — NOT the
-record-literal path (jetpack territory).
+**Current state:** E2-M3 ✅ and E2-M5 ✅ fully implemented + validated (full
+suite green) on branch `epoch-2-impl`, commits `5050565`→`fd02646`.
 
-After M5: revisit E2-M2 (policy docs + `jet --version` banner are collision-free
-and can land anytime; the edition-in-manifest piece waits on the pack.jet
-migration).
+**Next: E2-M2 (collision-free parts)** (`m2-release-policy.md`) — all ballots
+ratified (D-REL1…5). Implementable now WITHOUT touching the contested manifest
+parser: (1) write the compatibility/release-policy + generated-code-license
+docs in `docs/spec/`; (2) the `jet --version` banner (compiler SemVer + supported
+epoch/edition range + registry compat) in `src/main.rs` with a golden test;
+(3) register E2001/E2002/L2001 in `docs/spec/diagnostics.md`. **DEFER** the
+edition-marker-in-manifest piece + the E2001 *enforcement* (needs
+`packmanifest.rs`, jetpack territory) until the pack.jet/payload.jet migration
+settles — coordinate then.
+
+After M2: E2-M4 (`jet dev`) rides the LSP/incremental foundation — revisit once
+the jetpack agent's churn around shared files quiets. E2-M14 (C FFI) is the
+jetpack agent's (already committed on their branch).
+
+### Integration note (for the owner/coordinator)
+
+`epoch-2-impl` is branched from the jetpack agent's `jetos-ratified-arc`
+(`cec262a`) and must eventually be MERGED back. Conflict surface is small + range-
+disjoint by design: new modules (`explain/diagjson/doctor/cli_spec/fixengine.rs`)
+don't exist on their branch; shared-file edits are in disjoint regions —
+`docs/spec/diagnostics.md` adds only E21xx/E23xx/L2xxx rows (they add E09/E1x/
+E32xx), `src/main.rs` adds new subcommands, `src/sema.rs` edits are the view/ref
+region (they edit record-literal). `src/lsp.rs`/`src/codegen.rs` had small
+additive edits — check those two first when merging.
 
 (Update this section after each milestone commit so a fresh agent resumes here.)
