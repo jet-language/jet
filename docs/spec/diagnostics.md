@@ -335,6 +335,71 @@ CLI.
 | E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
 | E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
 
+## Command-line presentation (E2-M3)
+
+The renderer in `src/diag.rs` produces one set of bytes; how those bytes reach
+the user depends on three orthogonal switches. None of them ever change the
+*content* a script parses.
+
+### TTY-aware color (D-DX*)
+
+Color is added only around the existing text (the `Error`/`Warning` label, the
+`Why:`/`Fix:` headings, and the carets) — never the message body, location, or
+counts. Resolution order, highest priority first:
+
+1. `--color=always` / `--color=never` (a bare `--color` means *always*).
+2. `FORCE_COLOR` (any value) forces on; `NO_COLOR` (any value) forces off.
+3. `auto` (the default): color only when the target stream is a real terminal
+   (`std::io::IsTerminal`, std-only — invariant I6).
+
+When piped, redirected, or in CI, output is plain, deterministic, ANSI-free
+bytes. With color off, the output is byte-for-byte identical to the snapshots in
+`tests/ui/`. Pinned by `tests/cli.rs`.
+
+### `--json` diagnostics (D-DX1)
+
+`jet check`, `jet build`, and `jet test` accept `--json`, emitting one stable,
+versioned schema (hand-rolled, no serde — invariant I6) on stderr. The LSP and
+the fix engine consume the same shape. Top level:
+
+```json
+{ "schema_version": 1, "diagnostics": [ /* objects below */ ] }
+```
+
+Each diagnostic object:
+
+```json
+{
+  "schema_version": 1,
+  "code": "E0102",
+  "severity": "error",          // or "warning"
+  "message": "nothing named `pirnt` exists here",
+  "why": "…",
+  "fix": "did you mean `print`?",
+  "detail": null,               // or indented tool output (e.g. E0704)
+  "file": "a.jet",
+  "line": 2, "col": 5,          // null when the diagnostic has no span
+  "span": { "start": 16, "end": 21 },  // byte offsets, or null
+  "edit": null                  // machine-applicable fix, or:
+  // "edit": { "span": {"start":…,"end":…}, "new_text": "print" }
+}
+```
+
+`schema_version` is bumped only on a breaking change (`diag::JSON_SCHEMA_VERSION`).
+`edit` is the `TextEdit` the fix engine / LSP code action applies. In `--json`
+mode the human "N problems found" trailer and the `jet explain` pointer are
+suppressed (the code is already structured).
+
+### `jet explain <CODE>`
+
+`jet explain E0102` prints an offline essay for any registered code. The index
+is built from this file (`include_str!`-embedded) so it works with no network:
+every row in a code table above resolves, and codes with a detailed *what/why/fix*
+block get the richer essay. After a human-mode error, the renderer appends one
+quiet (dim) line — `run \`jet explain <CODE>\` to learn more` — naming the first
+code, without cluttering the message. `tests/cli.rs` asserts every registered
+code has an explain entry (the I4 loop, closed for explanations too).
+
 ## Process for a new diagnostic
 
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.

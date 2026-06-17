@@ -83,6 +83,23 @@ registry protocol: v1
 - the supported edition range and the newest stable edition,
 - the registry-protocol compatibility version.
 
+## Exit-code table (E2-M3, extends E2-M2)
+
+`jet` returns a stable, documented exit code so shells and CI gates can branch
+on the outcome without parsing text. The numbers never change meaning. The
+single source of truth is `src/exit_codes.rs`.
+
+| Code | Name           | Meaning                                                |
+|------|----------------|--------------------------------------------------------|
+| 0    | `OK`           | success                                                |
+| 1    | `USER_ERROR`   | the user's program or manifest has a problem we reported with a diagnostic |
+| 2    | `USAGE`        | the command line itself was wrong (unknown command, missing/invalid argument or flag) |
+| 70   | `RUNTIME_PANIC`| a built program stopped at runtime (`panic`, `require`, an index fault); emitted by the generated runtime `jet_panic` |
+| 101  | `ICE`          | internal compiler error (invariant I2): rustc rejected generated code, or the compiler hit an impossible state — never the user's fault |
+
+`USER_ERROR` (1) and `USAGE` (2) are deliberately distinct: "my program has a
+bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.
+
 ## Where this is enforced
 
 - `edition:` field — parsed in `src/jetpack/packmanifest.rs`, surfaced on

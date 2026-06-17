@@ -25,7 +25,7 @@ philosophy already commits to four; this milestone delivers the techniques.
 | D-DX4 | Shell completions + man pages from one source | **A** — ship in M3 | ✅ ratified 2026-06-16 — A: ship completions + man pages |
 | D-DX5 | External subcommands (`jet-foo` → `jet foo`) | **A** — PATH discovery now; formal plugin API → Epoch 3 | A | ✅ ratified 2026-06-16 — A now; B → `docs/plans/epoch-3/plugin-api.md` |
 | D-DX6 | OSC 8 terminal hyperlinks on file:line / codes | **A** — when supported | ✅ ratified 2026-06-16 — A: OSC-8 hyperlinks |
-| D-SUGAR1 | Digit separators `1_000_000` | **A** — lexer-only, free | — |
+| D-SUGAR1 | Digit separators `1_000_000` | **A** — lexer-only, free | ✅ S67, already implemented (src/lexer.rs; example `34_digits.jet`) |
 | D-BUILD1 | `jet doctor` FFI section | — | ✅ ratified 2026-06-16 — A: `jet doctor` FFI section |
 | D-BUILD2 | `jet build -v` bridge steps | — | ✅ ratified 2026-06-16 — A: `jet build -v` prints bridge steps |
 

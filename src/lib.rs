@@ -12,6 +12,8 @@ pub mod codegen;
 pub mod collections;
 pub mod comptime;
 pub mod diag;
+pub mod exit_codes;
+pub mod explain;
 pub mod fetch;
 pub mod ffi;
 pub mod fmt;
@@ -194,6 +196,7 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
 }
 
 pub use diag::render_all as render_diagnostics;
+pub use diag::{render_all_colored, render_all_json};
 
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
