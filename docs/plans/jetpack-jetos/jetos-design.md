@@ -184,28 +184,44 @@ apps.steam.enable   = true
 | list / map entries | combined (lists concatenate; order = sorted by source path, so results never depend on discovery order) |
 | scalar (bool/int/string/enum/pkg) | allowed only at DIFFERENT priorities; same priority ⇒ conflict error |
 
-Priorities, exactly three:
-- `default x = v` — "use this unless anyone cares" (modules suggesting)
-- `x = v` — normal (hosts/users deciding)
-- `force x = v` — "end of discussion" (two forces still conflict)
+Priorities — D-OS4=C (ratified 2026-06-17):
+
+- Bare assignment: `x = v` — normal priority (the common case)
+- Map form: `x = [default: v]` — "use this unless anyone cares" (modules suggesting)
+- Map form: `x = [force: v]` — "end of discussion" (two forces still conflict)
+- Mixed: `x = [default: a, force: b]` — suggest `a`, allow callers to override, but `b` wins everywhere
+
+A bare assignment with no map implies `default` priority when used in a module; in a host config it is normal priority. The `force` key always requires the explicit map form.
 
 Worked example:
 
-```
-modules/apps/firefox.jet:   sys.pkgs += [firefox]
-hosts/laptop.jet:           sys.pkgs += [vlc]
-        ⇒ merged sys.pkgs = [firefox, vlc]            (lists combine)
+```jet
+// modules/apps/firefox.jet
+sys.pkgs += [firefox]
 
-hosts/laptop.jet:           sys.desktop.environment = gnome
-modules/apps/kde-tools.jet: sys.desktop.environment = plasma
-        ⇒ error[J-M021]: conflicting values for sys.desktop.environment
-             hosts/laptop.jet:3            = gnome
-             modules/apps/kde-tools.jet:7  = plasma
-             why: scalar options take one value per priority level
-             fix: mark one `default`, or `force` the one you want
+// hosts/laptop.jet
+sys.pkgs += [vlc]
+// ⇒ merged sys.pkgs = [firefox, vlc]   (lists combine)
 
-   kde-tools.jet changes its line to:  default sys.desktop.environment = plasma
-        ⇒ laptop's normal-priority `gnome` wins. Resolved.
+// hosts/laptop.jet
+sys.desktop.environment = "gnome"
+
+// modules/apps/kde-tools.jet
+sys.desktop.environment = "plasma"
+// ⇒ error[J-M021]: conflicting values for sys.desktop.environment
+//      hosts/laptop.jet:3            = "gnome"
+//      modules/apps/kde-tools.jet:7  = "plasma"
+//      why: scalar options take one value per priority level
+//      fix: use [default: …] in the module, or [force: …] to override
+
+// fix: kde-tools.jet lowers its claim to a suggestion:
+sys.desktop.environment = [default: "plasma"]
+// ⇒ laptop's normal-priority "gnome" wins. Resolved.
+
+// service with explicit priority map (D-OS4 canonical form):
+service sshd {
+    priority = [default: 50, force: 100];
+}
 ```
 
 This conflict-instead-of-silent-override behavior is a FEATURE: it is the
@@ -237,6 +253,28 @@ error[J-M040]: lifted module reads undeclared option `alice.theme.accent`
 - `user.<name>.*` — per-user files/pkgs/prefs (the home-manager role);
   `user.me` = the primary user (D-OS6)
 - `apps.*` — feature toggles and per-app settings; the lifting layer
+
+D-OS6=A (ratified 2026-06-17) — user scope examples:
+
+```jet
+// primary user (stable alias — no rename needed when sharing configs):
+user.me {
+    shell = "fish";
+    pkgs  += [neovim, ripgrep];
+}
+
+// additional named user:
+user.alice {
+    shell = "zsh";
+    home_manager = {
+        programs.git.enable = true;
+    };
+}
+```
+
+`user.me` is a well-known name, not a runtime concept — it resolves to the
+config owner at build time. Adding a second user (`user.bob { … }`) is purely
+additive and does not require restructuring the file.
 
 One feature file touching all three scopes is the dendritic payoff.
 
