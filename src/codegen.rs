@@ -482,6 +482,17 @@ fn file_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// E2-M10: networking opaque types map to top-level prelude structs.
+fn net_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "TcpListener" => Some("JetTcpListener"),
+        "TcpStream" => Some("JetTcpStream"),
+        "HttpRequest" => Some("JetHttpRequest"),
+        "HttpResponse" => Some("JetHttpResponse"),
+        _ => None,
+    }
+}
+
 impl Cx {
     fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
@@ -541,6 +552,10 @@ impl Cx {
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, file_handle_rust_type(name).unwrap())
+            }
+            // E2-M10: networking opaque types are top-level in the prelude.
+            Type::Named(name) if net_handle_rust_type(name).is_some() => {
+                format!("{}{}", self.root_prefix, net_handle_rust_type(name).unwrap())
             }
             Type::Named(name) if std_rust_type_name(name).is_some() => {
                 format!(
@@ -2047,9 +2062,10 @@ fn emit_stmt(
             }
             // E2-M7: file handles need `let mut` even when bound with `val`,
             // because streaming reads and writes mutate the internal buffer state.
+            // E2-M10: TcpStream also needs `let mut` for the same reason.
             let is_file_handle = matches!(
                 &b.ty,
-                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
+                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter" || n == "TcpStream"
             );
             let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
                 "let mut"
@@ -3255,9 +3271,22 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                 }
                 return lit;
             }
-            let rust_type = user_type_apply_rust(cx, type_name, type_args);
+            // E2-M10: compiler-known struct types (HttpResponse, HttpRequest) use
+            // prelude types, not user_* prefixed names. Their fields are also plain
+            // (not mangled) since they're defined in the prelude, not user code.
+            let is_prelude_struct = net_handle_rust_type(type_name).is_some();
+            let rust_type = if is_prelude_struct {
+                format!("{}{}", cx.root_prefix, net_handle_rust_type(type_name).unwrap())
+            } else {
+                user_type_apply_rust(cx, type_name, type_args)
+            };
             for (n, _, e) in fields {
-                parts.push(format!("{}: {}", mangle(n), emit_expr(cx, e, env)));
+                let field_name = if is_prelude_struct {
+                    n.clone() // prelude struct fields are not mangled
+                } else {
+                    mangle(n)
+                };
+                parts.push(format!("{}: {}", field_name, emit_expr(cx, e, env)));
             }
             let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
             if let Some(trait_name) = as_trait {
@@ -3561,6 +3590,8 @@ fn std_struct_field_rust_name(
         "ProcessResult" => matches!(member, "code" | "output" | "errors"),
         _ if is_json_error_type_name(&type_name) => matches!(member, "line" | "message"),
         _ if is_utf8_error_type_name(&type_name) => member == "message",
+        // E2-M10: HttpRequest and HttpResponse field access.
+        "HttpRequest" | "HttpResponse" => matches!(member, "method" | "path" | "body" | "headers" | "status"),
         _ => false,
     };
     if known {
@@ -3782,6 +3813,52 @@ fn emit_builtin_method(
         "lines" if matches!(&rty, Some(Type::Named(n)) if n == "FileReader") => {
             Some(format!("/* FileLines handled in loop */ &mut ({})", recv))
         }
+        // E2-M10: TcpListener methods.
+        "accept" if matches!(&rty, Some(Type::Named(n)) if n == "TcpListener") => Some(format!(
+            "{}jet_net_tcp_accept(&({}))", cx.root_prefix, recv
+        )),
+        "local_addr" if matches!(&rty, Some(Type::Named(n)) if n == "TcpListener") => Some(format!(
+            "{}jet_net_listener_local_addr(&({}))", cx.root_prefix, recv
+        )),
+        // E2-M10: TcpStream methods.
+        "read" if matches!(&rty, Some(Type::Named(n)) if n == "TcpStream") => Some(format!(
+            "{}jet_net_tcp_read(&mut ({}))", cx.root_prefix, recv
+        )),
+        "write" if matches!(&rty, Some(Type::Named(n)) if n == "TcpStream") => Some(format!(
+            "{}jet_net_tcp_write(&mut ({}), &({}))", cx.root_prefix, recv, arg(0)
+        )),
+        "peer_addr" if matches!(&rty, Some(Type::Named(n)) if n == "TcpStream") => Some(format!(
+            "{}jet_net_tcp_peer_addr(&({}))", cx.root_prefix, recv
+        )),
+        "local_addr" if matches!(&rty, Some(Type::Named(n)) if n == "TcpStream") => Some(format!(
+            "{}jet_net_tcp_local_addr(&({}))", cx.root_prefix, recv
+        )),
+        "close" if matches!(&rty, Some(Type::Named(n)) if n == "TcpStream") => Some(format!(
+            "{{ drop({}); }}", recv
+        )),
+        // E2-M10: HttpRequest field accessors.
+        "method" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRequest") => Some(format!(
+            "({}).method.clone()", recv
+        )),
+        "path" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRequest") => Some(format!(
+            "({}).path.clone()", recv
+        )),
+        "body" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRequest") => Some(format!(
+            "({}).body.clone()", recv
+        )),
+        "header" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRequest") => Some(format!(
+            "({}).headers.get(&{}).cloned()", recv, arg(0)
+        )),
+        // E2-M10: HttpResponse field accessors.
+        "status" if matches!(&rty, Some(Type::Named(n)) if n == "HttpResponse") => Some(format!(
+            "({}).status.clone()", recv
+        )),
+        "body" if matches!(&rty, Some(Type::Named(n)) if n == "HttpResponse") => Some(format!(
+            "({}).body.clone()", recv
+        )),
+        "header" if matches!(&rty, Some(Type::Named(n)) if n == "HttpResponse") => Some(format!(
+            "({}).headers.get(&{}).cloned()", recv, arg(0)
+        )),
         "map" => {
             if let Expr::Lambda(l) = &args[0].expr {
                 if l.meta.needs_fn_mut {
@@ -3983,6 +4060,31 @@ fn emit_std_call(
         ("jet.time", "format") => format!("{}({}, &({}))", helper("jet_ring_time_format"), arg(0), arg(1)),
         ("jet.crypto", "sha256") => format!("{}(&({}))", helper("jet_ring_crypto_sha256"), arg(0)),
         ("jet.crypto", "sha256_bytes") => format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0)),
+        // E2-M10: core.net — blocking TCP sockets.
+        ("core.net", "tcp_listen") => format!("{}(&({}))", helper("jet_net_tcp_listen"), arg(0)),
+        ("core.net", "tcp_accept") => format!("{}(&({}))", helper("jet_net_tcp_accept"), arg(0)),
+        ("core.net", "tcp_connect") => format!("{}(&({}))", helper("jet_net_tcp_connect"), arg(0)),
+        ("core.net", "tcp_read") => format!("{}(&mut ({}))", helper("jet_net_tcp_read"), arg(0)),
+        ("core.net", "tcp_write") => {
+            format!("{}(&mut ({}), &({}))", helper("jet_net_tcp_write"), arg(0), arg(1))
+        }
+        ("core.net", "tcp_local_addr") => format!("{}(&({}))", helper("jet_net_tcp_local_addr"), arg(0)),
+        ("core.net", "tcp_peer_addr") => format!("{}(&({}))", helper("jet_net_tcp_peer_addr"), arg(0)),
+        ("core.net", "set_timeout") => {
+            format!("{}(&mut ({}), {})", helper("jet_net_set_timeout"), arg(0), arg(1))
+        }
+        ("core.net", "tcp_reply") => {
+            format!("{}({}, &({}), &({}))", helper("jet_net_tcp_reply"), arg(0), arg(1), arg(2))
+        }
+        // E2-M10: jet.http — HTTP client and server.
+        ("jet.http", "get") => format!("{}(&({}))", helper("jet_http_get"), arg(0)),
+        ("jet.http", "post") => {
+            format!("{}(&({}), &({}))", helper("jet_http_post"), arg(0), arg(1))
+        }
+        ("jet.http", "serve") => {
+            // serve(addr, handler): blocking; handler is a closure/fn.
+            format!("{}(&({}), {})", helper("jet_http_serve"), arg(0), arg(1))
+        }
         _ => "/* unknown std call */".to_string(),
     }
 }

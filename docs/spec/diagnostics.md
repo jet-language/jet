@@ -447,6 +447,18 @@ Wave-1 ring packages (`jet.csv`, `jet.toml`, `jet.yaml`, `jet.log`, `jet.json`, 
 | E2702 | Crypto API misuse: {detail}. | A `jet.crypto` call would use a key, nonce, or algorithm in an unsafe way — for example, an IV too short or a key length the algorithm doesn't accept. Reserved for future static checks. | Follow the fix named in the error; the `jet.crypto` API is intentionally restrictive to surface misuse. |
 | L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `jet.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
+## Networking and services diagnostics (E2-M10, D-NET1–3)
+
+`core.net` provides blocking TCP/UDP sockets; `jet.http` provides HTTP client and
+server built on top. E28xx is the block for M10.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2801 | {operation} on `{address}` failed: {detail}. | A socket bind, listen, connect, or accept call returned an OS error. The address and operation are named so you can act on the specific failure. | Check that the address is reachable and the port is not already in use. For `bind`, try a different port. For `connect`, verify the server is running. |
+| E2802 | TLS handshake with `{host}` failed: {detail}. | The TLS layer could not complete a secure handshake — the certificate may be invalid, expired, or untrusted by the system trust store. | Verify the server's certificate, ensure the system trust store is up-to-date, or use `jet.tls.insecure_skip_verify()` in a test environment only. |
+| E2803 | Request body exceeds the {limit}-byte limit. | The server's configured `max_body` cap was reached. Allowing unbounded bodies risks memory exhaustion. | Raise the `max_body` option passed to `http.serve`, or reject the request in your handler before reading the body. |
+| L2801 | Blocking call inside the accept loop without a worker task. | A slow handler inside `http.serve` or a raw `net.tcp_accept` loop blocks all new connections until it returns. | Wrap the handler body in `tasks.spawn(() => …)` so each connection runs in its own task. |
+
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an

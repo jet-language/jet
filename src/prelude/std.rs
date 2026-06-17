@@ -880,3 +880,241 @@ fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
     }
     out
 }
+
+// ── E2-M10: networking (core.net + jet.http) ─────────────────────────────────
+// All networking uses std::net only — zero external crates in the prelude (I6).
+// TLS (D-NET1) is delivered as the `jet.tls` FFI package and is not included here.
+
+pub struct JetTcpListener {
+    inner: std::net::TcpListener,
+}
+
+pub struct JetTcpStream {
+    inner: std::net::TcpStream,
+}
+
+#[derive(Clone)]
+pub struct JetHttpRequest {
+    pub method: String,
+    pub path: String,
+    pub body: String,
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone)]
+pub struct JetHttpResponse {
+    pub status: String,
+    pub body: String,
+    pub headers: std::collections::BTreeMap<String, String>,
+}
+
+impl JetShow for JetTcpListener {
+    fn jet_show(&self) -> String { format!("TcpListener({})", self.inner.local_addr().map(|a| a.to_string()).unwrap_or_default()) }
+}
+impl JetShow for JetTcpStream {
+    fn jet_show(&self) -> String { format!("TcpStream({})", self.inner.peer_addr().map(|a| a.to_string()).unwrap_or_default()) }
+}
+impl JetShow for JetHttpRequest {
+    fn jet_show(&self) -> String { format!("{} {}", self.method, self.path) }
+}
+impl JetShow for JetHttpResponse {
+    fn jet_show(&self) -> String { format!("HTTP {}", self.status) }
+}
+
+fn jet_net_tcp_listen(addr: &String) -> Result<JetTcpListener, String> {
+    std::net::TcpListener::bind(addr.as_str())
+        .map(|l| JetTcpListener { inner: l })
+        .map_err(|e| format!("bind on `{}` failed: {}", addr, e))
+}
+
+fn jet_net_tcp_accept(listener: &JetTcpListener) -> Result<JetTcpStream, String> {
+    listener.inner.accept()
+        .map(|(s, _)| JetTcpStream { inner: s })
+        .map_err(|e| format!("accept failed: {}", e))
+}
+
+fn jet_net_tcp_connect(addr: &String) -> Result<JetTcpStream, String> {
+    std::net::TcpStream::connect(addr.as_str())
+        .map(|s| JetTcpStream { inner: s })
+        .map_err(|e| format!("connect to `{}` failed: {}", addr, e))
+}
+
+fn jet_net_tcp_read(stream: &mut JetTcpStream) -> Result<String, String> {
+    use std::io::Read;
+    let mut buf = [0u8; 8192];
+    match stream.inner.read(&mut buf) {
+        Ok(0) => Ok(String::new()),
+        Ok(n) => String::from_utf8(buf[..n].to_vec())
+            .map_err(|e| format!("tcp read: invalid UTF-8: {}", e)),
+        Err(e) => Err(format!("tcp read failed: {}", e)),
+    }
+}
+
+fn jet_net_tcp_write(stream: &mut JetTcpStream, data: &String) -> Result<(), String> {
+    use std::io::Write;
+    stream.inner.write_all(data.as_bytes())
+        .map_err(|e| format!("tcp write failed: {}", e))
+}
+
+fn jet_net_tcp_local_addr(stream: &JetTcpStream) -> String {
+    stream.inner.local_addr().map(|a| a.to_string()).unwrap_or_default()
+}
+
+fn jet_net_tcp_peer_addr(stream: &JetTcpStream) -> String {
+    stream.inner.peer_addr().map(|a| a.to_string()).unwrap_or_default()
+}
+
+fn jet_net_listener_local_addr(listener: &JetTcpListener) -> String {
+    listener.inner.local_addr().map(|a| a.to_string()).unwrap_or_default()
+}
+
+fn jet_net_set_timeout(stream: &mut JetTcpStream, ms: i64) {
+    let dur = std::time::Duration::from_millis(ms as u64);
+    let _ = stream.inner.set_read_timeout(Some(dur));
+    let _ = stream.inner.set_write_timeout(Some(dur));
+}
+
+/// Send a well-formed HTTP/1.1 response on a TcpStream and close it.
+/// Handles CRLF line endings internally so Jet code doesn't need `\r`.
+fn jet_net_tcp_reply(mut stream: JetTcpStream, status: &String, body: &String) {
+    use std::io::Write;
+    let response = format!(
+        "HTTP/1.1 {}\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}",
+        status, body.len(), body
+    );
+    let _ = stream.inner.write_all(response.as_bytes());
+}
+
+// ── HTTP/1.1 client (minimal, over std::net::TcpStream) ──────────────────────
+
+fn jet_http_get(url: &String) -> Result<JetHttpResponse, String> {
+    jet_http_request(url, "GET", &[], "")
+}
+
+fn jet_http_post(url: &String, body: &String) -> Result<JetHttpResponse, String> {
+    jet_http_request(url, "POST", &[], body.as_str())
+}
+
+fn jet_http_request(url: &str, method: &str, extra_headers: &[(&str, &str)], body: &str) -> Result<JetHttpResponse, String> {
+    use std::io::{Read, Write};
+    // Parse URL: http://host[:port]/path
+    let url_str = url;
+    let (host_port, path) = if let Some(rest) = url_str.strip_prefix("http://") {
+        let slash = rest.find('/').unwrap_or(rest.len());
+        let hp = &rest[..slash];
+        let p = if slash < rest.len() { &rest[slash..] } else { "/" };
+        (hp.to_string(), p.to_string())
+    } else if let Some(rest) = url_str.strip_prefix("https://") {
+        return Err("HTTPS requires the `jet.tls` package; this is plain HTTP. Add `jet.tls` to your payload.jet to enable HTTPS.".to_string());
+        // Keep the variable to silence unused warning in case we extend later.
+        #[allow(unreachable_code)]
+        { (rest.to_string(), "/".to_string()) }
+    } else {
+        return Err(format!("URL must start with http:// — got `{}`", url));
+    };
+    // Default port 80 if not specified.
+    let addr = if host_port.contains(':') {
+        host_port.clone()
+    } else {
+        format!("{}:80", host_port)
+    };
+    let host = host_port.split(':').next().unwrap_or(&host_port);
+    let mut stream = std::net::TcpStream::connect(&addr)
+        .map_err(|e| format!("connect to `{}` failed: {}", addr, e))?;
+    // Build HTTP/1.1 request.
+    let content_len = body.len();
+    let mut req = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: Jet/1.0\r\nConnection: close\r\n",
+        method, path, host
+    );
+    if !body.is_empty() {
+        req.push_str(&format!("Content-Length: {}\r\n", content_len));
+    }
+    for (k, v) in extra_headers {
+        req.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    req.push_str("\r\n");
+    if !body.is_empty() {
+        req.push_str(body);
+    }
+    stream.write_all(req.as_bytes())
+        .map_err(|e| format!("http write failed: {}", e))?;
+    // Read response.
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw)
+        .map_err(|e| format!("http read failed: {}", e))?;
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    // Parse status line + headers + body.
+    let sep = text.find("\r\n\r\n").unwrap_or(text.len());
+    let header_part = &text[..sep];
+    let body_part = if sep + 4 <= text.len() { text[sep + 4..].to_string() } else { String::new() };
+    let mut lines = header_part.lines();
+    let status_line = lines.next().unwrap_or("HTTP/1.1 200 OK");
+    let status = status_line.splitn(2, ' ').nth(1).unwrap_or("200 OK").to_string();
+    let mut headers = std::collections::BTreeMap::new();
+    for line in lines {
+        if let Some((k, v)) = line.split_once(": ") {
+            headers.insert(k.to_lowercase(), v.to_string());
+        }
+    }
+    Ok(JetHttpResponse { status, body: body_part, headers })
+}
+
+// ── HTTP/1.1 server (blocking, one thread per connection) ────────────────────
+// note: `jet serve` uses one task per connection. This is excellent for internal
+//       services and tools at hundreds of concurrent connections. For very high
+//       connection counts, Jet is not the right tool yet — see docs/services.md.
+
+fn jet_http_serve<F>(addr: &String, handler: F)
+where
+    F: Fn(JetHttpRequest) -> JetHttpResponse + Send + Sync + 'static,
+{
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind(addr.as_str())
+        .unwrap_or_else(|e| { eprintln!("E2801: bind on `{}` failed: {}", addr, e); std::process::exit(1); });
+    let handler = std::sync::Arc::new(handler);
+    loop {
+        let (mut stream, _peer) = match listener.accept() {
+            Ok(x) => x,
+            Err(e) => { eprintln!("E2801: accept failed: {}", e); continue; }
+        };
+        let h = handler.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 16384];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let req = jet_http_parse_request(&raw);
+            let resp = h(req);
+            let response_text = jet_http_format_response(&resp);
+            let _ = stream.write_all(response_text.as_bytes());
+        });
+    }
+}
+
+fn jet_http_parse_request(raw: &str) -> JetHttpRequest {
+    let sep = raw.find("\r\n\r\n").unwrap_or(raw.len());
+    let header_part = &raw[..sep];
+    let body = if sep + 4 <= raw.len() { raw[sep + 4..].to_string() } else { String::new() };
+    let mut lines = header_part.lines();
+    let request_line = lines.next().unwrap_or("GET / HTTP/1.1");
+    let mut parts = request_line.splitn(3, ' ');
+    let method = parts.next().unwrap_or("GET").to_string();
+    let path = parts.next().unwrap_or("/").to_string();
+    let mut headers = std::collections::BTreeMap::new();
+    for line in lines {
+        if let Some((k, v)) = line.split_once(": ") {
+            headers.insert(k.to_lowercase(), v.to_string());
+        }
+    }
+    JetHttpRequest { method, path, body, headers }
+}
+
+fn jet_http_format_response(resp: &JetHttpResponse) -> String {
+    let mut out = format!("HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n", resp.status, resp.body.len());
+    for (k, v) in &resp.headers {
+        out.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    out.push_str("\r\n");
+    out.push_str(&resp.body);
+    out
+}

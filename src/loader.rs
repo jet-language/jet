@@ -663,7 +663,7 @@ pub fn normalize_std_module(name: &str) -> Option<String> {
 pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
-        "csv" | "toml" | "yaml" | "log" | "json" | "time" | "crypto"
+        "csv" | "toml" | "yaml" | "log" | "json" | "time" | "crypto" | "http"
     )
 }
 
@@ -696,6 +696,8 @@ pub fn is_known_std_module(name: &str) -> bool {
             // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
             | "core.files"
             | "core.path"
+            // E2-M10: TCP/UDP sockets.
+            | "core.net"
             // E2-M9: first-party ring packages.
             | "jet.csv"
             | "jet.toml"
@@ -704,11 +706,13 @@ pub fn is_known_std_module(name: &str) -> bool {
             | "jet.json"
             | "jet.time"
             | "jet.crypto"
+            // E2-M10: HTTP client/server ring package.
+            | "jet.http"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.files, core.path, jet.csv, jet.toml, jet.yaml, jet.log, jet.json, jet.time, jet.crypto"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.files, core.path, core.net, jet.csv, jet.toml, jet.yaml, jet.log, jet.json, jet.time, jet.crypto, jet.http"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

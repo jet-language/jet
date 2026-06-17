@@ -4615,6 +4615,12 @@ impl<'a> Checker<'a> {
             if take_set.contains(name) || param_names.contains(name) {
                 continue;
             }
+            // Module aliases (imports and std_imports) are always in scope in
+            // lambdas — they're not local variables but they're valid references.
+            // Don't report them as unknown names; the body check validates calls.
+            if self.imports.contains_key(name) || self.std_imports.contains_key(name) {
+                continue;
+            }
             if self.lookup(name).is_none() && !self.consts.contains_key(name) {
                 self.unknown_name(name, lam.span);
             }
@@ -5832,6 +5838,14 @@ impl<'a> Checker<'a> {
                 return ret;
             }
         }
+        // E2-M10: method calls on net/http opaque types.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if let Some(ret) = net_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                *recv_type_out = Some(handle_ty.clone());
+                return ret;
+            }
+        }
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
                 for (trait_name, info) in &self.m9.traits {
@@ -6621,6 +6635,32 @@ impl<'a> Checker<'a> {
                     args: vec![t],
                 });
             }
+            // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
+            // handler: fn(HttpRequest) -> HttpResponse (lambda or fn reference).
+            ("jet.http", "serve") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_std_arity("serve", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_std_arg("serve", 0, &Type::String, &mut args[0]);
+                // Check the handler arg — accept any callable (lambda or fn pointer).
+                let handler_ty = self.infer(&mut args[1].expr);
+                match &handler_ty {
+                    Some(Type::Fn { .. }) => {}
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`http.serve` handler must be a function, not {}", other.show()),
+                            "the handler is called with each incoming `HttpRequest`".to_string(),
+                            "write a lambda: `(req) => HttpResponse { status: \"200 OK\", body: req.body, headers: [:] }`".to_string(),
+                            Some(args[1].expr.span()),
+                        ));
+                    }
+                    None => {}
+                }
+                return None; // serve runs forever; no meaningful return type
+            }
             _ => {}
         }
 
@@ -7103,6 +7143,37 @@ impl<'a> Checker<'a> {
         fields: &mut [(String, Span, Expr)],
         span: Span,
     ) -> Type {
+        // E2-M10: compiler-known constructable struct types (HttpRequest, HttpResponse).
+        // These have no user-module owner but are valid in struct literals.
+        if let Some(std_fields) = std_constructable_fields(type_name) {
+            let str_map_ty = Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
+            let provided_names: std::collections::HashSet<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
+            for (fname, _, fexpr) in fields.iter_mut() {
+                let expected_ty: Option<Type> = std_fields.iter()
+                    .find(|(n, _)| n == fname)
+                    .map(|(_, t)| t.clone());
+                let saved = self.expected_type.clone();
+                if let Some(et) = expected_ty.as_ref() { self.expected_type = Some(et.clone()); }
+                self.infer(fexpr);
+                self.expected_type = saved;
+                let _ = (&str_map_ty, &expected_ty);
+            }
+            // Report missing fields.
+            let missing: Vec<_> = std_fields.iter()
+                .filter(|(n, _)| !provided_names.contains(n))
+                .map(|(n, _)| n.clone())
+                .collect();
+            if !missing.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0303",
+                    format!("struct literal for `{}` is missing fields: {}", type_name, missing.join(", ")),
+                    "every field must appear exactly once".to_string(),
+                    format!("add: {}", missing.join(", ")),
+                    Some(span),
+                ));
+            }
+            return Type::Named(type_name.to_string());
+        }
         let Some(owner_mod) = self.struct_owner_module(type_name, import_ns) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
@@ -9403,6 +9474,8 @@ fn std_type_known(name: &str) -> bool {
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
         | "FileReader" | "FileWriter" | "FileLines"
+        // E2-M10: networking opaque types.
+        | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -9426,6 +9499,18 @@ fn std_struct_field(type_name: &str, field: &str) -> Option<Type> {
     match (type_name, field) {
         ("ProcessResult", "code") => Some(Type::Int),
         ("ProcessResult", "output" | "errors") => Some(Type::String),
+        // E2-M10: HTTP request fields exposed to handlers.
+        ("HttpRequest", "method" | "path" | "body") => Some(Type::String),
+        ("HttpRequest", "headers") => Some(Type::Map {
+            key: Box::new(Type::String),
+            value: Box::new(Type::String),
+        }),
+        // E2-M10: HTTP response fields.
+        ("HttpResponse", "status" | "body") => Some(Type::String),
+        ("HttpResponse", "headers") => Some(Type::Map {
+            key: Box::new(Type::String),
+            value: Box::new(Type::String),
+        }),
         _ => None,
     }
 }
@@ -9503,6 +9588,65 @@ fn file_handle_method_return(
             }
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// E2-M10: field definitions for compiler-known constructable struct types.
+/// Returns `Some(fields)` when the named type is a prelude struct users can construct.
+fn std_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
+    let str_ty = Type::String;
+    let map_ty = Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
+    match type_name {
+        "HttpResponse" => Some(vec![
+            ("status".to_string(), str_ty.clone()),
+            ("body".to_string(), str_ty),
+            ("headers".to_string(), map_ty),
+        ]),
+        "HttpRequest" => Some(vec![
+            ("method".to_string(), str_ty.clone()),
+            ("path".to_string(), str_ty.clone()),
+            ("body".to_string(), str_ty),
+            ("headers".to_string(), map_ty),
+        ]),
+        _ => None,
+    }
+}
+
+/// E2-M10: type-check a method call on a networking opaque type.
+/// Returns `Some(return_type)` when the method is valid.
+fn net_method_return(
+    type_name: &str,
+    method: &str,
+    _n_args: usize,
+    _span: Span,
+    _diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let str_ty = Type::String;
+    let unit = unit_ty();
+    let err = str_ty.clone();
+    match (type_name, method) {
+        // HttpResponse field accessors (via method-style read, auto-generated by codegen).
+        ("HttpResponse", "status") => Some(Some(str_ty.clone())),
+        ("HttpResponse", "body") => Some(Some(str_ty.clone())),
+        ("HttpResponse", "header") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        // HttpRequest field accessors.
+        ("HttpRequest", "method") => Some(Some(str_ty.clone())),
+        ("HttpRequest", "path") => Some(Some(str_ty.clone())),
+        ("HttpRequest", "body") => Some(Some(str_ty.clone())),
+        ("HttpRequest", "header") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        // TcpListener methods.
+        ("TcpListener", "accept") => Some(Some(result_ty(
+            Type::Named("TcpStream".to_string()),
+            err.clone(),
+        ))),
+        ("TcpListener", "local_addr") => Some(Some(str_ty.clone())),
+        // TcpStream methods.
+        ("TcpStream", "read") => Some(Some(result_ty(str_ty.clone(), err.clone()))),
+        ("TcpStream", "write") => Some(Some(result_ty(unit.clone(), err.clone()))),
+        ("TcpStream", "peer_addr") => Some(Some(str_ty.clone())),
+        ("TcpStream", "local_addr") => Some(Some(str_ty.clone())),
+        ("TcpStream", "close") => Some(Some(unit)),
         _ => None,
     }
 }
@@ -9710,6 +9854,64 @@ fn std_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
+        // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
+        ("core.net", "tcp_listen") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("TcpListener".to_string()), Type::String)),
+        )),
+        ("core.net", "tcp_accept") => Some((
+            vec![(AccessConvention::Read, Type::Named("TcpListener".to_string()))],
+            Some(result_ty(Type::Named("TcpStream".to_string()), Type::String)),
+        )),
+        ("core.net", "tcp_connect") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("TcpStream".to_string()), Type::String)),
+        )),
+        ("core.net", "tcp_read") => Some((
+            vec![(AccessConvention::Mutate, Type::Named("TcpStream".to_string()))],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.net", "tcp_write") => Some((
+            vec![
+                (AccessConvention::Mutate, Type::Named("TcpStream".to_string())),
+                (read, Type::String),
+            ],
+            Some(result_ty(unit_ty(), Type::String)),
+        )),
+        ("core.net", "tcp_local_addr" | "tcp_peer_addr") => Some((
+            vec![(read, Type::Named("TcpStream".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net", "set_timeout") => Some((
+            vec![
+                (AccessConvention::Mutate, Type::Named("TcpStream".to_string())),
+                (read, Type::Int),
+            ],
+            None,
+        )),
+        // Convenience: send a complete HTTP/1.1 response and close the stream.
+        ("core.net", "tcp_reply") => Some((
+            vec![
+                (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            None,
+        )),
+        // E2-M10: jet.http — HTTP client/server over blocking I/O.
+        // GET / HEAD / DELETE requests (no body sent).
+        ("jet.http", "get") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("HttpResponse".to_string()), Type::String)),
+        )),
+        // POST / PUT / PATCH requests (body sent).
+        ("jet.http", "post") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::Named("HttpResponse".to_string()), Type::String)),
+        )),
+        // serve blocks until the listener is closed; handler is called per request.
+        // The handler type is resolved at the call site (lambda / fn pointer).
+        ("jet.http", "serve") => None, // special-cased in check_std_call
         _ => None,
     }
 }
@@ -9751,6 +9953,13 @@ fn std_module_items(module: &str) -> Vec<String> {
         "jet.json" => &["parse", "render", "render_pretty"],
         "jet.time" => &["now", "format"],
         "jet.crypto" => &["sha256", "sha256_bytes"],
+        // E2-M10: networking modules.
+        "core.net" => &[
+            "tcp_listen", "tcp_accept", "tcp_connect",
+            "tcp_read", "tcp_write", "tcp_local_addr", "tcp_peer_addr", "set_timeout",
+            "tcp_reply",
+        ],
+        "jet.http" => &["get", "post", "serve"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
