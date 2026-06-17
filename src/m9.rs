@@ -1,8 +1,8 @@
 //! M9 registration, checking hooks, and codegen helpers.
 
 use crate::ast::{
-    EnumDef, Func, ImplDef, Item, StructDef, TraitDef, TraitImplBlock, TraitMethodSig, Type,
-    TypeParam,
+    AccessConvention, EnumDef, Func, ImplDef, Item, StructDef, TraitDef, TraitImplBlock,
+    TraitMethodSig, Type, TypeParam,
 };
 use crate::diag::{Diagnostic, Span};
 use crate::generics::{
@@ -124,7 +124,16 @@ impl M9Registry {
 
     fn register_impl(&mut self, i: &ImplDef, diags: &mut Vec<Diagnostic>) {
         if let Some(trait_name) = &i.trait_name {
-            self.validate_trait_impl(&i.type_name, trait_name, &i.methods, i.type_span, diags);
+            if i.delegation_field.is_some() {
+                // S62: delegation — just register the impl pair; method completeness
+                // is satisfied by the field, not by the methods vec (which is empty).
+                // Full validation (field existence + field type implements trait) happens
+                // in sema.rs after type registration.
+                let key = (i.type_name.clone(), trait_name.clone());
+                let _ = self.trait_impls.insert(key); // may already be there; ignore dup
+            } else {
+                self.validate_trait_impl(&i.type_name, trait_name, &i.methods, i.type_span, diags);
+            }
         }
     }
 
@@ -177,11 +186,13 @@ impl M9Registry {
         }
         if let Some(trait_info) = self.traits.get(trait_name) {
             let provided: HashSet<String> = methods.iter().map(|m| m.name.clone()).collect();
+            // D-LIB2: methods that have a default body in the trait don't need to be
+            // provided by the implementor.
             let missing: Vec<String> = trait_info
                 .methods
-                .keys()
-                .filter(|k| !provided.contains(*k))
-                .cloned()
+                .iter()
+                .filter(|(k, sig)| !provided.contains(*k) && sig.default_body.is_none())
+                .map(|(k, _)| k.clone())
                 .collect();
             if !missing.is_empty() {
                 diags.push(e0906(trait_name, &missing, span));
@@ -388,7 +399,15 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                 if p.name == syntax::KW_SELF {
                     "&self".to_string()
                 } else {
-                    format!("_{}: {}", p.name, rust_type_name(&p.ty))
+                    // Match the convention applied by emit_trait_method / rust_param_type.
+                    let base = rust_type_name(&p.ty);
+                    let rust_ty = match p.convention {
+                        AccessConvention::Read if p.ty.is_scalar() => base,
+                        AccessConvention::Read => format!("&{}", base),
+                        AccessConvention::Mutate => format!("&mut {}", base),
+                        AccessConvention::Move => base,
+                    };
+                    format!("_{}: {}", p.name, rust_ty)
                 }
             })
             .collect();

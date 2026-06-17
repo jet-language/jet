@@ -1371,12 +1371,20 @@ impl<'a> Parser<'a> {
                 Some(name_span),
             ));
         };
+        // S61: optional trailing `= expr` default value.
+        let default = if matches!(self.peek().kind, TokKind::Eq) {
+            self.bump();
+            Some(Box::new(self.expr_no_struct_lit()?))
+        } else {
+            None
+        };
         Ok(Param {
             convention,
             name,
             name_span,
             ty,
             ty_span,
+            default,
         })
     }
 
@@ -1531,9 +1539,39 @@ impl<'a> Parser<'a> {
         } else {
             (None, None)
         };
+        // S62: `impl Type: Trait using field_name;` — delegation form.
+        if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+            if kw == "using" && trait_name.is_some() {
+                self.bump(); // consume `using`
+                let (field, _) = self.expect_ident("after `using` for the delegation field")?;
+                self.finish_stmt()?; // consume `;`
+                return Ok(ImplDef {
+                    type_name,
+                    type_span,
+                    trait_name,
+                    trait_span,
+                    methods: Vec::new(),
+                    delegation_field: Some(field),
+                    assoc_type_impls: Vec::new(),
+                });
+            }
+        }
         self.expect(TokKind::LBrace, "to open the `impl` body")?;
         let mut methods = Vec::new();
+        let mut assoc_type_impls = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            // D-LIB2: `type Name = ConcreteType;` associated type implementation.
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+                    self.expect(TokKind::Eq, "after associated type name")?;
+                    let (assoc_ty, _) = self.type_()?;
+                    self.finish_stmt()?;
+                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    continue;
+                }
+            }
             methods.push(self.method_in_type()?);
         }
         self.bump();
@@ -1543,6 +1581,8 @@ impl<'a> Parser<'a> {
             trait_name,
             trait_span,
             methods,
+            delegation_field: None,
+            assoc_type_impls,
         })
     }
 
@@ -1552,7 +1592,20 @@ impl<'a> Parser<'a> {
         let (trait_name, trait_span) = self.expect_ident("after `impl`")?;
         self.expect(TokKind::LBrace, "to open the trait impl body")?;
         let mut methods = Vec::new();
+        let mut assoc_type_impls = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            // D-LIB2: `type Name = ConcreteType;`
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+                    self.expect(TokKind::Eq, "after associated type name")?;
+                    let (assoc_ty, _) = self.type_()?;
+                    self.finish_stmt()?;
+                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    continue;
+                }
+            }
             methods.push(self.method_in_type()?);
         }
         self.bump();
@@ -1560,6 +1613,7 @@ impl<'a> Parser<'a> {
             trait_name,
             trait_span,
             methods,
+            assoc_type_impls,
         })
     }
 
@@ -1585,7 +1639,19 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident("after `trait`")?;
         self.expect(TokKind::LBrace, "to open the trait body")?;
         let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            // D-LIB2: `type Name;` associated type declaration.
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) =
+                        self.expect_ident("after `type` in trait body")?;
+                    self.finish_stmt()?;
+                    assoc_types.push((assoc_name, Span::new(kw_span.start, name_span.end)));
+                    continue;
+                }
+            }
             methods.push(self.trait_method_sig()?);
         }
         self.bump();
@@ -1593,6 +1659,7 @@ impl<'a> Parser<'a> {
             is_pub,
             name,
             name_span,
+            assoc_types,
             methods,
         })
     }
@@ -1624,8 +1691,18 @@ impl<'a> Parser<'a> {
             let (ty, _) = self.return_type()?;
             return_type = Some(ty);
         }
+        // D-LIB2: optional default body `{ … }` instead of `;`.
+        let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            let stmts = self.block_stmts();
+            Some(stmts)
+        } else {
+            let end = self.peek().span.end;
+            self.finish_stmt()?;
+            let _ = end;
+            None
+        };
         let end = self.peek().span.end;
-        self.finish_stmt()?;
         Ok(TraitMethodSig {
             name,
             name_span,
@@ -1633,6 +1710,7 @@ impl<'a> Parser<'a> {
             return_type,
             is_view_return,
             span: Span::new(start.start, end),
+            default_body,
         })
     }
 
@@ -3213,7 +3291,7 @@ impl<'a> Parser<'a> {
                 TokKind::Question => {
                     let qspan = self.bump().span;
                     let full = Span::new(expr.span().start, qspan.end);
-                    expr = Expr::Try(Box::new(expr), full);
+                    expr = Expr::Try(Box::new(expr), full, false);
                 }
                 // S71 (D-SG6): `base?.field` optional chaining.
                 TokKind::QuestionDot => {
@@ -4364,8 +4442,13 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             let (field, field_span) = self.expect_ident("for a field name")?;
-            self.expect(TokKind::Colon, "after a field name in a struct literal")?;
-            let value = self.expr()?;
+            let value = if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                self.expr()?
+            } else {
+                // S77: field punning — `{ name }` means `{ name: name }`.
+                Expr::Ident(field.clone(), field_span)
+            };
             fields.push((field, field_span, value));
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -4393,8 +4476,13 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             let (field, field_span) = self.expect_ident("for a field name")?;
-            self.expect(TokKind::Colon, "after a field name in a struct literal")?;
-            let value = self.expr()?;
+            let value = if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                self.expr()?
+            } else {
+                // S77: field punning — `{ name }` means `{ name: name }`.
+                Expr::Ident(field.clone(), field_span)
+            };
             fields.push((field, field_span, value));
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -4649,12 +4737,28 @@ impl<'a> Parser<'a> {
     fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
         let convention = self.parse_access_prefix();
         let span = self.peek().span;
+        // S61: detect `name: expr` label at call site — an ident followed by `:` that is
+        // NOT `::` (a Rust path). We must not consume it yet if it is just a variable name.
+        let label = if matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(self.peek2().kind, TokKind::Colon)
+        {
+            let lbl_tok = self.bump();
+            let lbl_name = match lbl_tok.kind {
+                TokKind::Ident(n) => n,
+                _ => unreachable!(),
+            };
+            self.bump(); // consume `:`
+            Some((lbl_name, lbl_tok.span))
+        } else {
+            None
+        };
         let expr = self.expr()?;
         Ok(CallArg {
             convention,
             expr,
             span,
             flags: Default::default(),
+            label,
         })
     }
 

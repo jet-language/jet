@@ -34,6 +34,12 @@ pub struct FuncSig {
     /// S58 (E2-M13): `@unsafe fn` — calling it requires an enclosing `@unsafe`
     /// block (E3103).
     pub is_unsafe: bool,
+    /// S61: parameter names and default-value presence, parallel to `params`.
+    /// Empty for extern/built-in functions (no label checking needed there).
+    pub param_info: Vec<(String, bool)>,
+    /// S61: default expressions for parameters that have them, parallel to `params`.
+    /// `None` when no default; only trailing params may have defaults.
+    pub defaults: Vec<Option<crate::ast::Expr>>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +145,16 @@ fn func_to_sig(f: &Func) -> FuncSig {
                 (conv, p.ty.clone())
             })
             .collect(),
+        param_info: f
+            .params
+            .iter()
+            .map(|p| (p.name.clone(), p.default.is_some()))
+            .collect(),
+        defaults: f
+            .params
+            .iter()
+            .map(|p| p.default.as_ref().map(|d| *d.clone()))
+            .collect(),
         return_type: f.return_type.clone(),
         is_view_return: f.is_view_return,
         is_extern: false,
@@ -153,6 +169,12 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
             .iter()
             .map(|p| (p.convention, p.ty.clone()))
             .collect(),
+        param_info: ef
+            .params
+            .iter()
+            .map(|p| (p.name.clone(), false))
+            .collect(),
+        defaults: ef.params.iter().map(|_| None).collect(),
         return_type: ef.return_type.clone(),
         is_view_return: ef.is_view_return,
         is_extern: true,
@@ -517,6 +539,31 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         f.name_span,
                     ));
                 } else {
+                    // L2401: advisory — public fn with a positional Bool parameter.
+                    if f.is_pub {
+                        for (idx, p) in f.params.iter().enumerate() {
+                            if matches!(p.ty, Type::Bool)
+                                && p.name != syntax::KW_SELF
+                                && p.default.is_none()
+                            {
+                                diags.push(Diagnostic::lint(
+                                    "L2401",
+                                    format!(
+                                        "public function `{}` has a positional `Bool` parameter `{}`",
+                                        f.name, p.name
+                                    ),
+                                    "positional booleans are easy to transpose at the call site"
+                                        .to_string(),
+                                    format!(
+                                        "callers can write `{}: true` to make the intent clear (S61 labels)",
+                                        p.name
+                                    ),
+                                    Some(p.name_span),
+                                ));
+                                let _ = idx;
+                            }
+                        }
+                    }
                     funcs.insert(f.name.clone(), func_to_sig(f));
                 }
             }
@@ -573,8 +620,58 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     }
 
     register_type_methods(&prog.items, &mut registry, &mut diags);
+    // S62 + D-LIB2: synthesise before register_impl_methods so synthesised
+    // Func nodes are visible when method lookup is registered.
+    synthesize_impls(&mut prog.items);
     register_impl_methods(&prog.items, &mut registry, &mut diags);
     m9.register_items(&prog.items, &mut diags);
+
+    // S62: delegation validation — check the field exists and implements the trait.
+    // Runs after m9.register_items so implements_trait is populated.
+    for item in &prog.items {
+        if let Item::Impl(i) = item {
+            if let (Some(trait_name), Some(field_name)) =
+                (&i.trait_name, &i.delegation_field)
+            {
+                if let Some(fields) = registry.struct_fields(&i.type_name) {
+                    if let Some((_, _, field_ty, _, _)) = fields.iter().find(|(n, _, _, _, _)| n == field_name) {
+                        let field_type_name = field_ty.name();
+                        if !m9.implements_trait(&field_type_name, trait_name) {
+                            diags.push(Diagnostic::error(
+                                "E2401",
+                                format!(
+                                    "`{}` doesn't implement `{}`, so it can't delegate",
+                                    field_type_name, trait_name
+                                ),
+                                format!(
+                                    "`impl {}: {} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
+                                    i.type_name, trait_name, field_name,
+                                    trait_name, field_name,
+                                    field_type_name, trait_name
+                                ),
+                                format!(
+                                    "implement `impl {}: {}` on the field's type, or choose a different field",
+                                    field_type_name, trait_name
+                                ),
+                                Some(i.type_span),
+                            ));
+                        }
+                    } else {
+                        diags.push(Diagnostic::error(
+                            "E2401",
+                            format!("`{}` has no field `{}`", i.type_name, field_name),
+                            format!(
+                                "`impl {}: {} using {}` needs `{}` to have a field named `{}`",
+                                i.type_name, trait_name, field_name, i.type_name, field_name
+                            ),
+                            format!("add `{}: Type` to `struct {}`", field_name, i.type_name),
+                            Some(i.type_span),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 
     if mode == CompileMode::Run {
         match funcs.get("main") {
@@ -4040,7 +4137,7 @@ impl<'a> Checker<'a> {
             }
             Expr::Ok(inner, span) => self.infer_ok(inner, *span),
             Expr::Err(inner, span) => self.infer_err(inner, *span),
-            Expr::Try(inner, span) => self.infer_try(inner, *span),
+            Expr::Try(inner, span, via_fallible) => self.infer_try(inner, *span, via_fallible),
             Expr::OrFallback {
                 value,
                 fallback,
@@ -4134,7 +4231,7 @@ impl<'a> Checker<'a> {
         None
     }
 
-    fn infer_try(&mut self, inner: &mut Box<Expr>, span: Span) -> Option<Type> {
+    fn infer_try(&mut self, inner: &mut Box<Expr>, span: Span, via_fallible: &mut bool) -> Option<Type> {
         let inner_ty = self.infer(inner)?;
         match inner_ty {
             Type::Result { ok, err } => {
@@ -4151,6 +4248,41 @@ impl<'a> Checker<'a> {
                         Some((*ok).clone())
                     }
                     Type::Result { err: ret_err, .. } => {
+                        // S80/D-LIB3: check if the error type implements `Fallible`
+                        // and the return error is the default `Error`.
+                        let err_type_name = err.name();
+                        if is_default_error(ret_err) {
+                            if self.m9.implements_trait(&err_type_name, syntax::TRAIT_FALLIBLE) {
+                                // Mark the Try node for Fallible conversion in codegen.
+                                *via_fallible = true;
+                                return Some((*ok).clone());
+                            }
+                            // E2402: return is `Error` but the error type has no Fallible impl.
+                            let err_name = err.name();
+                            self.diags.push(Diagnostic::error(
+                                "E2402",
+                                format!(
+                                    "`?` can't convert `{}` into `{}`",
+                                    err_name,
+                                    syntax::TYPE_ERROR
+                                ),
+                                format!(
+                                    "`{}` has no path to `{}`; implement `impl {}: {}` to enable conversion",
+                                    err_name,
+                                    syntax::TYPE_ERROR,
+                                    err_name,
+                                    syntax::TRAIT_FALLIBLE
+                                ),
+                                format!(
+                                    "add `impl {}: {} {{ fn to_error(self) -> {} {{ … }} }}`, or change the return type",
+                                    err_name,
+                                    syntax::TRAIT_FALLIBLE,
+                                    syntax::TYPE_ERROR
+                                ),
+                                Some(span),
+                            ));
+                            return None;
+                        }
                         self.diags.push(Diagnostic::error(
                             "E0403",
                             format!(
@@ -8117,6 +8249,61 @@ impl<'a> Checker<'a> {
             ));
         }
 
+        // S61: label validation — if a call arg has `name: val`, verify it matches
+        // the parameter name at that position. Labels never reorder.
+        if !sig.param_info.is_empty() {
+            for (i, arg) in call.args.iter().enumerate() {
+                if let Some((label, label_span)) = &arg.label {
+                    if let Some((param_name, _)) = sig.param_info.get(i) {
+                        if label != param_name {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "label `{}:` doesn't match the parameter `{}` at position {}",
+                                    label,
+                                    param_name,
+                                    i + 1
+                                ),
+                                "labels are checked documentation — they must match the parameter name at that position; arguments stay in declaration order"
+                                    .to_string(),
+                                format!(
+                                    "write `{}:` instead, or remove the label",
+                                    param_name
+                                ),
+                                Some(*label_span),
+                            ));
+                        }
+                    }
+                }
+            }
+            // L2401: advisory lint — public API has a positional Bool parameter.
+            // (Only warn on the callee definition side, not every call site.)
+        }
+
+        // S61: default-value filling — append defaults for omitted trailing params.
+        if call.args.len() < sig.params.len() && !sig.defaults.is_empty() {
+            let provided = call.args.len();
+            let required: usize = sig
+                .defaults
+                .iter()
+                .take_while(|d| d.is_none())
+                .count();
+            if provided >= required {
+                // fill trailing omitted params with their defaults
+                for i in provided..sig.params.len() {
+                    if let Some(Some(default_expr)) = sig.defaults.get(i) {
+                        call.args.push(crate::ast::CallArg {
+                            convention: sig.params[i].0,
+                            expr: default_expr.clone(),
+                            span: call.name_span,
+                            flags: Default::default(),
+                            label: None,
+                        });
+                    }
+                }
+            }
+        }
+
         if call.args.len() != sig.params.len() {
             self.diags.push(Diagnostic::error(
                 "E0104",
@@ -8692,7 +8879,7 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
         }
         Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
         Expr::Absent(_) => {}
-        Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _) => {
+        Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
         }
         Expr::OrFallback {
@@ -9464,7 +9651,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
         })
         .collect();
 
-    for (idx, module) in bundle.modules.iter().enumerate() {
+    for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let st = &mut states[idx];
         for item in &module.items {
             match item {
@@ -9578,9 +9765,67 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 }
             }
         }
+        // S62 + D-LIB2: synthesis must happen before register_impl_methods
+        // so the synthesised Func nodes appear in the type registry.
+        synthesize_impls(&mut module.items);
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         st.m9.register_items(&module.items, &mut diags);
+    }
+
+    // S62 E2401: delegation validation — check field exists and implements trait.
+    // Runs after all m9 registrations so implements_trait is populated.
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        let st = &states[idx];
+        for item in &module.items {
+            if let Item::Impl(i) = item {
+                if let (Some(trait_name), Some(field_name)) =
+                    (&i.trait_name, &i.delegation_field)
+                {
+                    if let Some(fields) = st.registry.struct_fields(&i.type_name) {
+                        if let Some((_, _, field_ty, _, _)) =
+                            fields.iter().find(|(n, _, _, _, _)| n == field_name)
+                        {
+                            let field_type_name = field_ty.name();
+                            if !st.m9.implements_trait(&field_type_name, trait_name) {
+                                diags.push(Diagnostic::error(
+                                    "E2401",
+                                    format!(
+                                        "`{}` doesn't implement `{}`, so it can't delegate",
+                                        field_type_name, trait_name
+                                    ),
+                                    format!(
+                                        "`impl {}: {} using {}` forwards `{}` methods to the `{}` field, but `{}` doesn't implement `{}`",
+                                        i.type_name, trait_name, field_name,
+                                        trait_name, field_name,
+                                        field_type_name, trait_name
+                                    ),
+                                    format!(
+                                        "implement `impl {}: {}` on the field's type, or choose a different field",
+                                        field_type_name, trait_name
+                                    ),
+                                    Some(i.type_span),
+                                ));
+                            }
+                        } else {
+                            diags.push(Diagnostic::error(
+                                "E2401",
+                                format!("`{}` has no field `{}`", i.type_name, field_name),
+                                format!(
+                                    "`impl {}: {} using {}` needs `{}` to have a field named `{}`",
+                                    i.type_name, trait_name, field_name, i.type_name, field_name
+                                ),
+                                format!(
+                                    "add `{}: Type` to `struct {}`",
+                                    field_name, i.type_name
+                                ),
+                                Some(i.type_span),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // S57 (M9.5): evaluate comptime bindings per module. `embed_file` paths
@@ -9956,6 +10201,30 @@ fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec<Diagnostic
         ));
         return;
     }
+    // L2401: advisory — public fn with a positional Bool parameter.
+    if f.is_pub {
+        for p in &f.params {
+            if matches!(p.ty, Type::Bool)
+                && p.name != syntax::KW_SELF
+                && p.default.is_none()
+            {
+                diags.push(Diagnostic::lint(
+                    "L2401",
+                    format!(
+                        "public function `{}` has a positional `Bool` parameter `{}`",
+                        f.name, p.name
+                    ),
+                    "positional booleans are easy to transpose at the call site"
+                        .to_string(),
+                    format!(
+                        "callers can write `{}: true` to make the intent clear (S61 labels)",
+                        p.name
+                    ),
+                    Some(p.name_span),
+                ));
+            }
+        }
+    }
     st.func_pub.insert(f.name.clone(), f.is_pub);
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
@@ -10121,7 +10390,7 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _) => collect_std_expr(inner, imports, used),
+        | Expr::Try(inner, _, _) => collect_std_expr(inner, imports, used),
         Expr::Binary(_, lhs, rhs, _)
         | Expr::Index {
             base: lhs,
@@ -10431,7 +10700,7 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::CallValue { callee, args, .. } => {
             expr_refs_name(callee, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }
-        Expr::Field(inner, _, _) | Expr::Present(inner, _) | Expr::Try(inner, _) => {
+        Expr::Field(inner, _, _) | Expr::Present(inner, _) | Expr::Try(inner, _, _) => {
             expr_refs_name(inner, name)
         }
         Expr::OptField { base, .. } => expr_refs_name(base, name),
@@ -10697,7 +10966,7 @@ fn expr_collect_captures(
         }
         Expr::Field(inner, _, _)
         | Expr::Present(inner, _)
-        | Expr::Try(inner, _)
+        | Expr::Try(inner, _, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
         Expr::MethodCall { receiver, args, .. } => {
@@ -10886,5 +11155,218 @@ fn else_collect_captures(
                 else_collect_captures(e, &mut nested_bound, read, mut_cap);
             }
         }
+    }
+}
+
+// S62 + D-LIB2: inject synthesised Func nodes into ImplDef items in-place.
+// Must run before register_impl_methods so the synthesised methods are visible
+// when method lookup is registered.
+fn synthesize_impls(items: &mut Vec<Item>) {
+    // Build trait_name -> method sigs from the AST (no m9 needed).
+    let mut trait_methods: HashMap<String, Vec<crate::ast::TraitMethodSig>> = HashMap::new();
+    for item in items.iter() {
+        if let Item::Trait(t) = item {
+            trait_methods.insert(t.name.clone(), t.methods.clone());
+        }
+    }
+
+    // Build (type_name, trait_name) impl pairs and struct field types from the AST.
+    // Used to guard delegation synthesis — only synthesize if the field type actually
+    // implements the trait (error is emitted later by E2401 validation if not).
+    let mut impl_pairs: std::collections::HashSet<(String, String)> = Default::default();
+    let mut struct_field_types: HashMap<String, HashMap<String, String>> = HashMap::new();
+    for item in items.iter() {
+        match item {
+            Item::Impl(i) => {
+                if let Some(trait_name) = &i.trait_name {
+                    if i.delegation_field.is_none() {
+                        impl_pairs.insert((i.type_name.clone(), trait_name.clone()));
+                    }
+                }
+            }
+            Item::Struct(s) => {
+                // Also check inline trait impls (impl Trait { … } inside struct body)
+                for block in &s.trait_impls {
+                    impl_pairs.insert((s.name.clone(), block.trait_name.clone()));
+                }
+                let fields: HashMap<String, String> = s
+                    .fields
+                    .iter()
+                    .map(|f| (f.name.clone(), f.ty.name()))
+                    .collect();
+                struct_field_types.insert(s.name.clone(), fields);
+            }
+            _ => {}
+        }
+    }
+
+    // S62: delegation — build forwarding Func nodes only when the field type
+    // implements the trait (guards against generating invalid code for E2401 cases).
+    let mut delegations: Vec<(usize, String, String, String)> = Vec::new(); // (idx, type_name, trait_name, field_name)
+    for (idx, item) in items.iter().enumerate() {
+        if let Item::Impl(i) = item {
+            if let (Some(trait_name), Some(field_name)) = (&i.trait_name, &i.delegation_field) {
+                delegations.push((idx, i.type_name.clone(), trait_name.clone(), field_name.clone()));
+            }
+        }
+    }
+    for (idx, type_name, trait_name, field_name) in delegations {
+        // Check if the field type implements the trait in the AST.
+        let field_type_name = struct_field_types
+            .get(&type_name)
+            .and_then(|fields| fields.get(&field_name))
+            .cloned();
+        let can_delegate = field_type_name.as_ref().is_some_and(|ft| {
+            impl_pairs.contains(&(ft.clone(), trait_name.clone()))
+        });
+        if !can_delegate {
+            // Skip synthesis; E2401 validation will emit the appropriate error.
+            continue;
+        }
+        if let Some(sigs) = trait_methods.get(&trait_name) {
+            let synthesized: Vec<crate::ast::Func> = sigs
+                .iter()
+                .map(|m| synthesize_delegation_method(m, &field_name))
+                .collect();
+            if let Item::Impl(i) = &mut items[idx] {
+                i.methods = synthesized;
+            }
+        }
+    }
+
+    // D-LIB2: default method body injection.
+    let mut trait_impls_to_fill: Vec<(usize, String)> = Vec::new();
+    for (idx, item) in items.iter().enumerate() {
+        if let Item::Impl(i) = item {
+            if let Some(trait_name) = &i.trait_name {
+                if i.delegation_field.is_none() {
+                    trait_impls_to_fill.push((idx, trait_name.clone()));
+                }
+            }
+        }
+    }
+    for (idx, trait_name) in trait_impls_to_fill {
+        if let Some(sigs) = trait_methods.get(&trait_name) {
+            let mut extras: Vec<crate::ast::Func> = Vec::new();
+            if let Item::Impl(i) = &items[idx] {
+                let provided: std::collections::HashSet<String> =
+                    i.methods.iter().map(|m| m.name.clone()).collect();
+                for sig in sigs {
+                    if !provided.contains(&sig.name) {
+                        if let Some(body) = &sig.default_body {
+                            extras.push(synthesize_default_method(sig, body));
+                        }
+                    }
+                }
+            }
+            if !extras.is_empty() {
+                if let Item::Impl(i) = &mut items[idx] {
+                    i.methods.extend(extras);
+                }
+            }
+        }
+    }
+}
+
+// S62: build a forwarding `Func` for one trait method sig, delegating to
+// `self.<field>.<method>(args…)`.
+fn synthesize_delegation_method(
+    sig: &crate::ast::TraitMethodSig,
+    field_name: &str,
+) -> crate::ast::Func {
+    use crate::ast::{AccessConvention, CallArg, CallArgFlags, Expr, Func, Param, Stmt, Type};
+    use crate::diag::Span;
+
+    let zero = Span::new(0, 0);
+
+    // Build the forwarding call: self.<field>.<method>(non-self params...)
+    let args: Vec<CallArg> = sig
+        .params
+        .iter()
+        .filter(|p| p.name != syntax::KW_SELF)
+        .map(|p| CallArg {
+            convention: p.convention,
+            expr: Expr::Ident(p.name.clone(), zero),
+            span: zero,
+            flags: CallArgFlags::default(),
+            label: None,
+        })
+        .collect();
+
+    let forward_call = Expr::MethodCall {
+        receiver: Box::new(Expr::Field(
+            Box::new(Expr::Ident(syntax::KW_SELF.to_string(), zero)),
+            field_name.to_string(),
+            zero,
+        )),
+        method: sig.name.clone(),
+        method_span: zero,
+        args,
+        recv_type: None,
+    };
+
+    // Wrap in a return stmt if there's a return type; otherwise a bare expr stmt.
+    let body_stmt = if sig.return_type.is_some() {
+        Stmt::Return(Some(forward_call), zero)
+    } else {
+        Stmt::Expr(forward_call)
+    };
+
+    // Build the `self` param.
+    let self_param = Param {
+        convention: AccessConvention::Read,
+        name: syntax::KW_SELF.to_string(),
+        name_span: zero,
+        ty: Type::Named(String::new()), // S27: sema fills in the actual type name
+        ty_span: zero,
+        default: None,
+    };
+
+    let mut params = vec![self_param];
+    params.extend(sig.params.iter().filter(|p| p.name != syntax::KW_SELF).cloned());
+
+    Func {
+        is_pub: false,
+        name: sig.name.clone(),
+        name_span: sig.name_span,
+        type_params: vec![],
+        params,
+        return_type: sig.return_type.clone(),
+        is_view_return: sig.is_view_return,
+        is_unsafe: false,
+        body: vec![body_stmt],
+    }
+}
+
+// D-LIB2: build a Func that uses the default body from the trait definition.
+fn synthesize_default_method(
+    sig: &crate::ast::TraitMethodSig,
+    body: &[crate::ast::Stmt],
+) -> crate::ast::Func {
+    use crate::ast::{AccessConvention, Func, Param, Type};
+    use crate::diag::Span;
+
+    let zero = Span::new(0, 0);
+    let self_param = Param {
+        convention: AccessConvention::Read,
+        name: syntax::KW_SELF.to_string(),
+        name_span: zero,
+        ty: Type::Named(String::new()), // S27: sema fills in the actual type name
+        ty_span: zero,
+        default: None,
+    };
+    let mut params = vec![self_param];
+    params.extend(sig.params.iter().filter(|p| p.name != syntax::KW_SELF).cloned());
+
+    Func {
+        is_pub: false,
+        name: sig.name.clone(),
+        name_span: sig.name_span,
+        type_params: vec![],
+        params,
+        return_type: sig.return_type.clone(),
+        is_view_return: sig.is_view_return,
+        is_unsafe: false,
+        body: body.to_vec(),
     }
 }

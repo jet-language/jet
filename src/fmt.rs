@@ -1464,7 +1464,7 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(inner, Prec::OrFallback);
                 self.write(")");
             }
-            Expr::Try(inner, _) => {
+            Expr::Try(inner, _, _) => {
                 self.fmt_expr(inner, Prec::Postfix);
                 self.write("?");
             }

@@ -149,7 +149,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _) => collect_tuple_shapes_from_expr(inner, out),
+        | Expr::Try(inner, _, _) => collect_tuple_shapes_from_expr(inner, out),
         Expr::Binary(_, l, r, _) => {
             collect_tuple_shapes_from_expr(l, out);
             collect_tuple_shapes_from_expr(r, out);
@@ -447,6 +447,9 @@ struct Cx {
     unqualified_inline: HashMap<String, String>,
     /// D-MOD3: unqualified file-module items (name → (rust_mod_name, fn_name)).
     unqualified_file: HashMap<String, (String, String)>,
+    /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
+    /// are called without the `user_` prefix in Rust (the trait impl owns the name).
+    trait_methods: HashSet<(String, String)>,
 }
 
 const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
@@ -996,6 +999,7 @@ fn build_cx_items(
         code_modules: HashSet::new(),
         unqualified_inline: HashMap::new(),
         unqualified_file: HashMap::new(),
+        trait_methods: HashSet::new(),
     };
 
     for item in items {
@@ -1154,6 +1158,10 @@ fn build_cx_items(
                 for m in &i.methods {
                     cx.method_sigs
                         .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
+                    // S62: track trait-impl methods so call sites know not to mangle.
+                    if i.trait_name.is_some() {
+                        cx.trait_methods.insert((i.type_name.clone(), m.name.clone()));
+                    }
                 }
             }
             _ => {}
@@ -1574,10 +1582,66 @@ fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
         generics::user_trait_rust(trait_name),
         i.type_name
     ));
-    for m in &i.methods {
-        emit_trait_method(cx, &i.type_name, m, out, 1);
+    if let Some(field) = &i.delegation_field {
+        // S62: delegation — emit forwarding methods directly to avoid the method
+        // call mangling that the standard path applies (trait methods are not
+        // prefixed with `user_` in Rust).
+        for m in &i.methods {
+            emit_delegation_method(cx, m, field, out);
+        }
+    } else {
+        for m in &i.methods {
+            emit_trait_method(cx, &i.type_name, m, out, 1);
+        }
     }
     out.push_str("}\n\n");
+}
+
+fn emit_delegation_method(cx: &Cx, f: &Func, field: &str, out: &mut String) {
+    let ret = f
+        .return_type
+        .as_ref()
+        .map(|t| rust_return_type(cx, t, f.is_view_return))
+        .unwrap_or_default();
+    let ret_clause = if ret.is_empty() {
+        String::new()
+    } else {
+        format!(" -> {}", ret)
+    };
+    // Emit signature.
+    let params: Vec<String> = f
+        .params
+        .iter()
+        .map(|p| {
+            if p.name == syntax::KW_SELF {
+                "&self".to_string()
+            } else {
+                format!("{}: {}", mangle(&p.name), rust_param_type(cx, p.convention, &p.ty))
+            }
+        })
+        .collect();
+    out.push_str(&format!(
+        "    fn {}({}){}  {{\n",
+        f.name,
+        params.join(", "),
+        if ret_clause.is_empty() { String::new() } else { format!(" {}", ret_clause.trim()) }
+    ));
+    // Emit forwarding call: self.<field>.<method>(args...) using trait method name (no mangle).
+    // The target trait method has the same convention, so forward args as-is.
+    let fwd_args: Vec<String> = f
+        .params
+        .iter()
+        .filter(|p| p.name != syntax::KW_SELF)
+        .map(|p| mangle(&p.name).to_string())
+        .collect();
+    let field_rust = mangle(field);
+    let fwd = format!("(self).{}.{}({})", field_rust, f.name, fwd_args.join(", "));
+    if f.return_type.is_some() {
+        out.push_str(&format!("        {}\n", fwd));
+    } else {
+        out.push_str(&format!("        {};\n", fwd));
+    }
+    out.push_str("    }\n");
 }
 
 fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
@@ -1599,8 +1663,9 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
             if p.name == syntax::KW_SELF {
                 "&self".to_string()
             } else {
+                // No underscore prefix — the body references the same mangled name.
                 format!(
-                    "_{}: {}",
+                    "{}: {}",
                     cx.mangle_name(&p.name),
                     rust_param_type(cx, p.convention, &p.ty)
                 )
@@ -3174,7 +3239,14 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         Expr::Absent(_) => "None".to_string(),
         Expr::Ok(inner, _) => format!("Ok({})", emit_expr(cx, inner, env)),
         Expr::Err(inner, _) => format!("Err({})", emit_expr(cx, inner, env)),
-        Expr::Try(inner, _) => format!("{}?", emit_expr(cx, inner, env)),
+        Expr::Try(inner, _, via_fallible) => {
+            if *via_fallible {
+                // S80/D-LIB3: error type implements Fallible; convert via .to_error()
+                format!("{}.map_err(|e| e.to_error())?", emit_expr(cx, inner, env))
+            } else {
+                format!("{}?", emit_expr(cx, inner, env))
+            }
+        }
         Expr::OrFallback {
             value,
             fallback,
@@ -3209,6 +3281,7 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                                 expr: item.clone(),
                                 span: item.span(),
                                 flags: Default::default(),
+                                label: None,
                             }],
                         };
                         emit_call(cx, &call, env)
@@ -3932,7 +4005,14 @@ fn emit_method_call(
     }
     let sig = recv_type.and_then(|t| cx.method_sigs.get(&(t.to_string(), method.to_string())));
     let arg_str = emit_call_args(cx, sig.map(|s| s.as_slice()), args, env);
-    format!("({}).{}({})", recv, mangle(method), arg_str)
+    // S62: trait-impl methods are not prefixed with `user_` in Rust (the trait
+    // owns the name). Check the recv_type's trait_methods set.
+    let method_name = if recv_type.is_some_and(|rt| cx.trait_methods.contains(&(rt.to_string(), method.to_string()))) {
+        method.to_string()
+    } else {
+        mangle(method).to_string()
+    };
+    format!("({}).{}({})", recv, method_name, arg_str)
 }
 
 fn emit_call_args(

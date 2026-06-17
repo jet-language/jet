@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M13 ✅ M14 ✅
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M13 ✅ M14 ✅
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -93,9 +93,32 @@ EXCEPT `s19-amend-loop-unification.md` (loop keyword unification — `while`/`fo
 must become teaching errors; `loop` with header disambiguation is the one form).
 That sidequest requires parser work + example rewrites + snapshot bless.
 
-**Next milestone to implement: E2-M6** (`m6-library-authoring.md`).
+**Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
 
-After M6: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+
+### E2-M6 completion record
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ S61 argument labels (checked at call site) + trailing default values (synthesised at call site when args omitted)
+- ✅ S62 trait delegation `impl Type: Trait using field` — synthesis pass injects forwarding methods before sema body check; codegen emits correct trait-method calls (no `user_` prefix for trait methods)
+- ✅ S77 field punning `Type { name }` ≡ `Type { name: name }` — parser fills pun value with `Expr::Ident`
+- ✅ D-LIB2 default method bodies — synthesis pass injects default bodies for omitted trait methods
+- ✅ D-LIB3/D-ERR2 Fallible `?` conversion — `impl E: Fallible` lets `?` in `T ? Error` functions convert; codegen emits `.map_err(|e| e.to_error())?`
+- ✅ E2401 (delegation field missing or field type not implementing trait) — ui fixture `tests/ui/e2401_delegation_no_impl.{jet,stderr}`
+- ✅ E2402 (Fallible path missing for `?`) — ui fixture `tests/ui/e2402_fallible_missing.{jet,stderr}`; the existing `tests/ui/try_wrong_error.jet` (non-Error return type mismatch) still emits E0403
+- ✅ E2403 (field pun not in scope) — covered by E0107 ("nothing named X exists"); fixture `tests/ui/e2403_pun_not_in_scope.{jet,stderr}` captures this
+- ✅ L2401 (public fn with positional Bool) — lint fires in both `check_with_mode` and `check_bundle` paths
+- ✅ `examples/features/47_library.jet` — demonstrates all M6 features; golden-pinned
+- ✅ E24xx codes registered in `docs/spec/diagnostics.md`
+- ✅ full `nix develop -c cargo test` green
+
+**Blocked (not implemented):**
+- D-ERR1 (Error carrier growth — msg + code + source): decision not ratified; left as `String` backing
+- E2403 distinct code for field-pun context: E0107 fires instead; "did you mean" for similar field names not implemented (I8: would need significant code, no ratified slot yet)
+
+Codegen fix: `emit_trait_method` params were emitted with `_user_` prefix (hiding them from the body); removed `_` prefix. Trait def `emit_trait_def` now uses matching convention (Read non-scalars → `&T`) so impl and def agree. Trait-method calls on concrete types no longer get `user_` prefix (tracked in `cx.trait_methods`).
 Read the sidequest files in `docs/plans/sidequests/mN-*.md` alongside each plan.
 
 (Update this section after each milestone commit so a fresh agent resumes here.)

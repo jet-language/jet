@@ -393,6 +393,19 @@ E2303` points there and the soundness matrix has a named cell.
 | E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
 | L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
 
+## Library authoring diagnostics (E2-M6)
+
+S61 (argument labels/defaults), S62 (trait delegation), D-LIB3 (Fallible `?`
+conversion), and S77 (field punning) introduce these codes. E24xx is the
+block reserved for M6.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2401 | The delegation target `{field}` doesn't implement `{trait}`, or the type has no field named `{field}`. | `impl Type: Trait using field` forwards every `Trait` method to the `field` field; if that field's type hasn't implemented `Trait`, there's nothing to forward to. | Implement `impl FieldType: Trait` on the field's type, or choose a different field that does implement `Trait`. If the field doesn't exist, add `{field}: FieldType` to the struct. |
+| E2402 | `?` can't convert `{err}` into `Error` — `{err}` has no `Fallible` implementation. | `?` inside a `T ? Error` function can propagate errors whose type implements `Fallible`; the `to_error` method converts them. Without an impl, there's no path from `{err}` to `Error`. | Add `impl {err}: Fallible { fn to_error(self) -> Error { Error(str(self)) } }` (or a more descriptive conversion), or change the return type to `T ? {err}`. |
+| E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `val name = …;` before the struct literal, or write the long form `Type { field_name: value }`. |
+| L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
+
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an

@@ -501,10 +501,12 @@ pub struct TraitDef {
     pub is_pub: bool,
     pub name: String,
     pub name_span: Span,
+    /// D-LIB2: `type Name;` associated type declarations inside the trait body.
+    pub assoc_types: Vec<(String, Span)>,
     pub methods: Vec<TraitMethodSig>,
 }
 
-/// S28: method signature inside a trait block (no body).
+/// S28: method signature inside a trait block (body optional per D-LIB2).
 #[derive(Debug, Clone)]
 pub struct TraitMethodSig {
     pub name: String,
@@ -513,6 +515,8 @@ pub struct TraitMethodSig {
     pub return_type: Option<Type>,
     pub is_view_return: bool,
     pub span: Span,
+    /// D-LIB2: optional default body for a trait method.
+    pub default_body: Option<Vec<Stmt>>,
 }
 
 /// S28: `impl Trait { … }` inside a struct or enum body.
@@ -521,6 +525,8 @@ pub struct TraitImplBlock {
     pub trait_name: String,
     pub trait_span: Span,
     pub methods: Vec<Func>,
+    /// D-LIB2: `type Name = ConcreteType;` associated type implementations.
+    pub assoc_type_impls: Vec<(String, Span, Type)>,
 }
 
 /// S50: one `extern rust` block declaring foreign functions.
@@ -577,6 +583,8 @@ pub struct Param {
     pub name_span: Span,
     pub ty: Type,
     pub ty_span: Span,
+    /// S61: trailing `= expr` default value. Only trailing params may have defaults.
+    pub default: Option<Box<Expr>>,
 }
 
 #[derive(Debug)]
@@ -638,6 +646,12 @@ pub struct ImplDef {
     pub trait_name: Option<String>,
     pub trait_span: Option<Span>,
     pub methods: Vec<Func>,
+    /// S62: `impl Type: Trait using field_name;` — the field that supplies the
+    /// delegation target. When `Some`, `methods` is empty and the compiler
+    /// generates forwarding for all trait methods.
+    pub delegation_field: Option<String>,
+    /// D-LIB2: `type Name = ConcreteType;` in top-level impl blocks.
+    pub assoc_type_impls: Vec<(String, Span, Type)>,
 }
 
 #[derive(Debug)]
@@ -916,6 +930,9 @@ pub struct CallArg {
     pub expr: Expr,
     pub span: Span,
     pub flags: CallArgFlags,
+    /// S61: optional `name:` label at the call site. When present, sema checks
+    /// that it matches the parameter name at this position.
+    pub label: Option<(String, Span)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1112,7 +1129,9 @@ pub enum Expr {
     /// S34: `err(expr)` — failure value for `T ? E`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
-    Try(Box<Expr>, Span),
+    /// S7/S80: `expr?` — propagates failure. When `via_fallible` is true, the
+    /// error type implements `Fallible` and codegen must call `.to_error()`.
+    Try(Box<Expr>, Span, bool /* via_fallible */),
     /// S35: `value or fallback`.
     OrFallback {
         value: Box<Expr>,
@@ -1190,7 +1209,7 @@ impl Expr {
             | Expr::Absent(s)
             | Expr::Ok(_, s)
             | Expr::Err(_, s)
-            | Expr::Try(_, s)
+            | Expr::Try(_, s, _)
             | Expr::OrFallback { span: s, .. }
             | Expr::PatternTest { span: s, .. }
             | Expr::If { span: s, .. }

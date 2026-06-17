@@ -1090,7 +1090,7 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
         ast::Expr::Present(inner, _)
         | ast::Expr::Ok(inner, _)
         | ast::Expr::Err(inner, _)
-        | ast::Expr::Try(inner, _) => collect_expr(inner, mp, db),
+        | ast::Expr::Try(inner, _, _) => collect_expr(inner, mp, db),
         ast::Expr::OrFallback {
             value, fallback, ..
         } => {
