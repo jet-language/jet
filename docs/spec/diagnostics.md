@@ -108,6 +108,8 @@ before continuing.
 | E0047 | type | `?.` left side must be optional `T?` (S71, D-SG6) |
 | E0048 | parse | teaching: positional tuples → named members (S73, D-SG7) |
 | E0049 | parse | teaching: `.0` field access → named members (S73, D-SG7) |
+| E0050 | parse | teaching: `while` → `loop cond { }` (S19-amend) |
+| E0051 | parse | teaching: `for x in` → `loop x in` (S19-amend) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |

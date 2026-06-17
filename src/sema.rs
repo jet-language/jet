@@ -2004,7 +2004,7 @@ impl<'a> Checker<'a> {
                                 "E0503",
                                 "strings aren't indexed with `[ ]`".to_string(),
                                 "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                                "e.g. `for c in s.chars()` or `s.slice(0..2)`".to_string(),
+                                "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
                                 Some(*span),
                             ));
                         }
@@ -2322,7 +2322,7 @@ impl<'a> Checker<'a> {
                                         "`for x in` needs a list or map, not {}",
                                         other.show()
                                     ),
-                                    "walk items with `for item in items` or characters with `for c in s.chars()`".to_string(),
+                                    "walk items with `loop item in items { }` or characters with `loop c in s.chars() { }`".to_string(),
                                     "use a `List`, `Map`, or `s.chars()`".to_string(),
                                     Some(collection.span()),
                                 ));
@@ -5331,7 +5331,7 @@ impl<'a> Checker<'a> {
                     "E0503",
                     "strings aren't indexed with `[ ]`".to_string(),
                     "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`".to_string(),
-                    "e.g. `for c in s.chars()` or `s.slice(0..2)`".to_string(),
+                    "e.g. `loop c in s.chars() { }` or `s.slice(0..2)`".to_string(),
                     Some(*span),
                 ));
                 None
@@ -8372,11 +8372,10 @@ fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
         "E0115",
         format!("`{}` only works inside a loop", kw),
         format!(
-            "`{}` and `{}` steer the nearest `{}` or `{}` loop",
+            "`{}` and `{}` steer the nearest `{}` loop",
             syntax::KW_BREAK,
             syntax::KW_CONTINUE,
-            syntax::KW_WHILE,
-            syntax::KW_FOR
+            syntax::KW_LOOP,
         ),
         "move this inside a loop, or remove it".to_string(),
         Some(span),
@@ -8882,9 +8881,9 @@ fn collection_changed_in_loop(name: &str, span: Span) -> Diagnostic {
             "while the loop is reading `{}`, nothing may change it",
             name
         ),
-        "a `for` loop borrows the whole collection until the body finishes".to_string(),
+        "a `loop` borrows the whole collection until the body finishes".to_string(),
         format!(
-            "collect changes into a second list, or loop over indices: `for i in 0..{}.len()-1`",
+            "collect changes into a second list, or loop over indices: `loop i in 0..{}.len()-1 {{ }}`",
             name
         ),
         Some(span),

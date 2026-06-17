@@ -9,9 +9,8 @@ semantic tokens, and quick-fixes.
 From the repo root:
 
 ```bash
-nix develop
-cargo build                 # produces target/debug/jet
-editors/zed/install.sh      # prebuilds extension.wasm + extension.toml
+nix develop -c cargo build                  # produces target/debug/jet
+nix develop -c editors/zed/install.sh       # syncs grammar, generates extension.toml
 ```
 
 In Zed:
@@ -73,7 +72,9 @@ removed by `install.sh` so checkout stays clean).
 ## Reinstall after changes
 
 ```bash
-editors/zed/install.sh
+nix develop -c editors/zed/install.sh
+# To rebuild grammar or extension wasm from scratch:
+FORCE=1 nix develop -c editors/zed/install.sh
 ```
 
 Remove and re-add the dev extension in Zed if the server or grammar did not

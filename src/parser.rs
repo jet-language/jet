@@ -133,6 +133,8 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0045"
             | "E0048"
             | "E0049"
+            | "E0050"
+            | "E0051"
     )
 }
 
@@ -1826,19 +1828,59 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwIf => Ok(Stmt::If(self.if_stmt()?)),
             TokKind::KwWhile => {
-                let span = self.bump().span;
+                // S19-amend (E0050): `while` is now a teaching error; use `loop cond { }`.
+                let t = self.bump();
+                let span = t.span;
+                self.diags.push(Diagnostic::error(
+                    "E0050",
+                    format!(
+                        "`{}` is not a keyword; write `{}` instead",
+                        syntax::FOREIGN_WHILE,
+                        syntax::KW_LOOP,
+                    ),
+                    format!(
+                        "`{}` has a single loop keyword: `loop cond {{ }}` for conditional loops",
+                        syntax::LANG_NAME,
+                    ),
+                    format!(
+                        "replace `{}` with `{}`",
+                        syntax::FOREIGN_WHILE,
+                        syntax::KW_LOOP,
+                    ),
+                    Some(span),
+                ));
                 let cond = self.expr_no_struct_lit()?;
-                self.expect(TokKind::LBrace, "to open the `while` body")?;
+                self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
                 Ok(Stmt::While { cond, body, span })
             }
             TokKind::KwFor => {
-                let span = self.bump().span;
-                let (var, var_span) = self.expect_ident("after `for`")?;
+                // S19-amend (E0051): `for` is now a teaching error; use `loop x in ... { }`.
+                let t = self.bump();
+                let span = t.span;
+                self.diags.push(Diagnostic::error(
+                    "E0051",
+                    format!(
+                        "`{}` is not a keyword; write `{} x in collection {{ }}` instead",
+                        syntax::FOREIGN_FOR,
+                        syntax::KW_LOOP,
+                    ),
+                    format!(
+                        "`{}` has a single loop keyword: `loop x in list {{ }}` for iteration",
+                        syntax::LANG_NAME,
+                    ),
+                    format!(
+                        "replace `{}` with `{}`",
+                        syntax::FOREIGN_FOR,
+                        syntax::KW_LOOP,
+                    ),
+                    Some(span),
+                ));
+                let (var, var_span) = self.expect_ident("after the loop variable name")?;
                 let mut var2 = None;
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
-                    let (v2, s2) = self.expect_ident("after `,` in `for key, value`")?;
+                    let (v2, s2) = self.expect_ident("after `,` in `loop key, value in`")?;
                     var2 = Some((v2, s2));
                 }
                 self.expect_kw(TokKind::KwIn, "after the loop name")?;
@@ -1846,7 +1888,6 @@ impl<'a> Parser<'a> {
                 let kind = if matches!(self.peek().kind, TokKind::DotDot) {
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    // S22 (D-SG8): optional contextual `step n` stride.
                     let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == syntax::KW_RANGE_STEP)
                     {
                         self.bump();
@@ -1854,24 +1895,13 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    ForKind::Range {
-                        start: first,
-                        end,
-                        step,
-                    }
+                    ForKind::Range { start: first, end, step }
                 } else {
                     ForKind::In { collection: first }
                 };
-                self.expect(TokKind::LBrace, "to open the `for` body")?;
+                self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
-                Ok(Stmt::For {
-                    var,
-                    var_span,
-                    var2,
-                    kind,
-                    body,
-                    span,
-                })
+                Ok(Stmt::For { var, var_span, var2, kind, body, span })
             }
             TokKind::KwSwitch => {
                 let span = self.bump().span;
@@ -1889,9 +1919,56 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwLoop => {
                 let span = self.bump().span;
-                self.expect(TokKind::LBrace, "after `loop`")?;
-                let inner = self.block_stmts();
-                Ok(Stmt::Loop(inner, span))
+                // S19-amend: `loop` handles all three loop forms by header.
+                //   loop { }               → infinite
+                //   loop cond { }          → conditional (was `while`)
+                //   loop x in ... { }      → iteration (was `for`)
+                //   loop k, v in ... { }   → key-value iteration
+                if matches!(self.peek().kind, TokKind::LBrace) {
+                    // Infinite loop
+                    self.bump();
+                    let inner = self.block_stmts();
+                    Ok(Stmt::Loop(inner, span))
+                } else if matches!(&self.peek().kind, TokKind::Ident(_))
+                    && matches!(
+                        &self.peek2().kind,
+                        TokKind::KwIn | TokKind::Comma
+                    )
+                {
+                    // Iteration: loop x in ... { } or loop k, v in ... { }
+                    let (var, var_span) = self.expect_ident("as the loop variable")?;
+                    let mut var2 = None;
+                    if matches!(self.peek().kind, TokKind::Comma) {
+                        self.bump();
+                        let (v2, s2) = self.expect_ident("after `,` in `loop key, value in`")?;
+                        var2 = Some((v2, s2));
+                    }
+                    self.expect_kw(TokKind::KwIn, "after the loop variable")?;
+                    let first = self.expr_no_struct_lit()?;
+                    let kind = if matches!(self.peek().kind, TokKind::DotDot) {
+                        self.bump();
+                        let end = self.expr_no_struct_lit()?;
+                        let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == syntax::KW_RANGE_STEP)
+                        {
+                            self.bump();
+                            Some(self.expr_no_struct_lit()?)
+                        } else {
+                            None
+                        };
+                        ForKind::Range { start: first, end, step }
+                    } else {
+                        ForKind::In { collection: first }
+                    };
+                    self.expect(TokKind::LBrace, "to open the loop body")?;
+                    let body = self.block_stmts();
+                    Ok(Stmt::For { var, var_span, var2, kind, body, span })
+                } else {
+                    // Conditional: loop cond { }
+                    let cond = self.expr_no_struct_lit()?;
+                    self.expect(TokKind::LBrace, "to open the loop body")?;
+                    let body = self.block_stmts();
+                    Ok(Stmt::While { cond, body, span })
+                }
             }
             // S58 (E2-M13): the audit + unsafe gate is `@audit("…")` then
             // `@unsafe { … }`. Bare `unsafe { … }` is the rejected former

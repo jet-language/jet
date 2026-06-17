@@ -116,7 +116,7 @@ struct Holder {
 fn main() {
     var h = Holder { items: [:] };
     h.items["x"] = 1;
-    for k, v in h.items {
+    loop k, v in h.items {
         print(k);
         print(v);
     }

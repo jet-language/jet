@@ -8,26 +8,48 @@
 # Zed clones tree-sitter grammars into grammars/<name>/ via git. If that folder
 # already exists without a matching remote, install fails. Grammar sources live
 # in grammar-repo/; grammars/jet/ is removed so Zed can clone cleanly.
+#
+# Usage:
+#   editors/zed/install.sh            # skip wasm rebuilds if files exist
+#   FORCE=1 editors/zed/install.sh    # rebuild all wasm files from scratch
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+FORCE="${FORCE:-0}"
 GRAMMAR_REPO="$ROOT/grammar-repo"
 GRAMMAR_URI="file://${GRAMMAR_REPO}"
 WASM_SRC="$ROOT/wasm-src"
+TREE_SITTER_SRC="$ROOT/../tree-sitter"
 
-# ── Tree-sitter grammar (sources in grammar-repo/, not grammars/jet/) ───────────
-if command -v tree-sitter >/dev/null 2>&1; then
-  (cd "$GRAMMAR_REPO" && tree-sitter generate)
-  tree-sitter build --wasm -o "$ROOT/grammars/jet.wasm" "$GRAMMAR_REPO"
-else
-  nix-shell -p tree-sitter --run "
-    cd '$GRAMMAR_REPO' && tree-sitter generate
-    tree-sitter build --wasm -o '$ROOT/grammars/jet.wasm' '$GRAMMAR_REPO'
-  "
+# ── Sync grammar sources into grammar-repo/ ───────────────────────────────────
+# Authoritative sources live in editors/tree-sitter/; grammar-repo/ is a
+# standalone git repo that Zed clones via a file:// URI.
+echo "Syncing grammar sources from editors/tree-sitter/ ..."
+mkdir -p "$GRAMMAR_REPO/src"
+cp "$TREE_SITTER_SRC/grammar.js" "$GRAMMAR_REPO/"
+cp "$TREE_SITTER_SRC/tree-sitter.json" "$GRAMMAR_REPO/"
+if [ -d "$TREE_SITTER_SRC/src" ]; then
+  cp -r "$TREE_SITTER_SRC/src/." "$GRAMMAR_REPO/src/"
 fi
 
-# Zed checks out into grammars/jet/ — keep sources in a separate git repo.
+# ── Tree-sitter grammar wasm ──────────────────────────────────────────────────
+if [ ! -s "$ROOT/grammars/jet.wasm" ] || [ "$FORCE" = "1" ]; then
+  echo "Building grammars/jet.wasm ..."
+  if command -v tree-sitter >/dev/null 2>&1; then
+    (cd "$GRAMMAR_REPO" && tree-sitter generate)
+    tree-sitter build --wasm -o "$ROOT/grammars/jet.wasm" "$GRAMMAR_REPO"
+  else
+    nix-shell -p tree-sitter emscripten --run "
+      cd '$GRAMMAR_REPO' && tree-sitter generate
+      tree-sitter build --wasm -o '$ROOT/grammars/jet.wasm' '$GRAMMAR_REPO'
+    "
+  fi
+else
+  echo "  grammars/jet.wasm exists — skipping (FORCE=1 to rebuild)"
+fi
+
+# ── Grammar git repo (Zed clones from file:// URI) ───────────────────────────
 if [ ! -d "$GRAMMAR_REPO/.git" ]; then
   git -C "$GRAMMAR_REPO" init -q
 fi
@@ -39,23 +61,34 @@ GRAMMAR_REV="$(git -C "$GRAMMAR_REPO" rev-parse HEAD)"
 
 # Remove Zed's clone target so checkout does not hit a stale directory.
 rm -rf "$ROOT/grammars/jet"
-touch "$ROOT/grammars/jet.wasm"
 
 # ── extension.wasm ────────────────────────────────────────────────────────────
-build_wasm() {
-  cargo build --release --target wasm32-wasip2 --manifest-path "$WASM_SRC/Cargo.toml"
-  cp "$WASM_SRC/target/wasm32-wasip2/release/jet_zed_extension.wasm" "$ROOT/extension.wasm"
-}
+if [ ! -s "$ROOT/extension.wasm" ] || [ "$FORCE" = "1" ]; then
+  echo "Building extension.wasm ..."
+  build_extension_wasm() {
+    if command -v rustup >/dev/null 2>&1; then
+      rustup target add wasm32-wasip2 >/dev/null 2>&1 || true
+      cargo build --release --target wasm32-wasip2 --manifest-path "$WASM_SRC/Cargo.toml"
+    else
+      nix-shell -p rustup --run "
+        rustup default stable >/dev/null 2>&1 || true
+        rustup target add wasm32-wasip2 >/dev/null 2>&1 || true
+        cargo build --release --target wasm32-wasip2 --manifest-path '$WASM_SRC/Cargo.toml'
+      "
+    fi
+    cp "$WASM_SRC/target/wasm32-wasip2/release/jet_zed_extension.wasm" "$ROOT/extension.wasm"
+  }
 
-if command -v rustup >/dev/null 2>&1; then
-  rustup target add wasm32-wasip2 >/dev/null 2>&1 || true
-  build_wasm
+  if (set +e; build_extension_wasm); then
+    echo "  extension.wasm built"
+  elif [ -s "$ROOT/extension.wasm" ]; then
+    echo "  warning: extension.wasm build failed; keeping pre-built $(du -h "$ROOT/extension.wasm" | awk '{print $1}')"
+  else
+    echo "  error: extension.wasm build failed and no pre-built file exists" >&2
+    exit 1
+  fi
 else
-  nix-shell -p rustup cargo --run "
-    rustup target add wasm32-wasip2 >/dev/null 2>&1 || true
-    cargo build --release --target wasm32-wasip2 --manifest-path '$WASM_SRC/Cargo.toml'
-    cp '$WASM_SRC/target/wasm32-wasip2/release/jet_zed_extension.wasm' '$ROOT/extension.wasm'
-  "
+  echo "  extension.wasm exists — skipping (FORCE=1 to rebuild)"
 fi
 
 # ── Manifest ──────────────────────────────────────────────────────────────────
@@ -65,9 +98,9 @@ sed -e "s|@GRAMMAR_URI@|${GRAMMAR_URI}|g" \
 
 echo ""
 echo "Jet Zed extension ready at: $ROOT"
-echo "  extension.wasm   ($(du -h extension.wasm | awk '{print $1}'))"
+echo "  extension.wasm    ($(du -h extension.wasm | awk '{print $1}'))"
 echo "  grammars/jet.wasm ($(du -h grammars/jet.wasm | awk '{print $1}'))"
-echo "  grammar rev      ${GRAMMAR_REV}"
+echo "  grammar rev       ${GRAMMAR_REV}"
 echo ""
 echo "In Zed:"
 echo "  1. Remove any old 'jet' dev extension (zed: extensions)"
@@ -77,5 +110,5 @@ echo "  4. Choose: $ROOT"
 echo "  5. zed: reload window"
 echo "  6. Open a .jet file — language picker shows 'Jet' (capital J)"
 echo ""
-echo "If you edit wasm-src/ or grammar-repo/, rerun: editors/zed/install.sh"
+echo "If you edit wasm-src/ or grammar-repo/, rerun: FORCE=1 editors/zed/install.sh"
 echo "Verify LSP: nix develop -c jet lsp doctor"

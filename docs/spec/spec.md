@@ -29,7 +29,7 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   E0001. Unary minus is an operator, not part of the literal.
 - `true` and `false` are `Bool` literals.
 - Statements end with `;` (S6 — required, including before `}`). Blocks
-  (`}` of `if`/`while`/`for`/`fn`) don't take one; `when` arms do.
+  (`}` of `if`/`loop`/`fn`) don't take one; `when` arms do.
 - The lexer recovers from bad characters and keeps going; one run reports
   every lexical error it can.
 
@@ -41,7 +41,7 @@ func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params   = param { "," param } ;
 param    = [ "mut" | "take" ] ident ":" type ;
 block    = "{" { stmt } "}" ;            // S3: curly braces
-stmt     = binding | assign | if | while | for | when
+stmt     = binding | assign | if | loop | when
          | "break" ";" | "continue" ";" | "return" [ expr ] ";"
          | expr ";" ;
 binding  = ( "val" | "var" ) ( ident [ ":" type ] | destructure ) "=" expr ";" ;
@@ -50,11 +50,13 @@ destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr ";" ;
 if       = "if" cond block { "else" "if" cond block } [ "else" block ] ;  // statement form
-while    = "while" cond block ;
+loop     = "loop" block                                                  // infinite
+         | "loop" cond block                                             // conditional (was `while`)
+         | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ; // iteration (was `for`)
+         // S19-amend: `while` and `for` are teaching errors (E0050/E0051)
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
 value-block = "{" { stmt } expr "}" ;                // trailing expr (no `;`) is the block's value
-for      = "for" ident "in" expr ".." expr [ "step" expr ] block ;  // S22 inclusive; D-SG8 step
 when     = "when" expr "{" { expr "->" block ";" }
            "else" "->" block ";" "}" ;               // S24 (D-SG1: was `switch`)
 expr     = precedence climbing over:
@@ -83,9 +85,10 @@ expr     = precedence climbing over:
   `day == "sat" || "sun"` means `day == "sat" || day == "sun"`. The
   value's type must match what was compared; a plain value with no
   comparison to its left is an error.
-- `if`/`else if`/`else` (conditions must be `Bool`); `while`; `for x in
-  a..b` iterates a through b **inclusive** (S22); `break`/`continue`
-  inside loops only (E0115, S23).
+- `if`/`else if`/`else` (conditions must be `Bool`); `loop` in three forms:
+  `loop { }` (infinite), `loop cond { }` (conditional), `loop x in a..b { }`
+  (iterates a through b **inclusive**, S22; S19-amend); `break`/`continue`
+  inside loops only (E0115, S23). `while`/`for` are teaching errors.
 - `when subject { cond -> { ... }; else -> { ... }; }` (S24): arms are
   arbitrary `Bool` conditions tried top to bottom; `else` is mandatory.
   Lowered to an if/else chain; rustc optimizes it.

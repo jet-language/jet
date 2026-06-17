@@ -111,7 +111,7 @@ fn parse_system(take data: JSON) -> System {
         user = field_strings(pkgs, "user");
         services = field_strings(root, "services");
         val opts = obj(root, "options");
-        for k, v in opts {
+        loop k, v in opts {
             options[k.clone()] = as_text(v.clone());
         }
     }
@@ -170,7 +170,7 @@ fn as_text(take j: JSON) -> String {
 fn as_strings(take j: JSON) -> [String] {
     var out: [String] = [];
     if j == Array(items) {
-        for item in items {
+        loop item in items {
             out.push(as_text(item.clone()));
         }
     }
@@ -184,7 +184,7 @@ fn header(theme: Theme, title: String) {
     print("{brand(theme)} {theme.gray("·")} {theme.bold(title.clone())}");
 }
 fn pad(mut s: String, width: Int) -> String {
-    while s.len() < width {
+    loop s.len() < width {
         s = "{s} ";
     }
     return s.clone();
@@ -222,7 +222,7 @@ fn cmd_list(theme: Theme) -> Int {
             section(theme, "services", sys.services.clone());
             if sys.options.len() > 0 {
                 print("  {theme.bold("options")}");
-                for k, v in sys.options.clone() {
+                loop k, v in sys.options.clone() {
                     val key = pad(k.clone(), 28);
                     val cv = theme.cyan(v.clone());
                     print("    {key}{cv}");
@@ -290,12 +290,12 @@ fn render_diff(theme: Theme, cur: System, des: System) -> Int {
 fn diff_list(theme: Theme, title: String, before: [String], after: [String]) -> Int {
     var added: [String] = [];
     var removed: [String] = [];
-    for a in after {
+    loop a in after {
         if contains(before.clone(), a.clone()) == false {
             added.push(a.clone());
         }
     }
-    for b in before {
+    loop b in before {
         if contains(after.clone(), b.clone()) == false {
             removed.push(b.clone());
         }
@@ -306,17 +306,17 @@ fn diff_list(theme: Theme, title: String, before: [String], after: [String]) -> 
         }
     }
     print("  {theme.bold(title.clone())}");
-    for a in added {
+    loop a in added {
         print("    {theme.green("+")} {a}");
     }
-    for r in removed {
+    loop r in removed {
         print("    {theme.red("-")} {r}");
     }
     return (added.len() + removed.len());
 }
 fn diff_options(theme: Theme, before: [String, String], after: [String, String]) -> Int {
     var lines: [String] = [];
-    for k, v in after {
+    loop k, v in after {
         val old = before.get(k.clone()) ?? "";
         val key = pad(k.clone(), 28);
         if old == "" {
@@ -333,7 +333,7 @@ fn diff_options(theme: Theme, before: [String, String], after: [String, String])
             }
         }
     }
-    for k, v in before {
+    loop k, v in before {
         if after.get(k.clone()) == value(_) {
 
         } else {
@@ -346,7 +346,7 @@ fn diff_options(theme: Theme, before: [String, String], after: [String, String])
         return 0;
     }
     print("  {theme.bold("options")}");
-    for line in lines {
+    loop line in lines {
         print(line);
     }
     return lines.len();
@@ -397,7 +397,7 @@ fn render_generations(theme: Theme, take data: JSON) -> Int {
     header(theme, "generations");
     if data == Object(root) {
         val current = field_text(root, "current");
-        for g in field_array(root, "generations") {
+        loop g in field_array(root, "generations") {
             print_generation(theme, g.clone(), current.clone());
         }
     }
@@ -421,10 +421,10 @@ fn cmd_sync(theme: Theme) -> Int {
     header(theme, "syncing import-tree");
     val modules = discover("modules");
     val hosts = discover("hosts");
-    for m in modules {
+    loop m in modules {
         print("  {theme.green("+")} {theme.gray("module")} {m}");
     }
-    for h in hosts {
+    loop h in hosts {
         print("  {theme.green("+")} {theme.gray("host")}   {h}");
     }
     print("");
@@ -436,11 +436,11 @@ fn cmd_sync(theme: Theme) -> Int {
 fn discover(root: String) -> [String] {
     var out: [String] = [];
     val top = fs.list_dir(root) ?? empty_strings();
-    for name in top {
+    loop name in top {
         val path = "{root}/{name}";
         if fs.is_dir(path) == true {
             val inner = fs.list_dir(path) ?? empty_strings();
-            for child in inner {
+            loop child in inner {
                 push_module(mut out, "{path}/{child}");
             }
         } else {
@@ -500,7 +500,7 @@ fn nix_available() -> Bool {
 }
 fn resolve_offline(pkgs: [String]) -> Int {
     var hits = 0;
-    for p in pkgs {
+    loop p in pkgs {
         if fs.exists("nix/fixtures/{p}.json") == true {
             hits = (hits + 1);
         } else {
@@ -535,7 +535,7 @@ fn next_generation() -> String {
 }
 // --- helpers --------------------------------------------------------------
 fn contains(haystack: [String], needle: String) -> Bool {
-    for h in haystack {
+    loop h in haystack {
         if h == needle {
             return true;
         }
@@ -553,7 +553,7 @@ fn main() {
     var command = "help";
     var online = false;
     var i = 1;
-    while i < args.len() {
+    loop i < args.len() {
         val a = args.get(i) ?? "";
         if a == "--no-color" {
             theme = Theme.mono();

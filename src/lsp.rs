@@ -1253,7 +1253,7 @@ impl CompletionItem {
 
 /// Jet keywords for completion.
 const JET_KEYWORDS: &[&str] = &[
-    "fn", "pub", "val", "var", "if", "else", "while", "for", "in", "when", "break", "continue",
+    "fn", "pub", "val", "var", "if", "else", "in", "when", "break", "continue",
     "return", "struct", "enum", "impl", "trait", "const", "comptime", "import", "extern", "test",
     "derive", "mut", "take", "view", "ref", "self", "loop", "unsafe", "or", "true", "false",
     "null", "ok", "err", "value", "it",

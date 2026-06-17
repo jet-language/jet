@@ -20,7 +20,7 @@ struct Record {
 // after that, reads should be free.
 fn parse(text: String) -> Record {
     var fields: [Field] = [];
-    for line in text.split("\n") {
+    loop line in text.split("\n") {
         val trimmed = line.trim();
         if trimmed.len() == 0 {
             continue;
@@ -28,7 +28,7 @@ fn parse(text: String) -> Record {
         var key = "";
         var val_text = "";
         var seen_eq = false;
-        for part in trimmed.split("=") {
+        loop part in trimmed.split("=") {
             if seen_eq {
                 val_text = part;
             } else {
@@ -59,13 +59,13 @@ fn main() {
     // Read every field name with the zero-copy view accessor — no clones.
     // A `view` result is read in place (here, printed) rather than stored.
     print("zero-copy field names (borrowed, no copies):");
-    for field in rec.fields {
+    loop field in rec.fields {
         print("  {name_of(field)}");
     }
 
     // The clone-heavy accessor returns the same text but copies it each time.
     print("clone-heavy field names (each one duplicated):");
-    for field in rec.fields {
+    loop field in rec.fields {
         val owned = name_copy(field);
         print("  {owned}");
     }

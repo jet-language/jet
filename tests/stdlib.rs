@@ -273,13 +273,13 @@ fn main() {
     val ch: Channel<Int> = tasks.channel();
     val sender = ch.sender();
     val producer = tasks.spawn(take(sender) () => {
-        for i in 1..1000 {
+        loop i in 1..1000 {
             sender.send(i);
         }
     });
     producer.join();
     var total = 0;
-    for i in 1..1000 {
+    loop i in 1..1000 {
         total = total + (ch.receive() ?? panic("channel closed"));
     }
     print(total);

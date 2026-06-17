@@ -148,9 +148,8 @@ pub const TYPE_SHARED: &str = "Shared";
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
 
-/// S19 (ratified): loop keywords.
-pub const KW_WHILE: &str = "while";
-pub const KW_FOR: &str = "for";
+/// S19 (ratified): loop keywords. `loop` is the one true loop keyword.
+/// `in` is a contextual keyword inside `loop x in …`.
 pub const KW_IN: &str = "in";
 
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
@@ -268,6 +267,9 @@ pub const ATTR_AUDIT: &str = "audit"; // S58
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 
 /// S14: foreign forms recognized only for teaching errors.
+/// S19-amend (2026-06-17): `while`/`for` are now teaching errors pointing at `loop`.
+pub const FOREIGN_WHILE: &str = "while";
+pub const FOREIGN_FOR: &str = "for";
 pub const FOREIGN_TRY: &str = "try";
 pub const FOREIGN_LET: &str = "let";
 pub const FOREIGN_LET_MUT: &str = "let mut";
@@ -632,7 +634,16 @@ pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 pub const OP_FAN_OUT: &str = ".[";
 
 /// S76 (ratified 2026-06-16): the fixed-size separator in `[T#N]` type
-/// position, e.g. `[Int#3]`. `#` appears nowhere else in Jet surface syntax
-/// (comments are `//`/`/* */`; Jetpack refs use `@`/`:`), so it is a clean
-/// dedicated token for this type-level size annotation.
+/// position, e.g. `[Int#3]`. Amended by VERSION-# (2026-06-16): `#` also
+/// introduces pinned version numbers in package references (`pkg#1.2.0`).
+/// Same token, two contexts: `[T#N]` is the type-level size form; `name#ver`
+/// is the package version-pin form. No dedicated two-character token in either
+/// case — the parser resolves by position.
 pub const TYPE_FIXED_SIZE_SEP: &str = "#";
+
+/// S81 (ratified 2026-06-16): loop-skip sigil — `?continue` inside a `loop`
+/// iteration propagates a `None` / `Err` result as a continue (skip to next
+/// element). It is the iteration-level analogue of `?` propagation for fallible
+/// loops. Written as a single two-char token `?continue` (the `?` is part of
+/// the keyword, not a standalone operator).
+pub const KW_QUESTION_CONTINUE: &str = "?continue";

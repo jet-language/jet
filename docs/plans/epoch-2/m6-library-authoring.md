@@ -28,7 +28,7 @@ same-error-type contortions.
 | D-OWN1 | Implicit-clone lint | — | — | ✅ ratified 2026-06-16 — A: keep + strengthen implicit-clone lint |
 | D-OWN2 | Ownership mini-examples | — | — | ✅ ratified 2026-06-16 — A: add ownership mini-examples |
 | D-OWN3 | `take` suggestion site | — | — | ✅ ratified 2026-06-16 — A: suggest `take` at call site |
-| D-JSON1 | JSON decode strictness baseline | — | — | ✅ ratified 2026-06-17 — B: lenient coerce where unambiguous (`"8080"` → `8080`); only error on truly impossible conversions; **implementation must surface coercions** (see owner-todo.md — brainstorm per-decode report or build-output log so magic is legible without breaking) |
+| D-JSON1 | JSON decode strictness baseline | — | — | ✅ ratified 2026-06-17 — B: lenient coerce where unambiguous (`"8080"` → `8080`); only error on truly impossible conversions; **implementation must surface coercions** (see owner-todo.md — brainstorm per-decode report or build-output log so magic is legible without disruption) |
 | D-JSON2 | Unknown JSON keys | — | — | ✅ ratified 2026-06-16 — A: ignore unknown JSON keys by default, opt-in strict |
 
 ## Surface (uses ratified S61/S62 + ballot recs)

@@ -1,25 +1,18 @@
 # Epoch-2 implementation stream — progress & resume log
 
-**This is the resume doc for the EPOCH-2 implementation stream.** It is distinct
-from `active-task.md` (which belongs to the parallel **jetpack/jetos** agent —
-do not edit that file from this stream).
+**This is the resume doc for the EPOCH-2 implementation stream.**
 
-## Isolation / collision-avoidance
+## Current branch: master
 
-- All work happens in a dedicated git worktree on branch **`epoch-2-impl`**
-  (`/home/nate/Projects/Github/jet-epoch2`), branched from the jetpack agent's
-  HEAD (`cec262a`, branch `jetos-ratified-arc`).
-- The jetpack/jetos agent owns: `src/jetpack/*`, `src/syntax.rs` config/U11–U18
-  record-literal surface, the record-literal path in `src/parser.rs`/`src/sema.rs`,
-  `docs/spec/diagnostics.md` codes **E09xx / E10xx / E12xx / E32xx (C FFI)**,
-  `examples/jetpack-typed/`, `tests/jetpack.rs`. **E2-M14 (C FFI) is THEIRS** —
-  they already committed it (`cec262a`). Do not touch any of these.
-- This stream owns: `jet` CLI surface (`src/main.rs`), `src/diag.rs` JSON,
-  `src/manifest.rs` edition field, references in `src/sema.rs` (view/ref region,
-  NOT the record-literal region), new modules (`src/explain.rs`, dev server),
-  and diagnostic codes **E20xx / E21xx / E23xx + L20xx / L21xx / L23xx**.
-- Integration is a future merge of `epoch-2-impl` into the jetpack branch;
-  disjoint code ranges + disjoint file regions keep it conflict-light.
+All prior epoch-2 work (`epoch-2-impl`) and the jetpack/jetos track
+(`jetos-ratified-arc`) have been merged into `master` (commit `5eec357`).
+All future epoch-2 work is directly on `master`. No separate worktrees.
+
+## Completed milestones
+
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M13 ✅ M14 ✅
+
+The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
 ## Milestone plan (sequential, fully-ratified, low-collision)
 
@@ -93,29 +86,16 @@ L2301 (borrow advisory/inlay). Key allow: `view` into a **field of a parameter**
 **Current state:** E2-M3 ✅ and E2-M5 ✅ fully implemented + validated (full
 suite green) on branch `epoch-2-impl`, commits `5050565`→`fd02646`.
 
-**Next: E2-M2 (collision-free parts)** (`m2-release-policy.md`) — all ballots
-ratified (D-REL1…5). Implementable now WITHOUT touching the contested manifest
-parser: (1) write the compatibility/release-policy + generated-code-license
-docs in `docs/spec/`; (2) the `jet --version` banner (compiler SemVer + supported
-epoch/edition range + registry compat) in `src/main.rs` with a golden test;
-(3) register E2001/E2002/L2001 in `docs/spec/diagnostics.md`. **DEFER** the
-edition-marker-in-manifest piece + the E2001 *enforcement* (needs
-`packmanifest.rs`, jetpack territory) until the pack.jet/payload.jet migration
-settles — coordinate then.
+## Resume pointer
 
-After M2: E2-M4 (`jet dev`) rides the LSP/incremental foundation — revisit once
-the jetpack agent's churn around shared files quiets. E2-M14 (C FFI) is the
-jetpack agent's (already committed on their branch).
+**Current state:** master. All sidequests in `docs/plans/sidequests/` are resolved
+EXCEPT `s19-amend-loop-unification.md` (loop keyword unification — `while`/`for`
+must become teaching errors; `loop` with header disambiguation is the one form).
+That sidequest requires parser work + example rewrites + snapshot bless.
 
-### Integration note (for the owner/coordinator)
+**Next milestone to implement: E2-M6** (`m6-library-authoring.md`).
 
-`epoch-2-impl` is branched from the jetpack agent's `jetos-ratified-arc`
-(`cec262a`) and must eventually be MERGED back. Conflict surface is small + range-
-disjoint by design: new modules (`explain/diagjson/doctor/cli_spec/fixengine.rs`)
-don't exist on their branch; shared-file edits are in disjoint regions —
-`docs/spec/diagnostics.md` adds only E21xx/E23xx/L2xxx rows (they add E09/E1x/
-E32xx), `src/main.rs` adds new subcommands, `src/sema.rs` edits are the view/ref
-region (they edit record-literal). `src/lsp.rs`/`src/codegen.rs` had small
-additive edits — check those two first when merging.
+After M6: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+Read the sidequest files in `docs/plans/sidequests/mN-*.md` alongside each plan.
 
 (Update this section after each milestone commit so a fresh agent resumes here.)

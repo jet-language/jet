@@ -14,7 +14,10 @@ module.exports = grammar({
   conflicts: ($) => [
     [$._expr, $.lambda_param],
     [$.lambda_expr, $.binary_expr],
+    [$.lambda_expr, $.index_expr],
     [$.method_call_expr, $.field_expr, $.lambda_expr],
+    [$.option_type, $.fallible_type],
+    [$.option_type, $.fallible_type, $.fn_type],
   ],
 
   extras: ($) => [/\s/, $.comment, $.doc_comment],
@@ -187,13 +190,7 @@ module.exports = grammar({
 
     fallible_type: ($) => seq($._type, "?", $._type),
 
-    return_type: ($) =>
-      choice(
-        $.fallible_type,
-        seq($._type, "?"),
-        seq("(", $.option_type, ")"),
-        $._type
-      ),
+    return_type: ($) => $._type,
 
     list_type: ($) => seq("List", "<", $._type, ">"),
 

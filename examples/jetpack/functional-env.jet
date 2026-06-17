@@ -38,7 +38,7 @@ fn flatten_overlay(take o: Overlay) -> [Package] {
     var out: [Package] = [];
     val names = o.packages;
     val source = o.source;
-    for name in names {
+    loop name in names {
         out.push(pack_item(source.clone(), take name));
     }
     return out;
@@ -46,9 +46,9 @@ fn flatten_overlay(take o: Overlay) -> [Package] {
 fn packages(take pack: Pack) -> [Package] {
     var out: [Package] = [];
     val overlays = pack.overlays;
-    for o in overlays {
+    loop o in overlays {
         val grouped = flatten_overlay(take o);
-        for p in grouped {
+        loop p in grouped {
             out.push(p);
         }
     }
@@ -59,21 +59,21 @@ fn source_ref(take p: Package) -> String {
 }
 fn package_refs(take pack: Pack) -> [String] {
     var out: [String] = [];
-    for p in packages(take pack) {
+    loop p in packages(take pack) {
         out.push(source_ref(take p));
     }
     return out;
 }
 fn source_directives(take sources: [Source]) -> [JSON] {
     var out: [JSON] = [];
-    for s in sources {
+    loop s in sources {
         out.push(source_json(take s));
     }
     return out;
 }
 fn text_array(take items: [String]) -> [JSON] {
     var out: [JSON] = [];
-    for item in items {
+    loop item in items {
         out.push(JSON.Text(item));
     }
     return out;

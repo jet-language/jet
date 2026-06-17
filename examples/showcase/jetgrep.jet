@@ -34,7 +34,7 @@ fn parse_flags(args: [String]) -> ParseOutcome {
     var pattern = "";
     var paths: [String] = [];
     var i = 1;
-    while i < args.len() {
+    loop i < args.len() {
         if args.get(i) == value(flag) {
             if flag == "-r" {
                 recursive = true;
@@ -77,14 +77,14 @@ fn collect_files(path: String, recursive: Bool) -> [String] {
         if recursive == true {
             val listed = fs.list_dir(root);
             if listed == ok(names) {
-                for name in names {
+                loop name in names {
                     if (name == ".") || (name == "..") {
                         continue;
                     }
                     val child = join_path(root, name);
                     if fs.is_dir(child) {
                         val nested = collect_files(child, true);
-                        for file in nested {
+                        loop file in nested {
                             out.push(file);
                         }
                     } else if fs.exists(child) {
@@ -129,7 +129,7 @@ fn grep_file(path: String, cfg: Config) -> GrepResult {
             var hits = 0;
             var lines_out: [String] = [];
             var line_no = 1;
-            for line in text.split("\n") {
+            loop line in text.split("\n") {
                 if line_matches(line, needle, cfg) {
                     hits+= 1;
                     if cfg.count_only == false {
@@ -166,27 +166,27 @@ fn main() {
         targets = default_paths();
     }
     var files: [String] = [];
-    for path in targets {
+    loop path in targets {
         val found = collect_files(path, cfg.recursive);
         if ((found.len() == 0) && fs.exists(path)) && (fs.is_dir(path) == false) {
             files.push(path);
         } else {
-            for file in found {
+            loop file in found {
                 files.push(file);
             }
         }
     }
     var total = 0;
     var output: [String] = [];
-    for file in files {
+    loop file in files {
         val result = grep_file(file, cfg);
         total+= result.matches;
         val hits = result.lines;
-        for line in hits {
+        loop line in hits {
             output.push(line);
         }
     }
-    for line in output {
+    loop line in output {
         print(line);
     }
     if total > 0 {

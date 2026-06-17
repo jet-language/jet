@@ -17,14 +17,14 @@ fn collect_files(path: String) -> [String] {
     if fs.is_dir(root) {
         val listed = fs.list_dir(root);
         if listed == ok(names) {
-            for name in names {
+            loop name in names {
                 if (name == ".") || (name == "..") {
                     continue;
                 }
                 val child = join_path(root, name);
                 if fs.is_dir(child) {
                     val nested = collect_files(child);
-                    for file in nested {
+                    loop file in nested {
                         out.push(file);
                     }
                 } else if fs.exists(child) && (is_text_file(child) == true) {
@@ -41,7 +41,7 @@ fn main() {
     val args = io.args();
     var paths: [String] = [];
     var i = 1;
-    while i < args.len() {
+    loop i < args.len() {
         if args.get(i) == value(path) {
             paths.push(path);
         }
@@ -51,14 +51,14 @@ fn main() {
         paths.push(".");
     }
     var counts: [String, Int] = [:];
-    for path in paths {
+    loop path in paths {
         val files = collect_files(path);
-        for file in files {
+        loop file in files {
             when fs.read(file) {
                 | it == ok(text) {
                     val lower = text.to_lower();
-                    for line in lower.split("\n") {
-                        for word in line.split(" ") {
+                    loop line in lower.split("\n") {
+                        loop word in line.split(" ") {
                             if word.len() > 0 {
                                 counts[word] = ((counts.get(word) ?? 0) + 1);
                             }
@@ -73,12 +73,12 @@ fn main() {
         }
     }
     var ranked: [String] = [];
-    for word, count in counts {
+    loop word, count in counts {
         val inv = (1000000 - count);
         ranked.push("{inv}\t{word}");
     }
     ranked.sort();
-    for entry in ranked {
+    loop entry in ranked {
         val parts = entry.split("\t");
         if parts.len() >= 2 {
             if parts.get(1) == value(word) {

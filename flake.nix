@@ -92,6 +92,8 @@
             nodejs_22
             nixfmt
             ripgrep
+            tree-sitter
+            emscripten
             jetDev
           ];
 

@@ -14,7 +14,7 @@ use core.io as io;
 use core.env as env;
 fn count_lines(text: String) -> Int {
     var lines = 0;
-    for _line in text.split("\n") {
+    loop _line in text.split("\n") {
         lines+= 1;
     }
     return lines;
@@ -31,7 +31,7 @@ fn paths_from_args() -> [String] {
     val args = io.args();
     var out: [String] = [];
     var i = 1;
-    while i < args.len() {
+    loop i < args.len() {
         if args.get(i) == value(path) {
             out.push(path);
         }
@@ -42,7 +42,7 @@ fn paths_from_args() -> [String] {
 fn paths_from_prompt() -> [String] {
     print("Enter file paths (blank line when done):");
     var out: [String] = [];
-    while true {
+    loop true {
         val raw = io.input("> ") ?? return out.clone();
         if raw == "" {
             break;
@@ -65,7 +65,7 @@ fn scan_parallel(paths: [String]) -> [String] {
     val ch: Channel<String> = tasks.channel();
     var workers: [Task<Unit>] = [];
     var i = 0;
-    while i < paths.len() {
+    loop i < paths.len() {
         if paths.get(i) == value(path) {
             val sender = ch.sender();
             val file = path.clone();
@@ -75,13 +75,13 @@ fn scan_parallel(paths: [String]) -> [String] {
         }
         i+= 1;
     }
-    while workers.len() > 0 {
+    loop workers.len() > 0 {
         val worker = workers.pop() ?? panic("missing worker");
         worker.join();
     }
     var results: [String] = [];
     var got = 0;
-    while got < paths.len() {
+    loop got < paths.len() {
         results.push(ch.receive() ?? panic("channel closed early"));
         got+= 1;
     }
@@ -90,7 +90,7 @@ fn scan_parallel(paths: [String]) -> [String] {
 }
 fn copy_paths(paths: [String]) -> [String] {
     var out: [String] = [];
-    for path in paths {
+    loop path in paths {
         out.push(path);
     }
     return out;
@@ -105,7 +105,7 @@ fn main() {
     print("");
     val parallel_paths = copy_paths(paths);
     val parallel = scan_parallel(parallel_paths);
-    for line in parallel {
+    loop line in parallel {
         print(line);
     }
     print("");

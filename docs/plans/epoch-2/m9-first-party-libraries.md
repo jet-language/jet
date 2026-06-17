@@ -1,10 +1,12 @@
 # E2-M9 — First-party library ring
 
-**Status:** draft — **blocked on D-LR1…D-LR3** (Group M9).
+**Status:** all decisions ratified; ready to implement after M6 + M8.
 **Depends on:** E2-M6 (clean API ergonomics), E2-M8 (versions + API diff enforce
-the ring). sqlite in the ring depends on E2-M14 (C FFI) timing (D-LR2).
+the ring). sqlite in the ring depends on E2-M14 ✅ (C FFI done).
 **Error codes:** E27xx block, shared across ring packages (claim in
 docs/spec/diagnostics.md).
+**Amendments:** D-LR4=B (jet.yaml in wave 1); D-DEP1 pattern for Rust-backed
+libs; D-JSON1 coercion surfacing required. See `docs/plans/sidequests/`.
 
 ## Goal
 
@@ -21,17 +23,34 @@ config rewrite, log processing, archive unpacking, hash verification.
 | D-LR3 | crypto surface | **A** — vetted hashes/HMAC/RNG only | A | ✅ ratified 2026-06-16 — crypto as broad as safely possible (vetted impls only) |
 | D-LR4 | YAML library | — | — | ✅ ratified 2026-06-16 — B: add `jet.yaml` in wave 1 (owner chose B against prior rec A) |
 
-## First wave (order per D-LR1)
+## First wave (order per D-LR1 — ALL ship in Epoch 2)
 
-- `jet.csv` — read/write with header handling and typed columns.
-- `jet.toml` — parse/emit; round-trips a config rewrite.
-- `jet.log` — structured logging (the observability minimum; pairs with E2-M12).
-- `jet.time` — calendar/timezone package.
-- `jet.regex` — matching/capture (no PCRE footguns by default).
-- `jet.crypto` — vetted hashes/HMAC/random **primitives only** (D-LR3); never
-  hand-rolled, never symmetric ciphers or TLS in this package.
-- `jet.archive` — zip/tar/gzip.
-- `jet.db` — base abstractions; sqlite first **if** E2-M14/runtime allow (D-LR2).
+Wave 1: `jet.csv`, `jet.toml`, `jet.yaml` (D-LR4=B), `jet.json`, `jet.log`, `jet.time`
+Wave 2: `jet.regex`, `jet.crypto`, `jet.archive`, `jet.db` (sqlite via C FFI, D-LR2)
+
+### D-DEP1: Rust-backed ring packages
+
+Ring libs that need a Rust internal (e.g. fast YAML parser, regex engine) follow the
+D-DEP1 FFI-wrapping pattern:
+
+```jet
+// In payload.jet — pin the Rust crate:
+[extern rust "some-crate@0.x.0"]
+
+// In src/lib.jet — wrap the API surface:
+@extern module some_crate { … }
+```
+
+This ships the Rust crate as a Jet package through the hangar store. No compiler crates (I6).
+Document the pattern once in `docs/spec/packages.md` and reference it from each lib that uses it.
+
+### D-JSON1: jet.json lenient coercion with surfacing
+
+`jet.json.decode` coerces unambiguously (`"8080"` → `8080`, `"true"` → `true`).
+The implementation MUST surface coercions — pick one mechanism:
+- A: `jet.json.decode_verbose` returns `{ value: T, coercions: [Coercion] }` (preferred)
+- C: sema advisory lint listing fields that will be coerced
+Implement at least option A. Document and test it (golden test or unit test).
 
 ## Rules (the ring's quality bar)
 
@@ -64,8 +83,7 @@ config rewrite, log processing, archive unpacking, hash verification.
 ## Out of scope
 
 - A web framework, ORM, or async drivers (E2-V5/V7).
-- Symmetric encryption / TLS in `jet.crypto` (TLS lives in E2-M10 via FFI).
-- YAML/XML in the first wave (add only on evidence).
+- Symmetric encryption / TLS in `jet.crypto` (TLS lives in E2-M10 as `jet.tls` package).
 - Pulling any of these into core std (they stay `jet.*` packages).
 
 ## Exit criteria
