@@ -419,6 +419,21 @@ is fixed).
 | E2501 | `{method}` is not available on a {direction} file handle. | `files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error. | Use the correct handle type for the operation: `files.open` to read, `files.create`/`files.append` to write. |
 | L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line in handle.lines() { … }` to stream line-by-line. Not emitted yet. |
 
+## Package supply-chain diagnostics (E2-M8, D-PKGS1–4)
+
+Enforced SemVer, resolver conflicts, audit advisories, and integrity
+verification live here. E26xx is the block for M8. These fire from the
+`jet publish`, `jet fetch`, and `jet audit` commands, never from compiling
+source files. Each diagnostic names the affected package and version so the
+output is machine-parseable with `--json`.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2601 | This release is tagged `{version}` but removes (or changes incompatibly) the public API item `{item}`. | `{version}` is a {bump_kind} bump, which promises no breaking changes under SemVer. Callers pinned to `^{major}.0` would stop compiling. | Bump to `{next_major}.0.0`, or restore `{item}` (a deprecated forwarding shim counts). Use `--force` to publish anyway with an explicit warning banner. |
+| E2602 | Dependency resolver conflict: `{package}` requires `{req_a}` from `{from_a}` but `{req_b}` from `{from_b}`, and no version satisfies both. | Jet uses a PubGrub-style resolver that requires a single version per package. Two incompatible constraints cannot both be met. | Upgrade or downgrade one of the conflicting dependents so their `{package}` constraints overlap, or ask the authors to release a version that satisfies both. |
+| E2603 | Advisory `{advisory_id}` matches `{package}` `{version}`: {title}. | The advisory database flags this version as having a known vulnerability, exposed interface, or supply-chain risk. | Upgrade to `>= {fixed_version}` (or the version listed in the advisory). Run `jet audit --explain {advisory_id}` for details. |
+| E2604 | Integrity check failed for `{package}` `{version}` — expected `{expected}`, got `{actual}`. | A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. | Re-run `jet fetch` after removing the corrupt store entry (`jet gc --force`). If the problem persists, the upstream source may have been altered; audit the change before proceeding. |
+
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an

@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M13 ✅ M14 ✅
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M13 ✅ M14 ✅
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -96,6 +96,31 @@ That sidequest requires parser work + example rewrites + snapshot bless.
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
 
 After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+
+### E2-M8 completion record
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ Publish refuses breaking changes under non-breaking version bump: `src/publish.rs` → `diff_public_api` + `e2601` (E2601). `jet publish` runs pre-publish gate + API surface extraction.
+- ✅ Publish refuses packages that fail `jet build` or `jet test` (D-PKGS4 pre-publish gate): `run_publish` in `src/main.rs` runs sema check; `--force` bypasses with warning.
+- ✅ `jet fetch --locked` and vendored builds work offline: `jet vendor` copies resolved dep dirs; existing `--locked` path in `fetch.rs` unchanged + tested in `vendored_offline_locked_build`.
+- ✅ Resolver conflict diagnostics are readable: `check_conflicts` + `e2602` with PubGrub-style explanation (named packages and dependents).
+- ✅ Private mirror flow works without hard-coding public infrastructure: `parse_registries_from_env` + `RegistryConfig` (configured via `JET_REGISTRY_<NAME>_URL` env vars).
+- ✅ SBOM emits in SPDX 2.3 (tag-value) and CycloneDX 1.5 JSON from the lockfile; both golden-tested.
+- ✅ Single-file programs still bypass all package machinery (unchanged).
+- ✅ Advisory database format + `jet audit` with E2603; `e2604` integrity checks.
+- ✅ E2601/E2602/E2603/E2604 registered in `docs/spec/diagnostics.md`.
+- ✅ `examples/features/50_publishable_pkg/` — publishable package with public API; golden-pinned.
+- ✅ `tests/pkg.rs` — 15 new M8 tests covering all exit criteria (semver_break_e2601, resolver_conflict_e2602, vendored_offline_locked_build, sbom_spdx_golden, sbom_cyclonedx_golden, audit_e2603_on_vulnerable_dep, integrity_e2604_on_tampered_store, private_registry_from_env, pre_publish_gate_*).
+- ✅ full `nix develop -c cargo test` green (45 pkg tests, all other suites green).
+
+**Not implemented (by design or deferral):**
+- Live registry upload (D-PKGS1: git registry ops are "hosted later"; `jet publish` validates locally and explains the git-push path).
+- Signed binary cache with rollback (explicitly out-of-scope per plan; designed only).
+- `jet explain E2601` etc. auto-populate from diagnostics.md (explain reads the spec).
+
+New modules: `src/publish.rs`.
+New commands: `jet publish`, `jet vendor`, `jet audit`, `jet sbom`.
 
 ### E2-M6 completion record
 

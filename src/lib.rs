@@ -30,6 +30,7 @@ pub mod lsp;
 pub mod m9;
 pub mod manifest;
 pub mod parser;
+pub mod publish;
 pub mod sema;
 pub mod sha256;
 pub mod store;

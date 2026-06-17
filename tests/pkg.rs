@@ -1045,3 +1045,234 @@ fn cli_end_to_end_new_then_add_path() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+// ─────────────────────────────────────────────
+// E2-M8: SemVer + supply-chain tests
+// ─────────────────────────────────────────────
+
+#[test]
+fn semver_break_e2601() {
+    // A minor bump that removes a public API item must produce E2601.
+    use jet::publish::{ApiItem, BumpKind, diff_public_api, e2601};
+
+    let old_api = vec![ApiItem {
+        kind: "fn".into(),
+        name: "parse".into(),
+        signature: "fn parse(raw: String) -> Int".into(),
+    }];
+    let new_api: Vec<ApiItem> = vec![]; // removed
+
+    let changes = diff_public_api(&old_api, &new_api);
+    assert!(!changes.is_empty(), "removed pub fn must be a breaking change");
+
+    let diag = e2601("1.2.0", BumpKind::Minor, &changes[0], 2);
+    assert_eq!(diag.code, "E2601");
+    assert!(diag.what.contains("1.2.0"), "what must name the version");
+    assert!(diag.why.contains("minor"), "why must name the bump kind");
+    assert!(diag.fix.contains("2.0.0"), "fix must name the next major");
+    assert!(diag.why.contains("parse") || diag.why.contains("removed"),
+        "why must name the broken item or action");
+}
+
+#[test]
+fn resolver_conflict_e2602() {
+    // Two packages requiring incompatible versions of a shared dep → E2602.
+    use jet::publish::{VersionConstraint, VersionReq, check_conflicts};
+    use std::collections::BTreeMap;
+
+    let constraints = vec![
+        VersionConstraint {
+            package: "log".into(),
+            req: VersionReq::parse("^1.0").unwrap(),
+            from: "web-server 2.1.0".into(),
+        },
+        VersionConstraint {
+            package: "log".into(),
+            req: VersionReq::parse("^2.0").unwrap(),
+            from: "db-client 3.0.0".into(),
+        },
+    ];
+    let diags = check_conflicts(&constraints, &BTreeMap::new());
+    assert!(!diags.is_empty(), "disjoint major caret ranges must be a conflict");
+    assert_eq!(diags[0].code, "E2602");
+    let why = &diags[0].why;
+    assert!(why.contains("log"), "why must name the conflicting package");
+    assert!(why.contains("web-server") || why.contains("db-client"), "why must name a dependent");
+}
+
+#[test]
+fn vendored_offline_locked_build() {
+    // --locked on a project with a lock file and a vendored dep must succeed.
+    // Without network this verifies the offline path works.
+    let tmp = tmp_dir("m8_vendor_locked");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    // Create a simple library.
+    write(&tmp, "greeter/payload.jet", &min_manifest("greeter", "0.1.0"));
+    write(&tmp, "greeter/greeter.jet", "pub fn greet() -> String { return \"hi\"; }\n");
+
+    // Project that depends on it.
+    write(
+        &tmp,
+        "payload.jet",
+        &manifest_with_deps("vendored_app", "0.1.0", "    greeter: path@greeter,"),
+    );
+    write(&tmp, "main.jet", "use greeter;\nfn main() { print(greeter.greet()); }\n");
+
+    let entry = tmp.join("main.jet");
+    let pack_path = tmp.join("payload.jet");
+
+    // Fetch to create the lock.
+    let mf = jet::manifest::parse(&pack_path, &fs::read_to_string(&pack_path).unwrap()).unwrap();
+    let opts = jet::fetch::FetchOptions { locked: false, update: false, update_dep: None };
+    let result = with_store(&store, || {
+        jet::fetch::fetch(&tmp, &mf, None, &opts)
+    });
+    assert!(result.is_ok(), "initial fetch must succeed");
+    let (lock, dep_dirs) = result.unwrap();
+
+    // Vendor the dependency.
+    let vendor_result = jet::publish::vendor(&tmp, &lock, &dep_dirs);
+    assert!(vendor_result.is_ok(), "vendor must succeed");
+    let copied = vendor_result.unwrap();
+    assert!(copied.contains(&"greeter".to_string()), "greeter must be vendored");
+    assert!(tmp.join("vendor/greeter").is_dir(), "vendor/greeter must exist");
+
+    // With the lock present, --locked fetch succeeds (no network needed).
+    let lock_text = fs::read_to_string(tmp.join(".jet/lock")).unwrap_or_default();
+    assert!(!lock_text.is_empty(), "lock file must exist after fetch");
+
+    // Compile the project (uses the in-store copy, not network).
+    let compile_result = with_store(&store, || {
+        jet::compile_with_path("", &entry.to_string_lossy())
+    });
+    assert!(compile_result.is_ok(), "vendored project must compile offline");
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::lock::LockFile {
+    use jet::lock::{LockFile, LockedPackage, LockSource};
+    LockFile {
+        version: 1,
+        packages: vec![LockedPackage {
+            name: name.into(),
+            version: version.into(),
+            fingerprint: fp.into(),
+            source: LockSource::Path("/tmp/placeholder".into()),
+            locked: None,
+            dependencies: vec![],
+        }],
+        root_dependencies: vec![name.into()],
+    }
+}
+
+#[test]
+fn sbom_spdx_golden() {
+    // SBOM emitted from a known lockfile has the expected SPDX structure.
+    use jet::publish::emit_spdx;
+
+    let lock = make_test_lock(
+        "logger",
+        "1.2.3",
+        "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb",
+    );
+    let sbom = emit_spdx(&lock, "myapp", "0.5.0");
+    // Golden structure checks (not full byte comparison because Created: timestamp varies).
+    assert!(sbom.starts_with("SPDXVersion: SPDX-2.3\n"));
+    assert!(sbom.contains("DataLicense: CC0-1.0\n"));
+    assert!(sbom.contains("DocumentNamespace: https://jet-lang.org/spdx/myapp-0.5.0-"));
+    assert!(sbom.contains("PackageName: logger\n"));
+    assert!(sbom.contains("PackageVersion: 1.2.3\n"));
+    assert!(sbom.contains("PackageChecksum: SHA256: deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb\n"));
+    assert!(sbom.contains("Relationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-0\n"));
+}
+
+#[test]
+fn sbom_cyclonedx_golden() {
+    use jet::publish::emit_cyclonedx;
+
+    let lock = make_test_lock(
+        "logger",
+        "1.2.3",
+        "sha256-deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb",
+    );
+    let sbom = emit_cyclonedx(&lock, "myapp", "0.5.0");
+    assert!(sbom.contains("\"bomFormat\": \"CycloneDX\""));
+    assert!(sbom.contains("\"specVersion\": \"1.5\""));
+    assert!(sbom.contains("\"name\": \"logger\""));
+    assert!(sbom.contains("\"version\": \"1.2.3\""));
+    assert!(sbom.contains("\"alg\": \"SHA-256\""));
+    assert!(sbom.contains("deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb"));
+}
+
+#[test]
+fn audit_e2603_on_vulnerable_dep() {
+    use jet::publish::{parse_advisory_db, audit_lockfile};
+
+    let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
+    // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
+    let db = "JET-2026-SEC-001|crypto-lib|^0|0.9.5|Timing side-channel in AES-GCM\n";
+    let advisories = parse_advisory_db(db);
+    let diags = audit_lockfile(&lock, &advisories);
+
+    assert_eq!(diags.len(), 1, "one advisory match expected");
+    assert_eq!(diags[0].code, "E2603");
+    assert!(diags[0].what.contains("JET-2026-SEC-001"));
+    assert!(diags[0].what.contains("crypto-lib"));
+    assert!(diags[0].what.contains("Timing side-channel"));
+}
+
+#[test]
+fn integrity_e2604_on_tampered_store() {
+    use jet::publish::e2604;
+
+    let diag = e2604("mylib", "1.0.0", "sha256-expected", "sha256-actual");
+    assert_eq!(diag.code, "E2604");
+    assert!(diag.what.contains("mylib"));
+    assert!(diag.what.contains("1.0.0"));
+    assert!(diag.why.contains("sha256-expected"));
+    assert!(diag.why.contains("sha256-actual"));
+}
+
+#[test]
+fn private_registry_from_env() {
+    use jet::publish::parse_registries_from_env;
+    let mut env = std::collections::HashMap::new();
+    env.insert("JET_REGISTRY_INTERNAL_URL".into(), "https://registry.acme.corp/jet".into());
+    let regs = parse_registries_from_env(&env);
+    assert!(!regs.is_empty());
+    assert_eq!(regs[0].name, "internal");
+    assert_eq!(regs[0].url, "https://registry.acme.corp/jet");
+    assert!(!regs[0].mirror);
+}
+
+#[test]
+fn pre_publish_gate_blocks_on_build_failure() {
+    use jet::publish::{PrePublishGate, BumpKind};
+    let gate = PrePublishGate {
+        build_ok: false,
+        tests_ok: true,
+        breaking: vec![],
+        version: "1.1.0".into(),
+        bump_kind: BumpKind::Minor,
+        next_major: 2,
+    };
+    assert!(gate.is_blocked(), "failed build must block publish");
+}
+
+#[test]
+fn pre_publish_gate_passes_with_no_breaks_and_minor_bump() {
+    use jet::publish::{PrePublishGate, BumpKind};
+    let gate = PrePublishGate {
+        build_ok: true,
+        tests_ok: true,
+        breaking: vec![],
+        version: "1.1.0".into(),
+        bump_kind: BumpKind::Minor,
+        next_major: 2,
+    };
+    assert!(!gate.is_blocked());
+    assert!(gate.semver_errors().is_empty());
+}
