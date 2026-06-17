@@ -565,7 +565,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             }
             // Stage 1a: modules are parsed but not yet type-checked; the U5
             // merge / eval pipeline consumes them. No runtime contribution.
-            Item::Module(_) => {}
+            Item::Module(_) | Item::CodeModule(_) => {}
             // S59: C FFI modules are folded by cffi::assemble before the
             // bundle path runs; this legacy single-Program path ignores them.
             Item::CModule(_) => {}
@@ -789,7 +789,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::ExternRust(_)
             | Item::Trait(_)
             | Item::Module(_)
-            | Item::CModule(_) => {}
+            | Item::CModule(_) | Item::CodeModule(_) => {}
         }
     }
 
@@ -916,7 +916,7 @@ fn comptime_context_from_items(
             | Item::Const(_)
             | Item::Trait(_)
             | Item::Module(_)
-            | Item::CModule(_) => {}
+            | Item::CModule(_) | Item::CodeModule(_) => {}
         }
     }
     (funcs, externs, globals)
@@ -1163,6 +1163,9 @@ fn check_func_body(
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_std_imports = HashMap::new();
+    let empty_code_modules = HashMap::new();
+    let empty_unqualified: HashMap<String, String> = HashMap::new();
+    let empty_unqualified_file: HashMap<String, (String, usize)> = HashMap::new();
     let mut ck = Checker {
         funcs,
         registry,
@@ -1172,6 +1175,9 @@ fn check_func_body(
         module_idx: 0,
         imports: &empty_imports,
         std_imports: &empty_std_imports,
+        code_modules: &empty_code_modules,
+        unqualified: &empty_unqualified,
+        unqualified_file: &empty_unqualified_file,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -1334,6 +1340,15 @@ struct ModuleState {
     std_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     m9: M9Registry,
+    /// D-MOD2: inline code module aliases present in this file (alias → module name).
+    /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
+    code_modules: HashMap<String, String>,
+    /// D-MOD3: unqualified items imported via `use alias.Item` (inline modules).
+    /// Maps unqualified name → mangled name (e.g. "clamp" → "math__clamp").
+    unqualified: HashMap<String, String>,
+    /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
+    /// Maps name → (function_name, module_idx).
+    unqualified_file: HashMap<String, (String, usize)>,
 }
 
 fn impl_type_exists(
@@ -1363,6 +1378,12 @@ struct Checker<'a> {
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
     std_imports: &'a HashMap<String, String>,
+    /// D-MOD2: inline code module aliases in scope (alias → module name).
+    code_modules: &'a HashMap<String, String>,
+    /// D-MOD3: unqualified inline-module items in scope (name → mangled name).
+    unqualified: &'a HashMap<String, String>,
+    /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
+    unqualified_file: &'a HashMap<String, (String, usize)>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
     /// name -> span of the use that gave the value away.
@@ -5086,9 +5107,33 @@ impl<'a> Checker<'a> {
         &mut self,
         callee: &mut Box<Expr>,
         items: &mut Vec<Expr>,
-        span: Span,
+        _span: Span,
     ) -> Option<Type> {
         let callee_span = callee.span();
+
+        // `print` is a builtin that doesn't live in scope as an ident — special-case it so
+        // `print.[a, b, c]` works without triggering E0107.
+        if let Expr::Ident(name, _) = callee.as_ref() {
+            if name == syntax::BUILTIN_PRINT {
+                self.borrow_ctx = true;
+                for item in items.iter_mut() {
+                    if let Some(t) = self.infer(item) {
+                        if !is_printable(&t, self.registry) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` doesn't know how to show {}", syntax::BUILTIN_PRINT, t.show()),
+                                "print shows values that have a display".to_string(),
+                                "print one of its parts instead".to_string(),
+                                Some(item.span()),
+                            ));
+                        }
+                    }
+                }
+                self.borrow_ctx = false;
+                return None;
+            }
+        }
+
         let callee_ty = self.infer(callee);
 
         // E0961: callee must be a one-argument function.
@@ -5159,7 +5204,10 @@ impl<'a> Checker<'a> {
             return None;
         }
 
-        let elem = ret_ty.unwrap_or(param_ty); // fall back to param type for void callees
+        let Some(elem) = ret_ty else {
+            // void callee: side effects only, no list produced
+            return None;
+        };
         let len = items.len() as u64;
         if len == 0 {
             Some(Type::List(Box::new(elem)))
@@ -5575,6 +5623,12 @@ impl<'a> Checker<'a> {
             if let Some(&mod_idx) = self.imports.get(alias) {
                 return self.infer_import_call(mod_idx, method, *alias_span, span, args);
             }
+            // D-MOD2: inline code module call — `math.double(x)` where `math` is an
+            // inline `module math { … }` in this file. Resolve via mangled name.
+            if self.code_modules.contains_key(alias.as_str()) {
+                let mangled = format!("{}__{}", alias, method);
+                return self.infer_code_module_call(alias, &mangled, *alias_span, span, args);
+            }
         }
         if let Expr::Ident(type_name, _) = &**receiver {
             if is_json_type_name(type_name) {
@@ -5832,6 +5886,66 @@ impl<'a> Checker<'a> {
         }
         self.check_method_args(&type_name, method, &msig, args, span)?;
         msig.return_type.clone()
+    }
+
+    /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
+    /// The function was registered as `{alias}__{method}` in `self.funcs`.
+    fn infer_code_module_call(
+        &mut self,
+        alias: &str,
+        mangled: &str,
+        alias_span: Span,
+        span: Span,
+        args: &mut [crate::ast::CallArg],
+    ) -> Option<Type> {
+        let Some(sig) = self.funcs.get(mangled).cloned() else {
+            self.diags.push(Diagnostic::error(
+                "E0608",
+                format!("`{}` is not defined in module `{}`", &mangled[alias.len() + 2..], alias),
+                "check the module body for the function you're calling".to_string(),
+                "make sure the function name is spelled correctly".to_string(),
+                Some(alias_span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        };
+        let is_pub = self.funcs.contains_key(mangled)
+            && self.func_pub_in_scope(mangled);
+        // pub check (inline modules share module_idx — always same file, always accessible)
+        let _ = is_pub;
+        if args.len() != sig.params.len() {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!(
+                    "`{}` expects {} argument{}, got {}",
+                    &mangled[alias.len() + 2..],
+                    sig.params.len(),
+                    if sig.params.len() == 1 { "" } else { "s" },
+                    args.len()
+                ),
+                "every argument must match a parameter".to_string(),
+                format!("check the definition of `{}` in module `{}`", &mangled[alias.len() + 2..], alias),
+                Some(span),
+            ));
+        }
+        for (arg, (pconv, pty)) in args.iter_mut().zip(sig.params.iter()) {
+            if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
+                self.borrow_ctx = true;
+            }
+            if let Some(aty) = self.infer(&mut arg.expr) {
+                let arg_span = arg.expr.span();
+                self.check_type_assignable(pty, &aty, arg_span);
+            }
+        }
+        sig.return_type
+    }
+
+    fn func_pub_in_scope(&self, name: &str) -> bool {
+        // inline modules are in the same file — all items accessible
+        let _ = name;
+        true
     }
 
     fn infer_import_call(
@@ -7936,6 +8050,17 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-MOD3: check unqualified inline-module imports (e.g. `use math.clamp`).
+            if let Some(mangled) = self.unqualified.get(&call.name).cloned() {
+                let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
+                let result = self.infer_code_module_call(&alias, &mangled, call.name_span, call.name_span, &mut call.args);
+                return Some(result);
+            }
+            // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
+            if let Some((fn_name, mod_idx)) = self.unqualified_file.get(&call.name).cloned() {
+                let result = self.infer_import_call(mod_idx, &fn_name, call.name_span, call.name_span, &mut call.args);
+                return Some(result);
+            }
         }
 
         let Some(sig) = self.funcs.get(&call.name).cloned() else {
@@ -9333,6 +9458,9 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
             std_imports: HashMap::new(),
             tests: HashMap::new(),
             m9: M9Registry::default(),
+            code_modules: HashMap::new(),
+            unqualified: HashMap::new(),
+            unqualified_file: HashMap::new(),
         })
         .collect();
 
@@ -9434,6 +9562,20 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
                 }
                 Item::Trait(_) => {}
                 Item::Module(_) => {}
+                Item::CodeModule(cm) => {
+                    if let Some(body) = &cm.body {
+                        // D-MOD2: register inline module functions under mangled names
+                        // (`math__double`) so call-site sema can check them.
+                        st.code_modules.insert(cm.name.clone(), cm.name.clone());
+                        for inner in body {
+                            if let Item::Func(f) = inner {
+                                let mangled = format!("{}__{}", cm.name, f.name);
+                                st.funcs.insert(mangled.clone(), func_to_sig(f));
+                                st.func_pub.insert(mangled, f.is_pub);
+                            }
+                        }
+                    }
+                }
             }
         }
         register_type_methods(&module.items, &mut st.registry, &mut diags);
@@ -9457,9 +9599,110 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
         );
     }
 
+    // D-MOD3: second pass — process Unqualified imports after all module aliases and
+    // inline code-modules are registered (so we can validate item membership).
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        for imp in &module.imports {
+            let ImportKind::Unqualified { module_alias, module_alias_span, items, .. } = &imp.kind else {
+                continue;
+            };
+            let st = &mut states[idx];
+            if st.code_modules.contains_key(module_alias.as_str()) {
+                // Inline module: items are mangled as `{alias}__{item}`.
+                for item in items {
+                    let mangled = format!("{}__{}", module_alias, item);
+                    if !st.funcs.contains_key(&mangled) {
+                        diags.push(Diagnostic::error(
+                            "E0611",
+                            format!("`{}` is not defined in module `{}`", item, module_alias),
+                            "check the module body for the item you're importing".to_string(),
+                            "make sure the name is spelled correctly".to_string(),
+                            Some(*module_alias_span),
+                        ));
+                    } else if !st.func_pub.get(&mangled).copied().unwrap_or(false) {
+                        diags.push(Diagnostic::error(
+                            "E0609",
+                            format!("`{}` is private in module `{}`", item, module_alias),
+                            "only `pub` items can be brought into scope with `use`".to_string(),
+                            format!("add `pub` before `fn {}` in module `{}`", item, module_alias),
+                            Some(*module_alias_span),
+                        ));
+                    } else {
+                        st.unqualified.insert(item.clone(), mangled);
+                    }
+                }
+            } else if module_alias == "core" || module_alias == "jet" {
+                // Std namespace prefix: `use core.mem` → bind each item as a std import.
+                // Each item `x` becomes `core.x` in the known-modules table.
+                let st = &mut states[idx];
+                for item in items {
+                    let full = format!("core.{}", item);
+                    if !loader::is_known_std_module(&full) {
+                        diags.push(Diagnostic::error(
+                            "E1001",
+                            format!("there is no core module `{}`", full),
+                            "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
+                            format!("import one of: {}", loader::std_modules_list()),
+                            Some(*module_alias_span),
+                        ));
+                    } else if st.std_imports.contains_key(item) {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{}` is used twice", item),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                    } else {
+                        st.std_imports.insert(item.clone(), full);
+                    }
+                }
+            } else if st.imports.contains_key(module_alias.as_str()) {
+                // File module: look up items in the target module's state.
+                let target_idx = st.imports[module_alias.as_str()];
+                for item in items {
+                    let is_pub = states[target_idx].func_pub.get(item).copied().unwrap_or(false);
+                    let exists = states[target_idx].funcs.contains_key(item);
+                    if !exists {
+                        diags.push(Diagnostic::error(
+                            "E0611",
+                            format!("`{}` is not defined in module `{}`", item, module_alias),
+                            "check the module for the item you're importing".to_string(),
+                            "make sure the name is spelled correctly".to_string(),
+                            Some(*module_alias_span),
+                        ));
+                    } else if !is_pub {
+                        diags.push(Diagnostic::error(
+                            "E0609",
+                            format!("`{}` is private in module `{}`", item, module_alias),
+                            "only `pub` items can be brought into scope with `use`".to_string(),
+                            format!("add `pub` before `fn {}` in the imported file", item),
+                            Some(*module_alias_span),
+                        ));
+                    } else {
+                        states[idx].unqualified_file.insert(item.clone(), (item.clone(), target_idx));
+                    }
+                }
+            } else {
+                // Module alias not found — E0610.
+                diags.push(Diagnostic::error(
+                    "E0610",
+                    format!("no module named `{}` in scope", module_alias),
+                    "the alias must refer to a module imported earlier in this file".to_string(),
+                    format!("add `import … as {}`  before this `use`", module_alias),
+                    Some(*module_alias_span),
+                ));
+            }
+        }
+    }
+
     for (idx, module) in bundle.modules.iter().enumerate() {
         let st = &mut states[idx];
         for imp in &module.imports {
+            // Unqualified imports are handled in the dedicated pass above.
+            if matches!(&imp.kind, ImportKind::Unqualified { .. }) {
+                continue;
+            }
             let alias = loader::import_alias(imp);
             if st.imports.contains_key(&alias) {
                 diags.push(Diagnostic::error(
@@ -9600,7 +9843,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
             | Item::ExternRust(_)
             | Item::Trait(_)
             | Item::Module(_)
-            | Item::CModule(_) => {}
+            | Item::CModule(_) | Item::CodeModule(_) => {}
             }
         }
         for item in &mut module.items {
@@ -9744,7 +9987,7 @@ fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -> HashSet<S
                 Item::Trait(_)
                 | Item::ExternRust(_)
                 | Item::Module(_)
-                | Item::CModule(_) => {}
+                | Item::CModule(_) | Item::CodeModule(_) => {}
             }
         }
     }
@@ -10101,6 +10344,9 @@ fn check_func_body_bundle(
         module_idx,
         imports: &st.imports,
         std_imports: &st.std_imports,
+        code_modules: &st.code_modules,
+        unqualified: &st.unqualified,
+        unqualified_file: &st.unqualified_file,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),

@@ -1545,10 +1545,11 @@ implementation milestone is pending.
 ### Registered for M3–M14 (see docs/spec/decision-ballots.md for options)
 
 
-| ID  | Question                                   | Needed by |
-| --- | ------------------------------------------ | --------- |
-| S56 | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
+| ID   | Question                                   | Needed by |
+| ---- | ------------------------------------------ | --------- |
+| S56  | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
+| S83  | external `::` definitions for structs and modules (see note below) | owner-paced |
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the
@@ -1572,6 +1573,30 @@ implementation milestone is pending.
 > struct/enum literals, and what a *mistake* looks like under each — before
 > choosing. Build the side-by-side example set first; do not re-litigate
 > S6's text until then.
+
+> **S83 — External `::` definitions for structs and modules.** The philosophy
+> (one mechanical path, flexible structure) permits methods and module items
+> to be defined either inline in the type/module body block, or externally
+> using a `TypeName::item` qualifier — analogous to C++ out-of-class
+> definitions. Both forms produce identical semantics; `jet fmt` may enforce
+> a project style.
+>
+> Options:
+>
+> 1. **A — Allow both.** Inline body block and `TypeName::item(...)` external
+>    form are both valid everywhere. The compiler treats them identically.
+>    `jet fmt` can enforce one or the other per project. Widest flexibility;
+>    the structural-freedom principle from philosophy.md.
+> 2. **B — Inline only.** All definitions must appear inside the body block.
+>    Simpler grammar; no `::` sigil. Forces a single layout convention; can
+>    feel constraining for large types split across a file.
+>
+> **Recommendation: A.** The owner has explicitly called out C++-style
+> external definitions as a desired structural option. The mechanical
+> operation is identical; the flexibility is in arrangement only, which
+> does not violate the one-path principle.
+>
+> **Decision gate:** owner ratification. No code changes until ratified.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
@@ -1806,3 +1831,4 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-17 | D-LIB2 | generics v1: **A** — associated types + default method bodies; no higher-kinded types | owner |
 | 2026-06-17 | S19 | **amended (S19-amend A):** unified `loop` keyword; header picks mode (empty=infinite, bool=conditional, `in`=iteration); `while`/`for` retired to S14 teaching errors | owner |
 | 2026-06-17 | D-JSON1-decode | JSON decode strictness: **B — lenient coerce** where unambiguous (`"8080"` → `8080`); only error on truly impossible conversions; implementation must surface coercions (see owner-todo.md). Note: S82/S55 reference a prior D-JSON1 for `@Serialize` config overrides — those are separate; this entry covers the decode-strictness ballot ratification. | owner |
+| 2026-06-17 | D-MOD4 | directory module surface: **C — auto-surface by default, optional facade to restrict**. No `mod.jet` → all `pub` items from sub-files auto-surface. Adding `mod.jet` with `export { from "file": item; … }` switches that directory to explicit-only mode; auto-surfacing is disabled. Call site (`use "./text" as text`) is unaffected by whether a facade exists. | owner |

@@ -14,7 +14,7 @@
 use crate::ast::{
     AccessConvention, BinOp, BindPattern, ConstAttr, ElseBranch, EnumDef, EnumLitArg, Expr, Field,
     ForKind,
-    Func, IfStmt, ImplDef, IndexKind, Item, LValue, Lambda, LambdaBody, OrFallback, Pattern,
+    Func, IfStmt, ImplDef, ImportKind, IndexKind, Item, LValue, Lambda, LambdaBody, OrFallback, Pattern,
     Program, ProgramBundle, RustConstKind, Stmt, StrPart, StructDef, TestDef, TraitImplBlock, Type,
     UnOp, VariantPayload,
 };
@@ -370,7 +370,8 @@ fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>>
                     collect_tuple_shapes_from_stmt(s, &mut out);
                 }
             }
-            Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_) => {}
+            Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
+            | Item::CodeModule(_) => {}
         }
     }
     out
@@ -440,6 +441,12 @@ struct Cx {
     ffi_crate: Option<String>,
     /// M7: Jet function name -> wrapper symbol in the FFI crate.
     extern_funcs: HashMap<String, String>,
+    /// D-MOD2: inline code module aliases in scope (alias → module name).
+    code_modules: HashSet<String>,
+    /// D-MOD3: unqualified inline-module items (name → "alias__method").
+    unqualified_inline: HashMap<String, String>,
+    /// D-MOD3: unqualified file-module items (name → (rust_mod_name, fn_name)).
+    unqualified_file: HashMap<String, (String, String)>,
 }
 
 const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
@@ -669,7 +676,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) => {}
         }
     }
 
@@ -742,7 +749,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) => {}
         }
     }
 
@@ -986,6 +993,9 @@ fn build_cx_items(
         root_prefix: String::new(),
         ffi_crate: link.map(|l| l.crate_name.clone()),
         extern_funcs: extern_funcs.clone(),
+        code_modules: HashSet::new(),
+        unqualified_inline: HashMap::new(),
+        unqualified_file: HashMap::new(),
     };
 
     for item in items {
@@ -1081,6 +1091,28 @@ fn build_cx_items(
                 cx.trait_names.insert(t.name.clone());
             }
             Item::Impl(_) | Item::Test(_) | Item::Module(_) => {}
+            Item::CodeModule(cm) => {
+                // D-MOD2: register inline module alias and add mangled function sigs.
+                if let Some(body) = &cm.body {
+                    cx.code_modules.insert(cm.name.clone());
+                    for inner in body {
+                        if let Item::Func(f) = inner {
+                            let mangled = format!("{}__{}", cm.name, f.name);
+                            cx.sigs.insert(
+                                mangled.clone(),
+                                f.params.iter().map(|p| (p.convention, p.ty.clone())).collect(),
+                            );
+                            cx.fn_types.insert(
+                                mangled,
+                                Type::Fn {
+                                    params: f.params.iter().map(|p| p.ty.clone()).collect(),
+                                    ret: f.return_type.clone().map(Box::new),
+                                },
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2178,12 +2210,15 @@ fn emit_pattern_match_switch(
             }
         })
     });
+    let subject_ty = expr_jet_ty_with_cx(cx, subject, env);
     out.push_str(&format!("{}match {} {{\n", pad, subj));
     for arm in arms {
         if let Some(pattern) = switch_arm_pattern_owned(cx, &arm.cond, subject) {
             let pat = emit_match_pattern(cx, &pattern, enum_type.as_deref());
             out.push_str(&format!("{}    {} => {{\n", pad, pat));
-            emit_stmts(cx, &arm.body, env, out, indent + 2, false);
+            let mut body_env = env.clone();
+            add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
+            emit_stmts(cx, &arm.body, &mut body_env, out, indent + 2, false);
             out.push_str(&format!("{}    }}\n", pad));
         }
     }
@@ -2527,7 +2562,8 @@ fn emit_if(
         let pat_str = emit_if_let_pattern(cx, pat);
         out.push_str(&format!("{}if let {} = {} {{\n", pad, pat_str, subj_expr));
         let mut body_env = env.clone();
-        add_pattern_bindings(cx, pat, &mut body_env);
+        let subj_ty = expr_jet_ty_with_cx(cx, subj, env);
+        add_pattern_bindings(cx, pat, &mut body_env, subj_ty.as_ref());
         emit_stmts(
             cx,
             &ifs.then_body,
@@ -2626,15 +2662,24 @@ fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     }
 }
 
-fn add_pattern_bindings(cx: &Cx, pattern: &Pattern, env: &mut HashMap<String, Slot>) {
+fn add_pattern_bindings(
+    cx: &Cx,
+    pattern: &Pattern,
+    env: &mut HashMap<String, Slot>,
+    subject_ty: Option<&Type>,
+) {
     match pattern {
         Pattern::Present { binding, .. } => {
+            let inner_ty = match subject_ty {
+                Some(Type::Option(inner)) => Some((**inner).clone()),
+                _ => None,
+            };
             env.insert(
                 binding.clone(),
                 Slot {
                     rust_name: mangle(binding),
                     deref: false,
-                    jet_ty: None,
+                    jet_ty: inner_ty,
                 },
             );
         }
@@ -2655,13 +2700,31 @@ fn add_pattern_bindings(cx: &Cx, pattern: &Pattern, env: &mut HashMap<String, Sl
             }
         }
         Pattern::Absent(_) => {}
-        Pattern::Ok { binding, .. } | Pattern::Err { binding, .. } => {
+        Pattern::Ok { binding, .. } => {
+            let ok_ty = match subject_ty {
+                Some(Type::Result { ok, .. }) => Some((**ok).clone()),
+                _ => None,
+            };
             env.insert(
                 binding.clone(),
                 Slot {
                     rust_name: mangle(binding),
                     deref: false,
-                    jet_ty: None,
+                    jet_ty: ok_ty,
+                },
+            );
+        }
+        Pattern::Err { binding, .. } => {
+            let err_ty = match subject_ty {
+                Some(Type::Result { err, .. }) => Some((**err).clone()),
+                _ => None,
+            };
+            env.insert(
+                binding.clone(),
+                Slot {
+                    rust_name: mangle(binding),
+                    deref: false,
+                    jet_ty: err_ty,
                 },
             );
         }
@@ -3133,27 +3196,34 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         // S75/S76 codegen: fan-out lowers to a Vec built by calling the callee on each item.
         // Sema erased [T#N] to the same Vec representation so this is straightforward.
         Expr::FanOut { callee, items, .. } => {
-            // For a named function callee, generate direct calls to avoid
-            // the boxed-lambda form that can't be called after a cast.
-            let caller: Box<dyn Fn(&str) -> String> = if let Expr::Ident(name, _) = callee.as_ref() {
-                if cx.sigs.contains_key(name.as_str()) {
-                    let fn_name = cx.mangle_name(name);
-                    Box::new(move |arg| format!("{}({})", fn_name, arg))
-                } else {
-                    let f = emit_expr(cx, callee, env);
-                    Box::new(move |arg| format!("({})({})", f, arg))
-                }
+            let elems: Vec<String> = if let Expr::Ident(name, name_span) = callee.as_ref() {
+                // Route through emit_call so builtins (print, panic, …) are handled correctly.
+                items
+                    .iter()
+                    .map(|item| {
+                        let call = crate::ast::Call {
+                            name: name.clone(),
+                            name_span: *name_span,
+                            args: vec![crate::ast::CallArg {
+                                convention: AccessConvention::Read,
+                                expr: item.clone(),
+                                span: item.span(),
+                                flags: Default::default(),
+                            }],
+                        };
+                        emit_call(cx, &call, env)
+                    })
+                    .collect()
             } else {
                 let f = emit_expr(cx, callee, env);
-                Box::new(move |arg| format!("({})({})", f, arg))
+                items
+                    .iter()
+                    .map(|item| {
+                        let arg = emit_expr(cx, item, env);
+                        format!("({})({})", f, arg)
+                    })
+                    .collect()
             };
-            let elems: Vec<String> = items
-                .iter()
-                .map(|item| {
-                    let arg = emit_expr(cx, item, env);
-                    caller(&arg)
-                })
-                .collect();
             format!("vec![{}]", elems.join(", "))
         }
     }
@@ -3414,6 +3484,48 @@ fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
         }
         _ => None,
     }
+}
+
+/// Like `expr_jet_ty` but also resolves std module call return types.
+/// Used to determine the subject type for pattern match switches so that
+/// `Ok(binding)` / `Err(binding)` patterns carry the correct inner type.
+fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
+    // First try the base resolver.
+    if let Some(ty) = expr_jet_ty(expr, env) {
+        return Some(ty);
+    }
+    // Handle std module method calls: `alias.method(...)` where `alias` is a
+    // std import.  Only the ones that return a `Result` matter here.
+    if let Expr::MethodCall { receiver, method, .. } = expr {
+        if let Expr::Ident(alias, _) = receiver.as_ref() {
+            if let Some(module) = cx.std_imports.get(alias) {
+                let json_ty = || Type::Named(syntax::TYPE_JSON.to_string());
+                let json_err_ty = || Type::Named(syntax::TYPE_JSON_ERROR.to_string());
+                let io_err_ty = || Type::Named(syntax::TYPE_IO_ERROR.to_string());
+                let str_ty = || Type::String;
+                let unit_ty = || Type::Named("Unit".to_string());
+                let list_str = || Type::List(Box::new(Type::String));
+                let list_u8 = || Type::List(Box::new(Type::Named("U8".to_string())));
+                let result = |ok: Type, err: Type| Type::Result { ok: Box::new(ok), err: Box::new(err) };
+                let ty: Option<Type> = match (module.as_str(), method.as_str()) {
+                    ("core.json", "parse") => Some(result(json_ty(), json_err_ty())),
+                    ("core.fs", "read") => Some(result(str_ty(), io_err_ty())),
+                    ("core.fs", "read_bytes") => Some(result(list_u8(), io_err_ty())),
+                    ("core.fs", "write" | "append" | "remove" | "create_dir" | "copy" | "rename") => {
+                        Some(result(unit_ty(), io_err_ty()))
+                    }
+                    ("core.fs", "list_dir") => Some(result(list_str(), io_err_ty())),
+                    ("core.io", "read_all_input") => Some(result(str_ty(), io_err_ty())),
+                    ("core.env", "current_dir") => Some(result(str_ty(), io_err_ty())),
+                    _ => None,
+                };
+                if ty.is_some() {
+                    return ty;
+                }
+            }
+        }
+    }
+    None
 }
 
 fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
@@ -3774,6 +3886,14 @@ fn emit_method_call(
                 arg_str
             );
         }
+        // D-MOD2: inline code module call — emit `user_{alias}__{method}(args)`.
+        // The function was emitted as `user_{alias}__{method}` by emit_program_items.
+        if cx.code_modules.contains(alias.as_str()) {
+            let mangled_key = format!("{}__{}", alias, method);
+            let sig = cx.sigs.get(&mangled_key).map(|s| s.as_slice());
+            let arg_str = emit_call_args(cx, sig, args, env);
+            return format!("{}user_{}__{}({})", cx.root_prefix, alias, method, arg_str);
+        }
     }
     // Built-in collection/string methods take precedence when they match.
     if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
@@ -3917,6 +4037,21 @@ fn emit_call(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -> S
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         return format!("{}::{}({})", crate_name, wrapper, args);
     }
+    // D-MOD3: unqualified inline-module import — emit `user_{alias}__{method}(...)`.
+    if let Some(mangled_key) = cx.unqualified_inline.get(&call.name) {
+        let sig = cx.sigs.get(mangled_key).map(|s| s.as_slice());
+        let arg_str = emit_call_args(cx, sig, &call.args, env);
+        return format!("{}user_{}({})", cx.root_prefix, mangled_key, arg_str);
+    }
+    // D-MOD3: unqualified file-module import — emit `{root}{rust_mod}::user_{fn}(...)`.
+    if let Some((rust_mod, fn_name)) = cx.unqualified_file.get(&call.name) {
+        let sig = cx
+            .import_sigs
+            .get(&(call.name.clone(), fn_name.clone()))
+            .map(|s| s.as_slice());
+        let arg_str = emit_call_args(cx, sig, &call.args, env);
+        return format!("{}{}::{}({})", cx.root_prefix, rust_mod, mangle(fn_name), arg_str);
+    }
     format!("{}({})", cx.mangle_name(&call.name), args)
 }
 
@@ -3973,9 +4108,72 @@ fn std_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, 
     for imp in &module.imports {
         if let Some(std_module) = loader::std_module_path(imp) {
             map.insert(loader::import_alias(imp), std_module);
+            continue;
+        }
+        // D-MOD3: `use core.item` / `use core.{a,b}` — bind each item name to its
+        // full std path so that `item.method(...)` resolves the same way as
+        // `import core.item as item` would.
+        if let ImportKind::Unqualified { module_alias, items, .. } = &imp.kind {
+            if module_alias == "core" || module_alias == "jet" {
+                for item in items {
+                    let full = format!("core.{}", item);
+                    if loader::is_known_std_module(&full) {
+                        map.insert(item.clone(), full);
+                    }
+                }
+            }
         }
     }
     map
+}
+
+/// D-MOD3: build unqualified-import maps for codegen.
+/// Returns (inline_map, file_map) where:
+///   inline_map: unqualified name → "alias__method" (for inline code modules)
+///   file_map:   unqualified name → (rust_mod_name, fn_name) (for file modules)
+fn unqualified_import_maps(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> (HashMap<String, String>, HashMap<String, (String, String)>) {
+    let mut inline_map: HashMap<String, String> = HashMap::new();
+    let mut file_map: HashMap<String, (String, String)> = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    // Build a set of inline code module aliases for this module.
+    let code_mod_aliases: std::collections::HashSet<String> = module
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let crate::ast::Item::CodeModule(cm) = item {
+                if cm.body.is_some() {
+                    return Some(cm.name.clone());
+                }
+            }
+            None
+        })
+        .collect();
+    for imp in &module.imports {
+        let ImportKind::Unqualified { module_alias, items, .. } = &imp.kind else {
+            continue;
+        };
+        if module_alias == "core" || module_alias == "jet" {
+            // Std namespace — handled separately by std_import_map.
+            continue;
+        }
+        if code_mod_aliases.contains(module_alias.as_str()) {
+            // Inline code module.
+            for item in items {
+                let key = format!("{}__{}", module_alias, item);
+                inline_map.insert(item.clone(), key);
+            }
+        } else if let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) {
+            // File module.
+            let rust_mod = format!("user_{}", bundle.modules[target].alias);
+            for item in items {
+                file_map.insert(item.clone(), (rust_mod.clone(), item.clone()));
+            }
+        }
+    }
+    (inline_map, file_map)
 }
 
 fn import_sig_map(
@@ -4038,7 +4236,7 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
             Item::Const(c) => emit_const(c, out),
             Item::CModule(cm) => emit_c_module(cm, out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) => {}
         }
     }
     for item in items {
@@ -4071,6 +4269,20 @@ fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: b
                 continue;
             }
             emit_func(cx, f, out);
+        }
+    }
+    // D-MOD2: emit inline code module functions with mangled names.
+    for item in items {
+        if let Item::CodeModule(cm) = item {
+            if let Some(body) = &cm.body {
+                for inner in body {
+                    if let Item::Func(f) = inner {
+                        let mut mangled_f = f.clone();
+                        mangled_f.name = format!("{}__{}", cm.name, f.name);
+                        emit_func(cx, &mangled_f, out);
+                    }
+                }
+            }
         }
     }
 }
@@ -4115,6 +4327,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         cx.std_imports = std_import_map(bundle, i);
         cx.used_std = bundle.used_std.clone();
         cx.root_prefix = "super::".to_string();
+        let (uinline, ufile) = unqualified_import_maps(bundle, i);
+        cx.unqualified_inline = uinline;
+        cx.unqualified_file = ufile;
         emit_program_items(&cx, &module.items, &mut out, true);
         out.push_str("}\n\n");
     }
@@ -4130,6 +4345,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.std_imports = std_import_map(bundle, bundle.entry);
     cx.used_std = bundle.used_std.clone();
+    let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
+    cx.unqualified_inline = uinline;
+    cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
     out
 }
@@ -4188,6 +4406,9 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         cx.std_imports = std_import_map(bundle, i);
         cx.used_std = bundle.used_std.clone();
         cx.root_prefix = "super::".to_string();
+        let (uinline, ufile) = unqualified_import_maps(bundle, i);
+        cx.unqualified_inline = uinline;
+        cx.unqualified_file = ufile;
         emit_program_items(&cx, &module.items, &mut out, false);
         out.push_str("}\n\n");
     }
@@ -4204,6 +4425,9 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.std_imports = std_import_map(bundle, bundle.entry);
     cx.used_std = bundle.used_std.clone();
+    let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
+    cx.unqualified_inline = uinline;
+    cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, false);
 
     for (i, test) in tests.iter().enumerate() {

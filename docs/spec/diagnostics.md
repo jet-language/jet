@@ -176,6 +176,12 @@ before continuing.
 | E0604 | jet   | `use` cycle (lists the loop) |
 | E0605 | sema  | item exists in another file but is private |
 | E0606 | jet   | ambiguous module name (lists every matching path) |
+| E0607 | jet   | `module name;` file declaration not found (D-MOD1) |
+| E0608 | sema  | function not defined in inline code module (D-MOD2) |
+| E0609 | sema  | `use alias.item` but item is private (D-MOD3) |
+| E0610 | sema  | `use alias.item` but alias is not a module (D-MOD3) |
+| E0611 | sema  | `use alias.item` but item is not defined (D-MOD3) |
+| E0612 | jet   | wildcard imports (`use math.*`) are not supported |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
 | E0702 | sema  | type or access mode can't cross the FFI boundary |
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |

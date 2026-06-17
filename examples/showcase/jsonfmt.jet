@@ -1,0 +1,25 @@
+// jsonfmt — JSON pretty-printer/validator.
+// Usage: jsonfmt FILE
+use core.io as io;
+use core.fs as fs;
+use core.json as json;
+use core.process as process;
+
+fn main() {
+    val args = io.args();
+    val path = args.get(1) ?? "";
+    if path == "" {
+        print("usage: jsonfmt FILE");
+        process.exit(1);
+    }
+    val text = fs.read(path) ?? panic("cannot read file");
+    when json.parse(text) {
+        | it == ok(data) {
+            print(json.render_pretty(data));
+        }
+        | it == err(e) {
+            io.eprint("parse error at line {e.line}: {e.message}");
+            process.exit(1);
+        }
+    }
+}

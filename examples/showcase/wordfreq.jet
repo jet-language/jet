@@ -1,0 +1,60 @@
+// wordfreq — word frequency across files in a directory.
+// Usage: wordfreq DIR
+use core.io as io;
+use core.fs as fs;
+use core.process as process;
+
+fn count_file(path: String, mut counts: [String, Int]) {
+    when fs.read(path) {
+        | it == ok(text) {
+            val flat = text.replace("\n", " ");
+            val words = flat.split(" ");
+            loop raw in words {
+                val word = raw.trim().to_lower();
+                if word != "" {
+                    counts[word] = ((counts.get(word) ?? 0) + 1);
+                }
+            }
+        }
+        | it == err(_) {}
+    }
+}
+
+fn count_dir(dir: String, mut counts: [String, Int]) {
+    when fs.list_dir(dir) {
+        | it == ok(entries) {
+            loop entry in entries {
+                val full = "{dir}/{entry}";
+                if fs.is_dir(full) {
+                    count_dir(full, mut counts);
+                } else if entry.ends_with(".txt") {
+                    count_file(full, mut counts);
+                }
+            }
+        }
+        | it == err(_) {}
+    }
+}
+
+fn main() {
+    val args = io.args();
+    val target = args.get(1) ?? "";
+    if target == "" {
+        print("usage: wordfreq DIR");
+        process.exit(1);
+    }
+    var counts: [String, Int] = [:];
+    if fs.is_dir(target) {
+        count_dir(target, mut counts);
+    } else {
+        count_file(target, mut counts);
+    }
+    var pairs: [(word: String, n: Int)] = [];
+    loop word, n in counts {
+        pairs.push((word: word, n: n));
+    }
+    pairs.sort_by((p: (word: String, n: Int)) => (-p.n));
+    loop p in pairs {
+        print("{p.word}: {p.n}");
+    }
+}

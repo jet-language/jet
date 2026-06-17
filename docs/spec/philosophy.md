@@ -5,23 +5,61 @@ wins. The accepted currency for having both is **implementation effort** —
 the owner has explicitly chosen to spend more build time rather than trade
 away ease of use or performance.
 
+## The two-facet design
+
+Jet has two audiences sharing one language:
+
+**Beginners** get magic. Batteries included, first-party packages, excellent
+tooling, ceremony-free entry. Footguns do not exist in their world — they
+are structurally hidden behind explicit opt-in gates, not merely
+undocumented. A beginner can build anything quickly, cleanly, and easily
+without ever encountering undefined behavior or memory unsafety.
+
+**Experts** can look behind the facade. When control is needed — raw memory,
+layout, volatile, custom allocators, unsafe operations — the expert opts in
+explicitly, takes responsibility, and gets the full capability. The compiler
+does not prevent expert-tier work; it requires the expert to ask for it.
+
+The design principle: *footguns are opt-in, not opt-out.* Beginners never
+encounter them. Experts choose them.
+
+## The north star: jack of all trades, master of ALL
+
+Jet's goal is to be the last language you need. Frontend, backend, CLI tools,
+networking, embedded, systems programming, scripting, configuration — Jet
+should be the *best* tool for all of it. Not adequate; best. This is an
+ambitious long-horizon target achieved incrementally. v1 scope is narrower,
+but design decisions must not foreclose any domain.
+
+## One mechanical path, flexible structure
+
+There is exactly one way to *perform* each operation in Jet. There is not
+exactly one way to *arrange* code. Mechanical uniqueness kills confusion;
+structural flexibility lets teams write code that fits their style.
+
+Concretely: a struct's methods can be written inline in its body block, or
+defined externally using `StructName::method(...)` — both produce the same
+program. The same applies to modules. This is one feature with two entry
+points, not two features. The compiler treats them identically. Style guides
+and `jet fmt` can enforce a project preference; the language never forces one.
+
 ## Ranked priorities
 
-**New**
-- Owner: Magic out-of-the-box, Batteries Included. Footguns are Opt-In. Memory & Type Safety by Default. Optimized Runtime Performance. 
-
-1. **Memory & type safety.** Never traded away, never configurable. 
+1. **Memory & type safety.** Never traded away, never configurable.
 2. **Beginner experience.** Learnability and diagnostics are the product.
-   If a feature can't be explained in two sentences to someone writing
-   their first compiled language, it needs a redesign or a tier (see C1).
-3. **Runtime performance.** Zero-cost defaults via the Rust backend. We
-   never add runtime overhead to buy simplicity (no GC, no hidden boxing).
-4. **Language smallness.** One obvious way. Features fight to get in;
-   the default answer to "should we add X?" is no, with a great error
-   message and a workaround instead (the simplicity ratchet, invariant I8).
+   If a feature cannot be explained in two sentences to someone writing
+   their first compiled program, it needs a redesign or a tier (see C1).
+3. **Runtime performance.** Zero-cost defaults via the Rust backend. No
+   runtime overhead to buy simplicity (no GC, no hidden boxing).
+4. **One mechanical path.** Exactly one canonical way to do each operation.
+   Features fight to get in; the default answer is no, with a great error
+   and a workaround instead (the simplicity ratchet, invariant I8).
+   Structural flexibility (where code lives, how it is nested or
+   externalized) is not constrained by this priority.
 5. **Implementation simplicity & compile speed.** Matters, loses to 1–4.
-6. **Rust ecosystem interop.** FFI-tier, post-v1 (milestone M7). Not a
-   v1 goal; see conflict C2.
+6. **Ecosystem breadth.** The stdlib grows to cover all target domains
+   post-v1: networking, web, embedded, systems. Each addition is
+   first-party and curated, not a fragmented afterthought.
 
 Tie-break rule: when a decision trades rank N against rank M, the smaller
 number wins. When it trades effort against anything, effort loses.
@@ -71,44 +109,39 @@ lifetime syntax; multiple string types; null (absence will be `Option` in
 M3+); global mutable state; a self-hosted compiler; `no_std` / sub-std
 binary sizes; a required project structure or package manifest.
 
-## Audience (provisional — owner to ratify)
+## Audience
 
-Someone writing their first compiled language: CLI tools, small services,
-learning projects. Not (yet): kernels, embedded, async network servers.
+**v1:** Someone writing their first compiled language *or* an experienced
+developer who would otherwise reach for Go, Zig, C, or Rust for small
+tools. Minimal friction by default, control when wanted, performance and
+safety enforced underneath.
 
-**Owner direction (2026-06-11):** the bar for v1.0 rises to a second
-audience — experienced developers who would otherwise reach for Go, Zig,
-C, or Rust for small tools, and who should *prefer* Jet: minimal
-friction by default, control when wanted, with performance and safety
-enforced underneath by the Rust backend and the ownership model. The
-roadmap (docs/spec/roadmap.md) reflects this; the ranked priorities above do not
-change — beginner experience still outranks everything but safety.
+**Post-v1:** Every developer, for every workload — kernels, embedded,
+async network servers, frontend, configuration. Design decisions in v1
+must not paint us into a corner that forecloses any of these targets.
 
-**Owner direction (2026-06-12):** Jet's identity is the **best hybrid
-language** — learn from every modern and long-standing language, adopt
-the best non-conflicting parts, with exceptional readability, ergonomic
-defaults, and a batteries-included experience that is approachable for
-beginners and loved by experts. Consequences, recorded here so plans
-stop inheriting the older, smaller vision:
+## Owner directions (recorded for plan inheritance)
 
-- **Long-horizon targets now include embedded systems and kernels.**
-  The "Not (yet)" audience line below stands for v1.x, but post-v1
-  work must not paint us into a corner that forecloses freestanding
-  targets. The Rust backend (`no_std`/`core`) is the enabling path.
+**2026-06-12:** Jet's identity is the **best hybrid language** — learn
+from every modern and long-standing language, adopt the best
+non-conflicting parts, with exceptional readability, ergonomic defaults,
+and a batteries-included experience that is approachable for beginners and
+loved by experts.
+
+- **Long-horizon targets include embedded systems and kernels.** The
+  `no_std`/`core` Rust backend is the enabling path.
 - **An expert low-level tier is required** — true C/C++/Rust/Zig-class
   control (raw memory, layout, volatile, allocators), gated so it never
   confuses beginners and never slows programs that don't use it.
   Gating ratified as S58 (`std/mem` import + `unsafe` blocks,
   Zig-style allocators). Onboarding materials never mention it until
   needed.
-- **C FFI is a needed future addition** (S59 ships in **Epoch 2**, E2-M14).
-  Rust FFI (M7) ships first; the C ABI story follows in v2.
+- **C FFI is a needed future addition** (S59 ships in **Epoch 2**,
+  E2-M14). Rust FFI (M7) ships first; the C ABI story follows in v2.
 - **Purity is a product feature, not just a comptime detail.** `pure fn`
   (S60 ratified) marks functions the compiler verifies as pure so Jet
   can eventually replace the Nix language for declarative configuration
-  via `jet eval --pure` (layer 3 post-v1; see
-  docs/plans/epoch-1/m12-packages.md and
-  docs/plans/jetpack-jetos/README.md).
+  via `jet eval --pure` (layer 3 post-v1).
 - **Go's territory (networking etc.) is standard-library scope**, built
   out post-v1 — never core-language scope.
 - Invariant **I1 will need a measured amendment** when the expert tier
@@ -117,7 +150,14 @@ stop inheriting the older, smaller vision:
   cannot be expressed without Rust `unsafe` internally. The amendment
   is owner-gated and not yet drafted.
 
-**Status note (amended 2026-06-15):** v1 Jet source-library package
-management is consolidated in docs/plans/epoch-1/m12-packages.md. Public
-binary/dev-shell package management is the owner-gated `jetpack` track in
+**2026-06-15:** v1 Jet source-library package management is consolidated
+in docs/plans/epoch-1/m12-packages.md. Public binary/dev-shell package
+management is the owner-gated `jetpack` track in
 docs/plans/jetpack-jetos/README.md; jetos is Phase 2 on top of jetpack.
+
+**2026-06-17:** Jet's dual-facet identity is formalized: magic-first for
+beginners, expert control accessible behind explicit opt-in. The north star
+is a jack-of-all-trades, master-of-ALL language — no reason to reach for
+another language for any workload. One mechanical path per operation, but
+structural flexibility in how code is arranged (inline vs. external `::` 
+definitions). See open decision S83 for the `::` external definition syntax.

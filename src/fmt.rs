@@ -152,6 +152,9 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             .unwrap_or(m.span.start),
         // S59: the `@extern`/`@bindgen` attribute precedes the span start.
         Item::CModule(cm) => cm.span.start,
+        Item::CodeModule(cm) => src[..cm.name_span.start]
+            .rfind(syntax::KW_MODULE)
+            .unwrap_or(cm.span.start),
     }
 }
 
@@ -205,6 +208,7 @@ fn item_span_end(item: &Item) -> usize {
             .unwrap_or(t.name_span.end),
         Item::Module(m) => m.span.end,
         Item::CModule(cm) => cm.span.end,
+        Item::CodeModule(cm) => cm.span.end,
     }
 }
 
@@ -379,6 +383,11 @@ impl<'a> Fmt<'a> {
             // S59: C FFI modules are emitted verbatim (non-destructive). A
             // canonical formatter can land alongside the bind backend.
             Item::CModule(cm) => {
+                let text = self.src[cm.span.start..cm.span.end].to_string();
+                self.write(&text);
+            }
+            // Code modules are emitted verbatim pending a dedicated formatter.
+            Item::CodeModule(cm) => {
                 let text = self.src[cm.span.start..cm.span.end].to_string();
                 self.write(&text);
             }
@@ -724,6 +733,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_import(&mut self, imp: &ImportDecl) {
+        if imp.is_pub {
+            self.write("pub ");
+        }
         self.write(syntax::KW_USE);
         self.write(" ");
         match &imp.kind {
@@ -731,18 +743,36 @@ impl<'a> Fmt<'a> {
                 self.write("\"");
                 self.write(path);
                 self.write("\"");
+                let default_alias = path.rsplit('/').next().unwrap_or("module");
+                if imp.alias != default_alias {
+                    self.write(" ");
+                    self.write(syntax::KW_AS);
+                    self.write(" ");
+                    self.write(&imp.alias);
+                }
             }
-            ImportKind::Module(name, _) => self.write(name),
-        }
-        let default_alias = match &imp.kind {
-            ImportKind::File(path, _) => path.rsplit('/').next().unwrap_or("module"),
-            ImportKind::Module(name, _) => name.as_str(),
-        };
-        if imp.alias != default_alias {
-            self.write(" ");
-            self.write(syntax::KW_AS);
-            self.write(" ");
-            self.write(&imp.alias);
+            ImportKind::Module(name, _) => {
+                self.write(name);
+                let default_alias = name.rsplit('.').next().unwrap_or(name.as_str());
+                if imp.alias != default_alias {
+                    self.write(" ");
+                    self.write(syntax::KW_AS);
+                    self.write(" ");
+                    self.write(&imp.alias);
+                }
+            }
+            ImportKind::Unqualified { module_alias, items, .. } => {
+                if items.len() == 1 {
+                    self.write(module_alias);
+                    self.write(".");
+                    self.write(&items[0]);
+                } else {
+                    self.write(module_alias);
+                    self.write(".{");
+                    self.write(&items.join(", "));
+                    self.write("}");
+                }
+            }
         }
         self.write(";");
     }

@@ -735,6 +735,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::Module(_) => {}
         // S59: C FFI boundary modules aren't yet indexed for symbols/hover.
         Item::CModule(_) => {}
+        // Code modules aren't yet indexed for symbols/hover.
+        Item::CodeModule(_) => {}
     }
 }
 

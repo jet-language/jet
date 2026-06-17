@@ -1,9 +1,11 @@
 # CLAUDE.md — agent operating manual
 
-You are building a beginner-first, memory-safe compiled language. The
-front end (this repo) owns all semantics and every error message; rustc
-is a hidden verifier/optimizer. A human **owner** has final say on all
-user-facing syntax.
+You are building a dual-facet, memory-safe compiled language: magic
+out-of-the-box for beginners, full expert control behind explicit opt-in.
+The long-run goal is jack-of-all-trades, master-of-ALL — no reason to
+reach for another language. The front end owns all semantics and every
+error message; rustc is a hidden verifier/optimizer. A human **owner**
+has final say on all user-facing syntax.
 
 ## Read order (before any work)
 
@@ -45,10 +47,12 @@ Commit that as "M0 verified" before anything else.
 
 ## Invariants (violating one = stop and fix)
 
-- **I1** Safe by default: ordinary Jet emits zero `unsafe`. Expert low-level code
-  (`@unsafe { … }` / `@unsafe fn`, E2-M13/D-LL1) may generate `unsafe` only
-  inside user-written, audited (`@audit("…")`) gate regions. No `unsafe`
-  without an explicit `@unsafe` gate in the source.
+- **I1** Safe by default, expert tier first-class: all Jet code is memory-safe
+  and type-safe unless the user explicitly opts in. `@unsafe { … }` / `@unsafe fn`
+  (E2-M13/D-LL1) is a real, supported expert tier — not a loophole — gated by
+  user-written, audited (`@audit("…")`) regions. Generated code may contain Rust
+  `unsafe` only inside those gate regions. No `unsafe` in generated code without
+  a corresponding `@unsafe` gate in the source.
 - **I2** rustc never speaks to users. rustc rejecting generated code is an
   internal compiler error (exit 101, banner in src/main.rs) and a P0 bug.
 - **I3** Codegen is dumb. All checking lives in sema. Never "try rustc and
@@ -57,7 +61,10 @@ Commit that as "M0 verified" before anything else.
   tests/ui snapshot. No snapshot → the diagnostic doesn't exist.
 - **I5** Examples are the executable spec. Every feature ships with an
   example + expected output that golden tests enforce.
-- **I6** Zero external crates in the compiler without owner approval.
+- **I6** Zero external crates in the compiler (`src/`), ever. Stdlib sub-libraries
+  and modules may use external crates to bootstrap until end of Epoch 3; after
+  that, all external deps must be replaced with native Jet/Rust implementations.
+  Any new stdlib external dep requires owner approval.
 - **I7** Every user-typeable keyword/sigil lives in src/syntax.rs with a
   decision ID.
 - **I8** Simplicity ratchet: prefer rejecting a program with a great
@@ -78,6 +85,23 @@ its Open Decisions table — options, one-line tradeoffs, your
 recommendation — and **stop work on that feature** until the owner
 decides. Build something else meanwhile. When the owner ratifies: update
 src/syntax.rs / parser, re-bless snapshots, log it in the decision table.
+
+## Sub-agent delegation
+
+Spawn sub-agents for parallelisable or context-heavy work rather than doing
+everything in one context window. Match the model to the task:
+
+| Model | When to use |
+|-------|-------------|
+| `haiku` | Mechanical, read-only tasks: grep, file lookup, snapshot diffing, doc summarisation |
+| `sonnet` | Default for most implementation sub-tasks: writing Rust, sema passes, codegen, tests |
+| `opus` | Hard reasoning: type-system design, architecture decisions, tricky sema edge cases, design reviews |
+
+Rules:
+- Prefer `pipeline()` over `parallel()` in workflows unless you genuinely need all results before proceeding.
+- Never spawn a sub-agent just to run a single shell command — use Bash directly.
+- Sub-agents must still follow all invariants (I1–I8) and the Nix command environment.
+- Pass the sub-agent enough context (relevant file paths, invariants, goal) so it can act without re-reading this whole file.
 
 ## Git workflow
 

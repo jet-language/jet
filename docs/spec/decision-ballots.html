@@ -42,7 +42,7 @@ button.copy-btn:active{background:#1a7f31}
 </head>
 <body>
 <h1>Jet — Owner Decision Ballot</h1>
-<p class="subtitle">All decisions ratified. New open decisions will appear here when drafted.</p>
+<p class="subtitle">4 open decisions — module system design. D-MOD3 leaning A. Review and confirm all.</p>
 
 <div id="ballot"></div>
 
@@ -52,7 +52,294 @@ button.copy-btn:active{background:#1a7f31}
 </div>
 
 <script>
-const DECISIONS = [];
+const DECISIONS = [
+  {
+    section: "0. Jet language module system",
+    id: "D-MOD1",
+    title: "What is a module?",
+    desc: "The most fundamental question: what unit of code constitutes one module? Community context is included in each option description to help decide. Cast: Alex (multi-file CLI tool), Maya (first project bigger than one file).",
+    rec: "no-rec",
+    options: [
+      {
+        key: "A",
+        name: "A — Rust: explicit mod declaration, file-based",
+        desc: "Every module must be declared with mod foo; in a parent file. Compiler errors on undeclared files. Praised for explicitness and large-codebase navigability; cited as one of Rust's steeper beginner onramps.",
+        nix: null,
+        code: `// main.jet — must declare every module:
+mod math;
+mod text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+    print("{clamped}");
+    print(line);
+}
+
+// text/mod.jet — declares submodules, re-exports:
+mod wrap;
+mod parse;
+pub use wrap.wrap;
+
+// Community: praised for explicitness and safety.
+// Cited as Rust's steepest beginner onramp (mod.rs confusion,
+// new file = must update parent). Excellent for large codebases.
+// Forget mod wrap; → compiler error, nothing silently orphaned.`
+      },
+      {
+        key: "B",
+        name: "B — Go: directory = module, no declaration",
+        desc: "All .jet files in the same directory automatically form one module. No mod declarations anywhere. Almost universally praised for simplicity; criticized for silent additions when a file is dropped in.",
+        nix: null,
+        code: `// main.jet — no mod declarations, just import by path:
+use "./math" as math;
+use "./text" as text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+    print("{clamped}");
+    print(line);
+}
+
+// math/clamp.jet — being in math/ is the declaration:
+pub fn clamp(n: Int, lo: Int, hi: Int) -&gt; Int { … }
+
+// Community: praised as Go's simplest, most beginner-friendly feature.
+// Main criticism: silent — adding any file to a directory adds it to
+// the module; can't have two modules in one directory; no inline submodules.`
+      },
+      {
+        key: "C",
+        name: "C — TypeScript/ES: every file is its own module",
+        desc: "Every .jet file is an independent module; directories are organizational only. Import any file by relative path. Zero ceremony.",
+        nix: null,
+        code: `// main.jet — import any file directly by path:
+use "./math"      as math;
+use "./text/wrap" as text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+    print("{clamped}");
+    print(line);
+}
+
+// math.jet — just write code, it's already a module:
+pub fn clamp(n: Int, lo: Int, hi: Int) -&gt; Int { … }
+pub fn lerp(a: Float, b: Float, t: Float) -&gt; Float { … }
+
+// Community: generally well-loved for explicit, traceable imports.
+// Limitation: text/wrap.jet and text/parse.jet are unrelated modules
+// — you need a facade file to bundle them under one name.`
+      }
+    ]
+  },
+  {
+    section: "0. Jet language module system",
+    id: "D-MOD2",
+    title: "Import access: qualified vs unqualified",
+    desc: "Once a module is imported, how do you refer to its contents? Option A reflects the owner's direction: Rust-style two-step, dot notation + path aliases instead of ::, no wildcard imports. Review A and confirm or pick an alternative.",
+    rec: "no-rec",
+    options: [
+      {
+        key: "A",
+        name: "A — Owner's proposed: two-step, dot notation, no wildcard",
+        desc: "Import the module with a path alias (step 1). Optionally bring specific items into unqualified scope with use alias.Item (step 2). No wildcards.",
+        nix: null,
+        code: `// Step 1: import with alias
+use "./math" as math;
+
+// Step 2 (optional): bring specific items into unqualified scope
+use math.clamp;
+use math.Stats;
+use math.{lerp, mix};   // group import
+
+fn main() {
+    val s = Stats.from([1, 2, 3, 4]);    // unqualified — step-2 imported
+    print(clamp(s.mean, 0, 100));         // unqualified
+    print(math.mix2(0.3, 0.7, 0.5));     // qualified — not step-2 imported
+}
+
+// Maya's first program — never needs step 2:
+use "./math" as math;
+fn main() { print(math.clamp(5, 0, 3)); }
+
+// Wildcard is a compile error:
+// use math.*;   →  Error: wildcard imports are not supported`
+      },
+      {
+        key: "B",
+        name: "B — Qualified-only, always prefix",
+        desc: "One concept: import with alias, always use module.Item. No unqualified access.",
+        nix: null,
+        code: `use "./math" as math;
+use "./text" as text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+    val stats   = math.Stats.from([1, 2, 3, 4]);
+    print(math.lerp(0.0, 1.0, 0.5));
+}
+
+// Short alias for heavily-used modules:
+use "./math" as m;
+print(m.clamp(200, 0, 100));`
+      },
+      {
+        key: "C",
+        name: "C — Single-step from … use (Python-style)",
+        desc: "One keyword form that skips the alias and imports items directly into unqualified scope.",
+        nix: null,
+        code: `from "./math" use clamp, Stats, lerp;
+
+fn main() {
+    val s = Stats.from([1, 2, 3, 4]);
+    print(clamp(s.mean, 0, 100));
+    print(lerp(0.0, 1.0, 0.5));
+    // No qualified form available once imported this way
+}`
+      }
+    ]
+  },
+  {
+    section: "0. Jet language module system",
+    id: "D-MOD3",
+    title: "Visibility defaults",
+    desc: "What is exported from a file by default? Owner selected A (private by default, pub to export). LSP follow-up noted: when a function exists in an imported module but isn't in scope, the LSP should surface an auto-import hint — this is a toolchain item, not a syntax decision, and applies regardless of which option is chosen here. Confirm A or reconsider.",
+    rec: "A",
+    options: [
+      {
+        key: "A",
+        name: "A — Private by default, pub to export (owner's selection)",
+        desc: "Nothing leaves a file unless marked pub. Safest model. The LSP softens the beginner stumble: a helpful warning + quick-fix instead of a bare error.",
+        nix: null,
+        code: `// math.jet
+pub fn clamp(n: Int, lo: Int, hi: Int) -&gt; Int { … }    // exported
+pub struct Stats { pub mean: Float; pub count: Int; }   // exported + fields
+
+fn validate(lo: Int, hi: Int) { … }   // private — not exported
+
+// Maya uses helper from main.jet without pub:
+// LSP hint:  "helper in math.jet is private — add pub to export it?"
+//            [ Quick fix: add pub ]
+
+// LSP follow-up (separate roadmap item, not syntax):
+// When a name is used that exists in an imported module but wasn't
+// brought into scope, the LSP offers an auto-import quick-fix:
+//   "Did you mean math.clamp? [ Add: use math.clamp ]"`
+      },
+      {
+        key: "B",
+        name: "B — Capitalize = exported (Go-style)",
+        desc: "No visibility keyword. Uppercase name = exported, lowercase = private. Clashes with Jet's existing PascalCase-for-types convention.",
+        nix: null,
+        code: `// math.jet
+fn Clamp(n: Int, lo: Int, hi: Int) -&gt; Int { … }  // Uppercase → exported
+fn validate(lo: Int, hi: Int) { … }               // lowercase → private
+
+// Problem: Jet already uses PascalCase for types (Stats, Config, User).
+// Under this scheme ALL types would look exported — even private ones.
+// Also forces users to name things by visibility, not by domain meaning.`
+      },
+      {
+        key: "C",
+        name: "C — Public by default, priv to hide",
+        desc: "Everything exported unless marked priv. Zero friction for beginners; requires discipline in large codebases.",
+        nix: null,
+        code: `// math.jet
+fn clamp(n: Int, lo: Int, hi: Int) -&gt; Int { … }   // exported automatically
+struct Stats { mean: Float; count: Int; }           // exported automatically
+priv fn validate(lo: Int, hi: Int) { … }           // explicitly hidden
+
+// Maya: writes fn helper(), it works from main.jet immediately.
+// Expert: uses priv aggressively to control surface.
+// Risk: forgetting priv silently leaks internals.`
+      }
+    ]
+  },
+  {
+    section: "0. Jet language module system",
+    id: "D-MOD4",
+    title: "Re-export: building a public API surface",
+    desc: "How does a directory module control its outward-facing surface? Reframed: what feels magical for beginners (it just works) vs. controllable for experts (lock down the API). Option C is recommended as the best of both.",
+    rec: "C",
+    options: [
+      {
+        key: "A",
+        name: "A — Auto-surface: all pub items bubble up, no facade needed",
+        desc: "Magical default. A directory module automatically exposes every pub item from every file inside it. No mod.jet, no extra lines.",
+        nix: null,
+        code: `// text/ directory — no mod.jet needed:
+// text/wrap.jet:   pub fn wrap(…)
+// text/parse.jet:  pub fn parse_words(…), pub fn count_words(…)
+// text/internal.jet: priv fn tokenize(…)
+
+use "./text" as text;
+
+fn main() {
+    text.wrap("a long line", 40);    // works — pub, auto-surfaced
+    text.parse_words(line);          // works
+    text.count_words(line);          // works
+    // text.tokenize(…)  → Error: tokenize is private
+}
+
+// Alex adds pub fn word_score(…) to parse.jet →
+// immediately visible as text.word_score. Nothing else to update.
+// Limitation: no way to hide a pub item from the surface without
+// making it priv (which also hides it inside the directory).`
+      },
+      {
+        key: "B",
+        name: "B — Explicit facade only (Rust pub use)",
+        desc: "Full expert control. A mod.jet lists exactly what the module exposes. Nothing auto-surfaces. Every new public item needs a pub use line.",
+        nix: null,
+        code: `// text/mod.jet — the only way items become visible:
+pub use "./wrap".wrap;
+pub use "./parse".parse_words;
+// count_words deliberately NOT listed — hidden even though pub in parse.jet
+
+use "./text" as text;
+text.wrap(…)         // works
+text.parse_words(…)  // works
+text.count_words(…)  // Error: count_words is not exported by text
+
+// Adding pub fn word_score to parse.jet?
+// Must also add: pub use "./parse".word_score in mod.jet
+// Two-file edit for every new public function.`
+      },
+      {
+        key: "C",
+        name: "C — Auto-surface by default, optional facade to restrict (Rec)",
+        desc: "Magic-first, expert-control hybrid. No mod.jet = all pub items auto-surface. Add mod.jet with export { } = explicit surface, auto-surfacing disabled.",
+        nix: null,
+        code: `// === Beginner path: no mod.jet, everything pub auto-surfaces ===
+// text/wrap.jet:   pub fn wrap(…)
+// text/parse.jet:  pub fn parse_words(…), pub fn count_words(…)
+
+use "./text" as text;
+text.wrap(…)         // works — auto-surfaced
+text.parse_words(…)  // works — auto-surfaced
+text.count_words(…)  // works — auto-surfaced
+
+// === Expert path: add text/mod.jet to lock the surface ===
+export {
+    from "./wrap":  wrap;
+    from "./parse": parse_words;
+    // count_words omitted — hidden from callers, even though pub in parse.jet
+}
+
+// Callers still write:  use "./text" as text
+// text.wrap(…)         → works
+// text.parse_words(…)  → works
+// text.count_words(…)  → Error: not in the module's export surface
+
+// The internal split (adding mod.jet) is invisible to callers.`
+      }
+    ]
+  }
+];
 
 const DECISIONS_PLACEHOLDER = [
   {

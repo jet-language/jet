@@ -8,8 +8,8 @@
 //! rest of the file's problems.
 
 use crate::ast::{
-    AccessConvention, BinOp, Binding, BindName, BindPattern, Call, CallArg, ConstAttr, ConstDef,
-    Contribution, ElseBranch, EnumDef,
+    AccessConvention, BinOp, Binding, BindName, BindPattern, Call, CallArg, CodeModule,
+    ConstAttr, ConstDef, Contribution, ElseBranch, EnumDef,
     EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     ModuleDecl, Namespace,
     LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
@@ -385,35 +385,168 @@ impl<'a> Parser<'a> {
 
     /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
     fn import_decl(&mut self) -> Result<crate::ast::ImportDecl, Diagnostic> {
-        let start = self.bump().span;
-        let (kind, alias_default) = match &self.peek().kind {
+        let start = self.bump().span; // consume `use`
+        match &self.peek().kind {
             TokKind::Str(parts) => {
                 let path = string_literal_value(parts)?;
-                let span = self.bump().span;
-                (
-                    crate::ast::ImportKind::File(path.clone(), span),
-                    path.rsplit('/').next().unwrap_or("module").to_string(),
-                )
+                let path_span = self.bump().span;
+                let alias_default = path.rsplit('/').next().unwrap_or("module").to_string();
+                let (alias, alias_span) = if matches!(
+                    &self.peek().kind,
+                    TokKind::Ident(n) if n == syntax::KW_AS
+                ) {
+                    self.bump();
+                    let (name, span) = self.expect_ident("after `as`")?;
+                    (name, span)
+                } else {
+                    (alias_default, start)
+                };
+                self.expect(TokKind::Semi, "after an import")?;
+                let end = self.toks[self.pos - 1].span.end;
+                Ok(crate::ast::ImportDecl {
+                    kind: crate::ast::ImportKind::File(path, path_span),
+                    alias,
+                    alias_span,
+                    span: Span::new(start.start, end),
+                    is_pub: false,
+                })
             }
             TokKind::Ident(_) => {
-                let (module_name, span) = self.module_path()?;
-                let alias_default = module_name
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(module_name.as_str())
-                    .to_string();
-                (
-                    crate::ast::ImportKind::Module(module_name.clone(), span),
-                    alias_default,
-                )
+                // Peek ahead to decide which import form this is:
+                //   use ident.{A, B}    → Unqualified group
+                //   use ident.ident ;   → Unqualified single (no `as`)
+                //   use ident.ident.*   → error: wildcard
+                //   use ident ...       → Module (may have dots + `as alias`)
+                let (first, first_span) = self.expect_ident("after `use`")?;
+                if matches!(self.peek().kind, TokKind::Dot) {
+                    // Look two tokens ahead (past the dot).
+                    let after_dot = &self.peek2().kind;
+                    match after_dot {
+                        TokKind::LBrace => {
+                            // use alias.{A, B, ...}
+                            self.bump(); // consume `.`
+                            let lbrace_span = self.bump().span; // consume `{`
+                            let mut items = Vec::new();
+                            loop {
+                                if matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                                    break;
+                                }
+                                let (item, _) = self.expect_ident("inside `use alias.{…}`")?;
+                                items.push(item);
+                                if matches!(self.peek().kind, TokKind::Comma) {
+                                    self.bump();
+                                } else {
+                                    break;
+                                }
+                            }
+                            let rbrace_span = self.peek().span;
+                            self.expect(TokKind::RBrace, "to close `use alias.{…}`")?;
+                            let items_span = Span::new(lbrace_span.start, rbrace_span.end);
+                            self.expect(TokKind::Semi, "after an import")?;
+                            let end = self.toks[self.pos - 1].span.end;
+                            Ok(crate::ast::ImportDecl {
+                                kind: crate::ast::ImportKind::Unqualified {
+                                    module_alias: first.clone(),
+                                    module_alias_span: first_span,
+                                    items,
+                                    items_span,
+                                    span: Span::new(start.start, end),
+                                },
+                                alias: first,
+                                alias_span: first_span,
+                                span: Span::new(start.start, end),
+                                is_pub: false,
+                            })
+                        }
+                        TokKind::Star => {
+                            // use alias.* — wildcard: reject
+                            self.bump(); // consume `.`
+                            let star_span = self.bump().span; // consume `*`
+                            return Err(Diagnostic::error(
+                                "E0612",
+                                "wildcard imports are not supported".to_string(),
+                                "`use math.*` would hide where each name comes from".to_string(),
+                                "list each item instead: `use math.{clamp, lerp}`".to_string(),
+                                Some(star_span),
+                            ));
+                        }
+                        TokKind::Ident(_) => {
+                            // Check if token after the item ident is `;` (no `as`).
+                            // peek3() is now 2 positions past current (dot + ident).
+                            let after_item = &self.peek3().kind;
+                            if matches!(after_item, TokKind::Semi | TokKind::Eof) {
+                                // use alias.item ; — Unqualified single
+                                self.bump(); // consume `.`
+                                let (item, item_span) =
+                                    self.expect_ident("after `.` in a `use` import")?;
+                                let items_span = item_span;
+                                self.expect(TokKind::Semi, "after an import")?;
+                                let end = self.toks[self.pos - 1].span.end;
+                                Ok(crate::ast::ImportDecl {
+                                    kind: crate::ast::ImportKind::Unqualified {
+                                        module_alias: first,
+                                        module_alias_span: first_span,
+                                        items: vec![item.clone()],
+                                        items_span,
+                                        span: Span::new(start.start, end),
+                                    },
+                                    alias: item.clone(),
+                                    alias_span: item_span,
+                                    span: Span::new(start.start, end),
+                                    is_pub: false,
+                                })
+                            } else {
+                                // use core.fs as fs — Module path with dots
+                                self.import_decl_module_path(start, first, first_span)
+                            }
+                        }
+                        _ => {
+                            // use alias. <something unexpected> — fall through to module path
+                            self.import_decl_module_path(start, first, first_span)
+                        }
+                    }
+                } else {
+                    // No dot: use module_name (optionally `as alias`)
+                    if matches!(self.peek().kind, TokKind::LBrace) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "selective imports aren't part of Jet".to_string(),
+                            "modules keep their namespace so call sites show where a library function comes from"
+                                .to_string(),
+                            "import the module with `as`, then call items through the alias: `use core.math as math; math.clamp(x, lo, hi);`"
+                                .to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
+                    let (alias, alias_span) = if matches!(
+                        &self.peek().kind,
+                        TokKind::Ident(n) if n == syntax::KW_AS
+                    ) {
+                        self.bump();
+                        let (name, span) = self.expect_ident("after `as`")?;
+                        (name, span)
+                    } else {
+                        (first.clone(), first_span)
+                    };
+                    self.expect(TokKind::Semi, "after an import")?;
+                    let end = self.toks[self.pos - 1].span.end;
+                    Ok(crate::ast::ImportDecl {
+                        kind: crate::ast::ImportKind::Module(first, first_span),
+                        alias,
+                        alias_span,
+                        span: Span::new(start.start, end),
+                        is_pub: false,
+                    })
+                }
             }
             other => {
-                return Err(Diagnostic::error(
+                let other = other.clone();
+                Err(Diagnostic::error(
                     "E0003",
                     format!(
                         "expected a file path in quotes or a module name after `{}`, found {}",
                         syntax::KW_USE,
-                        describe(other)
+                        describe(&other)
                     ),
                     format!(
                         "write `{} \"path/to/file\";` or `{} module_name;`",
@@ -426,9 +559,30 @@ impl<'a> Parser<'a> {
                         syntax::KW_USE
                     ),
                     Some(self.peek().span),
-                ));
+                ))
             }
-        };
+        }
+    }
+
+    /// Helper: finish parsing a module import whose first ident is already consumed.
+    /// Handles `use first.sub.module [as alias];`.
+    fn import_decl_module_path(
+        &mut self,
+        start: Span,
+        first: String,
+        first_span: Span,
+    ) -> Result<crate::ast::ImportDecl, Diagnostic> {
+        // Continue eating dots to build the full dotted name.
+        let mut name = first;
+        let mut end = first_span.end;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (part, span) = self.expect_ident("after `.` in an import")?;
+            name.push('.');
+            name.push_str(&part);
+            end = span.end;
+        }
+        let module_span = Span::new(first_span.start, end);
         if matches!(self.peek().kind, TokKind::LBrace) {
             return Err(Diagnostic::error(
                 "E0003",
@@ -440,23 +594,25 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
+        let alias_default = name.rsplit('.').next().unwrap_or(name.as_str()).to_string();
         let (alias, alias_span) = if matches!(
             &self.peek().kind,
             TokKind::Ident(n) if n == syntax::KW_AS
         ) {
             self.bump();
-            let (name, span) = self.expect_ident("after `as`")?;
-            (name, span)
+            let (n, s) = self.expect_ident("after `as`")?;
+            (n, s)
         } else {
             (alias_default, start)
         };
         self.expect(TokKind::Semi, "after an import")?;
         let end = self.toks[self.pos - 1].span.end;
         Ok(crate::ast::ImportDecl {
-            kind,
+            kind: crate::ast::ImportKind::Module(name, module_span),
             alias,
             alias_span,
             span: Span::new(start.start, end),
+            is_pub: false,
         })
     }
 
@@ -523,9 +679,30 @@ impl<'a> Parser<'a> {
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                    TokKind::KwModule if self.is_code_module_at(2) => {
+                        self.code_module(true).map(Item::CodeModule)
+                    }
+                    TokKind::KwUse => {
+                        self.bump(); // consume `pub`
+                        match self.import_decl() {
+                            Ok(mut imp) => {
+                                imp.is_pub = true;
+                                imports.push(imp);
+                                continue;
+                            }
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_stmt();
+                                continue;
+                            }
+                        }
+                    }
                     _ => self.func().map(Item::Func),
                 },
                 TokKind::KwTest => self.test_def().map(Item::Test),
+                TokKind::KwModule if self.is_code_module_at(1) => {
+                    self.code_module(false).map(Item::CodeModule)
+                }
                 TokKind::KwModule => self.module_decl().map(Item::Module),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -2008,7 +2185,10 @@ impl<'a> Parser<'a> {
                     });
                 }
                 match &expr {
-                    Expr::Call(_) | Expr::Field(_, _, _) | Expr::MethodCall { .. } => {}
+                    Expr::Call(_)
+                    | Expr::Field(_, _, _)
+                    | Expr::MethodCall { .. }
+                    | Expr::FanOut { .. } => {}
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
@@ -3676,6 +3856,177 @@ impl<'a> Parser<'a> {
             contributions,
             span: Span::new(start.start, end),
         })
+    }
+
+    /// D-MOD1/2: decide whether `module name` at position `offset` (1 = current pos
+    /// already on `module`, 2 = one past `pub`) starts a code module vs a JetOS module.
+    ///
+    /// Rules (from the plan):
+    /// - `module name ;` → code module (file declaration), always.
+    /// - `module name {` and first token inside is `fn`, `struct`, `enum`, `impl`,
+    ///   `pub`, `const`, `use`, `module`, `}` → code module (inline body).
+    /// - `module name {` and first token inside is `sources`, `imports`, or an
+    ///   ident followed by `.` → JetOS module.
+    fn is_code_module_at(&self, offset: usize) -> bool {
+        // After `module` is at pos+offset, name is at pos+offset+1.
+        let kw_pos = self.pos + offset - 1; // position of `module` token
+        // If the token after the name is `-`, the name is dashed (my-host) —
+        // that's always a JetOS module; code module names are plain identifiers.
+        let after_name = kw_pos + 2;
+        if matches!(
+            self.toks.get(after_name).map(|t| &t.kind),
+            Some(TokKind::Minus)
+        ) {
+            return false;
+        }
+        // Find the `{` or `;` that follows the (plain) name.
+        let scan = after_name;
+        let next = &self.toks[scan.min(self.toks.len() - 1)];
+        match &next.kind {
+            TokKind::Semi => true, // `module name;` — always a code module
+            TokKind::LBrace => {
+                // Peek inside the `{` at scan+1
+                let inside = &self.toks[(scan + 1).min(self.toks.len() - 1)];
+                match &inside.kind {
+                    // Code module body starters
+                    TokKind::KwFn
+                    | TokKind::KwStruct
+                    | TokKind::KwEnum
+                    | TokKind::KwImpl
+                    | TokKind::KwPub
+                    | TokKind::KwConst
+                    | TokKind::KwUse
+                    | TokKind::KwModule
+                    | TokKind::KwTrait
+                    | TokKind::KwComptime
+                    | TokKind::KwTest
+                    | TokKind::RBrace => true,
+                    // JetOS body starters: `sources:`, `imports:`, or `ident .`
+                    TokKind::Ident(n)
+                        if n == syntax::MODULE_FIELD_SOURCES
+                            || n == syntax::MODULE_FIELD_IMPORTS =>
+                    {
+                        false
+                    }
+                    TokKind::Ident(_) => {
+                        // `ident .` → JetOS contribution; anything else → code module
+                        let after_inside =
+                            &self.toks[(scan + 2).min(self.toks.len() - 1)];
+                        !matches!(after_inside.kind, TokKind::Dot)
+                    }
+                    _ => false, // unknown → treat as JetOS to be safe
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// D-MOD1/2: parse `[pub] module name ;` or `[pub] module name { items }`.
+    /// `is_pub` is true when `pub` was already peeked (but NOT consumed).
+    fn code_module(&mut self, is_pub: bool) -> Result<CodeModule, Diagnostic> {
+        if is_pub {
+            self.bump(); // consume `pub`
+        }
+        let start = self.bump().span; // consume `module`
+        let (name, name_span) = self.expect_ident("for the code module name")?;
+        match &self.peek().kind {
+            TokKind::Semi => {
+                let end = self.bump().span.end; // consume `;`
+                Ok(CodeModule {
+                    name,
+                    name_span,
+                    is_pub,
+                    body: None,
+                    span: Span::new(start.start, end),
+                })
+            }
+            TokKind::LBrace => {
+                self.bump(); // consume `{`
+                let mut items = Vec::new();
+                while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                    match self.top_level_item_in_code_module() {
+                        Ok(item) => items.push(item),
+                        Err(d) => {
+                            self.diags.push(d);
+                            self.sync_top();
+                        }
+                    }
+                }
+                let end = self.peek().span.end;
+                self.expect(TokKind::RBrace, "to close the module body")?;
+                Ok(CodeModule {
+                    name,
+                    name_span,
+                    is_pub,
+                    body: Some(items),
+                    span: Span::new(start.start, end),
+                })
+            }
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected `{{` or `;` after a module name, found {}",
+                    describe(other)
+                ),
+                "write `module name;` to load a file, or `module name { … }` for an inline module"
+                    .to_string(),
+                "example: `module math;` or `module math { pub fn double(n: Int) -> Int { … } }`"
+                    .to_string(),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
+    /// Parse one top-level item inside an inline `module name { … }` body.
+    fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
+        match &self.peek().kind {
+            TokKind::KwFn => self.func().map(Item::Func),
+            TokKind::KwPub => match self.peek2().kind {
+                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                TokKind::KwUse => {
+                    let span = self.peek().span;
+                    self.sync_stmt();
+                    Err(Diagnostic::error(
+                        "E0003",
+                        "`pub use` inside an inline code module is not yet supported".to_string(),
+                        "unqualified imports inside modules need D-MOD4 ratification".to_string(),
+                        "call items by their qualified path for now".to_string(),
+                        Some(span),
+                    ))
+                }
+                _ => self.func().map(Item::Func),
+            },
+            TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+            TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+            TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+            TokKind::KwImpl => self.impl_def().map(Item::Impl),
+            TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
+            TokKind::KwComptime => self.comptime_def().map(Item::Const),
+            TokKind::KwTest => self.test_def().map(Item::Test),
+            TokKind::KwUse => {
+                let span = self.peek().span;
+                self.sync_stmt();
+                Err(Diagnostic::error(
+                    "E0003",
+                    "`use` inside an inline code module is not yet supported".to_string(),
+                    "unqualified imports inside modules need D-MOD4 ratification".to_string(),
+                    "call items by their qualified path for now".to_string(),
+                    Some(span),
+                ))
+            }
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected a function, struct, enum, or other item inside a module, found {}",
+                    describe(other)
+                ),
+                "an inline code module body may only contain top-level items".to_string(),
+                "example: `pub fn double(n: Int) -> Int { return n * 2; }`".to_string(),
+                Some(self.peek().span),
+            )),
+        }
     }
 
     /// U8: a module's `sources: { name: provider@target, … }` block. Each ref is

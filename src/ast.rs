@@ -195,6 +195,8 @@ pub struct ImportDecl {
     pub alias: String,
     pub alias_span: Span,
     pub span: Span,
+    /// D-MOD3/4: true for `pub use alias.Item` re-exports.
+    pub is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +205,14 @@ pub enum ImportKind {
     File(String, Span),
     /// Bare module name — searched from the project root.
     Module(String, Span),
+    /// D-MOD3/4: `use alias.Item` / `use alias.{A, B}` / `pub use alias.Item`
+    Unqualified {
+        module_alias: String,
+        module_alias_span: Span,
+        items: Vec<String>,
+        items_span: Span,
+        span: Span,
+    },
 }
 
 #[derive(Debug)]
@@ -253,6 +263,21 @@ pub enum Item {
     /// S59 (E2-M14): `@extern module c.<lib> { … }` (user overlay) or
     /// `@bindgen module c.<lib>.__bindgen__ { … }` (compiler-generated cache).
     CModule(CModule),
+    /// D-MOD1/2 (code module system): `module name;` (file declaration) or
+    /// `module name { … }` (inline body). `body = None` means the items live in
+    /// a separate file found by the loader. NOT a JetOS module (see `ModuleDecl`).
+    CodeModule(CodeModule),
+}
+
+/// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
+#[derive(Debug)]
+pub struct CodeModule {
+    pub name: String,
+    pub name_span: Span,
+    pub is_pub: bool,
+    /// None = file declaration (`module math;`), Some = inline body.
+    pub body: Option<Vec<Item>>,
+    pub span: Span,
 }
 
 /// S59 (E2-M14): which attribute introduced a C FFI module — the user-written

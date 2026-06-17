@@ -25,6 +25,305 @@ decision, add its examples in the same edit.
 - **shrinking** — a property-test feature: minimize a failing input to the
   smallest case that still fails.
 - **freestanding** — a build with no OS underneath (embedded / microcontroller).
+- **module boundary** — what unit of code constitutes a single module (file, directory, explicit block).
+- **re-export** — making an item you imported visible to your own importers.
+
+---
+
+## 0. Jet language module system (blocks multi-file projects)
+
+Four ballots that define how Jet's language-level module system works. The JetOS
+`module { … }` declaration is a separate, already-scoped concept for config
+namespaces — these ballots concern how Jet *code* is organized across files.
+
+**Current state:** `use "path/to/file.jet" as alias` exists and works; it gives
+you `alias.FnName(…)` access. What's missing is: no named paths, no visibility
+control within files, no way to group or re-export, no inline submodules.
+
+Cast: **Alex** (experienced developer, building a multi-file CLI tool), **Maya**
+(beginner writing her first project bigger than one file).
+
+---
+
+### D-MOD1 — What *is* a module? · No rec — owner's call
+
+The most fundamental question. What unit of code constitutes one module?
+
+**Community context — Rust vs Go, what developers actually say:**
+
+*Rust (`mod foo;` explicit tree):*
+- **Praised for:** explicitness — you can always find every module by following the
+  declaration tree from the crate root; large codebases stay navigable; compiler
+  errors on forgotten declarations prevent orphaned files.
+- **Criticized for:** ceremony — every new file requires a `mod foo;` line somewhere;
+  the `mod.rs` vs directory layout (old `foo/mod.rs` vs new `foo.rs` + `foo/`) confused
+  beginners for years and Rust only resolved it in 2018 (edition change); directory
+  modules still need a `mod.jet` re-export file which adds friction.
+- **Community verdict:** experienced Rust devs consider it the right call for large
+  codebases; it's consistently cited as one of Rust's steeper beginner onramps.
+
+*Go (directory = package, no declaration):*
+- **Praised for:** zero ceremony — put a file in a folder, it's in the package; no
+  orphaned files, no forgotten declarations; the "one directory = one package" rule
+  is simple enough to explain in one sentence.
+- **Criticized for:** capitalization-as-visibility forces naming decisions; you cannot
+  have two packages in one directory (splits require full directory restructure);
+  no inline submodules; adding any `.go` file to a directory silently adds it to the
+  public module surface.
+- **Community verdict:** Go's package system is almost universally praised as its
+  simplest, most beginner-friendly feature. The main complaint is that it doesn't
+  scale to monorepos elegantly.
+
+**Practical tradeoff summary:**
+
+| | Rust explicit `mod` | Go directory |
+|---|---|---|
+| New file ceremony | add `mod foo;` in parent | none |
+| Orphan protection | compiler error | silent |
+| Inline submodules | yes | no |
+| Two modules, one directory | yes (inline `mod`) | no |
+| Directory restructure needed to split | no | yes |
+| Beginner friction | medium-high | low |
+| Large codebase navigability | excellent | good |
+
+**A — Rust: explicit `mod` declaration in a parent**
+
+Every module must be declared. `mod math;` finds `math.jet` or `math/mod.jet`.
+Inline `mod math { … }` also works. Compiler errors on undeclared files.
+
+```
+main.jet
+math.jet
+text/
+  mod.jet   ← re-exports text module's public surface
+  wrap.jet
+  parse.jet
+```
+
+`main.jet`:
+```jet
+mod math;
+mod text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+    print("{clamped}");
+    print(line);
+}
+```
+
+`text/mod.jet`:
+```jet
+mod wrap;
+mod parse;
+pub use wrap.wrap;
+```
+
+Forget `mod wrap;` → compiler error pointing at the missing declaration.
+
+---
+
+**B — Go: directory = module, no declaration needed**
+
+All `.jet` files in the same directory are one module automatically. No `mod`
+declarations anywhere. Import by directory path.
+
+```
+main.jet
+math/
+  clamp.jet
+  stats.jet
+text/
+  wrap.jet
+  parse.jet
+```
+
+`main.jet`:
+```jet
+use "./math" as math;
+use "./text" as text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+}
+```
+
+`math/clamp.jet` — no declaration; being in `math/` is enough:
+```jet
+pub fn clamp(n: Int, lo: Int, hi: Int) -> Int { … }
+```
+
+---
+
+**C — TypeScript/ES: every file is its own module, import by path**
+
+Every `.jet` file is a module; directories are organizational only. Import any
+file by relative path. No declaration ceremony anywhere.
+
+```
+main.jet
+math.jet
+text/wrap.jet
+text/parse.jet
+```
+
+`main.jet`:
+```jet
+use "./math"      as math;
+use "./text/wrap" as text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+}
+```
+
+`math.jet` — just write code:
+```jet
+pub fn clamp(n: Int, lo: Int, hi: Int) -> Int { … }
+pub fn lerp(a: Float, b: Float, t: Float) -> Float { … }
+```
+
+---
+
+### D-MOD2 — Import access: qualified vs unqualified · Updated per owner direction
+
+Owner specified: **Rust-style two-step, but dot notation + path-based aliases
+instead of `::`, and no wildcard imports.** Option A below reflects that.
+Confirm A or pick an alternative.
+
+**A — Owner's proposed: two-step with dot notation, path aliases, no wildcard**
+
+Step 1: import the module with a path alias (existing Jet syntax, extended).
+Step 2 (optional): bring specific items into unqualified scope with `use alias.Item`.
+No `use alias.*` — wildcard is not supported.
+
+```jet
+use "./math" as math;       // step 1: import with alias
+
+use math.clamp;             // step 2: clamp is now unqualified
+use math.Stats;             // step 2: Stats is now unqualified
+use math.{lerp, mix};       // step 2: group import
+
+fn main() {
+    val s = Stats.from([1, 2, 3, 4]);    // unqualified (step-2 imported)
+    print(clamp(s.mean, 0, 100));         // unqualified
+    print(math.lerp(0.0, 1.0, 0.5));     // qualified — lerp was in the group import above
+    // (fix: lerp IS in the group above — use math.mix2 for unimported example)
+    print(math.mix2(0.3, 0.7, 0.5));     // qualified — not step-2 imported
+}
+```
+
+Maya's first program — she never needs step 2:
+```jet
+use "./math" as math;
+
+fn main() {
+    print(math.clamp(5, 0, 3));   // qualified, simple, one concept
+}
+```
+
+No wildcard. `use math.*` is a compile error.
+
+---
+
+**B — Qualified-only (always use the module prefix)**
+
+One concept only: import with alias, always prefix. No step-2 unqualified imports.
+
+```jet
+use "./math" as math;
+use "./text" as text;
+
+fn main() {
+    val clamped = math.clamp(200, 0, 100);
+    val line    = text.wrap("a long sentence", 40);
+    val stats   = math.Stats.from([1, 2, 3, 4]);
+}
+
+// Short alias for heavily-used modules:
+use "./math" as m;
+print(m.clamp(200, 0, 100));
+```
+
+---
+
+**C — Single-step `from … use` (Python-style)**
+
+One keyword form that skips the alias and goes straight to unqualified:
+
+```jet
+from "./math" use clamp, Stats, lerp;
+
+fn main() {
+    val s = Stats.from([1, 2, 3, 4]);
+    print(clamp(s.mean, 0, 100));
+    print(lerp(0.0, 1.0, 0.5));
+    // No module-prefix form available — origin invisible at call site
+}
+```
+
+---
+
+### D-MOD3 — Visibility defaults · Leaning A — owner's call to confirm
+
+Owner selected **A** (private by default, `pub` to export) with a follow-up:
+the LSP should detect when a function exists in a module but hasn't been
+imported, and surface a hint. That is a **toolchain feature**, not a syntax
+decision — it goes in the LSP/diagnostics roadmap regardless of which option is
+chosen here. No syntax changes required to support it.
+
+**A — Private by default, `pub` to export** *(owner's selection)*
+
+Nothing leaves a file unless marked `pub`. Safest model, industry standard for
+compiled languages.
+
+```jet
+// math.jet
+pub fn clamp(n: Int, lo: Int, hi: Int) -> Int { … }   // exported
+pub struct Stats { pub mean: Float; pub count: Int; } // exported + fields exported
+
+fn validate(lo: Int, hi: Int) { … }   // private — callers cannot reach this
+```
+
+Maya writes `fn helper()` and tries to use it from `main.jet`:
+```
+Warning [L????]: `helper` in math.jet is private
+  → add `pub` to export it, or is this intentional?
+  Fix: pub fn helper(…) in math.jet
+```
+(A warning with a fix, not a hard error on first encounter — per owner's LSP note.)
+
+LSP follow-up (separate roadmap item): when a file uses a name that exists in an
+imported module but wasn't brought into scope, the LSP offers an auto-import
+quick-fix rather than a bare "not found" error.
+
+---
+
+**B — Go: Capitalize = exported, lowercase = private** *(for comparison)*
+
+No keyword; name casing is the visibility marker.
+
+```jet
+fn Clamp(n: Int, lo: Int, hi: Int) -> Int { … }  // exported
+fn validate(lo: Int, hi: Int) { … }               // private
+
+// Collision with Jet's existing PascalCase-for-types:
+// ALL type names would look exported even if they aren't.
+```
+
+---
+
+**C — Public by default, `priv` to hide** *(for comparison)*
+
+Everything exported unless marked `priv`.
+
+```jet
+fn clamp(n: Int, lo: Int, hi: Int) -> Int { … }   // exported automatically
+priv fn validate(lo: Int, hi: Int) { … }           // explicitly hidden
+```
 
 ---
 

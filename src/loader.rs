@@ -5,7 +5,7 @@
 //! When a `payload.jet` is found in the project root (walked upward from entry),
 //! validates the manifest and wires package dep paths into module search (M12.1).
 
-use crate::ast::{ImportDecl, ImportKind, LoadedModule, ProgramBundle};
+use crate::ast::{ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
 use crate::diag::{Diagnostic, Span};
 use crate::lexer;
 use crate::manifest;
@@ -461,6 +461,11 @@ fn load_file(
         if crate::cffi::is_c_import(imp) {
             continue;
         }
+        // D-MOD3: `use alias.Item` / `use alias.{A,B}` forms don't load new files;
+        // sema resolves them against already-loaded modules (E0609–E0611).
+        if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+            continue;
+        }
         if let Err(d) = check_reserved_import(imp) {
             stack.pop();
             return Err(vec![d]);
@@ -499,8 +504,101 @@ fn load_file(
         }
     }
 
+    // D-MOD1: resolve `module name;` file declarations — search adjacent to the
+    // current file, then load and register as synthetic imports.
+    // Collect the metadata we need before borrowing `modules` mutably below.
+    #[derive(Clone)]
+    struct CmMeta { name: String, name_span: crate::diag::Span, span: crate::diag::Span }
+    let code_module_decls: Vec<CmMeta> = modules[module_idx]
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let Item::CodeModule(cm) = item {
+                if cm.body.is_none() {
+                    return Some(CmMeta {
+                        name: cm.name.clone(),
+                        name_span: cm.name_span,
+                        span: cm.span,
+                    });
+                }
+            }
+            None
+        })
+        .collect();
+
+    for cm in code_module_decls {
+        let target = match resolve_code_module_file(&cm.name, cm.name_span, path) {
+            Ok(p) => p,
+            Err(d) => {
+                stack.pop();
+                return Err(vec![d]);
+            }
+        };
+        let child_display = relative_display(project_root, &target);
+        if let Err(diags) = load_file(
+            &target,
+            &child_display,
+            project_root,
+            pkg_dep_dirs,
+            pkg_resolution,
+            modules,
+            path_to_idx,
+            stack,
+            overlay,
+            for_check,
+            parse_teaching,
+        ) {
+            stack.pop();
+            return Err(diags);
+        }
+        // Add a synthetic import so sema can resolve `module_name.func()`.
+        // Use the path relative to the importing file (without extension) so
+        // that resolve_file_import can find it — for a directory module
+        // "text", target is ".../text/mod.jet" and we need "text/mod".
+        let importing_dir = path.parent().unwrap_or(Path::new("."));
+        let rel_path = target
+            .strip_prefix(importing_dir)
+            .map(|p| p.with_extension(""))
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| cm.name.clone());
+        let synthetic = ImportDecl {
+            kind: ImportKind::File(rel_path, cm.name_span),
+            alias: cm.name.clone(),
+            alias_span: cm.name_span,
+            span: cm.span,
+            is_pub: false,
+        };
+        modules[module_idx].imports.push(synthetic);
+    }
+
     stack.pop();
     Ok(())
+}
+
+/// D-MOD1: find the file for `module name;` — look in the same directory as
+/// `importing` for `{name}.jet` then `{name}/mod.jet`.
+fn resolve_code_module_file(
+    name: &str,
+    name_span: Span,
+    importing: &Path,
+) -> Result<PathBuf, Diagnostic> {
+    let dir = importing.parent().unwrap_or(Path::new("."));
+    let direct = normalize_path(&dir.join(format!("{}.{}", name, syntax::FILE_EXT)));
+    if direct.is_file() {
+        return Ok(direct);
+    }
+    let mod_jet = normalize_path(&dir.join(name).join(format!("mod.{}", syntax::FILE_EXT)));
+    if mod_jet.is_file() {
+        return Ok(mod_jet);
+    }
+    // E0607: neither search path found
+    Err(Diagnostic::error(
+        "E0607",
+        format!("module `{}` not found", name),
+        format!("looked for `{name}.jet` and `{name}/mod.jet` next to this file"),
+        format!("create `{}.{}` next to this file", name, syntax::FILE_EXT),
+        Some(name_span),
+    ))
 }
 
 fn resolve_import(
@@ -516,6 +614,18 @@ fn resolve_import(
         }
         ImportKind::Module(name, span) => {
             resolve_module_import(name, project_root, pkg_dep_dirs, pkg_resolution, *span)
+        }
+        ImportKind::Unqualified { .. } => {
+            // Unqualified imports don't map to a new file — the module is
+            // already imported. Resolution is handled by sema (E0609–E0611).
+            Err(Diagnostic::error(
+                "E0003",
+                "unqualified import cannot be resolved as a file".to_string(),
+                "use alias.Item imports are resolved by sema against an already-loaded module"
+                    .to_string(),
+                "ensure the module is imported first: `use module_name as alias;`".to_string(),
+                Some(imp.span),
+            ))
         }
     }
 }
@@ -576,7 +686,7 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
         if !is_known_std_module(&module) {
             let span = match &imp.kind {
                 ImportKind::Module(_, span) => *span,
-                ImportKind::File(_, _) => imp.span,
+                ImportKind::File(_, _) | ImportKind::Unqualified { .. } => imp.span,
             };
             return Err(Diagnostic::error(
                 "E1001",
@@ -843,6 +953,7 @@ fn default_import_alias(kind: &ImportKind) -> String {
     match kind {
         ImportKind::File(path, _) => path.rsplit('/').next().unwrap_or("module").to_string(),
         ImportKind::Module(name, _) => name.clone(),
+        ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
     }
 }
 
