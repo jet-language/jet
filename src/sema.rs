@@ -9646,6 +9646,70 @@ fn std_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::String),
         )),
+        // E2-M9: first-party ring packages.
+        // jet.csv: parse CSV text into a list of rows (each row is a list of fields).
+        ("jet.csv", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+                Type::String,
+            )),
+        )),
+        ("jet.csv", "render") => Some((
+            vec![(read, Type::List(Box::new(Type::List(Box::new(Type::String)))))],
+            Some(Type::String),
+        )),
+        // jet.toml: simplified flat key-value parsing.
+        ("jet.toml", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) },
+                Type::String,
+            )),
+        )),
+        ("jet.toml", "render") => Some((
+            vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
+            Some(Type::String),
+        )),
+        // jet.yaml: simplified flat key-value parsing.
+        ("jet.yaml", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) },
+                Type::String,
+            )),
+        )),
+        ("jet.yaml", "render") => Some((
+            vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
+            Some(Type::String),
+        )),
+        // jet.log: structured logging to stderr.
+        ("jet.log", "info" | "warn" | "error" | "debug") => Some((vec![(read, string)], None)),
+        ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
+        // jet.json: first-party JSON with coercion surfacing (D-JSON1).
+        // Reuses core.json types; decode_verbose returns a plain map with coercions field.
+        ("jet.json", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(json.clone(), json_error_ty())),
+        )),
+        ("jet.json", "render" | "render_pretty") => {
+            Some((vec![(read, json)], Some(Type::String)))
+        }
+        // jet.time: extended time utilities.
+        ("jet.time", "now") => Some((vec![], Some(Type::Int))),
+        ("jet.time", "format") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(Type::String),
+        )),
+        // jet.crypto: vetted hash functions (D-LR3).
+        ("jet.crypto", "sha256") => Some((
+            vec![(read, Type::String)],
+            Some(Type::String),
+        )),
+        ("jet.crypto", "sha256_bytes") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::String),
+        )),
         _ => None,
     }
 }
@@ -9679,6 +9743,14 @@ fn std_module_items(module: &str) -> Vec<String> {
         "core.files" => &["open", "create", "append"],
         "core.path" => &["join", "parent", "extension", "normalize"],
         "core" => &[],
+        // E2-M9: ring packages.
+        "jet.csv" => &["parse", "render"],
+        "jet.toml" => &["parse", "render"],
+        "jet.yaml" => &["parse", "render"],
+        "jet.log" => &["info", "warn", "error", "debug", "set_level"],
+        "jet.json" => &["parse", "render", "render_pretty"],
+        "jet.time" => &["now", "format"],
+        "jet.crypto" => &["sha256", "sha256_bytes"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()

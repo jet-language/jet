@@ -3620,8 +3620,10 @@ fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Slot>) -> Opt
                 let list_str = || Type::List(Box::new(Type::String));
                 let list_u8 = || Type::List(Box::new(Type::Named("U8".to_string())));
                 let result = |ok: Type, err: Type| Type::Result { ok: Box::new(ok), err: Box::new(err) };
+                let list_list_str = || Type::List(Box::new(Type::List(Box::new(Type::String))));
+                let map_str_str = || Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
                 let ty: Option<Type> = match (module.as_str(), method.as_str()) {
-                    ("core.json", "parse") => Some(result(json_ty(), json_err_ty())),
+                    ("core.json", "parse") | ("jet.json", "parse") => Some(result(json_ty(), json_err_ty())),
                     ("core.fs", "read") => Some(result(str_ty(), io_err_ty())),
                     ("core.fs", "read_bytes") => Some(result(list_u8(), io_err_ty())),
                     ("core.fs", "write" | "append" | "remove" | "create_dir" | "copy" | "rename") => {
@@ -3630,6 +3632,9 @@ fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Slot>) -> Opt
                     ("core.fs", "list_dir") => Some(result(list_str(), io_err_ty())),
                     ("core.io", "read_all_input") => Some(result(str_ty(), io_err_ty())),
                     ("core.env", "current_dir") => Some(result(str_ty(), io_err_ty())),
+                    // E2-M9: ring module result types.
+                    ("jet.csv", "parse") => Some(result(list_list_str(), str_ty())),
+                    ("jet.toml", "parse") | ("jet.yaml", "parse") => Some(result(map_str_str(), str_ty())),
                     _ => None,
                 };
                 if ty.is_some() {
@@ -3959,6 +3964,25 @@ fn emit_std_call(
         ("core.path", "parent") => format!("{}(&({}))", helper("jet_std_path_parent"), arg(0)),
         ("core.path", "extension") => format!("{}(&({}))", helper("jet_std_path_extension"), arg(0)),
         ("core.path", "normalize") => format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0)),
+        // E2-M9: first-party ring packages.
+        ("jet.csv", "parse") => format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0)),
+        ("jet.csv", "render") => format!("{}(&({}))", helper("jet_ring_csv_render"), arg(0)),
+        ("jet.toml", "parse") => format!("{}(&({}))", helper("jet_ring_toml_parse"), arg(0)),
+        ("jet.toml", "render") => format!("{}(&({}))", helper("jet_ring_toml_render"), arg(0)),
+        ("jet.yaml", "parse") => format!("{}(&({}))", helper("jet_ring_yaml_parse"), arg(0)),
+        ("jet.yaml", "render") => format!("{}(&({}))", helper("jet_ring_yaml_render"), arg(0)),
+        ("jet.log", "info") => format!("{}(&({}))", helper("jet_ring_log_info"), arg(0)),
+        ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),
+        ("jet.log", "error") => format!("{}(&({}))", helper("jet_ring_log_error"), arg(0)),
+        ("jet.log", "debug") => format!("{}(&({}))", helper("jet_ring_log_debug"), arg(0)),
+        ("jet.log", "set_level") => format!("{}(&({}))", helper("jet_ring_log_set_level"), arg(0)),
+        ("jet.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        ("jet.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
+        ("jet.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
+        ("jet.time", "now") => format!("{}()", helper("jet_std_time_now")),
+        ("jet.time", "format") => format!("{}({}, &({}))", helper("jet_ring_time_format"), arg(0), arg(1)),
+        ("jet.crypto", "sha256") => format!("{}(&({}))", helper("jet_ring_crypto_sha256"), arg(0)),
+        ("jet.crypto", "sha256_bytes") => format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0)),
         _ => "/* unknown std call */".to_string(),
     }
 }

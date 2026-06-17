@@ -650,7 +650,26 @@ pub fn normalize_std_module(name: &str) -> Option<String> {
     if let Some(rest) = name.strip_prefix("jet.core.") {
         return Some(format!("core.{rest}"));
     }
+    // E2-M9: first-party ring packages — `jet.csv`, `jet.toml`, etc.
+    if let Some(ring) = name.strip_prefix("jet.") {
+        if is_ring_module(ring) {
+            return Some(format!("jet.{ring}"));
+        }
+    }
     None
+}
+
+/// E2-M9: ring module names that resolve as compiler-known modules.
+pub fn is_ring_module(name: &str) -> bool {
+    matches!(
+        name,
+        "csv" | "toml" | "yaml" | "log" | "json" | "time" | "crypto"
+    )
+}
+
+/// E2-M9: ring modules not yet available (blocked on external deps or future milestones).
+pub fn is_ring_module_staged(name: &str) -> bool {
+    matches!(name, "regex" | "archive" | "db")
 }
 
 pub fn is_legacy_std_import(name: &str) -> bool {
@@ -677,11 +696,19 @@ pub fn is_known_std_module(name: &str) -> bool {
             // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
             | "core.files"
             | "core.path"
+            // E2-M9: first-party ring packages.
+            | "jet.csv"
+            | "jet.toml"
+            | "jet.yaml"
+            | "jet.log"
+            | "jet.json"
+            | "jet.time"
+            | "jet.crypto"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.files, core.path"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.files, core.path, jet.csv, jet.toml, jet.yaml, jet.log, jet.json, jet.time, jet.crypto"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

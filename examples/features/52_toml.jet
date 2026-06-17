@@ -1,0 +1,12 @@
+// E2-M9: jet.toml — parse and rewrite a config file.
+use jet.toml as toml;
+
+fn main() {
+    val raw = "# server config\nhost = \"localhost\"\nport = \"8080\"\ndebug = \"true\"";
+    val cfg = toml.parse(raw) ?? panic("toml parse failed");
+    val host = cfg["host"];
+    val port = cfg["port"];
+    print("{host}:{port}");
+    val rendered = toml.render(cfg);
+    print(rendered.len() > 0);
+}

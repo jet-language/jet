@@ -577,3 +577,306 @@ fn jet_int_to_u8(n: i64) -> Result<u8, String> {
 fn jet_stopwatch_elapsed_millis(sw: &jet_std::Stopwatch) -> i64 {
     sw.start.elapsed().as_millis() as i64
 }
+
+// ── E2-M9: First-party ring libraries ────────────────────────────────────────
+// Pure-Rust, zero external crates (I6). CSV, TOML, YAML, log, time, crypto.
+
+// ── jet.csv ───────────────────────────────────────────────────────────────────
+fn jet_ring_csv_parse(text: &String) -> Result<Vec<Vec<String>>, String> {
+    let mut rows = Vec::new();
+    for (line_no, line) in text.lines().enumerate() {
+        match csv_parse_row(line) {
+            Ok(row) => rows.push(row),
+            Err(msg) => {
+                return Err(format!("E2701: CSV row {} — {}", line_no + 1, msg));
+            }
+        }
+    }
+    Ok(rows)
+}
+
+fn csv_parse_row(line: &str) -> Result<Vec<String>, String> {
+    let mut fields = Vec::new();
+    let mut chars = line.chars().peekable();
+    loop {
+        let field = if chars.peek() == Some(&'"') {
+            chars.next(); // consume opening quote
+            let mut s = String::new();
+            loop {
+                match chars.next() {
+                    Some('"') => {
+                        if chars.peek() == Some(&'"') {
+                            chars.next(); // escaped quote
+                            s.push('"');
+                        } else {
+                            break;
+                        }
+                    }
+                    Some(c) => s.push(c),
+                    None => break,
+                }
+            }
+            s
+        } else {
+            let mut s = String::new();
+            while let Some(&c) = chars.peek() {
+                if c == ',' { break; }
+                s.push(c);
+                chars.next();
+            }
+            s
+        };
+        fields.push(field);
+        match chars.next() {
+            Some(',') => {}
+            None => break,
+            Some(c) => return Err(format!("unexpected character {:?} after field", c)),
+        }
+    }
+    Ok(fields)
+}
+
+fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .map(|field| {
+                    if field.contains(',') || field.contains('"') || field.contains('\n') {
+                        format!("\"{}\"", field.replace('"', "\"\""))
+                    } else {
+                        field.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// ── jet.toml ──────────────────────────────────────────────────────────────────
+// Simplified: parses flat `key = "value"` and `key = 123` TOML; skips sections
+// and tables. Returns String values for all scalar types.
+fn jet_ring_toml_parse(text: &String) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut map = std::collections::BTreeMap::new();
+    for (line_no, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+            continue;
+        }
+        let Some(eq) = line.find('=') else {
+            return Err(format!("E2701: TOML line {} — expected `key = value`", line_no + 1));
+        };
+        let key = line[..eq].trim().to_string();
+        let val_raw = line[eq + 1..].trim();
+        let val = if val_raw.starts_with('"') && val_raw.ends_with('"') && val_raw.len() >= 2 {
+            val_raw[1..val_raw.len() - 1].replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"")
+        } else {
+            val_raw.to_string()
+        };
+        map.insert(key, val);
+    }
+    Ok(map)
+}
+
+fn jet_ring_toml_render(data: &std::collections::BTreeMap<String, String>) -> String {
+    data.iter()
+        .map(|(k, v)| {
+            if v.parse::<f64>().is_ok() || v == "true" || v == "false" {
+                format!("{} = {}", k, v)
+            } else {
+                format!("{} = \"{}\"", k, v.replace('"', "\\\""))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// ── jet.yaml ──────────────────────────────────────────────────────────────────
+// Simplified: parses flat `key: value` YAML (no nesting, no lists).
+fn jet_ring_yaml_parse(text: &String) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut map = std::collections::BTreeMap::new();
+    for (line_no, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(colon) = line.find(':') else {
+            return Err(format!("E2701: YAML line {} — expected `key: value`", line_no + 1));
+        };
+        let key = line[..colon].trim().to_string();
+        let val = line[colon + 1..].trim();
+        let val = if (val.starts_with('"') && val.ends_with('"'))
+            || (val.starts_with('\'') && val.ends_with('\''))
+        {
+            val[1..val.len() - 1].to_string()
+        } else {
+            val.to_string()
+        };
+        map.insert(key, val);
+    }
+    Ok(map)
+}
+
+fn jet_ring_yaml_render(data: &std::collections::BTreeMap<String, String>) -> String {
+    data.iter()
+        .map(|(k, v)| {
+            if v.parse::<f64>().is_ok() || v == "true" || v == "false" {
+                format!("{}: {}", k, v)
+            } else {
+                format!("{}: \"{}\"", k, v.replace('"', "\\\""))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// ── jet.log ───────────────────────────────────────────────────────────────────
+// Log level: 0=debug, 1=info, 2=warn, 3=error. Default is info (1).
+thread_local! {
+    static JET_LOG_LEVEL: std::cell::Cell<u8> = std::cell::Cell::new(1);
+}
+
+fn jet_ring_log_set_level(level: &String) {
+    let n: u8 = match level.as_str() {
+        "debug" => 0, "info" => 1, "warn" => 2, "error" => 3, _ => 1,
+    };
+    JET_LOG_LEVEL.with(|l| l.set(n));
+}
+
+fn jet_ring_log_debug(msg: &String) {
+    if JET_LOG_LEVEL.with(|l| l.get()) <= 0 {
+        eprintln!("[DEBUG] {}", msg);
+    }
+}
+fn jet_ring_log_info(msg: &String) {
+    if JET_LOG_LEVEL.with(|l| l.get()) <= 1 {
+        eprintln!("[INFO] {}", msg);
+    }
+}
+fn jet_ring_log_warn(msg: &String) {
+    if JET_LOG_LEVEL.with(|l| l.get()) <= 2 {
+        eprintln!("[WARN] {}", msg);
+    }
+}
+fn jet_ring_log_error(msg: &String) {
+    if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
+        eprintln!("[ERROR] {}", msg);
+    }
+}
+
+// ── jet.time ──────────────────────────────────────────────────────────────────
+// Format a Unix millisecond timestamp using a strftime-like pattern.
+// Supported tokens: %Y year, %m month, %d day, %H hour, %M minute, %S second.
+fn jet_ring_time_format(millis: i64, fmt: &String) -> String {
+    let secs = (millis / 1000) as i64;
+    let (y, mo, d, h, mi, s) = unix_to_ymdhms(secs);
+    let mut out = fmt.clone();
+    out = out.replace("%Y", &format!("{:04}", y));
+    out = out.replace("%m", &format!("{:02}", mo));
+    out = out.replace("%d", &format!("{:02}", d));
+    out = out.replace("%H", &format!("{:02}", h));
+    out = out.replace("%M", &format!("{:02}", mi));
+    out = out.replace("%S", &format!("{:02}", s));
+    out
+}
+
+fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
+    // Days since epoch, treating every year as having the right leap-year logic.
+    let mut days = secs / 86400;
+    let time_of_day = (secs % 86400).unsigned_abs();
+    let h = (time_of_day / 3600) as u32;
+    let mi = ((time_of_day % 3600) / 60) as u32;
+    let s = (time_of_day % 60) as u32;
+    // Walk from 1970.
+    let mut year: i32 = 1970;
+    loop {
+        let dy = if is_leap(year) { 366 } else { 365 };
+        if days < dy { break; }
+        days -= dy;
+        year += 1;
+    }
+    let month_days: [i64; 12] = if is_leap(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month: u32 = 1;
+    for &md in &month_days {
+        if days < md { break; }
+        days -= md;
+        month += 1;
+    }
+    (year, month, (days + 1) as u32, h, mi, s)
+}
+
+fn is_leap(y: i32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+}
+
+// ── jet.crypto ────────────────────────────────────────────────────────────────
+// SHA-256 of a UTF-8 string, returned as a lowercase hex string.
+fn jet_ring_crypto_sha256(s: &String) -> String {
+    let hash = jet_sha256_raw(s.as_bytes());
+    hash.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+// SHA-256 of a byte list (Vec<u8>), returned as lowercase hex.
+fn jet_ring_crypto_sha256_bytes(bs: &Vec<u8>) -> String {
+    let hash = jet_sha256_raw(bs.as_slice());
+    hash.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+// Minimal SHA-256 (same algorithm as src/sha256.rs — duplicated here so the
+// prelude doesn't need to reach into the compiler crate; I6 forbids extern deps).
+fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    const H0: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    let mut state = H0;
+    let bit_len = (data.len() as u64) * 8;
+    let mut msg: Vec<u8> = data.to_vec();
+    msg.push(0x80);
+    while (msg.len() % 64) != 56 { msg.push(0); }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    for block in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 { w[i] = u32::from_be_bytes(block[i*4..i*4+4].try_into().unwrap()); }
+        for i in 16..64 {
+            let s0 = w[i-15].rotate_right(7) ^ w[i-15].rotate_right(18) ^ (w[i-15] >> 3);
+            let s1 = w[i-2].rotate_right(17) ^ w[i-2].rotate_right(19) ^ (w[i-2] >> 10);
+            w[i] = w[i-16].wrapping_add(s0).wrapping_add(w[i-7]).wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] =
+            [state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7]];
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ (!e & g);
+            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+            h = g; g = f; f = e; e = d.wrapping_add(temp1);
+            d = c; c = b; b = a; a = temp1.wrapping_add(temp2);
+        }
+        state[0] = state[0].wrapping_add(a); state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c); state[3] = state[3].wrapping_add(d);
+        state[4] = state[4].wrapping_add(e); state[5] = state[5].wrapping_add(f);
+        state[6] = state[6].wrapping_add(g); state[7] = state[7].wrapping_add(h);
+    }
+    let mut out = [0u8; 32];
+    for (i, &s) in state.iter().enumerate() {
+        out[i*4..i*4+4].copy_from_slice(&s.to_be_bytes());
+    }
+    out
+}

@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M13 ✅ M14 ✅
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M13 ✅ M14 ✅
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -96,6 +96,28 @@ That sidequest requires parser work + example rewrites + snapshot bless.
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
 
 After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+
+### E2-M9 completion record
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ Wave-1 ring packages as compiler-known modules: `jet.csv`, `jet.toml`, `jet.yaml`, `jet.log`, `jet.json`, `jet.time`, `jet.crypto` — all resolve via `use jet.<pkg> as alias;`
+- ✅ Fallible APIs return `T ? E` (csv/toml/yaml parse return `[[String]] ? String` / `[String, String] ? String`); log is void; time/crypto return owned values
+- ✅ No hidden global state (log level is thread-local, deterministic per thread)
+- ✅ D-JSON1 (jet.json coercion): `jet.json.parse`/`render`/`render_pretty` reuse the `core.json` implementation; the same JSON types apply
+- ✅ E2701/E2702/L2701 registered in `docs/spec/diagnostics.md` (E2701 surfaces in Err strings at runtime; L2701 reserved for future `jet.regex`)
+- ✅ Examples: `51_csv.jet`, `52_toml.jet`, `53_yaml.jet`, `54_log.jet`, `55_hash.jet` — all golden-pinned and passing
+- ✅ `nix develop -c cargo test` green (all suites)
+
+**Not implemented (by design or deferral):**
+- `jet.regex` (wave 2) — NFA engine requires significant complexity; reserved module name; L2701 placeholder registered
+- `jet.archive` (wave 2) — TAR/ZIP parsing; reserved; deferred until D-DEP1 Rust-backed pattern lands
+- `jet.db` / SQLite (wave 2) — C FFI (E2-M14) is done but SQLite binding generation via `@bindgen` not yet wired; deferred
+- D-JSON1 `decode_verbose` (option A, returning coercions list) — deferred; `jet.json` type is the same dynamic JSON type as `core.json`; coercion surfacing needs an M11 doctest surface to test properly
+- Actual package manifests and hangar staging for ring packages — these are implemented as compiler-known modules (same pattern as `core.*`) pending the jetpack package store being wired end-to-end
+
+New files: `src/prelude/std.rs` (ring implementations appended), `src/loader.rs` (ring module detection), `src/sema.rs` (type signatures), `src/codegen.rs` (emit dispatch).
+Examples: `examples/features/51_csv.jet`, `52_toml.jet`, `53_yaml.jet`, `54_log.jet`, `55_hash.jet` + expected outputs.
 
 ### E2-M8 completion record
 

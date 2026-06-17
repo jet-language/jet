@@ -1,0 +1,14 @@
+// E2-M9: jet.csv — parse and clean a CSV table.
+use jet.csv as csv;
+
+fn main() {
+    val raw = "name,score,grade\nAlice,95,A\nBob,\"82\",B\nCarol,71,C";
+    val rows = csv.parse(raw) ?? panic("csv parse failed");
+    loop row in rows {
+        val name = row[0];
+        val score = row[1];
+        print("{name}: {score}");
+    }
+    val rebuilt = csv.render(rows);
+    print(rebuilt.len() > 0);
+}
