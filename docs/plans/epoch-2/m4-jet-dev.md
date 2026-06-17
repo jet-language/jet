@@ -1,6 +1,7 @@
 # E2-M4 — `jet dev`
 
-**Status:** draft — **blocked on D-DEV1…D-DEV3** (Group M4).
+**Status:** ✅ implemented (D-DEV1…D-DEV4 ratified). `jet dev <file>` is the
+watch/interpret loop; the dev-shell-enter job is `jet env`.
 **Depends on:** E2-M3 (CLI/`--json` patterns), the M9.5 comptime interpreter
 (extended here to whole programs), and the M13 LSP foundation (overlays,
 incremental front end, crash policy, latency harness). Unblocks E2-M11 and
@@ -74,9 +75,37 @@ note: this program spawns a task, which `jet dev` can't interpret yet.
 
 ## Exit criteria
 
-- Save-to-diagnostic latency has a budget and a passing test.
-- `jet dev` watches/rechecks/reruns/streams a real example.
-- Unsupported programs fail with a plain explanation and a `jet build` suggestion.
-- The differential battery proves interpreted == compiled for supported programs.
-- No release build ever uses the interpreter/JIT path.
-- `nix develop -c cargo test` green.
+- [x] Save-to-diagnostic latency has a budget and a passing test
+  (`tests/dev.rs::check_latency_under_budget`, <200ms; measured <1ms on
+  wordcount — check-only, the diagnostic work a save does).
+- [x] `jet dev` watches/rechecks/reruns/streams a real example
+  (`src/main.rs::run_dev`, std-only mtime poll — I6; per-iteration work is
+  `jet::interp::dev_iteration`, golden-tested).
+- [x] Unsupported programs fail with a plain explanation and a `jet build`
+  suggestion (E2201; `tests/dev.rs::task_program_hits_e2201_boundary`,
+  `tests/dev/unsupported.txt`). Opt-in `--try-anyway` runs past the boundary
+  (D-DEV1).
+- [x] The differential battery proves interpreted == compiled for supported
+  programs (`tests/dev.rs::interpreter_matches_compiled_binary`, 15 examples,
+  byte-for-byte; mirrors `tests/comptime_diff.rs`).
+- [x] No release build ever uses the interpreter/JIT path (I2/I3: the
+  interpreter lives behind `jet dev` only; `jet build`/`jet run` are
+  unchanged and never call `jet::interp`/`comptime::run_main`).
+- [x] `nix develop -c cargo test` green.
+
+## Implementation notes
+
+- **One evaluator, not two.** The dev interpreter reuses the M9.5 comptime
+  tree-walker (`src/comptime.rs`): the `Interp` struct gained a `sink:
+  Option<&mut DevSink>` so `print`/`eprint` buffer their output in
+  whole-program "dev" mode, while pure comptime mode (`sink: None`) is
+  unchanged. `comptime::run_main` runs `main`'s body; `src/interp.rs` is the
+  thin driver (boundary scan → run-or-explain) that the CLI and tests share.
+- **JIT (D-DEV2).** Out of scope this epoch by ratification — interpreter
+  only. The Epoch-3 design lives in
+  `docs/plans/epoch-3/jit-runtime-type-server.md`; no code here.
+- **Coverage boundary.** The interpreter runs the deterministic, pure-enough
+  subset (control flow, math, strings/lists/maps, structs/enums, fan-out,
+  `print`). Constructs it doesn't evaluate yet (e.g. `??`/`or`, `?`
+  propagation, lambdas, `when`) surface as E0956; runtime-only features
+  (tasks/FFI/`@unsafe`/native std modules) surface as E2201 before running.

@@ -370,15 +370,24 @@ fn main() {
             exit(jet::jetpack::run(fwd));
         }
         "dev" => {
-            // D-DEV4: `jet dev` is reserved for the E2-M4 watch/interpret loop
-            // (re-check/re-run on save). The loop is not built yet, so we say so
-            // plainly rather than fake it; the env-shell job moved to `jet env`.
-            // Not advertised in completions/man until E2-M4 lands (honesty bar:
-            // advertised surface equals working surface).
-            eprintln!("`jet dev` (watch & re-run on save) isn't built yet — it lands in E2-M4.");
-            eprintln!(" For now: `jet run <file>` to run once, `jet check <file>` to look for problems.");
-            eprintln!(" Looking for the project dev shell? That moved to `jet env`.");
-            exit(exit_codes::USAGE);
+            // E2-M4 (D-DEV4): the watch/interpret loop. Re-check and re-run the
+            // entry file on every save, streaming output, for sub-200ms
+            // feedback. The interpreter is a dev convenience only — `jet build`/
+            // `jet run` never touch it (I2/I3).
+            let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            let file = match args.get(1) {
+                Some(f) => f.as_str(),
+                None => {
+                    eprintln!(
+                        "error: `jet dev` needs a file to watch: {} dev <file.{}>",
+                        jet::syntax::BINARY_NAME,
+                        jet::syntax::FILE_EXT
+                    );
+                    exit(exit_codes::USAGE);
+                }
+            };
+            run_dev(file, try_anyway, mode);
+            return;
         }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
@@ -597,6 +606,70 @@ fn run_compile_cmd(
             );
             eprint!("{}", usage());
             exit(exit_codes::USAGE);
+        }
+    }
+}
+
+/// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4). Re-checks and
+/// re-runs the entry file on every save, streaming output. The per-iteration
+/// work lives in `jet::interp::dev_iteration` (so it can be golden-tested);
+/// this is the thin std-only watcher around it (I6: no `notify` crate — we
+/// poll the file's mtime in a loop).
+fn run_dev(file: &str, try_anyway: bool, mode: OutputMode) {
+    let path = Path::new(file);
+    if !path.exists() {
+        eprintln!("error: can't find the file `{}`", file);
+        eprintln!(
+            " fix: check the spelling, or run {} from the folder that contains it",
+            jet::syntax::BINARY_NAME
+        );
+        exit(exit_codes::USER_ERROR);
+    }
+
+    println!("watching {} … (Ctrl-C to stop)", file);
+
+    // Run once immediately, then re-run whenever the file's mtime changes.
+    let mut last_mtime = file_mtime(path);
+    render_dev_iteration(file, try_anyway, mode);
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let now = file_mtime(path);
+        if now != last_mtime {
+            last_mtime = now;
+            // A debounce sleep lets editors finish writing before we read.
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            println!("\n— {} changed, re-running —", file);
+            render_dev_iteration(file, try_anyway, mode);
+        }
+    }
+}
+
+/// Last-modified time of a path, or `None` if it can't be read (treated as a
+/// distinct state so a transient unlink/rewrite still triggers a re-run).
+fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Run one dev iteration and render its outcome to the terminal in the active
+/// output mode. Diagnostics use the SAME renderer as batch compilation
+/// (D-DEV), so a problem looks identical whether seen via `jet check` or
+/// `jet dev`.
+fn render_dev_iteration(file: &str, try_anyway: bool, mode: OutputMode) {
+    let started = std::time::Instant::now();
+    let outcome = jet::interp::dev_iteration(file, try_anyway);
+    let elapsed = started.elapsed();
+    match outcome {
+        jet::interp::RunOutcome::Ran { stdout, stderr } => {
+            print!("{}", stdout);
+            if !stderr.is_empty() {
+                eprint!("{}", stderr);
+            }
+            println!("✓ ran in {} ms", elapsed.as_millis());
+        }
+        jet::interp::RunOutcome::Problems(diags) => {
+            let src = fs::read_to_string(file).unwrap_or_default();
+            report_problems(mode, file, &src, &diags);
         }
     }
 }

@@ -37,6 +37,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "check", summary: "look for problems, build nothing", headline: true },
     CommandSpec { name: "test", summary: "compile and run top-level test blocks", headline: true },
     CommandSpec { name: "build", summary: "compile to a native binary in ./build/", headline: false },
+    CommandSpec { name: "dev", summary: "watch a file and re-run it on every save", headline: false },
     CommandSpec { name: "new", summary: "create a new project folder", headline: false },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", headline: false },
     CommandSpec { name: "fix", summary: "apply all auto-fixable diagnostics in place", headline: false },
@@ -73,6 +74,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--online", help: "with doctor: allow network checks" },
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
+    FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
 ];
 
 /// Is `name` a built-in command?

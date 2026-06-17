@@ -20,6 +20,7 @@ pub mod fetch;
 pub mod ffi;
 pub mod fmt;
 pub mod generics;
+pub mod interp;
 pub mod jetpack;
 pub mod lexer;
 pub mod loader;

@@ -258,6 +258,8 @@ before continuing.
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
+| E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`@unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
+| E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
 | L2101 | jet   | `jet doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
 
@@ -294,6 +296,20 @@ suggestion reuses the edit-distance muscle behind the S14 teaching errors.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | L2101 | `jet doctor` found something in your environment that will bite you later. | Jet leans on a hidden toolchain (rustc, a build cache, your PATH); when one is missing or stale, builds fail with confusing errors far from the cause. | Apply the fix named in the report — many are auto-fixable with `jet doctor --fix`. |
+
+## Dev-loop diagnostics (E2-M4, `jet dev`)
+
+`jet dev` runs your program in a built-in tree-walking interpreter (the M9.5
+comptime evaluator, extended to whole programs) so a save gives feedback in
+well under 200ms (D-DEV3). The interpreter is a dev convenience only — `jet
+build`/`jet run` never use it, and it never produces a release artifact
+(I2/I3). When it can't run a program, it says so plainly and names the real
+build path; it never silently falls back to a different answer.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2201 | `jet dev` can't interpret this program yet — it uses a feature the dev interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `@unsafe`/`core.mem` region, or a native-only std module like files/clock/random/environment/process). | The dev interpreter runs a deterministic, pure-enough subset for instant feedback; features that touch threads, foreign code, raw memory, or the outside world need the real native build. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` keeps showing checks live. Opt in with `jet dev <file> --try-anyway` to attempt execution past the boundary, with no guarantees (D-DEV1). |
+| E2202 | A program ran too long for `jet dev` to keep interpreting (the step budget was exhausted). | `jet dev` interprets your program; a run that never finishes is almost always a loop whose condition never becomes false. | Check the loop near the pointed-at line for a condition that never ends; `jet run` executes the real build with no step limit. |
 
 ## Fan-out and fixed-size list diagnostics
 

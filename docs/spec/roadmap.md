@@ -48,6 +48,16 @@ no-args greeting + did-you-mean (E2101/E2102/L2101), completions + man page
 from one registry, unified CLI/LSP fix engine, external `jet-<name>` discovery,
 OSC 8 hyperlinks, `jet build -v`. Digit separators (S67) already shipped.
 
+**E2-M4 — `jet dev` (watch + interpreter loop)** verified 2026-06-17
+([`m4-jet-dev.md`](../plans/epoch-2/m4-jet-dev.md)). `jet dev <file>` (D-DEV4)
+watches and re-runs on save via the M9.5 comptime evaluator extended to whole
+programs; a 15-program differential battery proves interpreted stdout ==
+compiled stdout byte-for-byte (I2); honest boundaries E2201/E2202 name
+`jet build` for FFI/tasks/`@unsafe`/native-std (`--try-anyway` to attempt
+anyway, D-DEV1); <200ms latency budget tested (D-DEV3). No release path uses the
+interpreter (I2/I3); JIT deferred to Epoch 3 (D-DEV2). Std-only file watching
+(I6).
+
 **E2-M13 — Expert low-level tier (S58)** verified 2026-06-17
 ([`m13-low-level-tier.md`](../plans/epoch-2/m13-low-level-tier.md)). `use
 core.mem` discovery gate, `@audit("…")` + `@unsafe { … }` / `@unsafe fn` audit
