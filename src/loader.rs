@@ -674,11 +674,14 @@ pub fn is_known_std_module(name: &str) -> bool {
             | "core.json"
             | "core.tasks"
             | "core.mem"
+            // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
+            | "core.files"
+            | "core.path"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.files, core.path"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

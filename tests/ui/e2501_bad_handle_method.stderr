@@ -1,0 +1,15 @@
+Error [E2501]: `write_line` is not available on a read-only file handle
+  --> tests/ui/e2501_bad_handle_method.jet:5:7
+    |
+  5 |     h.write_line("hello")?;
+    |       ^^^^^^^^^^
+ Why: `files.open` returns a read-only handle; it can only read lines or bytes
+ Fix: use `files.create` or `files.append` to get a writable handle
+
+Error [E0402]: this call can fail and nothing checks it
+  --> tests/ui/e2501_bad_handle_method.jet:8:13
+    |
+  8 | fn main() { go(); }
+    |             ^^
+ Why: a fallible result can't be ignored — handle it or say failure is impossible
+ Fix: use `?`, `??`, or `panic ...` if failure can't happen here

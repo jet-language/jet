@@ -331,6 +331,87 @@ mod jet_std {
     }
 }
 
+// ── Streaming file handles (E2-M7, D-IO2) ────────────────────────────────────
+// FileReader / FileWriter are RAII: Drop closes (and flushes) them
+// on every exit path — including `?` early returns and panics.
+struct JetFileReader {
+    inner: std::io::BufReader<std::fs::File>,
+    path: String,
+}
+struct JetFileWriter {
+    inner: std::io::BufWriter<std::fs::File>,
+    path: String,
+}
+
+fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IoError> {
+    let f = std::fs::File::open(path).map_err(|e| jet_std::io_error(path, e))?;
+    Ok(JetFileReader { inner: std::io::BufReader::new(f), path: path.clone() })
+}
+fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IoError> {
+    let f = std::fs::File::create(path).map_err(|e| jet_std::io_error(path, e))?;
+    Ok(JetFileWriter { inner: std::io::BufWriter::new(f), path: path.clone() })
+}
+fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IoError> {
+    let f = std::fs::OpenOptions::new()
+        .create(true).append(true).open(path)
+        .map_err(|e| jet_std::io_error(path, e))?;
+    Ok(JetFileWriter { inner: std::io::BufWriter::new(f), path: path.clone() })
+}
+fn jet_std_file_reader_read_line(r: &mut JetFileReader) -> Result<Option<String>, jet_std::IoError> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    match r.inner.read_line(&mut line) {
+        Ok(0) => Ok(None),
+        Ok(_) => {
+            while line.ends_with('\n') || line.ends_with('\r') { line.pop(); }
+            Ok(Some(line))
+        }
+        Err(e) => Err(jet_std::io_error(&r.path, e)),
+    }
+}
+fn jet_std_file_writer_write_line(w: &mut JetFileWriter, line: &String) -> Result<(), jet_std::IoError> {
+    use std::io::Write;
+    w.inner.write_all(line.as_bytes()).and_then(|_| w.inner.write_all(b"\n"))
+        .map_err(|e| jet_std::io_error(&w.path, e))
+}
+fn jet_std_file_writer_flush(w: &mut JetFileWriter) -> Result<(), jet_std::IoError> {
+    use std::io::Write;
+    w.inner.flush().map_err(|e| jet_std::io_error(&w.path, e))
+}
+
+// ── std.path helpers (D-IO1) ──────────────────────────────────────────────────
+fn jet_std_path_join(base: &String, part: &String) -> String {
+    let b = std::path::Path::new(base.as_str());
+    b.join(part.as_str()).to_string_lossy().to_string()
+}
+fn jet_std_path_parent(path: &String) -> String {
+    std::path::Path::new(path.as_str())
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+fn jet_std_path_extension(path: &String) -> String {
+    std::path::Path::new(path.as_str())
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+fn jet_std_path_normalize(path: &String) -> String {
+    // Resolve `.` and `..` components without hitting the filesystem.
+    let mut parts: Vec<&str> = Vec::new();
+    let s = path.as_str();
+    let absolute = s.starts_with('/');
+    for seg in s.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => { parts.pop(); }
+            other => parts.push(other),
+        }
+    }
+    let joined = parts.join("/");
+    if absolute { format!("/{}", joined) } else { joined }
+}
+
 fn jet_std_fs_read(path: &String) -> Result<String, jet_std::IoError> {
     std::fs::read_to_string(path).map_err(|e| jet_std::io_error(path, e))
 }

@@ -471,6 +471,17 @@ fn std_rust_type_name(name: &str) -> Option<&'static str> {
     }
 }
 
+/// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
+fn file_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "FileReader" => Some("JetFileReader"),
+        "FileWriter" => Some("JetFileWriter"),
+        // FileLines is an internal sema marker; it should never appear in emitted Rust.
+        "FileLines" => Some("()"),
+        _ => None,
+    }
+}
+
 impl Cx {
     fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
@@ -527,6 +538,10 @@ impl Cx {
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "U8" => "u8".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
+            // E2-M7: file handle types are top-level in the prelude (not in jet_std).
+            Type::Named(name) if file_handle_rust_type(name).is_some() => {
+                format!("{}{}", self.root_prefix, file_handle_rust_type(name).unwrap())
+            }
             Type::Named(name) if std_rust_type_name(name).is_some() => {
                 format!(
                     "{}jet_std::{}",
@@ -2030,7 +2045,13 @@ fn emit_stmt(
                     );
                 }
             }
-            let kw = if (b.mutable && !b.is_comptime) || mut_fn {
+            // E2-M7: file handles need `let mut` even when bound with `val`,
+            // because streaming reads and writes mutate the internal buffer state.
+            let is_file_handle = matches!(
+                &b.ty,
+                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
+            );
+            let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
                 "let mut"
             } else {
                 "let"
@@ -2835,6 +2856,25 @@ fn emit_for_in(
                 pad,
                 pad,
                 mangle(var)
+            ));
+        } else if method == "lines"
+            && matches!(expr_jet_ty(receiver, env), Some(Type::Named(n)) if n == "FileReader")
+        {
+            // E2-M7: streaming line iteration — `loop line in handle.lines()`.
+            // BufRead::lines() on BufReader<File> is lazy and uses bounded memory.
+            // Each line error is converted to a runtime panic naming the resource (E2502).
+            let recv = emit_expr(cx, receiver, env);
+            out.push_str(&format!(
+                "{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",
+                pad, recv
+            ));
+            out.push_str(&format!(
+                "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                pad,
+                mangle(var),
+                cx.root_prefix,
+                cx.file,
+                0
             ));
         } else {
             out.push_str(&format!(
@@ -3712,6 +3752,31 @@ fn emit_builtin_method(
             "{}jet_stopwatch_elapsed_millis(&({}))",
             cx.root_prefix, recv
         )),
+        // E2-M7: FileWriter methods (D-IO2).
+        "write_line" if matches!(&rty, Some(Type::Named(n)) if n == "FileWriter") => {
+            Some(format!(
+                "{}jet_std_file_writer_write_line(&mut ({}), &({}))",
+                cx.root_prefix, recv, arg(0)
+            ))
+        }
+        "flush" if matches!(&rty, Some(Type::Named(n)) if n == "FileWriter") => {
+            Some(format!(
+                "{}jet_std_file_writer_flush(&mut ({}))",
+                cx.root_prefix, recv
+            ))
+        }
+        // E2-M7: FileReader.lines() is handled in emit_for_in; read_line for direct use.
+        "read_line" if matches!(&rty, Some(Type::Named(n)) if n == "FileReader") => {
+            Some(format!(
+                "{}jet_std_file_reader_read_line(&mut ({}))",
+                cx.root_prefix, recv
+            ))
+        }
+        // .lines() as an expression (outside a loop) — emit an empty vec placeholder;
+        // sema prevents this from being used anywhere meaningful.
+        "lines" if matches!(&rty, Some(Type::Named(n)) if n == "FileReader") => {
+            Some(format!("/* FileLines handled in loop */ &mut ({})", recv))
+        }
         "map" => {
             if let Expr::Lambda(l) = &args[0].expr {
                 if l.meta.needs_fn_mut {
@@ -3882,6 +3947,18 @@ fn emit_std_call(
             format!("{}jet_std::JetTask::spawn({})", cx.root_prefix, arg(0))
         }
         ("core.tasks", "channel") => format!("{}jet_std::JetChannel::new()", cx.root_prefix),
+        // E2-M7: streaming file handles (D-IO2).
+        ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
+        ("core.files", "create") => format!("{}(&({}))", helper("jet_std_files_create"), arg(0)),
+        ("core.files", "append") => format!("{}(&({}))", helper("jet_std_files_append"), arg(0)),
+        // E2-M7: std.path helpers (D-IO1).
+        ("core.path", "join") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_path_join"), arg(0), arg(1)
+        ),
+        ("core.path", "parent") => format!("{}(&({}))", helper("jet_std_path_parent"), arg(0)),
+        ("core.path", "extension") => format!("{}(&({}))", helper("jet_std_path_extension"), arg(0)),
+        ("core.path", "normalize") => format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0)),
         _ => "/* unknown std call */".to_string(),
     }
 }

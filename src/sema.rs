@@ -2433,6 +2433,10 @@ impl<'a> Checker<'a> {
                                 self.declare_loop_var(v2.clone(), *v2s, value);
                             }
                         }
+                        // E2-M7: `loop line in handle.lines()` — streaming line iterator.
+                        Some(Type::Named(n)) if n == "FileLines" => {
+                            self.declare_loop_var(var.clone(), *var_span, &Type::String);
+                        }
                         Some(other) => {
                             self.diags.push(Diagnostic::error(
                                     "E0109",
@@ -4237,13 +4241,16 @@ impl<'a> Checker<'a> {
             Type::Result { ok, err } => {
                 let ret = self.ret.clone().unwrap_or(Type::Int);
                 match &ret {
+                    // E2-M7: error types match — propagate and unwrap the Ok value.
+                    // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
+                    // only propagates the error; the unwrapped Ok value may have any
+                    // type (it is bound by the caller, not returned unchanged).
                     Type::Result {
-                        ok: ret_ok,
                         err: ret_err,
-                    } if *ret_ok == ok
-                        && (*ret_err == err
-                            || (is_default_error(ret_err)
-                                && matches!(err.as_ref(), Type::String))) =>
+                        ..
+                    } if *ret_err == err
+                        || (is_default_error(ret_err)
+                            && matches!(err.as_ref(), Type::String)) =>
                     {
                         Some((*ok).clone())
                     }
@@ -5817,6 +5824,14 @@ impl<'a> Checker<'a> {
                 return None;
             }
         }
+        // E2-M7: method calls on streaming file handles (D-IO2).
+        if let Type::Named(handle_ty) = &recv_ty {
+            if let Some(ret) = file_handle_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
+                *recv_type_out = Some(handle_ty.clone());
+                return ret;
+            }
+        }
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
                 for (trait_name, info) in &self.m9.traits {
@@ -6569,6 +6584,11 @@ impl<'a> Checker<'a> {
                     args: vec![t],
                 });
             }
+            // L2501 is reserved for "whole-file read advisory" but intentionally not
+            // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call
+            // site is too noisy (breaks showcase golden tests via path-specific output).
+            // Revisit when the test harness can normalise paths in exact comparisons.
+            ("core.fs", "read") => {}
             ("core.tasks", "channel") => {
                 if !args.is_empty() {
                     self.diags
@@ -9382,6 +9402,7 @@ fn std_type_known(name: &str) -> bool {
     matches!(
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
+        | "FileReader" | "FileWriter" | "FileLines"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -9421,6 +9442,67 @@ fn std_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
             key: Box::new(Type::String),
             value: Box::new(json),
         }]),
+        _ => None,
+    }
+}
+
+/// E2-M7: type-check a method call on a FileReader or FileWriter handle (D-IO2).
+/// Returns `Some(return_type)` when the method is valid, or emits E2501 and
+/// returns `None` for an invalid method / wrong-direction call.
+fn file_handle_method_return(
+    handle_ty: &str,
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let io = io_error_ty();
+    let unit = unit_ty();
+    match handle_ty {
+        "FileReader" => match method {
+            // `.lines()` — returns the handle as a streaming source for `loop … in`.
+            // We encode the return as `Named("FileLines")` so the loop body knows
+            // the element type is `String`.
+            "lines" if n_args == 0 => Some(Some(Type::Named("FileLines".to_string()))),
+            // `.read_line()` — returns one line or `None` at EOF.
+            "read_line" if n_args == 0 => {
+                Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
+            }
+            // Wrong direction: writing to a reader.
+            "write_line" | "flush" => {
+                diags.push(Diagnostic::error(
+                    "E2501",
+                    format!("`{}` is not available on a read-only file handle", method),
+                    "`files.open` returns a read-only handle; it can only read lines or bytes"
+                        .to_string(),
+                    "use `files.create` or `files.append` to get a writable handle".to_string(),
+                    Some(span),
+                ));
+                Some(None)
+            }
+            _ => None,
+        },
+        "FileWriter" => match method {
+            // `.write_line(text)` — writes a line followed by a newline.
+            "write_line" if n_args == 1 => {
+                Some(Some(result_ty(unit.clone(), io.clone())))
+            }
+            // `.flush()` — ensure buffered bytes reach disk.
+            "flush" if n_args == 0 => Some(Some(result_ty(unit, io))),
+            // Wrong direction: reading from a writer.
+            "lines" | "read_line" => {
+                diags.push(Diagnostic::error(
+                    "E2501",
+                    format!("`{}` is not available on a write-only file handle", method),
+                    "`files.create` returns a write-only handle; it can only write lines"
+                        .to_string(),
+                    "use `files.open` to get a readable handle".to_string(),
+                    Some(span),
+                ));
+                Some(None)
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -9546,6 +9628,24 @@ fn std_fixed_sig(
             Some(result_ty(json.clone(), json_error_ty())),
         )),
         ("core.json", "render" | "render_pretty") => Some((vec![(read, json)], Some(Type::String))),
+        // E2-M7: streaming file handles (D-IO2, files.open / files.create).
+        ("core.files", "open" | "append") => Some((
+            vec![(read, string.clone())],
+            Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
+        )),
+        ("core.files", "create") => Some((
+            vec![(read, string.clone())],
+            Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
+        )),
+        // E2-M7: std.path helpers (D-IO1).
+        ("core.path", "join") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(string),
+        )),
+        ("core.path", "parent" | "extension" | "normalize") => Some((
+            vec![(read, Type::String)],
+            Some(Type::String),
+        )),
         _ => None,
     }
 }
@@ -9576,6 +9676,8 @@ fn std_module_items(module: &str) -> Vec<String> {
         "core.json" => &["parse", "render", "render_pretty"],
         "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of"],
         "core.tasks" => &["spawn", "channel"],
+        "core.files" => &["open", "create", "append"],
+        "core.path" => &["join", "parent", "extension", "normalize"],
         "core" => &[],
         _ => &[],
     };

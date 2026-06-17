@@ -2266,7 +2266,10 @@ impl<'a> Parser<'a> {
                     Expr::Call(_)
                     | Expr::Field(_, _, _)
                     | Expr::MethodCall { .. }
-                    | Expr::FanOut { .. } => {}
+                    | Expr::FanOut { .. }
+                    // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
+                    | Expr::Try(_, _, _)
+                    | Expr::OrFallback { .. } => {}
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",

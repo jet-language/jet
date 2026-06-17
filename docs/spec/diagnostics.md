@@ -406,6 +406,19 @@ block reserved for M6.
 | E2403 | Field-pun name `{name}` is not in scope (or is not a field of `{type}`). | `Type { name }` is shorthand for `Type { name: name }` — it reads the local variable `name` and assigns it to the field of the same name. If no such local exists, or if `Type` has no field by that name, the shorthand is ambiguous. | Introduce a local `val name = …;` before the struct literal, or write the long form `Type { field_name: value }`. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
 
+## Streaming I/O diagnostics (E2-M7, D-IO1..3)
+
+RAII file handles (`files.open`, `files.create`, `files.append`) close on every
+exit path including `?` early returns. E25xx covers misuse of those handles.
+L2501 is reserved for a "whole-file read advisory" but is not emitted yet (the
+test harness can't normalise paths in exact-match comparisons; revisit when that
+is fixed).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2501 | `{method}` is not available on a {direction} file handle. | `files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error. | Use the correct handle type for the operation: `files.open` to read, `files.create`/`files.append` to write. |
+| L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line in handle.lines() { … }` to stream line-by-line. Not emitted yet. |
+
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an
