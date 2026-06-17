@@ -37,8 +37,15 @@ separate tutorial language (see docs/spec/decision-ballots.md Group 19).
   exists; shrinking (minimizing the failing case) is the part users love.
 - **`jet bench`** with warmups, repeated runs, variance, and comparison output —
   statistically honest out of the box (hyperfine-grade), never a naive timer.
-- **`todo` typed hole (D-TOOL2)** — compiles, panics at runtime, reports its
-  expected type. Recommended deferred unless the design is small.
+- **`todo` typed hole (D-TOOL2)** — ships in M11 (D-TOOL2=A, ratified 2026-06-17).
+  Compiles and type-checks; panics at runtime with file, line, and expected type:
+  ```jet
+  fn compute(x: Int) -> String = todo;  // compiles; jet build succeeds
+  // at runtime: panic: todo at src/main.jet:1 — expected String
+  ```
+- **Capability summary (D-TOOL5=C).** `jet build` prints a human-readable capability
+  summary by default (network, file I/O, unsafe tier, FFI, etc.). `--capabilities-json`
+  emits machine-readable JSON for tooling. Printed on normal build output, not behind a flag.
 - **`jet tour`/`jet learn` (D-TEST3)** — guided in-terminal exercises where the
   diagnostics are the teacher. Docs-first; promote to a command if cheap.
 - **Playground** design *if* the E2-M4 interpreter is ready (shareable,
@@ -90,6 +97,8 @@ parse   1.84 ms ±0.05  (200 runs, 20 warmup)   # honest stats, scriptable --jso
 - Published packages get docs and tested examples automatically.
 - Coverage works in CI-readable and human-readable modes.
 - `jet bench` output is statistically honest and scriptable.
+- `todo` typed-hole compiles, type-checks, and panics at runtime with expected type (D-TOOL2=A).
+- `jet build` prints a human-readable capability summary; `--capabilities-json` for tooling (D-TOOL5=C).
 - The beginner learning path uses real compiler feedback, not a separate
   language.
 - `nix develop -c cargo test` green.

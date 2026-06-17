@@ -24,8 +24,9 @@ an implementation detail for normal users).
 
 ## Scope
 
-- **DAP / source maps (D-OBS1).** Emit line directives / a source map so
-  gdb/lldb/VS Code step at Jet source lines. Ship for VS Code/Cursor before GA.
+- **Source maps (D-OBS1 foundation).** Emit line directives / a source map so
+  debuggers show Jet files and lines, not generated Rust. Full DAP step-through
+  (VS Code/Cursor breakpoints) is a **GA gate at E2-M17**, not an M12 deliverable.
 - **Panic reports in dev mode (D-OBS2).** Include relevant local values *when
   safe* (no secrets, no moved-from/uninitialized values). Off in release.
 - **Error propagation traces.** For `?`-propagated errors, show the propagation
@@ -61,7 +62,7 @@ propagated from: load_rows (report.jet:9) via `?`
 
 - `examples/features/47_debug.jet` — a program whose panic shows Jet lines +
   safe locals.
-- A DAP smoke test: set a breakpoint, hit it at a Jet line (scripted).
+- A source-map smoke test: a debugger (gdb/lldb) resolves a panic to a Jet source line.
 - `tests/observe/structured_log.txt` — `jet.log` JSON line shape.
 - A test proving moved-from/secret values are *not* shown in panic locals.
 
@@ -75,7 +76,7 @@ propagated from: load_rows (report.jet:9) via `?`
 
 ## Exit criteria
 
-- VS Code/Cursor can step through a Jet program at Jet source lines.
+- Source maps emit; a debugger resolves panics to Jet source lines (not generated Rust).
 - Panic/error reports stay beginner-readable and never leak unsafe locals.
 - Service examples emit structured logs (and trace context) without a framework.
 - Generated Rust remains an implementation detail for normal users.

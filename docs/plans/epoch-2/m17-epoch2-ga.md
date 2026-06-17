@@ -32,19 +32,21 @@ still sacred throughout (E2-V4).
    doctests (M11).
 4. A **`jet dev` demo** — instant feedback (M4).
 
-Stretch (D-GA1 = B): 5. a **C interop** example (M14); 6. a **low-level /
-freestanding** smoke project (M13/M15).
+5. A **C interop example** (M14) — mandatory (D-GA1=B).
+6. A **low-level / freestanding smoke project** (M13/M15) — mandatory (D-GA1=B).
 
 ## Audit gates
 
 - `nix develop -c cargo test` green across the whole workspace.
 - **Soundness fuzzing** for ownership, references (M5), tasks (M1), low-level
   gates (M13), and FFI (M14).
-- **Performance** target recorded per showcase (D-GA2 — record, don't hard-gate).
-- **Binary size + compile-time** budgets recorded.
+- **Performance** and **binary size + compile-time** budgets measured and encoded as
+  hard CI assertions (D-GA2=B); CI fails if any budget is exceeded.
 - **Docs** cover migration, compatibility (M2), packages (M8), services (M10),
   debugging (M12), and the low-level gates (M13).
 - Every new diagnostic across Epoch 2 has a `jet explain` entry (M3).
+- **Full DAP step-through** (VS Code/Cursor breakpoints at Jet source lines) ships
+  at M17 GA (moved from M12 per D-OBS1 split); this is a GA gate.
 
 ## Release checklist
 
@@ -52,7 +54,7 @@ freestanding** smoke project (M13/M15).
 - Launch versioning decided (D-GA4/E2-D2); `jet --version` prints normal SemVer
   at GA unless the owner flips encoded Epoch SemVer.
 - Showcase repos build from a clean checkout via `nix develop`.
-- A short public beta runs after audits (D-GA3) before the GA tag.
+- No beta period before the GA tag (D-GA3 ratified: straight to GA).
 
 ## Examples & tests
 
@@ -71,8 +73,10 @@ freestanding** smoke project (M13/M15).
 
 ## Exit criteria
 
-- The mandatory showcases build, run, and are smoke-tested in CI.
-- All audit gates pass; budgets are recorded.
+- All 6 mandatory showcases build, run, and are smoke-tested in CI (D-GA1=B).
+- Hard CI perf/size gates pass for every showcase (D-GA2=B; budgets encoded, not just recorded).
+- DAP step-through debugger works end-to-end in VS Code/Cursor at Jet source lines.
+- All audit gates pass.
 - Docs cover the full adoption story.
 - Every Epoch 2 diagnostic has `jet explain`.
 - Single-file `jet run file.jet` still needs no manifest.

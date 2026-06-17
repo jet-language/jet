@@ -40,6 +40,10 @@ of this (E2-V4, I).
   the lockfile).
 - **Advisory database format + `jet audit`** command.
 - **Namespace ownership** rules; immutable/yanked release policy (D-PKGS2/4).
+- **Pre-publish gate (D-PKGS4-amended):** `jet publish` must:
+  1. Run `jet build` + `jet test` locally first.
+  2. Submit only if both pass (`--force` overrides with a warning).
+  3. The registry re-verifies on receipt and rejects if verification fails.
 - **Signed registry metadata** (optional v1) and a **design** for signed
   binary/source caches with generations/rollback (ship later, E2-M16).
 
@@ -83,6 +87,7 @@ fix: bump to 2.0.0, or restore `parse` (a deprecated shim counts).
 ## Exit criteria
 
 - Publish refuses breaking changes under a non-breaking version bump.
+- Publish refuses packages that fail `jet build` or `jet test` (D-PKGS4 pre-publish gate).
 - `jet fetch --locked` and vendored builds work offline.
 - Resolver conflict diagnostics are readable.
 - Private mirror flow works without hard-coding public infrastructure.

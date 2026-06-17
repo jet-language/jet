@@ -133,6 +133,11 @@ Likely in scope once D-REPL1=A and D-REPL21=A:
 - Meta-commands per D-REPL15.
 - Optional `--project <dir>` per D-REPL10.
 - Transcript test harness.
+- **D-REPL-PRELOAD:** auto-import `use std.io` so `print` just works. On the first use
+  of each auto-imported symbol print exactly one teaching line (not on every invocation):
+  ```
+  note: `print` is from `use std.io` — imported automatically in the REPL
+  ```
 - No numbered `examples/features/NN_*.jet` file (the REPL is interactive, not a
   runnable demo); the executable spec is a **documented transcript** checked into
   `tests/repl/basics.txt`.
@@ -158,7 +163,8 @@ Likely in scope once D-REPL1=A and D-REPL21=A:
 4. Hard-reject table for D-REPL6 features with E18xx codes.
 5. Transcript harness + first fixtures (hello, arithmetic, ownership move,
    moved-from error, `:reset`, unsupported FFI message).
-6. Optional line-editor crate (D-REPL11/18) and completion (if C).
+6. **Skip** — D-REPL11=A (std-only) means no line-editor crate ships. Richer editing
+   is a future upgrade that needs a fresh I6 sign-off.
 7. `--project` loader (D-REPL10) if ratified.
 8. Docs: guide section, `jet explain` entries for new E18xx codes.
 
@@ -173,7 +179,7 @@ Likely in scope once D-REPL1=A and D-REPL21=A:
 - `:load examples/features/01_hello.jet` (if D-REPL15 ≥ B) runs or explains limits.
 - FFI/tasks snippet fails with a plain what/why/fix per docs/spec/diagnostics.md.
 - Unsupported interpreter features name `jet run` / `jet build` as the fix.
-- No new external crates unless D-REPL11/18 ratified.
+- No external crates (D-REPL11=A std-only; D-REPL18 moot).
 
 ---
 

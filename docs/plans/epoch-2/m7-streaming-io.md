@@ -47,9 +47,10 @@ val text = fs.read("config.toml")?;
   variants. Line iteration, byte chunks, `seek` where the platform allows.
 - **Paths (D-IO1).** A `std.path` helper module (join/parent/extension/normalize)
   rather than a first-class `Path` type this epoch.
-- **RAII cleanup (D-IO2 / S63).** Cleanup runs at scope end on *every* path; make
-  the S63 contract user-facing with docs and tests. Runtime errors name the
-  resource and operation ("could not write to `out.csv`: disk full").
+- **RAII cleanup (D-IO2 / S63).** Cleanup runs at scope end on *every* path —
+  including `?` early returns and panics. Codegen lowers scope-exit cleanup to
+  Rust `Drop` impls. Make the S63 contract user-facing with docs and tests.
+  Runtime errors name the resource and operation ("could not write to `out.csv`: disk full").
 - **Streaming std streams.** `stdin`/`stdout`/`stderr` as streaming
   readers/writers.
 - **Error conversion.** I/O errors integrate with E2-M6's **`Fallible`** trait so `?`

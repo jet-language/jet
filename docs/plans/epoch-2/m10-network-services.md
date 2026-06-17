@@ -27,8 +27,10 @@ not 100k-connection async workloads (E2-V5/V7).
 - **Blocking sockets.** TCP/UDP with timeouts and clean shutdown.
 - **HTTP client** over streaming I/O (E2-M7) — calls a real API.
 - **HTTP server** for small services; request limits, graceful shutdown.
-- **TLS (D-NET1).** Via a vetted Rust library (rustls-class) through the E2-M14
-  FFI tier. Never hand-roll crypto (cross-ref `jet.crypto` D-LR3).
+- **TLS (D-NET1).** Delivered as the `jet.tls` package — an FFI-wrapping Jet package
+  using `extern rust "rustls@<ver>"` (D-DEP1). Users add `jet.tls#<ver>` to their
+  `payload.jet`; it is not ambient. `jet.http` takes `jet.tls` as an optional dep for
+  HTTPS. Never hand-roll crypto (cross-ref `jet.crypto` D-LR3).
 - **Worker patterns.** Channel-based workers; timeouts compose with `jet.time`.
 - **Structured logging.** Integrate `jet.log` (E2-M9).
 - **Config/env conventions** without a framework (read env, typed config struct).

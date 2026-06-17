@@ -31,10 +31,12 @@ the low-level tier stays gated and never leaks into normal Jet.
   alternative.
 - **Allocator story** tied to E2-M13 (explicit/arena/fixed allocators in
   freestanding mode).
-- **Panic strategy + size profiles (D-CROSS2)** — abort by default; binary-size
-  profiles (e.g. `--small` from S15) documented.
-- **Embedded/freestanding smoke (D-CROSS3)** — a minimal target in CI or a
-  documented local harness with the minimum hardware/emulator requirement.
+- **Panic strategy + size profiles (D-CROSS2)** — `--freestanding` sets `panic = "abort"`
+  in the generated Rust. `--small` (S15) also implies `panic = "abort"`. Normal hosted
+  Jet builds may still use unwind; document the difference.
+- **Embedded/freestanding smoke (D-CROSS3)** — documented local QEMU harness; no
+  physical hardware required in CI. The repo ships `docs/embedded.md` with exact QEMU
+  commands to run the freestanding example.
 
 ## Freestanding diagnostic (example)
 

@@ -36,8 +36,9 @@ Epoch 2 builds the foundation; JetOS itself stays research (E2-V12).
   that lowers to a public pure fragment — the better-than-Nix `pack.jet` shape.
   `Shell`/`Profile`/`System`/`Image` stay ordinary types (jetpack supplies the
   schemas + merge semantics); LSP parses one shape everywhere, no DSL injection.
-- **Signed caches + generations/rollback (D-PURE3).** Design now (generations,
-  rollback depth), ship the signing later.
+- **Signed caches + generations/rollback (D-PURE3=B).** Ship in M16 (not design-only).
+  Implement: generation tracking for the package cache, signed cache entries,
+  rollback to a prior generation, and `jet store rollback <gen>` CLI surface.
 - **Jetpack integration path.** This unlocks jetpack-jetos Phase 2 system builds;
   Phase 1 (`jetpack run/build/list/...`) remains an independent track.
 
@@ -70,7 +71,6 @@ Calling an impure function inside `config` is **E3401** with the impurity path.
 ## Out of scope
 
 - Shipping JetOS as a product (E2-V12 = research-only).
-- Shipping the signed cache (design only this milestone).
 - General effect system beyond the `pure`/impure split (S60 is the line).
 - JetOS option/module merge semantics beyond what jetpack Phase 2 needs.
 
@@ -80,4 +80,5 @@ Calling an impure function inside `config` is **E3401** with the impurity path.
 - Impure calls fail with a path explaining why.
 - Package builds cannot perform ambient I/O or network access.
 - A small declarative config example evaluates to stable JSON.
+- Signed cache and generation rollback ship (D-PURE3=B); `jet store rollback <gen>` works.
 - `nix develop -c cargo test` green.

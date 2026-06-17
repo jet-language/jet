@@ -6,7 +6,7 @@ the ring). sqlite in the ring depends on E2-M14 ✅ (C FFI done).
 **Error codes:** E27xx block, shared across ring packages (claim in
 docs/spec/diagnostics.md).
 **Amendments:** D-LR4=B (jet.yaml in wave 1); D-DEP1 pattern for Rust-backed
-libs; D-JSON1 coercion surfacing required. See `docs/plans/sidequests/`.
+libs; D-JSON1 coercion surfacing required. See §D-DEP1 and §D-JSON1 below.
 
 ## Goal
 
