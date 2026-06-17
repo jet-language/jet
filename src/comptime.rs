@@ -807,7 +807,7 @@ impl<'a> Interp<'a> {
     }
 
     /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
-    /// docs/plans/fan-out-and-fixed-size-lists.md §2). Comptime only supports
+    /// docs/spec/spec.md (S75 fan-out). Comptime only supports
     /// the named-one-arg-function callee case; sources/type-constructor
     /// callees are jetpack-module-specific sugar handled structurally by the
     /// jetpack module evaluator (src/jetpack/modeval.rs), not here.

@@ -621,13 +621,11 @@ trailing parameters with defaults may be omitted at call sites.
 Rejected: Swift-style required labels (ceremony), Kotlin/Python
 reordering by name (two call shapes for one function), no labels at all.
 
-**S61 — Hyphens in package / module / system / image / env *names***
+**S84 — Hyphens in package / module / system / image / env *names***
 *(ratified 2026-06-16, finalist 2)*: **names in these positions may be
 kebab-case** — `image.halcyon-iso`, `system.my-host`, `module web-app` —
-matching the nixpkgs/npm package-name convention users already know. (This
-shares the S61 ballot ID with *Argument labels & defaults* above; it is the
-separate "hyphens in names" decision raised by the jetos arc.) The grammar is a
-**dashed name** `ident (-ident)*`: a `-` joins two segments only when it is
+matching the nixpkgs/npm package-name convention users already know. The grammar
+is a **dashed name** `ident (-ident)*`: a `-` joins two segments only when it is
 **span-adjacent** to both — `prev.end == minus.start` and
 `minus.end == next.start`, i.e. no surrounding whitespace. That span-adjacency
 rule is the whole safety mechanism: a spaced `a - b` stays **subtraction**, so
@@ -1523,13 +1521,6 @@ implementation milestone is pending.
 > choosing. Build the side-by-side example set first; do not re-litigate
 > S6's text until then.
 
-> **S61 — Hyphens in package / module / system / image / env names —
-> RATIFIED 2026-06-16 (finalist 2).** Moved to the Ratified section above. Names
-> in these positions may be kebab-case (`image.halcyon-iso`, `system.my-host`);
-> the dashed-name rule `ident (-ident)*` lives in the parser (`expect_dashed_name`,
-> span-adjacent hyphens only), so a spaced `a - b` stays subtraction — no lexer
-> change. Shipped in the jetos-ratified-arc.
-
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
 > section above and `docs/plans/jetpack-jetos/README.md` §3.3 (provider roadmap).
@@ -1712,4 +1703,4 @@ are fully ratified above. **S59 (C FFI)** ships in **Epoch 2** (E2-M14). **S53**
 | 2026-06-16 | U17 | a realized `library` package is consumed with `use <pkg>` (D-LIB-USE A) | owner |
 | 2026-06-16 | U18 | inferred constructors: bare `{…}` elaborates to the expected type; explicit `Type {…}` optional (D-INFER-CTOR) | owner |
 | 2026-06-16 | D-PAT6 | parameter destructuring deferred; unpack on first body line | owner |
-| 2026-06-16 | S61 | hyphens allowed in package/module/system/image/env *names* (finalist 2); dashed-name `ident (-ident)*`, span-adjacent only; no lexer change | owner |
+| 2026-06-16 | S84 | hyphens allowed in package/module/system/image/env *names* (finalist 2); dashed-name `ident (-ident)*`, span-adjacent only; no lexer change | owner |

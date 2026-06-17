@@ -200,7 +200,7 @@ These are compiler/sema/spec changes. Highest blast radius — get them right be
 | **Tier-2 stored/returned references** — entity graphs, parent pointers, zero-copy parse buffers | T, D | E2-M5; biggest unlock for Rust-territory programs; tier 1 intentionally blocks this |
 | **Expert low-level tier (S58)** — `volatile`, MMIO, layout, allocators behind `import std/mem` + `unsafe` | Ma, D | Ratified; E2-M13; not in onboarding |
 | **`extern c` surface** — `@bindgen` / `@extern module`, `use c.<lib>` (S59) | Ma, T, D | E2-M14; overlay + auto-bind cache; gateway to Raylib/SDL |
-| **Fixed-size lists `[T#N]` + fan-out `.[…]`** — grids and homogenous literals without nested dynamic lists | T | Ratified in `fan-out-and-fixed-size-lists.md`; in progress |
+| **Fixed-size lists `[T#N]` + fan-out `.[…]`** — grids and homogenous literals without nested dynamic lists | T | ✅ S75/S76 ratified + implemented (`spec.md`) |
 | **JSON ↔ typed struct bridge** — no schema inference or typed decode at the language/stdlib boundary today | E | Could be std `json` enhancement *or* a comptime/reflection layer; decide at language boundary before bolting on libs |
 | **Semicolons required** — unlike Python/JS habits | M | Intentional (S6); not a bug — teaching errors help; optional semicolons would be a major syntax ratchet decision |
 | **Async/await absent** — blocking-only concurrency story | A | Intentional non-goal v1; tasks+channels are the Jet model; document clearly so Aisha doesn't expect Go-style net stack + async |
@@ -211,7 +211,7 @@ These are compiler/sema/spec changes. Highest blast radius — get them right be
 2. `defer` / cleanup (pairs with errors; reduces beginner I/O anxiety)
 3. Named + default arguments (high read impact, localized surface)
 4. Optional-chaining / guard ergonomics for `T?`
-5. Fixed-size lists + fan-out (ratified — ship)
+5. Fixed-size lists + fan-out — ✅ shipped (S75/S76)
 6. Tier-2 references (large sema project — schedule after error/defer ergonomics)
 7. `extern c` (language surface before C-ecosystem libs)
 8. Expert tier S58 (gated; after `extern c` boundary is stable)
@@ -300,7 +300,7 @@ Cannot ship until `extern c` (§1) and often streaming/http (§2) exist. Dessert
 | **Raylib / SDL blocked** | Ma, T | `extern c` E2-M14 |
 | **ncurses / TUI libs blocked** | T | `extern c` |
 | **Vendor C `.a` / firmware parsers blocked** | D | `extern c` |
-| **Performance tuning unclear for large grids** | T | Fixed-size lists §1 + docs/examples |
+| **Performance tuning unclear for large grids** | T | Fixed-size lists (S76) + docs/examples |
 
 ---
 
@@ -335,7 +335,7 @@ Legend: ✅ planned (ballot or plan exists) · 🟡 partial (ratified/in progres
 | Tier-2 stored/returned references | ✅ | E2-M5, **D-REF1…3** |
 | Expert low-level tier S58 | ✅ | E2-M13, **D-LL1…3** |
 | `extern c` surface | ✅ | E2-M14, **D-CFFI1…3** |
-| Fixed-size `[T#N]` + fan-out `.[…]` | 🟡 | `fan-out-and-fixed-size-lists.md` — ratify + ship |
+| Fixed-size `[T#N]` + fan-out `.[…]` | ✅ | S75/S76 — `spec.md` + `syntax-decisions.md` |
 | JSON ↔ typed struct bridge | 🆕 | **Group 22** (D-JSON1…2) |
 | Semicolons required | 📋 | S6 — optional semicolons = **D-SUGAR7** if ever reopened |
 | No async/await | 📋 | **E2-V5**, S53 — document for Aisha persona |
@@ -408,7 +408,7 @@ Previous ordering led with `jet dev` and networking. **Revised:** language seman
 2. **`defer` / cleanup** — Priya; all I/O-heavy CLIs
 3. **Named + default arguments** — Carlos; universal readability
 4. **Optional-chaining / guard ergonomics** — owner todo §12
-5. **Fixed-size lists + fan-out** — ratified; ship in progress
+5. **Fixed-size lists + fan-out** — ✅ shipped (S75/S76)
 6. **Tier-2 references** — Tom, Dr. Chen; schedule after #1–2
 7. **`extern c`** — language surface before Raylib/vendor C
 8. **Expert tier S58** — Dr. Chen MMIO; gated
@@ -481,6 +481,8 @@ Previous ordering led with `jet dev` and networking. **Revised:** language seman
 - `docs/spec/roadmap.md`
 - `docs/reference/stdlib.md`
 - `docs/plans/owner-todo.md`
+- `docs/spec/syntax-decisions.md`
+- `docs/spec/spec.md`
 - `examples/showcase/` (jetgrep, jsonfmt, wordfreq)
 - `docs/plans/persona-examples.md` (persona push-factor crosscheck)
 - `docs/plans/epoch-2/README.md`

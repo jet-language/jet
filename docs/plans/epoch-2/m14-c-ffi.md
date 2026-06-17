@@ -350,5 +350,5 @@ Each needs what/why/fix in [`docs/spec/diagnostics.md`](../../spec/diagnostics.m
 
 - **S59** — [`docs/spec/syntax-decisions.md`](../../spec/syntax-decisions.md)
 - **S16 / D-S16-USE** — `use` keyword
-- **Ratified owner picks** — [`docs/spec/decision-ballots-owner.md`](../../spec/decision-ballots-owner.md)
+- **Ratified owner picks** — [`docs/spec/syntax-decisions.md`](../../spec/syntax-decisions.md) (S59, D-CBIND2/3/5/6, D-LL2)
 - **Bind engine pillar** — [`docs/plans/epoch-3/c-header-bindings.md`](../epoch-3/c-header-bindings.md) (CBIND open picks)

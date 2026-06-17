@@ -25,7 +25,7 @@ These are binding. When they disagree with anything else, they win.
   codegen) + rules R1–R7.
 - [diagnostics.md](spec/diagnostics.md) — error voice + exact render format;
   snapshot-pinned.
-- [roadmap.md](spec/roadmap.md) — milestones and exit criteria.
+- [roadmap.md](spec/roadmap.md) — what's active / not yet verified (completed work lives in epoch plans).
 - [decision-ballots.md](spec/decision-ballots.md) — the owner's *open* decision
   queue only (ratified items live in syntax-decisions.md).
 

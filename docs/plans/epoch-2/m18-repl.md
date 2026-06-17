@@ -1,7 +1,7 @@
 # E2-M18 — Interactive REPL (`jet repl`)
 
 **Status:** **all owner decisions D-REPL1…D-REPL21 ratified 2026-06-16** (see
-the decision tables below; routed from docs/spec/decision-ballots-owner.md).
+the decision tables below; ratified picks recorded in docs/spec/syntax-decisions.md).
 Ready for the detailed implementation pass when E2-M18 is scheduled — the M4
 interpreter (D-REPL4=A backend) must be green first. D-REPL14 carries an owner
 refinement (prompt-based compile-or-file fallback) — see its row.
