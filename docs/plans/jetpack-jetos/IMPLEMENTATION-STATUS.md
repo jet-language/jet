@@ -1,6 +1,6 @@
 # Jetpack / jetos — implementation status
 
-**Updated:** 2026-06-16. Durable record of what the `jet` + `jetpack` + `jetos`
+**Updated:** 2026-06-17. Durable record of what the `jet` + `jetpack` + `jetos`
 ecosystem actually IMPLEMENTS, versus the ratified design. The design-of-record
 is [`unified-ecosystem.md`](unified-ecosystem.md) (target surface, U1–U18);
 sequencing/roadmap is [`README.md`](README.md); the jetos tier is
@@ -13,7 +13,7 @@ Ratified ≠ implemented — check the tables below before assuming a feature ex
 ## Shipping today (built, tested, green)
 
 The typed `module { … }` surface builds and realizes end-to-end offline. Full
-suite green: **`nix develop -c cargo test` → 348 passed, 0 failed**;
+suite green: **`nix develop -c cargo test` → 386 passed, 0 failed**;
 `tests/decisions.rs` (ratification enforcement) green; `jet run
 examples/features/01_hello.jet` prints `hello, world`.
 
@@ -91,7 +91,7 @@ lexer change, no `a - b` ambiguity:
 
 ## How to verify
 ```
-nix develop -c cargo test                         # 348 passed, 0 failed
+nix develop -c cargo test                         # 386 passed, 0 failed
 nix develop -c cargo test --test decisions        # ratification gate
 nix develop -c jet run examples/features/01_hello.jet
 git log --oneline 3e6be24..jetos-ratified-arc     # the arc's commits
