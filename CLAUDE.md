@@ -79,6 +79,11 @@ recommendation — and **stop work on that feature** until the owner
 decides. Build something else meanwhile. When the owner ratifies: update
 src/syntax.rs / parser, re-bless snapshots, log it in the decision table.
 
+## Git workflow
+
+Work directly on the current branch. Do not create new branches, worktrees,
+or forks unless the owner explicitly asks for one.
+
 ## Style
 
 - Write terse. Use natural, minimal, plain language; reach for a technical
