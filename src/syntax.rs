@@ -101,8 +101,29 @@ pub const KW_RETURN: &str = "return";
 /// M2: loop statement (for SharedHandle lint checks).
 pub const KW_LOOP: &str = "loop";
 
-/// M2 tier 2: unsafe block for expert code.
+/// S58 (ratified 2026-06-12; amended 2026-06-16): the audited expert gate,
+/// written as the marker `@unsafe { … }` (statement) or `@unsafe fn` (whole-
+/// function contract). The bare `unsafe` keyword is the rejected former
+/// spelling, recognized only to emit a teaching error.
 pub const KW_UNSAFE: &str = "unsafe";
+
+/// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
+/// requires `use core.mem`.
+pub const CORE_MEM_MODULE: &str = "core.mem";
+
+/// S58 (ratified 2026-06-12): the pointer type — `Ptr<T>`.
+pub const TYPE_PTR: &str = "Ptr";
+
+/// S58 (ratified 2026-06-12): `mem.Ptr<T>.from_addr(addr)` — typed pointer
+/// from an integer address.
+pub const MEM_FROM_ADDR: &str = "from_addr";
+
+/// S58 (ratified 2026-06-12): `mem.volatile_read(p)` — volatile/MMIO read.
+pub const MEM_VOLATILE_READ: &str = "volatile_read";
+
+/// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
+/// an Int (taking a pointer is inert; using it needs `@unsafe`).
+pub const MEM_ADDRESS_OF: &str = "address_of";
 
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
@@ -584,6 +605,16 @@ pub const PACKAGE_KIND_EXECUTABLE: &str = "executable";
 /// U10 (ratified 2026-06-16): the per-package block field naming its kind —
 /// `deploy: { kind: executable, … }`.
 pub const PACKAGE_FIELD_KIND: &str = "kind";
+
+/// D-REL3 (ratified 2026-06-16): the project compatibility marker —
+/// `edition: "2026"` in the `payload: { … }` block of `payload.jet`. An edition
+/// opts a project into a specific era of Jet syntax; a toolchain advertises the
+/// editions it supports and rejects a future edition it can't provide (E2001).
+/// Single-file `jet run file.jet` has no edition marker and always uses the
+/// newest stable edition (E2-V4). Not an `S`/`N`/`U` surface decision, so it is
+/// not enforced by tests/decisions.rs; it is a release-policy key recorded here
+/// per I7.
+pub const MANIFEST_FIELD_EDITION: &str = "edition";
 
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
 /// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`

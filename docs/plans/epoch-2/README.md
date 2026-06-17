@@ -110,7 +110,7 @@ in `docs/spec/decision-ballots.md`; this section is product direction.
 | E2-V9 | Editor ecosystem priority | Allocates extension work after VS Code/Cursor | A: VS Code/Cursor + Zed dev extension · B: VS Code/Cursor only until GA · C: also Neovim in Epoch 2 |
 | E2-V10 | Public launch trigger | Decides when encoded Epoch SemVer and marketing align | A: E2-M17 technical GA · B: separate launch milestone after audits · C: no encoded epoch ever |
 | E2-V11 | Governance at launch | Trademark, foundation, advisory board, LTS ownership | A: OSS project, owner-led LTS · B: foundation prep in Epoch 2 · C: defer all governance messaging |
-| E2-V12 | JetOS / pure eval / layer 3 boundary | Prevents research scope from becoming a product promise | A: `pure fn` + `jet eval --pure` only (S60) · B: package recipes in Epoch 2 · C: JetOS remains research-only (recommended) |
+| E2-V12 | JetOS / pure eval / layer 3 boundary | Prevents research scope from becoming a product promise | A: `pure fn` + `jet eval --pure` only (S60) · B: package builds in Epoch 2 · C: JetOS remains research-only (recommended) |
 
 ### Milestone decision gates
 
@@ -133,7 +133,7 @@ Each detailed plan needs these owner calls in addition to any syntax ballots.
 | E2-M13 | I1 amendment wording; `unsafe` audit story (comments, attributes, or tool); `std.mem` API breadth | Generated unsafe only in user gates; comment audit; narrow mem API |
 | E2-M14 | Jet-export to C in scope; header discovery strategy; which C deps ship as examples | Import-only first; pkg-config/classic flags; one small C lib example |
 | E2-M15 | First cross target triple; freestanding panic strategy; CI embedded smoke vs doc-only | One non-host CLI target; abort default; documented harness minimum |
-| E2-M16 | Package recipe scope; sandbox guarantees; signed cache generation/rollback depth | Pure eval + recipes; no ambient I/O; design signed cache, ship later |
+| E2-M16 | Package build scope; sandbox guarantees; signed cache generation/rollback depth | Pure eval + builds; no ambient I/O; design signed cache, ship later |
 | E2-M17 | Showcase set (which 6 demos are mandatory); perf/size budgets; **launch versioning** (E2-D2); beta period | Four showcases + `jet dev` demo; record budgets; normal SemVer at GA |
 | E2-M18 | D-REPL1…21 ballots (see m18-repl.md); whether REPL ships before or after GA | Separate milestone after E2-M4; terminal REPL recommended; playground deferred |
 
@@ -160,7 +160,7 @@ after concurrence.
 | E2-M13 | `m13-low-level-tier.md` | `std.mem`, allocators, layout, `Ptr<T>`, volatile, unsafe audit model |
 | E2-M14 | `m14-c-ffi.md` | C FFI: `@bindgen` / `@extern module`, `use c.<lib>`, link discovery, overlay merge |
 | E2-M15 | `m15-freestanding-cross.md` | Cross-compilation, `no_std`/freestanding profile, embedded smoke target |
-| E2-M16 | `m16-pure-eval-layer3.md` | `pure fn`, `jet eval --pure`, package recipes, sandbox/cache foundations |
+| E2-M16 | `m16-pure-eval-layer3.md` | `pure fn`, `jet eval --pure`, package builds, sandbox/cache foundations |
 | E2-M17 | `m17-epoch2-ga.md` | Production showcase, audits, performance, docs, release checklist |
 | E2-M18 | `m18-repl.md` | `jet repl` — interpreter-backed interactive session (blocked on D-REPL1…21) |
 
@@ -535,14 +535,14 @@ Exit criteria:
 ## E2-M16 - Pure evaluation and package layer 3
 
 Goal: make purity a product feature and lay the groundwork for declarative
-configuration/package recipes.
+configuration/package builds.
 
 Scope from S60 and M12 layer 3:
 
 - `pure fn` checked modifier.
 - Purity in public signatures.
 - `jet eval --pure`.
-- Sandboxed package recipes on the existing store/lockfile.
+- Sandboxed package builds on the existing store/lockfile.
 - Signed binary/source caches and generations/rollback design.
 - Integration path for `docs/plans/jetpack-jetos/README.md`: Phase 1 builds an
   independent `jetpack run/build/list/clean/add/remove` product track, while
@@ -553,7 +553,7 @@ Exit criteria:
 
 - Pure evaluation is deterministic and has call-trace diagnostics.
 - Impure calls fail with a path explaining why.
-- Package recipes cannot perform ambient I/O or network access.
+- Package builds cannot perform ambient I/O or network access.
 - A small declarative config example evaluates to stable JSON.
 
 ## E2-M18 - Interactive REPL (`jet repl`)

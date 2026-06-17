@@ -321,6 +321,33 @@ hand-written `@bindgen` cache or `@extern module` in the meantime. Rust FFI
 snapshots (front-end ones under `tests/ui/cffi_*`; link-time/gated ones pinned in
 `tests/cffi.rs`).
 
+## E2-M13 — Expert low-level tier (S58, implemented)
+
+C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and
+emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`).
+
+- **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`Ptr<T>`,
+  `mem.volatile_read`, `mem.address_of`, allocators). Naming one of these without
+  the import → **E3102**.
+- **Audit gate** — `@audit("reason")` on the line above an `@unsafe { … }` block
+  opens the operations that can violate memory safety (pointer build/deref,
+  volatile access). A missing audit is lint **L3101**. `@unsafe` on the line
+  before `fn` marks a whole-function contract; its body is itself an audited
+  region, and calling it requires an enclosing `@unsafe` block → **E3103**.
+- **Operations** — `mem.Ptr<T>.from_addr(addr)` builds a typed pointer from an
+  `Int` address (`Ptr<T>` lowers to a Rust `*mut T`); `mem.volatile_read(p)`
+  reads through it (lowers to `std::ptr::read_volatile`); `mem.address_of(x)` is
+  inert (a plain address as `Int`) and legal outside a gate. Using a low-level op
+  outside `@unsafe` → **E3101**.
+
+Codegen stays dumb (I3): an `@unsafe { … }` region lowers straight to a Rust
+`unsafe { … }`, an `@unsafe fn` to a Rust `unsafe fn`. All gating is decided in
+sema. Diagnostics **E3101–E3103 + L3101** in diagnostics.md with snapshots
+(`tests/ui/lowlevel_e310*`, `tests/ui_lint/unsafe_missing_audit`); the audited
+end-to-end example is `examples/features/48_lowlevel.jet`. Deferred (unratified):
+arena allocators (D-REF2 open) and the wider expert `std.mem` API (D-LL3, name
+TBD).
+
 ## M6 phase 3 — multi-file imports (done)
 
 Two use forms (S16): **quotes = file path, no quotes = module.**
@@ -639,6 +666,18 @@ val [a, b, c] = result;   // OK — 3 names for 3 elements
 - A literal index outside `0..N-1` on a `[T#N]` is **E0965** (compile-time check).
 - `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
   length information is erased at that point.
+
+## Editions & release policy (E2-M2)
+
+A project pins an **edition** with `edition: "2026"` in its `payload.jet`
+(D-REL3). An edition opts the project into a specific era of Jet syntax; the
+toolchain advertises the editions it supports in `jet --version` and rejects a
+future edition it can't provide (E2001). Single-file `jet run file.jet` carries
+no edition marker and always uses the newest stable edition (E2-V4). The full
+compatibility contract — patch/minor/major/epoch/edition definitions, the
+backward-compatibility guarantee, the deprecation window (L2001 → E2002), the
+migration authority (only `jet fix` + edition upgrade, D-REL5), and the
+generated-code license statement — lives in docs/spec/release-policy.md.
 
 ## Deliberately absent
 

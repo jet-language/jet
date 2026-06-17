@@ -530,6 +530,7 @@ impl<'a> Parser<'a> {
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwImpl => self.impl_def().map(Item::Impl),
                 TokKind::At if self.at_c_module() => self.c_module().map(Item::CModule),
+                TokKind::At if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
                 TokKind::KwComptime => self.comptime_def().map(Item::Const),
                 TokKind::Ident(name) if name == syntax::FOREIGN_CLASS => {
@@ -600,7 +601,7 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false).map(Item::Func)
+                    self.func_after_fn(false, false).map(Item::Func)
                 }
                 TokKind::Ident(name) if name == syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
@@ -816,6 +817,117 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// S58 (E2-M13): is the cursor at `@unsafe fn …`? The whole-function
+    /// unsafe contract — `@` then the `unsafe` keyword then `fn`/`pub fn`.
+    fn at_unsafe_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::At)
+            && matches!(self.peek2().kind, TokKind::KwUnsafe)
+            && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// S58 (E2-M13): parse `@unsafe fn name(...) { ... }`. The body is checked
+    /// like any other; the contract is enforced at call sites (E3103).
+    fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
+        self.expect(TokKind::At, "before `unsafe`")?;
+        self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwFn, "after `@unsafe`")?;
+        self.func_after_fn(is_pub, true)
+    }
+
+    /// S58 (E2-M13, D-LL2): parse a `@unsafe { … }` audited region in
+    /// statement position, with an optional `@audit("…")` reason on the line
+    /// above. The reason is required at runtime by lint L3101, not by the
+    /// grammar, so a missing `@audit` parses fine and is flagged in sema.
+    fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        // Optional `@audit("…")`.
+        let mut audit = None;
+        if matches!(self.peek().kind, TokKind::At)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == syntax::ATTR_AUDIT)
+        {
+            self.bump(); // `@`
+            self.bump(); // `audit`
+            self.expect(TokKind::LParen, "after `@audit`")?;
+            let (reason, _) = self.expect_plain_string(
+                "for the audit reason",
+                "`@audit` takes one piece of quoted text explaining why the block is safe",
+                "write: @audit(\"index checked against len\")",
+            )?;
+            self.expect(TokKind::RParen, "after the audit reason")?;
+            audit = Some(reason);
+        }
+        // Required `@unsafe { … }`.
+        if !(matches!(self.peek().kind, TokKind::At)
+            && matches!(self.peek2().kind, TokKind::KwUnsafe))
+        {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`@{}` must be followed by an `@{}` block", syntax::ATTR_AUDIT, syntax::KW_UNSAFE),
+                "an audit reason annotates the gated region it sits above".to_string(),
+                format!(
+                    "write `@{}(\"…\") @{} {{ … }}`",
+                    syntax::ATTR_AUDIT,
+                    syntax::KW_UNSAFE
+                ),
+                Some(self.peek().span),
+            ));
+        }
+        self.bump(); // `@`
+        self.bump(); // `unsafe`
+        self.expect(TokKind::LBrace, "after `@unsafe`")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Unsafe {
+            audit,
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    /// S58 (E2-M13): parse the tail of `alias.Ptr<T>.from_addr(addr)`, with the
+    /// cursor at the `<`. The `alias`/`alias_span` are the already-parsed
+    /// module alias and `.Ptr` member.
+    fn ptr_from_addr(&mut self, alias: String, alias_span: Span) -> Result<Expr, Diagnostic> {
+        self.expect_type_args_open(syntax::TYPE_PTR)?;
+        let (elem, _) = self.type_()?;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`{}<…>` takes exactly one element type", syntax::TYPE_PTR),
+                "a pointer points at a single element type".to_string(),
+                format!("write `{}.{}<Int>.{}(addr)`", alias, syntax::TYPE_PTR, syntax::MEM_FROM_ADDR),
+                Some(self.peek().span),
+            ));
+        }
+        self.expect_type_args_close(&format!("after `{}<…>`", syntax::TYPE_PTR))?;
+        self.expect(TokKind::Dot, &format!("after `{}<…>`", syntax::TYPE_PTR))?;
+        let (method, method_span) = self.expect_field_name()?;
+        if method != syntax::MEM_FROM_ADDR {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`{}<…>` has no static method `{}`", syntax::TYPE_PTR, method),
+                "a typed pointer is built from an address".to_string(),
+                format!("write `{}.{}<Int>.{}(addr)`", alias, syntax::TYPE_PTR, syntax::MEM_FROM_ADDR),
+                Some(method_span),
+            ));
+        }
+        self.expect(TokKind::LParen, &format!("after `{}`", syntax::MEM_FROM_ADDR))?;
+        let addr = self.expr()?;
+        self.expect(TokKind::RParen, "to finish the call")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Expr::PtrFromAddr {
+            alias,
+            alias_span,
+            elem,
+            addr: Box::new(addr),
+            span: Span::new(alias_span.start, end),
+        })
+    }
+
     /// S59 (E2-M14): is the cursor at the start of a C FFI module — `@extern
     /// module …` or `@bindgen module …`? (Distinguishes from `@static const`,
     /// and from bare `extern rust`.)
@@ -1011,10 +1123,10 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-        self.func_after_fn(is_pub)
+        self.func_after_fn(is_pub, false)
     }
 
-    fn func_after_fn(&mut self, is_pub: bool) -> Result<Func, Diagnostic> {
+    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool) -> Result<Func, Diagnostic> {
         let (name, name_span) = self.expect_ident("after `fn`")?;
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LParen, "after the function name")?;
@@ -1052,6 +1164,7 @@ impl<'a> Parser<'a> {
             params,
             return_type,
             is_view_return,
+            is_unsafe,
             body,
         })
     }
@@ -1408,7 +1521,7 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a method")?;
-        self.func_after_fn(is_pub)
+        self.func_after_fn(is_pub, false)
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {
@@ -1780,12 +1893,25 @@ impl<'a> Parser<'a> {
                 let inner = self.block_stmts();
                 Ok(Stmt::Loop(inner, span))
             }
+            // S58 (E2-M13): the audit + unsafe gate is `@audit("…")` then
+            // `@unsafe { … }`. Bare `unsafe { … }` is the rejected former
+            // spelling — point users at the `@` form.
             TokKind::KwUnsafe => {
                 let span = self.bump().span;
-                self.expect(TokKind::LBrace, "after `unsafe`")?;
-                let inner = self.block_stmts();
-                Ok(Stmt::Unsafe(inner, span))
+                Err(Diagnostic::error(
+                    "E0003",
+                    format!("`{}` blocks are written with `@`", syntax::KW_UNSAFE),
+                    "the expert low-level gate is an attribute marker, never a bare keyword"
+                        .to_string(),
+                    format!(
+                        "write `@{}(\"why this is safe\") @{} {{ … }}`",
+                        syntax::ATTR_AUDIT,
+                        syntax::KW_UNSAFE
+                    ),
+                    Some(span),
+                ))
             }
+            TokKind::At => self.at_unsafe_stmt(),
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).
             TokKind::Ident(_) | TokKind::KwSelf => {
@@ -2789,6 +2915,20 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     let (member, member_span) = self.expect_field_name()?;
+                    // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed
+                    // pointer constructor through a `core.mem` alias. Recognise
+                    // the `<…>` here (postfix position) so `<` is read as a
+                    // type-arg list, not a comparison.
+                    if member == syntax::TYPE_PTR
+                        && matches!(self.peek().kind, TokKind::Lt)
+                    {
+                        if let Expr::Ident(alias, alias_span) = &expr {
+                            let alias = alias.clone();
+                            let alias_span = *alias_span;
+                            expr = self.ptr_from_addr(alias, alias_span)?;
+                            continue;
+                        }
+                    }
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -3317,6 +3457,14 @@ impl<'a> Parser<'a> {
                         return self.parse_fan_out_bracket(callee, dot_span);
                     }
                     let (member, member_span) = self.expect_field_name()?;
+                    // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed
+                    // pointer constructor through a `core.mem` alias. Recognise
+                    // the `<…>` here (primary position, where `alias.Member` is
+                    // consumed) so `<` is read as a type-arg list, not a
+                    // comparison. Mirrors the postfix-position trigger.
+                    if member == syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
+                        return self.ptr_from_addr(type_name, span);
+                    }
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -4033,7 +4181,8 @@ impl<'a> Parser<'a> {
                         | Stmt::Switch { span, .. } => span.end,
                         Stmt::Val(b) => b.init.span().end,
                         Stmt::Assign { value, .. } => value.span().end,
-                        Stmt::Loop(_, s) | Stmt::Unsafe(_, s) => s.end,
+                        Stmt::Loop(_, s) => s.end,
+                        Stmt::Unsafe { span, .. } => span.end,
                     }
                 } else {
                     close_paren.end

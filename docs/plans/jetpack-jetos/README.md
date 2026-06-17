@@ -46,7 +46,7 @@ Phase 1 — jetpack: temporary & project environments  (buildable on today's lan
   compose env (PATH + pretty prompt) ─▶ spawn subshell ─▶ `exit` returns clean
 
 Phase 2 — jetos: the declarative distro            (gated on M12 layer 3 + S60 pure-eval)
-  modules/ + config.jet ─▶ merge engine ─▶ system recipe ─▶ hangar build ─▶
+  modules/ + config.jet ─▶ merge engine ─▶ system build ─▶ hangar build ─▶
   activation (symlink flip + boot entry) ─▶ generations/rollback ─▶ installable ISO
 ```
 

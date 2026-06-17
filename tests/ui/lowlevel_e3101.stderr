@@ -1,0 +1,15 @@
+Error [E3101]: `from_addr` can only run inside an `@unsafe` block
+  --> tests/ui/lowlevel_e3101.jet:4:13
+    |
+  4 |     val p = mem.Ptr<Int>.from_addr(addr);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: this operation can violate memory safety, so it must sit in an audited region
+ Fix: wrap it: @audit("why this is safe") @unsafe { … }
+
+Error [E3101]: `volatile_read` can only run inside an `@unsafe` block
+  --> tests/ui/lowlevel_e3101.jet:5:16
+    |
+  5 |     return mem.volatile_read(p);
+    |                ^^^^^^^^^^^^^
+ Why: this operation can violate memory safety, so it must sit in an audited region
+ Fix: wrap it: @audit("why this is safe") @unsafe { … }

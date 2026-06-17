@@ -28,6 +28,91 @@ pub enum Severity {
     Lint,
 }
 
+/// The current `--json` diagnostic schema version. Bumped only on a
+/// breaking change to the shape below (D-DX1: stable + versioned). Consumers
+/// (LSP, fix engine) gate on this field.
+pub const JSON_SCHEMA_VERSION: u32 = 1;
+
+/// How the renderer decides whether to emit ANSI color (E2-M3, D-DX*).
+///
+/// Resolution order, highest priority first:
+///   1. `--color=always|never` (the flag always wins)
+///   2. `FORCE_COLOR` (any value) forces on; `NO_COLOR` (any value) forces off
+///   3. `auto`: color only when the target stream is a real terminal
+///
+/// Color never changes the bytes a script parses: it is suppressed whenever
+/// the stream is piped, redirected, in CI, or `NO_COLOR` is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorChoice {
+    /// Parse a `--color=<value>` argument. Unknown values fall back to `Auto`.
+    pub fn parse(value: &str) -> ColorChoice {
+        match value {
+            "always" => ColorChoice::Always,
+            "never" => ColorChoice::Never,
+            _ => ColorChoice::Auto,
+        }
+    }
+
+    /// Resolve to a concrete on/off decision for a given stream's TTY-ness,
+    /// honoring `NO_COLOR` / `FORCE_COLOR`. `is_tty` is the caller's
+    /// `std::io::IsTerminal` check on the target stream.
+    pub fn resolve(self, is_tty: bool) -> bool {
+        match self {
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+            ColorChoice::Auto => {
+                if std::env::var_os("NO_COLOR").is_some() {
+                    return false;
+                }
+                if std::env::var_os("FORCE_COLOR").is_some() {
+                    return true;
+                }
+                is_tty
+            }
+        }
+    }
+}
+
+/// ANSI style codes, applied only when color is on.
+struct Style {
+    on: bool,
+}
+
+impl Style {
+    fn new(on: bool) -> Self {
+        Style { on }
+    }
+    fn wrap(&self, code: &str, s: &str) -> String {
+        if self.on {
+            format!("\x1b[{}m{}\x1b[0m", code, s)
+        } else {
+            s.to_string()
+        }
+    }
+    /// Bold red — error labels.
+    fn error(&self, s: &str) -> String {
+        self.wrap("1;31", s)
+    }
+    /// Bold yellow — warning labels.
+    fn warn(&self, s: &str) -> String {
+        self.wrap("1;33", s)
+    }
+    /// Bold — headings (`Why:` / `Fix:`).
+    fn bold(&self, s: &str) -> String {
+        self.wrap("1", s)
+    }
+    /// Dim — the caret line / location.
+    fn dim(&self, s: &str) -> String {
+        self.wrap("2", s)
+    }
+}
+
 /// A single-span text replacement (LSP quick-fix / M6 S14 autocorrect).
 #[derive(Debug, Clone)]
 pub struct TextEdit {
@@ -126,18 +211,51 @@ impl Diagnostic {
         self
     }
 
-    /// Render in the exact format specified by docs/spec/diagnostics.md.
-    /// The ui snapshot tests pin this format; change it deliberately.
+    /// Render in the exact format specified by docs/spec/diagnostics.md, plain
+    /// (no color). The ui snapshot tests pin this format; change it
+    /// deliberately. This is the byte-stable form scripts and CI parse.
     pub fn render(&self, file: &str, src: &str) -> String {
+        self.render_styled(file, src, false)
+    }
+
+    /// Color-aware render. When `color` is false the output is byte-for-byte
+    /// identical to [`render`]; color only adds ANSI styling around the same
+    /// text, so it never changes what a script reads.
+    pub fn render_colored(&self, file: &str, src: &str, color: bool) -> String {
+        self.render_styled(file, src, color)
+    }
+
+    /// Like [`render_colored`], but on a supporting terminal the `--> file:line`
+    /// location is wrapped in an OSC 8 hyperlink (a `file://` URL) so editors and
+    /// terminals can jump to it (D-DX6). `hyperlinks` must only be true when the
+    /// stream is a real TTY *and* color is on; with it off the bytes are
+    /// byte-for-byte identical to [`render_colored`], so piped/CI output and the
+    /// existing snapshots are unaffected.
+    pub fn render_linked(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
+        self.render_inner(file, src, color, hyperlinks)
+    }
+
+    fn render_styled(&self, file: &str, src: &str, color: bool) -> String {
+        self.render_inner(file, src, color, false)
+    }
+
+    fn render_inner(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
+        let st = Style::new(color);
         let mut out = String::new();
         let label = match self.severity {
-            Severity::Error => "Error",
-            Severity::Lint => "Warning",
+            Severity::Error => st.error("Error"),
+            Severity::Lint => st.warn("Warning"),
         };
         out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
         if let Some(span) = self.span {
             let (line, col) = line_col(src, span.start);
-            out.push_str(&format!("  --> {}:{}:{}\n", file, line, col));
+            let loc = format!("--> {}:{}:{}", file, line, col);
+            let loc = if hyperlinks {
+                osc8(&file_url(file, line, col), &loc)
+            } else {
+                loc
+            };
+            out.push_str(&format!("  {}\n", st.dim(&loc)));
             let line_text = src.lines().nth(line - 1).unwrap_or("");
             out.push_str("    |\n");
             out.push_str(&format!("{:>3} | {}\n", line, line_text));
@@ -153,17 +271,24 @@ impl Diagnostic {
             if avail > 0 {
                 caret_len = caret_len.min(avail);
             }
-            out.push_str("    | ");
+            let mut carets = String::new();
             for _ in 0..pad_width {
-                out.push(' ');
+                carets.push(' ');
             }
+            let color_start = carets.len();
             for _ in 0..caret_len {
-                out.push('^');
+                carets.push('^');
             }
-            out.push('\n');
+            // Color only the caret glyphs, not the leading pad (keeps columns).
+            if color {
+                let (pad, marks) = carets.split_at(color_start);
+                out.push_str(&format!("    | {}{}\n", pad, st.error(marks)));
+            } else {
+                out.push_str(&format!("    | {}\n", carets));
+            }
         }
-        out.push_str(&format!(" Why: {}\n", self.why));
-        out.push_str(&format!(" Fix: {}\n", self.fix));
+        out.push_str(&format!(" {} {}\n", st.bold("Why:"), self.why));
+        out.push_str(&format!(" {} {}\n", st.bold("Fix:"), self.fix));
         if let Some(detail) = &self.detail {
             out.push_str(detail);
             if !detail.ends_with('\n') {
@@ -172,6 +297,146 @@ impl Diagnostic {
         }
         out
     }
+
+    /// Render this diagnostic as one JSON object in the stable `--json` schema
+    /// (D-DX1). Hand-rolled (invariant I6: no serde). The shape is:
+    ///
+    /// ```json
+    /// {
+    ///   "schema_version": 1,
+    ///   "code": "E0102", "severity": "error",
+    ///   "message": "…", "why": "…", "fix": "…",
+    ///   "detail": "…" | null,
+    ///   "file": "a.jet", "line": 2, "col": 5,
+    ///   "span": { "start": 12, "end": 17 } | null,
+    ///   "edit": { "span": {…}, "new_text": "…" } | null
+    /// }
+    /// ```
+    ///
+    /// `edit` is the machine-applicable fix the LSP / fix engine consumes.
+    pub fn to_json(&self, file: &str, src: &str) -> String {
+        let mut o = String::from("{");
+        o.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
+        o.push_str(&format!(",\"code\":{}", json_str(self.code)));
+        let sev = match self.severity {
+            Severity::Error => "error",
+            Severity::Lint => "warning",
+        };
+        o.push_str(&format!(",\"severity\":{}", json_str(sev)));
+        o.push_str(&format!(",\"message\":{}", json_str(&self.what)));
+        o.push_str(&format!(",\"why\":{}", json_str(&self.why)));
+        o.push_str(&format!(",\"fix\":{}", json_str(&self.fix)));
+        match &self.detail {
+            Some(d) => o.push_str(&format!(",\"detail\":{}", json_str(d))),
+            None => o.push_str(",\"detail\":null"),
+        }
+        o.push_str(&format!(",\"file\":{}", json_str(file)));
+        match self.span {
+            Some(span) => {
+                let (line, col) = line_col(src, span.start);
+                o.push_str(&format!(",\"line\":{},\"col\":{}", line, col));
+                o.push_str(&format!(
+                    ",\"span\":{{\"start\":{},\"end\":{}}}",
+                    span.start, span.end
+                ));
+            }
+            None => {
+                o.push_str(",\"line\":null,\"col\":null,\"span\":null");
+            }
+        }
+        match &self.edit {
+            Some(e) => {
+                o.push_str(&format!(
+                    ",\"edit\":{{\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{}}}",
+                    e.span.start,
+                    e.span.end,
+                    json_str(&e.new_text)
+                ));
+            }
+            None => o.push_str(",\"edit\":null"),
+        }
+        o.push('}');
+        o
+    }
+}
+
+/// Escape a string as a JSON string literal (RFC 8259), std-only (I6).
+pub fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0C}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Render a batch of diagnostics as a single JSON document in the `--json`
+/// schema: `{ "schema_version": 1, "diagnostics": [ … ] }`.
+pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
+    let mut out = String::from("{");
+    out.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
+    out.push_str(",\"diagnostics\":[");
+    for (i, d) in diags.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&d.to_json(file, src));
+    }
+    out.push_str("]}\n");
+    out
+}
+
+/// Color-aware batch render, blank line between each. Plain when `color` is
+/// false (byte-identical to [`render_all`]).
+pub fn render_all_colored(file: &str, src: &str, diags: &[Diagnostic], color: bool) -> String {
+    let rendered: Vec<String> = diags
+        .iter()
+        .map(|d| d.render_colored(file, src, color))
+        .collect();
+    rendered.join("\n")
+}
+
+/// Color-aware batch render that may add OSC 8 hyperlinks (D-DX6). `hyperlinks`
+/// must only be true on a real TTY with color on; with it off this is identical
+/// to [`render_all_colored`].
+pub fn render_all_linked(
+    file: &str,
+    src: &str,
+    diags: &[Diagnostic],
+    color: bool,
+    hyperlinks: bool,
+) -> String {
+    let rendered: Vec<String> = diags
+        .iter()
+        .map(|d| d.render_linked(file, src, color, hyperlinks))
+        .collect();
+    rendered.join("\n")
+}
+
+/// Wrap `text` in an OSC 8 terminal hyperlink to `url`.
+/// Format: `ESC ] 8 ; ; URL ST  text  ESC ] 8 ; ; ST`, with ST = `ESC \`.
+pub fn osc8(url: &str, text: &str) -> String {
+    format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, text)
+}
+
+/// Build a `file://` URL for a path + line/col, absolutized when possible so
+/// the link resolves regardless of the terminal's working directory.
+fn file_url(file: &str, line: usize, col: usize) -> String {
+    let abs = std::fs::canonicalize(file)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| file.to_string());
+    format!("file://{}:{}:{}", abs, line, col)
 }
 
 /// 1-based (line, column). Columns count characters, not bytes.

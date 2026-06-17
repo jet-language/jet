@@ -10,182 +10,50 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
-/// Stable CLI exit codes (E2-M3, docs/spec/architecture.md "Exit codes").
-/// Scripts depend on these; treat them as a contract.
-mod exit_code {
-    /// Everything went fine.
-    pub const OK: i32 = 0;
-    /// The user's program or input had a problem we reported (E-codes, failed
-    /// checks, missing files, failed tests).
-    pub const USER_ERROR: i32 = 1;
-    /// The command line itself was wrong (unknown subcommand/flag, missing
-    /// argument). The greeting is NOT this — running `jet` bare is fine.
-    pub const USAGE: i32 = 2;
-    // 70 — a built program panicked at runtime (S36); produced by the program,
-    //      not the driver, and forwarded through by `jet run`.
-    // 101 — internal compiler error (I2): rustc rejected generated code. Set in
-    //       `build()` when the backend fails.
-}
+use jet::diag::ColorChoice;
+use jet::exit_codes;
 
-/// Every subcommand the driver dispatches, for `jet` help and the E2101
-/// "did you mean" suggester — generated from the single-source command table in
-/// `cli_spec` so completions, the man page, and this suggester can never drift.
-/// The package-management verbs and the known-but-redirected `install`
-/// (E0043 → `jet fetch`) all live in that table, so a typo like `jet fecth`
-/// still lands on `fetch`.
-fn known_commands() -> Vec<&'static str> {
-    jet::cli_spec::command_names()
-}
-
-/// Known long flags (with `--`), for the E2102 unknown-flag suggester. Derived
-/// from the same `cli_spec` tables (global flags + every per-command flag), so a
-/// flag added to a command automatically passes the E2102 gate.
-fn known_flags() -> Vec<String> {
-    jet::cli_spec::flag_names()
-        .iter()
-        .map(|f| format!("--{}", f))
-        .collect()
-}
-
-/// Levenshtein edit distance (same algorithm sema.rs uses for "did you mean").
-/// Kept local to the driver because the sema copy is private and the CLI does
-/// not render through the `Diagnostic` type.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    for i in 1..=a.len() {
-        let mut cur = vec![i];
-        for j in 1..=b.len() {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost));
-        }
-        prev = cur;
-    }
-    prev[b.len()]
-}
-
-/// Closest candidate within edit distance 2 (the diagnostics.md threshold).
-fn closest<'a>(word: &str, candidates: &[&'a str]) -> Option<&'a str> {
-    let mut best: Option<(&str, usize)> = None;
-    for &cand in candidates {
-        let d = edit_distance(word, cand);
-        if d <= 2 && best.map_or(true, |(_, bd)| d < bd) {
-            best = Some((cand, d));
-        }
-    }
-    best.map(|(c, _)| c)
-}
-
-/// D-DX5 external subcommand discovery (cargo-style). Given a word that is NOT a
-/// built-in, return the path to an executable `jet-<word>` on `PATH`, or `None`.
-/// The caller orders this AFTER the built-in check and BEFORE the E2101 typo
-/// path, so a genuine typo of a built-in still teaches and only a real binary
-/// shadows it.
-fn resolve_external(cmd: &str) -> Option<PathBuf> {
-    // Reject anything that isn't a plain subcommand word (no path separators,
-    // no flags) so `jet ./foo` or `jet --x` can never exec an arbitrary file.
-    if cmd.is_empty()
-        || cmd.starts_with('-')
-        || cmd.contains('/')
-        || cmd.contains('\\')
-    {
-        return None;
-    }
-    let exe = format!("{}-{}", jet::syntax::BINARY_NAME, cmd);
-    find_on_path(&exe)
-}
-
-/// Search `PATH` for an executable file named `exe`. std-only (I6); honours the
-/// platform separator. Returns the first match.
-fn find_on_path(exe: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let cand = dir.join(exe);
-        if is_executable_file(&cand) {
-            return Some(cand);
-        }
-    }
-    None
-}
-
-/// True if `p` is a regular file the OS would treat as executable. On Unix we
-/// check the owner/group/other execute bits; elsewhere existence is enough.
-fn is_executable_file(p: &Path) -> bool {
-    let meta = match fs::metadata(p) {
-        Ok(m) => m,
-        Err(_) => return false,
-    };
-    if !meta.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        meta.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
-/// When color is allowed (E2-M3 TTY-aware presentation). Precedence:
-/// `--color=never`/`NO_COLOR` force off, `--color=always`/`FORCE_COLOR` force
-/// on, otherwise color only when the stream is a real terminal. Scripts (piped
-/// or in CI) get plain deterministic bytes and never have to parse ANSI.
+/// How diagnostics should be presented this run, resolved once from flags +
+/// environment and threaded through the diagnostic-printing helpers.
 #[derive(Clone, Copy)]
-enum ColorChoice {
-    Auto,
-    Always,
-    Never,
+struct OutputMode {
+    /// Emit machine-readable `--json` diagnostics instead of human text.
+    json: bool,
+    /// User's `--color` choice (resolved against TTY-ness at print time).
+    color: ColorChoice,
 }
 
-fn color_choice(raw: &[String]) -> ColorChoice {
-    // Last `--color=...` (or bare `--color`) on the line wins.
-    let mut choice = None;
+impl OutputMode {
+    /// Should stderr (where human diagnostics go) be colored?
+    fn color_stderr(&self) -> bool {
+        self.color.resolve(std::io::stderr().is_terminal())
+    }
+
+    /// Resolve the color decision against an explicit TTY-ness (e.g. stdout for
+    /// commands that print their report to stdout).
+    fn color_stderr_for(&self, is_tty: bool) -> bool {
+        self.color.resolve(is_tty)
+    }
+
+    /// Should OSC 8 hyperlinks be emitted on stderr? Only on a real TTY with
+    /// color resolved on — never when piped/redirected/CI (D-DX6), so existing
+    /// snapshots stay byte-identical.
+    fn hyperlinks_stderr(&self) -> bool {
+        std::io::stderr().is_terminal() && self.color_stderr()
+    }
+}
+
+/// Parse `--color=auto|always|never` from raw argv (last one wins).
+fn parse_color(raw: &[String]) -> ColorChoice {
+    let mut choice = ColorChoice::Auto;
     for a in raw {
-        if a == "--color" {
-            choice = Some(ColorChoice::Auto);
-        } else if let Some(v) = a.strip_prefix("--color=") {
-            choice = Some(match v {
-                "always" => ColorChoice::Always,
-                "never" => ColorChoice::Never,
-                _ => ColorChoice::Auto,
-            });
+        if let Some(v) = a.strip_prefix("--color=") {
+            choice = ColorChoice::parse(v);
+        } else if a == "--color" {
+            choice = ColorChoice::Always;
         }
     }
-    choice.unwrap_or(ColorChoice::Auto)
-}
-
-fn use_color(choice: ColorChoice, stream_is_tty: bool) -> bool {
-    match choice {
-        ColorChoice::Never => false,
-        ColorChoice::Always => true,
-        ColorChoice::Auto => {
-            if std::env::var_os("NO_COLOR").is_some() {
-                false
-            } else if std::env::var_os("FORCE_COLOR").is_some() {
-                true
-            } else {
-                stream_is_tty
-            }
-        }
-    }
-}
-
-/// True when the driver may color stderr (where diagnostics and the greeting
-/// go). Resolved once from argv + environment + TTY state.
-fn stderr_color(raw: &[String]) -> bool {
-    use_color(color_choice(raw), std::io::stderr().is_terminal())
-}
-
-/// Same as `stderr_color`, re-reading argv so deep command handlers (which do
-/// not carry `raw`) can decide whether to attach the dim `jet explain` footer.
-/// Honours `--color`, `NO_COLOR`, `FORCE_COLOR`, and the stderr TTY state.
-fn stderr_color_now() -> bool {
-    let raw: Vec<String> = std::env::args().skip(1).collect();
-    stderr_color(&raw)
+    choice
 }
 
 #[derive(Clone, Copy)]
@@ -209,10 +77,15 @@ usage:
   {bin} test  <file|dir>            compile and run top-level test blocks
   {bin} new   <name>                create a new project folder with payload.jet
   {bin} new   <name> --annotated    same, with commented example deps
-  {bin} dev                         enter the project shell (delegates to `jetpack enter`)
-  {bin} dev   -- cmd                run a command in the project shell, then exit
+  {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
+  {bin} env   -- cmd                run a command in the project dev shell, then exit
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
+  {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
+  {bin} doctor                      diagnose the toolchain and offer fixes
+  {bin} doctor --fix                apply the auto-fixable problems
+  {bin} completions <bash|zsh|fish> print a shell completion script
+  {bin} man                         print the jet man page (roff)
   {bin} bind  <header.h> --pkg <lib>   generate a C binding cache (S59)
   {bin} lsp                         language server (stdio JSON-RPC)
   {bin} doctor                      diagnose your environment (rustc, cache, PATH, FFI)
@@ -241,6 +114,9 @@ flags:
   --check                      with fmt: exit 1 if file would change (CI)
   --small                      with build/run: smallest binary (S15)
   --locked                     with fetch: verify only, refuse network
+  --verbose, -v                with build: print the bridge steps
+  --json                       emit machine-readable diagnostics
+  --color=auto|always|never    control color (auto: only on a terminal)
 ",
         bin = jet::syntax::BINARY_NAME,
         lang = jet::syntax::LANG_NAME,
@@ -249,8 +125,8 @@ flags:
     )
 }
 
-/// E2-M3 examples-first front door: `jet` with no args greets and shows the
-/// few commands that matter, then exits 0. Not a usage error — orientation.
+/// The bare-`jet` greeting (D-DX): friendly, exit 0, not a usage error.
+/// Keep this function as the single edit point for greeting customization.
 fn greeting() -> String {
     format!(
         "\
@@ -258,8 +134,8 @@ Welcome to {lang}! (v{ver})
 
 Get started:
   {bin} new   <name>           create a new project
-  {bin} run   <file.{ext}>         build and run a file (or a project)
-  {bin} check <file.{ext}>         look for problems, build nothing
+  {bin} run   <file.{ext}>     build and run a file (or a project)
+  {bin} check <file.{ext}>     look for problems, build nothing
 
   {bin} help                   see every command
 ",
@@ -270,50 +146,64 @@ Get started:
     )
 }
 
-/// E2101 — an unknown subcommand, with a "did you mean" when one is close.
-/// Renders in the diagnostics.md what/why/fix voice and exits 2 (usage).
-fn unknown_subcommand(cmd: &str, color: bool) -> ! {
-    let (red, bold, gray, reset) = palette(color);
+/// Teach E2101 for an unknown subcommand, with a "did you mean" when one is
+/// close (reusing the edit-distance muscle behind S14 teaching errors).
+fn unknown_subcommand(cmd: &str) -> ! {
     let bin = jet::syntax::BINARY_NAME;
-    eprintln!(
-        "{red}Error{reset} [E2101]: {bold}`{cmd}` isn't a {bin} command.{reset}"
-    );
-    eprintln!(" Why: every {bin} run starts with a command like `run`, `check`, or `new`.");
-    match closest(cmd, &known_commands()) {
-        Some(s) => eprintln!(" Fix: did you mean `{bin} {s}`? Run `{bin} help` to see them all."),
-        None => eprintln!(" Fix: run `{bin} help` to see every command."),
+    eprintln!("Error [E2101]: `{}` isn't a {} command.", cmd, bin);
+    eprintln!(" Why: every {} run starts with a command like `run`, `check`, or `new`.", bin);
+    match jet::cli::closest_command(cmd) {
+        Some(close) => eprintln!(" Fix: did you mean `{} {}`? Run `{} help` to see them all.", bin, close, bin),
+        None => eprintln!(" Fix: run `{} help` to see every command.", bin),
     }
-    let _ = gray;
-    exit(exit_code::USAGE);
+    exit(exit_codes::USAGE);
 }
 
-/// E2102 — an unknown (or ambiguous) flag, with a suggestion when one is close.
-fn unknown_flag(flag: &str, color: bool) -> ! {
-    let (red, bold, gray, reset) = palette(color);
+/// Validate every `--flag` in argv against the registry. The first unknown flag
+/// teaches E2102 (with a suggestion) and exits usage.
+fn check_flags(raw: &[String]) {
     let bin = jet::syntax::BINARY_NAME;
-    let head = flag.split('=').next().unwrap_or(flag);
-    eprintln!(
-        "{red}Error{reset} [E2102]: {bold}`{flag}` isn't a flag {bin} understands.{reset}"
-    );
-    eprintln!(" Why: {bin} ignores no flags silently, so a typo can't quietly change a build.");
-    let flags = known_flags();
-    let flag_refs: Vec<&str> = flags.iter().map(|s| s.as_str()).collect();
-    match closest(head, &flag_refs) {
-        Some(s) => eprintln!(" Fix: did you mean `{s}`? Run `{bin} help` to see the flags."),
-        None => eprintln!(" Fix: run `{bin} help` to see the flags {bin} accepts."),
+    for a in raw {
+        if !a.starts_with("--") || a == "--" {
+            continue;
+        }
+        if jet::cli::is_known_flag(a) {
+            continue;
+        }
+        let head = a.split('=').next().unwrap_or(a);
+        eprintln!("Error [E2102]: `{}` isn't a flag {} understands", head, bin);
+        eprintln!(" Why: each command accepts a fixed set of flags; an unknown one is usually a typo");
+        match jet::cli::closest_flag(head) {
+            Some(close) => eprintln!(" Fix: did you mean `{}`? (run `{} help` for the flags)", close, bin),
+            None => eprintln!(" Fix: drop the flag, or run `{} help` to see the flags", bin),
+        }
+        exit(exit_codes::USAGE);
     }
-    let _ = gray;
-    exit(exit_code::USAGE);
 }
 
-/// Minimal ANSI palette for driver-level diagnostics. Empty strings when color
-/// is off, so piped/CI output is plain deterministic bytes (E2-M3).
-fn palette(color: bool) -> (&'static str, &'static str, &'static str, &'static str) {
-    if color {
-        ("\x1b[31m", "\x1b[1m", "\x1b[90m", "\x1b[0m")
-    } else {
-        ("", "", "", "")
+/// Find an external `jet-<cmd>` executable on PATH (D-DX5).
+fn find_external(cmd: &str) -> Option<PathBuf> {
+    let exe = format!("{}-{}", jet::syntax::BINARY_NAME, cmd);
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(&exe);
+        if candidate.is_file() && is_executable(&candidate) {
+            return Some(candidate);
+        }
     }
+    None
+}
+
+#[cfg(unix)]
+fn is_executable(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p)
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+#[cfg(not(unix))]
+fn is_executable(p: &Path) -> bool {
+    p.is_file()
 }
 
 fn main() {
@@ -323,33 +213,12 @@ fn main() {
     // the front door, so it exits 0. (A genuine usage problem still exits 2.)
     if raw.is_empty() {
         print!("{}", greeting());
-        exit(exit_code::OK);
+        exit(exit_codes::OK);
     }
 
     if raw.iter().any(|a| a == "--version") {
         run_version();
         return;
-    }
-
-    // E2102: validate long flags up front so a typo'd flag teaches instead of
-    // being silently dropped by the positional filter below. `--color[=...]` is
-    // the presentation flag; it is known and consumed here. Commands that own
-    // their own flag universe (`dev` → jetpack, `bind`) are exempt: they parse
-    // and validate flags themselves further down.
-    let first_word = raw
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .map(|s| s.as_str());
-    let forwards_flags = matches!(first_word, Some("dev") | Some("bind"));
-    if !forwards_flags {
-        let flags = known_flags();
-        if let Some(bad) = raw.iter().find(|a| {
-            a.starts_with("--")
-                && a.as_str() != "--"
-                && !flags.iter().any(|k| k == a.split('=').next().unwrap_or(a.as_str()))
-        }) {
-            unknown_flag(bad, stderr_color(&raw));
-        }
     }
 
     let emit_rust = raw.iter().any(|a| a == "--emit-rust");
@@ -358,6 +227,11 @@ fn main() {
     let small = raw.iter().any(|a| a == "--small");
     let locked = raw.iter().any(|a| a == "--locked");
     let annotated = raw.iter().any(|a| a == "--annotated");
+    let verbose = raw.iter().any(|a| a == "--verbose" || a == "-v");
+    let mode = OutputMode {
+        json,
+        color: parse_color(&raw),
+    };
     let args: Vec<&String> = raw.iter().filter(|a| !a.starts_with("--")).collect();
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
@@ -378,7 +252,7 @@ fn main() {
         }
         if let Err(e) = jet::lsp::run_stdio() {
             eprintln!("error: language server failed: {}", e);
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
         return;
     }
@@ -386,43 +260,67 @@ fn main() {
     let cmd = match args.first() {
         Some(c) => c.as_str(),
         None => {
-            // Only flags were given (e.g. `jet --color=always`). Greet rather
-            // than error — there is no subcommand to be wrong about.
+            // No-args: a friendly greeting that orients, NOT a usage error.
             print!("{}", greeting());
-            exit(exit_code::OK);
+            exit(exit_codes::OK);
         }
     };
 
-    // E2101 / D-DX5: a word that isn't a built-in is resolved here, before it is
-    // mistaken for a file to compile. `lsp` is dispatched above and never
-    // reaches this point. Resolution order (see `resolve_external`):
-    //   1. built-in command  → fall through to dispatch below
-    //   2. external `jet-<cmd>` on PATH → exec it with the remaining args
-    //   3. neither           → E2101 "did you mean" (typos still teach)
-    if !known_commands().contains(&cmd) {
-        match resolve_external(cmd) {
-            Some(prog) => {
-                // cargo-style: forward everything after the subcommand word.
-                let pos = raw.iter().position(|a| a == cmd).unwrap_or(0);
-                let fwd: Vec<&String> = raw.iter().skip(pos + 1).collect();
-                let status = Command::new(&prog)
-                    .args(fwd.iter().map(|s| s.as_str()))
-                    .status()
-                    .unwrap_or_else(|e| {
-                        eprintln!("error: couldn't run `{}`: {}", prog.display(), e);
-                        exit(exit_code::USER_ERROR);
-                    });
-                exit(status.code().unwrap_or(exit_code::USER_ERROR));
-            }
-            None => unknown_subcommand(cmd, stderr_color(&raw)),
+    // If the first word is neither a built-in nor a recognized package/pkg
+    // command, try an external `jet-<cmd>` on PATH (D-DX5, cargo/git style),
+    // else teach E2101 with a "did you mean".
+    let known = jet::cli::is_builtin(cmd)
+        || matches!(cmd, "lsp" | "install" | "doctor" | "completions" | "man" | "dev");
+    if !known {
+        if let Some(bin) = find_external(cmd) {
+            // Forward every argument after the subcommand name verbatim.
+            let fwd: Vec<&String> = raw
+                .iter()
+                .skip_while(|a| a.as_str() != cmd)
+                .skip(1)
+                .collect();
+            let status = Command::new(&bin)
+                .args(fwd.iter().map(|s| s.as_str()))
+                .status()
+                .unwrap_or_else(|e| {
+                    eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
+                    exit(exit_codes::USER_ERROR);
+                });
+            exit(status.code().unwrap_or(exit_codes::OK));
         }
+        unknown_subcommand(cmd);
+    }
+
+    // Validate flags against the registry; an unknown/half-typed flag is E2102.
+    // Skipped for commands that own a bespoke flag vocabulary or forward flags
+    // downstream (so their flags aren't measured against the global set).
+    let owns_flags = matches!(
+        cmd,
+        "env" | "dev" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
+    );
+    if !owns_flags {
+        check_flags(&raw);
     }
 
     // Commands with no required positional target.
     match cmd {
         "help" => {
-            eprint!("{}", usage());
-            exit(2);
+            print!("{}", usage());
+            exit(exit_codes::OK);
+        }
+        "doctor" => {
+            let online = raw.iter().any(|a| a == "--online");
+            let apply = raw.iter().any(|a| a == "--fix");
+            run_doctor(online, apply, mode);
+            return;
+        }
+        "completions" => {
+            run_completions(args.get(1).map(|s| s.as_str()));
+            return;
+        }
+        "man" => {
+            print!("{}", jet::cli::man_page(env!("CARGO_PKG_VERSION")));
+            return;
         }
         "version" => {
             run_version();
@@ -434,16 +332,7 @@ fn main() {
         }
         "explain" => {
             let code = args.get(1).map(|s| s.as_str());
-            run_explain(code, stderr_color(&raw));
-            return;
-        }
-        "completions" => {
-            run_completions(args.get(1).map(|s| s.as_str()), stderr_color(&raw));
-            return;
-        }
-        "man" => {
-            // `jet man` (whole surface) or `jet man <subcommand>` (focused page).
-            print!("{}", jet::cli_spec::man(args.get(1).map(|s| s.as_str())));
+            run_explain(code, mode);
             return;
         }
         "fetch" => {
@@ -459,19 +348,6 @@ fn main() {
             run_gc();
             return;
         }
-        "doctor" => {
-            // E2-M3 / D-DX2 / D-BUILD1: environment self-diagnosis. Offline by
-            // default; `--online`/`--network` enables the registry probe,
-            // `--fix` applies conservative auto-fixes, `--plain` is the
-            // deterministic test mode. Color is gated on stdout's TTY since the
-            // report goes to stdout (it is a normal command result, not an error).
-            let online = raw.iter().any(|a| a == "--online" || a == "--network");
-            let do_fix = raw.iter().any(|a| a == "--fix");
-            let plain = raw.iter().any(|a| a == "--plain");
-            let color = use_color(color_choice(&raw), std::io::stdout().is_terminal());
-            let opts = jet::doctor::Options { online, fix: do_fix, plain, color };
-            exit(jet::doctor::run(&opts));
-        }
         "bind" => {
             // S59 / E2-M14 Phase 4 (D-CBIND2): generate (or refresh) a C binding
             // cache from a header. Shares the bind backend with compile-time
@@ -484,15 +360,35 @@ fn main() {
             run_bind(&bind_args);
             return;
         }
-        "dev" => {
-            // Scale-2 front door (U §8): `jet dev` delegates straight to
+        "env" => {
+            // Scale-2 front door (U §8, D-DEV4): `jet env` delegates straight to
             // `jetpack enter`, forwarding flags and any trailing `-- cmd`.
             let mut fwd = raw.clone();
-            if let Some(pos) = fwd.iter().position(|a| a == "dev") {
+            if let Some(pos) = fwd.iter().position(|a| a == "env") {
                 fwd.remove(pos);
             }
             fwd.insert(0, "enter".to_string());
             exit(jet::jetpack::run(fwd));
+        }
+        "dev" => {
+            // E2-M4 (D-DEV4): the watch/interpret loop. Re-check and re-run the
+            // entry file on every save, streaming output, for sub-200ms
+            // feedback. The interpreter is a dev convenience only — `jet build`/
+            // `jet run` never touch it (I2/I3).
+            let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            let file = match args.get(1) {
+                Some(f) => f.as_str(),
+                None => {
+                    eprintln!(
+                        "error: `jet dev` needs a file to watch: {} dev <file.{}>",
+                        jet::syntax::BINARY_NAME,
+                        jet::syntax::FILE_EXT
+                    );
+                    exit(exit_codes::USAGE);
+                }
+            };
+            run_dev(file, try_anyway, mode);
+            return;
         }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
@@ -501,7 +397,7 @@ fn main() {
                 _ => {
                     eprintln!("error: unknown store subcommand `{}`", sub);
                     eprintln!(" fix: try `jet store verify`");
-                    exit(2);
+                    exit(exit_codes::USAGE);
                 }
             }
             return;
@@ -521,13 +417,21 @@ fn main() {
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
-                                run_test(&entry_str, json);
+                                run_test(&entry_str, mode);
                                 return;
                             }
                             _ => {
                                 let program_args: Vec<&String> =
                                     args.iter().skip(1).copied().collect();
-                                run_compile_cmd(cmd, &entry_str, emit_rust, small, json, &program_args);
+                                run_compile_cmd(
+                                    cmd,
+                                    &entry_str,
+                                    emit_rust,
+                                    small,
+                                    verbose,
+                                    &program_args,
+                                    mode,
+                                );
                                 return;
                             }
                         }
@@ -540,11 +444,11 @@ fn main() {
                         cmd,
                         jet::syntax::FILE_EXT
                     );
-                    exit(2);
+                    exit(exit_codes::USAGE);
                 }
                 _ => {
                     eprint!("{}", usage());
-                    exit(2);
+                    exit(exit_codes::USAGE);
                 }
             }
         }
@@ -552,15 +456,9 @@ fn main() {
 
     match cmd {
         "fmt" => run_fmt(target, fmt_check),
-        "fix" => {
-            let write = raw.iter().any(|a| a == "--write" || a == "--apply");
-            // The preview goes to stdout (a normal command result), so color is
-            // gated on stdout's TTY, matching `doctor`.
-            let color = use_color(color_choice(&raw), std::io::stdout().is_terminal());
-            run_fix(target, write, color);
-        }
+        "fix" => run_fix(target, raw.iter().any(|a| a == "--dry-run")),
         "new" => run_new(target, annotated),
-        "test" => run_test(target, json),
+        "test" => run_test(target, mode),
         "add" => run_add(&raw),
         "remove" => run_remove(target),
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
@@ -568,11 +466,11 @@ fn main() {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
             eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
             eprintln!(" Fix: run `jet fetch` to install all dependencies listed in payload.jet");
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
         _ => {
             let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
-            run_compile_cmd(cmd, target, emit_rust, small, json, &program_args);
+            run_compile_cmd(cmd, target, emit_rust, small, verbose, &program_args, mode);
         }
     }
 }
@@ -589,7 +487,7 @@ fn find_project_entry(root: &Path) -> PathBuf {
 }
 
 fn run_version() {
-    println!("{}", env!("CARGO_PKG_VERSION"));
+    print!("{}", jet::manifest::version_banner());
 }
 
 fn run_upgrade() {
@@ -600,76 +498,14 @@ fn run_upgrade() {
     println!("  https://github.com/jet-lang/jet/releases");
 }
 
-/// `jet explain <code>` (E2-M3): print an offline essay for a diagnostic code,
-/// sourced from docs/spec/diagnostics.md. Unknown/missing codes fail cleanly
-/// with the what/why/fix voice and exit 2 (usage) — never a panic.
-fn run_explain(code: Option<&str>, color: bool) {
-    let bin = jet::syntax::BINARY_NAME;
-    let code = match code {
-        Some(c) => c,
-        None => {
-            let (red, bold, _gray, reset) = palette(color);
-            eprintln!("{red}Error{reset}: {bold}`{bin} explain` needs a diagnostic code.{reset}");
-            eprintln!(" Why: it prints the offline essay for one error or warning code.");
-            eprintln!(" Fix: try `{bin} explain E0102` (any code from an error message).");
-            exit(exit_code::USAGE);
-        }
-    };
-    match jet::explain::lookup(code) {
-        Some(entry) => {
-            print!("{}", entry.essay());
-        }
-        None => {
-            let (red, bold, _gray, reset) = palette(color);
-            eprintln!("{red}Error{reset}: {bold}`{code}` isn't a diagnostic code {bin} knows.{reset}");
-            eprintln!(" Why: every code {bin} reports is one of the `E####`/`L####` codes in its diagnostics reference.");
-            // Suggest a close known code, like the subcommand suggester.
-            let codes = jet::explain::live_codes();
-            let cand: Vec<&str> = codes.iter().map(|s| s.as_str()).collect();
-            match closest(&code.to_ascii_uppercase(), &cand) {
-                Some(s) => eprintln!(" Fix: did you mean `{bin} explain {s}`?"),
-                None => eprintln!(" Fix: copy the `E####` code from an error message and pass it to `{bin} explain`."),
-            }
-            exit(exit_code::USAGE);
-        }
-    }
-}
-
-/// `jet completions <bash|zsh|fish>` (E2-M3, D-DX4): print a shell completion
-/// script generated from the single-source `cli_spec` tables, so it can never
-/// drift from the real command/flag surface. An unknown or missing shell teaches
-/// the three supported shells and exits 2 — never a panic.
-fn run_completions(shell: Option<&str>, color: bool) {
-    let bin = jet::syntax::BINARY_NAME;
-    let shell = match shell {
-        Some(s) => s,
-        None => {
-            let (red, bold, _gray, reset) = palette(color);
-            eprintln!("{red}Error{reset}: {bold}`{bin} completions` needs a shell name.{reset}");
-            eprintln!(" Why: the script differs per shell (bash, zsh, fish).");
-            eprintln!(" Fix: try `{bin} completions bash` (or zsh, or fish).");
-            exit(exit_code::USAGE);
-        }
-    };
-    match jet::cli_spec::completions(shell) {
-        Some(script) => print!("{}", script),
-        None => {
-            let (red, bold, _gray, reset) = palette(color);
-            eprintln!("{red}Error{reset}: {bold}`{shell}` isn't a shell {bin} can generate completions for.{reset}");
-            eprintln!(" Why: completions are hand-written per shell; only bash, zsh, and fish are supported.");
-            eprintln!(" Fix: try `{bin} completions bash`, `{bin} completions zsh`, or `{bin} completions fish`.");
-            exit(exit_code::USAGE);
-        }
-    }
-}
-
 fn run_compile_cmd(
     cmd: &str,
     file: &str,
     emit_rust: bool,
     small: bool,
-    json: bool,
+    verbose: bool,
     program_args: &[&String],
+    mode: OutputMode,
 ) {
     let profile = if small {
         BuildProfile::Small
@@ -685,7 +521,7 @@ fn run_compile_cmd(
                 " fix: check the spelling, or run {} from the folder that contains it",
                 jet::syntax::BINARY_NAME
             );
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     };
 
@@ -695,16 +531,12 @@ fn run_compile_cmd(
             .filter(|d| matches!(d.severity, jet::diag::Severity::Error))
             .collect();
         if !diags.is_empty() {
-            if json {
-                print!("{}", jet::render_diagnostics_json(file, &src, &diags));
-            } else {
-                eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
-                let n = diags.len();
-                eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
-            }
-            exit(1);
+            report_problems(mode, file, &src, &diags);
+            exit(exit_codes::USER_ERROR);
         }
-        if !json {
+        if mode.json {
+            println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
+        } else {
             println!("ok: `{}` has no problems", file);
         }
         return;
@@ -713,10 +545,13 @@ fn run_compile_cmd(
     let (rust_code, ffi_link, clinks) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
-                if json {
-                    print!("{}", jet::render_diagnostics_json(file, &src, &out.lints));
+                if mode.json {
+                    eprint!("{}", jet::render_all_json(file, &src, &out.lints));
                 } else {
-                    eprint!("{}", jet::render_diagnostics_cli(file, &src, &out.lints, stderr_color_now()));
+                    eprint!(
+                        "{}",
+                        jet::render_all_colored(file, &src, &out.lints, mode.color_stderr())
+                    );
                     let n = out.lints.len();
                     eprintln!(
                         "\n{} warning{} emitted (compilation continues)",
@@ -730,27 +565,15 @@ fn run_compile_cmd(
             let clinks = match jet::resolve_c_links(file) {
                 Ok(args) => args,
                 Err(diags) => {
-                    if json {
-                        print!("{}", jet::render_diagnostics_json(file, &src, &diags));
-                    } else {
-                        eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
-                        let n = diags.len();
-                        eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
-                    }
-                    exit(1);
+                    report_problems(mode, file, &src, &diags);
+                    exit(exit_codes::USER_ERROR);
                 }
             };
             (out.rust, out.ffi, clinks)
         }
         Err(diags) => {
-            if json {
-                print!("{}", jet::render_diagnostics_json(file, &src, &diags));
-            } else {
-                eprint!("{}", jet::render_diagnostics_cli(file, &src, &diags, stderr_color_now()));
-                let n = diags.len();
-                eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
-            }
-            exit(1);
+            report_problems(mode, file, &src, &diags);
+            exit(exit_codes::USER_ERROR);
         }
     };
 
@@ -760,21 +583,21 @@ fn run_compile_cmd(
 
     match cmd {
         "build" => {
-            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks);
+            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose);
             println!("built: {}", bin_path(file).display());
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks);
+            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks, verbose);
             let mut run_cmd = Command::new(&out);
             for arg in program_args {
                 run_cmd.arg(arg.as_str());
             }
             let status = run_cmd.status().unwrap_or_else(|e| {
                 eprintln!("error: couldn't run the built program: {}", e);
-                exit(1);
+                exit(exit_codes::USER_ERROR);
             });
-            exit(status.code().unwrap_or(0));
+            exit(status.code().unwrap_or(exit_codes::OK));
         }
         other => {
             eprintln!(
@@ -783,134 +606,280 @@ fn run_compile_cmd(
                 jet::syntax::BINARY_NAME
             );
             eprint!("{}", usage());
-            exit(2);
+            exit(exit_codes::USAGE);
         }
     }
 }
 
-/// `jet fix` (E2-M3, D-REL5): the sanctioned code-migration tool. Runs the front
-/// end on `file`, collects the machine-applicable `edit`s its diagnostics carry
-/// (the S14 teaching autocorrects), and applies them through the unified fix
-/// engine (`jet::fixengine`) — the exact same applier the LSP code-action path
-/// builds its edits on.
-///
-/// Safety model: **dry-run by default**. Without `--write`/`--apply` it prints a
-/// unified-diff-style preview of what would change and exits 0, touching nothing
-/// on disk. With `write`, it writes the rewritten file back. It only ever
-/// touches the file it was handed; it never reaches into jetpack manifests.
-fn run_fix(file: &str, write: bool, color: bool) {
+/// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4). Re-checks and
+/// re-runs the entry file on every save, streaming output. The per-iteration
+/// work lives in `jet::interp::dev_iteration` (so it can be golden-tested);
+/// this is the thin std-only watcher around it (I6: no `notify` crate — we
+/// poll the file's mtime in a loop).
+fn run_dev(file: &str, try_anyway: bool, mode: OutputMode) {
+    let path = Path::new(file);
+    if !path.exists() {
+        eprintln!("error: can't find the file `{}`", file);
+        eprintln!(
+            " fix: check the spelling, or run {} from the folder that contains it",
+            jet::syntax::BINARY_NAME
+        );
+        exit(exit_codes::USER_ERROR);
+    }
+
+    println!("watching {} … (Ctrl-C to stop)", file);
+
+    // Run once immediately, then re-run whenever the file's mtime changes.
+    let mut last_mtime = file_mtime(path);
+    render_dev_iteration(file, try_anyway, mode);
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let now = file_mtime(path);
+        if now != last_mtime {
+            last_mtime = now;
+            // A debounce sleep lets editors finish writing before we read.
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            println!("\n— {} changed, re-running —", file);
+            render_dev_iteration(file, try_anyway, mode);
+        }
+    }
+}
+
+/// Last-modified time of a path, or `None` if it can't be read (treated as a
+/// distinct state so a transient unlink/rewrite still triggers a re-run).
+fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
+    fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Run one dev iteration and render its outcome to the terminal in the active
+/// output mode. Diagnostics use the SAME renderer as batch compilation
+/// (D-DEV), so a problem looks identical whether seen via `jet check` or
+/// `jet dev`.
+fn render_dev_iteration(file: &str, try_anyway: bool, mode: OutputMode) {
+    let started = std::time::Instant::now();
+    let outcome = jet::interp::dev_iteration(file, try_anyway);
+    let elapsed = started.elapsed();
+    match outcome {
+        jet::interp::RunOutcome::Ran { stdout, stderr } => {
+            print!("{}", stdout);
+            if !stderr.is_empty() {
+                eprint!("{}", stderr);
+            }
+            println!("✓ ran in {} ms", elapsed.as_millis());
+        }
+        jet::interp::RunOutcome::Problems(diags) => {
+            let src = fs::read_to_string(file).unwrap_or_default();
+            report_problems(mode, file, &src, &diags);
+        }
+    }
+}
+
+/// Print front-end problems in the active output mode, with the trailing
+/// "N problems found" count and (in human mode) one quiet `jet explain`
+/// pointer naming the first code. Suppressed entirely in `--json`, where the
+/// code is already structured.
+fn report_problems(mode: OutputMode, file: &str, src: &str, diags: &[jet::diag::Diagnostic]) {
+    if mode.json {
+        eprint!("{}", jet::render_all_json(file, src, diags));
+        return;
+    }
+    eprint!(
+        "{}",
+        jet::render_all_linked(file, src, diags, mode.color_stderr(), mode.hyperlinks_stderr())
+    );
+    let n = diags.len();
+    eprintln!("\n{} problem{} found", n, if n == 1 { "" } else { "s" });
+    if let Some(first) = diags.first() {
+        eprintln!(
+            "{}",
+            jet::explain::pointer_line(first.code, mode.color_stderr())
+        );
+    }
+}
+
+/// `jet completions <shell>` — print a shell completion script (D-DX4).
+fn run_completions(shell: Option<&str>) {
+    let out = match shell {
+        Some("bash") => jet::cli::completions_bash(),
+        Some("zsh") => jet::cli::completions_zsh(),
+        Some("fish") => jet::cli::completions_fish(),
+        other => {
+            eprintln!(
+                "error: completions need a shell: {} completions <bash|zsh|fish>",
+                jet::syntax::BINARY_NAME
+            );
+            if let Some(s) = other {
+                eprintln!(" why: `{}` isn't a shell I generate completions for", s);
+            }
+            exit(exit_codes::USAGE);
+        }
+    };
+    print!("{}", out);
+}
+
+/// `jet doctor` — environment self-diagnosis with actionable fixes (D-DX2,
+/// D-BUILD1). Offline by default; `--online` enables network checks; `--fix`
+/// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
+/// problems is L2101.
+fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
+    let checks = jet::doctor::run(jet::doctor::Options { online });
+    let color = mode.color_stderr_for(std::io::stdout().is_terminal());
+
+    if apply {
+        let fixed = jet::doctor::apply_fixes(&checks);
+        if fixed.is_empty() {
+            println!("doctor: nothing to auto-fix");
+        } else {
+            for f in &fixed {
+                println!("fixed: {}", f);
+            }
+        }
+        // Re-run so the report reflects the world after fixes.
+        return run_doctor(online, false, mode);
+    }
+
+    use jet::doctor::Health;
+    let bold = |s: &str| if color { format!("\x1b[1m{}\x1b[0m", s) } else { s.to_string() };
+    let green = |s: &str| if color { format!("\x1b[32m{}\x1b[0m", s) } else { s.to_string() };
+    let yellow = |s: &str| if color { format!("\x1b[33m{}\x1b[0m", s) } else { s.to_string() };
+
+    println!("{}", bold(&format!("{} doctor", jet::syntax::BINARY_NAME)));
+    let mut last_section = "";
+    for c in &checks {
+        if c.section != last_section {
+            println!();
+            println!("{}", bold(c.section));
+            last_section = c.section;
+        }
+        let (mark, label) = match c.health {
+            Health::Ok => (green("ok  "), c.label.clone()),
+            Health::Note => ("note".to_string(), c.label.clone()),
+            Health::Problem => (yellow("warn"), c.label.clone()),
+        };
+        println!("  [{}] {}: {}", mark, label, c.detail);
+        if let Some(fix) = &c.fix {
+            println!("        Fix: {}", fix);
+            if c.auto_fixable {
+                println!("        (auto-fixable: run `{} doctor --fix`)", jet::syntax::BINARY_NAME);
+            }
+        }
+    }
+    println!();
+    if jet::doctor::has_problem(&checks) {
+        // Advisory L2101 pointer, without making the report noisy.
+        println!(
+            "some checks need attention. {}",
+            jet::explain::pointer_line("L2101", color)
+        );
+        exit(exit_codes::USER_ERROR);
+    } else {
+        println!("everything looks good.");
+    }
+}
+
+/// `jet explain <CODE>` — print the offline essay for a diagnostic code.
+fn run_explain(code: Option<&str>, mode: OutputMode) {
+    let code = match code {
+        Some(c) => c,
+        None => {
+            eprintln!(
+                "usage: {} explain <CODE>   (e.g. {} explain E0102)",
+                jet::syntax::BINARY_NAME,
+                jet::syntax::BINARY_NAME
+            );
+            exit(exit_codes::USAGE);
+        }
+    };
+    match jet::explain::lookup(code) {
+        Some(ex) => {
+            let color = ColorChoice::resolve(mode.color, std::io::stdout().is_terminal());
+            print!("{}", jet::explain::render(&ex, color));
+        }
+        None => {
+            eprintln!("error: no diagnostic code `{}` exists", code);
+            eprintln!(
+                " fix: run a command that reports an error to see its code, e.g. `{} check file.{}`",
+                jet::syntax::BINARY_NAME,
+                jet::syntax::FILE_EXT
+            );
+            exit(exit_codes::USER_ERROR);
+        }
+    }
+}
+
+/// Apply all auto-fixable diagnostics in a source file in place (D-LSP7 / M13).
+/// Goes through `jet::lsp::collect_fixes` / `apply_all` — the SAME unified fix
+/// engine the LSP code-action layer uses — so a fix on the command line and a
+/// fix in the editor are byte-identical. `--dry-run` shows the diff without
+/// writing.
+fn run_fix(file: &str, dry_run: bool) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
             eprintln!("error: can't find the file `{}`", file);
             eprintln!(" fix: check the spelling");
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     };
-    let diags = jet::lsp::check_document(file, &src);
-    let edits: Vec<_> = diags.iter().filter_map(|d| d.edit.clone()).collect();
-    if edits.is_empty() {
+    let fixes = jet::lsp::collect_fixes(file, &src);
+    if fixes.is_empty() {
         println!("{}: no auto-fixable problems found", file);
         return;
     }
-    let fixed = match jet::fixengine::apply_edits(&src, &edits) {
-        Ok(f) => f,
-        Err(jet::fixengine::ApplyError::Overlap { first, second }) => {
-            // Two fixes contend for the same bytes; refuse rather than guess.
-            eprintln!(
-                "{}: two auto-fixes overlap (bytes {}..{} and {}..{})",
-                file, first.0, first.1, second.0, second.1
-            );
-            eprintln!(" why: applying both would be ambiguous, so `jet fix` won't.");
-            eprintln!(" fix: fix one problem by hand, then re-run `jet fix`.");
-            exit(1);
-        }
-    };
+    let fixed = jet::lsp::apply_all(&src, &fixes);
     if fixed == src {
         println!("{}: no changes made", file);
         return;
     }
-
-    let n = edits.len();
-    let plural = if n == 1 { "" } else { "es" };
-
-    if write {
-        fs::write(file, &fixed).unwrap_or_else(|e| {
-            eprintln!("error: couldn't write {}: {}", file, e);
-            exit(1);
-        });
-        println!("{}: applied {} fix{}", file, n, plural);
-        println!("{} fix{} in 1 file", n, plural);
-    } else {
-        // Dry-run: show a unified-diff-style preview and change nothing.
-        print!("{}", unified_diff(file, &src, &fixed, color));
+    let n = fixes.len();
+    if dry_run {
+        print!("{}", jet::fmt::unified_diff(file, &src, &fixed));
         println!(
-            "{}: {} fix{} available — run `jet fix --write {}` to apply",
-            file, n, plural, file
+            "{}: would apply {} fix{} (dry run; nothing written)",
+            file,
+            n,
+            if n == 1 { "" } else { "es" }
         );
-        println!("{} fix{} in 1 file (preview; nothing written)", n, plural);
+        return;
     }
-}
-
-/// Render a minimal unified-diff-style preview of a whole-file rewrite. Every
-/// changed line is shown as a `-`/`+` pair; unchanged lines are elided. This is
-/// presentation only (the engine already produced `new`), so it is free to be
-/// line-granular rather than byte-exact. Color is TTY-gated by the caller.
-fn unified_diff(file: &str, old: &str, new: &str, color: bool) -> String {
-    let (red, _bold, gray, reset) = palette(color);
-    let green = if color { "\x1b[32m" } else { "" };
-    let old_lines: Vec<&str> = old.lines().collect();
-    let new_lines: Vec<&str> = new.lines().collect();
-    let mut out = String::new();
-    out.push_str(&format!("{gray}--- {file}{reset}\n"));
-    out.push_str(&format!("{gray}+++ {file} (fixed){reset}\n"));
-    let max = old_lines.len().max(new_lines.len());
-    for i in 0..max {
-        let o = old_lines.get(i).copied();
-        let nw = new_lines.get(i).copied();
-        if o == nw {
-            continue;
-        }
-        if let Some(o) = o {
-            out.push_str(&format!("{red}-{:>4} | {}{reset}\n", i + 1, o));
-        }
-        if let Some(nw) = nw {
-            out.push_str(&format!("{green}+{:>4} | {}{reset}\n", i + 1, nw));
-        }
-    }
-    out
+    fs::write(file, &fixed).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write {}: {}", file, e);
+        exit(exit_codes::USER_ERROR);
+    });
+    println!("{}: applied {} fix{}", file, n, if n == 1 { "" } else { "es" });
 }
 
 fn run_new(name: &str, annotated: bool) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         eprintln!("error: project name must be a simple folder name");
         eprintln!(" fix: try: {} new my_app", jet::syntax::BINARY_NAME);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     }
     let dir = Path::new(name);
     if dir.exists() {
         eprintln!("error: `{}` already exists", name);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     }
     // Create: <name>/payload.jet, <name>/.jet/main.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let manifest_text = jet::manifest::new_template(name, annotated);
     fs::write(dir.join(jet::syntax::PAYLOAD_FILE), manifest_text).unwrap_or_else(|e| {
         eprintln!("error: couldn't write {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let main_src = "fn main() {\n    print(\"hello, world\");\n}\n";
     fs::write(jet_dir.join("main.jet"), main_src).unwrap_or_else(|e| {
         eprintln!("error: couldn't write .jet/main.jet: {}", e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     fs::write(dir.join(".gitignore"), "build/\n.jet-build/\n").unwrap_or_else(|e| {
         eprintln!("error: couldn't write .gitignore: {}", e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     println!("created {}/", name);
     println!("  {}", jet::syntax::PAYLOAD_FILE);
@@ -928,7 +897,7 @@ fn run_add(raw_args: &[String]) {
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
         eprintln!("error: no `payload.jet` found — run `jet add` inside a project");
         eprintln!(" fix: run `jet new <name>` to create a project first");
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
 
     // Parse: jet add <dep-name> --path <dir> | --git <url> [--tag <t>|--branch <b>|--rev <r>]
@@ -938,7 +907,7 @@ fn run_add(raw_args: &[String]) {
         None => {
             eprintln!("error: `jet add` needs a dependency name");
             eprintln!(" fix: try `jet add mylib --path ../mylib`");
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     };
 
@@ -964,7 +933,7 @@ fn run_add(raw_args: &[String]) {
                 "error: git dependency `{}` needs one of: --tag, --branch, --rev",
                 dep_name
             );
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         };
         jet::manifest::DepSpec::Git {
             url: url.to_string(),
@@ -976,19 +945,19 @@ fn run_add(raw_args: &[String]) {
             " fix: try `jet add {} --path ../{}` or `jet add {} --git <url> --tag <tag>`",
             dep_name, dep_name, dep_name
         );
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     };
 
     // Load the manifest, add the dep, write back.
     let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
         eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let updated = jet::manifest::add_dependency(&raw, dep_name, &spec);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
         eprintln!("error: couldn't write {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     println!("added `{}` to {}", dep_name, jet::syntax::PAYLOAD_FILE);
 
@@ -1000,18 +969,18 @@ fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
         eprintln!("error: no `payload.jet` found");
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
 
     let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
         eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let updated = jet::manifest::remove_dependency(&raw, dep_name);
     fs::write(&pack_path, updated).unwrap_or_else(|e| {
         eprintln!("error: couldn't write {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     println!("removed `{}` from {}", dep_name, jet::syntax::PAYLOAD_FILE);
 
@@ -1053,7 +1022,7 @@ fn run_bind(args: &[&String]) {
             other => {
                 eprintln!("error: unknown `bind` flag `{}`", other);
                 eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::syntax::BINARY_NAME);
-                exit(2);
+                exit(exit_codes::USAGE);
             }
         }
     }
@@ -1073,14 +1042,14 @@ fn run_bind(args: &[&String]) {
         " Fix: hand-write `@extern module c.{} {{ … }}`, or place a generated cache at .jet/bindings/c/{}.{}.",
         lib, lib, jet::syntax::FILE_EXT
     );
-    exit(1);
+    exit(exit_codes::USER_ERROR);
 }
 
 fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
         eprintln!("error: no `payload.jet` found — run `jet fetch` inside a project");
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     do_fetch(&root, locked);
 }
@@ -1089,20 +1058,20 @@ fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
         eprintln!("error: no `payload.jet` found");
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
 
     let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
         eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let mf = jet::manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
         eprintln!(
             "{}",
             jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
         );
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let existing_lock = jet::lock::load(&root);
     let opts = jet::fetch::FetchOptions {
@@ -1121,7 +1090,7 @@ fn run_update(dep: Option<&str>) {
         Err(diags) => {
             let src = String::new();
             eprint!("{}", jet::render_diagnostics(jet::syntax::PAYLOAD_FILE, &src, &diags));
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     }
 }
@@ -1150,7 +1119,7 @@ fn run_store_verify() {
     }
     println!("{} ok, {} bad", ok, bad);
     if bad > 0 {
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     }
 }
 
@@ -1169,14 +1138,14 @@ fn do_fetch(root: &Path, locked: bool) {
     let pack_path = root.join(jet::syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&pack_path).unwrap_or_else(|e| {
         eprintln!("error: couldn't read {}: {}", jet::syntax::PAYLOAD_FILE, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let mf = jet::manifest::parse(&pack_path, &raw).unwrap_or_else(|d| {
         eprint!(
             "{}",
             jet::render_diagnostics(&pack_path.display().to_string(), &raw, &[d])
         );
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let existing_lock = jet::lock::load(root);
     let opts = jet::fetch::FetchOptions {
@@ -1194,7 +1163,7 @@ fn do_fetch(root: &Path, locked: bool) {
         }
         Err(diags) => {
             eprint!("{}", jet::render_diagnostics(jet::syntax::PAYLOAD_FILE, &raw, &diags));
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     }
 }
@@ -1209,18 +1178,18 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     None
 }
 
-fn run_test(path: &str, json: bool) {
+fn run_test(path: &str, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
         eprintln!("error: can't find `{}`", path);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     }
     if p.is_dir() {
         let ext = jet::syntax::FILE_EXT;
         let mut files: Vec<PathBuf> = fs::read_dir(p)
             .unwrap_or_else(|e| {
                 eprintln!("error: couldn't read `{}`: {}", path, e);
-                exit(1);
+                exit(exit_codes::USER_ERROR);
             })
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|f| f.extension().and_then(|e| e.to_str()) == Some(ext))
@@ -1228,20 +1197,28 @@ fn run_test(path: &str, json: bool) {
         files.sort();
         if files.is_empty() {
             eprintln!("error: no .{} files in `{}`", ext, path);
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
         let mut any_fail = false;
         for f in files {
-            if !run_test_file(&f, json) {
+            if !run_test_file(&f, mode) {
                 any_fail = true;
             }
         }
-        exit(if any_fail { 1 } else { 0 });
+        exit(if any_fail {
+            exit_codes::USER_ERROR
+        } else {
+            exit_codes::OK
+        });
     }
-    exit(if run_test_file(p, json) { 0 } else { 1 });
+    exit(if run_test_file(p, mode) {
+        exit_codes::OK
+    } else {
+        exit_codes::USER_ERROR
+    });
 }
 
-fn run_test_file(path: &Path, json: bool) -> bool {
+fn run_test_file(path: &Path, mode: OutputMode) -> bool {
     let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -1253,11 +1230,7 @@ fn run_test_file(path: &Path, json: bool) -> bool {
     let (rust_code, ffi_link) = match jet::compile_tests_with_path(&src, &shown) {
         Ok(r) => r,
         Err(diags) => {
-            if json {
-                print!("{}", jet::render_diagnostics_json(&shown, &src, &diags));
-            } else {
-                eprint!("{}", jet::render_diagnostics(&shown, &src, &diags));
-            }
+            report_problems(mode, &shown, &src, &diags);
             return false;
         }
     };
@@ -1269,10 +1242,11 @@ fn run_test_file(path: &Path, json: bool) -> bool {
         BuildProfile::Default,
         ffi_link.as_ref(),
         &[],
+        false,
     );
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     print!("{}", String::from_utf8_lossy(&out.stdout));
     if !out.stderr.is_empty() {
@@ -1286,14 +1260,14 @@ fn run_fmt(file: &str, check_only: bool) {
         Ok(s) => s,
         Err(_) => {
             eprintln!("error: can't find the file `{}`", file);
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     };
     let formatted = match jet::format_source(&src) {
         Ok(s) => s,
         Err(diags) => {
             eprint!("{}", jet::render_diagnostics(file, &src, &diags));
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     };
     if formatted == src {
@@ -1301,11 +1275,11 @@ fn run_fmt(file: &str, check_only: bool) {
     }
     if check_only {
         print!("{}", jet::fmt::unified_diff(file, &src, &formatted));
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     }
     fs::write(file, &formatted).unwrap_or_else(|e| {
         eprintln!("error: couldn't write {}: {}", file, e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
 }
 
@@ -1332,15 +1306,25 @@ fn build(
     profile: BuildProfile,
     ffi: Option<&jet::ffi::FfiLink>,
     clinks: &[String],
+    verbose: bool,
 ) {
+    // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
+    // Step labels are deterministic so they can be golden-tested.
+    let step = |msg: String| {
+        if verbose {
+            eprintln!("[build] {}", msg);
+        }
+    };
+
     fs::create_dir_all("build").unwrap_or_else(|e| {
         eprintln!("error: couldn't create the build/ folder: {}", e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
     let rs_path = PathBuf::from("build").join(format!("{}.rs", stem(file)));
+    step(format!("emit Rust  -> {}", rs_path.display()));
     fs::write(&rs_path, rust_code).unwrap_or_else(|e| {
         eprintln!("error: couldn't write {}: {}", rs_path.display(), e);
-        exit(1);
+        exit(exit_codes::USER_ERROR);
     });
 
     let small = matches!(profile, BuildProfile::Small);
@@ -1354,10 +1338,19 @@ fn build(
     };
     if let Some(ref key) = cache_key {
         if jet::build_cache::try_copy_cached(key, &bin) {
+            step("cache hit -> reused cached binary".to_string());
             return;
         }
     }
+    if verbose {
+        if cache_key.is_some() {
+            step("cache miss -> compiling".to_string());
+        } else {
+            step("cache bypassed (C-linked build)".to_string());
+        }
+    }
 
+    step(format!("rustc      {} -> {}", rs_path.display(), bin.display()));
     let mut cmd = Command::new("rustc");
     cmd.arg("--edition").arg("2021");
     match profile {
@@ -1402,7 +1395,7 @@ fn build(
                 " why: v1 of this language uses Rust as its backend (docs/spec/architecture.md)"
             );
             eprintln!(" fix: install Rust from https://rustup.rs, then try again");
-            exit(1);
+            exit(exit_codes::USER_ERROR);
         }
     };
 
@@ -1416,10 +1409,13 @@ fn build(
         eprintln!("  generated: {}", rs_path.display());
         eprintln!("--- rustc said ---");
         eprintln!("{}", String::from_utf8_lossy(&out.stderr));
-        exit(101);
+        exit(exit_codes::ICE);
     }
+
+    step(format!("link       -> {}", bin.display()));
 
     if let Some(key) = cache_key {
         jet::build_cache::store_cached(&key, &bin);
+        step("cache store -> saved binary for next time".to_string());
     }
 }

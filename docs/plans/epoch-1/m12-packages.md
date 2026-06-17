@@ -30,11 +30,11 @@ LAYER 2 — M12.2
   · --as-of · local compile-once cache · jet vendor · jet audit
 
 LAYER 3 — post-v1 (same store/lockfile; needs ballots + docs/plans/jetpack-jetos/jetos-design.md)
-  jet eval --pure recipes · sandboxed builds · signed binary caches
+  jet eval --pure builds · sandboxed builds · signed binary caches
   · generations/rollback for installed tools · packaging non-Jet software
 ```
 
-Layer 3 is **out of M12 scope**. It re-homes recipe/sandbox work onto this
+Layer 3 is **out of M12 scope**. It re-homes build/sandbox work onto this
 store. Ordinary Jet source-library projects always use `jet.toml` — never a
 Jet-code manifest.
 
@@ -452,7 +452,7 @@ add without `--git`.
 
 ## Out of scope (v1)
 
-Layer 3 (recipes, sandbox, cross-machine cache, generations). Jet-code
+Layer 3 (builds, sandbox, cross-machine cache, generations). Jet-code
 `.jet` manifest for ordinary packages. Non-empty workspaces. Dev-dependencies
 content. Features/conditional compilation. Binary dep artifacts in phase 1.
 Yanking/mirrors implementation beyond spec.
@@ -481,6 +481,6 @@ and installable ISOs. Not M12 source-library work.
 1. Read this file end-to-end; implement per ratified D-PM1…8.
 2. Claim E1201–E1209 in docs/spec/diagnostics.md as diagnostics land.
 3. Store paths: `~/.jet/store/<name>-<version>-<full-fingerprint>/`.
-4. Do not implement layer-3 recipes, `package.jet` manifest, or `jetpack`
+4. Do not implement layer-3 builds, `package.jet` manifest, or `jetpack`
    from the M12 plan. Public `jetpack` is a separate owner-gated track in
    `docs/plans/jetpack-jetos/README.md`.

@@ -179,6 +179,10 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `@unsafe` block (S58) |
+| E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
+| E3103 | sema  | `@unsafe fn` called without an enclosing `@unsafe` block (S58) |
+| L3101 | sema  | `@unsafe` block missing its `@audit("…")` reason (S58, D-LL2) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `@unsafe` / `core.mem` |
 | E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
@@ -255,6 +259,62 @@ before continuing.
 | E1211 | jet   | `packages:` block-form entry missing `kind` field (U10) |
 | E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
+| E2001 | jet   | `payload.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
+| E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
+| E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
+| E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
+| E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`@unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
+| E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
+| L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
+| L2101 | jet   | `jet doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
+
+## Editions and release policy (E2-M2)
+
+These enforce the compatibility contract in docs/spec/release-policy.md. An
+**edition** opts a project into a specific era of Jet syntax (D-REL3); the
+toolchain advertises the editions it supports in `jet --version`. **E2001** is
+fully reachable from a real `payload.jet`. **E2002** and **L2001** read from the
+deprecation registry in `src/manifest.rs` (`DEPRECATIONS`); that registry is
+empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
+codes are registered and snapshotted but not yet user-triggerable. They become
+reachable the moment the first real deprecation is added, with no change to the
+diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `payload.jet`. |
+| E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
+| L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
+
+## Command-line diagnostics (E2-M3)
+
+These come from the CLI driver (`src/main.rs`, `src/cli.rs`), not the language
+front end. They use the same `Error [E####]` / `Why:` / `Fix:` voice so the
+command line teaches the same way the compiler does. The "did you mean"
+suggestion reuses the edit-distance muscle behind the S14 teaching errors.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2101 | That isn't a Jet command. | The first word after `jet` must be a known command (like `run`, `check`, or `test`) or an installed `jet-<name>` plugin on your PATH. | Run `jet help` to see the commands, or use the closest match named in the error. |
+| E2102 | That flag isn't one this command understands. | Each command accepts a fixed set of flags; an unknown or half-typed flag is usually a typo or a flag meant for a different command. | Drop the flag, or use the closest match named in the error; `jet help` lists the flags. |
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| L2101 | `jet doctor` found something in your environment that will bite you later. | Jet leans on a hidden toolchain (rustc, a build cache, your PATH); when one is missing or stale, builds fail with confusing errors far from the cause. | Apply the fix named in the report — many are auto-fixable with `jet doctor --fix`. |
+
+## Dev-loop diagnostics (E2-M4, `jet dev`)
+
+`jet dev` runs your program in a built-in tree-walking interpreter (the M9.5
+comptime evaluator, extended to whole programs) so a save gives feedback in
+well under 200ms (D-DEV3). The interpreter is a dev convenience only — `jet
+build`/`jet run` never use it, and it never produces a release artifact
+(I2/I3). When it can't run a program, it says so plainly and names the real
+build path; it never silently falls back to a different answer.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2201 | `jet dev` can't interpret this program yet — it uses a feature the dev interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `@unsafe`/`core.mem` region, or a native-only std module like files/clock/random/environment/process). | The dev interpreter runs a deterministic, pure-enough subset for instant feedback; features that touch threads, foreign code, raw memory, or the outside world need the real native build. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` keeps showing checks live. Opt in with `jet dev <file> --try-anyway` to attempt execution past the boundary, with no guarantees (D-DEV1). |
+| E2202 | A program ran too long for `jet dev` to keep interpreting (the step budget was exhausted). | `jet dev` interprets your program; a run that never finishes is almost always a loop whose condition never becomes false. | Check the loop near the pointed-at line for a condition that never ends; `jet run` executes the real build with no step limit. |
 
 ## Fan-out and fixed-size list diagnostics
 
@@ -325,6 +385,18 @@ E2303` points there and the soundness matrix has a named cell.
 | E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
 | L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
 
+## Low-level tier diagnostics (E2-M13, S58)
+
+The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an
+`@audit("…")` + `@unsafe { … }` region (or an `@unsafe fn` contract) opens the
+operations that can violate memory safety. Ordinary Jet never reaches these.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E3101 | `{op}` can only run inside an `@unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `@audit("why this is safe") @unsafe { … }`. |
+| E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
+| E3103 | `{fn}` is an `@unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `@audit("…") @unsafe { … }`. |
+| L3101 | This `@unsafe` block has no `@audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `@audit("why this is safe")` on the line above. |
 ## C FFI diagnostics (E2-M14, S59)
 
 | Code | What | Why | Fix |
@@ -431,7 +503,6 @@ the real output is one line):
 
 The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
 (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
-
 ## Process for a new diagnostic
 
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.

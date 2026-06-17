@@ -10,7 +10,7 @@ Provides the foundation for the jetpack-jetos track Phase 2.
 ## Goal
 
 Make purity a product feature and lay the groundwork for declarative
-configuration/package recipes — Nix's best property (declarative, function-shaped
+configuration/package builds — Nix's best property (declarative, function-shaped
 config) without Nix's evaluator mystique (design: docs/plans/jetpack-jetos/unified-ecosystem.md).
 Epoch 2 builds the foundation; JetOS itself stays research (E2-V12).
 
@@ -18,7 +18,7 @@ Epoch 2 builds the foundation; JetOS itself stays research (E2-V12).
 
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
-| D-PURE1 | Recipe scope | **A** — pure eval + sandboxed package build blocks | A | ✅ ratified 2026-06-16 — A (not JetOS; not "recipes" — pure build blocks in packages) |
+| D-PURE1 | Build scope | **A** — pure eval + sandboxed package build blocks | A | ✅ ratified 2026-06-16 — A (not JetOS; pure build blocks in packages) |
 | D-PURE2 | Sandbox guarantees | **A** — no ambient I/O or network during eval | A | ✅ ratified 2026-06-16 — A |
 | D-PURE3 | Signed cache / rollback | **A** — design now, ship later; record generations | A | ✅ ratified 2026-06-16 — B: ship the signed cache in M16 |
 | E2-V12 | JetOS / layer-3 boundary | **C** — JetOS research-only | C | ✅ ratified 2026-06-16 — **retired**; split: D-PURE (Epoch 2), S56 → Epoch 3 |
@@ -57,7 +57,7 @@ Calling an impure function inside `config` is **E3401** with the impurity path.
 ## Diagnostics to register
 
 - **E3401** impure call inside a `pure fn` / pure-eval context (call-trace path).
-- **E3402** package recipe attempted ambient I/O or network (names the call).
+- **E3402** package build attempted ambient I/O or network (names the call).
 - **E3403** non-deterministic construct in pure evaluation (e.g. time/random).
 
 ## Examples & tests
@@ -78,6 +78,6 @@ Calling an impure function inside `config` is **E3401** with the impurity path.
 
 - Pure evaluation is deterministic and has call-trace diagnostics.
 - Impure calls fail with a path explaining why.
-- Package recipes cannot perform ambient I/O or network access.
+- Package builds cannot perform ambient I/O or network access.
 - A small declarative config example evaluates to stable JSON.
 - `nix develop -c cargo test` green.

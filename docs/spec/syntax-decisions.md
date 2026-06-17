@@ -955,6 +955,30 @@ substitute packages, so R3 also needs store/substituter glue. Ship core-first
 (largest scope, blocks everything); keeping `nix`-binary orchestration as the
 permanent path (contradicts the no-installed-`nix` goal).
 
+**D-DEV4 — `jet dev` vs `jet env`** *(ratified 2026-06-17)*: the two jobs that
+were colliding on the name `jet dev` get **two distinct verbs**, following the
+prior art each one belongs to:
+
+- **`jet dev`** = the **watch / interpret code loop** (E2-M4) — re-check and
+  re-run the project entry on every save, sub-200ms feedback, interpreter-backed.
+  This matches the JS/Bun/Deno convention where `dev` means "run my code with
+  reload" (`bun --watch`, `deno run --watch`, `vite dev`).
+- **`jet env`** = **drop into the project's development shell** built from
+  `env.jet` (delegates to `jetpack enter`). This is the environment-provisioning
+  job, the analog of `nix develop` — given its own word because it is a separate
+  product, not a mode of running code.
+
+This resolves the collision by **renaming the shipped shell-enter verb from
+`jet dev` to `jet env`** (a clean break, no alias) and **reserving `jet dev`
+for the E2-M4 loop**. Until E2-M4 lands, a bare `jet dev` reports that the watch
+loop is not yet built and names `jet run`/`jet build` meanwhile; it is not yet
+advertised in completions/man (honesty bar — advertised surface equals working
+surface). Chosen over: A (disambiguate one verb by argument presence — one word
+with two meanings is less discoverable); B (`jet watch` for the loop, leave
+`jet dev` = shell — spends a second-class verb on what users reach for as
+"dev"). The shipped `jet dev` → `jetpack enter` docs/behavior migrate to
+`jet env`.
+
 **S67 — Numeric literals** *(ratified 2026-06-15)*: Rust/Swift/Kotlin-style
 numeric literals. **`_` digit separators** anywhere among the digits, stripped
 before parsing (`1_000_000`, `0xDEAD_BEEF`). **Base prefixes** `**0x`** (hex),
@@ -1201,7 +1225,7 @@ fn try_move(player: mut Player, target: Point) -> Bool ? {
     return ok(true);
 }
 
-@audit "bounds checked against len"
+@audit("bounds checked against len")
 @unsafe { slice.get_unchecked(i); }
 ```
 
@@ -1531,11 +1555,55 @@ are fully ratified above. **S59 (C FFI)** ships in **Epoch 2** (E2-M14). **S53**
 (concurrency) is ratified as deferred past v1.0. S60 is ratified post-1.0. S56
 (user derives via typed reflection) is deferred past v1.0 by S26's ratified layering.
 
+## Ratified 2026-06-17 — dependency strategy + M10 / M12 / M18 calls
+
+**D-DEP1 — third-party dependencies ship as FFI-wrapping Jet packages.** The
+compiler binary stays **zero external crates** (I6 holds). Any capability that
+needs a Rust crate (TLS, regex, zip, sqlite, an OTel exporter, …) is delivered
+as a normal **Jet package** whose source wraps the crate via the ratified Rust
+FFI (`extern rust "crate@version" { … }`, S50) and exposes a clean Jet API.
+Consumers depend on the *package*, never the crate. A later native port swaps
+the package body and keeps the public API — callers don't change. The version
+pin lives inline in the `extern rust "crate@version"` block (S50, authoritative);
+the Jet package itself is pinned with `pkg#version` (VERSION-#). The package
+manifest is **`payload.jet`** (`payload:` / `deps:` / `packages:`), never the
+retired `jet.toml`/`pack.jet`. **Exception:** the compiler's own internals
+(e.g. the `jet repl` line reader) cannot consume a Jet package — bootstrapping —
+so those stay std-only or take a directly-vetted crate only by separate owner
+sign-off.
+
+**D-NET1 (M10) — TLS via `rustls`, delivered as the `jet.tls` package** (an
+instance of D-DEP1). `jet.http` depends on `jet.tls`; `jet.tls` wraps `rustls`
+via `extern rust`. No crate enters the compiler. HTTPS works with zero config in
+user code (`use jet.http`).
+
+**D-OBS1 (M12) — observability foundation in M12, full debugger at GA.** M12
+ships source maps + Jet-line panic/error reports (no generated Rust shown to
+users). Full DAP step-through debugging is a **GA (E2-M17) gate**, not an M12
+blocker.
+
+**D-OBS3 (M12) — OpenTelemetry-aligned names, std-only now.** Structured JSON
+logs/metrics with OTel-aligned keys, std-only, in M12. An actual OTel *exporter*,
+when wanted, ships later as an FFI-wrapped Jet package (D-DEP1) — never a
+compiler dependency, never a framework baked into std.
+
+**D-REPL18 (revised 2026-06-17) — `jet repl` ships a std-only line reader; no
+`rustyline`.** Supersedes the 2026-06-16 pick of `rustyline`: it would have been
+the first-ever crate in the zero-dep compiler, and the REPL is compiler-internal
+so D-DEP1's package-wrapping can't apply. The REPL ships its interpreter session
+on a `std::io` reader now; richer line editing (history, arrow keys) is a later
+upgrade that must re-earn an owner crate sign-off.
+
 ## Decision log
 
 
 | Date       | ID  | Decision                                    | By    |
 | ---------- | --- | ------------------------------------------- | ----- |
+| 2026-06-17 | D-DEP1 | third-party deps ship as FFI-wrapping Jet packages (`extern rust`, S50); compiler stays zero-crate; native port later keeps API | owner |
+| 2026-06-17 | D-NET1 | TLS via `rustls` delivered as the `jet.tls` package (D-DEP1); `jet.http`→`jet.tls`; no compiler crate | owner |
+| 2026-06-17 | D-OBS1 | observability foundation (source maps + Jet-line panic reports) in M12; full DAP debugger at GA (M17) | owner |
+| 2026-06-17 | D-OBS3 | OTel-aligned, std-only structured logs/metrics in M12; OTel exporter later as an FFI-wrapped Jet package | owner |
+| 2026-06-17 | D-REPL18 | revised: `jet repl` ships a std-only line reader; no `rustyline` (compiler stays zero-crate) | owner |
 | 2026-06-11 | N1  | Jet; binary `jet`                           | owner |
 | 2026-06-11 | N2  | extension `.jet`                            | owner |
 | 2026-06-11 | S3  | `{ }` blocks                                | owner |

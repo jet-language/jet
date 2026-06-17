@@ -229,9 +229,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
             })
             .unwrap_or(0),
         Stmt::Break(s) | Stmt::Continue(s) => s.end,
-        Stmt::Loop(inner, s) | Stmt::Unsafe(inner, s) => {
-            inner.last().map(stmt_end).unwrap_or(s.end)
-        }
+        Stmt::Loop(inner, s) => inner.last().map(stmt_end).unwrap_or(s.end),
+        Stmt::Unsafe { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
     }
 }
 
@@ -513,6 +512,11 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
+        // S58 (E2-M13): `@unsafe` whole-function contract sits on its own line.
+        if f.is_unsafe {
+            self.write(&format!("@{}", syntax::KW_UNSAFE));
+            self.newline();
+        }
         if top_level {
             self.fmt_pub(f.is_pub);
         } else if f.is_pub {
@@ -878,10 +882,14 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(inner));
                 self.end_block();
             }
-            Stmt::Unsafe(inner, _) => {
-                self.write("unsafe {");
+            Stmt::Unsafe { audit, body, .. } => {
+                if let Some(reason) = audit {
+                    self.write(&format!("@{}(\"{}\")", syntax::ATTR_AUDIT, reason));
+                    self.newline();
+                }
+                self.write(&format!("@{} {{", syntax::KW_UNSAFE));
                 self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(inner));
+                self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
         }
@@ -1467,6 +1475,17 @@ impl<'a> Fmt<'a> {
                 }
                 self.write("]");
             }
+            // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`.
+            Expr::PtrFromAddr {
+                alias, elem, addr, ..
+            } => {
+                self.write(alias);
+                self.write(&format!(".{}<", syntax::TYPE_PTR));
+                self.fmt_type(elem);
+                self.write(&format!(">.{}(", syntax::MEM_FROM_ADDR));
+                self.fmt_expr(addr, Prec::OrFallback);
+                self.write(")");
+            }
         }
     }
 
@@ -1660,7 +1679,8 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::If(i) => i.span.start,
         Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::Switch { span, .. } => span.start,
         Stmt::Break(s) | Stmt::Continue(s) => s.start,
-        Stmt::Loop(_, s) | Stmt::Unsafe(_, s) => s.start,
+        Stmt::Loop(_, s) => s.start,
+        Stmt::Unsafe { span, .. } => span.start,
     }
 }
 

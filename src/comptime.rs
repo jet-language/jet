@@ -24,6 +24,12 @@ use crate::diag::{Diagnostic, Span};
 /// user knob (philosophy: minimal configuration).
 const FUEL_BUDGET: u64 = 10_000_000;
 
+/// Step budget for a whole-program `jet dev` interpretation (E2-M4). Larger
+/// than the per-binding comptime budget because a `main()` does real work,
+/// but still finite so a runaway loop surfaces as E2202 instead of hanging
+/// the watch loop. Compiler-internal, not a user knob.
+const DEV_FUEL_BUDGET: u64 = 1_000_000_000;
+
 /// A fully-evaluated compile-time value. Self-describing: the Jet type is
 /// recovered by [`CtValue::jet_type`] and the Rust literal by
 /// [`CtValue::serialize`].
@@ -241,15 +247,62 @@ enum Flow {
     Return(CtValue),
 }
 
+/// Where a [`Interp`] running in whole-program "dev" mode sends program
+/// output. In pure comptime mode this is `None` and `print`/`eprint` never
+/// reach the evaluator (the purity check rejects them as E0951 first).
+///
+/// The dev interpreter (E2-M4 `jet dev`) buffers stdout/stderr so the
+/// watch loop can stream them; the bytes are produced exactly as the
+/// compiled program would (`jet_show()` + a trailing newline), which the
+/// differential battery enforces.
+pub struct DevSink {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl DevSink {
+    pub fn new() -> Self {
+        DevSink {
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+}
+
+impl Default for DevSink {
+    fn default() -> Self {
+        DevSink::new()
+    }
+}
+
 struct Interp<'a> {
     funcs: &'a HashMap<String, &'a Func>,
     base_dir: &'a Path,
     fuel: u64,
+    /// `Some` in whole-program dev mode (E2-M4): `print`/`eprint` write here
+    /// instead of being rejected. `None` in pure comptime mode (M9.5).
+    sink: Option<&'a mut DevSink>,
 }
 
 impl<'a> Interp<'a> {
     fn burn(&mut self, span: Span) -> Result<(), Diagnostic> {
         if self.fuel == 0 {
+            // E2202 in whole-program dev mode (E2-M4): the interpreter ran out
+            // of fuel, which almost always means an unbounded loop. E0952 in
+            // pure comptime mode (M9.5).
+            if self.sink.is_some() {
+                return Err(Diagnostic::error(
+                    "E2202",
+                    "this program ran too long for `jet dev` to keep interpreting".to_string(),
+                    format!(
+                        "`jet dev` interprets your program to give instant feedback, but it ran more than {} steps without finishing — this usually means a loop that never ends",
+                        DEV_FUEL_BUDGET
+                    ),
+                    "check the loop near here for a condition that never becomes false; run `jet run` to execute the real build with no step limit"
+                        .to_string(),
+                    Some(span),
+                ));
+            }
             return Err(Diagnostic::error(
                 "E0952",
                 "comptime evaluation used up its budget".to_string(),
@@ -434,7 +487,7 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Unsafe(_, span) => Err(unsupported("an `unsafe` block", *span)),
+            Stmt::Unsafe { span, .. } => Err(unsupported("an `@unsafe` block", *span)),
         }
     }
 
@@ -854,6 +907,29 @@ impl<'a> Interp<'a> {
         args: &[crate::ast::CallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        // Whole-program dev mode (E2-M4): the two IO builtins write to the
+        // buffered sink, producing bytes identical to the compiled program
+        // (`jet_show()` + `\n`). In pure comptime mode the sink is `None` and
+        // these are unreachable (the purity check rejects them first, E0951).
+        if name == "print" || name == "eprint" {
+            if self.sink.is_some() {
+                let text = match args.first() {
+                    Some(a) => self.eval(&a.expr, scope)?.jet_show(),
+                    None => String::new(),
+                };
+                let sink = self.sink.as_mut().expect("dev-mode sink");
+                if name == "print" {
+                    sink.stdout.push_str(&text);
+                    sink.stdout.push('\n');
+                } else {
+                    sink.stderr.push_str(&text);
+                    sink.stderr.push('\n');
+                }
+                return Ok(CtValue::Unit);
+            }
+            // Pure comptime mode: unreachable in practice, but stay honest.
+            return Err(unsupported(&format!("`{}`", name), span));
+        }
         // The two sanctioned comptime builtins.
         if name == "embed_file" {
             return self.eval_embed_file(args, span, scope);
@@ -1502,7 +1578,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
                 b.iter().for_each(|s| walk_stmt_exprs(s, f));
             }
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => {
+        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f))
         }
         Stmt::Break(_) | Stmt::Continue(_) => {}
@@ -1535,9 +1611,37 @@ pub fn evaluate(
         funcs,
         base_dir,
         fuel: FUEL_BUDGET,
+        sink: None,
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
+}
+
+/// Whole-program dev interpretation (E2-M4 `jet dev`). Runs `main`'s body
+/// with a buffered stdout/stderr sink, reusing the exact same evaluator the
+/// M9.5 comptime path uses — there is no second interpreter. Output bytes are
+/// produced via `CtValue::jet_show()` + `\n`, identical to the compiled
+/// program (the differential battery in `tests/dev.rs` enforces this, I2).
+///
+/// The caller (src/interp.rs) is responsible for the E2201 boundary scan
+/// (FFI/tasks/`@unsafe`); this function simply runs and may itself return
+/// E0956 (`unsupported`) when it reaches a construct the evaluator can't run,
+/// or E2202 when the fuel budget is exhausted.
+pub fn run_main(
+    main: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+) -> Result<(), Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: DEV_FUEL_BUDGET,
+        sink: Some(sink),
+    };
+    let mut scope = HashMap::new();
+    interp.exec_block(&main.body, &mut scope)?;
+    Ok(())
 }
 
 /// Owned-function variant used while sema is mutating function bodies for

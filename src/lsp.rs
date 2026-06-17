@@ -892,7 +892,7 @@ fn collect_stmt(stmt: &ast::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
                 collect_stmts(eb, mp, module, db);
             }
         }
-        ast::Stmt::Loop(body, _) | ast::Stmt::Unsafe(body, _) => {
+        ast::Stmt::Loop(body, _) | ast::Stmt::Unsafe { body, .. } => {
             collect_stmts(body, mp, module, db);
         }
         ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {}
@@ -976,6 +976,7 @@ fn collect_binding(b: &ast::Binding, mp: &str, db: &mut SymbolDB) {
 
 fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
     match e {
+        ast::Expr::PtrFromAddr { addr, .. } => collect_expr(addr, mp, db),
         ast::Expr::Ident(name, span) => {
             db.refs.push(SymRef {
                 name: name.clone(),
@@ -2424,30 +2425,34 @@ fn code_action_response(
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
-    let diags = server.check(doc);
+    // Go through the SAME unified fix engine the CLI `jet fix` uses, so a fix
+    // offered in the editor is byte-identical to a fix applied on the command
+    // line.
+    let fixes = collect_fixes(&doc_path_for(uri), &doc.text);
     let mut actions = String::new();
-    let mut n = 0usize;
-    for d in &diags {
-        if let Some(edit) = &d.edit {
-            if n > 0 {
-                actions.push(',');
-            }
-            actions.push_str(&code_action_json(uri, &doc.text, d, edit));
-            n += 1;
+    for (n, fix) in fixes.iter().enumerate() {
+        if n > 0 {
+            actions.push(',');
         }
+        actions.push_str(&code_action_json(uri, &doc.text, fix));
     }
     Some(response(id, &format!("[{}]", actions)))
 }
 
-fn code_action_json(uri: &str, src: &str, d: &Diagnostic, edit: &TextEdit) -> String {
-    let range = byte_span_to_range(src, edit.span);
-    let title = d.fix.clone();
+/// The path `collect_fixes` should check for a `file://` URI (falls back to the
+/// raw URI so non-file documents still work).
+fn doc_path_for(uri: &str) -> String {
+    uri.strip_prefix("file://").unwrap_or(uri).to_string()
+}
+
+fn code_action_json(uri: &str, src: &str, fix: &Fix) -> String {
+    let range = byte_span_to_range(src, fix.edit.span);
     format!(
         r#"{{"title":"{}","kind":"quickfix","edit":{{"changes":{{"{}":[{{"range":{},"newText":"{}"}}]}}}}}}"#,
-        json_escape(&title),
+        json_escape(&fix.title),
         json_escape(uri),
         range_json(range),
-        json_escape(&edit.new_text)
+        json_escape(&fix.edit.new_text)
     )
 }
 
@@ -2834,6 +2839,46 @@ pub fn check_document_with_bundle(
 pub fn apply_edit(src: &str, edit: &TextEdit) -> String {
     crate::fixengine::apply_edits(src, std::slice::from_ref(edit))
         .unwrap_or_else(|_| src.to_string())
+}
+
+// ── Unified fix engine (CLI `jet fix` AND LSP code actions) ────────────────────
+
+/// One machine-applicable fix: the title a user sees and the edit that applies.
+/// This is the single shape both `jet fix` and the LSP "quick fix" code action
+/// are built from — the SAME `edit` carried in the `--json` diagnostic schema —
+/// so the two can never drift (E2-M3 unified fix engine; D-LSP7).
+#[derive(Debug, Clone)]
+pub struct Fix {
+    /// Action title (the diagnostic's `fix` line).
+    pub title: String,
+    /// The edit to apply.
+    pub edit: TextEdit,
+}
+
+/// Collect every machine-applicable fix for a document, in diagnostic order.
+/// Both the CLI and the LSP go through here.
+pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
+    check_document(path, text)
+        .into_iter()
+        .filter_map(|d| {
+            d.edit.clone().map(|edit| Fix {
+                title: d.fix.clone(),
+                edit,
+            })
+        })
+        .collect()
+}
+
+/// Apply every fix to `src`, returning the rewritten text. Edits are applied
+/// from the highest offset down so earlier spans stay valid.
+pub fn apply_all(src: &str, fixes: &[Fix]) -> String {
+    let mut edits: Vec<&TextEdit> = fixes.iter().map(|f| &f.edit).collect();
+    edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
+    let mut out = src.to_string();
+    for edit in edits {
+        out = apply_edit(&out, edit);
+    }
+    out
 }
 
 // ── Doctor ────────────────────────────────────────────────────────────────────

@@ -126,6 +126,14 @@ pub fn load_entry_with_overlay(
                     return Err(vec![d]);
                 }
 
+                // Check the `edition:` field (E2001, D-REL3): a manifest may not
+                // ask for an edition this toolchain doesn't ship.
+                if let Err(d) =
+                    manifest::check_edition_support(&mf, &pack_path.display().to_string())
+                {
+                    return Err(vec![d]);
+                }
+
                 // If there are deps, check lock staleness (E1202) and
                 // dry-resolve path dep graph to catch version conflicts (E1201).
                 if !mf.dependencies.is_empty() {
@@ -555,11 +563,12 @@ pub fn is_known_std_module(name: &str) -> bool {
             | "core.time"
             | "core.json"
             | "core.tasks"
+            | "core.mem"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

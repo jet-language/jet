@@ -538,6 +538,10 @@ pub struct Func {
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub is_view_return: bool,
+    /// S58 (E2-M13): `@unsafe` on the line before `fn` — a whole-function
+    /// contract. Calling such a function requires an enclosing `@unsafe`
+    /// block (else E3103).
+    pub is_unsafe: bool,
     pub body: Vec<Stmt>,
 }
 
@@ -804,7 +808,14 @@ pub enum Stmt {
     Break(Span),
     Continue(Span),
     Loop(Vec<Stmt>, Span),
-    Unsafe(Vec<Stmt>, Span),
+    /// S58 (E2-M13): `@unsafe { … }` audited region. `audit` carries the
+    /// `@audit("…")` reason on the line above, when present (lint L3101 fires
+    /// when it is `None`). `body` is the gated statements.
+    Unsafe {
+        audit: Option<String>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 /// Assignment target: local name or indexed collection slot (M5).
@@ -1107,6 +1118,18 @@ pub enum Expr {
         args: Vec<CallArg>,
         span: Span,
     },
+    /// S58 (E2-M13): `mem.Ptr<T>.from_addr(addr)` — build a typed pointer from
+    /// an integer address. The element type `elem` is the `<T>` argument; the
+    /// result type is `Ptr<elem>`. Only legal inside an `@unsafe` region in a
+    /// module that did `use core.mem` (else E3101/E3102).
+    PtrFromAddr {
+        /// The module alias the call came through (`mem` in the example).
+        alias: String,
+        alias_span: Span,
+        elem: Type,
+        addr: Box<Expr>,
+        span: Span,
+    },
     /// S75 (2026-06-16): `callee.[item0, item1, …]` — fan-out, desugars to
     /// `[callee(item0), callee(item1), …]`. Items are typed by `callee`'s
     /// parameter type (expected-type elaboration). Result type is `[T#N]` (S76).
@@ -1147,7 +1170,8 @@ impl Expr {
             | Expr::PatternTest { span: s, .. }
             | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. }
-            | Expr::FanOut { span: s, .. } => *s,
+            | Expr::FanOut { span: s, .. }
+            | Expr::PtrFromAddr { span: s, .. } => *s,
             Expr::Lambda(l) => l.span,
             Expr::Call(c) => c.name_span,
             Expr::MethodCall { method_span, .. } => *method_span,

@@ -1,6 +1,7 @@
 # E2-M12 — Debugging and observability
 
-**Status:** draft — **blocked on D-OBS1…D-OBS3** (Group M12).
+**Status:** ready — **D-OBS1/D-OBS2/D-OBS3 all ✅ ratified** (D-OBS1 splits:
+foundation in M12, full DAP at GA).
 **Depends on:** E2-M10 (services emit logs/metrics), E2-M4/M13 (dev + LSP for
 breakpoints/watch). A debugger is enterprise table stakes (owner-todo §2 — no
 team ships a language it cannot step through).
@@ -17,9 +18,9 @@ an implementation detail for normal users).
 
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
-| D-OBS1 | DAP timing | **A** — ship for VS Code/Cursor in M12 (before GA) | A | OPEN — needs owner |
+| D-OBS1 | DAP timing | **A** — ship for VS Code/Cursor in M12 (before GA) | A | ✅ ratified 2026-06-17 — **split**: M12 ships the *foundation* (source maps + Jet-line panic/error reports); full DAP step-through debugging is a **GA gate (E2-M17)**, not an M12 blocker |
 | D-OBS2 | Panic local-value privacy | **A** — show *safe* locals only, dev mode only | A | ✅ ratified 2026-06-16 — A: panic shows safe locals in dev mode only |
-| D-OBS3 | Metrics conventions | **A** — simple structured logs first; OTel-aligned metrics later | A | OPEN — needs owner |
+| D-OBS3 | Metrics conventions | **A** — simple structured logs first; OTel-aligned metrics later | A | ✅ ratified 2026-06-17 — OTel-aligned names, **std-only** structured JSON logs/metrics in M12; an OTel *exporter* ships later as an FFI-wrapped Jet package (D-DEP1), never a compiler dep or std framework |
 
 ## Scope
 

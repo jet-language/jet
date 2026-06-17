@@ -4,7 +4,7 @@
 ratified M12 package design (D-PM1…8, docs/plans/epoch-1/m12-packages.md) and the
 ratified jetpack track (D-JPK1…17).
 **Depends on:** E2-M6 (clean public APIs to diff). Unblocks E2-M9 (ring versions
-enforced here) and E2-M16 (layer-3 recipes on this store/lockfile).
+enforced here) and E2-M16 (layer-3 builds on this store/lockfile).
 **Error codes:** E26xx block (claim in docs/spec/diagnostics.md).
 
 ## Goal

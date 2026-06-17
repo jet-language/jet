@@ -45,7 +45,10 @@ Commit that as "M0 verified" before anything else.
 
 ## Invariants (violating one = stop and fix)
 
-- **I1** No `unsafe` in the language or in generated code. Ever (v1).
+- **I1** Safe by default: ordinary Jet emits zero `unsafe`. Expert low-level code
+  (`@unsafe { … }` / `@unsafe fn`, E2-M13/D-LL1) may generate `unsafe` only
+  inside user-written, audited (`@audit("…")`) gate regions. No `unsafe`
+  without an explicit `@unsafe` gate in the source.
 - **I2** rustc never speaks to users. rustc rejecting generated code is an
   internal compiler error (exit 101, banner in src/main.rs) and a P0 bug.
 - **I3** Codegen is dumb. All checking lives in sema. Never "try rustc and

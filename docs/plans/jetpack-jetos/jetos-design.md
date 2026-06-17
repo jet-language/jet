@@ -35,7 +35,7 @@ NixOS, restated: **your entire operating system is one big package.**
 Kernel, drivers, desktop, apps, config files — described in text, built by
 the package manager, stored under a fingerprint, activated by flipping a
 link. jetos is exactly that, with jetpack as the kitchen and Jet as the
-recipe language.
+build language.
 
 What that buys a beginner-friendly Mint/CachyOS-style distro:
 
@@ -48,7 +48,7 @@ What that buys a beginner-friendly Mint/CachyOS-style distro:
 - **Your machine in a text file.** Reinstall = clone repo, run one command.
 
 ```
-config repo ──jet eval (pure)──▶ merged settings ──▶ ONE giant recipe
+config repo ──jet eval (pure)──▶ merged settings ──▶ ONE giant build
                                                         │ jetpack engine
                                        /etc/jet/hangar/ab12…-jetos-system/
                                                         │ activate
@@ -56,7 +56,7 @@ config repo ──jet eval (pure)──▶ merged settings ──▶ ONE giant r
 ```
 
 jetos itself is a thin layer: a **module system** that turns many small
-config files into one merged settings tree, then hands jetpack one recipe.
+config files into one merged settings tree, then hands jetpack one build.
 
 ---
 
@@ -168,7 +168,7 @@ FINAL merged values (resolved lazily; cycles are detected and reported:
 // hosts/laptop.jet
 host { name: "laptop", arch: x86_64 }
 
-sys.desktop.environment = cinnamon
+sys.desktop.environment = gnome
 apps.firefox.enable = true
 apps.steam.enable   = true
 ```
@@ -192,16 +192,16 @@ modules/apps/firefox.jet:   sys.pkgs += [firefox]
 hosts/laptop.jet:           sys.pkgs += [vlc]
         ⇒ merged sys.pkgs = [firefox, vlc]            (lists combine)
 
-hosts/laptop.jet:           sys.desktop.environment = cinnamon
+hosts/laptop.jet:           sys.desktop.environment = gnome
 modules/apps/kde-tools.jet: sys.desktop.environment = plasma
         ⇒ error[J-M021]: conflicting values for sys.desktop.environment
-             hosts/laptop.jet:3            = cinnamon
+             hosts/laptop.jet:3            = gnome
              modules/apps/kde-tools.jet:7  = plasma
              why: scalar options take one value per priority level
              fix: mark one `default`, or `force` the one you want
 
    kde-tools.jet changes its line to:  default sys.desktop.environment = plasma
-        ⇒ laptop's normal-priority `cinnamon` wins. Resolved.
+        ⇒ laptop's normal-priority `gnome` wins. Resolved.
 ```
 
 This conflict-instead-of-silent-override behavior is a FEATURE: it is the
@@ -245,7 +245,7 @@ $ jetos init                      # generates the layout in §4
 $ jetos check                     # eval + merge + typecheck, NO side effects
                                   #   = CI for your config repo
 $ jetos diff                      # what would change, before you commit
-  Δ +ripgrep, firefox 126→127, sys.desktop.environment cinnamon
+  Δ +ripgrep, firefox 126→127, sys.desktop.environment gnome
 $ jetos switch                    # build new system in store, flip, add boot entry
   41 substituted ↓ · 2 built ⚒ · generation 23 → 24
 $ jetos rollback                  # instant; or pick gen 23 in the boot menu
@@ -264,12 +264,12 @@ config, no second tool.
 modules/ + hosts/ ─▶ jet eval --pure (per file)
                   ─▶ option registry + MERGE ENGINE   (the only new code)
                   ─▶ merged tree (canonical JSON)
-                  ─▶ recipe generator: tree → one jetpack system recipe
+                  ─▶ build generator: tree → one jetpack system build
                   ─▶ jetpack engine (JP1–JP5): store, cache, generations
                   ─▶ activation: symlink flip + bootloader entries
 ```
 
-New code = merge engine, recipe generator, activation scripts, std option
+New code = merge engine, build generator, activation scripts, std option
 tree. Everything hard (hashing, sandbox, caches, rollback storage) is
 jetpack's job and is already specified there. The store is the single global
 hangar at `/etc/jet/hangar/` (U2).
@@ -293,9 +293,9 @@ Invariants (extend compiler I1–I8):
 |----|-------|-------|---------------|
 | OS0 | M12 layer 3 + S60 | option registry + merge engine + J-M01x/02x/03x, driven through builtins (no new syntax yet) | golden: 3 modules merge to canonical JSON; conflict + cycle snapshots; shuffle-order determinism test |
 | OS1 | OS0 | import-tree, `_` skip, host selection, `jetos check`, `jetos init` | example repo (2 hosts, 5 modules) → identical JSON regardless of discovery order |
-| OS2 | layer 3 builds | recipe generator + activation (symlink, bootloader) + `switch/diff/rollback` | VM test: switch → rollback round-trip; power-cut simulation boots old generation |
+| OS2 | layer 3 builds | build generator + activation (symlink, bootloader) + `switch/diff/rollback` | VM test: switch → rollback round-trip; power-cut simulation boots old generation |
 | OS3 | OS1 | `lift` + module registry + J-M040 | lift from URL succeeds; private-option read rejected (snapshot) |
-| OS4 | OS2 | std option tree v0: boot, networking, users, Cinnamon desktop (the Mint target) | a real machine boots entirely from hosts/laptop.jet |
+| OS4 | OS2 | std option tree v0: boot, networking, users, GNOME desktop (default; KDE Plasma #2, Cinnamon #3 follow as alternate modules) | a real machine boots entirely from hosts/laptop.jet |
 
 Syntax-gated work (`option/when/force/default` parsing) lands only after §9
 ratification; OS0–OS1 proceed without it via builtin-call form.
@@ -306,38 +306,17 @@ sandboxed activation verb are the honest mitigations (see D-NX review notes).
 
 ---
 
-## 9. Decisions for the owner (jetos config surface — D-OS1…7)
+## 9. Decisions for the owner
 
-Each shown with the live example from this doc so it's decidable at a glance.
+Both decision tables (jetos config surface `D-OS2…6` and platform `D-NX1…6`,
+including the default-desktop ranking — **GNOME**, then KDE Plasma, then
+Cinnamon) now live in the single owner queue,
+[`docs/spec/decision-ballots.md`](../../spec/decision-ballots.md) §2–3.
 
-**Resolved:** `D-OS1` (module file shape) is **superseded by U3** — modules are
-explicit `module name { }`, disabled with a leading `_`. `D-OS7` (entrypoint) is
-**superseded by U4** — `find("./modules")` auto-discovery, no entrypoint listing.
-The rows below (`D-OS2/3/4/5/6` — option/guard/priority declaration syntax)
-remain **open**; do not implement them until ratified.
-
-| ID | Question | A (as written above) | B | Rec |
-|----|----------|----------------------|---|-----|
-| D-OS2 | Option declaration | `option a.b.c: T = default "doc"` one-liners | a single `options: { … }` record per file | A |
-| D-OS3 | Guard keyword | `when expr { }` (declarative; distinct from runtime `if`) | reuse `if` | A |
-| D-OS4 | Priorities | prefix keywords: `default x = v`, `force x = v` | call-style: `x = default(v)` | A |
-| D-OS5 | Enable flags | auto: every `modules/apps/<n>.jet` gets `apps.<n>.enable: bool = false` for free | each module hand-declares its enable | A — kills boilerplate, one convention |
-| D-OS6 | User scope | `user.<name>.*` with `user.me` alias (multi-user ready) | single-user `home.*` | A |
-
----
-
-## 10. Platform decisions (D-NX1…6 — from Nix-replacement review)
-
-Prerequisite: ratify D-PM1…8 in docs/plans/epoch-1/m12-packages.md and ship M12.
-
-| ID | Question | Rec |
-|---|---|---|
-| D-NX1 | Bootstrap 10k+ packages | **A** — tap cache.nixos.org read-only; native Jet recipes for spine; measure migration |
-| D-NX2 | What `jetos add` edits | **A** — host file, smallest edit; auto-commit with `--no-commit` escape; `--host` for fleet |
-| D-NX3 | Ephemeral `jetos try` | **A** — shell-scoped only; nothing recorded |
-| D-NX4 | NixOS migration | **A** — reporter/checklist, not automatic converter |
-| D-NX5 | v0 product | **A** — one reference desktop image (x86_64 Cinnamon) |
-| D-NX6 | Option-schema bootstrap | **new** — hand-write spine option modules; no cache to tap; `JSON` pass-through for vendor config tails |
+`D-OS1` (module file shape) is superseded by U3 — modules are explicit
+`module name { }`, disabled with a leading `_`. `D-OS7` (entrypoint) is
+superseded by U4 — `find("./modules")` auto-discovery. The D-NX rows are
+prerequisited on D-PM1…8 (docs/plans/epoch-1/m12-packages.md) and M12.
 
 **Imperative front door (headline feature):** `jetos add/set/remove` edit
 declarative config files only — never a second install database. Drift is

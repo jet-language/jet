@@ -71,12 +71,37 @@ fn examples_compile_and_run() {
         let rust_code = compiled.rust;
         let ffi_link = compiled.ffi;
 
-        // I1: memory safety is never traded away.
-        assert!(
-            !rust_code.contains("unsafe"),
-            "generated Rust for {} contains `unsafe`",
-            stem
-        );
+        // I1 (amended by D-LL1, E2-M13): memory safety is never traded away in
+        // ordinary Jet. Generated `unsafe` appears ONLY inside the gated
+        // low-level tier (`use core.mem` + `@unsafe`). The audited
+        // `48_lowlevel` example is the sole exception, and even there every
+        // `unsafe` must be a *gated* form (`unsafe {` or `unsafe fn`) — never a
+        // bare `unsafe` leaking memory safety. Every other example emits zero
+        // `unsafe`.
+        if stem == "48_lowlevel" {
+            assert!(
+                rust_code.contains("unsafe"),
+                "the low-level example should exercise the gated `unsafe` tier"
+            );
+            for (i, line) in rust_code.lines().enumerate() {
+                if let Some(col) = line.find("unsafe") {
+                    let after = line[col..].trim_start_matches("unsafe");
+                    let after = after.trim_start();
+                    assert!(
+                        after.starts_with('{') || after.starts_with("fn "),
+                        "48_lowlevel emits an ungated `unsafe` at line {}: {}",
+                        i + 1,
+                        line.trim()
+                    );
+                }
+            }
+        } else {
+            assert!(
+                !rust_code.contains("unsafe"),
+                "generated Rust for {} contains `unsafe`",
+                stem
+            );
+        }
         assert!(
             rust_code.contains("fn main()"),
             "generated Rust for {} has no fn main",

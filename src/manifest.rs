@@ -8,7 +8,7 @@
 //! `payload.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
 //! no back-compat alias.
 
-use crate::diag::Diagnostic;
+use crate::diag::{Diagnostic, Span};
 use crate::jetpack::packmanifest::{self, ManifestError};
 use crate::syntax;
 use std::collections::BTreeMap;
@@ -16,6 +16,148 @@ use std::path::Path;
 
 /// The compiler's version string for E1208 toolchain checks.
 pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// ──────────────────────────────────────────────
+// Editions & release policy (E2-M2, D-REL1…D-REL5)
+// ──────────────────────────────────────────────
+
+/// The editions this toolchain understands (D-REL3). An edition opts a project
+/// into a specific era of Jet syntax (docs/spec/release-policy.md). The list is
+/// ordered oldest→newest; the last entry is the newest stable edition, used by
+/// single-file `jet run file.jet` which carries no edition marker (E2-V4).
+pub const SUPPORTED_EDITIONS: &[&str] = &["2026"];
+
+/// The newest stable edition this toolchain ships. Single-file programs and a
+/// manifest with no `edition:` field use this.
+pub fn latest_edition() -> &'static str {
+    SUPPORTED_EDITIONS
+        .last()
+        .copied()
+        .expect("SUPPORTED_EDITIONS must be non-empty")
+}
+
+/// The registry-protocol version this toolchain speaks (D-REL1: normal SemVer;
+/// the registry index format is versioned independently of the compiler).
+pub const REGISTRY_COMPAT: &str = "1";
+
+/// `true` if `edition` is one this toolchain supports.
+pub fn edition_is_supported(edition: &str) -> bool {
+    SUPPORTED_EDITIONS.contains(&edition.trim())
+}
+
+/// Validate the `edition:` field from `payload.jet` (D-REL3). A manifest that
+/// asks for an edition this toolchain doesn't ship is E2001. A manifest with no
+/// `edition:` field is fine — it tracks the toolchain's newest stable edition.
+pub fn check_edition_support(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
+    let Some(edition) = &manifest.package.edition else {
+        return Ok(());
+    };
+    if edition_is_supported(edition) {
+        return Ok(());
+    }
+    Err(e2001(edition))
+}
+
+/// E2001 — the manifest requests an edition this toolchain can't provide.
+pub fn e2001(requested: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E2001",
+        "this package needs a newer Jet".to_string(),
+        format!(
+            "editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to {}, but `{}` asks for `{}`.",
+            latest_edition(),
+            syntax::PAYLOAD_FILE,
+            requested,
+        ),
+        format!(
+            "upgrade with `{} upgrade`, or set `{}: \"{}\"` in `{}`.",
+            syntax::BINARY_NAME,
+            syntax::MANIFEST_FIELD_EDITION,
+            latest_edition(),
+            syntax::PAYLOAD_FILE,
+        ),
+        None,
+    )
+}
+
+/// A deprecated language item: the edition it was deprecated in, its replacement,
+/// and the edition it is removed in (the end of its migration window). The
+/// registry is honest and currently empty — Jet is pre-1.0, so nothing post-1.0
+/// has been deprecated yet. E2002/L2001 read from this table, so they become
+/// reachable the moment the first real deprecation is registered, without
+/// touching the diagnostic plumbing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deprecation {
+    /// The deprecated item as the user writes it (a keyword, sigil, or name).
+    pub item: &'static str,
+    /// The edition in which the item became deprecated.
+    pub since_edition: &'static str,
+    /// What to use instead (named in the diagnostic).
+    pub replacement: &'static str,
+    /// The edition in which the item stops compiling (the migration window's end).
+    pub removed_in_edition: &'static str,
+}
+
+/// The deprecation registry (D-REL5). Empty pre-1.0 by design; see `Deprecation`.
+pub const DEPRECATIONS: &[Deprecation] = &[];
+
+/// Look up a deprecation by the item's spelling.
+pub fn lookup_deprecation(item: &str) -> Option<&'static Deprecation> {
+    DEPRECATIONS.iter().find(|d| d.item == item)
+}
+
+/// E2002 — a deprecated item is used past its migration window (i.e. in an
+/// edition at or after `removed_in_edition`). Names the replacement.
+pub fn e2002(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
+    Diagnostic::error(
+        "E2002",
+        format!("`{}` was removed in edition {}", dep.item, dep.removed_in_edition),
+        format!(
+            "`{}` was deprecated in edition {} and no longer exists in this edition; it has reached the end of its migration window.",
+            dep.item, dep.since_edition,
+        ),
+        format!(
+            "use `{}` instead, or run `{} fix` to migrate automatically.",
+            dep.replacement,
+            syntax::BINARY_NAME,
+        ),
+        span,
+    )
+}
+
+/// L2001 — a lint: an item is deprecated in this edition but still compiles
+/// during its migration window. Suggests `jet fix`.
+pub fn l2001(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
+    Diagnostic::lint(
+        "L2001",
+        format!("`{}` is deprecated", dep.item),
+        format!(
+            "`{}` was deprecated in edition {} and will be removed in edition {}; it still works for now but should be migrated.",
+            dep.item, dep.since_edition, dep.removed_in_edition,
+        ),
+        format!(
+            "use `{}` instead, or run `{} fix` to migrate automatically.",
+            dep.replacement,
+            syntax::BINARY_NAME,
+        ),
+        span,
+    )
+}
+
+/// The `jet --version` banner (E2-D1). Deterministic and golden-testable: it
+/// states the compiler SemVer, the supported epoch/edition range, the newest
+/// stable edition, and the registry-protocol compatibility.
+pub fn version_banner() -> String {
+    let editions = SUPPORTED_EDITIONS.join(", ");
+    format!(
+        "{lang} {ver}\nsupported editions: {editions} (newest: {latest})\nregistry protocol: v{registry}\n",
+        lang = syntax::LANG_NAME,
+        ver = COMPILER_VERSION,
+        editions = editions,
+        latest = latest_edition(),
+        registry = REGISTRY_COMPAT,
+    )
+}
 
 // ──────────────────────────────────────────────
 // Public types
@@ -39,6 +181,10 @@ pub struct Manifest {
 pub struct PackageMeta {
     pub name: String,
     pub version: String,
+    /// Project compatibility marker from `edition: "..."` (D-REL3). A toolchain
+    /// supports a fixed set of editions (`SUPPORTED_EDITIONS`); a future edition
+    /// is E2001. `None` means "use the toolchain's newest stable edition".
+    pub edition: Option<String>,
     /// Toolchain constraint from `jet: "..."`.
     pub jet_constraint: Option<String>,
     pub description: Option<String>,
