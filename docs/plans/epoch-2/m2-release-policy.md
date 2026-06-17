@@ -1,7 +1,8 @@
 # E2-M2 — Release policy, editions, and the epoch contract
 
-**Status:** draft — **blocked on E2-D1, E2-D2 and D-REL1…D-REL5** (Parts 1–2 of
-docs/spec/decision-ballots.md). Mostly docs + manifest plumbing; little codegen.
+**Status:** implemented 2026-06-16 — all five decisions ratified; edition marker
+in `payload.jet`, E2001/E2002/L2001 registered, version banner enriched, policy
+doc at docs/spec/release-policy.md. Mostly docs + manifest plumbing; little codegen.
 **Depends on:** E2-M1 (verified). Gates every later public-breaking milestone.
 **Error codes:** E20xx block (claim in docs/spec/diagnostics.md as implemented).
 
@@ -35,8 +36,9 @@ Substitute the owner's ratified option everywhere if it differs from the Rec.
   edition N keeps compiling on later toolchains that still support edition N.
 - **Deprecation policy + migration window.** How a feature is marked deprecated,
   how long it survives, and how `jet fix` assists the move.
-- **Edition marker.** `[package].edition` in `jet.toml`. A toolchain advertises
-  the editions it supports; an unsupported future edition is **E2001**.
+- **Edition marker.** `edition:` in the `payload: { … }` block of `payload.jet`
+  (`jet.toml` was retired — the manifest is Jet syntax, U1/U10). A toolchain
+  advertises the editions it supports; an unsupported future edition is **E2001**.
 - **Generated-code license.** State explicitly: generated Rust carries no
   additional license obligation from the compiler. This is product-critical and
   pure docs.
@@ -47,21 +49,21 @@ Substitute the owner's ratified option everywhere if it differs from the Rec.
 
 ## Manifest & diagnostics
 
-```toml
-[package]
-name = "wordstats"
-edition = "2026"
+```jet
+payload: {
+    name:    "wordstats",
+    version: "0.1.0",
+    edition: "2026",
+}
 ```
 
+The implemented E2001 (rendered in the project diagnostic voice; the
+manifest-level diagnostic carries no source span, matching E1206–E1213):
+
 ```
-error[E2001]: this package needs a newer Jet
-  --> jet.toml:3:11
-   |
- 3 | edition = "2027"
-   |           ^^^^^^ this toolchain supports editions up to 2026
-why: editions opt a project into a specific era of Jet syntax. A newer
-     edition can use syntax this compiler does not understand.
-fix: upgrade with `jet upgrade`, or set `edition = "2026"`.
+Error [E2001]: this package needs a newer Jet
+ Why: editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to 2026, but `payload.jet` asks for `2099`.
+ Fix: upgrade with `jet upgrade`, or set `edition: "2026"` in `payload.jet`.
 ```
 
 Single-file `jet run file.jet` has **no** edition marker and always uses the

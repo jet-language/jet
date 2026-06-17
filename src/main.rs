@@ -250,7 +250,7 @@ fn find_project_entry(root: &Path) -> PathBuf {
 }
 
 fn run_version() {
-    println!("{}", env!("CARGO_PKG_VERSION"));
+    print!("{}", jet::manifest::version_banner());
 }
 
 fn run_upgrade() {

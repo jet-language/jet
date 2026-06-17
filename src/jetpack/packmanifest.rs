@@ -363,6 +363,7 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::manifest::Mani
         package: MPackageMeta {
             name: pm.package.name.clone(),
             version: pm.package.version.clone(),
+            edition: pm.package.edition.clone(),
             jet_constraint: pm.package.jet_constraint.clone(),
             description: pm.package.description.clone(),
             license: pm.package.license.clone(),

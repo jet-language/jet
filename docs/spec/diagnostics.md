@@ -250,6 +250,27 @@ before continuing.
 | E1211 | jet   | `packages:` block-form entry missing `kind` field (U10) |
 | E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
+| E2001 | jet   | `payload.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
+| E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
+| L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
+
+## Editions and release policy (E2-M2)
+
+These enforce the compatibility contract in docs/spec/release-policy.md. An
+**edition** opts a project into a specific era of Jet syntax (D-REL3); the
+toolchain advertises the editions it supports in `jet --version`. **E2001** is
+fully reachable from a real `payload.jet`. **E2002** and **L2001** read from the
+deprecation registry in `src/manifest.rs` (`DEPRECATIONS`); that registry is
+empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
+codes are registered and snapshotted but not yet user-triggerable. They become
+reachable the moment the first real deprecation is added, with no change to the
+diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `payload.jet`. |
+| E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
+| L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
 
 ## Fan-out and fixed-size list diagnostics
 

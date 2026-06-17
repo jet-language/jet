@@ -640,6 +640,18 @@ val [a, b, c] = result;   // OK — 3 names for 3 elements
 - `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
   length information is erased at that point.
 
+## Editions & release policy (E2-M2)
+
+A project pins an **edition** with `edition: "2026"` in its `payload.jet`
+(D-REL3). An edition opts the project into a specific era of Jet syntax; the
+toolchain advertises the editions it supports in `jet --version` and rejects a
+future edition it can't provide (E2001). Single-file `jet run file.jet` carries
+no edition marker and always uses the newest stable edition (E2-V4). The full
+compatibility contract — patch/minor/major/epoch/edition definitions, the
+backward-compatibility guarantee, the deprecation window (L2001 → E2002), the
+migration authority (only `jet fix` + edition upgrade, D-REL5), and the
+generated-code license statement — lives in docs/spec/release-policy.md.
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

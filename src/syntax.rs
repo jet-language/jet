@@ -585,6 +585,16 @@ pub const PACKAGE_KIND_EXECUTABLE: &str = "executable";
 /// `deploy: { kind: executable, … }`.
 pub const PACKAGE_FIELD_KIND: &str = "kind";
 
+/// D-REL3 (ratified 2026-06-16): the project compatibility marker —
+/// `edition: "2026"` in the `payload: { … }` block of `payload.jet`. An edition
+/// opts a project into a specific era of Jet syntax; a toolchain advertises the
+/// editions it supports and rejects a future edition it can't provide (E2001).
+/// Single-file `jet run file.jet` has no edition marker and always uses the
+/// newest stable edition (E2-V4). Not an `S`/`N`/`U` surface decision, so it is
+/// not enforced by tests/decisions.rs; it is a release-policy key recorded here
+/// per I7.
+pub const MANIFEST_FIELD_EDITION: &str = "edition";
+
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
 /// inside the `.jet/` managed folder (SOURCE_ROOT_DIR). Replaces `jet.lock`
 /// (and `pack.lock`); the manifest reshape chunk migrates the old paths.
