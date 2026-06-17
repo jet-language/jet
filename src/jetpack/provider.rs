@@ -22,6 +22,9 @@ use std::process::Command;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Realized {
     pub name: String,
+    /// Package version for the hangar id (`<name>-<version>-<fp>`, D-PM1), or
+    /// empty when the provider can't determine one (Phase-1 nix refs often).
+    pub version: String,
     pub reference: String,
     pub out: String,
     pub bin: String,
@@ -198,10 +201,16 @@ impl Provider for CoreProvider {
         // PATH entry (an empty `bin`). With no manifest entry — a bare `core`
         // source declared by marker, no `payload.jet` — we default to
         // `executable`, today's behavior.
-        let kind = packmanifest::PackManifest::load(&repo)
-            .and_then(|r| r.ok())
+        let manifest = packmanifest::PackManifest::load(&repo).and_then(|r| r.ok());
+        let kind = manifest
+            .as_ref()
             .and_then(|pm| pm.package_kind(&spec.package))
             .unwrap_or(packmanifest::PackageKind::Executable);
+        // `payload.jet` carries the real version for core packages (U10).
+        let version = manifest
+            .as_ref()
+            .map(|pm| pm.package.version.clone())
+            .unwrap_or_default();
         let bin = match kind {
             packmanifest::PackageKind::Executable => {
                 out_dir.join("bin").to_string_lossy().into_owned()
@@ -210,6 +219,7 @@ impl Provider for CoreProvider {
         };
         Ok(Realized {
             name: spec.package.clone(),
+            version,
             reference: spec.raw.clone(),
             out: out_dir.to_string_lossy().into_owned(),
             bin,
@@ -644,12 +654,45 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         })?;
 
     let bin = format!("{}/bin", out.trim_end_matches('/'));
+    let name = spec.short_name().to_string();
     Ok(Realized {
-        name: spec.short_name().to_string(),
+        version: nix_store_version(out, &name),
+        name,
         reference: spec.raw.clone(),
         out: out.to_string(),
         bin,
     })
+}
+
+/// Recover a package version from a Nix store path basename, which by
+/// convention is `<32-char-hash>-<pname>-<version>[-<output>]`. We strip the
+/// fixed-width hash, the known `<name>-` prefix, and any trailing output
+/// segment, then accept the remainder only if it looks like a version (leads
+/// with a digit). Anything we can't confidently parse yields an empty version,
+/// so the hangar id falls back to `<name>-<fp>` rather than guessing wrong.
+fn nix_store_version(out: &str, name: &str) -> String {
+    const HASH_LEN: usize = 32;
+    const OUTPUT_SUFFIXES: &[&str] = &["-bin", "-dev", "-lib", "-doc", "-man", "-info", "-out"];
+
+    let base = out.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let Some(rest) = base.get(HASH_LEN..) else {
+        return String::new();
+    };
+    let rest = rest.strip_prefix('-').unwrap_or(rest);
+    let Some(mut version) = rest.strip_prefix(name).and_then(|s| s.strip_prefix('-')) else {
+        return String::new();
+    };
+    for suffix in OUTPUT_SUFFIXES {
+        if let Some(stripped) = version.strip_suffix(suffix) {
+            version = stripped;
+            break;
+        }
+    }
+    if version.starts_with(|c: char| c.is_ascii_digit()) {
+        version.to_string()
+    } else {
+        String::new()
+    }
 }
 
 #[cfg(test)]
@@ -659,6 +702,32 @@ mod tests {
 
     fn empty() -> SourceTable {
         SourceTable::empty()
+    }
+
+    #[test]
+    fn nix_store_version_parses_path_suffix() {
+        let h = "0000000000000000000000000000000a"; // 32-char stand-in hash
+        // Plain `out` path: version is the trailing segment.
+        assert_eq!(
+            nix_store_version(&format!("/nix/store/{h}-fastfetch-2.1.0"), "fastfetch"),
+            "2.1.0"
+        );
+        // Split `bin` output: the `-bin` suffix is stripped.
+        assert_eq!(
+            nix_store_version(&format!("/nix/store/{h}-ripgrep-14.1.0-bin"), "ripgrep"),
+            "14.1.0"
+        );
+        // Hyphenated package names are honored by matching the known name.
+        assert_eq!(
+            nix_store_version(&format!("/nix/store/{h}-jq-lib-1.7.1"), "jq-lib"),
+            "1.7.1"
+        );
+        // No recognizable version → empty, so the id falls back to `<name>-<fp>`.
+        assert_eq!(
+            nix_store_version(&format!("/nix/store/{h}-hello-unstable"), "hello"),
+            ""
+        );
+        assert_eq!(nix_store_version("/some/local/path", "hello"), "");
     }
 
     #[test]

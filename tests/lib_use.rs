@@ -71,7 +71,8 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> store::StoreEnt
         offline: true,
     };
     let r = provider::realize(&spec, &table, &ctx).expect("library realizes offline");
-    store::record(roots, &r.name, &r.reference, &r.out, &r.bin).expect("records into hangar")
+    store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin)
+        .expect("records into hangar")
 }
 
 /// `use jsonutil;` resolves a realized library and `jsonutil.parse(...)` works.

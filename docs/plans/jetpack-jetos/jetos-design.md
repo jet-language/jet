@@ -1,9 +1,13 @@
 # jetos — a declarative OS (Phase 2 design-of-record)
 
-> **STATUS: NOT RATIFIED — post-v1, do not implement.**
+> **STATUS: DESIGN-OF-RECORD — post-v1, do not implement yet.**
 > Depends on M12 layer 3 (`jet eval --pure`, sandboxed builds, signed
-> caches) on the same store as docs/plans/epoch-1/m12-packages.md. No decision
-> in this file (D-OS1…7, D-NX1…6) is ratified. Agents: do not implement.
+> caches) on the same store as docs/plans/epoch-1/m12-packages.md.
+>
+> **All D-OS and D-NX decisions ratified 2026-06-17 (owner ballot):**
+> D-OS2=B · D-OS3=B · D-OS4=C (priority map; bare assignment = default priority) · D-OS5=A · D-OS6=A · D-NX1=A · D-NX2=A · D-NX3=A · D-NX4=A · D-NX5=deferred to Epoch 3 · D-NX6=A
+>
+> Agents: do not implement until full ratification of all outstanding decisions and the sequencing prerequisites above are met.
 >
 > **⚠ Reconciled by `unified-ecosystem.md` (2026-06-16, owner-ratified).** The
 > authoring surface is now: explicit **`module name {}`** with **`_`-prefix
@@ -306,17 +310,33 @@ sandboxed activation verb are the honest mitigations (see D-NX review notes).
 
 ---
 
-## 9. Decisions for the owner
-
-Both decision tables (jetos config surface `D-OS2…6` and platform `D-NX1…6`,
-including the default-desktop ranking — **GNOME**, then KDE Plasma, then
-Cinnamon) now live in the single owner queue,
-[`docs/spec/decision-ballots.md`](../../spec/decision-ballots.md) §2–3.
+## 9. Decisions — ratified and open
 
 `D-OS1` (module file shape) is superseded by U3 — modules are explicit
 `module name { }`, disabled with a leading `_`. `D-OS7` (entrypoint) is
 superseded by U4 — `find("./modules")` auto-discovery. The D-NX rows are
 prerequisited on D-PM1…8 (docs/plans/epoch-1/m12-packages.md) and M12.
+
+### Config surface (D-OS2…6) — ratified 2026-06-17
+
+| ID | Decision | Ratified |
+|---|---|---|
+| D-OS2 | Option declaration syntax | ✅ **B** — one `options: { … }` record per file; all options grouped under a single header block |
+| D-OS3 | Guard keyword | ✅ **B** — reuse `if` for declarative guards; familiar keyword (note: jetos `if` is always a declarative merge-time guard, not a runtime branch) |
+| D-OS4 | Priorities syntax | ✅ **C** — priority map: `sys.desktop.default_browser = [default: firefox, force: qutebrowser]`. A bare assignment with no map (e.g. `sys.desktop.default_browser = firefox`) implicitly uses `default` priority. `force` requires the explicit map form. |
+| D-OS5 | Per-app enable flags | ✅ **A** — automatic enable flag; `apps.steam.enable: bool = false` is implicit; no `mkEnableOption` boilerplate |
+| D-OS6 | User scope | ✅ **A** — `user.<name>.*` namespace; `user.me` alias for the primary user; adding a second user is additive with no restructure |
+
+### Platform (D-NX1…6) — ratified 2026-06-17
+
+| ID | Decision | Ratified |
+|---|---|---|
+| D-NX1 | Bootstrapping ~10k packages | ✅ **A** — tap `cache.nixos.org` as compatibility provider (read-only); hand-write native Jet builds only for the spine; measure migration over time |
+| D-NX2 | What `jetos add` edits | ✅ **A** — edit the active (host) config file; auto-commit with `--no-commit` to stage only; orchestration/implementation refinement deferred |
+| D-NX3 | Ephemeral `jetos try` | ✅ **A** — shell-scoped; nothing recorded; gone on exit; config untouched |
+| D-NX4 | NixOS migration path | ✅ **A** — reporter, not auto-converter; checklist of what maps cleanly and what needs hand-porting |
+| D-NX5 | v0 reference image | **Deferred to Epoch 3** |
+| D-NX6 | Option-schema bootstrap | ✅ **A** — hand-write spine; JSON pass-through for tails (`sys.services.nginx.extraConfig = json({…})`) |
 
 **Imperative front door (headline feature):** `jetos add/set/remove` edit
 declarative config files only — never a second install database. Drift is

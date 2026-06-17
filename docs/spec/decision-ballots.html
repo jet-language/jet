@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jet — Owner Decision Ballot</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font:14px/1.6 ui-monospace,monospace;padding:32px 24px;max-width:1200px;margin:0 auto}
+h1{font-size:20px;font-weight:700;color:#f0f6fc;margin-bottom:4px}
+.subtitle{color:#8b949e;margin-bottom:32px;font-size:13px}
+h2{font-size:13px;font-weight:700;color:#8b949e;letter-spacing:.08em;text-transform:uppercase;margin:40px 0 16px;border-bottom:1px solid #21262d;padding-bottom:8px}
+.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:20px}
+.card-id{font-size:11px;color:#58a6ff;font-weight:700;letter-spacing:.05em;margin-bottom:6px}
+.card-title{font-size:15px;font-weight:700;color:#f0f6fc;margin-bottom:8px}
+.card-desc{color:#8b949e;font-size:13px;margin-bottom:16px;font-family:ui-sans-serif,sans-serif}
+.options-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px}
+.opt{border:2px solid #21262d;border-radius:6px;padding:14px;cursor:pointer;transition:border-color .15s}
+.opt:hover{border-color:#388bfd}
+.opt.selected{border-color:#58a6ff;background:#0d2044}
+.opt label{display:flex;align-items:flex-start;gap:10px;cursor:pointer}
+.opt input[type=radio]{accent-color:#58a6ff;flex-shrink:0;margin-top:3px}
+.opt-name{font-weight:700;color:#f0f6fc;font-size:13px}
+.opt-desc{color:#8b949e;font-size:12px;margin-top:4px;font-family:ui-sans-serif,sans-serif}
+pre{background:#010409;border:1px solid #30363d;border-radius:5px;padding:12px;overflow-x:auto;font-size:11px;line-height:1.5;margin-top:8px;color:#e6edf3;white-space:pre-wrap;word-break:break-word}
+.nix-label{font-size:10px;color:#f78166;font-weight:700;letter-spacing:.05em;margin-top:10px;margin-bottom:4px}
+.comment-row{display:flex;flex-direction:column;gap:6px}
+.comment-row label{font-size:12px;color:#8b949e}
+.comment-row textarea{background:#010409;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font:12px/1.5 ui-monospace,monospace;padding:8px;resize:vertical;min-height:52px;outline:none;width:100%}
+.comment-row textarea:focus{border-color:#388bfd}
+.rec-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;padding:1px 7px;border-radius:20px;background:#1a3a1a;color:#3fb950;border:1px solid #3fb950;margin-left:8px;vertical-align:middle}
+.no-rec-badge{background:#2d2000;color:#e3b341;border-color:#e3b341}
+.status-bar{position:sticky;bottom:0;background:#0d1117;border-top:1px solid #21262d;padding:14px 0;margin-top:40px;display:flex;align-items:center;gap:16px}
+.progress{color:#8b949e;font-size:13px;flex:1}
+.progress span{color:#3fb950;font-weight:700}
+button.copy-btn{background:#238636;border:1px solid #2ea043;color:#f0f6fc;border-radius:6px;padding:10px 20px;font:13px/1 ui-monospace,monospace;cursor:pointer;transition:background .15s;font-weight:700}
+button.copy-btn:hover{background:#2ea043}
+button.copy-btn:active{background:#1a7f31}
+.copied{background:#1a7f31 !important}
+.separator{border:none;border-top:1px solid #21262d;margin:8px 0}
+</style>
+</head>
+<body>
+<h1>Jet — Owner Decision Ballot</h1>
+<p class="subtitle">All decisions ratified. New open decisions will appear here when drafted.</p>
+
+<div id="ballot"></div>
+
+<div class="status-bar">
+  <div class="progress" id="progress">0 of 0 answered</div>
+  <button class="copy-btn" id="copyBtn" onclick="copyResults()">Copy All Answers</button>
+</div>
+
+<script>
+const DECISIONS = [];
+
+const DECISIONS_PLACEHOLDER = [
+  {
+    section: "2. jetos config surface",
+    id: "D-OS4",
+    title: "Priorities",
+    desc: "A lifted module suggests Firefox as default browser; Maya's host overrides to qutebrowser. How does the config language express that one value should win over another?",
+    rec: "no-rec",
+    options: [
+      {
+        key: "A",
+        name: "A — prefix keywords",
+        desc: "Priority leads the assignment. Two separate lines, two different files.",
+        nix: `programs.firefox.defaultBrowser = mkDefault "firefox";
+programs.firefox.defaultBrowser = mkForce "qutebrowser";`,
+        code: `// firefox.jet (lifted module):
+default sys.desktop.default_browser = "firefox"
+
+// hosts/desktop.jet (Maya's override):
+force sys.desktop.default_browser = "qutebrowser"
+// → qutebrowser wins`
+      },
+      {
+        key: "B",
+        name: "B — call-style markers",
+        desc: "Mirrors Nix mkDefault/mkForce. Priority looks like a function call wrapping the value.",
+        nix: null,
+        code: `// firefox.jet:
+sys.desktop.default_browser = default("firefox")
+
+// hosts/desktop.jet:
+sys.desktop.default_browser = force("qutebrowser")
+// → qutebrowser wins`
+      },
+      {
+        key: "C",
+        name: "C — priority map (owner-proposed)",
+        desc: "Each assignment carries its priority inline as a labeled key inside [ ]. The config merger picks the highest-priority value across all assignments.",
+        nix: null,
+        code: `// firefox.jet: suggests firefox at default priority
+sys.desktop.default_browser = [default: firefox]
+
+// hosts/desktop.jet: insists on qutebrowser
+sys.desktop.default_browser = [force: qutebrowser]
+
+// merged result: qutebrowser wins (force > default)
+
+// both levels expressed in one line (e.g. a module that supplies
+// a safe default but can be overridden by the host):
+sys.desktop.default_browser = [default: firefox, force: qutebrowser]`
+      }
+    ]
+  },
+  {
+    section: "2. jetos config surface",
+    id: "D-OS6",
+    title: "User scope",
+    desc: "How does jetos address per-user config — dotfiles, home-directory files, user packages? Maya's laptop is single-user today. Next year she adds her partner Alex. The question is whether the namespace forces a restructure when that happens.",
+    rec: "A",
+    options: [
+      {
+        key: "A",
+        name: "A — user.<name>.* with user.me alias",
+        desc: "All users live under one namespace. user.me is a short alias for the primary user defined at system level. Adding a second user is purely additive — nothing restructures.",
+        nix: `# NixOS today requires two separate config sections per user:
+users.users.maya = { isNormalUser = true; home = "/home/maya"; };
+home-manager.users.maya = {
+  home.file.".config/git/config".text = "...";
+  home.packages = [ pkgs.inkscape ];
+};
+users.users.alex = { isNormalUser = true; };
+home-manager.users.alex.home.packages = [ pkgs.steam ];`,
+        code: `// hosts/laptop.jet — Day 1, Maya's single-user laptop
+
+sys.pkgs += [git, ripgrep, tmux]   // system-wide; available to all users
+
+// user.me is an alias for Maya (defined once at system level)
+user.me.shell = zsh
+user.me.files["~/.config/git/config"] = """
+[user]
+    name = Maya
+    email = maya@example.com
+[core]
+    editor = nvim
+"""
+user.me.packages += [inkscape, blender]
+
+// Day 2 — Alex joins; NOTHING above changes
+user.alex.shell = fish
+user.alex.packages += [steam, discord]
+user.alex.files["~/.config/fish/config.fish"] = "set -x EDITOR nvim"
+
+// Both users' dotfiles and packages resolve independently.
+// jetos switch applies the right files to each home directory.`
+      },
+      {
+        key: "B",
+        name: "B — single-user home.*",
+        desc: "Simpler today. When a second user arrives, every home.* line must be renamed — no additive path.",
+        nix: null,
+        code: `// Day 1 — clean, simple
+home.shell = zsh
+home.files["~/.config/git/config"] = """
+[user]
+    name = Maya
+    email = maya@example.com
+"""
+home.packages += [inkscape, blender]
+
+// Day 2 — adding Alex requires renaming every line above:
+//   home.shell       →  user.maya.shell
+//   home.files[…]    →  user.maya.files[…]
+//   home.packages    →  user.maya.packages
+// then add user.alex.* on top — a full restructure of the file`
+      }
+    ]
+  },
+  {
+    section: "4. Epoch 2 milestones",
+    id: "D-REF2",
+    title: "Arena allocators in M5?",
+    desc: "The tier-2 references milestone (M5) includes a parser example. Owner noted that arena allocators belong in core.mem or core.memlowlev — not a free-standing surface. Question: should M5 include any arena API from those modules, or only if the parser example actually needs it?",
+    rec: "demand-driven",
+    options: [
+      {
+        key: "A",
+        name: "A — include from core.mem only if the parser example needs it",
+        desc: "Ship exactly what the example uses, nothing speculative. The module home is core.mem (or core.memlowlev for lower-level control).",
+        nix: null,
+        code: `// If the M5 parser example genuinely needs arena allocation:
+use core.mem.Arena;
+
+fn parse(src: String) -> Ast {
+    val arena = Arena.new();
+    // all nodes allocated from arena; freed in one batch at end
+    val root = arena.alloc(Node { kind: Root, span: src.span() });
+    // … build tree …
+    root
+    // arena drops here — one free, not one per node
+}`
+      },
+      {
+        key: "B",
+        name: "B — defer entirely; no arena surface in M5",
+        desc: "Keep M5 scoped to references and lifetime basics. core.mem arena API lands later when the module is designed holistically.",
+        nix: null,
+        code: `// M5: references, lifetimes, borrowing
+// core.mem / arena API: later milestone`
+      }
+    ]
+  },
+  {
+    section: "4. Epoch 2 milestones",
+    id: "D-LIB2",
+    title: "How far generics v1 goes",
+    desc: "Generics let you write one function or type that works across many concrete types. The ceiling question is: how much expressive power does v1 include? Three levels are on the table. (A) is the recommended sweet spot — associated types + default method bodies covers nearly all real library needs. (B) is simpler to implement but forces extra verbosity at every call site. (C) adds higher-kinded types for abstract algebraic patterns at significant complexity cost.",
+    rec: "A",
+    options: [
+      {
+        key: "A",
+        name: "Recommended — associated types + default method bodies",
+        desc: "A trait can declare abstract type slots (type Key, type Value) that each implementation fills in. Methods can have a default body that works for all implementations. Callers refer to 'any Store' without carrying extra type parameters. Covers almost all real library needs.",
+        nix: null,
+        code: `// Diego writes a generic storage trait:
+trait Store {
+    type Key;     // PgStore will say Key = String; MemStore will say Key = Int
+    type Value;   // each impl decides its own value type
+
+    fn get(self, k: Key) -> Value?;
+
+    // default body — every Store gets this for free unless it overrides
+    fn get_or(self, k: Key, fallback: Value) -> Value {
+        self.get(k) ?? fallback
+    }
+}
+
+// PostgreSQL implementation:
+struct PgStore { conn: PgConn }
+impl Store for PgStore {
+    type Key   = String;
+    type Value = Row;
+    fn get(self, k: String) -> Row? { /* query db */ }
+    // get_or comes automatically — no extra code
+}
+
+// In-memory cache, completely different types:
+struct MemStore { data: Map<Int, User> }
+impl Store for MemStore {
+    type Key   = Int;
+    type Value = User;
+    fn get(self, k: Int) -> User? { self.data.get(k) }
+}
+
+// A function that works with any Store — caller does not pass Key/Value:
+fn find_or_guest(store: impl Store<Key=String, Value=User>, id: String) -> User {
+    store.get_or(id, User.guest())
+}
+
+find_or_guest(pg, "user-42")    // works
+find_or_guest(mem_cache, "x")   // type error: MemStore has Key=Int, not String`
+      },
+      {
+        key: "B",
+        name: "Narrower — type-parameter traits only, no associated types",
+        desc: "Traits take explicit type parameters in angle brackets. Simpler to implement, but Key and Value must be written out at every call site. 'Any Store' becomes 'Store<K, V>' everywhere — callers carry extra type variables.",
+        nix: null,
+        code: `// Same Store, but with type parameters instead of associated types:
+trait Store<K, V> {
+    fn get(self, k: K) -> V?;
+    // no default bodies in this option
+}
+
+impl Store<String, Row> for PgStore { … }
+impl Store<Int, User>   for MemStore { … }
+
+// Problem: callers must always carry K and V explicitly:
+fn find_or_guest<K, V>(store: impl Store<K, V>, id: K, guest: V) -> V {
+    store.get(id) ?? guest
+}
+
+// Can't say "any Store" — must write "Store<K, V>" with free type variables
+// every time; more noise, more chances for mismatch`
+      },
+      {
+        key: "C",
+        name: "Wider — higher-kinded types",
+        desc: "A type parameter can itself be a type constructor (generic over a type). Enables Functor, Monad, etc. Rarely needed outside advanced abstractions; significant language and diagnostic complexity.",
+        nix: null,
+        code: `// Higher-kinded: F is a type constructor — it takes a type and returns a type
+trait Functor<F<_>> {
+    fn map<A, B>(self: F<A>, f: A -> B) -> F<B>;
+}
+
+// List is a Functor:
+impl Functor<List> {
+    fn map<A, B>(self: List<A>, f: A -> B) -> List<B> { … }
+}
+
+// Option is also a Functor:
+impl Functor<Option> {
+    fn map<A, B>(self: Option<A>, f: A -> B) -> Option<B> { … }
+}
+
+// Useful for deeply abstract libraries; adds meaningful compiler complexity
+// and harder error messages for beginners`
+      }
+    ]
+  }
+];
+
+// DECISIONS is empty — all decisions ratified. Add new entries to DECISIONS above when new ballots are needed.
+
+const answers = {};
+
+function recLabel(rec) {
+  if (rec === "no-rec") return '<span class="rec-badge no-rec-badge">NO REC</span>';
+  return `<span class="rec-badge">REC: ${rec.toUpperCase()}</span>`;
+}
+
+function renderDecisions() {
+  const container = document.getElementById('ballot');
+  let currentSection = '';
+  let html = '';
+
+  DECISIONS.forEach((d, di) => {
+    if (d.section !== currentSection) {
+      currentSection = d.section;
+      html += `<h2>${currentSection}</h2>`;
+    }
+
+    const optHtml = d.options.map((opt, oi) => {
+      const radioId = `${di}_${oi}`;
+      return `
+        <div class="opt" id="opt-${radioId}" onclick="selectOpt(${di},${oi})">
+          <label>
+            <input type="radio" name="d${di}" id="${radioId}" value="${opt.key}" onchange="selectOpt(${di},${oi})">
+            <div>
+              <div class="opt-name">${opt.name}</div>
+              <div class="opt-desc">${opt.desc}</div>
+              ${opt.nix ? `<div class="nix-label">NixOS today</div><pre>${opt.nix}</pre>` : ''}
+              ${opt.code ? `<pre>${opt.code}</pre>` : ''}
+            </div>
+          </label>
+        </div>`;
+    }).join('');
+
+    html += `
+      <div class="card" id="card-${di}">
+        <div class="card-id">${d.id} ${recLabel(d.rec)}</div>
+        <div class="card-title">${d.title}</div>
+        <div class="card-desc">${d.desc}</div>
+        <div class="options-grid">${optHtml}</div>
+        <div class="comment-row">
+          <label for="comment-${di}">Comment (optional)</label>
+          <textarea id="comment-${di}" placeholder="Your rationale or caveats…" oninput="updateProgress()"></textarea>
+        </div>
+      </div>`;
+  });
+
+  container.innerHTML = html;
+  updateProgress();
+}
+
+function selectOpt(di, oi) {
+  const opt = DECISIONS[di].options[oi];
+  answers[di] = opt.key;
+  // update radio
+  document.querySelector(`input[name="d${di}"][value="${opt.key}"]`).checked = true;
+  // update card borders
+  DECISIONS[di].options.forEach((_, i) => {
+    const el = document.getElementById(`opt-${di}_${i}`);
+    if (el) el.classList.toggle('selected', i === oi);
+  });
+  updateProgress();
+}
+
+function updateProgress() {
+  const answered = Object.keys(answers).length;
+  const total = DECISIONS.length;
+  document.getElementById('progress').innerHTML = `<span>${answered}</span> of ${total} answered`;
+}
+
+function copyResults() {
+  const lines = ['## Owner ballot results\n'];
+  let section = '';
+  DECISIONS.forEach((d, di) => {
+    if (d.section !== section) {
+      section = d.section;
+      lines.push(`\n### ${section}`);
+    }
+    const choice = answers[di] || '(no answer)';
+    const comment = (document.getElementById(`comment-${di}`)?.value || '').trim();
+    lines.push(`\n**${d.id}** — ${d.title}`);
+    lines.push(`Decision: **${choice}**`);
+    if (comment) lines.push(`Comment: ${comment}`);
+  });
+
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy All Answers'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+renderDecisions();
+</script>
+</body>
+</html>

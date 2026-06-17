@@ -17,13 +17,13 @@ separate tutorial language (see docs/spec/decision-ballots.md Group 19).
 
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
-| D-TEST1 | Property testing | **A** — in, if a small shrinking design exists | A | OPEN — needs owner |
+| D-TEST1 | Property testing | **A** — in, if a small shrinking design exists | A | ✅ ratified 2026-06-17 — A: ship if a small shrinking design exists; shrinking (minimizing the failing case) is the value; defer the whole feature if the shrinking design is large |
 | D-TEST4 = D-TOOL1 | Doctests run under `jet test` | **A** — yes (I5 for user code) | A | ✅ ratified 2026-06-16 — A: doctests run under `jet test` |
 | D-TOOL4 | Snapshot testing w/ `-u` / `--update-snapshots` | **A** — yes | A | ✅ ratified 2026-06-16 — A; flags `-u` and `--update-snapshots` (not "bless") |
-| D-TEST2 = D-TOOL2 | `todo` typed-hole expression | **B** — defer unless small | defer | OPEN — needs owner |
+| D-TEST2 = D-TOOL2 | `todo` typed-hole expression | **B** — defer unless small | defer | ✅ ratified 2026-06-17 — A: ship now; `todo` compiles and type-checks; at runtime panics with file, line, and expected type |
 | D-TEST3 | Guided learning (`jet tour`/`jet learn`) | **B** — docs-first; A if cheap | docs-first | ✅ ratified 2026-06-16 — B: docs-led learning first, `jet tour` later |
 | D-TOOL3 | `jet emit --rust` expert window | — | — | ✅ ratified 2026-06-16 — A: ship gated `jet emit --rust` expert window |
-| D-TOOL5 | Capability summary | — | — | OPEN — needs owner |
+| D-TOOL5 | Capability summary | — | — | ✅ ratified 2026-06-17 — C: human-readable summary by default (`jet build` prints capabilities); `--capabilities-json` for tooling |
 
 ## Scope
 

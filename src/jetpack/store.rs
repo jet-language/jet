@@ -98,9 +98,12 @@ fn can_write(dir: &std::path::Path) -> bool {
 /// A realized package recorded under the Jetpack store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreEntry {
-    /// Directory name under `store/`, e.g. `fastfetch-<fp>`.
+    /// Directory name under `store/`, e.g. `fastfetch-2.1.0-<fp>` (D-PM1: name
+    /// and version first, fingerprint last — never Nix's hash-first layout).
     pub id: String,
     pub name: String,
+    /// Package version, or empty when the provider can't determine one.
+    pub version: String,
     pub reference: String,
     /// The realized output root (often a `/nix/store/...` path).
     pub out: String,
@@ -112,6 +115,7 @@ impl StoreEntry {
     fn meta_json(&self) -> String {
         json::object_of(&[
             ("name", &self.name),
+            ("version", &self.version),
             ("ref", &self.reference),
             ("out", &self.out),
             ("bin", &self.bin),
@@ -119,25 +123,35 @@ impl StoreEntry {
     }
 }
 
-/// Build the store id for a (name, ref, out) triple — name plus a short hash so
-/// two realizations of the same name from different refs don't collide.
-pub fn entry_id(name: &str, reference: &str, out: &str) -> String {
+/// Build the store id for a realization — human-readable `<name>-<version>`
+/// first, then a short fingerprint of (ref, out) so two realizations of the
+/// same name+version from different refs don't collide (D-PM1). The version
+/// segment is dropped when unknown, leaving `<name>-<fp>`. Never hash-first:
+/// identity for correctness is the lockfile, the dir name is for humans.
+pub fn entry_id(name: &str, version: &str, reference: &str, out: &str) -> String {
     let fp = sha256::sha256_hex(format!("{reference}\n{out}").as_bytes());
-    format!("{name}-{}", &fp[..12])
+    let short = &fp[..12];
+    if version.is_empty() {
+        format!("{name}-{short}")
+    } else {
+        format!("{name}-{version}-{short}")
+    }
 }
 
 /// Record (or refresh) a store entry; returns the entry with its id filled in.
 pub fn record(
     roots: &Roots,
     name: &str,
+    version: &str,
     reference: &str,
     out: &str,
     bin: &str,
 ) -> std::io::Result<StoreEntry> {
-    let id = entry_id(name, reference, out);
+    let id = entry_id(name, version, reference, out);
     let entry = StoreEntry {
         id: id.clone(),
         name: name.to_string(),
+        version: version.to_string(),
         reference: reference.to_string(),
         out: out.to_string(),
         bin: bin.to_string(),
@@ -168,6 +182,8 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
             out.push(StoreEntry {
                 id: ent.file_name().to_string_lossy().into_owned(),
                 name,
+                // Older records predate the version field; treat as unknown.
+                version: get("version").unwrap_or_default(),
                 reference,
                 out: o,
                 bin: b,
@@ -216,11 +232,14 @@ mod tests {
         let e = record(
             &roots,
             "fastfetch",
+            "2.1.0",
             "nixpkgs:fastfetch",
             "/nix/store/x",
             "/nix/store/x/bin",
         )
         .unwrap();
+        // Name-and-version first, fingerprint last (D-PM1).
+        assert!(e.id.starts_with("fastfetch-2.1.0-"));
         let listed = list(&roots);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0], e);
@@ -229,17 +248,25 @@ mod tests {
     #[test]
     fn clean_removes_entries() {
         let (roots, _g) = temp_roots();
-        record(&roots, "a", "nixpkgs:a", "/nix/store/a", "/nix/store/a/bin").unwrap();
-        record(&roots, "b", "nixpkgs:b", "/nix/store/b", "/nix/store/b/bin").unwrap();
+        record(&roots, "a", "1.0", "nixpkgs:a", "/nix/store/a", "/nix/store/a/bin").unwrap();
+        record(&roots, "b", "1.0", "nixpkgs:b", "/nix/store/b", "/nix/store/b/bin").unwrap();
         assert_eq!(clean(&roots).unwrap(), 2);
         assert!(list(&roots).is_empty());
     }
 
     #[test]
     fn ids_differ_by_ref() {
-        let a = entry_id("x", "nixpkgs:x", "/o");
-        let b = entry_id("x", "github:o/x", "/o");
+        let a = entry_id("x", "1.0", "nixpkgs:x", "/o");
+        let b = entry_id("x", "1.0", "github:o/x", "/o");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn id_omits_empty_version() {
+        // Unknown version falls back to `<name>-<fp>`, no dangling segment.
+        let id = entry_id("x", "", "nixpkgs:x", "/o");
+        assert!(id.starts_with("x-"));
+        assert!(!id.starts_with("x--"));
     }
 }
 

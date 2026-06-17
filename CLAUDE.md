@@ -81,6 +81,13 @@ src/syntax.rs / parser, re-bless snapshots, log it in the decision table.
 
 ## Style
 
+- Write terse. Use natural, minimal, plain language; reach for a technical
+  term only when it's the precise word. No filler, no hedging, no throat-
+  clearing. This goes double for Markdown: don't pad docs with restated
+  headings, bullet lists that repeat the prose, "comprehensive"/"robust"/
+  "seamless" adjectives, or summary paragraphs that add nothing. Say the
+  thing once, plainly, and stop. Bloated LLM prose is tiring to read —
+  cut it.
 - Plain std-only Rust; small modules; no cleverness codegen-side.
 - Error message text is product copy: write it like docs/spec/diagnostics.md, get it
   snapshot-tested, never tweak casually.

@@ -19,8 +19,8 @@ same-error-type contortions.
 
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
-| D-LIB1 | S61 (labels/defaults) + S62 (delegation) timing | **A** — both in M6 | A | OPEN — needs owner |
-| D-LIB2 | Generics step | **A** — associated types + default method bodies | A | OPEN — needs owner |
+| D-LIB1 | S61 (labels/defaults) + S62 (delegation) timing | **A** — both in M6 | A | ✅ ratified 2026-06-17 — A: both S61 and S62 ship in M6; they reinforce each other for library ergonomics |
+| D-LIB2 | Generics step | **A** — associated types + default method bodies | A | ✅ ratified 2026-06-17 — A: associated types (`type Key`, `type Value` inside the trait) + default method bodies; covers bulk of library needs without higher-kinded complexity |
 | D-LIB3 = D-ERR2 | `?` error-conversion shape | **A** — `From`-style **`Fallible`** trait | trait, opt-in | ✅ ratified 2026-06-16 — **`Fallible` trait, `Error` type** |
 | D-ERR1 | Grow `Error` carrier (msg + code + source) | **A** | A | — |
 | D-FP1 | Struct field punning | **A** — `Source { name, upstream }` | A | — |
@@ -28,7 +28,7 @@ same-error-type contortions.
 | D-OWN1 | Implicit-clone lint | — | — | ✅ ratified 2026-06-16 — A: keep + strengthen implicit-clone lint |
 | D-OWN2 | Ownership mini-examples | — | — | ✅ ratified 2026-06-16 — A: add ownership mini-examples |
 | D-OWN3 | `take` suggestion site | — | — | ✅ ratified 2026-06-16 — A: suggest `take` at call site |
-| D-JSON1 | JSON decode strictness baseline | — | — | OPEN — needs owner |
+| D-JSON1 | JSON decode strictness baseline | — | — | ✅ ratified 2026-06-17 — B: lenient coerce where unambiguous (`"8080"` → `8080`); only error on truly impossible conversions; **implementation must surface coercions** (see owner-todo.md — brainstorm per-decode report or build-output log so magic is legible without breaking) |
 | D-JSON2 | Unknown JSON keys | — | — | ✅ ratified 2026-06-16 — A: ignore unknown JSON keys by default, opt-in strict |
 
 ## Surface (uses ratified S61/S62 + ballot recs)

@@ -23,7 +23,7 @@ of this (E2-V4, I).
 | D-PKGS1 | Registry hosting model | **A** — append-only git registry | A | ✅ ratified 2026-06-16 — A: git registry now (hosted later) |
 | D-PKGS2 | `jet.*` namespace policy | **A** — owner-held reserved namespace | A | ✅ ratified 2026-06-16 — A: reserved `jet.*` namespace |
 | D-PKGS3 | Signing | **A** — signed metadata optional v1; design signed cache | A | ✅ ratified 2026-06-16 — A: optional signed metadata v1 |
-| D-PKGS4 | Yank / immutability rules | **A** — immutable releases; yank hides from new solves | A | OPEN — wants brief discussion |
+| D-PKGS4 | Yank / immutability rules | **A** — immutable releases; yank hides from new solves | A | ✅ ratified 2026-06-17 — A-amended: immutable releases + yank hides from new resolves; **publishing requires the package to compile and pass CI/tests first** (the registry rejects a publish that cannot be verified) |
 
 ## Scope
 

@@ -69,9 +69,37 @@ case; no `pub` required (the runtime always finds `main`). Canonical form
 omits `pub`. Rejected: required `pub fn main` (ceremony), top-level
 statements without a main.
 
-**S19 — Loops (M1)** *(ratified 2026-06-11)*: `**while cond { }`** and
-`**for i in <range> { }**`. Rejected: recursion-only M1, `loop` + `break`
-as the primary construct.
+**S19 — Loops (M1)** *(ratified 2026-06-11; **amended 2026-06-17, S19-amend
+option A**)*: **one keyword, `loop`; the header picks the mode.**
+Empty header = infinite; a boolean expression = conditional; `in` = iteration:
+
+```jet
+// infinite
+loop {
+    val line = read_line();
+    if line == "quit" { break }
+    print(line);
+}
+
+// conditional (replaces `while`)
+var n = 10;
+loop n > 0 {
+    print(n);
+    n = n - 1;
+}
+
+// iteration (replaces `for … in`)
+loop i in 1..5 {
+    print(i);
+}
+```
+
+`while` and `for` are retired — recognized only for S14 teaching errors pointing
+at `loop`. `break` and `continue` (S23) are unchanged.
+Rejected: keeping three keywords (`loop`/`while`/`for`) as status quo (B),
+folding only infinite + conditional while keeping `for` separate (C).
+*Original (2026-06-11):* `while cond { }` and `for i in <range> { }`. Rejected:
+recursion-only M1, `loop` + `break` as the primary construct.
 
 **S22 — Range bounds (M1)** *(ratified 2026-06-11; amended 2026-06-15)*:
 `**1..10` is inclusive** — it counts 1 through 10. Reads like English, kills the
@@ -1772,3 +1800,9 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-16 | U18 | inferred constructors: bare `{…}` elaborates to the expected type; explicit `Type {…}` optional (D-INFER-CTOR) | owner |
 | 2026-06-16 | D-PAT6 | parameter destructuring deferred; unpack on first body line | owner |
 | 2026-06-16 | S84 | hyphens allowed in package/module/system/image/env *names* (finalist 2); dashed-name `ident (-ident)*`, span-adjacent only; no lexer change | owner |
+| 2026-06-17 | D-OS4 | jetos priorities syntax: **C — priority map** `[default: x, force: y]`; bare assignment with no map implicitly uses `default` priority; `force` requires explicit map form | owner |
+| 2026-06-17 | D-OS6 | jetos user scope: **A** — `user.<name>.*` with `user.me` alias; additive multi-user with no restructure | owner |
+| 2026-06-17 | D-REF2 | arena allocators ship in M5; live directly in `core.mem` (flat, not a submodule) | owner |
+| 2026-06-17 | D-LIB2 | generics v1: **A** — associated types + default method bodies; no higher-kinded types | owner |
+| 2026-06-17 | S19 | **amended (S19-amend A):** unified `loop` keyword; header picks mode (empty=infinite, bool=conditional, `in`=iteration); `while`/`for` retired to S14 teaching errors | owner |
+| 2026-06-17 | D-JSON1-decode | JSON decode strictness: **B — lenient coerce** where unambiguous (`"8080"` → `8080`); only error on truly impossible conversions; implementation must surface coercions (see owner-todo.md). Note: S82/S55 reference a prior D-JSON1 for `@Serialize` config overrides — those are separate; this entry covers the decode-strictness ballot ratification. | owner |

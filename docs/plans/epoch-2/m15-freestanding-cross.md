@@ -17,8 +17,8 @@ the low-level tier stays gated and never leaks into normal Jet.
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
 | D-CROSS1 | First non-host target | **A** — one CLI target (e.g. `aarch64-linux`) | A | ✅ ratified 2026-06-16 — A: first cross target = one CLI target (e.g. aarch64-linux) |
-| D-CROSS2 | Freestanding panic strategy | **A** — abort default | A | OPEN — needs owner |
-| D-CROSS3 | Embedded smoke | **A** — documented local harness minimum | A | OPEN — needs owner |
+| D-CROSS2 | Freestanding panic strategy | **A** — abort default | A | ✅ ratified 2026-06-17 — A: abort by default (no unwind tables; smaller binary; right for embedded) |
+| D-CROSS3 | Embedded smoke | **A** — documented local harness minimum | A | ✅ ratified 2026-06-17 — A: documented local QEMU harness; no physical hardware required in CI |
 
 ## Scope
 

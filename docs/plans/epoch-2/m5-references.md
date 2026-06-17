@@ -24,7 +24,7 @@ rather than inventing a new model. No user-written lifetime names, ever.
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
 | D-REF1 | Teaching order | **A** — after the beginner ownership chapter | A | ✅ ratified 2026-06-16 — A: teach references after the beginner ownership chapter |
-| D-REF2 | Ship arenas this milestone | **A** — only if the parser example needs them | A | OPEN — needs owner |
+| D-REF2 | Ship arenas this milestone | **A** — only if the parser example needs them | A | ✅ ratified 2026-06-17 — A: ship arenas; live directly in `core.mem` (not a submodule); surface the API as `core.mem.Arena` or equivalent flat path |
 | D-REF3 | Inlay-hint defaults beyond clone | **A** — borrowed-return + cleanup scopes on | A | ✅ ratified 2026-06-16 — A: borrowed-return + cleanup-scope hints on by default |
 | D-PAT1/2 (opt) | Nested patterns / `&&` guard scope | see Group 15 | deferred | — |
 

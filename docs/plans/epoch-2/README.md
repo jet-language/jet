@@ -41,54 +41,6 @@ production platform with these properties:
 - **Single-file Jet remains sacred.** `jet run file.jet` never requires a
   manifest, package, workspace, config file, or project ceremony.
 
-## Epoch versioning recommendation
-
-Anthony Fu's [Epoch Semantic Versioning](https://antfu.me/posts/epoch-semver)
-proposes separating large human-facing eras from smaller technical breaking
-changes while remaining compatible with SemVer tooling. His encoded form is:
-
-```
-{EPOCH * 1000 + MAJOR}.MINOR.PATCH
-```
-
-For Jet, this idea is useful for **storytelling at launch**, but encoded numbers
-like `1000.0.0` or `2000.0.0` are beginner-hostile and should not appear on the
-toolchain until a deliberate initial public launch.
-
-**Recommendation for concurrence:**
-
-1. Use **Epoch 1, Epoch 2, ...** immediately for roadmap organization and
-   internal release storytelling. The docs are already moving this way.
-2. Keep **compiler/toolchain versions ordinary SemVer** until public launch:
-   pre-1.0 `0.x`, then `1.x` for the first production era, `2.x` only when a
-   real breaking toolchain release requires it — independent of epoch labels in
-   docs.
-3. **Defer encoded Epoch SemVer** (`1000.0.0`, `2000.0.0`, …) to the initial
-   public launch milestone (E2-M17 or a separate launch decision). Until then,
-   `jet --version` prints normal SemVer plus supported language epoch/edition,
-   not an encoded epoch major.
-4. Add a formal **compatibility policy** in E2-M2: what can change in a patch,
-   minor, major, epoch, and edition.
-5. Introduce an explicit project compatibility marker before breaking syntax:
-   likely `[package].edition = "2026"` or `[package].epoch = 2`, decided in
-   E2-M2. This is Rust-edition-style compatibility, not a license to churn.
-6. Let the package registry enforce public API SemVer with sema-powered API
-   diffs. Package authors may later opt into Epoch SemVer as a convention, but
-   Jet should not require it for all packages.
-
-**Owner decision E2-D1:** choose one external release policy before E2-M2
-ships.
-
-| Option | Shape | Recommendation |
-|---|---|---|
-| A | Compiler versions stay normal SemVer (`0.x` → `1.x`); docs use Epoch labels; encoded `1000+` only at public launch | **Recommended now** |
-| B | Adopt Anthony-style encoded Epoch SemVer for the compiler now: Epoch 2 starts near `2000.0.0` | Powerful signal, but beginner-hostile — **not recommended pre-launch** |
-| C | Use calendar/edition versioning for language compatibility, SemVer only for the binary | Viable, but needs more policy |
-
-**Owner decision E2-D2:** what event flips on encoded Epoch SemVer (if ever)?
-Options: never (A only forever), at E2-M17 GA only, or at a separate marketing
-launch after GA hardening.
-
 ## Owner vision — decide before detailed milestone plans
 
 These are CEO-level choices. Agents should not write detailed `mN-*.md` files
@@ -110,7 +62,7 @@ in `docs/spec/decision-ballots.md`; this section is product direction.
 | E2-V9 | Editor ecosystem priority | Allocates extension work after VS Code/Cursor | A: VS Code/Cursor + Zed dev extension · B: VS Code/Cursor only until GA · C: also Neovim in Epoch 2 |
 | E2-V10 | Public launch trigger | Decides when encoded Epoch SemVer and marketing align | A: E2-M17 technical GA · B: separate launch milestone after audits · C: no encoded epoch ever |
 | E2-V11 | Governance at launch | Trademark, foundation, advisory board, LTS ownership | A: OSS project, owner-led LTS · B: foundation prep in Epoch 2 · C: defer all governance messaging |
-| E2-V12 | JetOS / pure eval / layer 3 boundary | Prevents research scope from becoming a product promise | A: `pure fn` + `jet eval --pure` only (S60) · B: package builds in Epoch 2 · C: JetOS remains research-only (recommended) |
+| E2-V12 | JetOS / pure eval / layer 3 boundary | Prevents research scope from becoming a product promise | A: `pure fn` + `jet eval --pure` only (S60) · B: package recipes in Epoch 2 · C: JetOS remains research-only (recommended) |
 
 ### Milestone decision gates
 
@@ -133,7 +85,7 @@ Each detailed plan needs these owner calls in addition to any syntax ballots.
 | E2-M13 | I1 amendment wording; `unsafe` audit story (comments, attributes, or tool); `std.mem` API breadth | Generated unsafe only in user gates; comment audit; narrow mem API |
 | E2-M14 | Jet-export to C in scope; header discovery strategy; which C deps ship as examples | Import-only first; pkg-config/classic flags; one small C lib example |
 | E2-M15 | First cross target triple; freestanding panic strategy; CI embedded smoke vs doc-only | One non-host CLI target; abort default; documented harness minimum |
-| E2-M16 | Package build scope; sandbox guarantees; signed cache generation/rollback depth | Pure eval + builds; no ambient I/O; design signed cache, ship later |
+| E2-M16 | Package recipe scope; sandbox guarantees; signed cache generation/rollback depth | Pure eval + recipes; no ambient I/O; design signed cache, ship later |
 | E2-M17 | Showcase set (which 6 demos are mandatory); perf/size budgets; **launch versioning** (E2-D2); beta period | Four showcases + `jet dev` demo; record budgets; normal SemVer at GA |
 | E2-M18 | D-REPL1…21 ballots (see m18-repl.md); whether REPL ships before or after GA | Separate milestone after E2-M4; terminal REPL recommended; playground deferred |
 
@@ -160,7 +112,7 @@ after concurrence.
 | E2-M13 | `m13-low-level-tier.md` | `std.mem`, allocators, layout, `Ptr<T>`, volatile, unsafe audit model |
 | E2-M14 | `m14-c-ffi.md` | C FFI: `@bindgen` / `@extern module`, `use c.<lib>`, link discovery, overlay merge |
 | E2-M15 | `m15-freestanding-cross.md` | Cross-compilation, `no_std`/freestanding profile, embedded smoke target |
-| E2-M16 | `m16-pure-eval-layer3.md` | `pure fn`, `jet eval --pure`, package builds, sandbox/cache foundations |
+| E2-M16 | `m16-pure-eval-layer3.md` | `pure fn`, `jet eval --pure`, package recipes, sandbox/cache foundations |
 | E2-M17 | `m17-epoch2-ga.md` | Production showcase, audits, performance, docs, release checklist |
 | E2-M18 | `m18-repl.md` | `jet repl` — interpreter-backed interactive session (blocked on D-REPL1…21) |
 
@@ -535,14 +487,14 @@ Exit criteria:
 ## E2-M16 - Pure evaluation and package layer 3
 
 Goal: make purity a product feature and lay the groundwork for declarative
-configuration/package builds.
+configuration/package recipes.
 
 Scope from S60 and M12 layer 3:
 
 - `pure fn` checked modifier.
 - Purity in public signatures.
 - `jet eval --pure`.
-- Sandboxed package builds on the existing store/lockfile.
+- Sandboxed package recipes on the existing store/lockfile.
 - Signed binary/source caches and generations/rollback design.
 - Integration path for `docs/plans/jetpack-jetos/README.md`: Phase 1 builds an
   independent `jetpack run/build/list/clean/add/remove` product track, while
@@ -553,7 +505,7 @@ Exit criteria:
 
 - Pure evaluation is deterministic and has call-trace diagnostics.
 - Impure calls fail with a path explaining why.
-- Package builds cannot perform ambient I/O or network access.
+- Package recipes cannot perform ambient I/O or network access.
 - A small declarative config example evaluates to stable JSON.
 
 ## E2-M18 - Interactive REPL (`jet repl`)
@@ -652,9 +604,26 @@ approve or edit:
 - [ ] Whether low-level tier and C FFI are both required inside Epoch 2.
 - [x] Pure evaluation vs layer 3. ✅ D-PURE1/2 in Epoch 2; user derives (S56) → Epoch 3.
 
-### REPL (E2-M18 / D-REPL1…21)
+### Milestone decision gates (ratified 2026-06-17)
 
-All REPL ballots ✅ ratified 2026-06-16 (see m18-repl.md owner-decisions).
+- [x] D-LIB1 — S61 (labels/defaults) + S62 (delegation) both in M6. ✅ ratified 2026-06-17 — A.
+- [x] D-IO2 — Cleanup surface. ✅ ratified 2026-06-17 — A: RAII handles (S63 confirmed).
+- [x] D-JSON1-decode — JSON decode strictness. ✅ ratified 2026-06-17 — B: lenient coerce; implementation must surface coercions.
+- [x] D-PKGS4 — Yank / immutability. ✅ ratified 2026-06-17 — A-amended: immutable + yank + must compile/pass CI before publish.
+- [x] D-TEST1 — Property testing. ✅ ratified 2026-06-17 — A: ship if small shrinking design exists.
+- [x] D-TOOL2 — `todo` typed-hole. ✅ ratified 2026-06-17 — A: ship now.
+- [x] D-TOOL5 — Capability summary. ✅ ratified 2026-06-17 — C: human by default + `--capabilities-json` for tooling.
+- [x] D-CROSS2 — Freestanding panic. ✅ ratified 2026-06-17 — A: abort by default.
+- [x] D-CROSS3 — Embedded smoke. ✅ ratified 2026-06-17 — A: documented QEMU harness.
+
+### REPL (E2-M18 / D-REPL1…21 + additional)
+
+All REPL ballots ✅ ratified 2026-06-16 (see m18-repl.md owner-decisions). Additional REPL UX decisions ratified 2026-06-17:
+
+- [x] D-REPL-FUEL — A: cap per-input steps (~10M); `:run` to allow unbounded.
+- [x] D-REPL-BANNER — A: show Jet version + "type `:help`" at startup.
+- [x] D-REPL-COLOR — A: respect `NO_COLOR`/`CLICOLOR`.
+- [x] D-REPL-PRELOAD — A: implicit `use std.io`; REPL prints a one-line teaching note on first use of an auto-imported symbol.
 
 - [x] D-REPL1 — A: ship terminal REPL in Epoch 2.
 - [x] D-REPL2 — A: terminal only (web playground deferred).

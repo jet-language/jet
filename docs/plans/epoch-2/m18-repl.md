@@ -177,17 +177,13 @@ Likely in scope once D-REPL1=A and D-REPL21=A:
 
 ---
 
-## Open questions for the owner (not yet decision IDs)
+## Additional owner decisions (ratified 2026-06-17)
 
-These can become D-REPL21+ if needed during ratification:
+These were open questions promoted to decisions when the owner balloted them.
 
-1. **Fuel / timeout** — should the interpreter cap steps per input (like comptime
-   fuel) to prevent accidental infinite loops in class demos?
-2. **Startup banner** — show Jet version + "type `:help`" or stay silent
-   (beginner-first vs minimal noise)?
-3. **Color** — respect `NO_COLOR`/`CLICOLOR` like other `jet` commands?
-4. **Std preload** — implicit `import std.io;` or require explicit imports
-   (teaches imports vs magic)?
-
-Record answers in this file when decided; promote to ballots if they affect
-syntax or public CLI contracts.
+| ID | Question | Options | Ratified |
+|---|---|---|---|
+| D-REPL-FUEL | Fuel / timeout | A — cap per-input at ~10M interpreter steps; `user> :run` to allow unbounded | ✅ ratified 2026-06-17 — A: cap per-input steps; stops infinite loops in demos; `:run` to bypass |
+| D-REPL-BANNER | Startup banner | A — show Jet version + "type `:help`" on start | ✅ ratified 2026-06-17 — A: show banner; warm for beginners, points at `:help` |
+| D-REPL-COLOR | Color convention | A — respect `NO_COLOR` / `CLICOLOR` (consistent with rest of `jet` CLI) | ✅ ratified 2026-06-17 — A: respect `NO_COLOR`/`CLICOLOR`; `NO_COLOR=1 jet repl` is plain bytes |
+| D-REPL-PRELOAD | Std preload | A — implicit `use std.io` so `print` etc. just work | ✅ ratified 2026-06-17 — A with teaching note: auto-import `std.io`, but on first use of an auto-imported symbol the REPL prints a one-line teaching note showing that it was auto-imported and what the explicit import would be. Benefit of magic without hiding the model. |

@@ -7,6 +7,9 @@ away ease of use or performance.
 
 ## Ranked priorities
 
+**New**
+- Owner: Magic out-of-the-box, Batteries Included. Footguns are Opt-In. Memory & Type Safety by Default. Optimized Runtime Performance. 
+
 1. **Memory & type safety.** Never traded away, never configurable. 
 2. **Beginner experience.** Learnability and diagnostics are the product.
    If a feature can't be explained in two sentences to someone writing
