@@ -10,7 +10,8 @@ and stops. Paste it again (or say "continue") for the next chunk.
 > **shipped** (two binaries; `payload.jet` manifest; typed `module {}` `env.jet`
 > surface; `core`+`nix` providers; hangar store; `.jet/lock`; merge engine). The
 > authoritative, current list of what is built vs. pending is
-> [`active-task.md`](active-task.md) — consult it before picking up a chunk. The
+> [`jetpack-jetos/IMPLEMENTATION-STATUS.md`](jetpack-jetos/IMPLEMENTATION-STATUS.md) —
+> consult it before picking up a chunk. The
 > remaining live work is **R3 (tvix)** and the **still-open jetos surface**
 > (Chunk 5 tail + Chunk 6). This file remains the chunk protocol + kickoff prompt.
 
@@ -32,7 +33,7 @@ Do NOT try to do everything in one run.
 3. docs/plans/README.md  ← the implementing-agent protocol; follow it exactly
 4. docs/plans/jetpack-jetos/unified-ecosystem.md  ← the owner-RATIFIED design-of-record
 5. docs/plans/jetpack-jetos/README.md (sequencing, milestones, provider roadmap, jetos parity)
-6. docs/plans/active-task.md (LIVE status — what is built vs. pending right now)
+6. docs/plans/jetpack-jetos/IMPLEMENTATION-STATUS.md (LIVE status — what is built vs. pending right now)
 7. docs/spec/decision-ballots.md (what is still OPEN — never implement an open ID)
 
 # Non-negotiable rules

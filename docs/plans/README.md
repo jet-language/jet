@@ -12,7 +12,8 @@ package/environment engine exposed directly as `jetpack
 run/enter/build/list/clean/add/remove`, and Phase 2 is the `jetos` distro/ISO
 built on top of it. The ratified design-of-record is
 [`jetpack-jetos/unified-ecosystem.md`](jetpack-jetos/unified-ecosystem.md);
-live build-vs-pending status is in [`active-task.md`](active-task.md). All Phase-1
+live build-vs-pending status is in
+[`jetpack-jetos/IMPLEMENTATION-STATUS.md`](jetpack-jetos/IMPLEMENTATION-STATUS.md). All Phase-1
 surface decisions (D-JPK*, U1–U10) are ratified; the open items are the jetos
 config surface and `System`/`Image` semantics.
 

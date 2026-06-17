@@ -211,8 +211,8 @@ amended S52). Existing `jet add/remove` are transitional; later they may plumb t
 `jetpack add/remove`.
 
 The live status of what is built vs. pending is tracked in
-[`../active-task.md`](../active-task.md) — read it before assuming a feature
-exists.
+[`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md) — read it before assuming a
+feature exists.
 
 ---
 
@@ -223,13 +223,16 @@ All Phase-1 surface decisions are **ratified** and recorded in
 named sources), and U1–U10 (the unified authoring surface). jetos `D-OS1`
 (file-is-module) and `D-OS7` (entrypoint) are **superseded** by U3/U4.
 
+`System`/`Image`/`Service` field semantics (U11–U14, U18), `config.jet` loading +
+the `jetpack os` tier (U15/U16), and consumer-side library import (U17) are now
+**ratified and shipped** — see [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).
+
 **Still open** (do not implement — owner ballots in
 `docs/spec/decision-ballots.md`):
 - jetos config-surface syntax: `D-OS2/3/4/5/6` (`option`/`when`/`force`/`default`
   declaration form, enable flags, user scope) — see `jetos-design.md` §9.
-- `System`/`Image` field semantics, the `jetos` binary, `config.jet` loading,
-  and the consumer-side import-a-library syntax — see `active-task.md`
-  "Remaining work → blocked on owner ratification".
+- `S61` — hyphens in contribution/package/image names (owner has indicated
+  support; plan in `IMPLEMENTATION-STATUS.md`).
 
 ---
 
