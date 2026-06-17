@@ -40,6 +40,14 @@ compatibility/release policy ([`release-policy.md`](release-policy.md));
 `edition:` marker in `payload.jet`; enriched `jet --version` banner; E2001
 reachable, E2002/L2001 registered (honestly empty pre-1.0 deprecation registry).
 
+**E2-M3 — Developer command UX** verified 2026-06-16
+([`m3-dx-cli.md`](../plans/epoch-2/m3-dx-cli.md)). Stable exit-code table,
+TTY-aware color (NO_COLOR/FORCE_COLOR/--color), versioned `--json` schema,
+`jet explain` for every code, `jet doctor` (offline + `--fix` + C-FFI section),
+no-args greeting + did-you-mean (E2101/E2102/L2101), completions + man page
+from one registry, unified CLI/LSP fix engine, external `jet-<name>` discovery,
+OSC 8 hyperlinks, `jet build -v`. Digit separators (S67) already shipped.
+
 **Post-v1 language features already shipped on `master`:** fan-out `f.[…]` (S75)
 and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 `spec.md` and `syntax-decisions.md`.

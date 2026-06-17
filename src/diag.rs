@@ -225,7 +225,21 @@ impl Diagnostic {
         self.render_styled(file, src, color)
     }
 
+    /// Like [`render_colored`], but on a supporting terminal the `--> file:line`
+    /// location is wrapped in an OSC 8 hyperlink (a `file://` URL) so editors and
+    /// terminals can jump to it (D-DX6). `hyperlinks` must only be true when the
+    /// stream is a real TTY *and* color is on; with it off the bytes are
+    /// byte-for-byte identical to [`render_colored`], so piped/CI output and the
+    /// existing snapshots are unaffected.
+    pub fn render_linked(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
+        self.render_inner(file, src, color, hyperlinks)
+    }
+
     fn render_styled(&self, file: &str, src: &str, color: bool) -> String {
+        self.render_inner(file, src, color, false)
+    }
+
+    fn render_inner(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
         let st = Style::new(color);
         let mut out = String::new();
         let label = match self.severity {
@@ -235,10 +249,13 @@ impl Diagnostic {
         out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
         if let Some(span) = self.span {
             let (line, col) = line_col(src, span.start);
-            out.push_str(&format!(
-                "  {}\n",
-                st.dim(&format!("--> {}:{}:{}", file, line, col))
-            ));
+            let loc = format!("--> {}:{}:{}", file, line, col);
+            let loc = if hyperlinks {
+                osc8(&file_url(file, line, col), &loc)
+            } else {
+                loc
+            };
+            out.push_str(&format!("  {}\n", st.dim(&loc)));
             let line_text = src.lines().nth(line - 1).unwrap_or("");
             out.push_str("    |\n");
             out.push_str(&format!("{:>3} | {}\n", line, line_text));
@@ -388,6 +405,38 @@ pub fn render_all_colored(file: &str, src: &str, diags: &[Diagnostic], color: bo
         .map(|d| d.render_colored(file, src, color))
         .collect();
     rendered.join("\n")
+}
+
+/// Color-aware batch render that may add OSC 8 hyperlinks (D-DX6). `hyperlinks`
+/// must only be true on a real TTY with color on; with it off this is identical
+/// to [`render_all_colored`].
+pub fn render_all_linked(
+    file: &str,
+    src: &str,
+    diags: &[Diagnostic],
+    color: bool,
+    hyperlinks: bool,
+) -> String {
+    let rendered: Vec<String> = diags
+        .iter()
+        .map(|d| d.render_linked(file, src, color, hyperlinks))
+        .collect();
+    rendered.join("\n")
+}
+
+/// Wrap `text` in an OSC 8 terminal hyperlink to `url`.
+/// Format: `ESC ] 8 ; ; URL ST  text  ESC ] 8 ; ; ST`, with ST = `ESC \`.
+pub fn osc8(url: &str, text: &str) -> String {
+    format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, text)
+}
+
+/// Build a `file://` URL for a path + line/col, absolutized when possible so
+/// the link resolves regardless of the terminal's working directory.
+fn file_url(file: &str, line: usize, col: usize) -> String {
+    let abs = std::fs::canonicalize(file)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| file.to_string());
+    format!("file://{}:{}:{}", abs, line, col)
 }
 
 /// 1-based (line, column). Columns count characters, not bytes.

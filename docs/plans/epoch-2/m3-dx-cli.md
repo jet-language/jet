@@ -84,10 +84,17 @@ philosophy already commits to four; this milestone delivers the techniques.
 
 ## Exit criteria
 
-- Golden tests pin human + JSON output; CI mode is deterministic and ANSI-free.
-- Every diagnostic points to `jet explain` without noisy error text.
-- `jet doctor` gives actionable fixes offline by default.
-- `jet` with no args greets and orients; typo'd subcommands suggest the right one.
-- Completions (bash/zsh/fish) + man pages generate from one source.
-- `nix develop -c cargo test` green; no new compiler crates (I6); any
-  tooling-binary crate for completions/line-handling is owner-approved.
+- [x] Golden tests pin human + JSON output; CI mode is deterministic and ANSI-free. *(Wave A: `tests/cli.rs`.)*
+- [x] Every diagnostic points to `jet explain` without noisy error text. *(Wave A; Wave B added E2101/E2102/L2101 to the explain index.)*
+- [x] `jet doctor` gives actionable fixes offline by default. *(Wave B: `src/doctor.rs`, `--online`/`--fix`, C-FFI section per D-BUILD1.)*
+- [x] `jet` with no args greets and orients; typo'd subcommands suggest the right one. *(Wave B: greeting exit 0; E2101 with edit-distance "did you mean".)*
+- [x] Completions (bash/zsh/fish) + man pages generate from one source. *(Wave B: `src/cli.rs` registry → `jet completions <shell>` / `jet man`, hand-rolled, no clap.)*
+- [x] `nix develop -c cargo test` green; no new compiler crates (I6); any
+  tooling-binary crate for completions/line-handling is owner-approved. *(Wave B: zero new crates; generators are std-only.)*
+
+### Wave B (this wave) additions, beyond the original criteria
+
+- [x] Unified fix engine shared by CLI `jet fix` and LSP code actions (`jet::lsp::collect_fixes`/`apply_all`); `jet fix --dry-run` shows a diff and writes nothing.
+- [x] External subcommand discovery (D-DX5): `jet-<name>` on PATH runs as `jet <name>`.
+- [x] OSC 8 hyperlinks (D-DX6): `--> file:line` becomes a `file://` link only on a real TTY with color on; piped/CI output and snapshots are byte-identical.
+- [x] `jet build -v` (D-BUILD2): deterministic bridge-step labels (emit Rust → cache → rustc → link).

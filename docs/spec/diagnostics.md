@@ -252,7 +252,10 @@ before continuing.
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
 | E2001 | jet   | `payload.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
+| E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
+| E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
+| L2101 | jet   | `jet doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
 
 ## Editions and release policy (E2-M2)
 
@@ -271,6 +274,22 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 | E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `payload.jet`. |
 | E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
 | L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
+
+## Command-line diagnostics (E2-M3)
+
+These come from the CLI driver (`src/main.rs`, `src/cli.rs`), not the language
+front end. They use the same `Error [E####]` / `Why:` / `Fix:` voice so the
+command line teaches the same way the compiler does. The "did you mean"
+suggestion reuses the edit-distance muscle behind the S14 teaching errors.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2101 | That isn't a Jet command. | The first word after `jet` must be a known command (like `run`, `check`, or `test`) or an installed `jet-<name>` plugin on your PATH. | Run `jet help` to see the commands, or use the closest match named in the error. |
+| E2102 | That flag isn't one this command understands. | Each command accepts a fixed set of flags; an unknown or half-typed flag is usually a typo or a flag meant for a different command. | Drop the flag, or use the closest match named in the error; `jet help` lists the flags. |
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| L2101 | `jet doctor` found something in your environment that will bite you later. | Jet leans on a hidden toolchain (rustc, a build cache, your PATH); when one is missing or stale, builds fail with confusing errors far from the cause. | Apply the fix named in the report — many are auto-fixable with `jet doctor --fix`. |
 
 ## Fan-out and fixed-size list diagnostics
 
