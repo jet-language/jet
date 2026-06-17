@@ -225,7 +225,7 @@ named sources), and U1–U10 (the unified authoring surface). jetos `D-OS1`
 
 `System`/`Image`/`Service` field semantics (U11–U14, U18), `config.jet` loading +
 the `jetpack os` tier (U15/U16), consumer-side library import (U17), and
-hyphenated names in package/module/system/image positions (`S61`, finalist 2) are
+hyphenated names in package/module/system/image positions (`S84`, finalist 2) are
 now **ratified and shipped** — see
 [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).
 

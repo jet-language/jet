@@ -3411,7 +3411,7 @@ impl<'a> Parser<'a> {
     /// list of typed namespace contributions (`env.dev: Env { … }`).
     fn module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
         let start = self.bump().span; // `module`
-        // S61: module names may be kebab-case (a module is the package the
+        // S84: module names may be kebab-case (a module is the package the
         // payload manifest discovers by name).
         let (name, name_span) = self.expect_dashed_name("for the module name")?;
         let disabled = name.starts_with('_');
@@ -3541,7 +3541,7 @@ impl<'a> Parser<'a> {
             }
         };
         self.expect(TokKind::Dot, "after the namespace name")?;
-        // S61: contribution names (`system.<name>`, `image.<name>`, `env.<name>`)
+        // S84: contribution names (`system.<name>`, `image.<name>`, `env.<name>`)
         // may be kebab-case, e.g. `image.halcyon-iso`.
         let (path, path_span) = self.expect_dashed_name("for the contribution name")?;
         self.expect(TokKind::Colon, "after the contribution name")?;
@@ -3750,7 +3750,7 @@ impl<'a> Parser<'a> {
                     return Err(image_from_not_system(kw_span));
                 }
                 self.expect(TokKind::Dot, "after `system`")?;
-                // S61: `from: system.<name>` may reference a kebab-case System
+                // S84: `from: system.<name>` may reference a kebab-case System
                 // name; must read the same way the definition does so the E0978
                 // cross-check still string-matches.
                 let (sys, sys_span) = self.expect_dashed_name("for the system name")?;
@@ -4600,7 +4600,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// S61 (ratified 2026-06-16): a *dashed name* — `ident (-ident)*` — for the
+    /// S84 (ratified 2026-06-16): a *dashed name* — `ident (-ident)*` — for the
     /// kebab-case naming positions (package / module / system / image / env
     /// names), matching nixpkgs/npm package-name convention. A `-` only joins
     /// when it is **span-adjacent** to both neighbours (`prev.end == minus.start`
@@ -4686,7 +4686,7 @@ mod s61_tests {
         parse(&toks).unwrap_or_else(|d| panic!("parse errors: {d:?}"))
     }
 
-    /// S61 (regression): spaced `a - b` is still subtraction. The dashed-name
+    /// S84 (regression): spaced `a - b` is still subtraction. The dashed-name
     /// reader only fires in name positions and only on span-adjacent hyphens, so
     /// the expression grammar is untouched.
     #[test]
@@ -4709,7 +4709,7 @@ mod s61_tests {
         );
     }
 
-    /// S61: a kebab-case module name (`my-host`) joins span-adjacent hyphens into
+    /// S84: a kebab-case module name (`my-host`) joins span-adjacent hyphens into
     /// one name.
     #[test]
     fn dashed_module_name_joins() {

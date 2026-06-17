@@ -42,7 +42,7 @@ Branch `jetos-ratified-arc` off `master` @ `3e6be24`. Not yet merged to `master`
 | **U17** — `library` package consumed with ordinary `use <pkg>` (extra resolver search root); executables stay on PATH | U17 (D-LIB-USE A) | `d885585` | `src/loader.rs`, `tests/lib_use.rs` | E0982, E0983 |
 | **B1–B4** — four codegen/parse ICEs fixed (I2/I3): JSON view-param move (clone + L0201), std-struct field mangling, `Map.get` via `Object(root)` pattern, `for … in recv.field {}` struct-lit misparse | — | `c4fff23` | `src/{sema,codegen,parser}.rs`, `tests/ice_regressions.rs` | (lint L0201) |
 | **E2-M14 C FFI** — Phases 1–2 + compile-time hook: `@extern`/`@bindgen module c.<lib>`, bindgen∪overlay merge (overlay wins), `use c.<lib>`/`use "hdr.h"`, hangar/pkg-config link discovery, `jet bind` CLI | S59, D-CFFI1–3, D-CFFI2-SYN-1..4, D-CBIND2/3/5/6, D-LL2 | `cec262a` | `src/cffi.rs`, `tests/cffi.rs`, `tests/ui/cffi_*` | E3201–E3208 |
-| **S61** — hyphens allowed in package/module/system/image/env *names* (kebab-case, finalist 2): dashed-name `ident (-ident)*` in name positions only (`expect_dashed_name`), span-adjacent hyphens so `a - b` stays subtraction — no lexer change. `image.halcyon-iso` + `from: system.my-host` parse→elaborate→field-check→realize | S61 | (this commit) | `src/parser.rs` (`expect_dashed_name`), `src/syntax.rs` (`NAME_SEGMENT_SEP`), `src/jetpack/modeval.rs` (tests), `examples/jetpack-typed/system.jet` | (reuses E0003 for malformed names) |
+| **S84** — hyphens allowed in package/module/system/image/env *names* (kebab-case, finalist 2): dashed-name `ident (-ident)*` in name positions only (`expect_dashed_name`), span-adjacent hyphens so `a - b` stays subtraction — no lexer change. `image.halcyon-iso` + `from: system.my-host` parse→elaborate→field-check→realize | S84 | (this commit) | `src/parser.rs` (`expect_dashed_name`), `src/syntax.rs` (`NAME_SEGMENT_SEP`), `src/jetpack/modeval.rs` (tests), `examples/jetpack-typed/system.jet` | (reuses E0003 for malformed names) |
 
 ---
 
@@ -63,7 +63,7 @@ Branch `jetos-ratified-arc` off `master` @ `3e6be24`. Not yet merged to `master`
 
 ## Shipped since the arc
 
-**S61 — hyphens in package / module / system / image / env *names*** (ratified
+**S84 — hyphens in package / module / system / image / env *names*** (ratified
 2026-06-16, finalist 2; see `docs/spec/syntax-decisions.md`). Name positions are
 never expression positions, so hyphen handling lives entirely in the parser — no
 lexer change, no `a - b` ambiguity:
@@ -77,7 +77,7 @@ lexer change, no `a - b` ambiguity:
    identifiers (variables/fields/types/functions) stay plain `expect_ident`. The
    `payload.jet` manifest parser (`packmanifest.rs`) was already
    hyphen-transparent (it splits keys on `:` and keeps the name verbatim).
-3. `src/syntax.rs` (I7): `NAME_SEGMENT_SEP` records the dashed-name rule under S61
+3. `src/syntax.rs` (I7): `NAME_SEGMENT_SEP` records the dashed-name rule under S84
    (no new sigil — reuses the `-`/Minus token).
 4. modeval: no logic change; the System name definition and the image `from:`
    reference both flow through `expect_dashed_name`, so the E0978 cross-check

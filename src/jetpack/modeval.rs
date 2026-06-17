@@ -1253,7 +1253,7 @@ module installer {
         assert_eq!(plan.images[0].target, None);
     }
 
-    /// S61: hyphenated System name + hyphenated `from:` reference parse,
+    /// S84: hyphenated System name + hyphenated `from:` reference parse,
     /// elaborate, field-check, and cross-match (E0978 still string-matches the
     /// kebab-case name end-to-end).
     #[test]
@@ -1275,7 +1275,7 @@ module net {
         assert_eq!(plan.images[0].format, "iso");
     }
 
-    /// S61 (regression): a leading-hyphen name is rejected cleanly (the ordinary
+    /// S84 (regression): a leading-hyphen name is rejected cleanly (the ordinary
     /// `expect_ident` teaching diagnostic, never an ICE). The `-` is not glued to
     /// a preceding ident, so it never starts a dashed name.
     #[test]
@@ -1285,7 +1285,7 @@ module net {
         assert_eq!(err.code, "E0003");
     }
 
-    /// S61 (regression): a doubled hyphen stops the dashed name at the first gap;
+    /// S84 (regression): a doubled hyphen stops the dashed name at the first gap;
     /// the trailing `-` then fails to find an adjacent ident, so the contribution
     /// name ends and the next `expect` reports cleanly (no ICE).
     #[test]
@@ -1308,7 +1308,7 @@ module net {
         let dir = path.parent().unwrap();
         let plan = evaluate_env(&src, dir).unwrap();
         assert_eq!(plan.systems.len(), 1);
-        // S61: the example uses kebab-case names in the System and Image positions.
+        // S84: the example uses kebab-case names in the System and Image positions.
         assert_eq!(plan.systems[0].name, "my-host");
         assert_eq!(plan.images.len(), 1);
         assert_eq!(plan.images[0].name, "halcyon-iso");
