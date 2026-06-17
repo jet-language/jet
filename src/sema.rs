@@ -2041,6 +2041,11 @@ impl<'a> Checker<'a> {
                         self.borrow_ctx = self.view_return || self.is_task_spawn;
                         let et = self.infer(e);
                         self.expected_type = saved_expected;
+                        // E2302 (E2-M5): a `ref`-field struct built right here in
+                        // a `return` is a construction site too — guard it like a
+                        // `val` binding so a dangling stored ref never reaches
+                        // codegen (which has no lifetime to lower it with).
+                        self.check_stored_ref_fields(e);
                         // Returning a borrowed parameter would move out of a
                         // borrow in the generated Rust (I2) — require a copy.
                         if let Expr::Ident(n, nspan) = &*e {
@@ -2078,7 +2083,26 @@ impl<'a> Checker<'a> {
                             // points into a *field of a local* names the owner that
                             // dies at the closing brace ("what owns this?"). The bare
                             // local case stays E0206. Only one diagnostic fires.
-                            if let Some(owner) = self.view_return_local_owner(e) {
+                            if matches!(e, Expr::Index { .. } | Expr::Slice { .. })
+                                && self.view_return_local_owner(e).is_none()
+                            {
+                                // E2304 (E2-M5 zero-copy cell): an index/slice
+                                // *into a parameter* the caller owns would be a
+                                // sound borrow on paper, but the list/string
+                                // helpers copy into a fresh value, so the view
+                                // would point at a temporary. Reject in Jet
+                                // words rather than let rustc choke (I2).
+                                self.diags.push(Diagnostic::error(
+                                    "E2304",
+                                    "an indexed or sliced piece can't be handed back as a view"
+                                        .to_string(),
+                                    "indexing or slicing builds a fresh, owned piece, so there's no longer-lived value for a view to point at — the piece would vanish the moment this function returns"
+                                        .to_string(),
+                                    "return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it"
+                                        .to_string(),
+                                    Some(e.span()),
+                                ));
+                            } else if let Some(owner) = self.view_return_local_owner(e) {
                                 self.diags.push(Diagnostic::error(
                                     "E2301",
                                     format!(
@@ -3127,6 +3151,28 @@ impl<'a> Checker<'a> {
                 }
                 false
             }
+            // E2-M5 (generic / zero-copy cell): a `view` may point *into* a
+            // field of something the caller already owns — a parameter (incl.
+            // a generic-typed one) or a const. The caller keeps owning the
+            // root for as long as the returned view lives, so the borrow of a
+            // stored field is sound. A field path rooted at a *local* is the
+            // E2301 case (handled by `view_return_local_owner`, not here).
+            //
+            // Index/slice are deliberately *not* here: the list/string slice
+            // helpers build a fresh owned value, so handing one back as a view
+            // would borrow a temporary. Those land in E2304, below.
+            Expr::Field(..) => {
+                let Some(root) = expr_root_ident(e) else {
+                    return false;
+                };
+                if self.consts.contains_key(root) {
+                    return true;
+                }
+                match self.lookup(root) {
+                    Some(info) => info.param_conv.is_some(),
+                    None => false,
+                }
+            }
             _ => false,
         }
     }
@@ -3196,30 +3242,39 @@ impl<'a> Checker<'a> {
                         fname
                     ),
                     format!(
-                        "a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but {} can live only as long as this function call",
+                        "a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but {} doesn't live long enough to promise that here",
                         why_short
                     ),
-                    "store an owned value (drop `ref` and let the struct keep its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning".to_string(),
+                    "store an owned value: drop `ref` so the struct keeps its own copy (or `.clone()` into it)".to_string(),
                     Some(*fspan),
                 ));
             }
         }
     }
 
-    /// If the expression filling a `ref` field won't outlive the struct, return
-    /// a short noun phrase describing the dangling source (for the E2302 *why*).
-    /// `None` means the source proves it outlives (a parameter or const).
+    /// If the expression filling a `ref` field won't *provably* outlive the
+    /// struct, return a short noun phrase describing the source (for the E2302
+    /// *why*). `None` means the source is `'static` (a const), the only thing a
+    /// stored `ref` can safely point at in v1.
+    ///
+    /// E2-M5 soundness note: a parameter outlives the *call*, but the struct it
+    /// fills can be returned or stored past the call, and the generated Rust
+    /// struct has no lifetime to name that borrow against. There is no sound
+    /// lowering for a `ref` field bound to a parameter or local without arenas
+    /// (D-REF2, OPEN). So only a const source survives; everything else is
+    /// rejected here rather than handed to rustc as an ICE (I2).
     fn ref_source_dangles(&self, e: &Expr) -> Option<String> {
         match e {
-            // A fresh literal has no owner that outlives the struct.
+            // A fresh literal has no owner at all that outlives the struct.
             Expr::Str(..) => Some("freshly made text".to_string()),
+            // A `'static` const is the one source a stored `ref` may point at.
             Expr::Ident(name, _) => {
                 if self.consts.contains_key(name) {
                     return None;
                 }
                 let info = self.lookup(name)?;
                 if info.param_conv.is_some() {
-                    None
+                    Some(format!("the borrowed `{}`", name))
                 } else {
                     Some(format!("the local `{}`", name))
                 }
@@ -3231,12 +3286,20 @@ impl<'a> Checker<'a> {
                 }
                 let info = self.lookup(root)?;
                 if info.param_conv.is_some() {
-                    None
+                    Some(format!("the borrowed `{}`", root))
                 } else {
                     Some(format!("the local `{}`", root))
                 }
             }
-            _ => None,
+            // Elaboration may wrap a `ref` field's source in an auto `.clone()`
+            // (record-literal path). A clone produces a fresh owned value, so a
+            // `ref` (which needs a borrow) can't be filled from it — look
+            // through to the receiver so we still name the real source.
+            Expr::MethodCall { receiver, .. } => self.ref_source_dangles(receiver),
+            // Anything else computed here (a call result, an operator, a fresh
+            // collection) is a temporary with no lifetime to name — there is no
+            // sound `ref`-field lowering for it in v1 (arenas, D-REF2, OPEN).
+            _ => Some("a value computed here".to_string()),
         }
     }
 

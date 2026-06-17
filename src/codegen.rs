@@ -2480,6 +2480,15 @@ fn emit_view_return(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             }
             place_of(env, name)
         }
+        // A `view` into a field of an owned root (a parameter) hands back a
+        // borrow of a place, so take its address. `emit_expr` yields the place
+        // expression; `&` makes it the `&T` the signature promises. (E2-M5
+        // generic / zero-copy cell — sema proved the root outlives the call in
+        // `expr_ok_for_view_return`; index/slice are rejected by E2304 and
+        // never reach codegen.)
+        Expr::Field(..) => {
+            format!("&{}", emit_expr(cx, e, env))
+        }
         _ => emit_expr(cx, e, env),
     }
 }

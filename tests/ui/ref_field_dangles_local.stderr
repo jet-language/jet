@@ -3,5 +3,5 @@ Error [E2302]: the `ref` field `name` would point at something that dies first
     |
   7 |     val h: Holder = Holder { name: local };
     |                              ^^^^
- Why: a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but the local `local` can live only as long as this function call
- Fix: store an owned value (drop `ref` and let the struct keep its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning
+ Why: a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but the local `local` doesn't live long enough to promise that here
+ Fix: store an owned value: drop `ref` so the struct keeps its own copy (or `.clone()` into it)

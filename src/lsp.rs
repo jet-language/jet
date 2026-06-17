@@ -520,6 +520,13 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
                 });
             }
             collect_stmts(&f.body, mp, module, db);
+            // L2301 (E2-M5, D-REF3): in a `-> view` function, every `return`
+            // hands back a borrow. Surface an advisory inlay naming the source
+            // the view points into, so the borrow is visible without reading
+            // the signature. On by default beyond the clone hints.
+            if f.is_view_return {
+                collect_view_return_hints(&f.body, mp, db);
+            }
         }
         Item::Struct(s) => {
             let fields: Vec<(String, ast::Type)> = s
@@ -748,6 +755,61 @@ fn hover_for_fn(f: &ast::Func) -> String {
 fn collect_stmts(stmts: &[ast::Stmt], mp: &str, module: &LoadedModule, db: &mut SymbolDB) {
     for stmt in stmts {
         collect_stmt(stmt, mp, module, db);
+    }
+}
+
+/// L2301 (E2-M5, D-REF3): walk a `-> view` function body and, at every
+/// `return`, push an advisory inlay hint naming the source the returned view
+/// borrows (the parameter or `param.field` it points into) plus a reminder
+/// that the borrow lives only as long as that source. On by default — no
+/// diagnostic, just a hint, so it never blocks compilation.
+fn collect_view_return_hints(stmts: &[ast::Stmt], mp: &str, db: &mut SymbolDB) {
+    for stmt in stmts {
+        match stmt {
+            ast::Stmt::Return(Some(e), _) => {
+                if let Some(src) = view_return_source(e) {
+                    db.inlay.push(InlayHint {
+                        span: e.span(),
+                        module_path: mp.to_string(),
+                        label: format!(" borrows `{}` — lives as long as it does", src),
+                    });
+                }
+            }
+            ast::Stmt::If(if_stmt) => collect_view_return_hints_if(if_stmt, mp, db),
+            ast::Stmt::While { body, .. }
+            | ast::Stmt::For { body, .. }
+            | ast::Stmt::Loop(body, _) => collect_view_return_hints(body, mp, db),
+            ast::Stmt::Switch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    collect_view_return_hints(&arm.body, mp, db);
+                }
+                if let Some(eb) = else_body {
+                    collect_view_return_hints(eb, mp, db);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_view_return_hints_if(if_stmt: &ast::IfStmt, mp: &str, db: &mut SymbolDB) {
+    collect_view_return_hints(&if_stmt.then_body, mp, db);
+    match &if_stmt.else_branch {
+        Some(ast::ElseBranch::ElseIf(inner)) => collect_view_return_hints_if(inner, mp, db),
+        Some(ast::ElseBranch::Else(body)) => collect_view_return_hints(body, mp, db),
+        None => {}
+    }
+}
+
+/// Name the source a returned `view` borrows: the root identifier of an
+/// `Ident` or `Field` path. `None` for shapes that don't read into a name.
+fn view_return_source(e: &ast::Expr) -> Option<String> {
+    match e {
+        ast::Expr::Ident(name, _) => Some(name.clone()),
+        ast::Expr::Field(base, _, _) => view_return_source(base),
+        _ => None,
     }
 }
 

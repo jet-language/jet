@@ -241,6 +241,7 @@ before continuing.
 | E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
 | E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
 | E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |
+| E2304 | sema  | an indexed or sliced piece can't be handed back as a `view` (E2-M5) |
 | L2301 | sema  | this return borrows; here is its source (advisory, E2-M5) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
@@ -321,6 +322,7 @@ E2303` points there and the soundness matrix has a named cell.
 | E2301 | A `-> view` function returns a view into a field of a value this function owns. | The owning local is made inside the call and freed when it returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at. | Return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it. |
 | E2302 | A `ref` field is filled from a value that won't outlive the struct. | A `ref` field stores a view, not its own copy, so its source must outlive the struct; a local or a fresh literal lives only as long as the call. | Store an owned value (drop `ref` so the struct keeps its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning. |
 | E2303 | A `view` borrow or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A borrowed value points into something another scope owns; a task or channel moves owned data between threads, so a borrow can't go with it. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the borrowed field before crossing, or rebuild the value as an owned copy. |
+| E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
 | L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
 
 ## C FFI diagnostics (E2-M14, S59)

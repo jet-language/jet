@@ -1,0 +1,26 @@
+{
+  "description": "L2301 (D-REF3): a `-> view` return shows an advisory inlay naming the borrowed source",
+  "source": "struct Holder {\n    name: String;\n}\nfn peek(holder: Holder) -> view String {\n    return holder.name;\n}\nfn main() {\n    print(0);\n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["inlayHintProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_view_hint_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///tmp/lsp_view_hint_test.jet"},"range":{"start":{"line":0,"character":0},"end":{"line":10,"character":0}}}},
+      "expect_contains": ["borrows", "holder"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}
