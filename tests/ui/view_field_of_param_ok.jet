@@ -1,0 +1,15 @@
+// Positive matrix cell: a `view` into a whole *field of a parameter* is sound.
+// The caller owns `holder`, so the borrowed field outlives the call. This is
+// the primitive the zero-copy parser is built on.
+struct Holder {
+    name: String;
+}
+
+fn peek(holder: Holder) -> view String {
+    return holder.name;
+}
+
+fn main() {
+    val h: Holder = Holder { name: "hi" };
+    print(peek(h));
+}

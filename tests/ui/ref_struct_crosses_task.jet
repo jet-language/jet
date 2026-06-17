@@ -1,0 +1,20 @@
+use core.tasks as tasks;
+
+struct Holder {
+    ref name: String;
+}
+
+// A `ref`-holding struct borrows something another scope owns, so it can't be
+// moved into a task — even when it arrives as a parameter we never built here.
+fn forward(h: Holder) {
+    val t = tasks.spawn(() => inspect(h));
+    t.join();
+}
+
+fn inspect(h: Holder) -> Int {
+    return 0;
+}
+
+fn main() {
+    print(0);
+}

@@ -1,0 +1,15 @@
+use core.tasks as tasks;
+
+struct Owned {
+    name: String;
+}
+
+fn make() -> Owned {
+    return Owned { name: "hi" };
+}
+
+fn main() {
+    val t = tasks.spawn(() => make());
+    val result: Owned = t.join();
+    print(result.name);
+}

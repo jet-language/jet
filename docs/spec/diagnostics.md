@@ -238,6 +238,11 @@ before continuing.
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | L1101 | sema  | Task value dropped without `.join()`       |
+| E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
+| E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
+| E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |
+| E2304 | sema  | an indexed or sliced piece can't be handed back as a `view` (E2-M5) |
+| L2301 | sema  | this return borrows; here is its source (advisory, E2-M5) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -301,6 +306,25 @@ CLI.
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
 
+## Tier-2 reference diagnostics (E2-M5, S10 `view`/`ref`)
+
+These harden the ownership checker around borrowed returns and stored
+references. They never mention lifetimes; they speak in Jet words — *what
+owns this* and *how long can this view live*. E2301/E2302 supplement the
+tier-1 reference codes (E0206 bare-local `view` return, E0207 unlabeled
+`ref` fields); they do not replace them. E2303 is the reference-specific
+name for the task/channel rule — that situation is **reported once, as
+E1102** (a `view`/`ref` value is unsendable); E2303 exists so `jet explain
+E2303` points there and the soundness matrix has a named cell.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2301 | A `-> view` function returns a view into a field of a value this function owns. | The owning local is made inside the call and freed when it returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at. | Return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it. |
+| E2302 | A `ref` field is filled from a value that won't outlive the struct. | A `ref` field stores a view, not its own copy, so its source must outlive the struct; a local or a fresh literal lives only as long as the call. | Store an owned value (drop `ref` so the struct keeps its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning. |
+| E2303 | A `view` borrow or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A borrowed value points into something another scope owns; a task or channel moves owned data between threads, so a borrow can't go with it. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the borrowed field before crossing, or rebuild the value as an owned copy. |
+| E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
+| L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
+
 ## C FFI diagnostics (E2-M14, S59)
 
 | Code | What | Why | Fix |
@@ -313,6 +337,100 @@ CLI.
 | E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `@extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `@extern module c.{lib} { … }`. |
 | E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
 | E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
+
+## CLI diagnostics (E2-M3 developer command UX)
+
+These are produced by the `jet` driver itself, not by checking a `.jet`
+file, so they have no source span. They use the same what/why/fix voice
+and exit with code **2** (usage error — see "Exit codes" in
+docs/spec/architecture.md). Both carry a "did you mean" when a known
+command/flag is within edit distance 2. Their golden transcripts live in
+`tests/cli/` (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2101 | `{cmd}` isn't a jet command. | Every jet run starts with a command like `run`, `check`, or `new`. | Did you mean `jet {closest}`? Run `jet help` to see them all. |
+| E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
+
+### `jet doctor` advisories
+
+`jet doctor` (decision **D-DX2**, ratified 2026-06-16 — health checks *and*
+auto-fix) self-diagnoses the environment Jet hides: the rustc backend, the
+build cache and package store, PATH, the language server, and the C-FFI/cargo
+bridge (the FFI section is decision **D-BUILD1**). It runs **offline by
+default** — only `--online`/`--network` lets it probe the registry. Each
+problem prints a single advisory line tagged **L2101** with the concrete fix.
+Safely auto-fixable problems (a missing cache or store directory) are applied
+under `jet doctor --fix`; doctor never modifies user source or package
+manifests. Exit code is 0 when every check is healthy or only advisories
+remain, and 1 when a hard problem (no rustc, an unwritable store) blocks normal
+use.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| L2101 | `jet doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet doctor --fix`. |
+
+## Machine-readable diagnostics (`--json`)
+
+Passing `--json` to `jet check`, `jet build`, or `jet test` makes the
+driver emit diagnostics as **data** instead of prose, for scripts, CI,
+and editors. This is decision **D-DX1** (ratified 2026-06-16): a single,
+**stable, versioned** schema, shared by the `--json` CLI flag, the future
+`jet fix` engine, and the LSP. The serializer lives in `src/diagjson.rs`
+(`to_json` / `render_all_json`); this section is its single source of
+truth. Adding a field is allowed any time; **removing or repurposing one
+requires bumping `schema_version`.**
+
+**Shape — JSON Lines.** One self-contained JSON object per diagnostic,
+each terminated by `\n`, matching `cargo --message-format=json`. A run
+with N diagnostics prints N lines on **stdout**; a clean run prints
+nothing on stdout. Human prose and the `jet explain` footer still go to
+**stderr** in the non-`--json` path, and `--json` emits **no ANSI ever**
+(scripts must never parse ANSI). Field order is fixed and numbers are
+integers, so the bytes are deterministic and snapshot-pinnable.
+
+**Fields (schema_version 1):**
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `schema_version` | integer | Schema version; `1` today. Bumped only for breaking changes. |
+| `code` | string | The diagnostic code, e.g. `"E0037"`. Pairs with `jet explain`. |
+| `severity` | string | `"error"` or `"warning"`. |
+| `message` | string | The one-line *what* (same text as the human `Error [...]:` line). |
+| `why` | string | The *why* — the rule behind the diagnostic. |
+| `fix` | string | The *fix* — the concrete next step (human text). |
+| `file` | string | Path of the source file the diagnostic is about. |
+| `span` | object \| null | Source location, or `null` for whole-file diagnostics. |
+| `suggestions` | array | Machine-applicable fixes (possibly empty). |
+| `detail` | string \| null | Extra indented detail (e.g. tool output), or `null`. |
+
+A **`span`** object carries both human and machine coordinates:
+`start_byte`, `end_byte` (byte offsets into the file, the range a fix
+slices), and 1-based `start_line` / `start_col` / `end_line` / `end_col`.
+
+A **`suggestions`** entry is `{ "message", "replacements": [...] }`, where
+each replacement is `{ "file", "span", "new_text" }` — apply `new_text`
+over the byte range `[start_byte, end_byte)` in `file`. This is the
+contract the future `jet fix` engine and LSP code actions consume; today
+it is populated from the S14 teaching auto-corrects (e.g. E0037 "replace
+`println` with `print`"). Diagnostics with no mechanical fix emit
+`"suggestions": []` — the field is always present so consumers never
+special-case its absence.
+
+Example (`jet check`, one teaching error, wrapped for readability —
+the real output is one line):
+
+```json
+{"schema_version":1,"code":"E0037","severity":"error",
+ "message":"Jet calls it `print`, not `println`","why":"...","fix":"replace `println` with `print`",
+ "file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},
+ "suggestions":[{"message":"replace `println` with `print`",
+   "replacements":[{"file":"hello.jet","span":{"start_byte":16,"end_byte":23,"start_line":2,"start_col":5,"end_line":2,"end_col":12},"new_text":"print"}]}],
+ "detail":null}
+```
+
+The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
+(blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
 
 ## Process for a new diagnostic
 

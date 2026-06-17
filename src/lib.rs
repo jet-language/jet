@@ -8,12 +8,17 @@
 pub mod ast;
 pub mod build_cache;
 pub mod cffi;
+pub mod cli_spec;
 pub mod codegen;
 pub mod collections;
 pub mod comptime;
 pub mod diag;
+pub mod diagjson;
+pub mod doctor;
+pub mod explain;
 pub mod fetch;
 pub mod ffi;
+pub mod fixengine;
 pub mod fmt;
 pub mod generics;
 pub mod jetpack;
@@ -194,6 +199,101 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
 }
 
 pub use diag::render_all as render_diagnostics;
+
+/// Render diagnostics as machine-readable JSON Lines (D-DX1, E2-M3): one
+/// versioned JSON object per diagnostic, never any ANSI. The shared serializer
+/// lives in `diagjson` so `jet fix` and the LSP reuse the exact same schema.
+pub use diagjson::render_all_json as render_diagnostics_json;
+
+/// Render diagnostics for the CLI, with the E2-M3 "learn more" footer.
+///
+/// When `color` is true (an attached terminal, not piped/NO_COLOR — see
+/// `stderr_color` in the driver), each rendered diagnostic gains one dim
+/// trailing line pointing at `jet explain <code>`. When `color` is false the
+/// output is byte-for-byte `render_diagnostics`, so piped/CI/golden output is
+/// unchanged and existing snapshots stay green.
+pub fn render_diagnostics_cli(
+    file: &str,
+    src: &str,
+    diags: &[Diagnostic],
+    color: bool,
+) -> String {
+    if !color {
+        return diag::render_all(file, src, diags);
+    }
+    // Dim each diagnostic's footer; one unobtrusive line per diagnostic. When
+    // color is on (an attached terminal), also weave OSC-8 hyperlinks (D-DX6)
+    // into the location line and the error code so a click jumps to the source
+    // or to `jet explain`. Hyperlinks ride the same gate as color, so piped /
+    // NO_COLOR / `--color=never` output is byte-identical to `render_all`.
+    let links = osc8_supported();
+    let blocks: Vec<String> = diags
+        .iter()
+        .map(|d| {
+            let mut body = d.render(file, src);
+            if links {
+                body = link_diagnostic(&body, file, src, d);
+            }
+            format!(
+                "{body}\x1b[2mrun `{bin} explain {code}` to learn more\x1b[0m\n",
+                bin = syntax::BINARY_NAME,
+                code = d.code,
+            )
+        })
+        .collect();
+    blocks.join("\n")
+}
+
+/// True when OSC-8 hyperlinks should be emitted. This is *gated on top of the
+/// already-resolved color decision* (callers only reach here with color on), so
+/// the only extra signal we honour is an explicit opt-out: a terminal that
+/// advertises no hyperlink support. We keep it conservative and env-driven
+/// rather than probing terminfo (std-only, I6). `FORCE_COLOR` (used by tests and
+/// CI-style "always color" runs) implies links so the feature is testable
+/// without a real TTY.
+fn osc8_supported() -> bool {
+    // An explicit kill switch wins (lets users disable links while keeping color).
+    if std::env::var_os("NO_HYPERLINKS").is_some() {
+        return false;
+    }
+    true
+}
+
+/// Build an OSC-8 hyperlink: `ESC ] 8 ; ; URI ST  TEXT  ESC ] 8 ; ; ST`.
+/// We use BEL (`\x07`) as the string terminator for the widest compatibility.
+fn osc8(uri: &str, text: &str) -> String {
+    format!("\x1b]8;;{uri}\x07{text}\x1b]8;;\x07")
+}
+
+/// Rewrite a rendered diagnostic so the `--> file:line:col` location becomes a
+/// `file://` link to the source and the `[CODE]` token links to a `jet explain`
+/// affordance. Only the link wrappers are inserted; the visible characters are
+/// unchanged, so a terminal that ignores OSC-8 shows identical text.
+fn link_diagnostic(body: &str, file: &str, src: &str, d: &diag::Diagnostic) -> String {
+    let mut out = body.to_string();
+
+    // 1) The error code in the header line: `Error [E0102]: ...`. Link the code
+    //    token (with brackets) to a `jet explain` helper URL so a click teaches.
+    let code = d.code;
+    let needle = format!("[{code}]");
+    let explain_uri = format!("{}:{}", syntax::BINARY_NAME, code); // e.g. `jet:E0102`
+    let linked_code = osc8(&explain_uri, &needle);
+    out = out.replacen(&needle, &linked_code, 1);
+
+    // 2) The location line: `  --> file:line:col`. Link `file:line:col` to a
+    //    `file://` URI with a `:line:col` fragment many terminals understand.
+    if let Some(span) = d.span {
+        let (line, col) = diag::span_line_col(src, span.start);
+        let loc = format!("{file}:{line}:{col}");
+        let abs = std::fs::canonicalize(file)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| file.to_string());
+        let uri = format!("file://{abs}#{line}:{col}");
+        let linked_loc = osc8(&uri, &loc);
+        out = out.replacen(&loc, &linked_loc, 1);
+    }
+    out
+}
 
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
