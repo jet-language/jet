@@ -42,6 +42,7 @@ Branch `jetos-ratified-arc` off `master` @ `3e6be24`. Not yet merged to `master`
 | **U17** — `library` package consumed with ordinary `use <pkg>` (extra resolver search root); executables stay on PATH | U17 (D-LIB-USE A) | `d885585` | `src/loader.rs`, `tests/lib_use.rs` | E0982, E0983 |
 | **B1–B4** — four codegen/parse ICEs fixed (I2/I3): JSON view-param move (clone + L0201), std-struct field mangling, `Map.get` via `Object(root)` pattern, `for … in recv.field {}` struct-lit misparse | — | `c4fff23` | `src/{sema,codegen,parser}.rs`, `tests/ice_regressions.rs` | (lint L0201) |
 | **E2-M14 C FFI** — Phases 1–2 + compile-time hook: `@extern`/`@bindgen module c.<lib>`, bindgen∪overlay merge (overlay wins), `use c.<lib>`/`use "hdr.h"`, hangar/pkg-config link discovery, `jet bind` CLI | S59, D-CFFI1–3, D-CFFI2-SYN-1..4, D-CBIND2/3/5/6, D-LL2 | `cec262a` | `src/cffi.rs`, `tests/cffi.rs`, `tests/ui/cffi_*` | E3201–E3208 |
+| **S61** — hyphens allowed in package/module/system/image/env *names* (kebab-case, finalist 2): dashed-name `ident (-ident)*` in name positions only (`expect_dashed_name`), span-adjacent hyphens so `a - b` stays subtraction — no lexer change. `image.halcyon-iso` + `from: system.my-host` parse→elaborate→field-check→realize | S61 | (this commit) | `src/parser.rs` (`expect_dashed_name`), `src/syntax.rs` (`NAME_SEGMENT_SEP`), `src/jetpack/modeval.rs` (tests), `examples/jetpack-typed/system.jet` | (reuses E0003 for malformed names) |
 
 ---
 
@@ -60,37 +61,31 @@ Branch `jetos-ratified-arc` off `master` @ `3e6be24`. Not yet merged to `master`
 
 ---
 
-## Open decision raised by this arc
+## Shipped since the arc
 
-**S61 — hyphens in contribution / package / image names** (added to
-`docs/spec/syntax-decisions.md`, Open Decisions). The ratified worked
-`config.jet` writes `image.halcyon-iso`, but name positions read a single
-identifier token via `expect_ident`, and `-` is not an identifier char — so
-`halcyon-iso` does not lex (gap #5 shipped `halcyon_iso`).
-
-**Implementation plan (small, no lexer change, no `a - b` ambiguity)** — name
-positions are never expression positions, so the hyphen handling lives entirely
-in the parser:
-1. Add `expect_dashed_name(where_)` next to `expect_ident` (`src/parser.rs`):
-   read an ident, then while the next token is `-` *span-adjacent* to the prior
-   segment and immediately followed by an adjacent ident, append `-<segment>`.
-   Rule `ident (-ident)*` (no leading/trailing/double hyphen). Span adjacency is
-   what keeps spaced `a - b` as subtraction.
-2. Swap call sites to it: contribution name (`parser.rs:3542`), the `from:
-   system.<name>` reference in `image_lit`/`system_lit`, `module_decl` name
-   (`~3412`), and package names in `src/jetpack/packmanifest.rs`. Leave
-   variable/field/type identifiers plain.
-3. `src/syntax.rs` (I7): document the dashed-name rule under S61 (no new sigil —
-   reuses the `-` token).
-4. modeval: no logic change; confirm definition + `from:` reference use the same
-   reader so the E0978 cross-check still matches.
-5. Tests (I4/I5): `image.halcyon-iso` + `from: system.my-host` parse→realize;
-   regression that `a - b` still subtracts; clean diagnostic for `-iso`/`a--b`.
-6. Ratify S61 (Open → Ratified, finalist 2); restore `halcyon-iso` in the gap #5
-   example/tests.
-
-Owner has indicated S61 should be supported (allow hyphens). Recommended finalist
-is (2) for package/image/module *names*.
+**S61 — hyphens in package / module / system / image / env *names*** (ratified
+2026-06-16, finalist 2; see `docs/spec/syntax-decisions.md`). Name positions are
+never expression positions, so hyphen handling lives entirely in the parser — no
+lexer change, no `a - b` ambiguity:
+1. `expect_dashed_name(where_)` next to `expect_ident` (`src/parser.rs`): reads an
+   ident, then while the next token is `-` *span-adjacent* to the prior segment
+   and immediately followed by an adjacent ident, appends `-<segment>`. Rule
+   `ident (-ident)*` (no leading/trailing/double hyphen). Span adjacency keeps a
+   spaced `a - b` as subtraction.
+2. Swapped at the name call sites: contribution name, the `from: system.<name>`
+   reference in `image_field`, and the `module` declaration name. Code
+   identifiers (variables/fields/types/functions) stay plain `expect_ident`. The
+   `payload.jet` manifest parser (`packmanifest.rs`) was already
+   hyphen-transparent (it splits keys on `:` and keeps the name verbatim).
+3. `src/syntax.rs` (I7): `NAME_SEGMENT_SEP` records the dashed-name rule under S61
+   (no new sigil — reuses the `-`/Minus token).
+4. modeval: no logic change; the System name definition and the image `from:`
+   reference both flow through `expect_dashed_name`, so the E0978 cross-check
+   still string-matches hyphenated names.
+5. Malformed names (`image.-iso` leading hyphen, `image.a--b` double hyphen) fall
+   through to the existing E0003 teaching diagnostic — never an ICE (tested).
+6. `examples/jetpack-typed/system.jet` restored to the ratified spelling
+   (`system.my-host`, `image.halcyon-iso`).
 
 ---
 

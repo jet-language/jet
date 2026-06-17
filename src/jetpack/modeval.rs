@@ -1217,7 +1217,7 @@ module halcyon {
     }
 }
 module installer {
-    image.halcyon_iso: { from: system.halcyon, format: iso }
+    image.halcyon-iso: { from: system.halcyon, format: iso }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -1247,10 +1247,54 @@ module installer {
             ]
         );
         assert_eq!(plan.images.len(), 1);
-        assert_eq!(plan.images[0].name, "halcyon_iso");
+        assert_eq!(plan.images[0].name, "halcyon-iso");
         assert_eq!(plan.images[0].from, "halcyon");
         assert_eq!(plan.images[0].format, "iso");
         assert_eq!(plan.images[0].target, None);
+    }
+
+    /// S61: hyphenated System name + hyphenated `from:` reference parse,
+    /// elaborate, field-check, and cross-match (E0978 still string-matches the
+    /// kebab-case name end-to-end).
+    #[test]
+    fn s61_hyphenated_system_and_image_names() {
+        let src = r#"
+module net {
+    system.my-host: {
+        target: linux.x64,
+    }
+    image.halcyon-iso: { from: system.my-host, format: iso }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.systems.len(), 1);
+        assert_eq!(plan.systems[0].name, "my-host");
+        assert_eq!(plan.images.len(), 1);
+        assert_eq!(plan.images[0].name, "halcyon-iso");
+        assert_eq!(plan.images[0].from, "my-host");
+        assert_eq!(plan.images[0].format, "iso");
+    }
+
+    /// S61 (regression): a leading-hyphen name is rejected cleanly (the ordinary
+    /// `expect_ident` teaching diagnostic, never an ICE). The `-` is not glued to
+    /// a preceding ident, so it never starts a dashed name.
+    #[test]
+    fn s61_leading_hyphen_name_is_clean_error() {
+        let src = "module m { image.-iso: { from: system.halcyon, format: iso } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0003");
+    }
+
+    /// S61 (regression): a doubled hyphen stops the dashed name at the first gap;
+    /// the trailing `-` then fails to find an adjacent ident, so the contribution
+    /// name ends and the next `expect` reports cleanly (no ICE).
+    #[test]
+    fn s61_double_hyphen_name_is_clean_error() {
+        let src = "module m { image.a--b: { from: system.halcyon, format: iso } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        // Reaches a parser diagnostic, not a panic; the exact code is the
+        // "expected `:`" family from the stalled name.
+        assert!(err.code.starts_with('E'), "code: {}", err.code);
     }
 
     /// I5: the committed `examples/jetpack-typed/system.jet` is the executable
@@ -1264,9 +1308,11 @@ module installer {
         let dir = path.parent().unwrap();
         let plan = evaluate_env(&src, dir).unwrap();
         assert_eq!(plan.systems.len(), 1);
-        assert_eq!(plan.systems[0].name, "halcyon");
+        // S61: the example uses kebab-case names in the System and Image positions.
+        assert_eq!(plan.systems[0].name, "my-host");
         assert_eq!(plan.images.len(), 1);
-        assert_eq!(plan.images[0].from, "halcyon");
+        assert_eq!(plan.images[0].name, "halcyon-iso");
+        assert_eq!(plan.images[0].from, "my-host");
     }
 
     /// U18: an explicit `System { … }` / `Service { … }` / `Image { … }` is still

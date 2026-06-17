@@ -3411,7 +3411,9 @@ impl<'a> Parser<'a> {
     /// list of typed namespace contributions (`env.dev: Env { … }`).
     fn module_decl(&mut self) -> Result<ModuleDecl, Diagnostic> {
         let start = self.bump().span; // `module`
-        let (name, name_span) = self.expect_ident("for the module name")?;
+        // S61: module names may be kebab-case (a module is the package the
+        // payload manifest discovers by name).
+        let (name, name_span) = self.expect_dashed_name("for the module name")?;
         let disabled = name.starts_with('_');
         self.expect(TokKind::LBrace, "to open the module body")?;
         let mut sources = Vec::new();
@@ -3539,7 +3541,9 @@ impl<'a> Parser<'a> {
             }
         };
         self.expect(TokKind::Dot, "after the namespace name")?;
-        let (path, path_span) = self.expect_ident("for the contribution name")?;
+        // S61: contribution names (`system.<name>`, `image.<name>`, `env.<name>`)
+        // may be kebab-case, e.g. `image.halcyon-iso`.
+        let (path, path_span) = self.expect_dashed_name("for the contribution name")?;
         self.expect(TokKind::Colon, "after the contribution name")?;
         // U11/U14/U18: `system.<name>:` and `image.<name>:` parse into dedicated
         // typed literals (the U13 `options` list, the typed `target` value, the
@@ -3746,7 +3750,10 @@ impl<'a> Parser<'a> {
                     return Err(image_from_not_system(kw_span));
                 }
                 self.expect(TokKind::Dot, "after `system`")?;
-                let (sys, sys_span) = self.expect_ident("for the system name")?;
+                // S61: `from: system.<name>` may reference a kebab-case System
+                // name; must read the same way the definition does so the E0978
+                // cross-check still string-matches.
+                let (sys, sys_span) = self.expect_dashed_name("for the system name")?;
                 crate::ast::ImageFieldValue::From {
                     system: sys,
                     span: Span::new(kw_span.start, sys_span.end),
@@ -4592,6 +4599,36 @@ impl<'a> Parser<'a> {
             )),
         }
     }
+
+    /// S61 (ratified 2026-06-16): a *dashed name* — `ident (-ident)*` — for the
+    /// kebab-case naming positions (package / module / system / image / env
+    /// names), matching nixpkgs/npm package-name convention. A `-` only joins
+    /// when it is **span-adjacent** to both neighbours (`prev.end == minus.start`
+    /// and `minus.end == next.start`); a spaced `a - b` therefore stays
+    /// subtraction (no lexer change, no expression-grammar change). No leading,
+    /// trailing, or doubled hyphen — `image.-iso` / `image.a--b` fall through to
+    /// the ordinary teaching diagnostic via `expect_ident`.
+    fn expect_dashed_name(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
+        let (mut name, first_span) = self.expect_ident(where_)?;
+        let start = first_span.start;
+        let mut end = first_span.end;
+        // Join `-<segment>` while the hyphen and the following ident are both
+        // glued (no intervening whitespace) to the preceding segment.
+        while matches!(self.peek().kind, TokKind::Minus)
+            && self.peek().span.start == end
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+            && self.peek2().span.start == self.peek().span.end
+        {
+            self.bump(); // `-`
+            let seg = self.bump(); // the adjacent ident
+            if let TokKind::Ident(s) = seg.kind {
+                name.push_str(syntax::NAME_SEGMENT_SEP);
+                name.push_str(&s);
+                end = seg.span.end;
+            }
+        }
+        Ok((name, Span::new(start, end)))
+    }
 }
 
 /// End byte of a parsed `System` field value, for the field's span.
@@ -4635,4 +4672,52 @@ fn binding_why() -> String {
 
 fn pat_span(pat: &Pattern) -> Span {
     pat.span()
+}
+
+#[cfg(test)]
+mod s61_tests {
+    use super::*;
+    use crate::ast::{BinOp, Expr, Stmt};
+    use crate::lexer::lex;
+
+    fn program(src: &str) -> Program {
+        let (toks, errs) = lex(src);
+        assert!(errs.is_empty(), "lex errors: {errs:?}");
+        parse(&toks).unwrap_or_else(|d| panic!("parse errors: {d:?}"))
+    }
+
+    /// S61 (regression): spaced `a - b` is still subtraction. The dashed-name
+    /// reader only fires in name positions and only on span-adjacent hyphens, so
+    /// the expression grammar is untouched.
+    #[test]
+    fn spaced_minus_is_subtraction() {
+        let p = program("fn main() { val d = 5 - 3; }");
+        let func = p.items.iter().find_map(|i| match i {
+            crate::ast::Item::Func(f) => Some(f),
+            _ => None,
+        });
+        let func = func.expect("a main function");
+        let val = func.body.iter().find_map(|s| match s {
+            Stmt::Val(b) => Some(b),
+            _ => None,
+        });
+        let val = val.expect("a val binding");
+        assert!(
+            matches!(val.init, Expr::Binary(BinOp::Sub, _, _, _)),
+            "expected `5 - 3` to parse as subtraction, got {:?}",
+            val.init
+        );
+    }
+
+    /// S61: a kebab-case module name (`my-host`) joins span-adjacent hyphens into
+    /// one name.
+    #[test]
+    fn dashed_module_name_joins() {
+        let p = program("module my-host { }");
+        let m = p.items.iter().find_map(|i| match i {
+            crate::ast::Item::Module(m) => Some(m),
+            _ => None,
+        });
+        assert_eq!(m.expect("a module").name, "my-host");
+    }
 }

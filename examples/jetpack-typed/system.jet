@@ -10,13 +10,16 @@
 // Constructors are inferred from the expected type (U18): `system.halcyon: { … }`
 // elaborates to `System { … }`; each service `{ enable: true }` to `Service { … }`.
 //
+// Names in these positions may be kebab-case (S61) — `my-host`, `halcyon-iso` —
+// matching nixpkgs/npm package-name convention.
+//
 // This file is field-checked by the jetpack module evaluator; realize/activation
 // (`jetpack os switch`) is a later chunk (gap #4).
 module halcyon {
     sources: {
         default: github@NixOS/nixpkgs/nixos-24.05,
     }
-    system.halcyon: {
+    system.my-host: {
         target: linux.x64,
         packages: [default.[firefox, btop, ripgrep]],
         services: {
@@ -32,5 +35,5 @@ module halcyon {
 }
 
 module installer {
-    image.halcyon_iso: { from: system.halcyon, format: iso }
+    image.halcyon-iso: { from: system.my-host, format: iso }
 }

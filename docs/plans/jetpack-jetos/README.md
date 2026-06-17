@@ -224,15 +224,15 @@ named sources), and U1–U10 (the unified authoring surface). jetos `D-OS1`
 (file-is-module) and `D-OS7` (entrypoint) are **superseded** by U3/U4.
 
 `System`/`Image`/`Service` field semantics (U11–U14, U18), `config.jet` loading +
-the `jetpack os` tier (U15/U16), and consumer-side library import (U17) are now
-**ratified and shipped** — see [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).
+the `jetpack os` tier (U15/U16), consumer-side library import (U17), and
+hyphenated names in package/module/system/image positions (`S61`, finalist 2) are
+now **ratified and shipped** — see
+[`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).
 
 **Still open** (do not implement — owner ballots in
 `docs/spec/decision-ballots.md`):
 - jetos config-surface syntax: `D-OS2/3/4/5/6` (`option`/`when`/`force`/`default`
   declaration form, enable flags, user scope) — see `jetos-design.md` §9.
-- `S61` — hyphens in contribution/package/image names (owner has indicated
-  support; plan in `IMPLEMENTATION-STATUS.md`).
 
 ---
 

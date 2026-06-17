@@ -481,11 +481,19 @@ A module is a named, composable top-level declaration that contributes typed
 values to reserved namespaces. Many modules may share a file.
 
 ```ebnf
-module      = "module" ident "{" contribution* "}" ;
-contribution = namespace "." ident ":" expr [","] ;
+module      = "module" dashed-name "{" contribution* "}" ;
+contribution = namespace "." dashed-name ":" expr [","] ;
 namespace   = "env" | "system" | "image" ;
+dashed-name = ident { "-" ident } ;                (* S61: kebab-case names *)
 ```
 
+- **Dashed names (S61):** package / module / system / image / env **names** may
+  be kebab-case — `module web-app`, `system.my-host`, `image.halcyon-iso` —
+  matching nixpkgs/npm convention. A `-` joins two segments only when it is
+  *span-adjacent* to both (no surrounding whitespace), so a spaced `a - b` stays
+  subtraction; this is a parser rule (`expect_dashed_name`), not a lexer or
+  expression-grammar change. Code identifiers (variables, fields, types,
+  functions) stay plain `ident`. No leading, trailing, or doubled hyphen.
 - **Disable with a leading underscore:** `module _name { … }` parses with
   `disabled = true` (the name begins with `_`); it is not discovered or merged
   (U3, one-character reversible toggle).
@@ -518,7 +526,7 @@ service_rec = [ "Service" ] "{" { ident ":" expr [ "," ] } "}" ;
 option_list = "[" { dotted_key ":" expr [ "," ] } "]" ;
 dotted_key  = ident { "." ident } ;
 image_lit   = [ "Image" ] "{" image_field { "," image_field } [ "," ] "}" ;
-image_field = "from"   ":" "system" "." ident      (* U14: required *)
+image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S61 name *)
             | "format" ":" ident                   (* U14: iso | qcow | raw, default iso *)
             | "target" ":" platform ;              (* U14: cross-compile only *)
 ```

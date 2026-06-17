@@ -621,6 +621,28 @@ trailing parameters with defaults may be omitted at call sites.
 Rejected: Swift-style required labels (ceremony), Kotlin/Python
 reordering by name (two call shapes for one function), no labels at all.
 
+**S61 — Hyphens in package / module / system / image / env *names***
+*(ratified 2026-06-16, finalist 2)*: **names in these positions may be
+kebab-case** — `image.halcyon-iso`, `system.my-host`, `module web-app` —
+matching the nixpkgs/npm package-name convention users already know. (This
+shares the S61 ballot ID with *Argument labels & defaults* above; it is the
+separate "hyphens in names" decision raised by the jetos arc.) The grammar is a
+**dashed name** `ident (-ident)*`: a `-` joins two segments only when it is
+**span-adjacent** to both — `prev.end == minus.start` and
+`minus.end == next.start`, i.e. no surrounding whitespace. That span-adjacency
+rule is the whole safety mechanism: a spaced `a - b` stays **subtraction**, so
+there is **no lexer change and no expression-grammar change** — the hyphen
+handling lives entirely in the parser's `expect_dashed_name`, used only in name
+positions (contribution names, `from: system.<name>` references, the `module`
+declaration name; package names in `payload.jet` are already hyphen-transparent
+in the manifest parser). No leading, trailing, or doubled hyphen (`image.-iso`,
+`image.a--b` produce the ordinary teaching diagnostic, never an ICE). **Code
+identifiers** — variables, fields, types, functions — stay plain `ident`. No new
+sigil (reuses the `-`/Minus token; recorded as `NAME_SEGMENT_SEP` in
+`src/syntax.rs` per I7). Rejected: finalist 1 (underscores only, status quo) —
+the ratified worked `config.jet` and the nixpkgs/npm convention both write
+hyphens; a lexer-level identifier change (would break `a - b`).
+
 **S62 — Trait delegation** *(ratified 2026-06-12; post-1.0, lands only
 after M9 traits show real usage)*: `**impl Trait using field;**` — the
 compiler writes the forwarding methods for that one trait to that one
@@ -1477,7 +1499,6 @@ implementation milestone is pending.
 | --- | ------------------------------------------ | --------- |
 | S56 | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
 | S6-R | revisit statement terminators (see note below) | owner-paced |
-| S61 | hyphens in contribution / package / image names (see note below) | jetos polish |
 
 > **S6-R — Statement terminators, revisit (future).** S6 is ratified today
 > (semicolons required after every statement) and stays binding until the
@@ -1502,25 +1523,12 @@ implementation milestone is pending.
 > choosing. Build the side-by-side example set first; do not re-litigate
 > S6's text until then.
 
-> **S61 — Hyphens in contribution / package / image names (open).** The
-> ratified worked `config.jet` in `decision-ballots.md` writes
-> `image.halcyon-iso`, but contribution/module path segments today go through
-> `expect_ident`, and `-` is not an identifier character — so `image.halcyon-iso`
-> does not lex (gap #5 shipped with `halcyon_iso`). Finalists:
->
-> 1. **Underscores only (status quo)** — names are plain identifiers
->    (`halcyon_iso`). Zero parser change; consistent with every other Jet name;
->    cost is the ratified example must be corrected to underscores.
-> 2. **Allow hyphens in these name positions** — treat contribution/package/
->    image names as a dashed-name token (kebab-case), matching nixpkgs/npm
->    package-name convention. Beginner-familiar for package names; cost is a
->    lexer/parser special-case and a `a - b` vs `a-b` ambiguity to settle in
->    these positions.
->
-> **Recommendation: (2)** for package/image *names* specifically (they mirror
-> external package identifiers users already know), scoped so it cannot bleed
-> into expression context. Until ratified, S61 stays at finalist (1): names are
-> underscored identifiers.
+> **S61 — Hyphens in package / module / system / image / env names —
+> RATIFIED 2026-06-16 (finalist 2).** Moved to the Ratified section above. Names
+> in these positions may be kebab-case (`image.halcyon-iso`, `system.my-host`);
+> the dashed-name rule `ident (-ident)*` lives in the parser (`expect_dashed_name`,
+> span-adjacent hyphens only), so a spaced `a - b` stays subtraction — no lexer
+> change. Shipped in the jetos-ratified-arc.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
@@ -1704,3 +1712,4 @@ are fully ratified above. **S59 (C FFI)** ships in **Epoch 2** (E2-M14). **S53**
 | 2026-06-16 | U17 | a realized `library` package is consumed with `use <pkg>` (D-LIB-USE A) | owner |
 | 2026-06-16 | U18 | inferred constructors: bare `{…}` elaborates to the expected type; explicit `Type {…}` optional (D-INFER-CTOR) | owner |
 | 2026-06-16 | D-PAT6 | parameter destructuring deferred; unpack on first body line | owner |
+| 2026-06-16 | S61 | hyphens allowed in package/module/system/image/env *names* (finalist 2); dashed-name `ident (-ident)*`, span-adjacent only; no lexer change | owner |

@@ -455,6 +455,18 @@ pub const KW_MODULE: &str = "module";
 /// (`module _name { … }` is not discovered or merged). One char, reversible.
 pub const MODULE_DISABLE_PREFIX: &str = "_";
 
+/// S61 (ratified 2026-06-16): *dashed names* — the kebab-case naming rule for
+/// package / module / system / image / env **names** (and `from: system.<name>`
+/// references). The grammar is `ident (-ident)*`: a `-` joins two segments only
+/// when it is span-adjacent to both (no surrounding whitespace), matching
+/// nixpkgs/npm package-name convention (e.g. `image.halcyon-iso`,
+/// `system.my-host`). No new sigil — this reuses the existing `-`/Minus token;
+/// span adjacency is what keeps a spaced `a - b` as subtraction, so the rule
+/// never bleeds into the expression grammar. No leading, trailing, or doubled
+/// hyphen. Code identifiers (variables, fields, types, functions) stay plain
+/// `ident`. Enforced in `parser.rs::expect_dashed_name`.
+pub const NAME_SEGMENT_SEP: &str = "-";
+
 /// U3 (ratified 2026-06-16): reserved namespaces any module may contribute to.
 pub const NS_ENV: &str = "env";
 pub const NS_SYSTEM: &str = "system";
