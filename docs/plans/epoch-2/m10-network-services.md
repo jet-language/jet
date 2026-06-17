@@ -1,6 +1,6 @@
 # E2-M10 — Networking and services
 
-**Status:** draft — **blocked on D-NET1…D-NET3** (Group M10). Governed by the
+**Status:** ready — **D-NET1/D-NET2/D-NET3 all ✅ ratified**. Governed by the
 ratified concurrency lock (E2-V5 / S53: tasks + channels, no async).
 **Depends on:** E2-M1 (tasks/channels), E2-M7 (streaming I/O), E2-M9 (`jet.log`).
 TLS depends on the E2-M14 FFI tier. Unblocks E2-M12 (service observability) and
@@ -18,7 +18,7 @@ not 100k-connection async workloads (E2-V5/V7).
 
 | ID | Question | Rec | Default if deferred | Ratified |
 |---|---|---|---|---|
-| D-NET1 | TLS/HTTP dependency | **A** — rustls-class via the FFI tier, never hand-rolled | A | OPEN — needs owner |
+| D-NET1 | TLS/HTTP dependency | **A** — rustls-class via the FFI tier, never hand-rolled | A | ✅ ratified 2026-06-17 — TLS via `rustls` delivered as the `jet.tls` package (D-DEP1: FFI-wrapped via `extern rust "rustls@<ver>"`); `jet.http`→`jet.tls`; **no compiler crate** |
 | D-NET2 | Server concurrency story | **A** — S53 tasks/channels in Epoch 2; Go-scale async → Epoch 3 | A | ✅ ratified 2026-06-16 — Epoch 2: S53; Go-scale → `docs/plans/epoch-3/async-networking.md` |
 | D-NET3 | Service showcase backing store | **A** — sqlite-first | A | ✅ ratified 2026-06-16 — A: sqlite-first service showcase |
 

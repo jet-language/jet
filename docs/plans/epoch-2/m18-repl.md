@@ -87,8 +87,8 @@ picks another option.
 
 | ID | Question | Options | Rec | Ratified |
 |---|---|---|---|---|
-| D-REPL11 | Line editor tier (I6) | **A** — std-only: minimal read loop, no history · **B** — owner-approved line-editing crate (history, basic editing) · **C** — B plus LSP-style completions from sema | **B** | ✅ ratified 2026-06-16 — C |
-| D-REPL18 | If D-REPL11 ≠ A: external crate | **A** — `rustyline` · **B** — `reedline` · **C** — other (owner names crate; needs I6 sign-off) | **A** | ✅ ratified 2026-06-16 — A (`rustyline`) |
+| D-REPL11 | Line editor tier (I6) | **A** — std-only: minimal read loop, no history · **B** — owner-approved line-editing crate (history, basic editing) · **C** — B plus LSP-style completions from sema | **B** | ✅ **revised 2026-06-17 → A** (std-only). The compiler stays zero-crate; the REPL is compiler-internal so the D-DEP1 package-wrapping can't apply. Richer editing is a later upgrade that must re-earn an owner crate sign-off. (Was: C, 2026-06-16.) |
+| D-REPL18 | If D-REPL11 ≠ A: external crate | **A** — `rustyline` · **B** — `reedline` · **C** — other (owner names crate; needs I6 sign-off) | — | ✅ **revised 2026-06-17 → moot**: D-REPL11 is now A (std-only), so **no external crate** ships with the REPL. (Was: A `rustyline`, 2026-06-16.) |
 | D-REPL15 | Meta-commands (`:` commands) | **A** — `:quit` `:reset` only · **B** — A + `:load` `:type` `:help` · **C** — B + `:doc` `:imports` `:emit` (show generated Rust for session) | **B** | ✅ ratified 2026-06-16 — B |
 | D-REPL16 | Showing results | **A** — print value of last expression when it has a value; `;` suppresses · **B** — always print type + value (`x: Int = 3`) · **C** — only explicit `print` (no implicit echo) | **A** | ✅ ratified 2026-06-16 — B (with `;` suppression) |
 | D-REPL17 | Diagnostic voice | **A** — byte-identical to batch compiler (I4) · **B** — shorter headers; same codes and fix lines · **C** — REPL adds extra "in this session" context line | **A** | ✅ ratified 2026-06-16 — A |
