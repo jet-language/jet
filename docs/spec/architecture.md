@@ -39,6 +39,19 @@
 - **R1 — Codegen is dumb.** No checks, no decisions, no "see if rustc
   accepts it". If codegen needs to know something, sema should have
   established it.
+
+  **I1 amendment (D-LL1, ratified 2026-06-16, E2-M13).** I1 originally read
+  *"no `unsafe` in the language or generated code, ever (v1)."* The expert
+  low-level tier (S58) amends it: generated `unsafe` appears **only** inside
+  user-written gated regions — an `@unsafe { … }` block (which requires an
+  `@audit("…")` reason, lint L3101) or an `@unsafe fn` contract, both
+  unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
+  memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
+  sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
+  the audited `48_lowlevel` must contain no `unsafe`, and even there every
+  `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
+  it lowers an already-checked `@unsafe` region straight to a Rust `unsafe`
+  region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must
   produce Rust that compiles. New language features land as: spec →
   parser → sema checks → codegen → tests, in that order.

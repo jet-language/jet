@@ -228,6 +228,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
                 collect_tuple_shapes_from_expr(item, out);
             }
         }
+        Expr::PtrFromAddr { addr, .. } => collect_tuple_shapes_from_expr(addr, out),
     }
 }
 
@@ -284,7 +285,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
                 }
             }
         }
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Loop(_, _) | Stmt::Unsafe(_, _) => {}
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Loop(_, _) | Stmt::Unsafe { .. } => {}
     }
 }
 
@@ -547,6 +548,12 @@ impl Cx {
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
+            }
+            // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
+            // Memory safety is enforced in sema (the `@unsafe` gate); codegen
+            // is dumb.
+            Type::Apply { name, args } if name == syntax::TYPE_PTR && args.len() == 1 => {
+                format!("*mut {}", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } => {
                 if args.is_empty() {
@@ -1569,8 +1576,12 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
         })
         .collect::<Vec<_>>()
         .join(", ");
+    // S58 (E2-M13, D-LL1): an `@unsafe fn` lowers to a Rust `unsafe fn` so its
+    // body may use gated pointer ops directly; calling it is already gated to an
+    // `@unsafe` block in sema (E3103). Codegen stays dumb.
+    let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
     out.push_str(&format!(
-        "{pad}fn {}({}){ret_clause} {{\n",
+        "{pad}{unsafe_kw}fn {}({}){ret_clause} {{\n",
         f.name,
         params,
         ret_clause = ret_clause
@@ -1638,9 +1649,11 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
     out.push_str(&format!(
-        "{}pub fn {}({}){} {{\n",
+        "{}pub {}fn {}({}){} {{\n",
         pad,
+        unsafe_kw,
         mangle(&f.name),
         params,
         ret_clause
@@ -1738,8 +1751,12 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         .collect::<Vec<_>>()
         .join(", ");
     let vis = if f.name == "main" { "" } else { "pub " };
+    // S58 (E2-M13, D-LL1): an `@unsafe fn` lowers to a Rust `unsafe fn` so its
+    // body may use gated ops directly (callers are gated to an `@unsafe` block
+    // in sema, E3103). Codegen stays dumb.
+    let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
     out.push_str(&format!(
-        "{vis}fn {name}{gen}({params}){ret} {{\n",
+        "{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&f.name),
         gen = gen,
         params = params,
@@ -2090,9 +2107,12 @@ fn emit_stmt(
             emit_stmts(cx, inner, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }
-        Stmt::Unsafe(inner, _) => {
+        Stmt::Unsafe { body, .. } => {
+            // S58 (E2-M13, D-LL1): codegen is dumb — a gated `@unsafe { … }`
+            // region lowers straight to a Rust `unsafe { … }`. All safety
+            // checking already happened in sema.
             out.push_str(&format!("{}unsafe {{\n", pad));
-            emit_stmts(cx, inner, env, out, indent + 1, view_return);
+            emit_stmts(cx, body, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }
     }
@@ -2849,6 +2869,13 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
             let else_block = emit_value_block(cx, else_body, else_value, env);
             format!("if {} {} else {}", c, then_block, else_block)
         }
+        // S58 (E2-M13): `mem.Ptr<T>.from_addr(addr)` builds a raw pointer from a
+        // machine address. The cast itself is safe in Rust (only *using* the
+        // pointer needs `unsafe`, which the surrounding `@unsafe` provides).
+        Expr::PtrFromAddr { elem, addr, .. } => {
+            let cx_ty = cx.rust_type(elem);
+            format!("(({}) as usize as *mut {})", emit_expr(cx, addr, env), cx_ty)
+        }
         Expr::Int(n, _) => format!("{}i64", n),
         Expr::Float(v, _) => format!("{:?}f64", v),
         Expr::Bool(b, _) => b.to_string(),
@@ -3566,6 +3593,13 @@ fn emit_std_call(
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
     match (module, method) {
+        // S58 (E2-M13): low-level pointer ops. `address_of` is inert (a plain
+        // address as Int); `volatile_read` reads through a `Ptr<T>`. Both are
+        // only reachable inside an `@unsafe` gate (sema E3101), which codegen
+        // has already lowered to a Rust `unsafe` region, so `read_volatile`
+        // sits in a valid unsafe context.
+        ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
+        ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
         ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
         ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
         ("core.fs", "write") => format!(

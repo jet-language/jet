@@ -955,6 +955,30 @@ substitute packages, so R3 also needs store/substituter glue. Ship core-first
 (largest scope, blocks everything); keeping `nix`-binary orchestration as the
 permanent path (contradicts the no-installed-`nix` goal).
 
+**D-DEV4 — `jet dev` vs `jet env`** *(ratified 2026-06-17)*: the two jobs that
+were colliding on the name `jet dev` get **two distinct verbs**, following the
+prior art each one belongs to:
+
+- **`jet dev`** = the **watch / interpret code loop** (E2-M4) — re-check and
+  re-run the project entry on every save, sub-200ms feedback, interpreter-backed.
+  This matches the JS/Bun/Deno convention where `dev` means "run my code with
+  reload" (`bun --watch`, `deno run --watch`, `vite dev`).
+- **`jet env`** = **drop into the project's development shell** built from
+  `env.jet` (delegates to `jetpack enter`). This is the environment-provisioning
+  job, the analog of `nix develop` — given its own word because it is a separate
+  product, not a mode of running code.
+
+This resolves the collision by **renaming the shipped shell-enter verb from
+`jet dev` to `jet env`** (a clean break, no alias) and **reserving `jet dev`
+for the E2-M4 loop**. Until E2-M4 lands, a bare `jet dev` reports that the watch
+loop is not yet built and names `jet run`/`jet build` meanwhile; it is not yet
+advertised in completions/man (honesty bar — advertised surface equals working
+surface). Chosen over: A (disambiguate one verb by argument presence — one word
+with two meanings is less discoverable); B (`jet watch` for the loop, leave
+`jet dev` = shell — spends a second-class verb on what users reach for as
+"dev"). The shipped `jet dev` → `jetpack enter` docs/behavior migrate to
+`jet env`.
+
 **S67 — Numeric literals** *(ratified 2026-06-15)*: Rust/Swift/Kotlin-style
 numeric literals. **`_` digit separators** anywhere among the digits, stripped
 before parsing (`1_000_000`, `0xDEAD_BEEF`). **Base prefixes** `**0x`** (hex),
@@ -1201,7 +1225,7 @@ fn try_move(player: mut Player, target: Point) -> Bool ? {
     return ok(true);
 }
 
-@audit "bounds checked against len"
+@audit("bounds checked against len")
 @unsafe { slice.get_unchecked(i); }
 ```
 

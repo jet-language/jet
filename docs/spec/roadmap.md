@@ -48,6 +48,15 @@ no-args greeting + did-you-mean (E2101/E2102/L2101), completions + man page
 from one registry, unified CLI/LSP fix engine, external `jet-<name>` discovery,
 OSC 8 hyperlinks, `jet build -v`. Digit separators (S67) already shipped.
 
+**E2-M13 — Expert low-level tier (S58)** verified 2026-06-17
+([`m13-low-level-tier.md`](../plans/epoch-2/m13-low-level-tier.md)). `use
+core.mem` discovery gate, `@audit("…")` + `@unsafe { … }` / `@unsafe fn` audit
+gate, `Ptr<T>` (→ `*mut`), `mem.volatile_read`/`address_of`/`from_addr`;
+diagnostics E3101/E3102/E3103 + lint L3101; the I1 amendment (D-LL1) recorded in
+`architecture.md` (generated `unsafe` only inside user gates; safe Jet emits
+none, enforced by `tests/golden.rs`). Deferred (open ballots): arenas (D-REF2),
+wider `std.mem` API (D-LL3, name TBD).
+
 **Post-v1 language features already shipped on `master`:** fan-out `f.[…]` (S75)
 and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 `spec.md` and `syntax-decisions.md`.

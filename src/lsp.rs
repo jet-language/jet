@@ -830,7 +830,7 @@ fn collect_stmt(stmt: &ast::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
                 collect_stmts(eb, mp, module, db);
             }
         }
-        ast::Stmt::Loop(body, _) | ast::Stmt::Unsafe(body, _) => {
+        ast::Stmt::Loop(body, _) | ast::Stmt::Unsafe { body, .. } => {
             collect_stmts(body, mp, module, db);
         }
         ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {}
@@ -914,6 +914,7 @@ fn collect_binding(b: &ast::Binding, mp: &str, db: &mut SymbolDB) {
 
 fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
     match e {
+        ast::Expr::PtrFromAddr { addr, .. } => collect_expr(addr, mp, db),
         ast::Expr::Ident(name, span) => {
             db.refs.push(SymRef {
                 name: name.clone(),

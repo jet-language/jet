@@ -563,11 +563,12 @@ pub fn is_known_std_module(name: &str) -> bool {
             | "core.time"
             | "core.json"
             | "core.tasks"
+            | "core.mem"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

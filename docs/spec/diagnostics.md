@@ -179,6 +179,10 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `@unsafe` block (S58) |
+| E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
+| E3103 | sema  | `@unsafe fn` called without an enclosing `@unsafe` block (S58) |
+| L3101 | sema  | `@unsafe` block missing its `@audit("…")` reason (S58, D-LL2) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `@unsafe` / `core.mem` |
 | E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
@@ -340,6 +344,19 @@ CLI.
 | L1101 | A `Task` is dropped without `.join()`. | The program may end before that task finishes. | Call `.join()` on the task before it goes out of scope. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
+
+## Low-level tier diagnostics (E2-M13, S58)
+
+The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an
+`@audit("…")` + `@unsafe { … }` region (or an `@unsafe fn` contract) opens the
+operations that can violate memory safety. Ordinary Jet never reaches these.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E3101 | `{op}` can only run inside an `@unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `@audit("why this is safe") @unsafe { … }`. |
+| E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
+| E3103 | `{fn}` is an `@unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `@audit("…") @unsafe { … }`. |
+| L3101 | This `@unsafe` block has no `@audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `@audit("why this is safe")` on the line above. |
 
 ## C FFI diagnostics (E2-M14, S59)
 

@@ -31,6 +31,9 @@ pub struct FuncSig {
     pub is_view_return: bool,
     /// S50: declared in `extern rust`, implemented by the FFI bridge.
     pub is_extern: bool,
+    /// S58 (E2-M13): `@unsafe fn` — calling it requires an enclosing `@unsafe`
+    /// block (E3103).
+    pub is_unsafe: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +142,7 @@ fn func_to_sig(f: &Func) -> FuncSig {
         return_type: f.return_type.clone(),
         is_view_return: f.is_view_return,
         is_extern: false,
+        is_unsafe: f.is_unsafe,
     }
 }
 
@@ -152,6 +156,7 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         return_type: ef.return_type.clone(),
         is_view_return: ef.is_view_return,
         is_extern: true,
+        is_unsafe: false,
     }
 }
 
@@ -762,6 +767,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     params: Vec::new(),
                     return_type: None,
                     is_view_return: false,
+                    is_unsafe: false,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -1170,7 +1176,10 @@ fn check_func_body(
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
         loop_depth: 0,
-        in_unsafe: false,
+        // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
+        // statements may use low-level ops directly without a nested `@unsafe`
+        // block. Calling such a fn is gated separately (E3103).
+        in_unsafe: f.is_unsafe,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
         fn_name: f.name.clone(),
@@ -1501,7 +1510,8 @@ impl<'a> Checker<'a> {
                 ));
             }
             Type::Apply { name, args } => {
-                let is_std_generic = matches!(name.as_str(), "Task" | "Channel" | "Sender");
+                let is_std_generic =
+                    matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Ptr");
                 if !is_std_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0119",
@@ -2308,10 +2318,22 @@ impl<'a> Checker<'a> {
                 self.check_block(inner, true);
                 self.loop_depth -= 1;
             }
-            Stmt::Unsafe(inner, _) => {
+            Stmt::Unsafe { audit, body, span } => {
+                // L3101 (D-LL2): every `@unsafe` block needs an `@audit("…")`
+                // reason on the line above so the safety case is on record.
+                if audit.is_none() {
+                    self.diags.push(Diagnostic::lint(
+                        "L3101",
+                        "this `@unsafe` block has no `@audit` reason".to_string(),
+                        "every gated region records, in one line, why it can't break memory safety"
+                            .to_string(),
+                        "add `@audit(\"why this is safe\")` on the line above".to_string(),
+                        Some(*span),
+                    ));
+                }
                 let prev = self.in_unsafe;
                 self.in_unsafe = true;
-                self.check_block(inner, true);
+                self.check_block(body, true);
                 self.in_unsafe = prev;
             }
         }
@@ -3678,14 +3700,21 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0208",
                         "`*` isn't allowed here".to_string(),
-                        "dereferencing with `*` is only for expert code inside `unsafe`"
+                        "dereferencing with `*` is only for expert code inside an `@unsafe` block"
                             .to_string(),
-                        "remove `*`, or wrap this code in `unsafe { ... }`".to_string(),
+                        "remove `*`, or wrap this code in `@unsafe { ... }`".to_string(),
                         Some(*span),
                     ));
                 }
                 self.infer(inner)
             }
+            Expr::PtrFromAddr {
+                alias,
+                alias_span,
+                elem,
+                addr,
+                span,
+            } => self.infer_ptr_from_addr(alias, *alias_span, elem, addr, *span),
             Expr::Field(inner, member, span) => self.infer_field(inner, member, *span),
             Expr::OptField {
                 base,
@@ -5752,6 +5781,61 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`. Gated by `use core.mem`
+    /// (E3102) and an enclosing `@unsafe` block (E3101). Returns `Ptr<T>`.
+    fn infer_ptr_from_addr(
+        &mut self,
+        alias: &str,
+        alias_span: Span,
+        elem: &Type,
+        addr: &mut Expr,
+        span: Span,
+    ) -> Option<Type> {
+        // E3102: the discovery gate — the alias must be a `core.mem` import.
+        let is_mem = self
+            .std_imports
+            .get(alias)
+            .map(|m| m == syntax::CORE_MEM_MODULE)
+            .unwrap_or(false);
+        if !is_mem {
+            self.diags.push(self.e3102(alias, alias_span));
+            self.infer(addr);
+            return None;
+        }
+        // E3101: pointer construction is a low-level operation; it needs the
+        // audit gate.
+        if !self.in_unsafe {
+            self.diags.push(e3101(syntax::MEM_FROM_ADDR, span));
+        }
+        // The address is a plain Int.
+        if let Some(t) = self.infer(addr) {
+            if t != Type::Int {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`{}` needs an Int address, not {}", syntax::MEM_FROM_ADDR, t.show()),
+                    "a pointer is built from a numeric machine address".to_string(),
+                    "pass an Int, e.g. from `mem.address_of(x)`".to_string(),
+                    Some(addr.span()),
+                ));
+            }
+        }
+        Some(ptr_type(elem.clone()))
+    }
+
+    /// E3102: a `core.mem` item was named without `use core.mem`.
+    fn e3102(&self, alias: &str, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E3102",
+            format!("`{}` is part of the low-level tier", syntax::TYPE_PTR),
+            format!(
+                "naming `{}`, `{}`, or an allocator needs the discovery gate",
+                syntax::TYPE_PTR, syntax::MEM_VOLATILE_READ
+            ),
+            format!("add `use {};` and call through `{}.…`", syntax::CORE_MEM_MODULE, alias),
+            Some(span),
+        )
+    }
+
     fn infer_std_call(
         &mut self,
         module: &str,
@@ -5762,6 +5846,41 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         let sig = std_fixed_sig(module, name);
         match (module, name) {
+            ("core.mem", "volatile_read") => {
+                if !self.in_unsafe {
+                    self.diags.push(e3101(syntax::MEM_VOLATILE_READ, span));
+                }
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    return None;
+                }
+                let arg = args.get_mut(0)?;
+                let t = self.infer(&mut arg.expr)?;
+                return match ptr_elem(&t) {
+                    Some(elem) => Some(elem),
+                    None => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs a `Ptr<T>`, not {}", syntax::MEM_VOLATILE_READ, t.show()),
+                            "a volatile read reads through a typed pointer".to_string(),
+                            "build a pointer first with `mem.Ptr<T>.from_addr(addr)`".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        None
+                    }
+                };
+            }
+            ("core.mem", "address_of") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    return None;
+                }
+                // Taking an address is inert (S58): legal outside `@unsafe`.
+                let arg = args.get_mut(0)?;
+                self.infer(&mut arg.expr);
+                let _ = alias_span;
+                return Some(Type::Int);
+            }
             ("core.io", "eprint") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_std_arity(name, 1, args.len(), span));
@@ -7658,6 +7777,23 @@ impl<'a> Checker<'a> {
             return None;
         };
 
+        // E3103 (S58): an `@unsafe fn` is a whole-function contract; callers
+        // must take responsibility inside their own `@unsafe` block.
+        if sig.is_unsafe && !self.in_unsafe {
+            self.diags.push(Diagnostic::error(
+                "E3103",
+                format!("`{}` is an `@unsafe` function", call.name),
+                "its contract can't be checked by the compiler, so the caller must vouch for it"
+                    .to_string(),
+                format!(
+                    "call it inside `@{}(\"…\") @{} {{ … }}`",
+                    syntax::ATTR_AUDIT,
+                    syntax::KW_UNSAFE
+                ),
+                Some(call.name_span),
+            ));
+        }
+
         if call.args.len() != sig.params.len() {
             self.diags.push(Diagnostic::error(
                 "E0104",
@@ -8171,7 +8307,7 @@ fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], taken: &mut
                 walk_stmts_for_const_refs(else_body.as_deref().unwrap_or(&[]), const_names, taken);
             }
             Stmt::Break(_) | Stmt::Continue(_) => {}
-            Stmt::Loop(inner, _) | Stmt::Unsafe(inner, _) => {
+            Stmt::Loop(inner, _) | Stmt::Unsafe { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
         }
@@ -8190,6 +8326,7 @@ fn walk_if_for_const_refs(ifs: &IfStmt, const_names: &[String], taken: &mut Hash
 
 fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut HashSet<String>) {
     match expr {
+        Expr::PtrFromAddr { addr, .. } => walk_expr_for_const_refs(addr, const_names, taken),
         Expr::Ident(name, _) => {
             if const_names.iter().any(|c| c == name) {
                 taken.insert(name.clone());
@@ -8790,6 +8927,40 @@ fn result_ty(ok: Type, err: Type) -> Type {
     }
 }
 
+/// S58 (E2-M13): `Ptr<T>`.
+fn ptr_type(elem: Type) -> Type {
+    Type::Apply {
+        name: syntax::TYPE_PTR.to_string(),
+        args: vec![elem],
+    }
+}
+
+/// S58 (E2-M13): the element type of a `Ptr<T>`, if `t` is one.
+fn ptr_elem(t: &Type) -> Option<Type> {
+    match t {
+        Type::Apply { name, args } if name == syntax::TYPE_PTR && args.len() == 1 => {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+/// E3101: a low-level memory operation used outside an `@unsafe` block.
+fn e3101(op: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3101",
+        format!("`{}` can only run inside an `@unsafe` block", op),
+        "this operation can violate memory safety, so it must sit in an audited region"
+            .to_string(),
+        format!(
+            "wrap it: @{}(\"why this is safe\") @{} {{ … }}",
+            syntax::ATTR_AUDIT,
+            syntax::KW_UNSAFE
+        ),
+        Some(span),
+    )
+}
+
 fn std_fixed_sig(
     module: &str,
     name: &str,
@@ -8894,6 +9065,7 @@ fn std_module_items(module: &str) -> Vec<String> {
         "core.random" => &["int", "float", "pick", "shuffle", "seed"],
         "core.time" => &["now", "sleep", "start"],
         "core.json" => &["parse", "render", "render_pretty"],
+        "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of"],
         "core.tasks" => &["spawn", "channel"],
         "core" => &[],
         _ => &[],
@@ -9430,7 +9602,7 @@ fn collect_std_stmts(
                     collect_std_stmts(body, imports, used);
                 }
             }
-            Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => collect_std_stmts(body, imports, used),
+            Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => collect_std_stmts(body, imports, used),
             Stmt::Break(_) | Stmt::Continue(_) => {}
         }
     }
@@ -9458,6 +9630,7 @@ fn collect_std_lvalue(lv: &LValue, imports: &HashMap<String, String>, used: &mut
 
 fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
     match expr {
+        Expr::PtrFromAddr { addr, .. } => collect_std_expr(addr, imports, used),
         Expr::MethodCall {
             receiver,
             method,
@@ -9689,6 +9862,7 @@ fn check_module_bodies(
                     params: Vec::new(),
                     return_type: None,
                     is_view_return: false,
+                    is_unsafe: false,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -9734,7 +9908,10 @@ fn check_func_body_bundle(
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
         loop_depth: 0,
-        in_unsafe: false,
+        // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
+        // statements may use low-level ops directly without a nested `@unsafe`
+        // block. Calling such a fn is gated separately (E3103).
+        in_unsafe: f.is_unsafe,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
         fn_name: f.name.clone(),
@@ -9803,6 +9980,7 @@ fn lambda_body_refs_name(body: &LambdaBody, name: &str) -> bool {
 
 fn expr_refs_name(e: &Expr, name: &str) -> bool {
     match e {
+        Expr::PtrFromAddr { addr, .. } => expr_refs_name(addr, name),
         Expr::Ident(n, _) => n == name,
         Expr::Unary(_, inner, _) => expr_refs_name(inner, name),
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
@@ -9922,7 +10100,7 @@ fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|b| b.iter().any(|s| stmt_refs_name(s, name)))
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => body.iter().any(|s| stmt_refs_name(s, name)),
+        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(None, _) => false,
     }
 }
@@ -9994,7 +10172,7 @@ fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Option<Span> {
                 .as_ref()
                 .and_then(|branch| else_view_return_span(checker, branch))
         }
-        Stmt::While { body, .. } | Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => body
+        Stmt::While { body, .. } | Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => body
             .iter()
             .find_map(|stmt| stmt_view_return_span(checker, stmt)),
         Stmt::For { body, .. } => body
@@ -10238,7 +10416,7 @@ fn stmt_collect_captures(
                 block_collect_captures(b, &mut else_bound, read, mut_cap);
             }
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => {
+        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }

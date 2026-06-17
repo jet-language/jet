@@ -101,8 +101,29 @@ pub const KW_RETURN: &str = "return";
 /// M2: loop statement (for SharedHandle lint checks).
 pub const KW_LOOP: &str = "loop";
 
-/// M2 tier 2: unsafe block for expert code.
+/// S58 (ratified 2026-06-12; amended 2026-06-16): the audited expert gate,
+/// written as the marker `@unsafe { … }` (statement) or `@unsafe fn` (whole-
+/// function contract). The bare `unsafe` keyword is the rejected former
+/// spelling, recognized only to emit a teaching error.
 pub const KW_UNSAFE: &str = "unsafe";
+
+/// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
+/// requires `use core.mem`.
+pub const CORE_MEM_MODULE: &str = "core.mem";
+
+/// S58 (ratified 2026-06-12): the pointer type — `Ptr<T>`.
+pub const TYPE_PTR: &str = "Ptr";
+
+/// S58 (ratified 2026-06-12): `mem.Ptr<T>.from_addr(addr)` — typed pointer
+/// from an integer address.
+pub const MEM_FROM_ADDR: &str = "from_addr";
+
+/// S58 (ratified 2026-06-12): `mem.volatile_read(p)` — volatile/MMIO read.
+pub const MEM_VOLATILE_READ: &str = "volatile_read";
+
+/// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
+/// an Int (taking a pointer is inert; using it needs `@unsafe`).
+pub const MEM_ADDRESS_OF: &str = "address_of";
 
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.

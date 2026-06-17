@@ -434,7 +434,7 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Unsafe(_, span) => Err(unsupported("an `unsafe` block", *span)),
+            Stmt::Unsafe { span, .. } => Err(unsupported("an `@unsafe` block", *span)),
         }
     }
 
@@ -1502,7 +1502,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
                 b.iter().for_each(|s| walk_stmt_exprs(s, f));
             }
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe(body, _) => {
+        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f))
         }
         Stmt::Break(_) | Stmt::Continue(_) => {}
