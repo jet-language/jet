@@ -352,6 +352,15 @@ pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
 /// S43 (ratified M6): top-level test block keyword.
 pub const KW_TEST: &str = "test";
 
+/// D-TOOL2 (ratified 2026-06-17, E2-M11): typed hole — compiles everywhere,
+/// panics at runtime with file, line, and expected type.
+pub const KW_TODO: &str = "todo";
+
+/// D-TOOL4 (ratified 2026-06-16, E2-M11): snapshot testing builtin.
+/// `expect(value).snapshot()` records or compares a golden snapshot.
+pub const BUILTIN_EXPECT: &str = "expect";
+pub const BUILTIN_SNAPSHOT: &str = "snapshot";
+
 /// M4: synthetic name for a `switch` subject that isn't a plain identifier.
 pub const KW_IT: &str = "it";
 

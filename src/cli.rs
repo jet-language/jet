@@ -55,6 +55,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "vendor", summary: "copy all dependencies into vendor/", headline: false },
     CommandSpec { name: "audit", summary: "check dependencies against the advisory database", headline: false },
     CommandSpec { name: "sbom", summary: "emit a software bill of materials from the lockfile", headline: false },
+    CommandSpec { name: "emit", summary: "emit generated output (--rust: print Rust source)", headline: false },
+    CommandSpec { name: "bench", summary: "benchmark a Jet program with honest stats", headline: false },
     CommandSpec { name: "completions", summary: "print shell completions (bash | zsh | fish)", headline: false },
     CommandSpec { name: "man", summary: "print the jet man page (roff)", headline: false },
     CommandSpec { name: "lsp", summary: "language server (stdio JSON-RPC)", headline: false },
@@ -83,6 +85,11 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
+    // E2-M11 flags.
+    FlagSpec { long: "--capabilities-json", help: "with build: emit capability summary as JSON (D-TOOL5)" },
+    FlagSpec { long: "--update-snapshots", help: "with test: update snapshot golden files (D-TOOL4)" },
+    FlagSpec { long: "--rust", help: "with emit: print the generated Rust source (D-TOOL3)" },
+    FlagSpec { long: "-u", help: "short form of --update-snapshots" },
 ];
 
 /// Is `name` a built-in command?

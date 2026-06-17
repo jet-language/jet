@@ -31,8 +31,34 @@ use std::hash::{Hash, Hasher};
 /// Emitted at the top of every program: core runtime helpers used by generated Rust.
 const PRELUDE: &str = include_str!("prelude/core.rs");
 
-/// Extra helpers for `jet test` harnesses only (M6/S43).
-const TEST_PRELUDE: &str = "";
+/// Extra helpers for `jet test` harnesses only (M6/S43, E2-M11 D-TOOL4).
+const TEST_PRELUDE: &str = r#"
+/// D-TOOL4 (E2-M11): snapshot wrapper — records or compares a golden snapshot.
+struct JetExpect { value: String }
+fn jet_expect(s: String) -> JetExpect { JetExpect { value: s } }
+impl JetExpect {
+    fn snapshot(&self, snap_path: &str) -> Result<(), String> {
+        let update = std::env::var("JET_UPDATE_SNAPSHOTS").is_ok();
+        if update {
+            std::fs::create_dir_all(std::path::Path::new(snap_path).parent().unwrap_or(std::path::Path::new("."))).ok();
+            std::fs::write(snap_path, &self.value).map_err(|e| format!("could not write snapshot {snap_path}: {e}"))?;
+            return Ok(());
+        }
+        match std::fs::read_to_string(snap_path) {
+            Ok(expected) => {
+                if expected == self.value {
+                    Ok(())
+                } else {
+                    Err(format!("snapshot mismatch at {snap_path}\n  expected: {}\n  got:      {}", expected.trim(), self.value.trim()))
+                }
+            }
+            Err(_) => {
+                Err(format!("missing snapshot {snap_path}; run `jet test --update-snapshots` to create it"))
+            }
+        }
+    }
+}
+"#;
 const STD_PRELUDE: &str = include_str!("prelude/std.rs");
 
 fn mangle(name: &str) -> String {
@@ -138,7 +164,8 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
-        | Expr::Absent(_) => {}
+        | Expr::Absent(_)
+        | Expr::Todo { .. } => {}
         Expr::Call(c) => {
             for a in &c.args {
                 collect_tuple_shapes_from_expr(&a.expr, out);
@@ -3306,6 +3333,19 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         } => emit_enum_lit(cx, type_name, variant, args, env),
         Expr::Present(inner, _) => format!("Some({})", emit_expr(cx, inner, env)),
         Expr::Absent(_) => "None".to_string(),
+        Expr::Todo { span, expected_type } => {
+            // D-TOOL2 (E2-M11): emit a runtime panic with file, line, and
+            // expected type. `todo!()` is diverging in Rust so it type-checks
+            // anywhere (I1: no unsafe generated).
+            let ty = expected_type.as_deref().unwrap_or("(unknown)");
+            let (line, _) = span_line_col(&cx.src, span.start);
+            format!(
+                "todo!(\"todo at {}:{} — expected {}\")",
+                cx.file,
+                line,
+                ty
+            )
+        }
         Expr::Ok(inner, _) => format!("Ok({})", emit_expr(cx, inner, env)),
         Expr::Err(inner, _) => format!("Err({})", emit_expr(cx, inner, env)),
         Expr::Try(inner, _, via_fallible) => {
@@ -4130,6 +4170,23 @@ fn emit_method_call(
     if method == "clone" {
         return format!("({}).clone()", emit_expr(cx, receiver, env));
     }
+    // D-TOOL4 (E2-M11): `expect(x).snapshot()` — snapshot assertion.
+    // The receiver is a `Call` to `expect`; emit the jet_expect(…).snapshot(…) form.
+    if method == crate::syntax::BUILTIN_SNAPSHOT {
+        if let Expr::Call(call) = receiver {
+            if call.name == crate::syntax::BUILTIN_EXPECT && call.args.len() == 1 {
+                let val = emit_expr(cx, &call.args[0].expr, env);
+                // Derive a stable snapshot path from the source file + location.
+                let (line, _) = span_line_col(&cx.src, call.args[0].expr.span().start);
+                let snap_path = format!("snapshots/{}_{}.snap", cx.file.replace(['/', '\\', '.'], "_"), line);
+                return format!(
+                    "jet_expect(format!(\"{{}}\", ({}).jet_show())).snapshot({snap_path:?})?",
+                    val,
+                    snap_path = snap_path
+                );
+            }
+        }
+    }
     let struct_ty = recv_type
         .map(|s| s.to_string())
         .or_else(|| receiver_struct_type(receiver, env));
@@ -4304,6 +4361,15 @@ fn emit_call(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -> S
     }
     if call.name == syntax::BUILTIN_REQUIRE_EQ {
         return emit_require_eq(cx, call, env);
+    }
+    // D-TOOL4 (E2-M11): `expect(x)` emits as `jet_expect(format!("{}", x.jet_show()))`.
+    // The full `.snapshot()` form is handled in emit_method_call above.
+    if call.name == syntax::BUILTIN_EXPECT {
+        if call.args.len() == 1 {
+            let val = emit_expr(cx, &call.args[0].expr, env);
+            return format!("jet_expect(format!(\"{{}}\", ({}).jet_show()))", val);
+        }
+        return "jet_expect(String::new())".to_string();
     }
     if env.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
         let callee = place_of(env, &call.name);

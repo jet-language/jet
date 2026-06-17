@@ -47,6 +47,63 @@ pub struct CompileOutput {
     pub ffi: Option<ffi::FfiLink>,
     /// Native C-library linker args (S59 / E2-M14), ready for `rustc`.
     pub clinks: Vec<String>,
+    /// D-TOOL5 (E2-M11): capability flags inferred from the generated code.
+    pub capabilities: Capabilities,
+}
+
+/// D-TOOL5 (E2-M11, ratified as option C): capability summary emitted by
+/// `jet build`. Human-readable by default; `--capabilities-json` for tooling.
+#[derive(Debug, Default)]
+pub struct Capabilities {
+    pub uses_network: bool,
+    pub uses_file_io: bool,
+    pub uses_unsafe: bool,
+    pub uses_ffi: bool,
+    pub uses_crypto: bool,
+    pub uses_concurrency: bool,
+}
+
+impl Capabilities {
+    /// Detect capabilities from the generated Rust source.
+    pub fn from_rust(rust: &str) -> Self {
+        Capabilities {
+            uses_network: rust.contains("jet_net_") || rust.contains("jet_http_"),
+            uses_file_io: rust.contains("jet_fs_") || rust.contains("jet_io_"),
+            uses_unsafe: rust.contains("unsafe {") || rust.contains("unsafe fn"),
+            uses_ffi: rust.contains("extern \"C\"") || rust.contains("jet_ffi"),
+            uses_crypto: rust.contains("jet_crypto_"),
+            uses_concurrency: rust.contains("jet_tasks_") || rust.contains("jet_time_"),
+        }
+    }
+
+    /// Render a human-readable one-line summary (empty when no special capabilities).
+    pub fn summary(&self) -> String {
+        let mut caps = Vec::new();
+        if self.uses_network { caps.push("network"); }
+        if self.uses_file_io { caps.push("file-io"); }
+        if self.uses_crypto { caps.push("crypto"); }
+        if self.uses_concurrency { caps.push("concurrency"); }
+        if self.uses_ffi { caps.push("ffi"); }
+        if self.uses_unsafe { caps.push("unsafe"); }
+        if caps.is_empty() {
+            "capabilities: none".to_string()
+        } else {
+            format!("capabilities: {}", caps.join(", "))
+        }
+    }
+
+    /// Render machine-readable JSON for `--capabilities-json`.
+    pub fn to_json(&self) -> String {
+        format!(
+            "{{\"network\":{},\"file_io\":{},\"unsafe\":{},\"ffi\":{},\"crypto\":{},\"concurrency\":{}}}",
+            self.uses_network,
+            self.uses_file_io,
+            self.uses_unsafe,
+            self.uses_ffi,
+            self.uses_crypto,
+            self.uses_concurrency,
+        )
+    }
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -94,14 +151,17 @@ fn compile_bundle_path(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
+    let rust = codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    let capabilities = Capabilities::from_rust(&rust);
     Ok(CompileOutput {
-        rust: codegen::emit_bundle(&bundle, mode, ffi.as_ref()),
+        rust,
         lints,
         ffi,
         // Native C link flags are resolved separately at build time (so that
         // codegen / front-end checks never depend on system link discovery);
         // see `resolve_c_links`.
         clinks: Vec::new(),
+        capabilities,
     })
 }
 
@@ -187,11 +247,14 @@ fn compile_with_mode(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
+    let rust = codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    let capabilities = Capabilities::from_rust(&rust);
     Ok(CompileOutput {
-        rust: codegen::emit_bundle(&bundle, mode, ffi.as_ref()),
+        rust,
         lints,
         ffi,
         clinks: Vec::new(),
+        capabilities,
     })
 }
 

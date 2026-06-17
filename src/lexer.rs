@@ -55,6 +55,8 @@ pub enum TokKind {
     KwExtern,
     KwModule,
     KwTest,
+    /// D-TOOL2 (E2-M11): typed hole `todo`.
+    KwTodo,
     Ident(String),
     Str(Vec<StrTokPart>),
     Int(i64),
@@ -190,6 +192,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwExtern => format!("the keyword `{}`", syntax::KW_EXTERN),
         TokKind::KwModule => format!("the keyword `{}`", syntax::KW_MODULE),
         TokKind::KwTest => format!("the keyword `{}`", syntax::KW_TEST),
+        TokKind::KwTodo => format!("the keyword `{}`", syntax::KW_TODO),
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
         TokKind::Int(_) => "a number".to_string(),
@@ -309,6 +312,7 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == syntax::KW_EXTERN => Some(TokKind::KwExtern),
         s if s == syntax::KW_MODULE => Some(TokKind::KwModule),
         s if s == syntax::KW_TEST => Some(TokKind::KwTest),
+        s if s == syntax::KW_TODO => Some(TokKind::KwTodo),
         _ => None,
     }
 }

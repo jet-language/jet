@@ -57,6 +57,10 @@ pub const GLOBAL_FLAGS: &[FlagSpec] = &[
 const FLAG_HELP: &[(&str, &str)] = &[
     ("small", "build the smallest possible binary (S15)"),
     ("emit-rust", "also print the generated Rust code"),
+    ("capabilities-json", "emit capability summary as JSON (D-TOOL5)"),
+    ("update-snapshots", "update snapshot golden files (D-TOOL4)"),
+    ("u", "short form of --update-snapshots"),
+    ("rust", "with `emit`: print the generated Rust source (D-TOOL3)"),
     ("annotated", "with `new`: include commented example deps"),
     ("check", "with `fmt`: exit 1 if the file would change (CI)"),
     ("bench", "with `lsp`: run the latency benchmark"),
@@ -92,9 +96,11 @@ pub fn flag_help(name: &str) -> &'static str {
 /// is generated from it (see `command_names`).
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "check", summary: "look for problems, build nothing", flags: &["json"], arg: Arg::File },
-    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json"], arg: Arg::File },
+    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json"], arg: Arg::File },
     CommandSpec { name: "run", summary: "build, then run (or run a project)", flags: &["small", "emit-rust", "json"], arg: Arg::File },
-    CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json"], arg: Arg::Path },
+    CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json", "update-snapshots", "u"], arg: Arg::Path },
+    CommandSpec { name: "emit", summary: "emit the generated Rust source (D-TOOL3)", flags: &["rust"], arg: Arg::File },
+    CommandSpec { name: "bench", summary: "benchmark a Jet program (D-TOOL5)", flags: &["json"], arg: Arg::File },
     CommandSpec { name: "new", summary: "create a new project folder", flags: &["annotated"], arg: Arg::Name },
     CommandSpec { name: "dev", summary: "enter the project shell (jetpack enter)", flags: &[], arg: Arg::None },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", flags: &["check"], arg: Arg::Path },

@@ -420,6 +420,7 @@ fn register_extern_fn(
         || ef.name == syntax::BUILTIN_PANIC
         || ef.name == syntax::BUILTIN_REQUIRE
         || ef.name == syntax::BUILTIN_REQUIRE_EQ
+        || ef.name == syntax::BUILTIN_EXPECT
     {
         diags.push(Diagnostic::error(
             "E0106",
@@ -524,6 +525,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     || f.name == syntax::BUILTIN_PANIC
                     || f.name == syntax::BUILTIN_REQUIRE
                     || f.name == syntax::BUILTIN_REQUIRE_EQ
+                    || f.name == syntax::BUILTIN_EXPECT
                 {
                     diags.push(Diagnostic::error(
                         "E0106",
@@ -3851,8 +3853,23 @@ impl<'a> Checker<'a> {
                 self.moved = after;
                 match (then_ty, else_ty) {
                     (Some(a), Some(b)) => {
-                        if a == b {
+                        // D-TOOL2: `todo` is diverging; if one branch is a
+                        // typed hole, the other branch's type wins.
+                        let then_is_todo = matches!(then_value.as_ref(), Expr::Todo { .. });
+                        let else_is_todo = matches!(else_value.as_ref(), Expr::Todo { .. });
+                        if a == b || else_is_todo {
+                            // Update the todo's expected_type to match what we know.
+                            if else_is_todo {
+                                if let Expr::Todo { expected_type, .. } = else_value.as_mut() {
+                                    *expected_type = Some(a.name());
+                                }
+                            }
                             Some(a)
+                        } else if then_is_todo {
+                            if let Expr::Todo { expected_type, .. } = then_value.as_mut() {
+                                *expected_type = Some(b.name());
+                            }
+                            Some(b)
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0124",
@@ -4138,6 +4155,24 @@ impl<'a> Checker<'a> {
             } => {
                 self.check_pattern_test(subject, pattern, *span);
                 Some(Type::Bool)
+            }
+            Expr::Todo { expected_type, .. } => {
+                // D-TOOL2 (E2-M11): `todo` is a typed hole — valid in any
+                // position. Fill the expected-type field so codegen can print
+                // it in the panic message, then return that type (or the
+                // fallback Unit so callers that require Some(…) are satisfied).
+                let ty = self.expected_type.clone();
+                if let Some(ref t) = ty {
+                    *expected_type = Some(t.name());
+                } else {
+                    *expected_type = Some("(unknown)".to_string());
+                }
+                // Return the expected type so the surrounding expression sees
+                // a consistent type. If no expected type is known, return Unit.
+                // todo is diverging — it never returns, so any type is OK.
+                // When the expected type is unknown, return Int as a placeholder
+                // so callers that need Some(…) don't see a false type error.
+                Some(ty.unwrap_or(Type::Int))
             }
             Expr::Ok(inner, span) => self.infer_ok(inner, *span),
             Expr::Err(inner, span) => self.infer_err(inner, *span),
@@ -5743,6 +5778,24 @@ impl<'a> Checker<'a> {
         if method == "clone" {
             self.borrow_ctx = true;
             return self.infer(receiver);
+        }
+        // D-TOOL4 (E2-M11): `expect(x).snapshot()` — the special snapshot
+        // assertion. Recognized by checking the receiver type.
+        if method == syntax::BUILTIN_SNAPSHOT {
+            let recv_ty = self.infer(receiver);
+            if recv_ty.as_ref().map(|t| t == &Type::Named("__JetExpect__".to_string())).unwrap_or(false) {
+                // Valid: snapshot assertion — void, no return type.
+                return None;
+            }
+            // Not from expect() — error.
+            self.diags.push(Diagnostic::error(
+                "E2901",
+                format!("`.{}()` is only valid on the result of `{}(…)`", syntax::BUILTIN_SNAPSHOT, syntax::BUILTIN_EXPECT),
+                "snapshot testing: call `expect(value).snapshot()` in a test block".to_string(),
+                format!("e.g. `{}(my_result).snapshot()`", syntax::BUILTIN_EXPECT),
+                Some(span),
+            ));
+            return None;
         }
         if let Expr::Ident(root, _) = &**receiver {
             if root == "File" && method == syntax::FOREIGN_OPEN {
@@ -8257,6 +8310,25 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
+        // D-TOOL4 (E2-M11): `expect(x)` — test-only builtin that wraps a value
+        // for snapshot testing. The expression `expect(x).snapshot()` is the
+        // full form; `.snapshot()` is handled in the method-call path below.
+        if call.name == syntax::BUILTIN_EXPECT {
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E2901",
+                    format!("`{}` needs exactly one value to test", syntax::BUILTIN_EXPECT),
+                    "snapshot testing wraps one value at a time".to_string(),
+                    format!("e.g. {}(my_value).snapshot()", syntax::BUILTIN_EXPECT),
+                    Some(call.name_span),
+                ));
+            } else {
+                self.infer(&mut call.args[0].expr);
+            }
+            // Returns a Named type marker so the `.snapshot()` call can detect it.
+            return Some(Some(Type::Named("__JetExpect__".to_string())));
+        }
+
         if self.funcs.get(&call.name).is_none() {
             if let Some(info) = self.lookup(&call.name) {
                 if matches!(info.ty, Type::Fn { .. }) {
@@ -8793,6 +8865,9 @@ fn block_definitely_returns(stmts: &[Stmt]) -> bool {
 fn stmt_definitely_returns(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(_, _) => true,
+        // D-TOOL2 (E2-M11): `todo` is diverging — a bare `todo;` satisfies
+        // the "every path must return" check just like `return`.
+        Stmt::Expr(Expr::Todo { .. }) => true,
         Stmt::If(ifs) => if_definitely_returns(ifs),
         Stmt::Switch {
             arms, else_body, ..
@@ -8969,7 +9044,7 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
             }
         }
         Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
-        Expr::Absent(_) => {}
+        Expr::Absent(_) | Expr::Todo { .. } => {}
         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Try(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken);
         }
@@ -10871,7 +10946,8 @@ fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut H
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)
-        | Expr::Absent(_) => {}
+        | Expr::Absent(_)
+        | Expr::Todo { .. } => {}
     }
 }
 
@@ -11148,6 +11224,7 @@ fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)
+        | Expr::Todo { .. }
         | Expr::Deref(_, _) => false,
     }
 }

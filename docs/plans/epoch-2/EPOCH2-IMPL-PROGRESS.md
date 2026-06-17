@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M13 ✅ M14 ✅
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M13 ✅ M14 ✅
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -96,6 +96,32 @@ That sidequest requires parser work + example rewrites + snapshot bless.
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
 
 After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+
+### E2-M11 completion record (partial)
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ `todo` typed-hole compiles and type-checks; panics at runtime with file, line, expected type (D-TOOL2=A). Keyword in `src/syntax.rs`; `TokKind::KwTodo` in lexer; `Expr::Todo` in AST/sema/codegen/fmt/lsp. `examples/features/58_todo_hole.jet` golden-pinned.
+- ✅ Single-expression function body `fn name() -> T = expr;` (desugars to `Stmt::Return` in parser — needed for `todo` example pattern).
+- ✅ `jet build` prints human-readable capability summary by default; `--capabilities-json` for tooling (D-TOOL5=C). `Capabilities` struct in `src/lib.rs`; `--capabilities-json` flag in CLI.
+- ✅ `jet emit --rust` expert window (D-TOOL3=A). Prints generated Rust to stdout; gated behind `--rust` flag so `jet emit` without flag errors gracefully.
+- ✅ `jet bench` with honest stats (D-TEST1 adjacent). 5 warmup + 20 timed trials; prints mean ± stddev in ms. `--json` for scriptable output.
+- ✅ `expect(x).snapshot()` snapshot-testing builtin (D-TOOL4=A). `jet test -u` / `jet test --update-snapshots` sets `JET_UPDATE_SNAPSHOTS=1`; the `JetExpect` wrapper in `TEST_PRELUDE` reads/writes `.snap` files; `BUILTIN_EXPECT`/`BUILTIN_SNAPSHOT` in `src/syntax.rs`; sema recognizes the pattern; codegen emits the runtime call.
+- ✅ `--capabilities-json`, `--update-snapshots`, `-u`, `--rust` flags in CLI registry (`src/cli.rs`); `emit` and `bench` in COMMANDS.
+- ✅ E2901/E2902/L2901 registered in `docs/spec/diagnostics.md`.
+- ✅ `nix develop -c cargo test` green (all suites).
+
+**Not implemented (deferred):**
+- Doctests (D-TEST4=D-TOOL1=A): extracting `> expr` / expected-output pairs from `///` doc comments and running them under `jet test`. Requires new lexer pass over comment text + doctest runner. Non-trivial; deferred to a follow-up slot.
+- Coverage output (CI-readable + human-readable). Requires LLVM coverage instrumentation or source-line counters; out of scope for this slot.
+- Property testing (D-TEST1=A): plan gates on "small shrinking design exists"; design not yet done; deferred.
+- `jet doc` rendered HTML/markdown docs: design not ratified; deferred.
+
+New functions in `src/main.rs`: `run_emit_rust`, `run_bench`.
+New struct: `Capabilities` (`src/lib.rs`).
+New prelude const: `TEST_PRELUDE` (snapshot helper `JetExpect` in `src/codegen.rs`).
+New syntax consts: `KW_TODO`, `BUILTIN_EXPECT`, `BUILTIN_SNAPSHOT` (`src/syntax.rs`).
+Examples: `examples/features/58_todo_hole.jet`.
 
 ### E2-M9 completion record
 

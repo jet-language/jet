@@ -1118,6 +1118,13 @@ pub enum Expr {
     Present(Box<Expr>, Span),
     /// S32: bare `null` — absent optional.
     Absent(Span),
+    /// D-TOOL2 (E2-M11): `todo` typed hole. Compiles anywhere; panics at
+    /// runtime with file, line, and the expected type (filled in by sema).
+    Todo {
+        span: Span,
+        /// The expected type, as a display string — filled by sema.
+        expected_type: Option<String>,
+    },
     /// S31: `subject == pattern` (stored as dedicated node for sema/codegen).
     PatternTest {
         subject: Box<Expr>,
@@ -1207,6 +1214,7 @@ impl Expr {
             | Expr::EnumLit { span: s, .. }
             | Expr::Present(_, s)
             | Expr::Absent(s)
+            | Expr::Todo { span: s, .. }
             | Expr::Ok(_, s)
             | Expr::Err(_, s)
             | Expr::Try(_, s, _)

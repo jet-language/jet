@@ -237,6 +237,8 @@ fn main() {
     let locked = raw.iter().any(|a| a == "--locked");
     let annotated = raw.iter().any(|a| a == "--annotated");
     let verbose = raw.iter().any(|a| a == "--verbose" || a == "-v");
+    // D-TOOL5 (E2-M11): capability summary flags.
+    let capabilities_json = raw.iter().any(|a| a == "--capabilities-json");
     let mode = OutputMode {
         json,
         color: parse_color(&raw),
@@ -283,6 +285,7 @@ fn main() {
             cmd,
             "lsp" | "install" | "doctor" | "completions" | "man" | "dev"
                 | "publish" | "vendor" | "audit" | "sbom"
+                | "emit" | "bench"
         );
     if !known {
         if let Some(bin) = find_external(cmd) {
@@ -450,7 +453,7 @@ fn main() {
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
-                                run_test(&entry_str, mode);
+                                run_test(&entry_str, false, mode);
                                 return;
                             }
                             _ => {
@@ -462,6 +465,7 @@ fn main() {
                                     emit_rust,
                                     small,
                                     verbose,
+                                    capabilities_json,
                                     &program_args,
                                     mode,
                                 );
@@ -491,9 +495,27 @@ fn main() {
         "fmt" => run_fmt(target, fmt_check),
         "fix" => run_fix(target, raw.iter().any(|a| a == "--dry-run")),
         "new" => run_new(target, annotated),
-        "test" => run_test(target, mode),
+        "test" => {
+            let update_snapshots = raw.iter().any(|a| a == "--update-snapshots" || a == "-u");
+            run_test(target, update_snapshots, mode);
+        }
         "add" => run_add(&raw),
         "remove" => run_remove(target),
+        // D-TOOL3 (E2-M11): `jet emit --rust` — print the generated Rust source.
+        "emit" => {
+            let rust_flag = raw.iter().any(|a| a == "--rust");
+            if !rust_flag {
+                eprintln!("usage: {} emit --rust <file.{}>", jet::syntax::BINARY_NAME, jet::syntax::FILE_EXT);
+                eprintln!(" Why: `emit` needs a mode flag; today only `--rust` is supported");
+                eprintln!(" Fix: run `{} emit --rust <file.{}>` to print the generated Rust", jet::syntax::BINARY_NAME, jet::syntax::FILE_EXT);
+                exit(exit_codes::USAGE);
+            }
+            run_emit_rust(target, mode);
+        }
+        // D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.
+        "bench" => {
+            run_bench(target, mode);
+        }
         // Teaching error: E0042 foreign manifest filename, E0043 `jet install`
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
@@ -503,7 +525,7 @@ fn main() {
         }
         _ => {
             let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
-            run_compile_cmd(cmd, target, emit_rust, small, verbose, &program_args, mode);
+            run_compile_cmd(cmd, target, emit_rust, small, verbose, capabilities_json, &program_args, mode);
         }
     }
 }
@@ -537,6 +559,7 @@ fn run_compile_cmd(
     emit_rust: bool,
     small: bool,
     verbose: bool,
+    capabilities_json: bool,
     program_args: &[&String],
     mode: OutputMode,
 ) {
@@ -575,7 +598,7 @@ fn run_compile_cmd(
         return;
     }
 
-    let (rust_code, ffi_link, clinks) = match jet::compile_with_path(&src, file) {
+    let (rust_code, ffi_link, clinks, capabilities) = match jet::compile_with_path(&src, file) {
         Ok(out) => {
             if !out.lints.is_empty() {
                 if mode.json {
@@ -602,7 +625,7 @@ fn run_compile_cmd(
                     exit(exit_codes::USER_ERROR);
                 }
             };
-            (out.rust, out.ffi, clinks)
+            (out.rust, out.ffi, clinks, out.capabilities)
         }
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
@@ -618,6 +641,12 @@ fn run_compile_cmd(
         "build" => {
             build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose);
             println!("built: {}", bin_path(file).display());
+            // D-TOOL5 (E2-M11): print capability summary after a successful build.
+            if capabilities_json {
+                println!("{}", capabilities.to_json());
+            } else {
+                println!("{}", capabilities.summary());
+            }
         }
         "run" => {
             let out = bin_path(file);
@@ -1211,7 +1240,7 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     None
 }
 
-fn run_test(path: &str, mode: OutputMode) {
+fn run_test(path: &str, _update_snapshots: bool, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
         eprintln!("error: can't find `{}`", path);
@@ -1690,4 +1719,104 @@ fn run_sbom(cyclonedx: bool) {
         jet::publish::emit_spdx(&lock, &mf.package.name, &mf.package.version)
     };
     print!("{}", out);
+}
+
+/// D-TOOL3 (E2-M11): `jet emit --rust` — print the generated Rust source for a
+/// Jet file. This is the expert-window view: the hidden Jet→Rust translation
+/// without compiling to native. Useful for debugging or learning what codegen
+/// produces.
+fn run_emit_rust(file: &str, mode: OutputMode) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            eprintln!(
+                " fix: check the spelling, or run {} from the folder that contains it",
+                jet::syntax::BINARY_NAME
+            );
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+    match jet::compile_with_path(&src, file) {
+        Ok(out) => {
+            if !out.lints.is_empty() {
+                eprint!(
+                    "{}",
+                    jet::render_all_colored(file, &src, &out.lints, mode.color_stderr())
+                );
+            }
+            print!("{}", out.rust);
+        }
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(exit_codes::USER_ERROR);
+        }
+    }
+}
+
+/// D-TEST1 / D-TOOL5 (E2-M11): `jet bench` — benchmark a Jet program.
+/// Builds the program, runs it with warmups and repeated trials, and reports
+/// statistically honest output: mean, stddev, and trial count.
+fn run_bench(file: &str, mode: OutputMode) {
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("error: can't find the file `{}`", file);
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+    let (rust_code, ffi_link, _capabilities) = match jet::compile_with_path(&src, file) {
+        Ok(out) => (out.rust, out.ffi, out.capabilities),
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
+    build(file, &rust_code, bin.clone(), BuildProfile::Default, ffi_link.as_ref(), &[], false);
+
+    let warmups = 5u32;
+    let trials = 20u32;
+
+    // Warmup runs.
+    for _ in 0..warmups {
+        Command::new(&bin).output().ok();
+    }
+
+    // Timed trials.
+    let mut times_ms: Vec<f64> = Vec::new();
+    for _ in 0..trials {
+        let t0 = std::time::Instant::now();
+        let status = Command::new(&bin).status();
+        let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
+        match status {
+            Ok(s) if s.success() => times_ms.push(elapsed),
+            Ok(_) => {
+                eprintln!("bench: program exited with non-zero status during trial");
+                exit(exit_codes::USER_ERROR);
+            }
+            Err(e) => {
+                eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);
+                exit(exit_codes::USER_ERROR);
+            }
+        }
+    }
+
+    let n = times_ms.len() as f64;
+    let mean = times_ms.iter().sum::<f64>() / n;
+    let variance = times_ms.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / n;
+    let stddev = variance.sqrt();
+    let stem_name = stem(file);
+
+    if mode.json {
+        println!(
+            "{{\"name\":\"{}\",\"mean_ms\":{:.3},\"stddev_ms\":{:.3},\"trials\":{},\"warmups\":{}}}",
+            stem_name, mean, stddev, trials, warmups
+        );
+    } else {
+        println!(
+            "{}  {:.2} ms ±{:.2}  ({} runs, {} warmup)",
+            stem_name, mean, stddev, trials, warmups
+        );
+    }
 }

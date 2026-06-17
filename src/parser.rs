@@ -1333,6 +1333,28 @@ impl<'a> Parser<'a> {
             return_type = Some(ty);
         }
 
+        // Single-expression body: `fn name(...) -> T = expr;`
+        // Desugars to `return expr;` so the "path must return" check is satisfied.
+        if matches!(self.peek().kind, TokKind::Eq) {
+            let start = self.bump().span.start;
+            let expr = self.expr_no_struct_lit()?;
+            let expr_end = expr.span().end;
+            self.expect(TokKind::Semi, "after the single-expression function body")?;
+            let end = if self.pos > 0 { self.toks[self.pos - 1].span.end } else { expr_end };
+            let ret_span = Span::new(start, end);
+            let body = vec![crate::ast::Stmt::Return(Some(expr), ret_span)];
+            return Ok(Func {
+                is_pub,
+                name,
+                name_span,
+                type_params,
+                params,
+                return_type,
+                is_view_return,
+                is_unsafe,
+                body,
+            });
+        }
         self.expect(TokKind::LBrace, "to open the function body")?;
         let body = self.block_stmts();
         Ok(Func {
@@ -3487,6 +3509,12 @@ impl<'a> Parser<'a> {
             TokKind::KwNull => {
                 let span = self.bump().span;
                 return Ok(Expr::Absent(span));
+            }
+            TokKind::KwTodo => {
+                // D-TOOL2 (E2-M11): `todo` typed hole — valid in any expression
+                // position; sema fills `expected_type`; codegen emits a panic.
+                let span = self.bump().span;
+                return Ok(Expr::Todo { span, expected_type: None });
             }
             TokKind::Ident(name)
                 if matches!(name.as_str(), syntax::FOREIGN_THROW | syntax::FOREIGN_RAISE) =>

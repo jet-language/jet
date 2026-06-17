@@ -1169,7 +1169,8 @@ fn collect_expr(e: &ast::Expr, mp: &str, db: &mut SymbolDB) {
         | ast::Expr::Float(_, _)
         | ast::Expr::Bool(_, _)
         | ast::Expr::Char(_, _)
-        | ast::Expr::Absent(_) => {}
+        | ast::Expr::Absent(_)
+        | ast::Expr::Todo { .. } => {}
     }
 }
 

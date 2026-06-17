@@ -1447,6 +1447,7 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write("null"),
+            Expr::Todo { .. } => self.write("todo"),
             Expr::PatternTest {
                 subject, pattern, ..
             } => {
