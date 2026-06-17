@@ -42,7 +42,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "fix", summary: "apply all auto-fixable diagnostics in place", headline: false },
     CommandSpec { name: "explain", summary: "print the offline essay for a diagnostic code", headline: false },
     CommandSpec { name: "doctor", summary: "diagnose the toolchain and offer fixes", headline: false },
-    CommandSpec { name: "dev", summary: "enter the project shell", headline: false },
+    CommandSpec { name: "env", summary: "enter the project dev shell", headline: false },
     CommandSpec { name: "bind", summary: "generate a C binding cache from a header", headline: false },
     CommandSpec { name: "add", summary: "add a dependency and fetch it", headline: false },
     CommandSpec { name: "remove", summary: "remove a dependency", headline: false },

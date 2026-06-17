@@ -385,13 +385,15 @@ fn jetpack_enter_runs_command_in_project_env() {
 }
 
 #[test]
-fn jet_dev_delegates_to_jetpack_enter() {
-    // Gap #6 / U §8: `jet dev` is the friendly Scale-2 front door — it delegates
-    // straight to `jetpack enter`, forwarding flags and the trailing `-- cmd`.
-    // Running through the `jet` binary must reach the same composed env.
-    let (_base, proj, root) = core_hello_project("jet-dev");
+fn jet_env_delegates_to_jetpack_enter() {
+    // D-DEV4 (ratified 2026-06-17): `jet env` is the friendly Scale-2 front door
+    // into the project dev shell — it delegates straight to `jetpack enter`,
+    // forwarding flags and the trailing `-- cmd`. (`jet dev` is now reserved for
+    // the E2-M4 watch/interpret loop.) Running through the `jet` binary must
+    // reach the same composed env.
+    let (_base, proj, root) = core_hello_project("jet-env");
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["dev", "--no-color", "--", "hello"])
+        .args(["env", "--no-color", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("PATH", "/usr/bin:/bin") // no nix on PATH

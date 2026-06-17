@@ -79,8 +79,8 @@ usage:
   {bin} test  <file|dir>            compile and run top-level test blocks
   {bin} new   <name>                create a new project folder with payload.jet
   {bin} new   <name> --annotated    same, with commented example deps
-  {bin} dev                         enter the project shell (delegates to `jetpack enter`)
-  {bin} dev   -- cmd                run a command in the project shell, then exit
+  {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
+  {bin} env   -- cmd                run a command in the project dev shell, then exit
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
@@ -269,7 +269,7 @@ fn main() {
     // command, try an external `jet-<cmd>` on PATH (D-DX5, cargo/git style),
     // else teach E2101 with a "did you mean".
     let known = jet::cli::is_builtin(cmd)
-        || matches!(cmd, "lsp" | "install" | "doctor" | "completions" | "man");
+        || matches!(cmd, "lsp" | "install" | "doctor" | "completions" | "man" | "dev");
     if !known {
         if let Some(bin) = find_external(cmd) {
             // Forward every argument after the subcommand name verbatim.
@@ -295,7 +295,7 @@ fn main() {
     // downstream (so their flags aren't measured against the global set).
     let owns_flags = matches!(
         cmd,
-        "dev" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
+        "env" | "dev" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
     );
     if !owns_flags {
         check_flags(&raw);
@@ -359,15 +359,26 @@ fn main() {
             run_bind(&bind_args);
             return;
         }
-        "dev" => {
-            // Scale-2 front door (U §8): `jet dev` delegates straight to
+        "env" => {
+            // Scale-2 front door (U §8, D-DEV4): `jet env` delegates straight to
             // `jetpack enter`, forwarding flags and any trailing `-- cmd`.
             let mut fwd = raw.clone();
-            if let Some(pos) = fwd.iter().position(|a| a == "dev") {
+            if let Some(pos) = fwd.iter().position(|a| a == "env") {
                 fwd.remove(pos);
             }
             fwd.insert(0, "enter".to_string());
             exit(jet::jetpack::run(fwd));
+        }
+        "dev" => {
+            // D-DEV4: `jet dev` is reserved for the E2-M4 watch/interpret loop
+            // (re-check/re-run on save). The loop is not built yet, so we say so
+            // plainly rather than fake it; the env-shell job moved to `jet env`.
+            // Not advertised in completions/man until E2-M4 lands (honesty bar:
+            // advertised surface equals working surface).
+            eprintln!("`jet dev` (watch & re-run on save) isn't built yet — it lands in E2-M4.");
+            eprintln!(" For now: `jet run <file>` to run once, `jet check <file>` to look for problems.");
+            eprintln!(" Looking for the project dev shell? That moved to `jet env`.");
+            exit(exit_codes::USAGE);
         }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
