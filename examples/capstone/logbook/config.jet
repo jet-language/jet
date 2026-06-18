@@ -1,0 +1,34 @@
+use core.fs as fs;
+use core.env as env;
+use jet.toml as toml;
+
+pub struct Config {
+    pub addr: String,
+    pub notes_dir: String,
+    pub level: String,
+}
+
+pub fn load(path: String) -> Config {
+    var addr: String = "127.0.0.1:7070";
+    var notes_dir: String = "notes";
+    var level: String = "info";
+    if fs.exists(path .clone()) {
+        val raw = fs.read(path .clone()) ?? "";
+        when toml.parse(raw) {
+            | it == ok(table) {
+                addr = table.get("addr") ?? addr;
+                notes_dir = table.get("notes_dir") ?? notes_dir;
+                level = table.get("level") ?? level;
+            }
+            | it == err(e) { }
+        }
+    }
+    addr = env.get("LOGBOOK_ADDR") ?? addr;
+    level = env.get("LOGBOOK_LEVEL") ?? level;
+    return Config { addr: addr, notes_dir: notes_dir, level: level };
+}
+
+fn main() {
+    val cfg = load("config.toml");
+    print("addr: {cfg.addr}");
+}

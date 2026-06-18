@@ -456,6 +456,8 @@ struct Cx {
     test_mode: bool,
     /// Import alias -> Rust module name (`user_scoring`).
     import_mods: HashMap<String, String>,
+    /// Cross-module pub type name -> Rust module path (e.g. `Note` -> `user_note`).
+    foreign_types: HashMap<String, String>,
     /// D-MOD4: `(alias, item)` -> `(real Rust module, real fn)` for `pub use`
     /// re-exports, so `text.wrap` lowers to the module that actually defines it.
     reexport_calls: HashMap<(String, String), (String, String)>,
@@ -599,6 +601,10 @@ impl Cx {
             }
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", generics::user_trait_rust(name))
+            }
+            Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
+                let rust_mod = &self.foreign_types[name.as_str()];
+                format!("{}{}::user_{name}", self.root_prefix, rust_mod)
             }
             Type::Named(name) => format!("user_{name}"),
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
@@ -1057,6 +1063,7 @@ fn build_cx_items(
         file: file.to_string(),
         test_mode: false,
         import_mods: HashMap::new(),
+        foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
         std_imports: HashMap::new(),
@@ -2343,7 +2350,17 @@ fn emit_pattern_match_switch(
     indent: usize,
 ) {
     let pad = "    ".repeat(indent);
-    let subj = emit_expr(cx, subject, env);
+    // When the subject is a by-reference slot (parameter convention), clone it
+    // so the match owns the value.  This avoids both "move out of reference"
+    // errors (deref-and-move) and `&&T` double-reference bindings that arise
+    // when matching on `&T` via ergonomics.
+    let subj = match subject {
+        Expr::Ident(name, _) => match env.get(name.as_str()) {
+            Some(slot) if slot.deref => format!("({}).clone()", slot.rust_name),
+            _ => emit_expr(cx, subject, env),
+        },
+        _ => emit_expr(cx, subject, env),
+    };
     let enum_type = arms.iter().find_map(|a| {
         switch_arm_pattern_owned(cx, &a.cond, subject).and_then(|pattern| {
             if let Pattern::Variant { variant, .. } = pattern {
@@ -2434,7 +2451,13 @@ fn emit_switch_arm_cond(cx: &Cx, cond: &Expr, env: &HashMap<String, Slot>) -> St
 fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
     cx.variant_owner
         .get(variant)
-        .map(|t| format!("user_{}", t))
+        .map(|t| {
+            if let Some(rust_mod) = cx.foreign_types.get(t.as_str()) {
+                format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
+            } else {
+                format!("user_{}", t)
+            }
+        })
         .unwrap_or_else(|| {
             if is_json_variant(variant) {
                 format!("{}jet_std::Json", cx.root_prefix)
@@ -2507,21 +2530,35 @@ fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
     }
 }
 
-fn emit_match_pattern(_cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
+fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
+    let is_json = enum_type.map(is_json_type_name).unwrap_or(false);
     let prefix = enum_type
-        .map(|t| format!("user_{}", t))
+        .map(|t| {
+            if is_json_type_name(t) {
+                format!("{}jet_std::Json", cx.root_prefix)
+            } else if let Some(rust_mod) = cx.foreign_types.get(t) {
+                format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
+            } else {
+                format!("user_{}", t)
+            }
+        })
         .unwrap_or_else(|| "user_TYPE".to_string());
+    // Variant names are mangled for user enums, but JSON variants keep their
+    // original Rust name (they are defined as plain Rust identifiers in std.rs).
+    let vname = |v: &str| -> String {
+        if is_json { v.to_string() } else { mangle(v) }
+    };
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
         } => {
             if bindings.is_empty() {
-                format!("{}::{}", prefix, variant_rust_name(variant))
+                format!("{}::{}", prefix, vname(variant))
             } else if bindings.len() == 1 {
                 format!(
                     "{}::{}({})",
                     prefix,
-                    variant_rust_name(variant),
+                    vname(variant),
                     mangle(&bindings[0])
                 )
             } else {
@@ -2533,7 +2570,7 @@ fn emit_match_pattern(_cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> S
                 format!(
                     "{}::{} {{ {} }}",
                     prefix,
-                    variant_rust_name(variant),
+                    vname(variant),
                     fields
                 )
             }
@@ -3304,13 +3341,19 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
                 } else if is_json_type_name(alias) && member == "Null" {
                     format!("{}jet_std::Json::Null", cx.root_prefix)
                 } else if cx.enum_variants.contains_key(alias) {
-                    format!("user_{}::{}", alias, mangle(member))
-                } else {
-                    format!("({}).{}", emit_expr(cx, inner, env), field)
-                }
-            } else if let Expr::Ident(type_name, _) = &**inner {
-                if cx.enum_variants.contains_key(type_name) {
-                    format!("user_{}::{}", type_name, mangle(member))
+                    // Qualify with the foreign module path when the enum type
+                    // comes from an imported file-module.
+                    if let Some(rust_mod) = cx.foreign_types.get(alias.as_str()) {
+                        format!(
+                            "{}{}::user_{}::{}",
+                            cx.root_prefix,
+                            rust_mod,
+                            alias,
+                            mangle(member)
+                        )
+                    } else {
+                        format!("user_{}::{}", alias, mangle(member))
+                    }
                 } else {
                     format!("({}).{}", emit_expr(cx, inner, env), field)
                 }
@@ -3682,7 +3725,12 @@ fn emit_enum_lit(
     args: &[EnumLitArg],
     env: &HashMap<String, Slot>,
 ) -> String {
-    let prefix = format!("user_{}::{}", type_name, mangle(variant));
+    let type_prefix = if let Some(rust_mod) = cx.foreign_types.get(type_name) {
+        format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name)
+    } else {
+        format!("user_{}", type_name)
+    };
+    let prefix = format!("{}::{}", type_prefix, mangle(variant));
     if args.is_empty() {
         return prefix;
     }
@@ -4552,6 +4600,97 @@ fn emit_extern_call_args(
         .join(", ")
 }
 
+/// After `cx.foreign_types` is populated, add the foreign type names to
+/// `cx.type_names` and re-run the cloneable/comparable checks for any local
+/// structs or enums that reference those foreign types as fields.
+fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]) {
+    for name in cx.foreign_types.keys() {
+        cx.type_names.insert(name.clone());
+    }
+    for item in items {
+        match item {
+            Item::Struct(s) => {
+                if !cx.cloneable.contains(&s.name) && type_is_cloneable_struct(s, &cx.type_names) {
+                    cx.cloneable.insert(s.name.clone());
+                }
+                if !cx.comparable.contains(&s.name)
+                    && type_is_comparable_struct(s, &cx.type_names)
+                {
+                    cx.comparable.insert(s.name.clone());
+                }
+            }
+            Item::Enum(e) => {
+                if !cx.cloneable.contains(&e.name) && type_is_cloneable_enum(e, &cx.type_names) {
+                    cx.cloneable.insert(e.name.clone());
+                }
+                if !cx.comparable.contains(&e.name) && type_is_comparable_enum(e, &cx.type_names)
+                {
+                    cx.comparable.insert(e.name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Build a map from pub type name → Rust module path for all types defined in
+/// imported file-modules of `module_idx`. Used by codegen to qualify cross-module
+/// type references (e.g. `Note` → `user_note::user_Note`).
+fn foreign_type_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        if crate::cffi::is_c_import(imp) {
+            continue;
+        }
+        if let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) {
+            let rust_mod = format!("user_{}", bundle.modules[target].alias);
+            for item in &bundle.modules[target].items {
+                match item {
+                    Item::Struct(s) if s.is_pub => {
+                        map.insert(s.name.clone(), rust_mod.clone());
+                    }
+                    Item::Enum(e) if e.is_pub => {
+                        map.insert(e.name.clone(), rust_mod.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Populate `cx.variant_owner` and `cx.enum_variants` with pub enum variants
+/// from imported file-modules, so cross-module pattern matching works in codegen.
+fn register_foreign_enum_variants(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        if crate::cffi::is_c_import(imp) {
+            continue;
+        }
+        if let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) {
+            for item in &bundle.modules[target].items {
+                if let Item::Enum(e) = item {
+                    if e.is_pub {
+                        cx.enum_variants.entry(e.name.clone()).or_insert_with(|| {
+                            e.variants
+                                .iter()
+                                .map(|v| (v.name.clone(), v.payload.clone()))
+                                .collect()
+                        });
+                        for v in &e.variants {
+                            cx.variant_owner
+                                .entry(v.name.clone())
+                                .or_insert_with(|| e.name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
@@ -4871,6 +5010,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
             &extern_funcs,
         );
         cx.import_mods = import_mod_map(bundle, i);
+        cx.foreign_types = foreign_type_map(bundle, i);
+        register_foreign_enum_variants(&mut cx, bundle, i);
+        update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
         cx.std_imports = std_import_map(bundle, i);
@@ -4891,6 +5033,9 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         &extern_funcs,
     );
     cx.import_mods = import_mods;
+    cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
+    update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.std_imports = std_import_map(bundle, bundle.entry);
@@ -4952,6 +5097,9 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         );
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
+        cx.foreign_types = foreign_type_map(bundle, i);
+        register_foreign_enum_variants(&mut cx, bundle, i);
+        update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
         cx.std_imports = std_import_map(bundle, i);
@@ -4973,6 +5121,9 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     );
     cx.test_mode = true;
     cx.import_mods = import_mods;
+    cx.foreign_types = foreign_type_map(bundle, bundle.entry);
+    register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
+    update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.std_imports = std_import_map(bundle, bundle.entry);

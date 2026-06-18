@@ -1,0 +1,104 @@
+// server.jet — HTTP server for the logbook capstone.
+// Routes GET requests to note listing, individual notes, graph JSON,
+// health check, and full-text search.
+use jet.http as http;
+use jet.crypto as crypto;
+use core.json as json;
+use "note";
+use "index";
+use "render";
+use "search";
+
+fn graph_json(idx: Index) -> JSON {
+    var nodes: [JSON] = [];
+    var edges: [JSON] = [];
+
+    loop name, n in idx.notes {
+        val node_fields: [String, JSON] = ["id": JSON.Text(name .clone())];
+        val node = JSON.Object(node_fields);
+        nodes.push(node);
+        loop target in n.links {
+            val edge_fields: [String, JSON] = ["from": JSON.Text(name .clone()), "to": JSON.Text(target)];
+            val edge = JSON.Object(edge_fields);
+            edges.push(edge);
+        }
+    }
+
+    val arr_nodes: [JSON] = nodes;
+    val arr_edges: [JSON] = edges;
+    val obj: [String, JSON] = ["nodes": JSON.Array(arr_nodes), "edges": JSON.Array(arr_edges)];
+    return JSON.Object(obj);
+}
+
+fn html_response(body: String) -> HttpResponse {
+    val empty_hdrs: [String, String] = [:];
+    return HttpResponse { status: "200 OK", body: body .clone(), headers: empty_hdrs };
+}
+
+fn route(req: HttpRequest, idx: Index) -> HttpResponse {
+    val method = req.method();
+    when method {
+        | "GET" {
+            val p = req.path();
+            if p == "/" {
+                val names = index.note_names(idx);
+                return html_response(render.list_to_html(names));
+            }
+            if p == "/graph.json" {
+                val g = graph_json(idx);
+                val body = json.render_pretty(g);
+                val hdrs: [String, String] = ["Content-Type": "application/json"];
+                return HttpResponse { status: "200 OK", body: body, headers: hdrs };
+            }
+            if p == "/health" {
+                val empty_hdrs: [String, String] = [:];
+                return HttpResponse { status: "200 OK", body: "ok", headers: empty_hdrs };
+            }
+            if p.starts_with("/note/") {
+                val name = p.slice(6, p.len() - 1);
+                val notes_map: [String, Note] = idx.notes;
+                val maybe_note: Note? = notes_map.get(name);
+                when maybe_note {
+                    | maybe_note == value(note_val) {
+                        val bls_map: [String, [String]] = idx.backlinks;
+                        val bls: [String] = bls_map.get(name) ?? [];
+                        val body = render.note_to_html(note_val, bls);
+                        val etag = crypto.sha256(note_val.body);
+                        var hdrs: [String, String] = [:];
+                        hdrs.insert("ETag", etag);
+                        return HttpResponse { status: "200 OK", body: body, headers: hdrs };
+                    }
+                    | maybe_note == null {
+                        val empty_hdrs: [String, String] = [:];
+                        return HttpResponse { status: "404 Not Found", body: "note not found: {name}", headers: empty_hdrs };
+                    }
+                }
+            }
+            if p.starts_with("/search") {
+                val q = req.header("q") ?? "";
+                val hits = search.find(idx, q);
+                val body = render.search_to_html(q, hits);
+                return html_response(body);
+            }
+            val empty_hdrs: [String, String] = [:];
+            return HttpResponse { status: "404 Not Found", body: "not found: {p}", headers: empty_hdrs };
+        }
+        | else {
+            val empty_hdrs: [String, String] = [:];
+            return HttpResponse { status: "405 Method Not Allowed", body: "only GET is supported", headers: empty_hdrs };
+        }
+    }
+}
+
+pub fn serve(addr: String, idx: Index) {
+    val idx2 = idx .clone();
+    http.serve(addr, take(idx2) (req: HttpRequest) => route(req, idx2));
+}
+
+pub fn graph_json_str(idx: Index) -> String {
+    return json.render_pretty(graph_json(idx));
+}
+
+fn main() {
+    print("server module loaded");
+}

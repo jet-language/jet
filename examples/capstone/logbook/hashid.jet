@@ -1,0 +1,36 @@
+// hashid.jet — expert-tier demonstration for the logbook capstone.
+//
+// FNV-1a is a non-cryptographic hash used to derive stable content keys from
+// note bodies. The implementation drops into the low-level tier via
+// `use core.mem`, `@unsafe fn`, and an audited `@unsafe { }` call site.
+// Ordinary Jet code never needs any of this; it simply calls `content_key`.
+use core.mem;
+
+// FNV-1a over a byte slice. Marked `@unsafe` because the caller must ensure
+// `bytes` is a valid, in-bounds slice for the duration of the call.
+@unsafe
+fn fnv1a(bytes: [U8]) -> Int {
+    val offset_basis: Int = 2166136261;
+    val prime: Int = 16777619;
+    var hash: Int = offset_basis;
+    loop b in bytes {
+        hash = (hash ^ b.to_int()) * prime;
+    }
+    return hash;
+}
+
+// Derive a stable integer key from a string body.
+// This is the public surface; callers never touch @unsafe directly.
+pub fn content_key(body: String) -> Int {
+    val bytes = body.bytes();
+    var result: Int = 0;
+    @audit("fnv1a reads bytes in bounds")
+    @unsafe {
+        result = fnv1a(bytes);
+    }
+    return result;
+}
+
+fn main() {
+    print("content key: {content_key("hello, jet")}");
+}

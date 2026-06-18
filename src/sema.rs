@@ -1695,6 +1695,16 @@ impl<'a> Checker<'a> {
                 if self.registry.contains(n) {
                     return;
                 }
+                // Check imported file-module registries for pub types.
+                if let Some(mods) = self.modules {
+                    let found = self.imports.values().any(|&idx| {
+                        mods[idx].registry.contains(n)
+                            && mods[idx].type_pub.get(n).copied().unwrap_or(false)
+                    });
+                    if found {
+                        return;
+                    }
+                }
                 self.diags.push(Diagnostic::error(
                     "E0119",
                     format!("there's no type called `{}`", n),
@@ -5740,7 +5750,7 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
-            if self.registry.enum_variants(type_name).is_some() {
+            if self.is_known_enum(type_name) {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
@@ -5920,8 +5930,11 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
-            if let Some(variants) = self.registry.enum_variants(type_name) {
-                if variants.contains_key(method) {
+            {
+                let has_variant = self.resolve_enum_variants_cloned(type_name)
+                    .map(|v| v.contains_key(method))
+                    .unwrap_or(false);
+                if has_variant {
                     let saved: Vec<Expr> = args
                         .iter_mut()
                         .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span)))
@@ -7285,6 +7298,44 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Check if `enum_name` is a known enum in the current or any imported module.
+    fn is_known_enum(&self, enum_name: &str) -> bool {
+        if self.registry.enum_variants(enum_name).is_some() {
+            return true;
+        }
+        if let Some(mods) = self.modules {
+            for &idx in self.imports.values() {
+                if mods[idx].type_pub.get(enum_name).copied().unwrap_or(false)
+                    && mods[idx].registry.enum_variants(enum_name).is_some()
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Resolve enum variants for `enum_name`, returning a cloned copy.
+    /// Checks current registry and imported file-module registries.
+    fn resolve_enum_variants_cloned(
+        &self,
+        enum_name: &str,
+    ) -> Option<HashMap<String, (Span, VariantPayload)>> {
+        if let Some(v) = self.registry.enum_variants(enum_name) {
+            return Some(v.clone());
+        }
+        if let Some(mods) = self.modules {
+            for &idx in self.imports.values() {
+                if mods[idx].type_pub.get(enum_name).copied().unwrap_or(false) {
+                    if let Some(v) = mods[idx].registry.enum_variants(enum_name) {
+                        return Some(v.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn field_is_pub_in(&self, owner_mod: usize, type_name: &str, field: &str) -> bool {
         if owner_mod == self.module_idx {
             return true;
@@ -7480,7 +7531,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Type {
         let ty = Type::Named(type_name.to_string());
-        let Some(variants) = self.registry.enum_variants(type_name) else {
+        let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(
                 "E0119",
                 format!("there's no enum called `{}`", type_name),
@@ -7646,11 +7697,10 @@ impl<'a> Checker<'a> {
         let Type::Named(enum_name) = subj_ty else {
             return None;
         };
-        if !self
-            .registry
-            .enum_variants(enum_name)
-            .is_some_and(|variants| variants.contains_key(variant))
-        {
+        let variant_known = self
+            .resolve_enum_variants_cloned(enum_name)
+            .is_some_and(|variants| variants.contains_key(variant));
+        if !variant_known {
             return None;
         }
         Some(Pattern::Variant {
@@ -7803,7 +7853,7 @@ impl<'a> Checker<'a> {
                         .map(|(b, t)| (b.clone(), t.clone()))
                         .collect();
                 }
-                let Some(variants) = self.registry.enum_variants(enum_name) else {
+                let Some(variants) = self.resolve_enum_variants_cloned(enum_name) else {
                     self.diags.push(Diagnostic::error(
                         "E0305",
                         format!("pattern `{}` doesn't match this value's type", variant),
@@ -12005,9 +12055,33 @@ fn stmt_collect_captures(
             ..
         } => {
             expr_collect_captures(subject, bound, read, mut_cap);
+            // `it` is synthesised by the when-checker when the subject is a
+            // non-ident fallible value; always treat it as bound so that the
+            // `| it == ok(n)` pattern subjects are not treated as free vars.
+            let mut when_bound = bound.clone();
+            when_bound.insert(syntax::KW_IT.to_string());
             for a in arms {
-                expr_collect_captures(&a.cond, bound, read, mut_cap);
-                let mut arm_bound = bound.clone();
+                // Collect from the condition using the extended bound set so
+                // that the synthesised `it` subject is not treated as a capture.
+                expr_collect_captures(&a.cond, &when_bound, read, mut_cap);
+                // Add any pattern bindings introduced by the arm condition so
+                // they are not treated as captures inside the arm body.
+                let mut arm_bound = when_bound.clone();
+                if let Expr::PatternTest { pattern, .. } = &a.cond {
+                    match pattern {
+                        Pattern::Ok { binding, .. }
+                        | Pattern::Err { binding, .. }
+                        | Pattern::Present { binding, .. } => {
+                            arm_bound.insert(binding.clone());
+                        }
+                        Pattern::Variant { bindings, .. } => {
+                            for b in bindings {
+                                arm_bound.insert(b.clone());
+                            }
+                        }
+                        Pattern::Absent(_) => {}
+                    }
+                }
                 block_collect_captures(&a.body, &mut arm_bound, read, mut_cap);
             }
             if let Some(b) = else_body {

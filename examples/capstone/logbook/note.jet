@@ -1,0 +1,206 @@
+// note.jet — note parsing for the logbook capstone.
+// Parses Markdown files with YAML-style frontmatter into typed Note values.
+// No regex: all string work uses split/contains/slice/starts_with/ends_with.
+
+pub enum NoteType {
+    User;
+    Feedback;
+    Project;
+    Reference;
+}
+
+pub enum ParseError {
+    NoFrontmatter(String);
+    MissingField(String);
+    BadType(String);
+}
+
+pub struct Note {
+    pub name: String,
+    pub description: String,
+    pub note_type: NoteType,
+    pub path: String,
+    pub links: [String],
+    pub tags: [String],
+    pub body: String,
+}
+
+fn parse_note_type(path: String, s: String) -> NoteType ? ParseError {
+    val trimmed = s.trim();
+    if trimmed == "user" {
+        return ok(NoteType.User);
+    }
+    if trimmed == "feedback" {
+        return ok(NoteType.Feedback);
+    }
+    if trimmed == "project" {
+        return ok(NoteType.Project);
+    }
+    if trimmed == "reference" {
+        return ok(NoteType.Reference);
+    }
+    return err(ParseError.BadType("{path}: unknown type `{trimmed}`"));
+}
+
+// extract_links scans body for [[target]] patterns, returns deduped list preserving order.
+fn extract_links(body: String) -> [String] {
+    var links: [String] = [];
+    val parts = body.split("[[");
+    var i: Int = 1;
+    loop i < parts.len() {
+        val seg = parts[i];
+        if seg.contains("]]") {
+            val halves = seg.split("]]");
+            val target = halves[0].trim();
+            if links.contains(target) {
+            } else {
+                links.push(target);
+            }
+        }
+        i = i + 1;
+    }
+    return links;
+}
+
+// extract_tags scans body for #tag patterns, returns sorted deduped list.
+fn extract_tags(body: String) -> [String] {
+    var tags: [String] = [];
+    loop line in body.split("\n") {
+        loop word in line.split(" ") {
+            if word.starts_with("#") && word.len() > 1 {
+                val tag = word.slice(1, word.len() - 1).trim();
+                if tags.contains(tag) {
+                } else {
+                    tags.push(tag);
+                }
+            }
+        }
+    }
+    tags.sort();
+    return tags;
+}
+
+pub fn parse(path: String, text: String) -> Note ? ParseError {
+    val sections = text.split("---");
+    if sections.len() < 3 {
+        return err(ParseError.NoFrontmatter(path));
+    }
+    val frontmatter = sections[1];
+    val body = sections[2].trim();
+
+    var name: String = "";
+    var description: String = "";
+    var type_str: String = "";
+
+    loop line in frontmatter.split("\n") {
+        val t = line.trim();
+        if t.starts_with("name:") {
+            val parts = t.split(":");
+            if parts.len() > 1 {
+                name = parts[1].trim();
+            }
+        }
+        if t.starts_with("description:") {
+            val parts = t.split(":");
+            if parts.len() > 1 {
+                description = parts[1].trim();
+            }
+        }
+        if t.starts_with("type:") {
+            val parts = t.split(":");
+            if parts.len() > 1 {
+                type_str = parts[1].trim();
+            }
+        }
+    }
+
+    if name == "" {
+        return err(ParseError.MissingField("{path}: missing field `name`"));
+    }
+    if description == "" {
+        return err(ParseError.MissingField("{path}: missing field `description`"));
+    }
+    if type_str == "" {
+        return err(ParseError.MissingField("{path}: missing field `type`"));
+    }
+
+    val kind = parse_note_type(path, type_str)?;
+    val links = extract_links(body);
+    val tags = extract_tags(body);
+    val note_path = "{path}";
+
+    return ok(Note {
+        name: name,
+        description: description,
+        note_type: kind,
+        path: note_path,
+        links: links,
+        tags: tags,
+        body: body,
+    });
+}
+
+pub fn kind_str(n: Note) -> String {
+    val k = n.note_type;
+    when k {
+        | User      { return "user"; }
+        | Feedback  { return "feedback"; }
+        | Project   { return "project"; }
+        | Reference { return "reference"; }
+    }
+}
+
+fn main() {
+    print("note module loaded");
+}
+
+test "extract_links deduplicates preserving order" {
+    val body = "See [[jet-philosophy]] and [[syntax-decisions]] and [[jet-philosophy]] again.";
+    require_eq(extract_links(body).join(","), "jet-philosophy,syntax-decisions");
+}
+
+test "extract_tags returns sorted deduped list" {
+    val body = "some text\n\n#design #owner";
+    require_eq(extract_tags(body).join(","), "design,owner");
+}
+
+test "parse succeeds on well-formed frontmatter" {
+    val doc = """
+---
+name: owner-design
+description: owner design preferences and workflow constraints
+metadata:
+  type: feedback
+---
+The owner works "measure twice, cut once".
+
+See [[jet-philosophy]] for the ranked priorities, and [[syntax-decisions]] for the syntax.
+
+#design #owner
+""";
+    val note = parse("test.md", doc) ?? panic("parse failed");
+    val note_kind = kind_str(note);
+    require_eq(note.name, "owner-design");
+    require_eq(note.description, "owner design preferences and workflow constraints");
+    require_eq(note_kind, "feedback");
+}
+
+test "parse error on bad type string" {
+    val doc = """
+---
+name: test
+description: a test note
+metadata:
+  type: unknown-kind
+---
+body text
+""";
+    when parse("test.md", doc) {
+        | it == ok(n) {
+            require_eq(n.name, "");
+        }
+        | it == err(e) {
+            require_eq(extract_links("no links here").join(","), "");
+        }
+    }
+}
