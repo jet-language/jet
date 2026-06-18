@@ -1,7 +1,29 @@
 # D-ILE1 — Implicit lib/exec inference
 
-**Status: ratified 2026-06-18 (option A)** — recorded in `syntax-decisions.md`;
-ready to implement. Amends U10 / D-JPK-FILES.
+**Status: done 2026-06-18 (option A).** Implementation notes vs. the original plan:
+
+- **Inference** lives in the core provider (`src/jetpack/provider.rs`):
+  `package_kind` returns `None` both when a package is unlisted *and* when its
+  `packages:` entry omits `kind`; the provider then infers — a non-empty staged
+  `bin/` or a **top-level `fn main`** (lexer-scanned, so comments/strings never
+  false-match) ⇒ executable, else library. An explicit `library`/`executable`
+  wins.
+- **`pkg.jet` `kind`-optional** (`src/jetpack/packmanifest.rs`): a bare
+  `packages: { deploy, web: library }` parses (`PackageEntry.kind: Option`).
+- **Diagnostics dissolved** (owner, 2026-06-18): the planned `E0989` (two
+  `fn main`) and `E0990` (bad `main` signature) duplicate existing **E0105**
+  (`main` defined twice) and **E0122** (`main` takes no params / returns
+  nothing) — reused, no new codes (I8).
+- **R9 interpretation:** single-file `jet run`/`build file.jet` stays
+  executable-requiring (E0101 if no `main`); the bare-file→library path is not
+  added. Library inference is served by the provider/`pkg.jet` package route,
+  which already has a library build path.
+- **Example/tests:** `examples/simple_exec/main.jet` (+ `tests/cli.rs`
+  `simple_exec_runs_without_a_manifest`); unit tests
+  `packmanifest::…package_kind_is_optional_and_inferred` and
+  `provider::…top_level_main_drives_kind_inference`.
+
+Original plan below (kept for reference). Amends U10 / D-JPK-FILES.
 
 Package **kind is inferred from `fn main()` presence**, not required. The owner's
 framing: a `pkg.jet` is a package *definition* the user can manage by hand; the

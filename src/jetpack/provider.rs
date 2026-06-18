@@ -202,10 +202,14 @@ impl Provider for CoreProvider {
         // source declared by marker, no `pkg.jet` — we default to
         // `executable`, today's behavior.
         let manifest = packmanifest::PackManifest::load(&repo).and_then(|r| r.ok());
+        // D-ILE1: `kind` is inferred when `pkg.jet` omits it (or there is no
+        // `pkg.jet`): a top-level `fn main` in the package source means
+        // executable, otherwise library. An explicit `library`/`executable`
+        // always wins.
         let kind = manifest
             .as_ref()
             .and_then(|pm| pm.package_kind(&spec.package))
-            .unwrap_or(packmanifest::PackageKind::Executable);
+            .unwrap_or_else(|| infer_package_kind(&out_dir));
         // `pkg.jet` carries the real version for core packages (U10).
         let version = manifest
             .as_ref()
@@ -225,6 +229,70 @@ impl Provider for CoreProvider {
             bin,
         })
     }
+}
+
+/// D-ILE1: infer a package's kind from its source. A top-level `fn main` in any
+/// of the package's `.jet` files means `executable`; otherwise `library`. The
+/// source is lexed (not string-matched) so `fn main` inside a comment or string
+/// literal never produces a false positive.
+fn infer_package_kind(dir: &Path) -> packmanifest::PackageKind {
+    // A staged, non-empty `bin/` is the realized-package convention for "installs
+    // on PATH" — executable, regardless of source shape.
+    let has_bin = std::fs::read_dir(dir.join("bin"))
+        .map(|mut d| d.next().is_some())
+        .unwrap_or(false);
+    if has_bin || dir_has_top_level_main(dir) {
+        packmanifest::PackageKind::Executable
+    } else {
+        packmanifest::PackageKind::Library
+    }
+}
+
+fn dir_has_top_level_main(dir: &Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || matches!(name.as_ref(), "build" | "target" | "bin") {
+            continue;
+        }
+        if path.is_dir() {
+            if dir_has_top_level_main(&path) {
+                return true;
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some(crate::syntax::FILE_EXT) {
+            if let Ok(src) = std::fs::read_to_string(&path) {
+                if file_has_top_level_main(&src) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// True when `src` declares a top-level `fn main` (brace depth 0).
+fn file_has_top_level_main(src: &str) -> bool {
+    use crate::lexer::TokKind;
+    let (toks, _diags) = crate::lexer::lex(src);
+    let mut depth: i32 = 0;
+    for i in 0..toks.len() {
+        match &toks[i].kind {
+            TokKind::LBrace => depth += 1,
+            TokKind::RBrace => depth -= 1,
+            TokKind::KwFn if depth == 0 => {
+                if matches!(toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(n)) if n == "main")
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Resolve a `core` upstream to a local checkout. `path:` sources are used in
@@ -702,6 +770,22 @@ mod tests {
 
     fn empty() -> SourceTable {
         SourceTable::empty()
+    }
+
+    #[test]
+    fn top_level_main_drives_kind_inference() {
+        // D-ILE1: a top-level `fn main` means executable.
+        assert!(file_has_top_level_main("fn main() {}\n"));
+        assert!(file_has_top_level_main(
+            "fn helper() -> Int { return 1; }\nfn main() { print(\"hi\"); }\n"
+        ));
+        // A `main` nested in a module/impl block is not the entry point.
+        assert!(!file_has_top_level_main("module m { fn main() {} }\n"));
+        // A library: no top-level `fn main`.
+        assert!(!file_has_top_level_main("fn add(a: Int, b: Int) -> Int { return a + b; }\n"));
+        // `fn main` inside a comment or string never counts.
+        assert!(!file_has_top_level_main("// fn main()\nfn lib() {}\n"));
+        assert!(!file_has_top_level_main("fn lib() { let s = \"fn main()\"; }\n"));
     }
 
     #[test]

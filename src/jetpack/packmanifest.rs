@@ -58,11 +58,13 @@ pub enum PackageKind {
     Executable,
 }
 
-/// One entry in the `packages: { … }` block (U10).
+/// One entry in the `packages: { … }` block (U10). `kind` is `None` when the
+/// manifest omits it (D-ILE1) — the kind is then inferred from the module's
+/// `fn main` at realize time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageEntry {
     pub name: String,
-    pub kind: PackageKind,
+    pub kind: Option<PackageKind>,
 }
 
 /// Where a dependency resolves from.
@@ -139,12 +141,14 @@ impl PackManifest {
         Some(parse(&text))
     }
 
-    /// The declared kind of package `name`, if listed in `packages:` (U10).
+    /// The declared kind of package `name`. Returns `None` when the package is
+    /// not listed *or* lists no `kind` (D-ILE1) — both leave the kind to be
+    /// inferred from the source at realize time.
     pub fn package_kind(&self, name: &str) -> Option<PackageKind> {
         self.packages
             .iter()
             .find(|p| p.name == name)
-            .map(|p| p.kind.clone())
+            .and_then(|p| p.kind.clone())
     }
 }
 
@@ -658,20 +662,34 @@ fn parse_git_dep(name: &str, body: &str) -> Result<DepSource, ManifestError> {
 
 fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestError> {
     let mut packages = Vec::new();
-    for (name, value) in key_value_entries(body) {
-        let trimmed = value.trim();
-        let kind = if trimmed == syntax::PACKAGE_KIND_LIBRARY {
-            PackageKind::Library
-        } else if trimmed == syntax::PACKAGE_KIND_EXECUTABLE {
-            PackageKind::Executable
-        } else if let Some(inner) = trimmed.strip_prefix('{') {
-            let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
-            parse_package_entry_block(&name, inner)?
-        } else {
-            return Err(ManifestError::BadPackageKind {
-                name,
-                value: trimmed.to_string(),
-            });
+    for entry in top_level_commas(body) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        // D-ILE1: `kind` is optional. A bare `name` lets the kind be inferred
+        // from the module's `fn main`; `name: library` / `name: executable` /
+        // `name: { kind: … }` states it explicitly (an explicit kind wins).
+        let (name, kind) = match entry.split_once(':') {
+            Some((k, v)) => {
+                let name = k.trim().to_string();
+                let value = v.trim();
+                let kind = if value == syntax::PACKAGE_KIND_LIBRARY {
+                    PackageKind::Library
+                } else if value == syntax::PACKAGE_KIND_EXECUTABLE {
+                    PackageKind::Executable
+                } else if let Some(inner) = value.strip_prefix('{') {
+                    let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
+                    parse_package_entry_block(&name, inner)?
+                } else {
+                    return Err(ManifestError::BadPackageKind {
+                        name,
+                        value: value.to_string(),
+                    });
+                };
+                (name, Some(kind))
+            }
+            None => (entry.to_string(), None),
         };
         packages.push(PackageEntry { name, kind });
     }
@@ -879,9 +897,28 @@ deps: {
         let m = parse(FULL).unwrap();
         assert_eq!(m.packages.len(), 2);
         assert_eq!(m.packages[0].name, "web");
-        assert_eq!(m.packages[0].kind, PackageKind::Library);
+        assert_eq!(m.packages[0].kind, Some(PackageKind::Library));
         assert_eq!(m.packages[1].name, "cli");
-        assert_eq!(m.packages[1].kind, PackageKind::Executable);
+        assert_eq!(m.packages[1].kind, Some(PackageKind::Executable));
+    }
+
+    #[test]
+    fn package_kind_is_optional_and_inferred() {
+        // D-ILE1: a bare `name` omits `kind` (inferred from the module's
+        // `fn main` at realize time); an explicit kind still wins.
+        let src =
+            "payload: { name: \"x\", version: \"1\" }\npackages: { deploy, web: library }";
+        let m = parse(src).unwrap();
+        assert_eq!(m.packages.len(), 2);
+        assert_eq!(m.packages[0].name, "deploy");
+        assert_eq!(m.packages[0].kind, None);
+        assert_eq!(m.packages[1].name, "web");
+        assert_eq!(m.packages[1].kind, Some(PackageKind::Library));
+        // package_kind collapses "not listed" and "listed without kind" to None
+        // so the provider infers in both cases.
+        assert_eq!(m.package_kind("deploy"), None);
+        assert_eq!(m.package_kind("web"), Some(PackageKind::Library));
+        assert_eq!(m.package_kind("absent"), None);
     }
 
     #[test]
@@ -895,8 +932,8 @@ packages: {
 "#;
         let m = parse(src).unwrap();
         assert_eq!(m.packages.len(), 2);
-        assert_eq!(m.packages[0].kind, PackageKind::Executable);
-        assert_eq!(m.packages[1].kind, PackageKind::Library);
+        assert_eq!(m.packages[0].kind, Some(PackageKind::Executable));
+        assert_eq!(m.packages[1].kind, Some(PackageKind::Library));
     }
 
     #[test]

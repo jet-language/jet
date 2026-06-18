@@ -461,3 +461,24 @@ fn ext_optional_missing_path_keeps_original_name() {
         "error should name the original path; stderr: {err}"
     );
 }
+
+// ── D-ILE1: implicit executable inference (no pkg.jet) ───────────────
+
+#[test]
+fn simple_exec_runs_without_a_manifest() {
+    // A single file with a top-level `fn main` and no pkg.jet runs as an
+    // executable with zero ceremony (R9 / D-ILE1).
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/simple_exec/main.jet");
+    let out = Command::new(jet()).arg("run").arg(&path).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("simple exec, no manifest"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

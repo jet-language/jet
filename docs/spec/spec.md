@@ -390,7 +390,12 @@ the same module resolver, with the hangar staging dir added as an extra search
 root (the staged tree is searched exactly like the project tree or a path dep).
 No new keyword, no `..` import, no special call form — it is an ordinary module
 on the search path. An **`executable`** package goes on PATH, not `use`: naming
-one in `use` is **E0982**. A `library` dependency the project declares but hasn't
+one in `use` is **E0982**. A package's **`kind` is inferred when omitted**
+(D-ILE1): in a `pkg.jet` `packages:` block a bare `name` (no `: kind`), or a
+package with no `pkg.jet` at all, resolves to `executable` when its source stages
+a `bin/` or declares a top-level `fn main`, otherwise `library`; an explicit
+`library`/`executable` always wins. Single-file `jet run`/`build file.jet` stays
+executable-requiring (R9; E0101 if it has no `main`). A `library` dependency the project declares but hasn't
 realized yet is **E0983** (run `jetpack build`) — `jet build`/`run` never realize
 on demand, keeping them offline and deterministic, the same flow as pre-fetched
 deps. Resolver: `src/loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`

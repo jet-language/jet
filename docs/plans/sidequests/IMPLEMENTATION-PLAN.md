@@ -28,7 +28,7 @@ worktrees (owner preference), no parallel edits to shared files.
 | 1 | **ext-optional-cli** | main.rs `resolve_source_path` | — | full green |
 | 2 | **S19** finish | lexer/parser `while`/`for` teaching errors; `loop_forms` example | (S14 code) | full green |
 | 3 | **D-LABEL1** | parser loop-label + `break/continue @name`; sema label scope; codegen Rust labels | E0987, E0988 | full green |
-| 4 | **D-ILE1** | loader infer from `fn main()`; manifest `packages:` kind optional; sema | E0989, E0990 | full green |
+| 4 | **D-ILE1** | provider infers kind (`bin/` or top-level `fn main`); manifest `packages:` kind optional | reuse E0105/E0122 (E0989/E0990 dissolved) | full green |
 | 5 | **D-BIND1** | lexer `::`/`:=`, retire `val`/`var`; parser binding; sema; syntax.rs; fmt | E0985 | own tests + build (corpus red) |
 | 6 | **S6-R** | lexer terminator insertion + continuation suppression (`.`/binary-op next line); fmt; syntax.rs | E0986 | own tests + build (corpus red) |
 | 7 | **D-IF1** (after S6-R) | parser `if` arm-mode; sema inferred comparator (`subject ==`); `when`→teaching; fmt | E0984 | own tests + build (corpus red) |
