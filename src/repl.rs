@@ -185,7 +185,7 @@ impl Session {
             CtValue::List(_) => "List<Int> = []",
             CtValue::Map(_) => "Map<String, Int> = [:]",
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
-            CtValue::Struct { type_name, .. } => {
+            CtValue::Struct { .. } => {
                 // We can't easily construct a dummy struct; skip sema pre-check
                 // for struct bindings. The interpreter scope still has the value.
                 return;
@@ -908,7 +908,6 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
         }
 
         session.step += 1;
-        let step_src = format!("<repl:{}>", session.step);
 
         let kind = match classify(trimmed, session.step) {
             Ok(k) => k,

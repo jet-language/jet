@@ -12,7 +12,7 @@
 //!   - Private / mirror registry configuration.
 
 use crate::diag::Diagnostic;
-use crate::lock::{LockFile, LockedPackage, LockSource};
+use crate::lock::{LockFile, LockedPackage};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

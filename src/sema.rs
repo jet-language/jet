@@ -8309,7 +8309,7 @@ impl<'a> Checker<'a> {
 
         if matches!(
             call.name.as_str(),
-            syntax::FOREIGN_MUTEX | syntax::FOREIGN_LOCK | "RwLock" | "mutex" | "lock"
+            syntax::FOREIGN_MUTEX | syntax::FOREIGN_LOCK | "RwLock" | "mutex"
         ) {
             self.diags.push(Diagnostic::error(
                 "E0041",

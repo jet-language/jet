@@ -1394,7 +1394,7 @@ fn compute_completions(
                 }
                 // Also add methods
                 for md in &db.defs {
-                    if let SymKind::Function { params, ret } = &md.kind {
+                    if let SymKind::Function { params, .. } = &md.kind {
                         if params.first().map(|(n, _)| n.as_str()) == Some("self")
                             || md.module_path == def.module_path
                         {

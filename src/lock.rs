@@ -8,7 +8,7 @@ use crate::diag::Diagnostic;
 use crate::manifest::{DepSpec, GitSelector, Manifest};
 use crate::sha256::sha256_hex;
 use crate::syntax;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 // ──────────────────────────────────────────────

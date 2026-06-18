@@ -385,7 +385,7 @@ impl<'a> Resolver<'a> {
                 );
             }
 
-            DepSpec::Registry(version) => {
+            DepSpec::Registry(_version) => {
                 // Registry deps are M12.2. Give a clear error.
                 return Err(vec![Diagnostic::error(
                     "E1207",
