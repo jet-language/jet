@@ -125,6 +125,8 @@ before continuing.
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
 | E0114 | sema  | a path reaches the end without `return`   |
 | E0115 | sema  | `break`/`continue` outside a loop         |
+| E0987 | sema  | `break @name`/`continue @name` names a loop label not in scope (D-LABEL1) |
+| E0988 | parse | a `@name` loop label is not followed by `loop` (D-LABEL1) |
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |

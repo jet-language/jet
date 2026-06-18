@@ -829,6 +829,8 @@ pub enum Stmt {
         cond: Expr,
         body: Vec<Stmt>,
         span: Span,
+        /// D-LABEL1: optional `@name` loop label (`@outer loop cond { }`).
+        label: Option<(String, Span)>,
     },
     /// `for i in a..b` (S22) or `for x in collection` / `for k, v in map` (M5).
     For {
@@ -839,6 +841,8 @@ pub enum Stmt {
         kind: ForKind,
         body: Vec<Stmt>,
         span: Span,
+        /// D-LABEL1: optional `@name` loop label.
+        label: Option<(String, Span)>,
     },
     Switch {
         subject: Expr,
@@ -848,7 +852,15 @@ pub enum Stmt {
     },
     Break(Span),
     Continue(Span),
-    Loop(Vec<Stmt>, Span),
+    /// D-LABEL1: `break @name` / `continue @name` targeting a labeled loop.
+    BreakLabel(String, Span),
+    ContinueLabel(String, Span),
+    Loop {
+        body: Vec<Stmt>,
+        span: Span,
+        /// D-LABEL1: optional `@name` loop label (`@outer loop { }`).
+        label: Option<(String, Span)>,
+    },
     /// S58 (E2-M13): `@unsafe { … }` audited region. `audit` carries the
     /// `@audit("…")` reason on the line above, when present (lint L3101 fires
     /// when it is `None`). `body` is the gated statements.

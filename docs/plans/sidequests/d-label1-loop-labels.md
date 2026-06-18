@@ -3,6 +3,13 @@
 **Status: ratified 2026-06-18 (option B — `@name` label)** — recorded in
 `syntax-decisions.md` (amends S19, S23); ready to implement.
 
+**Status: done 2026-06-18.** Lexer unchanged (reuses S82 `@`); parser
+`loop_stmt(label)` + `@name loop` detection + `break/continue @name`; sema label
+stack + E0987/E0988; codegen Rust `'jet_<name>:` labels; fmt prints `@name ` and
+canonicalizes `while`/`for`→`loop`; interpreter declines labeled break/continue
+honestly (like `@unsafe`). Example `examples/features/labeled_loops.jet`; ui
+snapshots `tests/ui/undefined_loop_label.*`, `tests/ui/label_not_on_loop.*`.
+
 A loop carries an **`@name` label**; `break @name` / `continue @name` target it.
 Reuses the S82 `@` marker sigil in a **new inline position** (immediately before
 `loop`), so it can never be confused with an S61 labeled argument. Rust-style

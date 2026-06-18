@@ -312,7 +312,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
                 }
             }
         }
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Loop(_, _) | Stmt::Unsafe { .. } => {}
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Loop { .. } | Stmt::Unsafe { .. } => {}
     }
 }
 
@@ -2198,8 +2198,13 @@ fn emit_stmt(
             out.push_str(&format!("{}return;\n", pad));
         }
         Stmt::If(ifs) => emit_if(cx, ifs, env, out, indent, view_return),
-        Stmt::While { cond, body, .. } => {
-            out.push_str(&format!("{}while {} {{\n", pad, emit_expr(cx, cond, env)));
+        Stmt::While { cond, body, label, .. } => {
+            out.push_str(&format!(
+                "{}{}while {} {{\n",
+                pad,
+                loop_label_prefix(label),
+                emit_expr(cx, cond, env)
+            ));
             emit_stmts(cx, body, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -2208,19 +2213,22 @@ fn emit_stmt(
             var2,
             kind,
             body,
+            label,
             ..
         } => match kind {
             ForKind::Range { start, end, step } => {
                 let s = emit_expr(cx, start, env);
                 let e = emit_expr(cx, end, env);
+                let lbl = loop_label_prefix(label);
                 match step {
                     // S22 (D-SG8): `.step_by` takes a usize; sema has already
                     // checked the stride is a positive Int.
                     Some(step) => {
                         let st = emit_expr(cx, step, env);
                         out.push_str(&format!(
-                            "{}for {} in (({})..=({})).step_by(({}) as usize) {{\n",
+                            "{}{}for {} in (({})..=({})).step_by(({}) as usize) {{\n",
                             pad,
+                            lbl,
                             mangle(var),
                             s,
                             e,
@@ -2229,8 +2237,9 @@ fn emit_stmt(
                     }
                     None => {
                         out.push_str(&format!(
-                            "{}for {} in ({})..=({}) {{\n",
+                            "{}{}for {} in ({})..=({}) {{\n",
                             pad,
+                            lbl,
                             mangle(var),
                             s,
                             e
@@ -2267,6 +2276,7 @@ fn emit_stmt(
                     out,
                     indent,
                     view_return,
+                    &loop_label_prefix(label),
                 );
             }
         },
@@ -2284,8 +2294,15 @@ fn emit_stmt(
         }
         Stmt::Break(_) => out.push_str(&format!("{}break;\n", pad)),
         Stmt::Continue(_) => out.push_str(&format!("{}continue;\n", pad)),
-        Stmt::Loop(inner, _) => {
-            out.push_str(&format!("{}loop {{\n", pad));
+        // D-LABEL1: labeled `break @name` / `continue @name`.
+        Stmt::BreakLabel(name, _) => {
+            out.push_str(&format!("{}break 'jet_{};\n", pad, name))
+        }
+        Stmt::ContinueLabel(name, _) => {
+            out.push_str(&format!("{}continue 'jet_{};\n", pad, name))
+        }
+        Stmt::Loop { body: inner, label, .. } => {
+            out.push_str(&format!("{}{}loop {{\n", pad, loop_label_prefix(label)));
             emit_stmts(cx, inner, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -2982,6 +2999,16 @@ fn add_pattern_bindings(
     }
 }
 
+/// D-LABEL1: render the Rust loop-label prefix for a `@name` loop label, e.g.
+/// `'jet_outer: `, or empty when the loop is unlabeled. The `jet_` namespace
+/// keeps user labels clear of Rust's own lifetime/label names.
+fn loop_label_prefix(label: &Option<(String, Span)>) -> String {
+    match label {
+        Some((n, _)) => format!("'jet_{}: ", n),
+        None => String::new(),
+    }
+}
+
 fn emit_for_in(
     cx: &Cx,
     var: &str,
@@ -2992,13 +3019,14 @@ fn emit_for_in(
     out: &mut String,
     indent: usize,
     view_return: bool,
+    lbl: &str,
 ) {
     let pad = "    ".repeat(indent);
     let coll = emit_expr(cx, collection, env);
     if let Some((v2, _)) = var2 {
         out.push_str(&format!(
-            "{}for (_jet_k, _jet_v) in ({coll}).iter() {{\n",
-            pad
+            "{}{}for (_jet_k, _jet_v) in ({coll}).iter() {{\n",
+            pad, lbl
         ));
         out.push_str(&format!(
             "{}    let {} = _jet_k.clone();\n",
@@ -3017,8 +3045,9 @@ fn emit_for_in(
         if method == "chars" {
             let recv = emit_expr(cx, receiver, env);
             out.push_str(&format!(
-                "{}for _jet_c in ({recv}).chars() {{\n    {}let {} = _jet_c;\n",
+                "{}{}for _jet_c in ({recv}).chars() {{\n    {}let {} = _jet_c;\n",
                 pad,
+                lbl,
                 pad,
                 mangle(var)
             ));
@@ -3030,8 +3059,8 @@ fn emit_for_in(
             // Each line error is converted to a runtime panic naming the resource (E2502).
             let recv = emit_expr(cx, receiver, env);
             out.push_str(&format!(
-                "{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",
-                pad, recv
+                "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",
+                pad, lbl, recv
             ));
             out.push_str(&format!(
                 "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
@@ -3043,16 +3072,18 @@ fn emit_for_in(
             ));
         } else {
             out.push_str(&format!(
-                "{}for _jet_item in ({coll}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+                "{}{}for _jet_item in ({coll}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
                 pad,
+                lbl,
                 pad,
                 mangle(var)
             ));
         }
     } else {
         out.push_str(&format!(
-            "{}for _jet_item in ({coll}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+            "{}{}for _jet_item in ({coll}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
             pad,
+            lbl,
             pad,
             mangle(var)
         ));

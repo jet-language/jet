@@ -263,6 +263,11 @@ pub const ATTR_BINDGEN: &str = "bindgen"; // S59
 pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `@extern module`, not `extern rust`
 /// S58 / D-LL2: required reason on `@unsafe { … }` — `@audit("…")`.
 pub const ATTR_AUDIT: &str = "audit"; // S58
+// D-LABEL1: a loop label is `@name` immediately before `loop`
+// (`@outer loop { … }`); `break @name` / `continue @name` target it. This
+// reuses the S82 `@` marker sigil in a new inline (pre-`loop`) position — no
+// new token; the `@` and identifier already lex. The parser disambiguates a
+// label from an `@audit`/`@unsafe`/`@Marker` form by the following keyword.
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 

@@ -142,7 +142,7 @@ fn scan_stmt_for_unsafe(s: &Stmt) -> Option<Boundary> {
             span: Some(*span),
         }),
         Stmt::If(ifs) => scan_if_for_unsafe(ifs),
-        Stmt::While { body, .. } | Stmt::Loop(body, _) => scan_stmts_for_unsafe(body),
+        Stmt::While { body, .. } | Stmt::Loop { body, .. } => scan_stmts_for_unsafe(body),
         Stmt::For { body, .. } => scan_stmts_for_unsafe(body),
         Stmt::Switch {
             arms, else_body, ..

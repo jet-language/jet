@@ -1069,6 +1069,60 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// S19 + D-LABEL1: parse a `loop` statement (all three header forms), with an
+    /// optional `@name` label already parsed by the caller. The cursor is on the
+    /// `loop` keyword.
+    fn loop_stmt(&mut self, label: Option<(String, Span)>) -> Result<Stmt, Diagnostic> {
+        let span = self.bump().span; // `loop`
+        // S19-amend: `loop` handles all three loop forms by header.
+        //   loop { }               → infinite
+        //   loop cond { }          → conditional (was `while`)
+        //   loop x in ... { }      → iteration (was `for`)
+        //   loop k, v in ... { }   → key-value iteration
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            // Infinite loop
+            self.bump();
+            let body = self.block_stmts();
+            Ok(Stmt::Loop { body, span, label })
+        } else if matches!(&self.peek().kind, TokKind::Ident(_))
+            && matches!(&self.peek2().kind, TokKind::KwIn | TokKind::Comma)
+        {
+            // Iteration: loop x in ... { } or loop k, v in ... { }
+            let (var, var_span) = self.expect_ident("as the loop variable")?;
+            let mut var2 = None;
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                let (v2, s2) = self.expect_ident("after `,` in `loop key, value in`")?;
+                var2 = Some((v2, s2));
+            }
+            self.expect_kw(TokKind::KwIn, "after the loop variable")?;
+            let first = self.expr_no_struct_lit()?;
+            let kind = if matches!(self.peek().kind, TokKind::DotDot) {
+                self.bump();
+                let end = self.expr_no_struct_lit()?;
+                let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == syntax::KW_RANGE_STEP)
+                {
+                    self.bump();
+                    Some(self.expr_no_struct_lit()?)
+                } else {
+                    None
+                };
+                ForKind::Range { start: first, end, step }
+            } else {
+                ForKind::In { collection: first }
+            };
+            self.expect(TokKind::LBrace, "to open the loop body")?;
+            let body = self.block_stmts();
+            Ok(Stmt::For { var, var_span, var2, kind, body, span, label })
+        } else {
+            // Conditional: loop cond { }
+            let cond = self.expr_no_struct_lit()?;
+            self.expect(TokKind::LBrace, "to open the loop body")?;
+            let body = self.block_stmts();
+            Ok(Stmt::While { cond, body, span, label })
+        }
+    }
+
     /// S58 (E2-M13): parse the tail of `alias.Ptr<T>.from_addr(addr)`, with the
     /// cursor at the `<`. The `alias`/`alias_span` are the already-parsed
     /// module alias and `.Ptr` member.
@@ -2143,7 +2197,7 @@ impl<'a> Parser<'a> {
                 let cond = self.expr_no_struct_lit()?;
                 self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
-                Ok(Stmt::While { cond, body, span })
+                Ok(Stmt::While { cond, body, span, label: None })
             }
             TokKind::KwFor => {
                 // S19-amend (E0051): `for` is now a teaching error; use `loop x in ... { }`.
@@ -2192,7 +2246,7 @@ impl<'a> Parser<'a> {
                 };
                 self.expect(TokKind::LBrace, "to open the loop body")?;
                 let body = self.block_stmts();
-                Ok(Stmt::For { var, var_span, var2, kind, body, span })
+                Ok(Stmt::For { var, var_span, var2, kind, body, span, label: None })
             }
             TokKind::KwSwitch => {
                 let span = self.bump().span;
@@ -2200,67 +2254,28 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwBreak => {
                 let span = self.bump().span;
+                // D-LABEL1: optional `@name` targets an enclosing labeled loop.
+                if matches!(self.peek().kind, TokKind::At) {
+                    self.bump(); // `@`
+                    let (name, _) = self.expect_ident("after `break @` for the loop label")?;
+                    self.finish_stmt()?;
+                    return Ok(Stmt::BreakLabel(name, span));
+                }
                 self.finish_stmt()?;
                 Ok(Stmt::Break(span))
             }
             TokKind::KwContinue => {
                 let span = self.bump().span;
+                if matches!(self.peek().kind, TokKind::At) {
+                    self.bump(); // `@`
+                    let (name, _) = self.expect_ident("after `continue @` for the loop label")?;
+                    self.finish_stmt()?;
+                    return Ok(Stmt::ContinueLabel(name, span));
+                }
                 self.finish_stmt()?;
                 Ok(Stmt::Continue(span))
             }
-            TokKind::KwLoop => {
-                let span = self.bump().span;
-                // S19-amend: `loop` handles all three loop forms by header.
-                //   loop { }               → infinite
-                //   loop cond { }          → conditional (was `while`)
-                //   loop x in ... { }      → iteration (was `for`)
-                //   loop k, v in ... { }   → key-value iteration
-                if matches!(self.peek().kind, TokKind::LBrace) {
-                    // Infinite loop
-                    self.bump();
-                    let inner = self.block_stmts();
-                    Ok(Stmt::Loop(inner, span))
-                } else if matches!(&self.peek().kind, TokKind::Ident(_))
-                    && matches!(
-                        &self.peek2().kind,
-                        TokKind::KwIn | TokKind::Comma
-                    )
-                {
-                    // Iteration: loop x in ... { } or loop k, v in ... { }
-                    let (var, var_span) = self.expect_ident("as the loop variable")?;
-                    let mut var2 = None;
-                    if matches!(self.peek().kind, TokKind::Comma) {
-                        self.bump();
-                        let (v2, s2) = self.expect_ident("after `,` in `loop key, value in`")?;
-                        var2 = Some((v2, s2));
-                    }
-                    self.expect_kw(TokKind::KwIn, "after the loop variable")?;
-                    let first = self.expr_no_struct_lit()?;
-                    let kind = if matches!(self.peek().kind, TokKind::DotDot) {
-                        self.bump();
-                        let end = self.expr_no_struct_lit()?;
-                        let step = if matches!(&self.peek().kind, TokKind::Ident(n) if n == syntax::KW_RANGE_STEP)
-                        {
-                            self.bump();
-                            Some(self.expr_no_struct_lit()?)
-                        } else {
-                            None
-                        };
-                        ForKind::Range { start: first, end, step }
-                    } else {
-                        ForKind::In { collection: first }
-                    };
-                    self.expect(TokKind::LBrace, "to open the loop body")?;
-                    let body = self.block_stmts();
-                    Ok(Stmt::For { var, var_span, var2, kind, body, span })
-                } else {
-                    // Conditional: loop cond { }
-                    let cond = self.expr_no_struct_lit()?;
-                    self.expect(TokKind::LBrace, "to open the loop body")?;
-                    let body = self.block_stmts();
-                    Ok(Stmt::While { cond, body, span })
-                }
-            }
+            TokKind::KwLoop => self.loop_stmt(None),
             // S58 (E2-M13): the audit + unsafe gate is `@audit("…")` then
             // `@unsafe { … }`. Bare `unsafe { … }` is the rejected former
             // spelling — point users at the `@` form.
@@ -2279,7 +2294,37 @@ impl<'a> Parser<'a> {
                     Some(span),
                 ))
             }
-            TokKind::At => self.at_unsafe_stmt(),
+            TokKind::At => {
+                // D-LABEL1: `@name loop … { }` is a loop label. Disambiguate from
+                // the S58 `@audit(…)` / `@unsafe { … }` statement forms (handled by
+                // `at_unsafe_stmt`) by the token after the name: a `loop` keyword
+                // marks a label; `@unsafe` is `@` + the `unsafe` keyword (not an
+                // identifier); `@audit` is the identifier `audit`.
+                if let TokKind::Ident(name) = &self.peek2().kind {
+                    if name != syntax::ATTR_AUDIT {
+                        if matches!(self.peek3().kind, TokKind::KwLoop) {
+                            self.bump(); // `@`
+                            let (label, lspan) =
+                                self.expect_ident("for the loop label after `@`")?;
+                            return self.loop_stmt(Some((label, lspan)));
+                        }
+                        // `@name` that is not followed by `loop` and is not an
+                        // `@audit`/`@unsafe` form: a mis-placed label (E0988).
+                        let at_span = self.peek().span;
+                        self.bump(); // `@`
+                        let (_, name_span) = self.expect_ident("for the loop label after `@`")?;
+                        return Err(Diagnostic::error(
+                            "E0988",
+                            "a `@name` loop label must be followed by `loop`".to_string(),
+                            "the `@name` label sigil attaches only to a `loop` (D-LABEL1)"
+                                .to_string(),
+                            "write `@name loop { … }`, or remove the label".to_string(),
+                            Some(Span::new(at_span.start, name_span.end)),
+                        ));
+                    }
+                }
+                self.at_unsafe_stmt()
+            }
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).
             TokKind::Ident(_) | TokKind::KwSelf => {
@@ -4735,14 +4780,14 @@ impl<'a> Parser<'a> {
                     match last {
                         Stmt::Expr(e) => e.span().end,
                         Stmt::Return(_, s) => s.end,
-                        Stmt::Break(s) | Stmt::Continue(s) => s.end,
+                        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.end,
                         Stmt::If(i) => i.span.end,
                         Stmt::While { span, .. }
                         | Stmt::For { span, .. }
                         | Stmt::Switch { span, .. } => span.end,
                         Stmt::Val(b) => b.init.span().end,
                         Stmt::Assign { value, .. } => value.span().end,
-                        Stmt::Loop(_, s) => s.end,
+                        Stmt::Loop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
                     }
                 } else {

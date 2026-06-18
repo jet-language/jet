@@ -1,0 +1,27 @@
+// labeled_loops — D-LABEL1. A loop can carry an `@name` label; `break @name`
+// and `continue @name` target that loop from inside a nested one.
+fn main() {
+    // `break @outer` leaves both loops at once on the first match.
+    var found = "";
+    @outer loop row in [1, 2, 3] {
+        loop col in [1, 2, 3] {
+            if (row * col) == 6 {
+                found = "{row}x{col}";
+                break @outer;
+            }
+        }
+    }
+    print("first product 6 at {found}");
+
+    // `continue @rows` skips to the next outer iteration.
+    var count = 0;
+    @rows loop r in [1, 2, 3] {
+        loop c in [1, 2, 3] {
+            if c == 2 {
+                continue @rows;
+            }
+            count += 1;
+        }
+    }
+    print("counted {count}");
+}

@@ -54,10 +54,13 @@ destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr ";" ;
 if       = "if" cond block { "else" "if" cond block } [ "else" block ] ;  // statement form
-loop     = "loop" block                                                  // infinite
+loop     = [ "@" ident ] loop-body ;            // D-LABEL1: optional `@name` label
+loop-body= "loop" block                                                  // infinite
          | "loop" cond block                                             // conditional (was `while`)
          | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ; // iteration (was `for`)
          // S19-amend: `while` and `for` are teaching errors (E0050/E0051)
+break    = "break" [ "@" ident ] ";" ;          // D-LABEL1: `break @name` targets a label
+continue = "continue" [ "@" ident ] ";" ;       // D-LABEL1: `continue @name`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
 value-block = "{" { stmt } expr "}" ;                // trailing expr (no `;`) is the block's value
@@ -92,7 +95,10 @@ expr     = precedence climbing over:
 - `if`/`else if`/`else` (conditions must be `Bool`); `loop` in three forms:
   `loop { }` (infinite), `loop cond { }` (conditional), `loop x in a..b { }`
   (iterates a through b **inclusive**, S22; S19-amend); `break`/`continue`
-  inside loops only (E0115, S23). `while`/`for` are teaching errors.
+  inside loops only (E0115, S23). `while`/`for` are teaching errors. A loop may
+  carry an `@name` label (D-LABEL1) — `@outer loop … { }` — and `break @outer` /
+  `continue @outer` target it from a nested loop (E0987 names an out-of-scope
+  label; E0988 flags a `@name` not followed by `loop`).
 - `when subject { cond -> { ... }; else -> { ... }; }` (S24): arms are
   arbitrary `Bool` conditions tried top to bottom; `else` is mandatory.
   Lowered to an if/else chain; rustc optimizes it.

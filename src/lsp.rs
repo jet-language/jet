@@ -780,7 +780,7 @@ fn collect_view_return_hints(stmts: &[ast::Stmt], mp: &str, db: &mut SymbolDB) {
             ast::Stmt::If(if_stmt) => collect_view_return_hints_if(if_stmt, mp, db),
             ast::Stmt::While { body, .. }
             | ast::Stmt::For { body, .. }
-            | ast::Stmt::Loop(body, _) => collect_view_return_hints(body, mp, db),
+            | ast::Stmt::Loop { body, .. } => collect_view_return_hints(body, mp, db),
             ast::Stmt::Switch {
                 arms, else_body, ..
             } => {
@@ -894,10 +894,13 @@ fn collect_stmt(stmt: &ast::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
                 collect_stmts(eb, mp, module, db);
             }
         }
-        ast::Stmt::Loop(body, _) | ast::Stmt::Unsafe { body, .. } => {
+        ast::Stmt::Loop { body, .. } | ast::Stmt::Unsafe { body, .. } => {
             collect_stmts(body, mp, module, db);
         }
-        ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {}
+        ast::Stmt::Break(_)
+        | ast::Stmt::Continue(_)
+        | ast::Stmt::BreakLabel(..)
+        | ast::Stmt::ContinueLabel(..) => {}
     }
 }
 

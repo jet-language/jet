@@ -1342,6 +1342,7 @@ fn check_func_body(
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
         loop_depth: 0,
+        loop_labels: Vec::new(),
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
@@ -1563,6 +1564,8 @@ struct Checker<'a> {
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
     loop_depth: usize,
+    /// D-LABEL1: stack of `@name` loop labels in scope, innermost last.
+    loop_labels: Vec<String>,
     in_unsafe: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
@@ -2400,11 +2403,18 @@ impl<'a> Checker<'a> {
                 cond,
                 body,
                 span: _,
+                label,
             } => {
                 self.require_bool(cond, "a `while` condition");
+                if let Some((n, _)) = label {
+                    self.loop_labels.push(n.clone());
+                }
                 self.loop_depth += 1;
                 self.check_block(body, true);
                 self.loop_depth -= 1;
+                if label.is_some() {
+                    self.loop_labels.pop();
+                }
             }
             Stmt::For {
                 var,
@@ -2413,7 +2423,12 @@ impl<'a> Checker<'a> {
                 kind,
                 body,
                 span: _,
-            } => match kind {
+                label,
+            } => {
+                if let Some((n, _)) = label {
+                    self.loop_labels.push(n.clone());
+                }
+                match kind {
                 ForKind::Range { start, end, step } => {
                     for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
                         let t = self.infer(e);
@@ -2552,7 +2567,11 @@ impl<'a> Checker<'a> {
                     }
                     self.loop_depth -= 1;
                 }
-            },
+                }
+                if label.is_some() {
+                    self.loop_labels.pop();
+                }
+            }
             Stmt::Switch {
                 subject,
                 arms,
@@ -2571,10 +2590,39 @@ impl<'a> Checker<'a> {
                         .push(loop_control_outside(syntax::KW_CONTINUE, *span));
                 }
             }
-            Stmt::Loop(inner, _) => {
+            // D-LABEL1: `break @name` / `continue @name`.
+            Stmt::BreakLabel(name, span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(syntax::KW_BREAK, *span));
+                } else if !self.loop_labels.iter().any(|l| l == name) {
+                    self.diags
+                        .push(undefined_loop_label(name, &self.loop_labels, *span));
+                }
+            }
+            Stmt::ContinueLabel(name, span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(syntax::KW_CONTINUE, *span));
+                } else if !self.loop_labels.iter().any(|l| l == name) {
+                    self.diags
+                        .push(undefined_loop_label(name, &self.loop_labels, *span));
+                }
+            }
+            Stmt::Loop {
+                body: inner,
+                label,
+                ..
+            } => {
+                if let Some((n, _)) = label {
+                    self.loop_labels.push(n.clone());
+                }
                 self.loop_depth += 1;
                 self.check_block(inner, true);
                 self.loop_depth -= 1;
+                if label.is_some() {
+                    self.loop_labels.pop();
+                }
             }
             Stmt::Unsafe { audit, body, span } => {
                 // L3101 (D-LL2): every `@unsafe` block needs an `@audit("…")`
@@ -9028,6 +9076,28 @@ fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// D-LABEL1 (E0987): `break @name` / `continue @name` names a loop label that is
+/// not in scope. The fix lists the labels that *are* reachable here.
+fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) -> Diagnostic {
+    let fix = if in_scope.is_empty() {
+        "label an enclosing loop with `@name loop { … }` first".to_string()
+    } else {
+        let labels = in_scope
+            .iter()
+            .map(|l| format!("`@{l}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("use a label in scope: {labels}")
+    };
+    Diagnostic::error(
+        "E0987",
+        format!("no loop labeled `@{name}` is in scope"),
+        "a labeled `break`/`continue` must name an enclosing `@name loop` (D-LABEL1)".to_string(),
+        fix,
+        Some(span),
+    )
+}
+
 /// Does this block definitely hit a `return` on every path?
 fn block_definitely_returns(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_definitely_returns)
@@ -9152,8 +9222,8 @@ fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], taken: &mut
                 }
                 walk_stmts_for_const_refs(else_body.as_deref().unwrap_or(&[]), const_names, taken);
             }
-            Stmt::Break(_) | Stmt::Continue(_) => {}
-            Stmt::Loop(inner, _) | Stmt::Unsafe { body: inner, .. } => {
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
         }
@@ -9336,7 +9406,7 @@ fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<String>, mo
             Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
             Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
             Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
-            Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
             Stmt::If(ifs) => rewrite_inline_calls_if(ifs, siblings, modname),
             Stmt::While { cond, body, .. } => {
                 rewrite_inline_calls_expr(cond, siblings, modname);
@@ -9367,7 +9437,7 @@ fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<String>, mo
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
-            Stmt::Loop(inner, _) | Stmt::Unsafe { body: inner, .. } => {
+            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
         }
@@ -11209,8 +11279,8 @@ fn collect_std_stmts(
                     collect_std_stmts(body, imports, used);
                 }
             }
-            Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => collect_std_stmts(body, imports, used),
-            Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => collect_std_stmts(body, imports, used),
+            Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
         }
     }
 }
@@ -11550,6 +11620,7 @@ fn check_func_body_bundle(
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
         loop_depth: 0,
+        loop_labels: Vec::new(),
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
@@ -11749,8 +11820,8 @@ fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|b| b.iter().any(|s| stmt_refs_name(s, name)))
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(None, _) => false,
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => false,
     }
 }
 
@@ -11821,7 +11892,7 @@ fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Option<Span> {
                 .as_ref()
                 .and_then(|branch| else_view_return_span(checker, branch))
         }
-        Stmt::While { body, .. } | Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => body
+        Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => body
             .iter()
             .find_map(|stmt| stmt_view_return_span(checker, stmt)),
         Stmt::For { body, .. } => body
@@ -12089,11 +12160,11 @@ fn stmt_collect_captures(
                 block_collect_captures(b, &mut else_bound, read, mut_cap);
             }
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => {
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
-        Stmt::Break(_) | Stmt::Continue(_) | Stmt::Return(None, _) => {}
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => {}
     }
 }
 
@@ -12487,7 +12558,7 @@ fn check_pure_stmt(
             }
             None
         }
-        Stmt::Loop(body, _) => {
+        Stmt::Loop { body, .. } => {
             for st in body {
                 if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
                     return Some(d);
@@ -12526,7 +12597,7 @@ fn check_pure_stmt(
             }
             None
         }
-        Stmt::Break(_) | Stmt::Continue(_) => None,
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
     }
 }
 

@@ -438,7 +438,7 @@ impl<'a> Interp<'a> {
                 Ok(Flow::Return(v))
             }
             Stmt::If(ifs) => self.exec_if(ifs, scope),
-            Stmt::While { cond, body, span } => {
+            Stmt::While { cond, body, span, .. } => {
                 loop {
                     self.burn(*span)?;
                     let c = self.eval(cond, scope)?;
@@ -483,7 +483,7 @@ impl<'a> Interp<'a> {
             }
             Stmt::Break(_) => Ok(Flow::Break),
             Stmt::Continue(_) => Ok(Flow::Continue),
-            Stmt::Loop(body, span) => {
+            Stmt::Loop { body, span, .. } => {
                 loop {
                     self.burn(*span)?;
                     match self.exec_block(body, scope)? {
@@ -495,6 +495,12 @@ impl<'a> Interp<'a> {
                 Ok(Flow::Normal)
             }
             Stmt::Unsafe { span, .. } => Err(unsupported("an `@unsafe` block", *span)),
+            // D-LABEL1: labeled `break @name`/`continue @name` need the compiled
+            // backend's multi-level loop control; the interpreter declines them
+            // honestly (like `@unsafe`) rather than approximate them.
+            Stmt::BreakLabel(_, span) | Stmt::ContinueLabel(_, span) => {
+                Err(unsupported("a labeled `break`/`continue`", *span))
+            }
         }
     }
 
@@ -1585,10 +1591,10 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
                 b.iter().for_each(|s| walk_stmt_exprs(s, f));
             }
         }
-        Stmt::Loop(body, _) | Stmt::Unsafe { body, .. } => {
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f))
         }
-        Stmt::Break(_) | Stmt::Continue(_) => {}
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
     }
 }
 

@@ -232,8 +232,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
                     .map(|a| a.body.last().map(stmt_end).unwrap_or(a.span.end))
             })
             .unwrap_or(0),
-        Stmt::Break(s) | Stmt::Continue(s) => s.end,
-        Stmt::Loop(inner, s) => inner.last().map(stmt_end).unwrap_or(s.end),
+        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.end,
+        Stmt::Loop { body: inner, span: s, .. } => inner.last().map(stmt_end).unwrap_or(s.end),
         Stmt::Unsafe { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
     }
 }
@@ -842,8 +842,13 @@ impl<'a> Fmt<'a> {
                 self.write(";");
             }
             Stmt::If(i) => self.fmt_if(i),
-            Stmt::While { cond, body, .. } => {
-                self.write("while ");
+            Stmt::While { cond, body, label, .. } => {
+                // S19: the canonical loop keyword is `loop` (a parsed `loop cond`
+                // becomes a `While` node). D-LABEL1: print the `@name` label.
+                if let Some((_n, _)) = label {
+                    self.write(&format!("@{} ", _n));
+                }
+                self.write("loop ");
                 self.fmt_cond(cond);
                 self.write(" {");
                 self.newline();
@@ -855,9 +860,13 @@ impl<'a> Fmt<'a> {
                 var2,
                 kind,
                 body,
+                label,
                 ..
             } => {
-                self.write("for ");
+                if let Some((_n, _)) = label {
+                    self.write(&format!("@{} ", _n));
+                }
+                self.write("loop ");
                 self.write(var);
                 if let Some((v2, _)) = var2 {
                     self.write(", ");
@@ -910,7 +919,12 @@ impl<'a> Fmt<'a> {
             }
             Stmt::Break(_) => self.write("break;"),
             Stmt::Continue(_) => self.write("continue;"),
-            Stmt::Loop(inner, _) => {
+            Stmt::BreakLabel(name, _) => self.write(&format!("break @{};", name)),
+            Stmt::ContinueLabel(name, _) => self.write(&format!("continue @{};", name)),
+            Stmt::Loop { body: inner, label, .. } => {
+                if let Some((_n, _)) = label {
+                    self.write(&format!("@{} ", _n));
+                }
                 self.write("loop {");
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(inner));
@@ -1713,8 +1727,8 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Return(_, s) => s.start,
         Stmt::If(i) => i.span.start,
         Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::Switch { span, .. } => span.start,
-        Stmt::Break(s) | Stmt::Continue(s) => s.start,
-        Stmt::Loop(_, s) => s.start,
+        Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.start,
+        Stmt::Loop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
     }
 }
