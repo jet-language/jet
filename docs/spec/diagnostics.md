@@ -204,6 +204,9 @@ before continuing.
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
+| E3401 | sema  | impure call inside a `pure fn` / pure-eval context (call-trace path) |
+| E3402 | sema  | package build attempted ambient I/O or network (names the call) |
+| E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -518,6 +521,14 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3301 | `{api}` is not available in a freestanding build. | `--freestanding` targets have no OS; only `core`-level APIs are available. | Embed data at compile time with `@embed("file")`, or build without `--freestanding`. |
 | E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. | Run `jet doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it. |
 | E3303 | This freestanding program allocates memory but has no global allocator configured. | `--freestanding` builds cannot use the OS heap; a custom allocator is required. | Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`. |
+
+## Pure evaluation diagnostics (E2-M16)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `pure fn` may only call other `pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). | Mark `{call}` as `pure fn`, or remove the call from `{pure_fn}`. |
+| E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
+| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `pure`. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 

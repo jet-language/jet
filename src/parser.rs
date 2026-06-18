@@ -675,6 +675,8 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
+                // S60 (E2-M16): `pure fn name(…)` or at file level.
+                TokKind::KwPure => self.func().map(Item::Func),
                 TokKind::KwPub => match self.peek2().kind {
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -780,7 +782,7 @@ impl<'a> Parser<'a> {
                         format!("replace `{}` with `{}`", foreign, syntax::KW_FN),
                         Some(t.span),
                     ));
-                    self.func_after_fn(false, false).map(Item::Func)
+                    self.func_after_fn(false, false, false).map(Item::Func)
                 }
                 TokKind::Ident(name) if name == syntax::FOREIGN_IMPORT => {
                     let t = self.bump();
@@ -1014,7 +1016,7 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "after `@unsafe`")?;
-        self.func_after_fn(is_pub, true)
+        self.func_after_fn(is_pub, true, false)
     }
 
     /// S58 (E2-M13, D-LL2): parse a `@unsafe { … }` audited region in
@@ -1301,11 +1303,16 @@ impl<'a> Parser<'a> {
         if is_pub {
             self.bump();
         }
+        // S60 (E2-M16): `pure fn` or `pub pure fn`.
+        let is_pure = matches!(self.peek().kind, TokKind::KwPure);
+        if is_pure {
+            self.bump();
+        }
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-        self.func_after_fn(is_pub, false)
+        self.func_after_fn(is_pub, false, is_pure)
     }
 
-    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool) -> Result<Func, Diagnostic> {
+    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool, is_pure: bool) -> Result<Func, Diagnostic> {
         let (name, name_span) = self.expect_ident("after `fn`")?;
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LParen, "after the function name")?;
@@ -1352,6 +1359,7 @@ impl<'a> Parser<'a> {
                 return_type,
                 is_view_return,
                 is_unsafe,
+                is_pure,
                 body,
             });
         }
@@ -1366,6 +1374,7 @@ impl<'a> Parser<'a> {
             return_type,
             is_view_return,
             is_unsafe,
+            is_pure,
             body,
         })
     }
@@ -1799,8 +1808,13 @@ impl<'a> Parser<'a> {
         if is_pub {
             self.bump();
         }
+        // S60: allow `pure fn` on methods too.
+        let is_pure = matches!(self.peek().kind, TokKind::KwPure);
+        if is_pure {
+            self.bump();
+        }
         self.expect_kw(TokKind::KwFn, "to start a method")?;
-        self.func_after_fn(is_pub, false)
+        self.func_after_fn(is_pub, false, is_pure)
     }
 
     fn field(&mut self) -> Result<Field, Diagnostic> {

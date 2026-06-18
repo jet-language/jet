@@ -531,6 +531,10 @@ impl<'a> Fmt<'a> {
         } else if f.is_pub {
             self.write("pub ");
         }
+        // S60 (E2-M16): `pure fn` modifier.
+        if f.is_pure {
+            self.write("pure ");
+        }
         self.write("fn ");
         self.write(&f.name);
         self.fmt_type_params(&f.type_params);

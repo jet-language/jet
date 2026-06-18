@@ -1259,7 +1259,7 @@ const JET_KEYWORDS: &[&str] = &[
     "fn", "pub", "val", "var", "if", "else", "in", "when", "break", "continue",
     "return", "struct", "enum", "impl", "trait", "const", "comptime", "import", "extern", "test",
     "derive", "mut", "take", "view", "ref", "self", "loop", "unsafe", "or", "true", "false",
-    "null", "ok", "err", "value", "it",
+    "null", "ok", "err", "value", "it", "pure", "module", "todo", "use",
 ];
 
 /// Built-in type names for completion.
@@ -1885,7 +1885,10 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwNull
         | TokKind::KwOk
         | TokKind::KwErr
-        | TokKind::KwIt => Some((st::KEYWORD, 0)),
+        | TokKind::KwIt
+        | TokKind::KwPure
+        | TokKind::KwTodo
+        | TokKind::KwModule => Some((st::KEYWORD, 0)),
 
         TokKind::KwTrue | TokKind::KwFalse => Some((st::KEYWORD, sm::READONLY)),
 

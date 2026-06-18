@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅ M15 (partial)
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅ M15 (partial) M16 (partial)
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -94,6 +94,33 @@ must become teaching errors; `loop` with header disambiguation is the one form).
 That sidequest requires parser work + example rewrites + snapshot bless.
 
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
+
+### E2-M16 completion record (partial)
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ `pure fn` / `pub pure fn` parsing (S60): `KW_PURE` in `src/syntax.rs`, `KwPure` token in lexer, `is_pure: bool` on `Func` and `FuncSig` AST nodes. Parser handles `pure fn`, `pub pure fn`, and `pure fn` on methods.
+- ✅ Purity enforcement — E3401: `check_pure_fn` in `src/sema.rs` walks the body of every `pure fn` and fires E3401 (with the impure function name) when `print`/`eprint`/`input`/`read_all_input` or any non-pure user-defined function is called. Called from both `check_func_body` and `check_func_body_bundle`.
+- ✅ E3401/E3402/E3403 registered in `docs/spec/diagnostics.md` (code table + what/why/fix section).
+- ✅ UI snapshot: `tests/ui/pure_e3401.{jet,stderr}` — golden-tested impure call inside `pure fn`.
+- ✅ `jet eval --pure <file>` CLI command: parses + sema-checks the program, verifies all top-level fns are `pure fn` when `--pure` is passed, then evaluates `main()` via the comptime interpreter and prints the result as JSON.
+- ✅ `jet store rollback <gen>` + `jet store generations` — generation tracking in `src/store.rs` (`record_generation`, `list_generations`, `rollback_to`); CLI dispatch in `main.rs` (D-PURE3=B).
+- ✅ `examples/features/62_pure.jet` + `expected/62_pure.out` — `pure fn double` / `pure fn greeting` golden-pinned.
+- ✅ `tests/pure.rs` — 8 tests covering pure fn compile/fail, E3401 fire/no-fire, pub pure fn, store generations, rollback.
+- ✅ `eval_pure_program` in `src/lib.rs` — evaluates `main()` via comptime engine and returns JSON.
+- ✅ `nix develop -c cargo test` fully green (all suites).
+
+**Not implemented (deferred):**
+- E3402 sema enforcement: detecting ambient I/O in package builds requires wiring the package build runner (jetpack Phase 2). Diagnostic registered, constructor in place.
+- E3403 automatic emission: detecting time/random use in pure evaluation requires scanning stdlib calls. Registered and constructor in place.
+- Full call-trace path in E3401: the current check shows one level (the direct impure callee); transitive chains (pure_a → pure_b → impure_c) show only the direct call. Deeper tracing requires visited-set recursion (deferred).
+- `jet eval --pure` JSON rendering of struct/list return values from main (main returns void in the example; richer output needs return-type codegen).
+
+New syntax: `KW_PURE = "pure"` (S60).
+New diagnostic codes: E3401, E3402, E3403.
+New test file: `tests/pure.rs`.
+New example: `examples/features/62_pure.jet`.
+New store functions: `record_generation`, `list_generations`, `rollback_to`.
 
 After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
 

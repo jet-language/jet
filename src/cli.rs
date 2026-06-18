@@ -56,6 +56,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "audit", summary: "check dependencies against the advisory database", headline: false },
     CommandSpec { name: "sbom", summary: "emit a software bill of materials from the lockfile", headline: false },
     CommandSpec { name: "emit", summary: "emit generated output (--rust: print Rust source)", headline: false },
+    CommandSpec { name: "eval", summary: "evaluate a pure Jet program to stable JSON (--pure required)", headline: false },
     CommandSpec { name: "bench", summary: "benchmark a Jet program with honest stats", headline: false },
     CommandSpec { name: "completions", summary: "print shell completions (bash | zsh | fish)", headline: false },
     CommandSpec { name: "man", summary: "print the jet man page (roff)", headline: false },
@@ -85,6 +86,10 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
+    // E2-M16 flags.
+    FlagSpec { long: "--pure", help: "with eval: require the program to be pure (S60 / D-PURE2)" },
+    FlagSpec { long: "--freestanding", help: "with build/run: no OS; rejects std-only APIs (E2-M15)" },
+    FlagSpec { long: "--target", help: "with build: cross-compile for a rustc target triple (E2-M15)" },
     // E2-M11 flags.
     FlagSpec { long: "--capabilities-json", help: "with build: emit capability summary as JSON (D-TOOL5)" },
     FlagSpec { long: "--update-snapshots", help: "with test: update snapshot golden files (D-TOOL4)" },

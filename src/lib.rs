@@ -293,3 +293,64 @@ pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
 pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     lsp::check_document(path, text)
 }
+
+/// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
+/// interpreter and return its output as a stable JSON string. The program's
+/// `main()` function is interpreted using the comptime engine; any print calls
+/// are captured; the captured output is returned as a JSON string value.
+///
+/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
+    use std::collections::HashMap;
+
+    let (toks, lex_diags) = lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
+    }
+    let prog = parser::parse(&toks)?;
+
+    // Collect functions into a map for the comptime evaluator.
+    let func_map: HashMap<String, &ast::Func> = prog
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let ast::Item::Func(f) = item {
+                Some((f.name.clone(), f))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let main_fn = func_map.get("main").ok_or_else(|| {
+        vec![diag::Diagnostic::error(
+            "E3401",
+            "no `main` function found for `jet eval`".to_string(),
+            "pure evaluation needs a `pure fn main()` entry point".to_string(),
+            "add `pure fn main() { … }` to the program".to_string(),
+            None,
+        )]
+    })?;
+
+    // Run main() via the comptime engine with a dev sink capturing print output.
+    let base_dir = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
+    let mut sink = comptime::DevSink::new();
+    comptime::run_main(main_fn, &func_map, base_dir, &mut sink)
+        .map_err(|d| vec![d])?;
+    let text = sink.stdout;
+    // Render the captured output as a JSON string.
+    let json = if text.trim().is_empty() {
+        "null".to_string()
+    } else {
+        // Try to parse as a number or bool for cleaner output; otherwise quote it.
+        let trimmed = text.trim();
+        if trimmed == "true" || trimmed == "false" {
+            trimmed.to_string()
+        } else if trimmed.parse::<i64>().is_ok() || trimmed.parse::<f64>().is_ok() {
+            trimmed.to_string()
+        } else {
+            format!("{:?}", trimmed)
+        }
+    };
+    Ok(json)
+}

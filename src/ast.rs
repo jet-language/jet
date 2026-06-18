@@ -573,6 +573,8 @@ pub struct Func {
     /// contract. Calling such a function requires an enclosing `@unsafe`
     /// block (else E3103).
     pub is_unsafe: bool,
+    /// S60 (E2-M16): `pure fn` — impure calls inside the body are E3401.
+    pub is_pure: bool,
     pub body: Vec<Stmt>,
 }
 

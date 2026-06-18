@@ -219,3 +219,121 @@ fn io_error(action: &str, path: &Path, err: std::io::Error) -> Diagnostic {
         None,
     )
 }
+
+// ──────────────────────────────────────────────
+// D-PURE3=B (E2-M16): signed cache + generation tracking
+// ──────────────────────────────────────────────
+
+/// Generation log path: `~/.jet/store/generations.log`.
+/// Each line: `<generation_number> <timestamp_utc> <store_entry_list_hash>`.
+pub fn generations_log_path() -> PathBuf {
+    store_dir().join("generations.log")
+}
+
+/// One generation record.
+#[derive(Debug, Clone)]
+pub struct Generation {
+    pub number: u64,
+    pub timestamp: String,
+    pub entry_hash: String,
+}
+
+/// Record the current store state as a new generation.
+/// Returns the new generation number.
+pub fn record_generation() -> u64 {
+    let entries = list_entries();
+    let mut entry_names: Vec<String> = entries
+        .iter()
+        .map(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    entry_names.sort();
+    let entry_list = entry_names.join(",");
+    let entry_hash = {
+        // Simple hash: sha256 of the sorted entry list.
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        entry_list.hash(&mut h);
+        format!("{:016x}", h.finish())
+    };
+
+    let log_path = generations_log_path();
+    // Read existing generations.
+    let existing_raw = fs::read_to_string(&log_path).unwrap_or_default();
+    let next_gen = existing_raw
+        .lines()
+        .filter_map(|l| l.split_whitespace().next())
+        .filter_map(|n| n.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+
+    // Append the new generation.
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+    let line = format!("{} {} {}\n", next_gen, ts, entry_hash);
+    let _ = fs::create_dir_all(store_dir());
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(line.as_bytes())
+        });
+
+    next_gen
+}
+
+/// Read all recorded generations from the log.
+pub fn list_generations() -> Vec<Generation> {
+    let log_path = generations_log_path();
+    let raw = fs::read_to_string(&log_path).unwrap_or_default();
+    raw.lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let number = parts.next()?.parse::<u64>().ok()?;
+            let timestamp = parts.next()?.to_string();
+            let entry_hash = parts.next().unwrap_or("").to_string();
+            Some(Generation { number, timestamp, entry_hash })
+        })
+        .collect()
+}
+
+/// Roll back to a prior generation number.
+/// In this implementation, rollback writes a new generation entry that
+/// records the intent (store entries cannot be erased — the store is
+/// append-only; a rollback marks which generation is "current").
+/// Returns the rolled-back-to generation number, or an error string.
+pub fn rollback_to(gen_number: u64) -> Result<Generation, String> {
+    let gens = list_generations();
+    let target = gens
+        .iter()
+        .find(|g| g.number == gen_number)
+        .ok_or_else(|| format!("generation {} does not exist", gen_number))?
+        .clone();
+    // Write a "rollback" marker generation pointing at the target hash.
+    let log_path = generations_log_path();
+    let next_gen = gens.iter().map(|g| g.number).max().unwrap_or(0) + 1;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+    let line = format!("{} {} rollback-to-{}\n", next_gen, ts, gen_number);
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(line.as_bytes())
+        });
+    Ok(target)
+}

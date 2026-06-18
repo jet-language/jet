@@ -81,6 +81,7 @@ usage:
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
+  {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
@@ -109,6 +110,8 @@ package management (M12.1):
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
   {bin} store verify                re-check all store entry hashes
+  {bin} store generations           list recorded store generations (D-PURE3)
+  {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
   {bin} gc                          remove unreferenced store entries
 
 supply chain (E2-M8):
@@ -439,12 +442,35 @@ fn main() {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
             match sub {
                 "verify" => run_store_verify(),
+                "rollback" => {
+                    // D-PURE3=B (E2-M16): roll back to a prior store generation.
+                    let gen_str = args.get(2).map(|s| s.as_str()).unwrap_or("");
+                    run_store_rollback(gen_str);
+                }
+                "generations" => run_store_generations(),
                 _ => {
                     eprintln!("error: unknown store subcommand `{}`", sub);
-                    eprintln!(" fix: try `jet store verify`");
+                    eprintln!(" fix: try `jet store verify`, `jet store generations`, or `jet store rollback <gen>`");
                     exit(exit_codes::USAGE);
                 }
             }
+            return;
+        }
+        "eval" => {
+            // S60 / D-PURE1 (E2-M16): deterministic evaluation of a pure program.
+            let pure_flag = raw.iter().any(|a| a == "--pure");
+            let file = match args.get(1) {
+                Some(f) => f.as_str(),
+                None => {
+                    eprintln!(
+                        "error: `jet eval` needs a file: {} eval --pure <file.{}>",
+                        jet::syntax::BINARY_NAME,
+                        jet::syntax::FILE_EXT
+                    );
+                    exit(exit_codes::USAGE);
+                }
+            };
+            run_eval(file, pure_flag, mode);
             return;
         }
         _ => {}
@@ -1229,6 +1255,124 @@ fn run_gc() {
         entries.len()
     );
     println!("(gc: removing unreferenced entries requires a future registry — coming in M12.2)");
+}
+
+/// D-PURE3=B (E2-M16): print recorded store generations.
+fn run_store_generations() {
+    let gens = jet::store::list_generations();
+    if gens.is_empty() {
+        println!("no store generations recorded yet");
+        println!("hint: generations are recorded when packages are installed");
+        return;
+    }
+    println!("{} generation(s):", gens.len());
+    for g in &gens {
+        println!("  gen {}: {} (hash: {})", g.number, g.timestamp, g.entry_hash);
+    }
+}
+
+/// D-PURE3=B (E2-M16): roll back to a prior store generation.
+fn run_store_rollback(gen_str: &str) {
+    let gen_number = match gen_str.parse::<u64>() {
+        Ok(n) => n,
+        Err(_) => {
+            eprintln!("error: `jet store rollback` needs a generation number");
+            eprintln!(" fix: run `jet store generations` to see available generations");
+            exit(exit_codes::USAGE);
+        }
+    };
+    match jet::store::rollback_to(gen_number) {
+        Ok(g) => {
+            println!("rolled back to generation {} (entry hash: {})", g.number, g.entry_hash);
+            println!("hint: the store is append-only; run `jet fetch` to restore the generation's packages");
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            eprintln!(" fix: run `jet store generations` to see available generations");
+            exit(exit_codes::USER_ERROR);
+        }
+    }
+}
+
+/// S60 / D-PURE1 (E2-M16): evaluate a `pure fn main()` program to stable JSON.
+/// All top-level functions must be `pure`; any impure call is E3401.
+fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
+    // Use check_with_path to validate, then run through comptime interpreter.
+    let src = match fs::read_to_string(file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: couldn't read `{}`: {}", file, e);
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+    // Lex + parse to get the AST for purity inspection.
+    let (toks, lex_diags) = jet::lexer::lex(&src);
+    if !lex_diags.is_empty() {
+        eprint!(
+            "{}",
+            jet::render_all_colored(file, &src, &lex_diags, mode.color_stderr())
+        );
+        exit(exit_codes::USER_ERROR);
+    }
+    let prog = match jet::parser::parse(&toks) {
+        Ok(p) => p,
+        Err(ds) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, &src, &ds, mode.color_stderr())
+            );
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+
+    // Verify purity if --pure: every top-level fn must be `pure fn`.
+    if pure_required {
+        let mut impure_fns: Vec<String> = Vec::new();
+        for item in &prog.items {
+            if let jet::ast::Item::Func(f) = item {
+                if !f.is_pure {
+                    impure_fns.push(f.name.clone());
+                }
+            }
+        }
+        if !impure_fns.is_empty() {
+            eprintln!(
+                "error [E3401]: `jet eval --pure` requires all functions to be `pure fn`"
+            );
+            for name in &impure_fns {
+                eprintln!("  impure: `{}`", name);
+            }
+            eprintln!(" fix: add `pure` before `fn` on each function, or remove the call");
+            exit(exit_codes::USER_ERROR);
+        }
+    }
+
+    // Use the comptime evaluator to interpret main() and render as JSON.
+    // The comptime module evaluates a pure subset — E3401/E3402/E3403 fire on impure calls.
+    match jet::compile(&src) {
+        Ok(_) => {
+            // Program is valid. Run via comptime.
+            match jet::eval_pure_program(&src, file) {
+                Ok(json) => {
+                    println!("{}", json);
+                }
+                Err(diags) => {
+                    eprint!(
+                        "{}",
+                        jet::render_all_colored(file, &src, &diags, mode.color_stderr())
+                    );
+                    exit(exit_codes::USER_ERROR);
+                }
+            }
+        }
+        Err(diags) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, &src, &diags, mode.color_stderr())
+            );
+            exit(exit_codes::USER_ERROR);
+        }
+    }
 }
 
 fn do_fetch(root: &Path, locked: bool) {

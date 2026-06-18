@@ -356,6 +356,11 @@ pub const KW_TEST: &str = "test";
 /// panics at runtime with file, line, and expected type.
 pub const KW_TODO: &str = "todo";
 
+/// S60 (ratified 2026-06-12; implemented E2-M16): `pure fn` checked modifier.
+/// A `pure fn` may only call other `pure fn`s and pure builtins; impure calls
+/// are a compile error (E3401) with the call-trace path.
+pub const KW_PURE: &str = "pure";
+
 /// D-TOOL4 (ratified 2026-06-16, E2-M11): snapshot testing builtin.
 /// `expect(value).snapshot()` records or compares a golden snapshot.
 pub const BUILTIN_EXPECT: &str = "expect";
