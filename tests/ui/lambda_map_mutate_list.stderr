@@ -1,7 +1,15 @@
-Error [E0985]: `var` is no longer a binding keyword in Jet
-  --> tests/ui/lambda_map_mutate_list.jet:2:5
+Error [E0507]: while the loop is reading `nums`, nothing may change it
+  --> tests/ui/lambda_map_mutate_list.jet:5:13
     |
-  2 |     var nums = [1, 2, 3];
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name := value` instead of `var name = value`
+  5 |             nums.push(0)
+    |             ^^^^
+ Why: a `loop` borrows the whole collection until the body finishes
+ Fix: collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`
+
+Error [E0507]: while the loop is reading `nums`, nothing may change it
+  --> tests/ui/lambda_map_mutate_list.jet:5:13
+    |
+  5 |             nums.push(0)
+    |             ^^^^
+ Why: a `loop` borrows the whole collection until the body finishes
+ Fix: collect changes into a second list, or loop over indices: `loop i in 0..nums.len()-1 { }`

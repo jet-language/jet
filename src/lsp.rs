@@ -2996,14 +2996,15 @@ mod tests {
 
     #[test]
     fn teaching_edit_from_let() {
-        let src = "fn main() {\n    let x = 1;\n}\n";
+        // D-BIND1: `let x = 1` migrates to `x :: 1`, which moves tokens — it is
+        // no longer a single-keyword swap, so no auto-edit is synthesized (the
+        // `replace `X` with `Y`` shape). `jet fmt` performs the migration. The
+        // teaching diagnostic still fires and points at the sigil form.
+        let src = "fn main() {\n    let x = 1\n}\n";
         let diags = check_document("test.jet", src);
         let e0009 = diags.iter().find(|d| d.code == "E0009").expect("E0009");
-        let edit = e0009.edit.as_ref().expect("edit");
-        assert_eq!(edit.new_text, "val");
-        let fixed = apply_edit(src, edit);
-        assert!(fixed.contains("val x = 1"));
-        assert!(!fixed.contains("let x"));
+        assert!(e0009.edit.is_none(), "E0009 fix moves tokens; no trivial edit");
+        assert!(e0009.fix.contains(crate::syntax::SIGIL_BIND_IMMUT));
     }
 
     #[test]

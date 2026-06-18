@@ -88,12 +88,12 @@ fn canonical_and_short_std_imports_resolve() {
     let out = compile_temp(
         "std_imports.jet",
         r#"
-use core.fs as fs;
-use jet.core.fs as files;
+use core.fs as fs
+use jet.core.fs as files
 
 fn main() {
-    print(fs.exists("/tmp"));
-    print(files.exists("/tmp"));
+    print(fs.exists("/tmp"))
+    print(files.exists("/tmp"))
 }
 "#,
     );
@@ -105,17 +105,17 @@ fn importing_std_without_calls_is_free_in_codegen() {
     let out = compile_temp(
         "std_import_only.jet",
         r#"
-use core.fs as fs;
-use core.io as io;
-use core.env as env;
-use core.process as process;
-use core.math as math;
-use core.random as random;
-use core.time as time;
-use core.json as json;
+use core.fs as fs
+use core.io as io
+use core.env as env
+use core.process as process
+use core.math as math
+use core.random as random
+use core.time as time
+use core.json as json
 
 fn main() {
-    print("ok");
+    print("ok")
 }
 "#,
     );
@@ -138,11 +138,11 @@ fn io_input_reads_a_line_from_stdin() {
         &dir,
         "input_demo",
         r#"
-use core.io as io;
+use core.io as io
 
 fn main() {
-    val name = io.input("name? ") ?? panic("read failed");
-    print("hello, {name}");
+    name :: io.input("name? ") ?? panic("read failed")
+    print("hello, {name}")
 }
 "#,
         &[],
@@ -170,14 +170,14 @@ fn random_and_time_output_pins_with_seed_and_epoch() {
         &dir,
         "time_random",
         r#"
-use core.random as random;
-use core.time as time;
+use core.random as random
+use core.time as time
 
 fn main() {
-    random.seed(42);
-    print(random.int(1, 100));
-    print(random.float());
-    print(time.now());
+    random.seed(42)
+    print(random.int(1, 100))
+    print(random.float())
+    print(time.now())
 }
 "#,
         &[("LEX_TEST_EPOCH", "1700000000000")],
@@ -211,17 +211,17 @@ fn importing_all_std_modules_without_calls_stays_hello_world_sized() {
     fs::write(
         dir.join("std_import_only.jet"),
         r#"
-use core.fs as fs;
-use core.io as io;
-use core.env as env;
-use core.process as process;
-use core.math as math;
-use core.random as random;
-use core.time as time;
-use core.json as json;
+use core.fs as fs
+use core.io as io
+use core.env as env
+use core.process as process
+use core.math as math
+use core.random as random
+use core.time as time
+use core.json as json
 
 fn main() {
-    print("ok");
+    print("ok")
 }
 "#,
     )
@@ -267,22 +267,22 @@ fn channel_stress_1000_messages() {
         &dir,
         "channel_stress",
         r#"
-use core.tasks as tasks;
+use core.tasks as tasks
 
 fn main() {
-    val ch: Channel<Int> = tasks.channel();
-    val sender = ch.sender();
-    val producer = tasks.spawn(take(sender) () => {
+    ch: Channel<Int> :: tasks.channel()
+    sender :: ch.sender()
+    producer :: tasks.spawn(take(sender) () => {
         loop i in 1..1000 {
-            sender.send(i);
+            sender.send(i)
         }
-    });
-    producer.join();
-    var total = 0;
+    })
+    producer.join()
+    total := 0
     loop i in 1..1000 {
-        total = total + (ch.receive() ?? panic("channel closed"));
+        total = total + (ch.receive() ?? panic("channel closed"))
     }
-    print(total);
+    print(total)
 }
 "#,
         &[],

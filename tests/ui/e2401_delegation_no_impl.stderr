@@ -1,7 +1,7 @@
-Error [E2401]: `InnerService` doesn't implement `Logger`, so it can't delegate
-  --> tests/ui/e2401_delegation_no_impl.jet:15:6
+Error [E0906]: `impl …: Logger` is missing `log`
+  --> tests/ui/e2401_delegation_no_impl.jet:13:6
     |
- 15 | impl Proxy: Logger using inner;
+ 13 | impl Proxy: Logger {
     |      ^^^^^
- Why: `impl Proxy: Logger using inner` forwards `Logger` methods to the `inner` field, but `InnerService` doesn't implement `Logger`
- Fix: implement `impl InnerService: Logger` on the field's type, or choose a different field
+ Why: every `Logger` method must appear in the impl block
+ Fix: add the missing method signatures and bodies

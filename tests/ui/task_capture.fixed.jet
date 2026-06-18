@@ -1,11 +1,10 @@
-use core.tasks as tasks;
-
+use core.tasks
 fn main() {
-    val ch: Channel<Int> = tasks.channel();
-    val sender = ch.sender();
-    val t = tasks.spawn(take(sender) () => {
-        sender.send(1);
-    });
-    t.join();
-    print(ch.receive() ?? panic("task did not send a value"));
+    ch: Channel<Int> :: tasks.channel()
+    sender :: ch.sender()
+    t :: tasks.spawn(take(sender) () => {
+        sender.send(1)
+    })
+    t.join()
+    print(ch.receive() ?? panic("task did not send a value"))
 }

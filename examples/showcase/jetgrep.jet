@@ -1,83 +1,80 @@
 // jetgrep — grep-lite: search files for a pattern.
 // Usage: jetgrep [-n] [-r] PATTERN FILE_OR_DIR
-use core.io as io;
-use core.fs as fs;
-use core.process as process;
-
+use core.io as io
+use core.fs as fs
+use core.process as process
 fn grep_file(path: String, pattern: String, show_line_nums: Bool) -> Bool {
-    val text = fs.read(path) ?? return false;
-    val lines = text.split("\n");
-    var matched = false;
-    var n = 0;
+    text :: fs.read(path) ?? return false
+    lines :: text.split("\n")
+    matched := false
+    n := 0
     loop line in lines {
-        n += 1;
+        n+= 1
         if line.contains(pattern) {
-            matched = true;
+            matched = true
             if show_line_nums {
-                print("{path}:{n}:{line}");
+                print("{path}:{n}:{line}")
             } else {
-                print("{path}:{line}");
+                print("{path}:{line}")
             }
         }
     }
-    return matched;
+    return matched
 }
-
 fn grep_dir(dir: String, pattern: String, show_line_nums: Bool) -> Bool {
-    val entries = fs.list_dir(dir) ?? return false;
-    var matched = false;
+    entries :: fs.list_dir(dir) ?? return false
+    matched := false
     loop entry in entries {
-        val full = "{dir}/{entry}";
+        full :: "{dir}/{entry}"
         if fs.is_dir(full) {
             if grep_dir(full, pattern, show_line_nums) {
-                matched = true;
+                matched = true
             }
         } else {
             if grep_file(full, pattern, show_line_nums) {
-                matched = true;
+                matched = true
             }
         }
     }
-    return matched;
+    return matched
 }
-
 fn main() {
-    val args = io.args();
-    var show_line_nums = false;
-    var recursive = false;
-    var pattern = "";
-    var target = "";
-    var i = 1;
+    args :: io.args()
+    show_line_nums := false
+    recursive := false
+    pattern := ""
+    target := ""
+    i := 1
     loop i < args.len() {
-        val a = args.get(i) ?? "";
+        a :: args.get(i) ?? ""
         if a == "-n" {
-            show_line_nums = true;
+            show_line_nums = true
         } else if a == "-r" {
-            recursive = true;
+            recursive = true
         } else if pattern == "" {
-            pattern = a;
+            pattern = a
         } else {
-            target = a;
+            target = a
         }
-        i += 1;
+        i+= 1
     }
     if pattern == "" {
-        print("usage: jetgrep [-n] [-r] PATTERN FILE_OR_DIR");
-        process.exit(1);
+        print("usage: jetgrep [-n] [-r] PATTERN FILE_OR_DIR")
+        process.exit(1)
     }
     if target == "" {
-        print("usage: jetgrep [-n] [-r] PATTERN FILE_OR_DIR");
-        process.exit(1);
+        print("usage: jetgrep [-n] [-r] PATTERN FILE_OR_DIR")
+        process.exit(1)
     }
-    var found = false;
+    found := false
     if recursive || fs.is_dir(target) {
-        found = grep_dir(target, pattern, show_line_nums);
+        found = grep_dir(target, pattern, show_line_nums)
     } else {
-        found = grep_file(target, pattern, show_line_nums);
+        found = grep_file(target, pattern, show_line_nums)
     }
     if found {
-        process.exit(0);
+        process.exit(0)
     } else {
-        process.exit(1);
+        process.exit(1)
     }
 }

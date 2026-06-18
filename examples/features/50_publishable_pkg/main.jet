@@ -3,34 +3,33 @@
 // This file doubles as the package entry point (jet run) and the library
 // surface that `jet publish` would diff against the previous release.
 // Every `pub` item here is part of the public API that E2601 guards.
-
 pub struct Point {
-    x: Float;
-    y: Float;
+    x: Float
+    y: Float
 }
-
 pub fn distance(a: Point, b: Point) -> Float {
-    val dx = a.x - b.x;
-    val dy = a.y - b.y;
-    return (dx * dx + dy * dy);
+    dx :: (a.x - b.x)
+    dy :: (a.y - b.y)
+    return ((dx * dx) + (dy * dy))
 }
-
 pub fn midpoint(a: Point, b: Point) -> Point {
-    return Point { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+    return Point {x: (a.x + (b.x / 2.0)), y: (a.y + (b.y / 2.0))}
 }
-
 // Private helper — not part of the public API; removing it is never breaking.
 fn clamp(v: Float, lo: Float, hi: Float) -> Float {
-    if v < lo { return lo; }
-    if v > hi { return hi; }
-    return v;
+    if v < lo {
+        return lo
+    }
+    if v > hi {
+        return hi
+    }
+    return v
 }
-
 fn main() {
-    val origin = Point { x: 0.0, y: 0.0 };
-    val p = Point { x: 3.0, y: 4.0 };
-    val d = distance(origin, p);
-    print("distance squared: {d}");
-    val mid = midpoint(origin, p);
-    print("midpoint: ({mid.x}, {mid.y})");
+    origin :: Point {x: 0.0, y: 0.0}
+    p :: Point {x: 3.0, y: 4.0}
+    d :: distance(origin, p)
+    print("distance squared: {d}")
+    mid :: midpoint(origin, p)
+    print("midpoint: ({mid.x}, {mid.y})")
 }

@@ -1,15 +1,7 @@
-Error [E0985]: `var` is no longer a binding keyword in Jet
-  --> tests/ui/lambda_mut_borrow_conflict.jet:2:5
+Error [E0204]: `total` is being changed in this call, so it can't be used again here
+  --> tests/ui/lambda_mut_borrow_conflict.jet:6:5
     |
-  2 |     var total = 0;
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name := value` instead of `var name = value`
-
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/lambda_mut_borrow_conflict.jet:3:5
-    |
-  3 |     val f = (n: Int) => { total += n; };
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  6 |     total+= 1
+    |     ^^^^^
+ Why: while something is being changed, nobody else may be looking at it
+ Fix: pass `mut total` only once, or copy first with `total .clone()`

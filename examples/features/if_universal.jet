@@ -8,22 +8,26 @@ fn classify(code: Int) -> String {
     // Bare-value arms (inferred `code == …`), a full-condition arm, braceless
     // and block bodies, and an `else` catch-all — mixed freely.
     if code {
-        200 -> return "ok"
+        200 -> {
+            return "ok"
+        }
         404 -> {
             note :: "not found"
             return note
         }
-        code >= 500 -> return "server error"
-        else -> return "other"
+        (code >= 500) -> {
+            return "server error"
+        }
+        else -> {
+            return "other"
+        }
     }
 }
-
 fn main() {
     print(classify(200))
     print(classify(404))
     print(classify(503))
     print(classify(301))
-
     // The conventional two-arm `if` is unchanged.
     n :: 7
     if n > 5 {

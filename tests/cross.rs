@@ -22,10 +22,10 @@ fn check_freestanding_src(src: &str, label: &str) -> String {
 
 #[test]
 fn e3301_fs_read_in_freestanding() {
-    let src = r#"use core.fs as fs;
+    let src = r#"use core.fs as fs
 
 fn main() {
-    val _ = fs.read("config.txt");
+    _ :: fs.read("config.txt")
 }
 "#;
     let out = check_freestanding_src(src, "fs_read");
@@ -43,10 +43,10 @@ fn main() {
 
 #[test]
 fn e3301_http_in_freestanding() {
-    let src = r#"use jet.http as http;
+    let src = r#"use jet.http as http
 
 fn main() {
-    val _ = http.get("http://example.com");
+    _ :: http.get("http://example.com")
 }
 "#;
     let out = check_freestanding_src(src, "http");
@@ -59,11 +59,11 @@ fn main() {
 
 #[test]
 fn e3301_tasks_in_freestanding() {
-    let src = r#"use core.tasks as tasks;
+    let src = r#"use core.tasks as tasks
 
 fn main() {
-    val t = tasks.spawn(() => 42);
-    t.join();
+    t :: tasks.spawn(() => 42)
+    t.join()
 }
 "#;
     let out = check_freestanding_src(src, "tasks");
@@ -77,11 +77,11 @@ fn main() {
 #[test]
 fn freestanding_allows_core_math() {
     // core.math is not OS-dependent; must not trigger E3301.
-    let src = r#"use core.math as math;
+    let src = r#"use core.math as math
 
 fn main() {
-    val x = math.sqrt(4.0);
-    print(x);
+    x :: math.sqrt(4.0)
+    print(x)
 }
 "#;
     let out = check_freestanding_src(src, "core_math");
@@ -95,11 +95,11 @@ fn main() {
 #[test]
 fn freestanding_allows_core_json() {
     // core.json does not need an OS.
-    let src = r#"use core.json as json;
+    let src = r#"use core.json as json
 
 fn main() {
-    val s = json.render("hello");
-    print(s);
+    s :: json.render("hello")
+    print(s)
 }
 "#;
     let out = check_freestanding_src(src, "core_json");

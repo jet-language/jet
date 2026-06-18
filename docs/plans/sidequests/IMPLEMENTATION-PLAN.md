@@ -34,6 +34,15 @@ worktrees (owner preference), no parallel edits to shared files.
 | 7 | **D-IF1** (after S6-R) | parser `if` arm-mode; sema inferred comparator (`subject ==`); `when`→teaching; fmt | E0984 | own tests + build (corpus red) |
 | 8 | **Consolidation** | `jet fmt` migrates `examples/` (sigils, no-`;`, `when`→`if`); re-bless ALL ui/golden snapshots; finalize diagnostics.md + spec.md | — | **full green** |
 
+**Phases 5–8 status: DONE (2026-06-18).** Whole corpus migrated via `jet fmt`;
+full suite green. Phase 8 also fixed several latent `jet fmt` data-loss bugs
+that "migrate via fmt" exposed: test-block statement newlines, trait default
+bodies, `impl … using` delegation, associated-type impls, parameter defaults,
+the `it`-placeholder collapse in `if`-arm pattern tests, and dotted-module
+import-alias dropping. Inline module bodies (`module { … }`) keep explicit `;`
+only where the deferred module formatter doesn't yet rewrite them — none remain
+in the corpus (hand-stripped). `src/repl.rs` echo wrapper moved to sigils.
+
 ## Per-feature design references (do not re-derive)
 
 - **D-JPK-FILES** → `d-jpk-files-structure.md` + syntax-decisions D-JPK-FILES.

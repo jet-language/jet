@@ -1,41 +1,42 @@
-// 07 — Choosing one branch from many: `when` (S24).
-// Each arm is a condition; the first true arm runs; `else` catches the rest.
+// 07 — Choosing one branch from many: multi-arm `if` (D-IF1).
+// `if subject { arm -> body }`: a bare-value arm compares against the subject,
+// the first matching arm runs, and `else ->` catches the rest.
 // The backend lowers value-equality chains to a native Rust match (jump
 // tables where profitable), so this is never slower than if/else.
 // S25: in a `||` chain, a plain value re-applies the nearest comparison —
 // `day == "sat" || "sun"` means `day == "sat" || day == "sun"`.
 fn day_type(day: String) -> String {
-    when day {
-        | "sat" || "sun" {
-            return "weekend";
+    if day {
+        "sat" || "sun" -> {
+            return "weekend"
         }
-        | "mon" || "tue" || "wed" || "thu" || "fri" {
-            return "weekday";
+        "mon" || "tue" || "wed" || "thu" || "fri" -> {
+            return "weekday"
         }
-        | else {
-            return "not a day";
+        else -> {
+            return "not a day"
         }
     }
 }
 fn main() {
-    val code = 404;
-    when code {
-        | 200 {
-            print("ok");
+    code :: 404
+    if code {
+        200 -> {
+            print("ok")
         }
-        | 301 || 302 {
-            print("redirected");
+        301 || 302 -> {
+            print("redirected")
         }
-        | (code >= 400) && (code <= 499) {
-            print("client error");
+        (code >= 400) && (code <= 499) -> {
+            print("client error")
         }
-        | else {
-            print("unexpected: {code}");
+        else -> {
+            print("unexpected: {code}")
         }
     }
-    print(day_type("sun"));
-    print(day_type("wed"));
-    print(day_type("pizza"));
+    print(day_type("sun"))
+    print(day_type("wed"))
+    print(day_type("pizza"))
 }
 // --- expected output --------------------------------------------------
 // client error

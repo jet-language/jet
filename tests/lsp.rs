@@ -482,6 +482,10 @@ fn lsp_teaching_autocorrect_let_to_val() {
         diag_msg
     );
 
+    // D-BIND1: `let x = 1` migrates to `x :: 1`, which moves tokens — it is no
+    // longer a single-keyword swap, so the E0009 teaching diagnostic carries no
+    // trivial quick-fix edit (the codeAction result is empty). `jet fmt`
+    // performs the migration.
     let action_req = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":1,"character":4}},"end":{{"line":1,"character":7}}}},"context":{{"diagnostics":[]}}}}}}"#,
         uri
@@ -489,11 +493,15 @@ fn lsp_teaching_autocorrect_let_to_val() {
     send_msg(&mut stdin, &action_req);
     let actions = read_msg(&mut stdout);
     assert!(
-        actions.contains(r#""newText":"val""#),
-        "expected val quick-fix, got: {}",
+        !actions.contains(r#""newText":"val""#),
+        "the retired `val` token-swap quick-fix must be gone, got: {}",
         actions
     );
-    assert!(actions.contains("quickfix"), "expected quickfix kind");
+    assert!(
+        actions.contains(r#""id":2"#) && actions.contains(r#""result":[]"#),
+        "expected an empty codeAction result for E0009 (no trivial edit), got: {}",
+        actions
+    );
 
     send_msg(
         &mut stdin,
@@ -520,7 +528,7 @@ fn main() {
 }
 "#;
     let diags = jet::check_document("snippet.jet", src);
-    assert!(diags.iter().any(|d| d.code == "E0009"), "let → val");
+    assert!(diags.iter().any(|d| d.code == "E0009"), "let → binding sigil");
     assert!(diags.iter().any(|d| d.code == "E0037"), "println → print");
     assert!(diags.iter().any(|d| d.code == "E0008"), "def → fn");
 
@@ -530,8 +538,11 @@ fn main() {
     for edit in edits {
         fixed = jet::lsp::apply_edit(&fixed, &edit);
     }
-    assert!(fixed.contains("val count"));
-    assert!(!fixed.contains("let count"));
+    // D-BIND1: E0009 (`let`) carries no token-swap edit — migrating to `count :: 1`
+    // moves tokens, so `jet fmt` handles it and the LSP leaves `let` in place.
+    assert!(fixed.contains("let count"));
+    assert!(!fixed.contains("val count"));
+    // E0037 and E0008 are still single-token swaps and apply.
     assert!(fixed.contains("print("));
     assert!(!fixed.contains("println("));
     assert!(fixed.contains("fn greet"));

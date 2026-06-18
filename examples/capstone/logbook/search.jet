@@ -1,143 +1,150 @@
 // search.jet — query parsing and note search for the logbook capstone.
 // Parses a raw query string into a typed Query, then filters and ranks notes.
-use "note";
-use "index";
-
+use "note"
+use "index"
 enum Query {
-    Tag(String);
-    Kind(NoteType);
-    Text(String);
+    Tag(String)
+    Kind(NoteType)
+    Text(String)
 }
-
 struct Hit {
-    pub name: String;
-    pub score: Int;
+    pub name: String
+    pub score: Int
 }
-
 pub fn parse_query(raw: String) -> Query {
-    if raw.starts_with("#") && raw.len() > 1 {
-        val tag = raw.slice(1, raw.len() - 1).trim();
-        return Query.Tag(tag);
+    if raw.starts_with("#") && (raw.len() > 1) {
+        tag :: raw.slice(1, (raw.len() - 1)).trim()
+        return Query.Tag(tag)
     }
-    if raw.starts_with("type:") && raw.len() > 5 {
-        val kind_str = raw.slice(5, raw.len() - 1).trim();
+    if raw.starts_with("type:") && (raw.len() > 5) {
+        kind_str :: raw.slice(5, (raw.len() - 1)).trim()
         if kind_str == "user" {
-            return Query.Kind(NoteType.User);
+            return Query.Kind(NoteType.User)
         }
         if kind_str == "feedback" {
-            return Query.Kind(NoteType.Feedback);
+            return Query.Kind(NoteType.Feedback)
         }
         if kind_str == "project" {
-            return Query.Kind(NoteType.Project);
+            return Query.Kind(NoteType.Project)
         }
         if kind_str == "reference" {
-            return Query.Kind(NoteType.Reference);
+            return Query.Kind(NoteType.Reference)
         }
     }
-    return Query.Text(raw);
+    return Query.Text(raw)
 }
-
 fn note_type_matches(n: Note, k: NoteType) -> Bool {
-    val note_kind = note.kind_str(n);
-    when k {
-        | User      { return note_kind == "user"; }
-        | Feedback  { return note_kind == "feedback"; }
-        | Project   { return note_kind == "project"; }
-        | Reference { return note_kind == "reference"; }
+    note_kind :: note.kind_str(n)
+    if k {
+        User -> {
+            return (note_kind == "user")
+        }
+        Feedback -> {
+            return (note_kind == "feedback")
+        }
+        Project -> {
+            return (note_kind == "project")
+        }
+        Reference -> {
+            return (note_kind == "reference")
+        }
+
     }
 }
-
 fn note_matches(n: Note, q: Query) -> Bool {
-    when q {
-        | q == Tag(t) {
-            return n.tags.contains(t);
+    if q {
+        q == Tag(t) -> {
+            return n.tags.contains(t)
         }
-        | q == Kind(k) {
-            return note_type_matches(n, k);
+        q == Kind(k) -> {
+            return note_type_matches(n, k)
         }
-        | q == Text(s) {
-            return n.name.contains(s) || n.description.contains(s) || n.body.contains(s);
+        q == Text(s) -> {
+            return ((n.name.contains(s) || n.description.contains(s)) || n.body.contains(s))
         }
+
     }
 }
-
 fn note_score(n: Note, q: Query) -> Int {
-    when q {
-        | q == Tag(t) {
+    if q {
+        q == Tag(t) -> {
             if n.name.contains(t) {
-                return 2;
+                return 2
             }
-            return 1;
+            return 1
         }
-        | q == Kind(k) {
-            return 1;
+        q == Kind(k) -> {
+            return 1
         }
-        | q == Text(s) {
-            var score: Int = 0;
+        q == Text(s) -> {
+            score: Int := 0
             if n.name.contains(s) {
-                score = score + 3;
+                score = (score + 3)
             }
             if n.description.contains(s) {
-                score = score + 2;
+                score = (score + 2)
             }
             if n.body.contains(s) {
-                score = score + 1;
+                score = (score + 1)
             }
-            return score;
+            return score
         }
+
     }
 }
-
 pub pure fn rank(hits: [Hit]) -> [Hit] {
-    var sorted = hits;
-    sorted.sort_by((h) => h.score);
-    sorted.reverse();
-    return sorted;
+    sorted := hits
+    sorted.sort_by((h) => h.score)
+    sorted.reverse()
+    return sorted
 }
-
 pub fn find(idx: Index, raw_query: String) -> [String] {
-    val q = parse_query(raw_query);
-    var hits: [Hit] = [];
+    q :: parse_query(raw_query)
+    hits: [Hit] := []
     loop name, n in idx.notes {
-        if note_matches(n, q .clone()) {
-            val score = note_score(n, q .clone());
-            hits.push(Hit { name: name, score: score });
+        if note_matches(n, q.clone()) {
+            score :: note_score(n, q.clone())
+            hits.push(Hit {name: name, score: score})
         }
     }
-    val ranked = rank(hits);
-    var names: [String] = [];
+    ranked :: rank(hits)
+    names: [String] := []
     loop h in ranked {
-        names.push(h.name);
+        names.push(h.name)
     }
-    return names;
+    return names
 }
-
 pub fn count_matching(idx: Index, q: Query) -> Int {
-    var count: Int = 0;
+    count: Int := 0
     loop name, n in idx.notes {
-        if note_matches(n, q .clone()) {
-            count = count + 1;
+        if note_matches(n, q.clone()) {
+            count = (count + 1)
         }
     }
-    return count;
+    return count
 }
-
 fn main() {
-    print("search module loaded");
+    print("search module loaded")
 }
-
 test "tag query parses" {
-    val raw = parse_query("#feedback");
-    when raw {
-        | raw == Tag(t) { require_eq(t, "feedback"); }
-        | else { require_eq("wrong", "tag"); }
+    raw :: parse_query("#feedback")
+    if raw {
+        raw == Tag(t) -> {
+            require_eq(t, "feedback")
+        }
+        else -> {
+            require_eq("wrong", "tag")
+        }
     }
 }
-
 test "text query is default" {
-    val raw = parse_query("owner");
-    when raw {
-        | raw == Text(s) { require_eq(s, "owner"); }
-        | else { require_eq("wrong", "text"); }
+    raw :: parse_query("owner")
+    if raw {
+        raw == Text(s) -> {
+            require_eq(s, "owner")
+        }
+        else -> {
+            require_eq("wrong", "text")
+        }
     }
 }

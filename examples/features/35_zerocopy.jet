@@ -6,67 +6,59 @@
 // borrows straight into the record the caller is holding.
 //
 //   nix develop -c jet run examples/features/35_zerocopy.jet
-
 struct Field {
-    name: String;
-    value: String;
+    name: String
+    value: String
 }
-
 struct Record {
-    fields: [Field];
+    fields: [Field]
 }
-
 // Parse "key=value" lines into an owned record. Parsing builds the record once;
 // after that, reads should be free.
 fn parse(text: String) -> Record {
-    var fields: [Field] = [];
+    fields: [Field] := []
     loop line in text.split("\n") {
-        val trimmed = line.trim();
+        trimmed :: line.trim()
         if trimmed.len() == 0 {
-            continue;
+            continue
         }
-        var key = "";
-        var val_text = "";
-        var seen_eq = false;
+        key := ""
+        val_text := ""
+        seen_eq := false
         loop part in trimmed.split("=") {
             if seen_eq {
-                val_text = part;
+                val_text = part
             } else {
-                key = part;
-                seen_eq = true;
+                key = part
+                seen_eq = true
             }
         }
-        fields.push(Field { name: key, value: val_text });
+        fields.push(Field {name: key, value: val_text})
     }
-    return Record { fields: fields };
+    return Record {fields: fields}
 }
-
 // ZERO-COPY read: hand back a borrow into the field the caller already owns.
 // No copy is made. This compiles because `field` is a parameter — the caller
 // keeps owning it for as long as the returned view is used.
 fn name_of(field: Field) -> view String {
-    return field.name;
+    return field.name
 }
-
 // CLONE-HEAVY read: returns an owned copy. Every call duplicates the text.
 fn name_copy(field: Field) -> String {
-    return field.name.clone();
+    return field.name.clone()
 }
-
 fn main() {
-    val rec: Record = parse("host=localhost\nport=8080\nmode=fast");
-
+    rec: Record :: parse("host=localhost\nport=8080\nmode=fast")
     // Read every field name with the zero-copy view accessor — no clones.
     // A `view` result is read in place (here, printed) rather than stored.
-    print("zero-copy field names (borrowed, no copies):");
+    print("zero-copy field names (borrowed, no copies):")
     loop field in rec.fields {
-        print("  {name_of(field)}");
+        print("  {name_of(field)}")
     }
-
     // The clone-heavy accessor returns the same text but copies it each time.
-    print("clone-heavy field names (each one duplicated):");
+    print("clone-heavy field names (each one duplicated):")
     loop field in rec.fields {
-        val owned = name_copy(field);
-        print("  {owned}");
+        owned :: name_copy(field)
+        print("  {owned}")
     }
 }

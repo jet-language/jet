@@ -1,7 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/view_return_field_of_local.jet:6:5
+Error [E2301]: this view points into `local`, which this function owns
+  --> tests/ui/view_return_field_of_local.jet:6:18
     |
-  6 |     val local: Holder = Holder { name: "hi" };
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  6 |     return local.name
+    |                  ^^^^
+ Why: `local` is made here and freed when the function returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at
+ Fix: return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it

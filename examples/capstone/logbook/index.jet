@@ -1,120 +1,115 @@
 // index.jet — parallel note index builder for the logbook capstone.
 // Reads all .md files from a directory concurrently, parses them into Note
 // values, builds a reverse backlinks map, and reports dead links / errors.
-use core.fs as fs;
-use core.path as path;
-use "note";
-
+use core.fs as fs
+use core.path as path
+use "note"
 struct ParsedResult {
-    pub file_path: String;
-    pub note: Note?;
-    pub error_msg: String?;
+    pub file_path: String
+    pub note: Note?
+    pub error_msg: String?
 }
-
 pub struct Index {
-    pub notes: [String, Note];
-    pub backlinks: [String, [String]];
-    pub errors: [String];
+    pub notes: [String, Note]
+    pub backlinks: [String, [String]]
+    pub errors: [String]
 }
-
 fn parse_error_msg(e: ParseError) -> String {
-    when e {
-        | e == NoFrontmatter(p) { return "no frontmatter: {p}"; }
-        | e == MissingField(p)  { return "missing field: {p}"; }
-        | e == BadType(p)       { return "bad type: {p}"; }
+    if e {
+        e == NoFrontmatter(p) -> {
+            return "no frontmatter: {p}"
+        }
+        e == MissingField(p) -> {
+            return "missing field: {p}"
+        }
+        e == BadType(p) -> {
+            return "bad type: {p}"
+        }
+
     }
 }
-
 fn build_backlinks(notes: [String, Note]) -> [String, [String]] {
-    var bl: [String, [String]] = [:];
+    bl: [String, [String]] := [:]
     loop name, n in notes {
         loop target in n.links {
             if bl.contains_key(target) {
-                var existing: [String] = bl.get(target) ?? [];
-                existing.push(name .clone());
-                bl.insert(target, existing);
+                existing: [String] := bl.get(target) ?? []
+                existing.push(name.clone())
+                bl.insert(target, existing)
             } else {
-                val new_list: [String] = [name .clone()];
-                bl.insert(target, new_list);
+                new_list: [String] :: [name.clone()]
+                bl.insert(target, new_list)
             }
         }
     }
-    return bl;
+    return bl
 }
-
 pub fn build(dir: String) -> Index ? String {
-    val file_names = fs.list_dir(dir) ?? return err("cannot read directory: {dir}");
-    var md_files: [String] = [];
+    file_names :: fs.list_dir(dir) ?? return err("cannot read directory: {dir}")
+    md_files: [String] := []
     loop p in file_names {
         if p.ends_with(".md") {
-            md_files.push(p);
+            md_files.push(p)
         }
     }
-
-    md_files.sort();
-
-    var results: [ParsedResult] = [];
+    md_files.sort()
+    results: [ParsedResult] := []
     loop p in md_files {
-        val full = path.join(dir, p);
-        val text = fs.read(full) ?? "";
-        when note.parse(full, text) {
-            | it == ok(n) {
-                val no_err: String? = null;
-                results.push(ParsedResult { file_path: full, note: value(n), error_msg: no_err });
+        full :: path.join(dir, p)
+        text :: fs.read(full) ?? ""
+        if note.parse(full, text) {
+            it == ok(n) -> {
+                no_err: String? :: null
+                results.push(ParsedResult {file_path: full, note: value(n), error_msg: no_err})
             }
-            | it == err(e) {
-                val msg = parse_error_msg(e);
-                val no_note: Note? = null;
-                results.push(ParsedResult { file_path: full, note: no_note, error_msg: value(msg) });
+            it == err(e) -> {
+                msg :: parse_error_msg(e)
+                no_note: Note? :: null
+                results.push(ParsedResult {file_path: full, note: no_note, error_msg: value(msg)})
             }
+
         }
     }
-
-    var notes: [String, Note] = [:];
-    var errors: [String] = [];
-
+    notes: [String, Note] := [:]
+    errors: [String] := []
     loop r in results {
-        val maybe_note = r.note;
-        when maybe_note {
-            | maybe_note == value(note_val) {
+        maybe_note :: r.note
+        if maybe_note {
+            maybe_note == value(note_val) -> {
                 if notes.contains_key(note_val.name) {
-                    errors.push("duplicate slug `{note_val.name}` in {r.file_path}");
+                    errors.push("duplicate slug `{note_val.name}` in {r.file_path}")
                 } else {
-                    notes.insert(note_val.name, note_val);
+                    notes.insert(note_val.name, note_val)
                 }
             }
-            | maybe_note == null {
-                val msg = r.error_msg ?? "unknown error";
-                errors.push("{r.file_path}: {msg}");
+            maybe_note == null -> {
+                msg :: r.error_msg ?? "unknown error"
+                errors.push("{r.file_path}: {msg}")
             }
+
         }
     }
-
-    val backlinks = build_backlinks(notes);
-
+    backlinks :: build_backlinks(notes)
     loop name, n in notes {
         loop target in n.links {
             if notes.contains_key(target) {
+
             } else {
-                errors.push("dead link: `{name}` -> `{target}`");
+                errors.push("dead link: `{name}` -> `{target}`")
             }
         }
     }
-
-    errors.sort();
-    return ok(Index { notes: notes, backlinks: backlinks, errors: errors });
+    errors.sort()
+    return ok(Index {notes: notes, backlinks: backlinks, errors: errors})
 }
-
 pub fn dead_links(idx: Index) -> [String] {
-    return idx.errors.filter((e) => e.starts_with("dead link:"));
+    return idx.errors.filter((e) => e.starts_with("dead link:"))
 }
-
 pub fn note_names(idx: Index) -> [String] {
-    var names: [String] = idx.notes.keys();
-    names.sort();
-    return names;
+    names: [String] := idx.notes.keys()
+    names.sort()
+    return names
 }
-
 fn main() {
-    print("index module loaded");
+    print("index module loaded")
 }

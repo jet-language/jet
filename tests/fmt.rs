@@ -38,8 +38,8 @@ fn fmt_preserves_block_comments() {
     let src = r#"/* a leading block comment */
 fn main() {
     /* explains the next line, /* with a nested comment */ inside */
-    val x = 5;
-    print("{x}");
+    x :: 5
+    print("{x}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should keep block comments");
@@ -64,8 +64,8 @@ fn fmt_canonicalizes_s14_foreign_spellings() {
 "#;
     let out = jet::format_source(src).expect("fmt should parse through S14 recovery");
     assert!(
-        out.contains("val x"),
-        "expected `let` lowered to `val`, got:\n{out}"
+        out.contains("x :: 1"),
+        "expected `let` lowered to the `::` binding sigil, got:\n{out}"
     );
     assert!(
         !out.contains("let x"),
@@ -103,18 +103,22 @@ fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
 "#;
     let out = jet::format_source(src).expect("fmt should parse legacy switch syntax");
     assert!(
-        out.contains("| apple {"),
+        out.contains("if fruit {"),
+        "expected `when` lowered to `if SUBJECT {{`, got:\n{out}"
+    );
+    assert!(
+        out.contains("apple -> {"),
         "expected bare equality case, got:\n{out}"
     );
     assert!(
-        out.contains("| orange || (frozen != true) {"),
-        "expected mixed pipe condition, got:\n{out}"
+        out.contains("orange || (frozen != true) -> {"),
+        "expected mixed condition arm, got:\n{out}"
     );
     assert!(
-        out.contains("| tangerine || yuzu {"),
+        out.contains("tangerine || yuzu -> {"),
         "expected repeated subject equality to collapse, got:\n{out}"
     );
-    assert!(out.contains("| else {"), "expected pipe else, got:\n{out}");
+    assert!(out.contains("else -> {"), "expected else arm, got:\n{out}");
     let twice = jet::format_source(&out).expect("pipe switch output should re-fmt");
     assert_eq!(out, twice, "pipe switch formatting must be idempotent");
 }
@@ -123,19 +127,19 @@ fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
 fn fmt_if_expression_and_strips_redundant_condition_parens() {
     // S68 (D-SG2): `if` as a value round-trips; redundant condition parens go.
     let src = r#"fn main() {
-    val m = if (a > b) {
+    m :: if (a > b) {
         a
     } else {
         b
-    };
+    }
     if (a > b) {
-        print("hi");
+        print("hi")
     }
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept an if-expression");
     assert!(
-        out.contains("val m = if a > b {"),
+        out.contains("m :: if a > b {"),
         "expected paren-free condition in if-expression, got:\n{out}"
     );
     assert!(
@@ -153,11 +157,11 @@ fn fmt_preserves_author_placed_chain_breaks() {
     // carry its own trailing comment, and the final step's comment stays after
     // the statement terminator.
     let src = r#"fn main() {
-    val raw = "  hi  ";
-    val out = raw
+    raw :: "  hi  "
+    out :: raw
         .trim()  // strip padding
-        .to_upper();  // shout it
-    print("{out}");
+        .to_upper()  // shout it
+    print("{out}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept a broken dot-chain");
@@ -166,8 +170,8 @@ fn fmt_preserves_author_placed_chain_breaks() {
         "expected the break and per-step comment to survive, got:\n{out}"
     );
     assert!(
-        out.contains(".to_upper();  // shout it"),
-        "expected the final step's comment to stay after the `;`, got:\n{out}"
+        out.contains(".to_upper()  // shout it"),
+        "expected the final step's comment to stay after the chain, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("broken-chain output should re-fmt");
     assert_eq!(out, twice, "chain-break formatting must be idempotent");
@@ -178,17 +182,17 @@ fn fmt_preserves_triple_quoted_strings() {
     // S70 (D-SG5): a `"""…"""` string keeps its multi-line shape, relative
     // indentation, and interpolation across fmt.
     let src = r#"fn main() {
-    val who = "Jet";
-    val banner = """
+    who :: "Jet"
+    banner :: """
     hello, {who}
         indented
-    """;
-    print("{banner}");
+    """
+    print("{banner}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept a triple-quoted string");
     assert!(
-        out.contains("val banner = \"\"\"\n"),
+        out.contains("banner :: \"\"\"\n"),
         "expected the opening `\"\"\"` to stay on its own, got:\n{out}"
     );
     assert!(
@@ -207,7 +211,7 @@ fn fmt_preserves_triple_quoted_strings() {
 fn fmt_rewrites_retired_or_fallback_to_question_question() {
     // S71 (D-SG6): the retired word `or` formats to `??`; `??` round-trips.
     let src = r#"fn pick(xs: [Int]) -> Int {
-    return xs.first() or 0;
+    return xs.first() or 0
 }
 "#;
     let out = jet::format_source(src).expect("fmt should recover the retired `or`");
@@ -226,18 +230,18 @@ fn fmt_preserves_destructuring_targets() {
     let src = r#"struct Point { x: Int, y: Int }
 
 fn main() {
-    val Point { x, y } = make();
-    var [a, b, c] = nums();
-    print("{x}{y}{a}{b}{c}");
+    Point { x, y } :: make()
+    [a, b, c] := nums()
+    print("{x}{y}{a}{b}{c}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept destructuring targets");
     assert!(
-        out.contains("val Point { x, y } = make();"),
+        out.contains("Point { x, y } :: make()"),
         "expected struct destructuring preserved, got:\n{out}"
     );
     assert!(
-        out.contains("var [a, b, c] = nums();"),
+        out.contains("[a, b, c] := nums()"),
         "expected list destructuring preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("destructuring output should re-fmt");
@@ -248,18 +252,18 @@ fn main() {
 fn fmt_preserves_named_tuples() {
     // S73 (D-SG7): named tuple literals, types, access, and destructuring round-trip.
     let src = r#"fn bounds() -> (min: Int, max: Int) {
-    return (min: 0, max: 10);
+    return (min: 0, max: 10)
 }
 
 fn main() {
-    val p = (x: 1, y: 2);
-    val (a, b) = p;
-    print("{p.x}{a}{b}");
+    p :: (x: 1, y: 2)
+    (a, b) :: p
+    print("{p.x}{a}{b}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept named tuples");
     assert!(
-        out.contains("val p = (x: 1, y: 2);"),
+        out.contains("p :: (x: 1, y: 2)"),
         "expected named tuple literal preserved, got:\n{out}"
     );
     assert!(
@@ -267,7 +271,7 @@ fn main() {
         "expected canonical named tuple return type preserved, got:\n{out}"
     );
     assert!(
-        out.contains("val (a, b) = p;"),
+        out.contains("(a, b) :: p"),
         "expected tuple destructuring preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("named tuple output should re-fmt");
@@ -278,8 +282,8 @@ fn main() {
 fn fmt_preserves_optional_chaining() {
     // S71 (D-SG6): `?.` chains round-trip unchanged.
     let src = r#"fn main() {
-    val n = o.mid?.inner?.name;
-    print("{n}");
+    n :: o.mid?.inner?.name
+    print("{n}")
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept optional chaining");
@@ -311,7 +315,7 @@ fn use_collections(items: List<String>, counts: Map<String, Int>) {}
         "expected bracket collection type formatting, got:\n{out}"
     );
     assert!(
-        out.contains("return [JSON.Null];"),
+        out.contains("return [JSON.Null]"),
         "expected semicolon-separated list input to format cleanly, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("collection shorthand output should re-fmt");
@@ -323,7 +327,7 @@ fn use_collections(items: List<String>, counts: Map<String, Int>) {}
 
 #[test]
 fn fmt_still_errors_on_real_parse_problems() {
-    let src = "fn main() { val x = ; }\n";
+    let src = "fn main() { x :: ; }\n";
     assert!(
         jet::format_source(src).is_err(),
         "fmt must not run when the AST is not recoverable"

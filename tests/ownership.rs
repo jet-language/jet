@@ -4,12 +4,12 @@
 fn implicit_clone_is_lint_not_error() {
     let src = r#"
 fn consume(take s: String) {
-    print(s);
+    print(s)
 }
 
 fn main() {
-    val msg: String = "hello";
-    consume(msg);
+    msg: String :: "hello"
+    consume(msg)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -24,12 +24,12 @@ fn main() {
 fn mutate_required_at_call_site() {
     let src = r#"
 fn touch(mut n: Int) {
-    print(n);
+    print(n)
 }
 
 fn main() {
-    var x: Int = 1;
-    touch(x);
+    x: Int := 1
+    touch(x)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
@@ -40,12 +40,12 @@ fn main() {
 fn move_non_clonable_is_hard_error() {
     let src = r#"
 fn consume(take item: NoClone) {
-    print(0);
+    print(0)
 }
 
 fn main() {
-    val msg: String = "hi";
-    consume(msg);
+    msg: String :: "hi"
+    consume(msg)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
@@ -56,11 +56,11 @@ fn main() {
 fn view_return_transpiles_to_ref() {
     let src = r#"
 fn peek(msg: String) -> view String {
-    return msg;
+    return msg
 }
 
 fn main() {
-    print(0);
+    print(0)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -80,12 +80,12 @@ fn main() {
 fn view_return_local_text_is_error() {
     let src = r#"
 fn bad() -> view String {
-    val msg: String = "ok";
-    return msg;
+    msg: String :: "ok"
+    return msg
 }
 
 fn main() {
-    print(0);
+    print(0)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
@@ -100,7 +100,7 @@ struct Holder {
 }
 
 fn main() {
-    print(0);
+    print(0)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -120,17 +120,17 @@ fn main() {
 fn shared_auto_clone_in_loop_is_lint() {
     let src = r#"
 fn noop(h: Shared<Int>) {
-    print(0);
+    print(0)
 }
 
 fn loop_user(h: Shared<Int>) {
     loop {
-        noop(h);
+        noop(h)
     }
 }
 
 fn main() {
-    print(0);
+    print(0)
 }
 "#;
     let out = jet::compile(src).expect("should compile with lint");
@@ -144,14 +144,14 @@ fn main() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-const LIMIT = 10;
+const LIMIT = 10
 
 fn show(n: Int) {
-    print(n);
+    print(n)
 }
 
 fn main() {
-    show(LIMIT);
+    show(LIMIT)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -166,12 +166,12 @@ fn main() {
 fn same_call_mut_and_read_is_error() {
     let src = r#"
 fn both(mut a: Int, b: Int) {
-    print(b);
+    print(b)
 }
 
 fn main() {
-    var x: Int = 1;
-    both(mut x, x);
+    x: Int := 1
+    both(mut x, x)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
@@ -182,8 +182,8 @@ fn main() {
 fn deref_outside_unsafe_is_error() {
     let src = r#"
 fn main() {
-    val x: Int = 1;
-    print(*x);
+    x: Int :: 1
+    print(*x)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");

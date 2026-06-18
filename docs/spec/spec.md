@@ -69,8 +69,8 @@ loop-body= "loop" block                                                  // infi
          | "loop" cond block                                             // conditional (was `while`)
          | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ; // iteration (was `for`)
          // S19-amend: `while` and `for` are teaching errors (E0050/E0051)
-break    = "break" [ "@" ident ] ";" ;          // D-LABEL1: `break @name` targets a label
-continue = "continue" [ "@" ident ] ";" ;       // D-LABEL1: `continue @name`
+break    = "break" [ "@" ident ] NL ;           // D-LABEL1: `break @name` targets a label
+continue = "continue" [ "@" ident ] NL ;        // D-LABEL1: `continue @name`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
 value-block = "{" { stmt } expr "}" ;                // trailing expr (no `;`) is the block's value

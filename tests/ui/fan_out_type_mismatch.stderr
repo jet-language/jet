@@ -1,7 +1,15 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/fan_out_type_mismatch.jet:4:5
+Error [E0962]: fan-out item 1 is String (text), but the function expects Int (a whole number)
+  --> tests/ui/fan_out_type_mismatch.jet:5:18
     |
-  4 |     val _ = double.["a", "b"];
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  5 |     _ :: double.["a", "b"]
+    |                  ^^^
+ Why: each item in `f.[a, b, c]` is passed as the argument to `f`
+ Fix: use Int (a whole number) here
+
+Error [E0962]: fan-out item 2 is String (text), but the function expects Int (a whole number)
+  --> tests/ui/fan_out_type_mismatch.jet:5:23
+    |
+  5 |     _ :: double.["a", "b"]
+    |                       ^^^
+ Why: each item in `f.[a, b, c]` is passed as the argument to `f`
+ Fix: use Int (a whole number) here

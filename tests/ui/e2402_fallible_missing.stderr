@@ -1,7 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/e2402_fallible_missing.jet:11:5
+Error [E2402]: `?` can't convert `MyError` into `Error`
+  --> tests/ui/e2402_fallible_missing.jet:9:10
     |
- 11 |     val x = inner()?;
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  9 |     x :: inner()?
+    |          ^^^^^^^^
+ Why: `MyError` has no path to `Error`; implement `impl MyError: Fallible` to enable conversion
+ Fix: add `impl MyError: Fallible { fn to_error(self) -> Error { … } }`, or change the return type

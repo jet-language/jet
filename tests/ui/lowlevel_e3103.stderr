@@ -1,7 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/lowlevel_e3103.jet:5:5
+Error [E3103]: `read_reg` is an `@unsafe` function
+  --> tests/ui/lowlevel_e3103.jet:8:11
     |
-  5 |     val p = mem.Ptr<Int>.from_addr(addr);
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  8 |     print(read_reg(0))
+    |           ^^^^^^^^
+ Why: its contract can't be checked by the compiler, so the caller must vouch for it
+ Fix: call it inside `@audit("…") @unsafe { … }`

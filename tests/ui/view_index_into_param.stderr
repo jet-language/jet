@@ -1,7 +1,7 @@
 Error [E2304]: an indexed or sliced piece can't be handed back as a view
-  --> tests/ui/view_index_into_param.jet:6:22
+  --> tests/ui/view_index_into_param.jet:5:22
     |
-  6 |     return line.words[0];
+  5 |     return line.words[0]
     |                      ^^^
  Why: indexing or slicing builds a fresh, owned piece, so there's no longer-lived value for a view to point at — the piece would vanish the moment this function returns
  Fix: return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it

@@ -1,8 +1,7 @@
 // render.jet — HTML rendering for the logbook capstone.
 // Converts Note values and lists to HTML pages.
 // No regex: all string work uses split/contains/slice/starts_with/ends_with.
-use "note";
-
+use "note"
 comptime PAGE_HEADER = """
 <!DOCTYPE html>
 <html lang="en">
@@ -26,145 +25,147 @@ comptime PAGE_HEADER = """
 </head>
 <body>
 <nav><a href="/">All notes</a></nav>
-""";
-
-comptime PAGE_FOOTER = "</body></html>";
-
+"""
+comptime PAGE_FOOTER = "</body></html>"
 // render_inline converts [[wikilinks]] and #tags within a line of body text.
 // Wikilinks: split on "[["; if a segment contains "]]", extract the target.
 // Tags: split on " "; words starting with "#" become <span class="tag">.
 fn render_inline(s: String) -> String {
     // Pass 1: resolve [[wikilinks]].
-    val link_parts = s.split("[[");
-    var after_links: String = link_parts[0];
-    var i: Int = 1;
+    link_parts :: s.split("[[")
+    after_links: String := link_parts[0]
+    i: Int := 1
     loop i < link_parts.len() {
-        val seg = link_parts[i];
+        seg :: link_parts[i]
         if seg.contains("]]") {
-            val halves = seg.split("]]");
-            val target = halves[0];
-            var rest: String = "";
+            halves :: seg.split("]]")
+            target :: halves[0]
+            rest: String := ""
             if halves.len() > 1 {
-                rest = halves[1];
+                rest = halves[1]
             }
-            after_links = "{after_links}<a href=\"/note/{target}\">{target}</a>{rest}";
+            after_links = "{after_links}<a href=\"/note/{target}\">{target}</a>{rest}"
         } else {
             // Not a closed link — pass through literally.
-            after_links = "{after_links}[[{seg}";
+            after_links = "{after_links}[[{seg}"
         }
-        i = i + 1;
+        i = (i + 1)
     }
-
     // Pass 2: resolve #tags (words starting with "#").
-    val words = after_links.split(" ");
-    var out: String = "";
-    var w: Int = 0;
+    words :: after_links.split(" ")
+    out: String := ""
+    w: Int := 0
     loop w < words.len() {
-        val word = words[w];
-        val sep = if w == 0 { "" } else { " " };
-        if word.starts_with("#") && word.len() > 1 {
-            out = "{out}{sep}<span class=\"tag\">{word}</span>";
+        word :: words[w]
+        sep :: if w == 0 {
+            ""
         } else {
-            out = "{out}{sep}{word}";
+            " "
         }
-        w = w + 1;
+        if word.starts_with("#") && (word.len() > 1) {
+            out = "{out}{sep}<span class=\"tag\">{word}</span>"
+        } else {
+            out = "{out}{sep}{word}"
+        }
+        w = (w + 1)
     }
-    return out;
+    return out
 }
-
 // render_line turns one line of raw body text into an HTML block element.
 // Leading "#" sequences → headings; empty line → <p></p>; else → <p>…</p>.
 fn render_line(line: String) -> String {
     if line.starts_with("### ") {
-        val text = render_inline(line.slice(4, line.len() - 1));
-        return "<h3>{text}</h3>";
+        text :: render_inline(line.slice(4, (line.len() - 1)))
+        return "<h3>{text}</h3>"
     }
     if line.starts_with("## ") {
-        val text = render_inline(line.slice(3, line.len() - 1));
-        return "<h2>{text}</h2>";
+        text :: render_inline(line.slice(3, (line.len() - 1)))
+        return "<h2>{text}</h2>"
     }
     if line.starts_with("# ") {
-        val text = render_inline(line.slice(2, line.len() - 1));
-        return "<h1>{text}</h1>";
+        text :: render_inline(line.slice(2, (line.len() - 1)))
+        return "<h1>{text}</h1>"
     }
     if line.trim() == "" {
-        return "<p></p>";
+        return "<p></p>"
     }
-    val text = render_inline(line);
-    return "<p>{text}</p>";
+    text :: render_inline(line)
+    return "<p>{text}</p>"
 }
-
 // note_to_html renders a full page for a single note, including backlinks.
 pub fn note_to_html(n: Note, backlinks: [String]) -> String {
-    var type_label: String = "";
-    val note_kind = n.note_type;
-    when note_kind {
-        | User      { type_label = "user"; }
-        | Feedback  { type_label = "feedback"; }
-        | Project   { type_label = "project"; }
-        | Reference { type_label = "reference"; }
-    }
-
-    var body_html: String = "";
-    loop line in n.body.split("\n") {
-        body_html = "{body_html}{render_line(line)}\n";
-    }
-
-    var backlink_html: String = "";
-    if backlinks.len() > 0 {
-        backlink_html = "<div class=\"backlinks\"><strong>Backlinks</strong><ul>";
-        loop name in backlinks {
-            backlink_html = "{backlink_html}<li><a href=\"/note/{name}\">{name}</a></li>";
+    type_label: String := ""
+    note_kind :: n.note_type
+    if note_kind {
+        User -> {
+            type_label = "user"
         }
-        backlink_html = "{backlink_html}</ul></div>";
+        Feedback -> {
+            type_label = "feedback"
+        }
+        Project -> {
+            type_label = "project"
+        }
+        Reference -> {
+            type_label = "reference"
+        }
+
     }
-
+    body_html: String := ""
+    loop line in n.body.split("\n") {
+        body_html = "{body_html}{render_line(line)}\n"
+    }
+    backlink_html: String := ""
+    if backlinks.len() > 0 {
+        backlink_html = "<div class=\"backlinks\"><strong>Backlinks</strong><ul>"
+        loop name in backlinks {
+            backlink_html = "{backlink_html}<li><a href=\"/note/{name}\">{name}</a></li>"
+        }
+        backlink_html = "{backlink_html}</ul></div>"
+    }
     return """
-{PAGE_HEADER}
-<h1>{n.name}</h1>
-<div class="note-meta">{n.description} &mdash; <em>{type_label}</em></div>
-{body_html}
-{backlink_html}
-{PAGE_FOOTER}
-""";
+    {PAGE_HEADER}
+    <h1>{n.name}</h1>
+    <div class="note-meta">{n.description} &mdash; <em>{type_label}</em></div>
+    {body_html}
+    {backlink_html}
+    {PAGE_FOOTER}
+    """
 }
-
 // list_to_html renders the index page listing all note names.
 pub fn list_to_html(names: [String]) -> String {
-    var items: String = "";
+    items: String := ""
     loop name in names {
-        items = "{items}<li><a href=\"/note/{name}\">{name}</a></li>\n";
+        items = "{items}<li><a href=\"/note/{name}\">{name}</a></li>\n"
     }
     return """
-{PAGE_HEADER}
-<h1>Logbook</h1>
-<ul class="note-list">
-{items}
-</ul>
-{PAGE_FOOTER}
-""";
+    {PAGE_HEADER}
+    <h1>Logbook</h1>
+    <ul class="note-list">
+    {items}
+    </ul>
+    {PAGE_FOOTER}
+    """
 }
-
 // search_to_html renders a search results page.
 pub fn search_to_html(query: String, hits: [String]) -> String {
-    var items: String = "";
+    items: String := ""
     if hits.len() == 0 {
-        items = "<p>No notes match <em>{query}</em>.</p>";
+        items = "<p>No notes match <em>{query}</em>.</p>"
     } else {
         loop name in hits {
-            items = "{items}<li><a href=\"/note/{name}\">{name}</a></li>\n";
+            items = "{items}<li><a href=\"/note/{name}\">{name}</a></li>\n"
         }
-        items = "<ul class=\"note-list\">\n{items}</ul>";
+        items = "<ul class=\"note-list\">\n{items}</ul>"
     }
     return """
-{PAGE_HEADER}
-<h1>Search: {query}</h1>
-<div class="search-box"><a href="/">Back to index</a></div>
-{items}
-{PAGE_FOOTER}
-""";
+    {PAGE_HEADER}
+    <h1>Search: {query}</h1>
+    <div class="search-box"><a href="/">Back to index</a></div>
+    {items}
+    {PAGE_FOOTER}
+    """
 }
-
 fn main() {
-    print("render module loaded");
+    print("render module loaded")
 }

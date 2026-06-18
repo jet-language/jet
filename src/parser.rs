@@ -2191,8 +2191,7 @@ impl<'a> Parser<'a> {
                         syntax::KW_IF
                     ),
                     format!(
-                        "replace `{}` with `{} subject {{ arm {} body }}`",
-                        syntax::FOREIGN_MATCH,
+                        "write `{} subject {{ value {} body … }}` instead",
                         syntax::KW_IF,
                         syntax::OP_ARM_ARROW
                     ),
@@ -2214,8 +2213,7 @@ impl<'a> Parser<'a> {
                         syntax::KW_IF
                     ),
                     format!(
-                        "replace `{}` with `{} subject {{ arm {} body }}`",
-                        syntax::FOREIGN_SWITCH,
+                        "write `{} subject {{ value {} body … }}` instead",
                         syntax::KW_IF,
                         syntax::OP_ARM_ARROW
                     ),
@@ -2928,8 +2926,8 @@ impl<'a> Parser<'a> {
                 self.peek3().kind,
                 TokKind::Eq | TokKind::Colon | TokKind::LBrace
             ),
-            // `val [a, b] = …` / `val Type { … } = …`
-            TokKind::LBracket => true,
+            // `val [a, b] = …` (list pattern) / `val (a, b) = …` (tuple pattern).
+            TokKind::LBracket | TokKind::LParen => true,
             _ => false,
         }
     }
@@ -2984,9 +2982,10 @@ impl<'a> Parser<'a> {
             {
                 true
             }
-            // Destructuring targets: scan ahead to a `::`/`:=` before the line
-            // would otherwise end. Cheap bounded lookahead.
-            TokKind::LBracket => self.pattern_target_is_binding(),
+            // Destructuring targets: scan ahead to a `::`/`:=` after the matching
+            // close. Cheap bounded lookahead. `[a, b] ::`, `(a, b) ::`, and
+            // `Type { … } ::`.
+            TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
                 self.pattern_target_is_binding()
             }
@@ -2994,8 +2993,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Scan a `[ … ]` or `Ident { … }` destructuring target and check whether a
-    /// binding sigil follows its close. Bounded by the matching bracket depth.
+    /// Scan a `[ … ]` / `( … )` / `Ident { … }` destructuring target and check
+    /// whether a binding sigil follows its close. Bounded by the bracket depth.
     fn pattern_target_is_binding(&self) -> bool {
         let mut i = self.pos;
         let n = self.toks.len();
@@ -3006,6 +3005,7 @@ impl<'a> Parser<'a> {
         let (open, close) = match self.toks.get(i).map(|t| &t.kind) {
             Some(TokKind::LBracket) => (TokKind::LBracket, TokKind::RBracket),
             Some(TokKind::LBrace) => (TokKind::LBrace, TokKind::RBrace),
+            Some(TokKind::LParen) => (TokKind::LParen, TokKind::RParen),
             _ => return false,
         };
         let mut depth = 0usize;
@@ -5703,6 +5703,12 @@ impl<'a> Parser<'a> {
                 self.bump();
                 Ok(())
             }
+            // S6-R (Go's rule part 2): a terminator may be omitted before a
+            // closing `}` or EOF — a single-line block `{ stmt }` needs no
+            // synthetic terminator. Don't consume the `}`; the block loop closes
+            // it. A struct/map literal's `}` is consumed by the expression
+            // parser, so it never reaches here — no risk to literals.
+            TokKind::RBrace | TokKind::Eof => Ok(()),
             other => Err(Diagnostic::error(
                 "E0003",
                 format!("expected the end of this statement, found {}", describe(other)),
@@ -5845,7 +5851,9 @@ mod s61_tests {
     /// the expression grammar is untouched.
     #[test]
     fn spaced_minus_is_subtraction() {
-        let p = program("fn main() { val d = 5 - 3; }");
+        // Also a single-line-block regression guard (S6-R Go-rule part 2: a
+        // terminator may be omitted before the closing `}`).
+        let p = program("fn main() { d :: 5 - 3 }");
         let func = p.items.iter().find_map(|i| match i {
             crate::ast::Item::Func(f) => Some(f),
             _ => None,

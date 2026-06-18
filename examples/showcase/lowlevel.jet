@@ -3,21 +3,18 @@
 // pointer operations are confined to the explicitly-audited block.
 // C FFI (use c.<lib>) is in tests/cffi.rs; this smoke shows the
 // core.mem tier that underpins it — E2-M13.
-use core.mem;
-
+use core.mem
 @unsafe
 fn read_int(addr: Int) -> Int {
-    val p = mem.Ptr<Int>.from_addr(addr);
-    return mem.volatile_read(p);
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
 }
-
 fn main() {
-    val cell: Int = 42;
-    val addr = mem.address_of(cell);
-
+    cell: Int :: 42
+    addr :: mem.address_of(cell)
     @audit("addr is the address of `cell`, a live stack Int")
     @unsafe {
-        val seen = read_int(addr);
-        print("low-level read: {seen}");
+        seen :: read_int(addr)
+        print("low-level read: {seen}")
     }
 }

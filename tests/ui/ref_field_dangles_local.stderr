@@ -1,15 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/ref_field_dangles_local.jet:6:5
+Error [E2302]: the `ref` field `name` would point at something that dies first
+  --> tests/ui/ref_field_dangles_local.jet:6:26
     |
-  6 |     val local: String = "hi";
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
-
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/ref_field_dangles_local.jet:7:5
-    |
-  7 |     val h: Holder = Holder { name: local };
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  6 |     h: Holder :: Holder {name: local}
+    |                          ^^^^
+ Why: a `ref` field stores a view, not its own copy, so its source has to outlive the struct — but the local `local` doesn't live long enough to promise that here
+ Fix: store an owned value: drop `ref` so the struct keeps its own copy (or `.clone()` into it)

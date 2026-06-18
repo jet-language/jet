@@ -1,6 +1,6 @@
 //! M9.5 differential battery (permanent CI). For each expression, the same
 //! code is evaluated twice — once as `comptime C = e;` (the sema
-//! tree-walking interpreter) and once as a runtime `val r = e;` (generated
+//! tree-walking interpreter) and once as a runtime `r :: e` (generated
 //! Rust). The program prints both; the two lines MUST be byte-identical.
 //!
 //! Divergence is a P0 miscompile-class bug (S26 rule 6: comptime implements
@@ -67,7 +67,7 @@ fn comptime_matches_runtime() {
     let dir = std::env::temp_dir();
     for (i, expr) in CASES.iter().enumerate() {
         let src = format!(
-            "comptime C = {e};\n\nfn main() {{\n    val r = {e};\n    print(\"{{C}}\");\n    print(\"{{r}}\");\n}}\n",
+            "comptime C = {e}\n\nfn main() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
             e = expr
         );
         let compiled = match jet::compile(&src) {
@@ -126,17 +126,17 @@ fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"
 fn build() -> List<Int> {
-    var xs: List<Int> = [];
+    xs: List<Int> := []
     loop i in 1..3 {
-        xs.push(i * 10);
+        xs.push(i * 10)
     }
-    return xs;
+    return xs
 }
 
 fn main() {
-    comptime xs = build();
-    print("{xs}");
-    print("{xs[1]}");
+    comptime xs = build()
+    print("{xs}")
+    print("{xs[1]}")
 }
 "#,
     );
@@ -151,27 +151,27 @@ fn struct_and_enum_comptime_values_round_trip() {
     let stdout = compile_and_run(
         r#"
 struct Pair {
-    left: Int;
-    right: String;
+    left: Int
+    right: String
 }
 
 enum Light {
-    Red;
-    Green;
+    Red
+    Green
 }
 
-comptime P = Pair {left: 7, right: "seven"};
-comptime L = Light.Green;
+comptime P = Pair {left: 7, right: "seven"}
+comptime L = Light.Green
 
 fn main() {
-    val p = Pair {left: 7, right: "seven"};
-    val l = Light.Green;
-    print("{P.left}");
-    print("{p.left}");
-    print("{P.right}");
-    print("{p.right}");
-    print("{L == Light.Green}");
-    print("{l == Light.Green}");
+    p :: Pair {left: 7, right: "seven"}
+    l :: Light.Green
+    print("{P.left}")
+    print("{p.left}")
+    print("{P.right}")
+    print("{p.right}")
+    print("{L == Light.Green}")
+    print("{l == Light.Green}")
 }
 "#,
     );
@@ -185,16 +185,16 @@ fn main() {
 fn if_expr_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
-comptime C = if 3 > 2 { 10 } else { 20 };
-comptime D = if 1 > 2 { 10 } else { 20 };
+comptime C = if 3 > 2 { 10 } else { 20 }
+comptime D = if 1 > 2 { 10 } else { 20 }
 
 fn main() {
-    val c = if 3 > 2 { 10 } else { 20 };
-    val d = if 1 > 2 { 10 } else { 20 };
-    print("{C}");
-    print("{c}");
-    print("{D}");
-    print("{d}");
+    c :: if 3 > 2 { 10 } else { 20 }
+    d :: if 1 > 2 { 10 } else { 20 }
+    print("{C}")
+    print("{c}")
+    print("{D}")
+    print("{d}")
 }
 "#,
     );
@@ -206,15 +206,15 @@ fn fan_out_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
 fn double(x: Int) -> Int {
-    return x * 2;
+    return x * 2
 }
 
-comptime C = double.[1, 2, 3];
+comptime C = double.[1, 2, 3]
 
 fn main() {
-    val c = double.[1, 2, 3];
-    print("{C}");
-    print("{c}");
+    c :: double.[1, 2, 3]
+    print("{C}")
+    print("{c}")
 }
 "#,
     );

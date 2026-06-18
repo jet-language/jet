@@ -67,7 +67,7 @@ fn repl_arithmetic_echo() {
 
 #[test]
 fn repl_val_binding_then_expr() {
-    let inputs = &["val x = 10", "x * 2"];
+    let inputs = &["x :: 10", "x * 2"];
     let out = run_transcript(inputs, None);
     // First input produces no output (val declaration).
     // Second produces the echo.
@@ -94,14 +94,14 @@ fn repl_bool_echo() {
 
 #[test]
 fn repl_suppress_semicolon() {
-    // `val` declaration with trailing `;` produces no echo.
-    let out = run_transcript(&["val _ignored = 42;"], None);
+    // A binding declaration produces no echo.
+    let out = run_transcript(&["_ignored :: 42"], None);
     assert!(out.trim().is_empty(), "expected no output, got: {:?}", out);
 }
 
 #[test]
 fn repl_reset_clears_bindings() {
-    let inputs = &["val x = 10", ":reset", ":type x"];
+    let inputs = &["x :: 10", ":reset", ":type x"];
     let out = run_transcript(inputs, None);
     assert!(out.contains("session reset"), "got: {:?}", out);
     assert!(out.contains("isn't defined"), "got: {:?}", out);
@@ -109,7 +109,7 @@ fn repl_reset_clears_bindings() {
 
 #[test]
 fn repl_function_declare_and_call() {
-    let inputs = &["fn double(n: Int) -> Int { return n * 2; }", "double(5)"];
+    let inputs = &["fn double(n: Int) -> Int { return n * 2 }", "double(5)"];
     let out = run_transcript(inputs, None);
     assert!(out.contains("ok"), "no ok for fn declaration, got: {:?}", out);
     assert!(out.contains("10 : Int"), "fn call result wrong, got: {:?}", out);
@@ -129,7 +129,7 @@ fn repl_hard_reject_extern_rust() {
 
 #[test]
 fn repl_type_meta_command() {
-    let inputs = &["val y = 42", ":type y"];
+    let inputs = &["y :: 42", ":type y"];
     let out = run_transcript(inputs, None);
     assert!(out.contains("y : Int"), "got: {:?}", out);
 }

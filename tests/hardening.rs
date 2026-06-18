@@ -33,8 +33,8 @@ fn list_index_assign_requires_var() {
     expect_error(
         r#"
 fn main() {
-    val xs = [1, 2, 3];
-    xs[0] = 9;
+    xs :: [1, 2, 3]
+    xs[0] = 9
 }
 "#,
         "E0202",
@@ -45,17 +45,17 @@ fn main() {
 fn instance_method_args_keep_read_convention() {
     let src = r#"
 struct Greeter {
-    prefix: String;
+    prefix: String
 
     fn greet(self, name: String) -> String {
-        return "{self.prefix} {name}";
+        return "{self.prefix} {name}"
     }
 }
 
 fn main() {
-    val g = Greeter { prefix: "hi" };
-    val name = "bob";
-    print(g.greet(name));
+    g :: Greeter { prefix: "hi" }
+    name :: "bob"
+    print(g.greet(name))
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -70,15 +70,15 @@ fn main() {
 fn field_read_clones_instead_of_moving() {
     let src = r#"
 struct P {
-    name: String;
+    name: String
 }
 
 fn main() {
-    val p = P { name: "x" };
-    val s = p.name;
-    val t = p.name;
-    print(s);
-    print(t);
+    p :: P { name: "x" }
+    s :: p.name
+    t :: p.name
+    print(s)
+    print(t)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -93,14 +93,14 @@ fn main() {
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
 fn maybe() -> (Int?) {
-    return null;
+    return null
 }
 
 fn main() {
-    var m: Map<String, Int> = [:];
-    m["k"] = 7;
-    val x = maybe() ?? m["k"];
-    print(x);
+    m: Map<String, Int> := [:]
+    m["k"] = 7
+    x :: maybe() ?? m["k"]
+    print(x)
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -116,14 +116,14 @@ fn bare_question_return_uses_default_error() {
     let src = r#"
 fn parse_count(raw: String) -> Int? {
     if raw == "" {
-        return err("empty");
+        return err("empty")
     }
-    return ok(1);
+    return ok(1)
 }
 
 fn main() {
-    val n = parse_count("") ?? 0;
-    print(n);
+    n :: parse_count("") ?? 0
+    print(n)
 }
 "#;
     let out = jet::compile(src).expect("default Error fallible return should compile");
@@ -138,13 +138,13 @@ fn main() {
 fn map_assign_through_field_uses_map_helper() {
     let src = r#"
 struct S {
-    scores: Map<String, Int>;
+    scores: Map<String, Int>
 }
 
 fn main() {
-    var s = S { scores: [:] };
-    s.scores["a"] = 1;
-    print(s.scores["a"]);
+    s := S { scores: [:] }
+    s.scores["a"] = 1
+    print(s.scores["a"])
 }
 "#;
     let out = jet::compile(src).expect("should compile");
@@ -160,12 +160,12 @@ fn struct_literal_field_knows_expected_type() {
     // `[:]` in a struct literal used to fail with a spurious E0501.
     let src = r#"
 struct S {
-    scores: Map<String, Int>;
+    scores: Map<String, Int>
 }
 
 fn main() {
-    var s = S { scores: [:] };
-    print(s.scores.len());
+    s := S { scores: [:] }
+    print(s.scores.len())
 }
 "#;
     jet::compile(src).expect("empty map literal in field position should typecheck");
@@ -176,13 +176,13 @@ fn view_result_cannot_be_stored() {
     expect_error(
         r#"
 fn pick(items: List<String>) -> view List<String> {
-    return items;
+    return items
 }
 
 fn main() {
-    val xs = ["a", "b"];
-    val ys = pick(xs);
-    print(ys.len());
+    xs :: ["a", "b"]
+    ys :: pick(xs)
+    print(ys.len())
 }
 "#,
         "E0206",
@@ -194,17 +194,17 @@ fn mut_self_method_requires_var_receiver() {
     expect_error(
         r#"
 struct Bag {
-    n: Int;
+    n: Int
 
     fn poke(mut self) {
-        val x = self.n;
-        print(x);
+        x :: self.n
+        print(x)
     }
 }
 
 fn main() {
-    val b = Bag { n: 1 };
-    b.poke();
+    b :: Bag { n: 1 }
+    b.poke()
 }
 "#,
         "E0202",
@@ -216,19 +216,19 @@ fn take_self_on_borrowed_param_is_error() {
     expect_error(
         r#"
 struct Token {
-    s: String;
+    s: String
 
     fn consume(take self) {
-        print(0);
+        print(0)
     }
 }
 
 fn use_it(t: Token) {
-    t.consume();
+    t.consume()
 }
 
 fn main() {
-    print(0);
+    print(0)
 }
 "#,
         "E0120",
@@ -240,11 +240,11 @@ fn if_pattern_binding_moves_subject() {
     expect_error(
         r#"
 fn main() {
-    val o: String? = value("hi");
+    o: String? :: value("hi")
     if o == value(n) {
-        print(n);
+        print(n)
     }
-    print(o ?? "none");
+    print(o ?? "none")
 }
 "#,
         "E0121",
@@ -261,22 +261,22 @@ enum Shape {
 }
 
 fn main() {
-    val s = Shape.Circle("big");
-    when s {
+    s :: Shape.Circle("big")
+    if s {
         s == Circle(label) -> {
-            print(label);
-        };
+            print(label)
+        }
         s == Empty -> {
-            print("empty");
-        };
+            print("empty")
+        }
     }
-    when s {
+    if s {
         s == Circle(label2) -> {
-            print(label2);
-        };
+            print(label2)
+        }
         s == Empty -> {
-            print("still empty");
-        };
+            print("still empty")
+        }
     }
 }
 "#,
@@ -288,17 +288,17 @@ fn main() {
 fn statement_can_start_with_self() {
     let src = r#"
 struct Bag {
-    items: List<Int>;
+    items: List<Int>
 
     fn add(mut self, n: Int) {
-        self.items.push(n);
+        self.items.push(n)
     }
 }
 
 fn main() {
-    var b = Bag { items: [0] };
-    b.add(5);
-    print(b.items.len());
+    b := Bag { items: [0] }
+    b.add(5)
+    print(b.items.len())
 }
 "#;
     jet::compile(src).expect("`self.items.push(n);` should be a valid statement");
@@ -309,15 +309,15 @@ fn builtin_mutator_on_read_self_is_error() {
     expect_error(
         r#"
 struct Bag {
-    items: List<Int>;
+    items: List<Int>
 
     fn add(self, n: Int) {
-        self.items.push(n);
+        self.items.push(n)
     }
 }
 
 fn main() {
-    print(0);
+    print(0)
 }
 "#,
         "E0202",
@@ -329,16 +329,16 @@ fn user_struct_named_noclone_is_still_cloneable() {
     // A user type literally named `NoClone` must not hit a hidden magic name.
     let src = r#"
 struct NoClone {
-    n: Int;
+    n: Int
 }
 
 fn eat(take v: NoClone) {
-    print(v.n);
+    print(v.n)
 }
 
 fn main() {
-    val v = NoClone { n: 1 };
-    eat(v);
+    v :: NoClone { n: 1 }
+    eat(v)
 }
 "#;
     let out = jet::compile(src).expect("an Int-only struct is cloneable whatever its name");
@@ -351,15 +351,15 @@ fn int_where_struct_expected_is_error() {
     expect_error(
         r#"
 struct P {
-    n: Int;
+    n: Int
 }
 
 fn show(p: P) {
-    print(p.n);
+    print(p.n)
 }
 
 fn main() {
-    show(7);
+    show(7)
 }
 "#,
         "E0112",
@@ -371,16 +371,16 @@ fn mut_arg_must_be_plain_name() {
     expect_error(
         r#"
 struct S {
-    n: Int;
+    n: Int
 }
 
 fn bump(mut n: Int) {
-    n = n + 1;
+    n = n + 1
 }
 
 fn main() {
-    val s = S { n: 1 };
-    bump(mut s.n);
+    s :: S { n: 1 }
+    bump(mut s.n)
 }
 "#,
         "E0202",
@@ -406,12 +406,12 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     let dir = temp_project("hyphen");
     fs::write(
         dir.join("my-utils.jet"),
-        "pub fn helper() -> Int {\n    return 42;\n}\n",
+        "pub fn helper() -> Int {\n    return 42\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"my-utils\" as util;\nfn main() {\n    print(util.helper());\n}\n",
+        "use \"my-utils\" as util\nfn main() {\n    print(util.helper())\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -427,12 +427,12 @@ fn imported_struct_constructs_and_reads_fields() {
     let dir = temp_project("structs");
     fs::write(
         dir.join("shapes.jet"),
-        "pub struct Point {\n    pub x: Int;\n    pub y: Int;\n}\n",
+        "pub struct Point {\n    pub x: Int\n    pub y: Int\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"shapes\";\nfn main() {\n    val p = shapes.Point { x: 1, y: 2 };\n    print(p.x);\n}\n",
+        "use \"shapes\"\nfn main() {\n    p :: shapes.Point { x: 1, y: 2 }\n    print(p.x)\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -454,17 +454,17 @@ fn duplicate_file_stems_get_unique_module_names() {
     fs::create_dir_all(dir.join("b")).unwrap();
     fs::write(
         dir.join("a/util.jet"),
-        "pub fn one() -> Int {\n    return 1;\n}\n",
+        "pub fn one() -> Int {\n    return 1\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("b/util.jet"),
-        "pub fn two() -> Int {\n    return 2;\n}\n",
+        "pub fn two() -> Int {\n    return 2\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use \"a/util\" as autil;\nuse \"b/util\" as butil;\nfn main() {\n    print(autil.one());\n    print(butil.two());\n}\n",
+        "use \"a/util\" as autil\nuse \"b/util\" as butil\nfn main() {\n    print(autil.one())\n    print(butil.two())\n}\n",
     )
     .unwrap();
     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
@@ -479,11 +479,11 @@ fn duplicate_file_stems_get_unique_module_names() {
 fn value_is_identifier_not_keyword() {
     let src = r#"
 fn show(label: String, value: Int) {
-    print("{label}: {value}");
+    print("{label}: {value}")
 }
 
 fn main() {
-    show("score", 42);
+    show("score", 42)
 }
 "#;
     jet::compile(src).expect("`value` may name a binding; only `val` is reserved");

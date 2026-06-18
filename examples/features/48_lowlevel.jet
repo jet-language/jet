@@ -3,30 +3,26 @@
 // open the audited region where pointer operations are allowed.
 //
 // Ordinary Jet never needs any of this, and never emits `unsafe`.
-use core.mem;
-
+use core.mem
 // `@unsafe` on the line before `fn` marks a whole-function contract: callers
 // must wrap the call in their own `@unsafe` block.
 @unsafe
 fn read_reg(addr: Int) -> Int {
-    val p = mem.Ptr<Int>.from_addr(addr);
-    return mem.volatile_read(p);
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
 }
-
 fn main() {
     // A boxed Int gives us a real, valid address to read back through the
     // pointer tier — keeping the example self-contained and deterministic.
-    val cell: Int = 1337;
-    val addr = mem.address_of(cell);
-
+    cell: Int :: 1337
+    addr :: mem.address_of(cell)
     @audit("addr is the address of `cell`, a live Int on this stack frame")
     @unsafe {
-        val p = mem.Ptr<Int>.from_addr(addr);
-        val seen = mem.volatile_read(p);
-        print(seen);
-
+        p :: mem.Ptr<Int>.from_addr(addr)
+        seen :: mem.volatile_read(p)
+        print(seen)
         // Calling an `@unsafe fn` is allowed here because we are inside a block.
-        val again = read_reg(addr);
-        print(again);
+        again :: read_reg(addr)
+        print(again)
     }
 }

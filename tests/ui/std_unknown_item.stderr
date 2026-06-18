@@ -1,15 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/std_unknown_item.jet:4:5
+Error [E1004]: `core.fs` has no item `reed`
+  --> tests/ui/std_unknown_item.jet:3:16
     |
-  4 |     val text = fs.reed("missing.txt") or "";
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
-
-Error [E0045]: Jet writes the fallback as `??`, not `or`
-  --> tests/ui/std_unknown_item.jet:4:39
-    |
-  4 |     val text = fs.reed("missing.txt") or "";
-    |                                       ^^
- Why: `??` supplies a value when a `T?` is absent or a `T ? E` failed — `count ?? 0`, `read() ?? return`
- Fix: replace `or` with `??`
+  3 |     text :: fs.reed("missing.txt") ?? ""
+    |                ^^^^
+ Why: standard library modules expose only their documented M10 items
+ Fix: did you mean `read`?

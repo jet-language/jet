@@ -45,13 +45,13 @@ fn structured_log_json_fields() {
     if !have_rustc { return; }
 
     let src = r#"
-use jet.log as log;
+use jet.log as log
 fn main() {
-    log.set_level("debug");
-    log.info("hello world");
-    log.warn("disk low");
-    log.error("connection lost");
-    log.debug("trace detail");
+    log.set_level("debug")
+    log.info("hello world")
+    log.warn("disk low")
+    log.error("connection lost")
+    log.debug("trace detail")
 }
 "#;
     let (code, _stdout, stderr) = build_and_run_debug("log_json", src);
@@ -87,10 +87,10 @@ fn structured_log_level_filter() {
 
     // Default level is "info" — debug messages are suppressed.
     let src = r#"
-use jet.log as log;
+use jet.log as log
 fn main() {
-    log.info("visible");
-    log.debug("hidden");
+    log.info("visible")
+    log.debug("hidden")
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("log_filter", src);
@@ -105,10 +105,10 @@ fn structured_log_trace_id() {
     if !have_rustc { return; }
 
     let src = r#"
-use jet.log as log;
+use jet.log as log
 fn main() {
-    log.set_trace_id("req-abc-123");
-    log.info("with trace");
+    log.set_trace_id("req-abc-123")
+    log.info("with trace")
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("log_trace_id", src);
@@ -125,9 +125,9 @@ fn structured_log_json_escape() {
 
     // Special characters in the message must be JSON-escaped.
     let src = r#"
-use jet.log as log;
+use jet.log as log
 fn main() {
-    log.info("say \"hello\"");
+    log.info("say \"hello\"")
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("log_escape", src);
@@ -144,10 +144,10 @@ fn rich_panic_shows_jet_location() {
 
     let src = r#"
 fn check(n: Int) {
-    require(n > 0, "must be positive");
+    require(n > 0, "must be positive")
 }
 fn main() {
-    check(0);
+    check(0)
 }
 "#;
     let (code, _stdout, stderr) = build_and_run_debug("rich_panic", src);
@@ -166,10 +166,10 @@ fn safe_locals_shown_in_dev_mode() {
     // Int and Bool locals should appear; String should not (non-scalar).
     let src = r#"
 fn run(count: Int, active: Bool, name: String) {
-    require(count > 10, "not enough");
+    require(count > 10, "not enough")
 }
 fn main() {
-    run(3, true, "test");
+    run(3, true, "test")
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("safe_locals", src);
@@ -195,10 +195,10 @@ fn unsafe_block_locals_not_leaked() {
 
     let src = r#"
 fn run(secret: String, count: Int) {
-    require(count > 5, "failed");
+    require(count > 5, "failed")
 }
 fn main() {
-    run("password123", 1);
+    run("password123", 1)
 }
 "#;
     let (_code, _stdout, stderr) = build_and_run_debug("no_leak", src);
@@ -212,7 +212,7 @@ fn main() {
 fn source_map_marker_in_generated_rust() {
     let src = r#"
 fn main() {
-    print("hello");
+    print("hello")
 }
 "#;
     // jet::compile takes source directly and uses "input.jet" as the synthetic path.
@@ -233,27 +233,27 @@ fn error_return_trace_frames() {
     // one E3002 frame as the error propagates. main catches it, so exit is 0.
     let src = r#"
 enum ParseError {
-    Empty;
-    BadDigit(String);
+    Empty
+    BadDigit(String)
 }
 fn parse_age(raw: String) -> Int ? ParseError {
     if raw == "" {
-        return err(ParseError.Empty);
+        return err(ParseError.Empty)
     }
-    return ok(42);
+    return ok(42)
 }
 fn load(raw: String) -> Int ? ParseError {
-    val n = parse_age(raw)?;
-    return ok((n * 2));
+    n :: parse_age(raw)?
+    return ok((n * 2))
 }
 fn double(raw: String) -> Int ? ParseError {
-    val n = load(raw)?;
-    return ok((n * 2));
+    n :: load(raw)?
+    return ok((n * 2))
 }
 fn main() {
-    when double("") {
-        | it == ok(n) { print(n); }
-        | it == err(e) { print("failed"); }
+    if double("") {
+        it == ok(n) -> { print(n) }
+        it == err(e) -> { print("failed") }
     }
 }
 "#;

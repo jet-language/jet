@@ -1,7 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/view_return_local.jet:2:5
+Error [E0206]: this value can't be handed back as a shared view
+  --> tests/ui/view_return_local.jet:3:12
     |
-  2 |     val msg: String = "hi";
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+  3 |     return msg
+    |            ^^^
+ Why: a `view` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here
+ Fix: return a parameter or const, copy with `.clone()` into an owned return type, or change `-> view` to `->`

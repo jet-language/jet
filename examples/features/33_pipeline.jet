@@ -1,27 +1,27 @@
-use core.tasks as tasks;
+use core.tasks as tasks
 fn main() {
-    val ch: Channel<Int> = tasks.channel();
-    val s1 = ch.sender();
-    val t1 = tasks.spawn(take(s1) () => {
-        s1.send(30);
-    });
-    val s2 = ch.sender();
-    val t2 = tasks.spawn(take(s2) () => {
-        s2.send(10);
-    });
-    val s3 = ch.sender();
-    val t3 = tasks.spawn(take(s3) () => {
-        s3.send(20);
-    });
-    t1.join();
-    t2.join();
-    t3.join();
-    var results: [Int] = [];
-    results.push(ch.receive() ?? panic("channel closed"));
-    results.push(ch.receive() ?? panic("channel closed"));
-    results.push(ch.receive() ?? panic("channel closed"));
-    results.sort();
+    ch: Channel<Int> :: tasks.channel()
+    s1 :: ch.sender()
+    t1 :: tasks.spawn(take(s1) () => {
+        s1.send(30)
+    })
+    s2 :: ch.sender()
+    t2 :: tasks.spawn(take(s2) () => {
+        s2.send(10)
+    })
+    s3 :: ch.sender()
+    t3 :: tasks.spawn(take(s3) () => {
+        s3.send(20)
+    })
+    t1.join()
+    t2.join()
+    t3.join()
+    results: [Int] := []
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.push(ch.receive() ?? panic("channel closed"))
+    results.sort()
     loop x in results {
-        print(x);
+        print(x)
     }
 }

@@ -1,7 +1,7 @@
-Error [E0985]: `val` is no longer a binding keyword in Jet
-  --> tests/ui/take_self_method.jet:10:5
+Error [E0121]: `b` was given away earlier, so it can't be used here
+  --> tests/ui/take_self_method.jet:11:11
     |
- 10 |     val b = Box { n: 1 };
-    |     ^^^
- Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
- Fix: write `name :: value` instead of `val name = value`
+ 11 |     print(b.n)
+    |           ^
+ Why: after a value moves somewhere else, the old name no longer holds it
+ Fix: give away a copy instead (`b.clone()`) where it moved

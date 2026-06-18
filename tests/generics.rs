@@ -30,17 +30,17 @@ fn generic_scalar_matrix() {
         let src = format!(
             r#"
 fn twice<T>(x: T) -> Pair<T> {{
-    return Pair<T> {{ first: x, second: x }};
+    return Pair<T> {{ first: x, second: x }}
 }}
 
 struct Pair<T> {{
-    first: T;
-    second: T;
+    first: T
+    second: T
 }}
 
 fn main() {{
-    val p = twice({lit});
-    print(p.first);
+    p :: twice({lit})
+    print(p.first)
 }}
 "#
         );
@@ -53,19 +53,19 @@ fn main() {{
 fn generic_fn_with_scalar_types() {
     let src = r#"
 fn twice<T>(x: T) -> Pair<T> {
-    return Pair<T> { first: x, second: x };
+    return Pair<T> { first: x, second: x }
 }
 
 struct Pair<T> {
-    first: T;
-    second: T;
+    first: T
+    second: T
 }
 
 fn main() {
-    val a = twice(1);
-    val b = twice(2.5);
-    print(a.first);
-    print(b.first);
+    a :: twice(1)
+    b :: twice(2.5)
+    print(a.first)
+    print(b.first)
 }
 "#;
     let diags = jet::compile(src);

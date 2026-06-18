@@ -60,13 +60,13 @@ fn b1_json_text_clones_borrowed_view_param() {
     assert_compiles(
         "b1_json_text_view",
         r#"
-use core.json as json;
+use core.json as json
 fn wrap(x: String) -> String {
-    val j = JSON.Text(x);
-    return json.render(j);
+    j :: JSON.Text(x)
+    return json.render(j)
 }
 fn main() {
-    print(wrap("hi"));
+    print(wrap("hi"))
 }
 "#,
     );
@@ -77,12 +77,12 @@ fn b2_std_struct_field_uses_plain_name() {
     assert_compiles(
         "b2_process_result_field",
         r#"
-use core.process as process;
+use core.process as process
 fn main() {
-    val result = process.run(["echo", "hi"]) ?? panic("run failed");
-    print(result.code);
-    print(result.output);
-    print(result.errors);
+    result :: process.run(["echo", "hi"]) ?? panic("run failed")
+    print(result.code)
+    print(result.output)
+    print(result.errors)
 }
 "#,
     );
@@ -93,12 +93,12 @@ fn b3_map_get_through_object_pattern() {
     assert_compiles(
         "b3_map_get_object_pattern",
         r#"
-use core.json as json;
+use core.json as json
 fn main() {
-    val data = json.parse("{{\"a\":1}}") ?? panic("bad");
+    data :: json.parse("{{\"a\":1}}") ?? panic("bad")
     if data == Object(root) {
-        val v = root.get("a") ?? JSON.Null;
-        print(json.render(v));
+        v :: root.get("a") ?? JSON.Null
+        print(json.render(v))
     }
 }
 "#,
@@ -111,14 +111,14 @@ fn b4_for_in_field_subject_parses_body_not_struct_lit() {
         "b4_for_field_subject",
         r#"
 struct Holder {
-    items: [String, Int],
+    items: [String, Int]
 }
 fn main() {
-    var h = Holder { items: [:] };
-    h.items["x"] = 1;
+    h := Holder { items: [:] }
+    h.items["x"] = 1
     loop k, v in h.items {
-        print(k);
-        print(v);
+        print(k)
+        print(v)
     }
 }
 "#,

@@ -1,17 +1,14 @@
-use core.tasks as tasks;
-
+use core.tasks
 struct Logger {
-    ref sink: String;
+    ref sink: String
 }
-
 struct Config {
-    logger: Logger;
-    id: Int;
+    logger: Logger
+    id: Int
 }
-
 fn main() {
-    val ch: Channel<Config> = tasks.channel();
-    val sender = ch.sender();
-    val cfg = Config { logger: Logger { }, id: 1 };
-    sender.send(take cfg);
+    ch: Channel<Config> :: tasks.channel()
+    sender :: ch.sender()
+    cfg :: Config {logger: Logger {}, id: 1}
+    sender.send(take cfg)
 }

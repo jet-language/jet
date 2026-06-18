@@ -419,6 +419,13 @@ impl<'a> Fmt<'a> {
                     f.write(" -> ");
                     f.fmt_return_type(ret);
                 }
+                // D-LIB2: a trait method may carry a default body.
+                if let Some(body) = &m.default_body {
+                    f.write(" {");
+                    f.newline();
+                    f.with_indent(|f| f.fmt_block_stmts(body));
+                    f.end_block();
+                }
                 f.newline();
             }
         });
@@ -465,7 +472,7 @@ impl<'a> Fmt<'a> {
         self.write(" = \"");
         self.write(&ef.rust_path);
         self.write("\"");
-        self.write(syntax::STMT_SEP);
+        // S6-R: no visible `;` — the synthetic terminator ends the declaration.
         self.newline();
     }
 
@@ -478,11 +485,7 @@ impl<'a> Fmt<'a> {
         self.write(" ");
         self.write(syntax::BLOCK_OPEN);
         self.newline();
-        self.with_indent(|f| {
-            for stmt in &t.body {
-                f.fmt_stmt(stmt);
-            }
-        });
+        self.with_indent(|f| f.fmt_block_stmts(&t.body));
         self.end_block();
     }
 
@@ -573,6 +576,11 @@ impl<'a> Fmt<'a> {
         if p.name != syntax::KW_SELF || !p.ty.name().is_empty() {
             self.write(": ");
             self.fmt_type(&p.ty);
+        }
+        // S61: a trailing parameter may carry a `= default` value.
+        if let Some(default) = &p.default {
+            self.write(" = ");
+            self.fmt_expr(default, Prec::OrFallback);
         }
     }
 
@@ -695,11 +703,28 @@ impl<'a> Fmt<'a> {
             self.write(": ");
             self.write(tr);
         }
+        // S62: `impl Type: Trait using field` — delegation, no method body.
+        if let Some(field) = &i.delegation_field {
+            self.write(" using ");
+            self.write(field);
+            return;
+        }
         self.write(" {");
         self.newline();
         self.with_indent(|f| {
-            for (idx, m) in i.methods.iter().enumerate() {
+            // D-LIB2: `type Name = ConcreteType` associated-type implementations.
+            for (idx, (name, _, ty)) in i.assoc_type_impls.iter().enumerate() {
                 if idx > 0 {
+                    f.newline();
+                }
+                f.write("type ");
+                f.write(name);
+                f.write(" = ");
+                f.fmt_type(ty);
+            }
+            let had_assoc = !i.assoc_type_impls.is_empty();
+            for (idx, m) in i.methods.iter().enumerate() {
+                if idx > 0 || had_assoc {
                     f.newline();
                     f.newline();
                 }
@@ -752,7 +777,13 @@ impl<'a> Fmt<'a> {
             ImportKind::Module(name, _) => {
                 self.write(name);
                 let default_alias = name.rsplit('.').next().unwrap_or(name.as_str());
-                if imp.alias != default_alias {
+                // A dotted `use a.b` with no `as` parses as an *unqualified*
+                // item import (`b` from `a`), not a module import. So for a
+                // dotted module name the `as alias` is load-bearing even when it
+                // equals the last segment — keep it. Only a single-segment name
+                // (`use foo`) can safely omit a matching alias.
+                let dotted = name.contains('.');
+                if imp.alias != default_alias || dotted {
                     self.write(" ");
                     self.write(syntax::KW_AS);
                     self.write(" ");
@@ -1020,16 +1051,13 @@ impl<'a> Fmt<'a> {
                 pattern,
                 ..
             } => {
-                // A pattern arm keeps its `subject == pattern` shape: the bare
-                // pattern would re-parse as a value comparison and drop the
-                // binding names (e.g. `| ok(n)` wouldn't bind `n`). When the arm
-                // repeats the subject, collapse it to `it` so the subject is
-                // evaluated once and stays exhaustiveness-checkable (S24).
-                if self.same_subject(lhs, subject) {
-                    self.write(syntax::KW_IT);
-                } else {
-                    self.fmt_expr(lhs, Prec::Cmp);
-                }
+                // D-IF1: a pattern arm keeps its `subject == pattern` shape (a
+                // bare pattern would re-parse as a value comparison and drop the
+                // binding names, e.g. `ok(n)` wouldn't bind `n`). Emit the real
+                // subject expression as written. `it` is preserved only when the
+                // source already used it (a complex subject sema declares as
+                // `it`); a plain subject identifier prints itself — no collapse.
+                self.fmt_expr(lhs, Prec::Cmp);
                 self.write(" == ");
                 self.fmt_pattern(pattern);
             }
