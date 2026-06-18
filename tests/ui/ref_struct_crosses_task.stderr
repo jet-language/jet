@@ -1,7 +1,7 @@
-Error [E1102]: `h` can't cross into a task because `Holder` isn't sendable
-  --> tests/ui/ref_struct_crosses_task.jet:10:25
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/ref_struct_crosses_task.jet:10:5
     |
  10 |     val t = tasks.spawn(() => inspect(h));
-    |                         ^^^^^^^^^^^^^
- Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or remove the borrowed field before spawning
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`

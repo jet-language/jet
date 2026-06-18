@@ -1,7 +1,11 @@
 # D-BIND1 — Binding sigils
 
-**Status: ratified 2026-06-18 (option A — full sigils)** — recorded in
-`syntax-decisions.md` (amends S2); ready to implement.
+**Status: DONE (implemented 2026-06-18).** Lexer emits `::`/`:=`; `val`/`var`
+are E0985 teaching errors; `jet fmt` migrates `val name = e`→`name :: e` and
+`var name = e`→`name := e`. ui snapshots `retired_val_keyword`/`retired_var_keyword`.
+
+**Ratified 2026-06-18 (option A — full sigils)** — recorded in
+`syntax-decisions.md` (amends S2).
 
 Switch fully to Odin-style sigils: `name :: expr` (immutable), `name := expr`
 (mutable). `val` / `var` are retired to teaching errors. The owner accepted

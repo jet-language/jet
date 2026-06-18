@@ -1,7 +1,7 @@
-Error [E0121]: `t` was given away earlier, so it can't be used here
-  --> tests/ui/task_double_join.jet:6:11
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/task_double_join.jet:4:5
     |
-  6 |     print(t.join());
-    |           ^
- Why: after a value moves somewhere else, the old name no longer holds it
- Fix: give away a copy instead (`t.clone()`) where it moved
+  4 |     val t = tasks.spawn(() => 42);
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`

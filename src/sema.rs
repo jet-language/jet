@@ -2037,7 +2037,7 @@ impl<'a> Checker<'a> {
                                     "a const is fixed for the whole program".to_string(),
                                     format!(
                                         "use a `{}` binding if it needs to change",
-                                        syntax::KW_VAR
+                                        syntax::SIGIL_BIND_MUT
                                     ),
                                     Some(name_span),
                                 ));
@@ -2053,7 +2053,7 @@ impl<'a> Checker<'a> {
                                 format!(
                                     "`{}` was made with `{}`, so it can't change",
                                     name,
-                                    syntax::KW_VAL
+                                    syntax::SIGIL_BIND_IMMUT
                                 )
                             };
                             let fix = if info.param_conv.is_some() {
@@ -2065,9 +2065,9 @@ impl<'a> Checker<'a> {
                                 )
                             } else {
                                 format!(
-                                    "declare it with `{} {} = ...` instead",
-                                    syntax::KW_VAR,
-                                    name
+                                    "declare it with `{} {} ...` instead",
+                                    name,
+                                    syntax::SIGIL_BIND_MUT
                                 )
                             };
                             self.diags.push(Diagnostic::error(
@@ -2075,7 +2075,7 @@ impl<'a> Checker<'a> {
                                 what,
                                 format!(
                                     "only `{}` bindings (and `{}` parameters) can be changed",
-                                    syntax::KW_VAR,
+                                    syntax::SIGIL_BIND_MUT,
                                     syntax::KW_MUTATE
                                 ),
                                 fix,
@@ -2129,12 +2129,12 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0202",
                                             format!(
-                                                "`{}` must be declared with `{}` to change it",
+                                                "`{}` must be declared mutable (`{}`) to change it",
                                                 root,
-                                                syntax::KW_VAR
+                                                syntax::SIGIL_BIND_MUT
                                             ),
                                             "assigning into a collection changes it".to_string(),
-                                            format!("declare `var {}: ...`", root),
+                                            format!("declare `{} {} ...`", root, syntax::SIGIL_BIND_MUT),
                                             Some(*span),
                                         ));
                                     }
@@ -3004,13 +3004,13 @@ impl<'a> Checker<'a> {
                             format!("`{}` is only borrowed here, so it can't be moved", n),
                             "this function reads the value but doesn't own it".to_string(),
                             format!(
-                                "copy it instead: `{} {} = {}.clone();`",
-                                if b.mutable {
-                                    syntax::KW_VAR
-                                } else {
-                                    syntax::KW_VAL
-                                },
+                                "copy it instead: `{} {} {}.clone()`",
                                 b.name,
+                                if b.mutable {
+                                    syntax::SIGIL_BIND_MUT
+                                } else {
+                                    syntax::SIGIL_BIND_IMMUT
+                                },
                                 n
                             ),
                             Some(*nspan),
@@ -3397,7 +3397,7 @@ impl<'a> Checker<'a> {
     }
 
     fn unknown_name(&mut self, name: &str, span: Span) {
-        let mut fix = format!("declare it first: `{} {} = ...;`", syntax::KW_VAL, name);
+        let mut fix = format!("declare it first: `{} {} ...`", name, syntax::SIGIL_BIND_IMMUT);
         let mut best: Option<(String, usize)> = None;
         let candidates: Vec<String> = self
             .scopes
@@ -5234,12 +5234,12 @@ impl<'a> Checker<'a> {
                         } else {
                             (
                                 format!(
-                                    "`{}` must be declared with `{}` before calling `.{}()`",
+                                    "`{}` must be declared mutable (`{}`) before calling `.{}()`",
                                     root,
-                                    syntax::KW_VAR,
+                                    syntax::SIGIL_BIND_MUT,
                                     method
                                 ),
-                                format!("declare `var {}: ...`", root),
+                                format!("declare `{} {} ...`", root, syntax::SIGIL_BIND_MUT),
                             )
                         };
                         self.diags.push(Diagnostic::error(
@@ -6188,12 +6188,12 @@ impl<'a> Checker<'a> {
                         } else {
                             (
                                 format!(
-                                    "`{}` must be declared with `{}` before calling `.{}()`",
+                                    "`{}` must be declared mutable (`{}`) before calling `.{}()`",
                                     root,
-                                    syntax::KW_VAR,
+                                    syntax::SIGIL_BIND_MUT,
                                     method
                                 ),
-                                format!("declare `var {} = ...`", root),
+                                format!("declare `{} {} ...`", root, syntax::SIGIL_BIND_MUT),
                             )
                         };
                         self.diags.push(Diagnostic::error(
@@ -7168,11 +7168,14 @@ impl<'a> Checker<'a> {
                 {
                     self.diags.push(Diagnostic::error(
                         "E0202",
-                        format!("`{}` needs a plain `var` name after it", syntax::KW_MUTATE),
+                        format!(
+                            "`{}` needs a plain mutable name after it",
+                            syntax::KW_MUTATE
+                        ),
                         "only a named binding can be handed out for changing".to_string(),
                         format!(
-                            "bind the value first: `{} x = ...;` then pass `{} x`",
-                            syntax::KW_VAR,
+                            "bind the value first: `x {} ...` then pass `{} x`",
+                            syntax::SIGIL_BIND_MUT,
                             syntax::KW_MUTATE
                         ),
                         Some(arg.span),
@@ -7265,17 +7268,17 @@ impl<'a> Checker<'a> {
                                         format!(
                                             "`{}` was made with `{}`, so it can't be changed",
                                             name,
-                                            syntax::KW_VAL
+                                            syntax::SIGIL_BIND_IMMUT
                                         ),
                                         format!(
-                                            "`{}` will change this value, so it must be a `{}`",
+                                            "`{}` will change this value, so it must be mutable (`{}`)",
                                             method,
-                                            syntax::KW_VAR
+                                            syntax::SIGIL_BIND_MUT
                                         ),
                                         format!(
-                                            "declare it with `{} {} = ...`",
-                                            syntax::KW_VAR,
-                                            name
+                                            "declare it with `{} {} ...`",
+                                            name,
+                                            syntax::SIGIL_BIND_MUT
                                         ),
                                         Some(*span),
                                     ));
@@ -8782,11 +8785,14 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E0202",
-                    format!("`{}` needs a plain `var` name after it", syntax::KW_MUTATE),
+                    format!(
+                        "`{}` needs a plain mutable name after it",
+                        syntax::KW_MUTATE
+                    ),
                     "only a named binding can be handed out for changing".to_string(),
                     format!(
-                        "bind the value first: `{} x = ...;` then pass `{} x`",
-                        syntax::KW_VAR,
+                        "bind the value first: `x {} ...` then pass `{} x`",
+                        syntax::SIGIL_BIND_MUT,
                         syntax::KW_MUTATE
                     ),
                     Some(arg.span),
@@ -8908,14 +8914,14 @@ impl<'a> Checker<'a> {
                                     format!(
                                         "`{}` was made with `{}`, so it can't be changed",
                                         name,
-                                        syntax::KW_VAL
+                                        syntax::SIGIL_BIND_IMMUT
                                     ),
                                     format!(
-                                        "`{}` will change this value, so it must be a `{}`",
+                                        "`{}` will change this value, so it must be mutable (`{}`)",
                                         call.name,
-                                        syntax::KW_VAR
+                                        syntax::SIGIL_BIND_MUT
                                     ),
-                                    format!("declare it with `{} {} = ...`", syntax::KW_VAR, name),
+                                    format!("declare it with `{} {} ...`", name, syntax::SIGIL_BIND_MUT),
                                     Some(*span),
                                 ));
                             }

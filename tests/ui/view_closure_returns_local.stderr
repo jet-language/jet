@@ -1,7 +1,15 @@
-Error [E0206]: this value can't be handed back as a shared view
-  --> tests/ui/view_closure_returns_local.jet:7:12
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/view_closure_returns_local.jet:5:5
     |
-  7 |     return grab();
-    |            ^^^^
- Why: a `view` return may only point at a parameter, a whole-number or yes/no name, or a const — not at fresh text you just made here
- Fix: return a parameter or const, copy with `.clone()` into an owned return type, or change `-> view` to `->`
+  5 |     val local: String = "hi";
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`
+
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/view_closure_returns_local.jet:6:5
+    |
+  6 |     val grab = () => local;
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`

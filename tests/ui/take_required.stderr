@@ -1,7 +1,7 @@
-Error [E0201]: `consume` needs `take` here — this value can't be copied
-  --> tests/ui/take_required.jet:11:13
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/take_required.jet:10:5
     |
- 11 |     consume(n);
-    |             ^
- Why: parameter `1` takes ownership; passing `n` without `take` would have to copy it, but this type can't be copied
- Fix: write `take n` to transfer ownership
+ 10 |     val n = NoClone { };
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`

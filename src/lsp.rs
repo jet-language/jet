@@ -1857,8 +1857,6 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
     match &tok.kind {
         TokKind::KwFn
         | TokKind::KwPub
-        | TokKind::KwVal
-        | TokKind::KwVar
         | TokKind::KwIf
         | TokKind::KwElse
         | TokKind::KwWhile

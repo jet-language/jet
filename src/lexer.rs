@@ -20,8 +20,6 @@ pub enum StrTokPart {
 pub enum TokKind {
     KwFn,
     KwPub,
-    KwVal,
-    KwVar,
     KwIf,
     KwElse,
     KwWhile,
@@ -72,6 +70,10 @@ pub enum TokKind {
     LBracket,
     RBracket,
     Colon,
+    /// D-BIND1 (ratified 2026-06-18): `::` immutable binding sigil (was `val`).
+    ColonColon,
+    /// D-BIND1 (ratified 2026-06-18): `:=` mutable binding sigil (was `var`).
+    ColonEq,
     Comma,
     Arrow,
     /// S46 (M8): lambda arrow `=>` — distinct from `->`.
@@ -159,8 +161,6 @@ pub fn describe(kind: &TokKind) -> String {
     match kind {
         TokKind::KwFn => format!("the keyword `{}`", syntax::KW_FN),
         TokKind::KwPub => format!("the keyword `{}`", syntax::KW_PUB),
-        TokKind::KwVal => format!("the keyword `{}`", syntax::KW_VAL),
-        TokKind::KwVar => format!("the keyword `{}`", syntax::KW_VAR),
         TokKind::KwIf => format!("the keyword `{}`", syntax::KW_IF),
         TokKind::KwElse => format!("the keyword `{}`", syntax::KW_ELSE),
         TokKind::KwWhile => format!("the keyword `{}`", syntax::FOREIGN_WHILE),
@@ -208,6 +208,8 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::LBracket => "`[`".to_string(),
         TokKind::RBracket => "`]`".to_string(),
         TokKind::Colon => "`:`".to_string(),
+        TokKind::ColonColon => format!("`{}`", syntax::SIGIL_BIND_IMMUT),
+        TokKind::ColonEq => format!("`{}`", syntax::SIGIL_BIND_MUT),
         TokKind::Comma => "`,`".to_string(),
         TokKind::Arrow => "`->`".to_string(),
         TokKind::LambdaArrow => "`=>`".to_string(),
@@ -280,8 +282,6 @@ fn keyword(name: &str) -> Option<TokKind> {
     match name {
         s if s == syntax::KW_FN => Some(TokKind::KwFn),
         s if s == syntax::KW_PUB => Some(TokKind::KwPub),
-        s if s == syntax::KW_VAL => Some(TokKind::KwVal),
-        s if s == syntax::KW_VAR => Some(TokKind::KwVar),
         s if s == syntax::KW_IF => Some(TokKind::KwIf),
         s if s == syntax::KW_ELSE => Some(TokKind::KwElse),
         s if s == syntax::FOREIGN_WHILE => Some(TokKind::KwWhile),
@@ -443,6 +443,9 @@ impl<'a> Lexer<'a> {
                 '}' => toks.push(simple(self, TokKind::RBrace, 1)),
                 '[' => toks.push(simple(self, TokKind::LBracket, 1)),
                 ']' => toks.push(simple(self, TokKind::RBracket, 1)),
+                // D-BIND1: `::` immutable / `:=` mutable binding sigils.
+                ':' if next == ':' => toks.push(simple(self, TokKind::ColonColon, 2)),
+                ':' if next == '=' => toks.push(simple(self, TokKind::ColonEq, 2)),
                 ':' => toks.push(simple(self, TokKind::Colon, 1)),
                 ',' => toks.push(simple(self, TokKind::Comma, 1)),
                 ';' => toks.push(simple(self, TokKind::Semi, 1)),

@@ -1,7 +1,23 @@
-Error [E1102]: `cfg` can't be sent because `Config` isn't sendable
-  --> tests/ui/unsendable_send.jet:16:22
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/unsendable_send.jet:13:5
     |
- 16 |     sender.send(take cfg);
-    |                      ^^^
- Why: `Config` contains `logger`, which holds a `ref` field at `logger.sink`; tasks and channels move owned values between threads
- Fix: send plain data instead, or rebuild the value without borrowed fields before calling `.send()`
+ 13 |     val ch: Channel<Config> = tasks.channel();
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`
+
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/unsendable_send.jet:14:5
+    |
+ 14 |     val sender = ch.sender();
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`
+
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/unsendable_send.jet:15:5
+    |
+ 15 |     val cfg = Config { logger: Logger { }, id: 1 };
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`

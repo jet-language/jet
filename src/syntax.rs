@@ -23,11 +23,19 @@ pub const KW_FN: &str = "fn";
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
-/// S2 (ratified): introduces an immutable binding.
-pub const KW_VAL: &str = "val";
+/// S2 / D-BIND1 (ratified 2026-06-18): immutable binding sigil `name :: expr`
+/// (was the keyword `val`). Spends the `::` token (S83 external form must pick
+/// a different separator).
+pub const SIGIL_BIND_IMMUT: &str = "::";
 
-/// S2 (ratified): introduces a mutable binding.
-pub const KW_VAR: &str = "var";
+/// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`
+/// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
+pub const SIGIL_BIND_MUT: &str = ":=";
+
+/// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
+/// teaching error that points at the `::` / `:=` sigils.
+pub const FOREIGN_VAL: &str = "val";
+pub const FOREIGN_VAR: &str = "var";
 
 /// S3 (ratified): block delimiters.
 pub const BLOCK_OPEN: &str = "{";

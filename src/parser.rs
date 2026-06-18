@@ -135,6 +135,9 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0049"
             | "E0050"
             | "E0051"
+            | "E0984"
+            | "E0985"
+            | "E0986"
     )
 }
 
@@ -1943,27 +1946,28 @@ impl<'a> Parser<'a> {
         let kw = self.peek().span;
         self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
         // E0954: `comptime val` / `comptime var` — one keyword suffices.
-        if matches!(self.peek().kind, TokKind::KwVal | TokKind::KwVar) {
-            let extra = self.peek().span;
-            return Err(Diagnostic::error(
-                "E0954",
-                format!(
-                    "write `{} NAME = ...`, not `{} {} NAME = ...`",
-                    syntax::KW_COMPTIME,
-                    syntax::KW_COMPTIME,
-                    if matches!(self.peek().kind, TokKind::KwVal) {
-                        syntax::KW_VAL
-                    } else {
-                        syntax::KW_VAR
-                    }
-                ),
-                format!(
-                    "`{}` is already the binding keyword, and a comptime value is always a constant",
-                    syntax::KW_COMPTIME
-                ),
-                format!("remove the extra keyword: `{} NAME = ...`", syntax::KW_COMPTIME),
-                Some(Span::new(kw.start, extra.end)),
-            ));
+        if let TokKind::Ident(n) = &self.peek().kind {
+            if (n == syntax::FOREIGN_VAL || n == syntax::FOREIGN_VAR)
+                && matches!(self.peek2().kind, TokKind::Ident(_))
+            {
+                let foreign = n.clone();
+                let extra = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E0954",
+                    format!(
+                        "write `{} NAME = ...`, not `{} {} NAME = ...`",
+                        syntax::KW_COMPTIME,
+                        syntax::KW_COMPTIME,
+                        foreign
+                    ),
+                    format!(
+                        "`{}` is already the binding keyword, and a comptime value is always a constant",
+                        syntax::KW_COMPTIME
+                    ),
+                    format!("remove the extra keyword: `{} NAME = ...`", syntax::KW_COMPTIME),
+                    Some(Span::new(kw.start, extra.end)),
+                ));
+            }
         }
         let (name, name_span) = self.expect_ident("after `comptime`")?;
         self.expect(TokKind::Eq, "after the comptime name")?;
@@ -2040,8 +2044,39 @@ impl<'a> Parser<'a> {
                     Some(span),
                 ))
             }
-            TokKind::KwVal | TokKind::KwVar => {
-                let binding = self.binding()?;
+            // D-BIND1: retired binding keywords `val` / `var` → E0985, then parse
+            // the old `name = e` form so `jet fmt` can migrate them to sigils.
+            TokKind::Ident(n) if (n == syntax::FOREIGN_VAL || n == syntax::FOREIGN_VAR)
+                && self.binding_target_follows() =>
+            {
+                let t = self.bump();
+                let foreign = if let TokKind::Ident(n) = &t.kind {
+                    n.clone()
+                } else {
+                    unreachable!()
+                };
+                let mutable = foreign == syntax::FOREIGN_VAR;
+                let sigil = if mutable {
+                    syntax::SIGIL_BIND_MUT
+                } else {
+                    syntax::SIGIL_BIND_IMMUT
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0985",
+                    format!(
+                        "`{}` is no longer a binding keyword in {}",
+                        foreign,
+                        syntax::LANG_NAME
+                    ),
+                    format!(
+                        "bindings are written with a sigil: `name {} value` (immutable) or `name {} value` (mutable)",
+                        syntax::SIGIL_BIND_IMMUT,
+                        syntax::SIGIL_BIND_MUT
+                    ),
+                    format!("write `name {} value` instead of `{} name = value`", sigil, foreign),
+                    Some(t.span),
+                ));
+                let binding = self.binding_after_kw(mutable)?;
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
@@ -2066,9 +2101,9 @@ impl<'a> Parser<'a> {
                         ),
                         binding_why(),
                         format!(
-                            "replace `{}` with `{}`",
-                            syntax::FOREIGN_LET_MUT,
-                            syntax::KW_VAR
+                            "write `name {} value` instead of `{} name = value`",
+                            syntax::SIGIL_BIND_MUT,
+                            syntax::FOREIGN_LET_MUT
                         ),
                         Some(full_span),
                     ));
@@ -2082,9 +2117,9 @@ impl<'a> Parser<'a> {
                         ),
                         binding_why(),
                         format!(
-                            "replace `{}` with `{}`",
-                            syntax::FOREIGN_LET,
-                            syntax::KW_VAL
+                            "write `name {} value` instead of `{} name = value`",
+                            syntax::SIGIL_BIND_IMMUT,
+                            syntax::FOREIGN_LET
                         ),
                         Some(t.span),
                     ));
@@ -2106,9 +2141,9 @@ impl<'a> Parser<'a> {
                     ),
                     binding_why(),
                     format!(
-                        "replace `{}` with `{}`",
-                        syntax::FOREIGN_SET,
-                        syntax::KW_VAL
+                        "write `name {} value` instead of `{} name = value`",
+                        syntax::SIGIL_BIND_IMMUT,
+                        syntax::FOREIGN_SET
                     ),
                     Some(t.span),
                 ));
@@ -2276,6 +2311,13 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Continue(span))
             }
             TokKind::KwLoop => self.loop_stmt(None),
+            // D-BIND1: a sigil binding `name (: type)? (:: | :=) expr` — no
+            // leading keyword. Detected before the general Ident statement path.
+            _ if self.looks_like_sigil_binding() => {
+                let binding = self.sigil_binding()?;
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
+            }
             // S58 (E2-M13): the audit + unsafe gate is `@audit("…")` then
             // `@unsafe { … }`. Bare `unsafe { … }` is the rejected former
             // spelling — point users at the `@` form.
@@ -2358,8 +2400,8 @@ impl<'a> Parser<'a> {
                                 .to_string(),
                             "a statement must have an effect: a call, a binding, an assignment, or `return`".to_string(),
                             format!(
-                                "use the value, e.g. `{} x = ...;` or `{}(...)`",
-                                syntax::KW_VAL,
+                                "use the value, e.g. `x {} ...` or `{}(...)`",
+                                syntax::SIGIL_BIND_IMMUT,
                                 syntax::BUILTIN_PRINT
                             ),
                             Some(other.span()),
@@ -2375,9 +2417,9 @@ impl<'a> Parser<'a> {
                 "inside a function body, write a call, binding, assignment, or `return`"
                     .to_string(),
                 format!(
-                    "e.g. {}(\"hello\"); or {} x = 1;",
+                    "e.g. {}(\"hello\") or x {} 1",
                     syntax::BUILTIN_PRINT,
-                    syntax::KW_VAL
+                    syntax::SIGIL_BIND_IMMUT
                 ),
                 Some(self.peek().span),
             )),
@@ -2636,21 +2678,161 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn binding(&mut self) -> Result<Binding, Diagnostic> {
-        let mutable = match self.peek().kind {
-            TokKind::KwVar => {
-                self.bump();
-                true
-            }
-            TokKind::KwVal => {
-                self.bump();
-                false
-            }
-            _ => unreachable!(),
+    /// D-BIND1: a binding starting with the target (no keyword), written
+    /// `name (: type)? (:: | :=) expr`. The sigil chooses mutability:
+    /// `::` immutable (was `val`), `:=` mutable (was `var`).
+    fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
+        // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
+        // struct — instead of a plain `name`.
+        if let Some(pattern) = self.try_bind_pattern()? {
+            let mutable = self.expect_bind_sigil()?;
+            let init = self.expr()?;
+            return Ok(Binding {
+                mutable,
+                name: String::new(),
+                name_span: pattern.span(),
+                pattern: Some(pattern),
+                ty: None,
+                ty_span: None,
+                init,
+                is_comptime: false,
+                ct: None,
+            });
+        }
+        let (name, name_span) = self.expect_ident("for the binding name")?;
+        let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            let (t, s) = self.type_()?;
+            (Some(t), Some(s))
+        } else {
+            (None, None)
         };
-        self.binding_after_kw(mutable)
+        let mutable = self.expect_bind_sigil()?;
+        let init = self.expr()?;
+        Ok(Binding {
+            mutable,
+            name,
+            name_span,
+            pattern: None,
+            ty,
+            ty_span,
+            init,
+            is_comptime: false,
+            ct: None,
+        })
     }
 
+    /// D-BIND1: after a retired `val`/`var` keyword, does the old binding shape
+    /// `name (: type)? = …` or a destructuring pattern follow? Guards the E0985
+    /// teaching path so a stray identifier literally named `val` isn't captured.
+    fn binding_target_follows(&self) -> bool {
+        match &self.peek2().kind {
+            // `val name = …` / `val name : T = …` / `val Type { … } = …`
+            TokKind::Ident(_) => matches!(
+                self.peek3().kind,
+                TokKind::Eq | TokKind::Colon | TokKind::LBrace
+            ),
+            // `val [a, b] = …` / `val Type { … } = …`
+            TokKind::LBracket => true,
+            _ => false,
+        }
+    }
+
+    /// D-BIND1: consume `::` (immutable) or `:=` (mutable); returns `mutable`.
+    fn expect_bind_sigil(&mut self) -> Result<bool, Diagnostic> {
+        match self.peek().kind {
+            TokKind::ColonColon => {
+                self.bump();
+                Ok(false)
+            }
+            TokKind::ColonEq => {
+                self.bump();
+                Ok(true)
+            }
+            _ => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected `{}` or `{}` in a binding, found {}",
+                    syntax::SIGIL_BIND_IMMUT,
+                    syntax::SIGIL_BIND_MUT,
+                    describe(&self.peek().kind)
+                ),
+                format!(
+                    "a binding is `name {} value` (immutable) or `name {} value` (mutable)",
+                    syntax::SIGIL_BIND_IMMUT,
+                    syntax::SIGIL_BIND_MUT
+                ),
+                format!("write `name {} value`", syntax::SIGIL_BIND_IMMUT),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
+    /// D-BIND1: true when the tokens at the cursor begin a sigil binding —
+    /// `name ::`, `name :=`, `name : type ::`, or a destructuring pattern target
+    /// (`[ … ] ::`, `Ident { … } ::`). Used by the statement dispatcher to tell a
+    /// binding apart from an expression/assignment that also starts with a name.
+    fn looks_like_sigil_binding(&self) -> bool {
+        match &self.peek().kind {
+            // `name :: e` / `name := e`
+            TokKind::Ident(_) | TokKind::KwSelf
+                if matches!(self.peek2().kind, TokKind::ColonColon | TokKind::ColonEq) =>
+            {
+                true
+            }
+            // `name : type :: e` — typed binding. A bare `:` only ever opens a
+            // type annotation here, so any `name :` at statement start is a
+            // binding (a map index uses `[`, not `:`).
+            TokKind::Ident(_) | TokKind::KwSelf
+                if matches!(self.peek2().kind, TokKind::Colon) =>
+            {
+                true
+            }
+            // Destructuring targets: scan ahead to a `::`/`:=` before the line
+            // would otherwise end. Cheap bounded lookahead.
+            TokKind::LBracket => self.pattern_target_is_binding(),
+            TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
+                self.pattern_target_is_binding()
+            }
+            _ => false,
+        }
+    }
+
+    /// Scan a `[ … ]` or `Ident { … }` destructuring target and check whether a
+    /// binding sigil follows its close. Bounded by the matching bracket depth.
+    fn pattern_target_is_binding(&self) -> bool {
+        let mut i = self.pos;
+        let n = self.toks.len();
+        // skip a leading `Ident` for the struct-pattern form.
+        if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Ident(_))) {
+            i += 1;
+        }
+        let (open, close) = match self.toks.get(i).map(|t| &t.kind) {
+            Some(TokKind::LBracket) => (TokKind::LBracket, TokKind::RBracket),
+            Some(TokKind::LBrace) => (TokKind::LBrace, TokKind::RBrace),
+            _ => return false,
+        };
+        let mut depth = 0usize;
+        while i < n {
+            let k = &self.toks[i].kind;
+            if std::mem::discriminant(k) == std::mem::discriminant(&open) {
+                depth += 1;
+            } else if std::mem::discriminant(k) == std::mem::discriminant(&close) {
+                depth -= 1;
+                if depth == 0 {
+                    return matches!(
+                        self.toks.get(i + 1).map(|t| &t.kind),
+                        Some(TokKind::ColonColon | TokKind::ColonEq)
+                    );
+                }
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// D-BIND1: parse the old keyword-led binding `val/var name (: type)? = expr`
+    /// after the retired keyword was consumed, for the E0985 teaching path.
     fn binding_after_kw(&mut self, mutable: bool) -> Result<Binding, Diagnostic> {
         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
         // struct — instead of a plain `name`.
@@ -2984,27 +3166,28 @@ impl<'a> Parser<'a> {
     fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
         let kw = self.peek().span;
         self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
-        if matches!(self.peek().kind, TokKind::KwVal | TokKind::KwVar) {
-            let extra = self.peek().span;
-            return Err(Diagnostic::error(
-                "E0954",
-                format!(
-                    "write `{} NAME = ...`, not `{} {} NAME = ...`",
-                    syntax::KW_COMPTIME,
-                    syntax::KW_COMPTIME,
-                    if matches!(self.peek().kind, TokKind::KwVal) {
-                        syntax::KW_VAL
-                    } else {
-                        syntax::KW_VAR
-                    }
-                ),
-                format!(
-                    "`{}` is already the binding keyword, and a comptime value is always a constant",
-                    syntax::KW_COMPTIME
-                ),
-                format!("remove the extra keyword: `{} NAME = ...`", syntax::KW_COMPTIME),
-                Some(Span::new(kw.start, extra.end)),
-            ));
+        if let TokKind::Ident(n) = &self.peek().kind {
+            if (n == syntax::FOREIGN_VAL || n == syntax::FOREIGN_VAR)
+                && matches!(self.peek2().kind, TokKind::Ident(_))
+            {
+                let foreign = n.clone();
+                let extra = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E0954",
+                    format!(
+                        "write `{} NAME = ...`, not `{} {} NAME = ...`",
+                        syntax::KW_COMPTIME,
+                        syntax::KW_COMPTIME,
+                        foreign
+                    ),
+                    format!(
+                        "`{}` is already the binding keyword, and a comptime value is always a constant",
+                        syntax::KW_COMPTIME
+                    ),
+                    format!("remove the extra keyword: `{} NAME = ...`", syntax::KW_COMPTIME),
+                    Some(Span::new(kw.start, extra.end)),
+                ));
+            }
         }
         let (name, name_span) = self.expect_ident("after `comptime`")?;
         self.expect(TokKind::Eq, "in a comptime binding")?;
@@ -3523,7 +3706,7 @@ impl<'a> Parser<'a> {
                 "this value can't be assigned to".to_string(),
                 "only a name or an indexed slot like `items[0]` can appear on the left of `=`"
                     .to_string(),
-                format!("use `{} name = ...` or `map[key] = ...`", syntax::KW_VAR),
+                format!("use `name {} ...` or `map[key] = ...`", syntax::SIGIL_BIND_MUT),
                 Some(other.span()),
             )),
         }
@@ -5435,9 +5618,9 @@ fn image_from_not_system(span: Span) -> Diagnostic {
 
 fn binding_why() -> String {
     format!(
-        "a binding is `{}` if it never changes, or `{}` if it can",
-        syntax::KW_VAL,
-        syntax::KW_VAR
+        "a binding is `name {} value` if it never changes, or `name {} value` if it can",
+        syntax::SIGIL_BIND_IMMUT,
+        syntax::SIGIL_BIND_MUT
     )
 }
 

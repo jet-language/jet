@@ -1052,16 +1052,16 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
+        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND1: ordinary
+        // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
         if b.is_comptime {
             self.write(syntax::KW_COMPTIME);
-        } else {
-            self.write(if b.mutable {
-                syntax::KW_VAR
-            } else {
-                syntax::KW_VAL
-            });
+            self.write(" ");
+            self.write(&b.name);
+            self.write(" = ");
+            self.fmt_expr(&b.init, Prec::OrFallback);
+            return;
         }
-        self.write(" ");
         if let Some(pat) = &b.pattern {
             // S74: a destructuring target stands in for the name.
             self.fmt_bind_pattern(pat);
@@ -1072,7 +1072,13 @@ impl<'a> Fmt<'a> {
                 self.fmt_type(ty);
             }
         }
-        self.write(" = ");
+        self.write(" ");
+        self.write(if b.mutable {
+            syntax::SIGIL_BIND_MUT
+        } else {
+            syntax::SIGIL_BIND_IMMUT
+        });
+        self.write(" ");
         self.fmt_expr(&b.init, Prec::OrFallback);
     }
 

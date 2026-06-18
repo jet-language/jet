@@ -48,7 +48,7 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop | when
          | "break" ";" | "continue" ";" | "return" [ expr ] ";"
          | expr ";" ;
-binding  = ( "val" | "var" ) ( ident [ ":" type ] | destructure ) "=" expr ";" ;
+binding  = ( ident [ ":" type ] | destructure ) ( "::" | ":=" ) expr ";" ; // D-BIND1: `::` immutable, `:=` mutable (no keyword)
 destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -79,8 +79,9 @@ expr     = precedence climbing over:
   bindings are optional; mismatched annotations are E0108.
 - A program must define `fn main` with no parameters and no return type
   (E0101, E0122); execution starts there. `main` never takes `pub` (S12).
-- `val` is immutable, `var` mutable; assigning to a `val` is E0111. Names
-  may not shadow an existing name in scope (E0118).
+- `name :: value` is immutable, `name := value` mutable (D-BIND1); assigning
+  to an immutable binding is E0111. The retired `val`/`var` keywords are a
+  teaching error (E0985). Names may not shadow an existing name in scope (E0118).
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
   `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
   pointing at interpolation. Compound assignment (S17) mirrors the binary

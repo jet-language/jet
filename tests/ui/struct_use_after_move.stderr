@@ -1,7 +1,7 @@
-Error [E0121]: `p` was given away earlier, so it can't be used here
-  --> tests/ui/struct_use_after_move.jet:12:11
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/struct_use_after_move.jet:10:5
     |
- 12 |     print(p.x);
-    |           ^
- Why: after a value moves somewhere else, the old name no longer holds it
- Fix: give away a copy instead (`p.clone()`) where it moved
+ 10 |     val p = Point { x: 1 };
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`

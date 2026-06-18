@@ -1,15 +1,7 @@
-Error [E3101]: `from_addr` can only run inside an `@unsafe` block
-  --> tests/ui/lowlevel_e3101.jet:4:13
+Error [E0985]: `val` is no longer a binding keyword in Jet
+  --> tests/ui/lowlevel_e3101.jet:4:5
     |
   4 |     val p = mem.Ptr<Int>.from_addr(addr);
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: this operation can violate memory safety, so it must sit in an audited region
- Fix: wrap it: @audit("why this is safe") @unsafe { … }
-
-Error [E3101]: `volatile_read` can only run inside an `@unsafe` block
-  --> tests/ui/lowlevel_e3101.jet:5:16
-    |
-  5 |     return mem.volatile_read(p);
-    |                ^^^^^^^^^^^^^
- Why: this operation can violate memory safety, so it must sit in an audited region
- Fix: wrap it: @audit("why this is safe") @unsafe { … }
+    |     ^^^
+ Why: bindings are written with a sigil: `name :: value` (immutable) or `name := value` (mutable)
+ Fix: write `name :: value` instead of `val name = value`
