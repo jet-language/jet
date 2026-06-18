@@ -413,3 +413,51 @@ fn osc8_hyperlinks_only_when_forced_on() {
     let plain = d.render_linked("a.jet", src, true, false);
     assert!(!plain.contains("\x1b]8;;"), "render_linked(hyperlinks=false) must not");
 }
+
+// ── Ext-optional CLI (no syntax decision; pure CLI behavior) ──────────
+
+#[test]
+fn ext_optional_check_resolves_dot_jet() {
+    // `jet check <path-without-.jet>` resolves to `<path>.jet` when the bare
+    // path does not exist but the .jet file does.
+    let stem = std::env::temp_dir().join("jet_cli_extopt_check");
+    let file = stem.with_extension("jet");
+    fs::write(&file, "fn main() {\n    print(\"ok\");\n}\n").unwrap();
+    let out = Command::new(jet()).arg("check").arg(&stem).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "ext-optional check should resolve {}.jet and exit 0; stderr: {}",
+        stem.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn ext_optional_run_resolves_dot_jet() {
+    // Same resolution for `jet run`.
+    let stem = std::env::temp_dir().join("jet_cli_extopt_run");
+    let file = stem.with_extension("jet");
+    fs::write(&file, "fn main() {\n    print(\"hello-extopt\");\n}\n").unwrap();
+    let out = Command::new(jet()).arg("run").arg(&stem).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "ext-optional run should exit 0; stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("hello-extopt"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn ext_optional_missing_path_keeps_original_name() {
+    // Neither `<path>` nor `<path>.jet` exists: the original name must surface
+    // in the file-not-found error (resolution returns it unchanged).
+    let stem = std::env::temp_dir().join("jet_cli_extopt_absent_xyz");
+    let out = Command::new(jet()).arg("check").arg(&stem).output().unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("jet_cli_extopt_absent_xyz"),
+        "error should name the original path; stderr: {err}"
+    );
+}

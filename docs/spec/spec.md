@@ -11,7 +11,11 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
 ### Lexical rules
 
 - Source is UTF-8. Identifiers: a letter or `_`, then letters, digits, `_`.
-- Source files use the `.jet` extension (N2).
+- Source files use the `.jet` extension (N2). The path-accepting commands
+  (`jet run`/`build`/`check`/`eval`) make the extension optional: `jet run
+  examples/test` resolves to `examples/test.jet` when the literal path has no
+  matching file. If neither the literal path nor `<path>.jet` exists, the
+  original name is kept so the file-not-found diagnostic names what you typed.
 - Line comments: `//` to end of line (S5). Block comments: `/* … */`, which
   nest (an unbalanced `/*` is E0002), so any region can be commented out (S5).
 - String literals: `"..."` on a single line. Escapes (S20): `\n` `\t` `\"`

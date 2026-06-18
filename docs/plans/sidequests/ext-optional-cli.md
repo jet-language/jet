@@ -1,5 +1,10 @@
 # Extension-optional CLI
 
+**Status: done 2026-06-18.** `resolve_source_path` in `src/main.rs` applied to
+`run`/`build`/`check`/`eval`; tests in `tests/cli.rs`
+(`ext_optional_check_resolves_dot_jet`, `ext_optional_run_resolves_dot_jet`,
+`ext_optional_missing_path_keeps_original_name`).
+
 No syntax decision needed. Pure CLI behavior.
 
 ## Goal

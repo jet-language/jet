@@ -481,7 +481,8 @@ fn main() {
                     exit(exit_codes::USAGE);
                 }
             };
-            run_eval(file, pure_flag, mode);
+            let resolved = resolve_source_path(file);
+            run_eval(&resolved, pure_flag, mode);
             return;
         }
         _ => {}
@@ -573,9 +574,31 @@ fn main() {
         }
         _ => {
             let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
-            run_compile_cmd(cmd, target, emit_rust, small, freestanding, cross_target.as_deref(), verbose, capabilities_json, &program_args, mode);
+            // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
+            // for the path-accepting compile commands.
+            let resolved = if matches!(cmd, "run" | "build" | "check") {
+                resolve_source_path(target)
+            } else {
+                target.to_string()
+            };
+            run_compile_cmd(cmd, &resolved, emit_rust, small, freestanding, cross_target.as_deref(), verbose, capabilities_json, &program_args, mode);
         }
     }
+}
+
+/// Resolve a source-path argument, allowing the `.jet` extension to be omitted
+/// (ext-optional CLI). If `raw` exists as-is, use it. Otherwise, if `raw.jet`
+/// exists, use that. If neither exists, return `raw` unchanged so the normal
+/// file-not-found diagnostic fires with the original name the user typed.
+fn resolve_source_path(raw: &str) -> String {
+    if Path::new(raw).exists() {
+        return raw.to_string();
+    }
+    let with_ext = format!("{}.{}", raw, jet::syntax::FILE_EXT);
+    if Path::new(&with_ext).exists() {
+        return with_ext;
+    }
+    raw.to_string()
 }
 
 /// Find the entry .jet file for a project (`.jet/main.jet` if exists, else `main.jet`).
