@@ -50,7 +50,7 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 // terminator-based. A leading `.` or binary/logical operator on the next line
 // suppresses insertion (continuation). `-> Type` / `{` must stay on the `)`
 // line (E0986). `NL` below denotes that synthetic terminator.
-stmt     = binding | assign | if | loop | when
+stmt     = binding | assign | if | loop
          | "break" NL | "continue" NL | "return" [ expr ] NL
          | expr NL ;
 binding  = ( ident [ ":" type ] | destructure ) ( "::" | ":=" ) expr NL ; // D-BIND1: `::` immutable, `:=` mutable (no keyword)
@@ -58,7 +58,12 @@ destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
-if       = "if" cond block { "else" "if" cond block } [ "else" block ] ;  // statement form
+// D-IF1: `if` is the one branching keyword. Two forms by body shape:
+if       = "if" cond block { "else" "if" cond block } [ "else" block ]   // two-arm
+         | "if" subject "{" { arm } [ "else" "->" arm-body ] "}" ;       // multi-arm dispatch
+arm      = arm-head "->" arm-body NL ;
+arm-head = value | condition ;   // bare value ⇒ `subject == value`; else a Bool condition (D-IF2 Q3)
+arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
 loop     = [ "@" ident ] loop-body ;            // D-LABEL1: optional `@name` label
 loop-body= "loop" block                                                  // infinite
          | "loop" cond block                                             // conditional (was `while`)
@@ -69,8 +74,8 @@ continue = "continue" [ "@" ident ] ";" ;       // D-LABEL1: `continue @name`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
 value-block = "{" { stmt } expr "}" ;                // trailing expr (no `;`) is the block's value
-when     = "when" expr "{" { expr "->" block ";" }
-           "else" "->" block ";" "}" ;               // S24 (D-SG1: was `switch`)
+           // `when` is retired (D-IF1): a teaching error (E0984) pointing at the
+           // multi-arm `if` form above.
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
            >  "|"  >  "^"  >  "&"  >  "<<" ">>"

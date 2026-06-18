@@ -881,13 +881,15 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-IF1: multi-arm dispatch renders as `if subject { head -> body }`
+            // (the `Stmt::Switch` IR is shared with the retired `when`).
             Stmt::Switch {
                 subject,
                 arms,
                 else_body,
                 ..
             } => {
-                self.write(syntax::KW_SWITCH);
+                self.write(syntax::KW_IF);
                 self.write(" ");
                 self.fmt_expr(subject, Prec::OrFallback);
                 self.write(" {");
@@ -898,7 +900,10 @@ impl<'a> Fmt<'a> {
                         f.newline();
                     }
                     if let Some(else_b) = else_body {
-                        f.write("| else {");
+                        f.write(syntax::KW_ELSE);
+                        f.write(" ");
+                        f.write(syntax::OP_ARM_ARROW);
+                        f.write(" {");
                         f.newline();
                         f.with_indent(|f| f.fmt_block_stmts(else_b));
                         f.end_block();
@@ -976,9 +981,14 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// D-IF1: render one arm as `head -> { body }`. A bare-value arm
+    /// (`subject == value`) prints just the value; a full condition prints as
+    /// written. A single-statement body could be braceless, but fmt always uses
+    /// a block for a stable, idempotent shape.
     fn fmt_switch_arm(&mut self, subject: &Expr, arm: &SwitchArm) {
-        self.write("| ");
         self.fmt_switch_cond(subject, &arm.cond, Prec::OrFallback);
+        self.write(" ");
+        self.write(syntax::OP_ARM_ARROW);
         self.write(" {");
         self.newline();
         self.with_indent(|f| f.fmt_block_stmts(&arm.body));

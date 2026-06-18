@@ -1,7 +1,15 @@
 # D-IF1 — `if` as universal branching
 
-**Status: fully ratified 2026-06-18** — D-IF1 (option A) + D-IF2 (surface) in
-`syntax-decisions.md` (amends S24, S68). Ready to implement; no open questions.
+**Status: DONE (implemented 2026-06-18).** `if_or_dispatch` parses `if subject
+{ … }`; `if_body_is_arms` (one-token `->` lookahead) chooses multi-arm mode,
+lowering to the shared `Stmt::Switch` IR (bare-value arms via `switch_pipe_cond`,
+braceless or block bodies, `else ->` catch-all). `when` → E0984 (still parsed
+via `switch_after_kw` for fmt recovery). `jet fmt` renders `Stmt::Switch` as
+`if subject { head -> body }` and migrates `when { | arm {} }`. Example
+`if_universal.jet`; ui `retired_when_keyword`.
+
+**Fully ratified 2026-06-18** — D-IF1 (option A) + D-IF2 (surface) in
+`syntax-decisions.md` (amends S24, S68).
 
 ## Ratified design
 

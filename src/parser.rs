@@ -2187,13 +2187,14 @@ impl<'a> Parser<'a> {
                         syntax::FOREIGN_MATCH
                     ),
                     format!(
-                        "choosing one branch from many is written with `{}`",
-                        syntax::KW_SWITCH
+                        "choosing one branch from many is written with `{}` (D-IF1)",
+                        syntax::KW_IF
                     ),
                     format!(
-                        "replace `{}` with `{}`",
+                        "replace `{}` with `{} subject {{ arm {} body }}`",
                         syntax::FOREIGN_MATCH,
-                        syntax::KW_SWITCH
+                        syntax::KW_IF,
+                        syntax::OP_ARM_ARROW
                     ),
                     Some(t.span),
                 ));
@@ -2204,19 +2205,19 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0044",
                     format!(
-                        "{} renamed `{}` to `{}`",
+                        "{} does not use `{}`",
                         syntax::LANG_NAME,
-                        syntax::FOREIGN_SWITCH,
-                        syntax::KW_SWITCH
+                        syntax::FOREIGN_SWITCH
                     ),
                     format!(
-                        "choosing one branch from many is written with `{}` (S24)",
-                        syntax::KW_SWITCH
+                        "choosing one branch from many is written with `{}` (D-IF1)",
+                        syntax::KW_IF
                     ),
                     format!(
-                        "replace `{}` with `{}`",
+                        "replace `{}` with `{} subject {{ arm {} body }}`",
                         syntax::FOREIGN_SWITCH,
-                        syntax::KW_SWITCH
+                        syntax::KW_IF,
+                        syntax::OP_ARM_ARROW
                     ),
                     Some(t.span),
                 ));
@@ -2232,7 +2233,7 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Return(expr, span))
             }
-            TokKind::KwIf => Ok(Stmt::If(self.if_stmt()?)),
+            TokKind::KwIf => self.if_or_dispatch(),
             TokKind::KwWhile => {
                 // S19-amend (E0050): `while` is now a teaching error; use `loop cond { }`.
                 let t = self.bump();
@@ -2309,8 +2310,33 @@ impl<'a> Parser<'a> {
                 let body = self.block_stmts();
                 Ok(Stmt::For { var, var_span, var2, kind, body, span, label: None })
             }
+            // D-IF1: `when` is retired — `if` is the one branching keyword. Emit
+            // E0984, then parse the old body so `jet fmt` can migrate it to
+            // `if subject { arm -> body }`.
             TokKind::KwSwitch => {
                 let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
+                    "E0984",
+                    format!(
+                        "`{}` is no longer a keyword in {}",
+                        syntax::KW_SWITCH,
+                        syntax::LANG_NAME
+                    ),
+                    format!(
+                        "`{}` is the one branching keyword — multi-arm dispatch is `{} subject {{ arm {} body }}`",
+                        syntax::KW_IF,
+                        syntax::KW_IF,
+                        syntax::OP_ARM_ARROW
+                    ),
+                    format!(
+                        "write `{} subject {{ value {} body … }}` (an `{} {} body` catch-all)",
+                        syntax::KW_IF,
+                        syntax::OP_ARM_ARROW,
+                        syntax::KW_ELSE,
+                        syntax::OP_ARM_ARROW
+                    ),
+                    Some(span),
+                ));
                 self.switch_after_kw(span)
             }
             TokKind::KwBreak => {
@@ -2449,6 +2475,141 @@ impl<'a> Parser<'a> {
                 ),
                 Some(self.peek().span),
             )),
+        }
+    }
+
+    /// D-IF1: `if subject { … }` is either a conventional two-arm `if` (its body
+    /// is statements, optional `else`) or a multi-arm dispatch when the body's
+    /// first item is an arm `head -> body`. One token of lookahead after the
+    /// arm head decides: `->` is not a valid expression operator, so an arm head
+    /// followed by `->` unambiguously marks arm mode. Multi-arm `if` lowers to
+    /// the same `Stmt::Switch` IR the former `when` used.
+    fn if_or_dispatch(&mut self) -> Result<Stmt, Diagnostic> {
+        let span = self.bump().span; // `if`
+        let subject = self.expr_no_struct_lit()?;
+        self.expect(TokKind::LBrace, "to open the `if` body")?;
+
+        // Peek for arm mode: an `else ->` first arm, or an arm head followed by
+        // `->`. Speculatively parse the head and look for `->`.
+        if self.if_body_is_arms() {
+            return self.if_arms(subject, span);
+        }
+
+        // Conventional `if`: the subject is the condition.
+        let then_body = self.block_stmts();
+        let mut else_branch = None;
+        if matches!(self.peek().kind, TokKind::KwElse) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::KwIf) {
+                else_branch = Some(ElseBranch::ElseIf(Box::new(self.if_stmt()?)));
+            } else {
+                self.expect(TokKind::LBrace, "to open the `else` body")?;
+                else_branch = Some(ElseBranch::Else(self.block_stmts()));
+            }
+        }
+        Ok(Stmt::If(IfStmt {
+            cond: subject,
+            then_body,
+            else_branch,
+            span,
+        }))
+    }
+
+    /// D-IF1: is the `if` body (cursor just past `{`) a multi-arm dispatch?
+    /// True when the body opens with `else ->`, or with an expression arm head
+    /// immediately followed by `->`. Pure lookahead — restores the cursor.
+    fn if_body_is_arms(&mut self) -> bool {
+        // `else ->` catch-all as the first (only) arm.
+        if matches!(self.peek().kind, TokKind::KwElse)
+            && matches!(self.peek2().kind, TokKind::Arrow)
+        {
+            return true;
+        }
+        // An empty body `{}` is a conventional (empty) if, not arm mode.
+        if matches!(self.peek().kind, TokKind::RBrace) {
+            return false;
+        }
+        let save = self.pos;
+        let saved_diags = self.diags.len();
+        let is_arm = matches!(self.expr_no_struct_lit(), Ok(_))
+            && matches!(self.peek().kind, TokKind::Arrow);
+        self.pos = save;
+        self.diags.truncate(saved_diags);
+        is_arm
+    }
+
+    /// D-IF1: parse the arms of a multi-arm `if` (cursor just past `{`), lowering
+    /// to `Stmt::Switch`. Each arm is `head -> body`; `head` with no top-level
+    /// comparison/logical operator is a bare value compared against the subject
+    /// (`subject == head`), otherwise a full `Bool` condition (D-IF2 Q3).
+    /// `body` is a braceless single statement/expression or a `{ … }` block
+    /// (D-IF2 Q2). `else -> body` is the catch-all (D-IF2 Q1).
+    fn if_arms(&mut self, subject: Expr, span: Span) -> Result<Stmt, Diagnostic> {
+        let mut arms: Vec<SwitchArm> = Vec::new();
+        let mut else_body: Option<Vec<Stmt>> = None;
+        loop {
+            // Skip synthetic terminators between arms (S6-R).
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            match &self.peek().kind {
+                TokKind::RBrace => {
+                    self.bump();
+                    break;
+                }
+                TokKind::Eof => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected `}` to close this `if`, found the end of the file".to_string(),
+                        "every `{` needs a matching `}`".to_string(),
+                        "add a closing `}`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                TokKind::KwElse => {
+                    let arm_start = self.bump().span; // `else`
+                    self.expect(TokKind::Arrow, "after `else` in an `if`")?;
+                    let body = self.arm_body()?;
+                    let _ = arm_start;
+                    else_body = Some(body);
+                }
+                _ => {
+                    let arm_start = self.peek().span;
+                    let raw_head = self.expr_no_struct_lit()?;
+                    let cond = Self::switch_pipe_cond(subject.clone(), raw_head);
+                    self.expect(TokKind::Arrow, "after an `if` arm value or condition")?;
+                    let body = self.arm_body()?;
+                    let end = self
+                        .toks
+                        .get(self.pos.saturating_sub(1))
+                        .map(|t| t.span.end)
+                        .unwrap_or(arm_start.end);
+                    arms.push(SwitchArm {
+                        cond,
+                        body,
+                        span: Span::new(arm_start.start, end),
+                    });
+                }
+            }
+        }
+        Ok(Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            span,
+        })
+    }
+
+    /// D-IF2 Q2: an arm body is a `{ … }` block or a single braceless statement.
+    fn arm_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            Ok(self.block_stmts())
+        } else {
+            // Braceless single statement (a call, binding, return, etc.).
+            let stmt = self.stmt()?;
+            Ok(vec![stmt])
         }
     }
 
@@ -2634,17 +2795,18 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0023",
                         format!(
-                            "`{}` arms are written `condition {} {{ ... }};`, not `{}`",
-                            syntax::KW_SWITCH,
+                            "`{}` arms are written `value {} body`, not `{}`",
+                            syntax::KW_IF,
                             syntax::OP_ARM_ARROW,
                             foreign
                         ),
                         format!(
-                            "choosing one branch from many uses `{}` with `->` arms (S24)",
-                            syntax::KW_SWITCH
+                            "choosing one branch from many uses `{}` with `{}` arms (D-IF1)",
+                            syntax::KW_IF,
+                            syntax::OP_ARM_ARROW
                         ),
                         format!(
-                            "replace `{}` with a condition and `{}`, like `x == 1 {} {{ ... }};`",
+                            "replace `{}` with a value or condition and `{}`, like `1 {} body`",
                             foreign,
                             syntax::OP_ARM_ARROW,
                             syntax::OP_ARM_ARROW

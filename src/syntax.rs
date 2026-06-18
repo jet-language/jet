@@ -175,11 +175,13 @@ pub const KW_RANGE_STEP: &str = "step";
 pub const KW_BREAK: &str = "break";
 pub const KW_CONTINUE: &str = "continue";
 
-/// S24 (ratified; keyword amended to `when` 2026-06-15, D-SG1): many-way
-/// choice with condition arms.
+/// S24 / D-IF1 (ratified 2026-06-18): `when` is retired — `if` is the one
+/// branching keyword (`if subject { arm -> body }`). `when` is recognized only
+/// for the E0984 teaching error pointing at `if`.
 pub const KW_SWITCH: &str = "when";
 
-/// S24 (ratified): arm arrow inside `when` (same spelling as return types).
+/// S24 / D-IF1 (ratified): arm arrow inside a multi-arm `if` (same spelling as
+/// return types).
 pub const OP_ARM_ARROW: &str = "->";
 
 /// S46 (ratified M8): lambda arrow — distinct from `->` return/arm arrow.

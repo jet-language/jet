@@ -2822,7 +2822,7 @@ impl<'a> Checker<'a> {
             if bindings.is_empty() {
                 self.require_bool(
                     &mut arm.cond,
-                    &format!("a `{}` arm's condition", syntax::KW_SWITCH),
+                    &format!("an `{}` arm's condition", syntax::KW_IF),
                 );
                 self.check_block(&mut arm.body, true);
             } else {
@@ -2858,8 +2858,8 @@ impl<'a> Checker<'a> {
                         let mut diag = Diagnostic::error(
                             "E0307",
                             format!(
-                                "`{}` doesn't cover every case — missing: {}",
-                                syntax::KW_SWITCH,
+                                "this `{}` doesn't cover every case — missing: {}",
+                                syntax::KW_IF,
                                 missing.join(", ")
                             ),
                             "every arm here is a pattern test, so each variant must appear once"
@@ -2882,10 +2882,10 @@ impl<'a> Checker<'a> {
         } else if else_body.is_none() {
             self.diags.push(Diagnostic::error(
                 "E0003",
-                format!("this `{}` needs an `else` branch", syntax::KW_SWITCH),
-                "mixed condition arms (or non-pattern arms) must always have a fallback (S24)"
+                format!("this `{}` needs an `{}` arm", syntax::KW_IF, syntax::KW_ELSE),
+                "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)"
                     .to_string(),
-                format!("add `{} {{ ... }};` after the last arm", syntax::KW_ELSE),
+                format!("add `{} {} {{ ... }}` after the last arm", syntax::KW_ELSE, syntax::OP_ARM_ARROW),
                 Some(span),
             ));
         }

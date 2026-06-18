@@ -1,0 +1,34 @@
+// if_universal — D-IF1. `if` is the one branching keyword. Beyond the familiar
+// two-arm form, `if subject { arm -> body }` is multi-arm dispatch:
+//   - a bare value arm compares against the subject (`subject == value`);
+//   - an arm with a comparison/logical operator is a full Bool condition;
+//   - an arm body is a braceless single statement OR a `{ … }` block;
+//   - `else -> …` is the catch-all.
+fn classify(code: Int) -> String {
+    // Bare-value arms (inferred `code == …`), a full-condition arm, braceless
+    // and block bodies, and an `else` catch-all — mixed freely.
+    if code {
+        200 -> return "ok"
+        404 -> {
+            note :: "not found"
+            return note
+        }
+        code >= 500 -> return "server error"
+        else -> return "other"
+    }
+}
+
+fn main() {
+    print(classify(200))
+    print(classify(404))
+    print(classify(503))
+    print(classify(301))
+
+    // The conventional two-arm `if` is unchanged.
+    n :: 7
+    if n > 5 {
+        print("big")
+    } else {
+        print("small")
+    }
+}
