@@ -1,5 +1,14 @@
-//! Golden tests for M14 showcase tools (jetgrep, jsonfmt, wordfreq).
+//! Golden tests for E2-M17 showcase programs.
 //! Fixed inputs and pinned outputs — permanent regression armor (I5).
+//!
+//! Showcases:
+//!   1. jetgrep    — CLI tool (M7 streaming I/O, regex, tests)
+//!   2. jsonfmt    — CLI tool (M9 data-format libs)
+//!   3. wordfreq   — CLI tool (M7 streaming I/O)
+//!   4. library    — library authoring (M6: traits, delegation, labels)
+//!   5. lowlevel   — expert low-level tier (M13: @unsafe, Ptr<T>)
+//!   6. freestanding — freestanding / cross-compile smoke (M15)
+//!   7. http_service — HTTP service with tasks + channels (M10)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,6 +50,7 @@ fn showcase_tools_golden() {
 
     let expected_dir = root.join("examples/showcase/expected");
     let cases = [
+        // Showcase 1 — CLI tool (jetgrep)
         ShowcaseCase {
             name: "jetgrep",
             tool: "examples/showcase/jetgrep.jet",
@@ -55,6 +65,7 @@ fn showcase_tools_golden() {
             exit_code: None,
             stderr_contains: None,
         },
+        // Showcase 1 continued — CLI tool (jsonfmt)
         ShowcaseCase {
             name: "jsonfmt",
             tool: "examples/showcase/jsonfmt.jet",
@@ -69,10 +80,43 @@ fn showcase_tools_golden() {
             exit_code: Some(1),
             stderr_contains: Some("line"),
         },
+        // Showcase 1 continued — CLI tool (wordfreq)
         ShowcaseCase {
             name: "wordfreq",
             tool: "examples/showcase/wordfreq.jet",
             args: &["examples/showcase/fixtures"],
+            exit_code: None,
+            stderr_contains: None,
+        },
+        // Showcase 2 — HTTP service (M10: tasks, channels, net, HTTP)
+        ShowcaseCase {
+            name: "http_service",
+            tool: "examples/showcase/http_service.jet",
+            args: &[],
+            exit_code: None,
+            stderr_contains: None,
+        },
+        // Showcase 3 — library authoring (M6: traits, delegation, labels)
+        ShowcaseCase {
+            name: "library",
+            tool: "examples/showcase/library.jet",
+            args: &[],
+            exit_code: None,
+            stderr_contains: None,
+        },
+        // Showcase 5 — expert low-level tier (M13: @unsafe, Ptr<T>, @audit)
+        ShowcaseCase {
+            name: "lowlevel",
+            tool: "examples/showcase/lowlevel.jet",
+            args: &[],
+            exit_code: None,
+            stderr_contains: None,
+        },
+        // Showcase 6 — freestanding / cross-compile smoke (M15)
+        ShowcaseCase {
+            name: "freestanding",
+            tool: "examples/showcase/freestanding.jet",
+            args: &[],
             exit_code: None,
             stderr_contains: None,
         },

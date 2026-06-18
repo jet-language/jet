@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅ M15 (partial) M16 (partial)
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M7 ✅ M8 ✅ M9 ✅ M10 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅ M15 (partial) M16 (partial) M17 (partial) M18 ✅
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -93,10 +93,34 @@ EXCEPT `s19-amend-loop-unification.md` (loop keyword unification — `while`/`fo
 must become teaching errors; `loop` with header disambiguation is the one form).
 That sidequest requires parser work + example rewrites + snapshot bless.
 
+E2-M17 (partial) DONE (2026-06-17). All 6 D-GA1=B showcases in `examples/showcase/`
+and front-end-clean; GA checklist + size budgets in `tests/ga.rs`; roadmap updated.
+Deferred: DAP step-through debugger (VS Code extension work, out of compiler scope).
+
 E2-M18 ✅ DONE (2026-06-17). `jet repl` interactive session implemented; all 16
 transcript tests green; full suite green.
 
-**Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
+**All E2 compiler work done.** Remaining gate: DAP debugger (VS Code extension).
+
+### E2-M17 completion record (partial)
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ All 6 D-GA1=B showcases in `examples/showcase/`: jetgrep, jsonfmt, wordfreq (showcase 1 CLI tools), http_service (showcase 2), library (showcase 3), lowlevel (showcase 5, expert @unsafe tier), freestanding (showcase 6, cross-compile smoke).
+- ✅ All showcases pass `jet::compile_with_path` (front-end-clean): `tests/ga.rs::ga_all_showcases_front_end_clean`.
+- ✅ Hard size budgets (D-GA2=B): `tests/ga.rs::ga_showcase_size_budgets` — 6 showcases each under 4 MiB `--small` ceiling.
+- ✅ Every E2 diagnostic has `jet explain` entry: `tests/ga.rs::ga_every_diagnostic_has_explain` (mirrors cli.rs gate).
+- ✅ Single-file `jet run file.jet` needs no manifest — unchanged, permanently tested in golden.rs.
+- ✅ `nix develop -c cargo test` fully green (all suites, 31 test binaries, 0 failures).
+- ✅ Roadmap updated: Epoch 2 milestones noted; M17 partial status recorded.
+
+**Not implemented (deferred):**
+- DAP step-through debugger (VS Code extension + DAP server): out of compiler scope; pre-cursor work (source-map markers, rich panics) is in M12. Explicit hard gate deferred.
+- Showcase 4 (`jet dev` demo): watch loop can't be golden-tested; `jet dev` is tested in `tests/dev.rs`.
+- Showcase 5 (C interop with actual C FFI `use c.<lib>`): tested in `tests/cffi.rs`; showcase uses `core.mem` @unsafe tier as the low-level smoke.
+- Full docs coverage (migration, compatibility, services, debugging): docs exist per-milestone; no separate adoption-story doc written.
+
+New files: `examples/showcase/http_service.jet`, `library.jet`, `lowlevel.jet`, `freestanding.jet`; `examples/showcase/expected/` outputs; `tests/ga.rs`.
 
 ### E2-M18 completion record
 

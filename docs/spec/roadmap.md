@@ -73,6 +73,23 @@ and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 
 ---
 
+**E2-M17 — Epoch 2 GA** partial 2026-06-17
+([`m17-epoch2-ga.md`](../plans/epoch-2/m17-epoch2-ga.md)). All 6 D-GA1=B
+showcases exist in `examples/showcase/` (jetgrep, jsonfmt, wordfreq, library,
+lowlevel, freestanding, http_service) and pass the front end. Hard size budgets
+(D-GA2=B) enforced in `tests/ga.rs`. Every E2 diagnostic has `jet explain`
+(enforced). Single-file `jet run` needs no manifest.
+
+Deferred from M17: DAP step-through debugger (VS Code extension work — out of
+compiler scope; `tests/observe.rs` has source-map markers and rich panics as
+the pre-cursor).
+
+**E2-M18 — REPL** verified 2026-06-17
+([`m18-repl.md`](../plans/epoch-2/m18-repl.md)). `jet repl` interactive
+session; 16 transcript tests green.
+
+---
+
 ## Active / not yet verified
 
 ### Epoch 2 — production platform
@@ -80,9 +97,9 @@ and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 Consolidated overview, dependency order, and ballot gates:
 [`docs/plans/epoch-2/README.md`](../plans/epoch-2/README.md).
 
-All **E2-M2…E2-M18** remain open except **E2-M1**. Work may land on feature
-branches before the roadmap marks a milestone verified — check git history and
-`cargo test` rather than this file alone.
+Most E2 milestones are done on `master` — check git history and
+`cargo test` rather than this file alone. The single remaining gate is
+DAP step-through debugging (deferred from E2-M17).
 
 ### Jetpack & jetos
 

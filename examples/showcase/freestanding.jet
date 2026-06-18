@@ -1,0 +1,18 @@
+// Showcase 6 — freestanding / cross-compile smoke.
+// Only core-level APIs — no OS I/O, no network, no threads.
+// Build with `jet build --freestanding` to enforce the boundary at sema level;
+// `jet run` compiles it normally for CI golden-testing — E2-M15.
+use core.math as math;
+
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if x < lo { return lo; }
+    if x > hi { return hi; }
+    return x;
+}
+
+fn main() {
+    val a = clamp(15, 0, 10);
+    val b = clamp(-3, 0, 10);
+    val root = math.sqrt(16.0);
+    print("freestanding: clamp(15,0,10)={a}, clamp(-3,0,10)={b}, sqrt(16)={root}");
+}

@@ -1,0 +1,73 @@
+// Showcase 3 — library authoring: traits, delegation, labels, field punning.
+// Demonstrates: S61 (arg labels/defaults), S62 (delegation), S77 (field puns),
+// D-LIB2 (default trait methods), D-LIB3 (Fallible ? conversion) — E2-M6.
+
+fn greet(name: String, loud: Bool = false) -> String {
+    if loud { return "HELLO {name}!"; }
+    return "hello {name}.";
+}
+
+trait Greetable {
+    fn greeting(self) -> String;
+    fn announce(self) -> String {
+        val g = self.greeting();
+        return "[ {g} ]";
+    }
+}
+
+struct Person {
+    name: String;
+}
+
+impl Person: Greetable {
+    fn greeting(self) -> String {
+        val n = self.name;
+        return "hi, I'm {n}";
+    }
+}
+
+struct Point {
+    x: Int;
+    y: Int;
+}
+
+fn make_point(x: Int, y: Int) -> Point {
+    return Point { x, y };
+}
+
+trait Logger {
+    fn log(self, msg: String);
+}
+
+struct ConsoleLogger {
+    prefix: String;
+}
+
+impl ConsoleLogger: Logger {
+    fn log(self, msg: String) {
+        val p = self.prefix;
+        print("{p}: {msg}");
+    }
+}
+
+struct App {
+    logger: ConsoleLogger;
+}
+
+impl App: Logger using logger;
+
+fn main() {
+    print(greet("world"));
+    print(greet("world", loud: true));
+
+    val p = Person { name: "Ada" };
+    print(p.greeting());
+    print(p.announce());
+
+    val pt = make_point(3, 4);
+    print(pt.x);
+    print(pt.y);
+
+    val app = App { logger: ConsoleLogger { prefix: "INFO" } };
+    app.log("delegation works");
+}
