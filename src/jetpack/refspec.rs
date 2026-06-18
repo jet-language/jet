@@ -140,6 +140,15 @@ impl SourceTable {
     pub fn declared_names(&self) -> Vec<String> {
         self.named.keys().cloned().collect()
     }
+
+    /// Merge `other` into this table, filling in names that are not already
+    /// declared here. `self` wins on conflict — inline declarations take
+    /// priority over `jetpack.toml` fallbacks.
+    pub fn merge_defaults(&mut self, other: SourceTable) {
+        for (name, entry) in other.named {
+            self.named.entry(name).or_insert(entry);
+        }
+    }
 }
 
 /// A classified ref. `package` is the part after the first `:` — an attr name

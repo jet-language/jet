@@ -8,12 +8,16 @@ Depends on M6 (multi-file), M7 (FFI deps in manifest), M10 (std imports).
 **Error codes:** E1201–E1213 (claimed in docs/spec/diagnostics.md), E1214–E1215
 (D-JPK-FILES, ratified 2026-06-18: `jetpack.toml` parse errors).
 
-> **Note (2026-06-18 — D-JPK-FILES):** The manifest filename has been renamed
-> `payload.jet` → `pkg.jet` (the `payload: { … }` block name is unchanged).
-> A new `jetpack.toml` monorepo manifest has been added at repo root.
-> The `jet.toml` references throughout this document describe the original M12
-> plan; U1/U10 superseded them with Jet-syntax `pkg.jet` (see
-> `docs/plans/jetpack-jetos/unified-ecosystem.md`).
+> **Note (2026-06-18 — D-JPK-FILES):** The package manifest filename is `pkg.jet`
+> (renamed from `payload.jet`; the `payload: { … }` block name is unchanged).
+> The monorepo manifest is `jetpack.toml` at repo root; it holds `[repo]`,
+> `[sources]`, and `[packages]` tables and is wired into the jetpack CLI
+> (`src/jetpack/cli.rs`). The `jet.toml` references below describe the original
+> M12 source-library plan; U1/U10 superseded them with Jet-syntax `pkg.jet`
+> (see `docs/plans/jetpack-jetos/unified-ecosystem.md`).
+> D-JPK-FILES Phase 2b is complete: `jetpack.toml` sources are merged into the
+> source table at CLI time; E1214/E1215 fire from real `jetpack build/enter`
+> usage when the file is malformed.
 
 ## Goal
 

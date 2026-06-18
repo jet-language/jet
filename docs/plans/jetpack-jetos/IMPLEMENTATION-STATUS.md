@@ -106,10 +106,15 @@ front-end `.jet` diagnostics; the faithful what/why/fix snapshot awaits CLI
 wiring). New constants in `src/syntax.rs` (I7). Example at
 `examples/jetpack/jetpack.toml`.
 
-**Phase 2b — CLI wiring + discovery** (pending): wire `manifest_toml::load`
-into `jetpack list/build/enter`; fold `[sources]` into the source table; `find .
--name pkg.jet` discovery; add ≥2 pkg.jet members to the example; `.gitignore`
-entries; integration test via real CLI path so E1214/E1215 fire from usage.
+**Phase 2b — CLI wiring + discovery** (commit `TBD`): `manifest_toml::load`
+wired into `load_project_plan` and `cwd_table` in `src/jetpack/cli.rs`; `[sources]`
+folded into the source table (additive — env.jet inline declarations win);
+`SourceTable::merge_defaults` added to `src/jetpack/refspec.rs`; malformed
+`jetpack.toml` exits 2 and prints E1214/E1215 from the real CLI path (tests
+`malformed_jetpack_toml_fires_e1214_from_cli`, `malformed_jetpack_toml_fires_e1215_from_cli`
+in `tests/jetpack.rs`); multi-package monorepo example at `examples/jetpack-mono/`
+with `jetpack.toml` + `packages/greeter/pkg.jet` + `packages/logger/pkg.jet`;
+`jet new` `.gitignore` now includes `.jet/lock` and `.jet/cache/`.
 
 ---
 

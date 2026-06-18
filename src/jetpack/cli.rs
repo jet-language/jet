@@ -3,9 +3,10 @@
 //! `jetpack run/build/list/clean/add/remove`. Independent from the `jet`
 //! binary (D-JPK1). All user-facing output flows through `output::Theme`.
 
+use super::manifest_toml;
 use super::output::{self, Theme};
 use super::provider::{self, ProviderError};
-use super::refspec::{self, RefSpec};
+use super::refspec::{self, ProviderKind, RefSpec};
 use super::shell::{self, Env, ShellKind};
 use super::store::{self, Roots};
 use super::{envfile, modeval, refspec::RefError};
@@ -104,12 +105,56 @@ fn fixtures_for(flags: &Flags) -> Option<PathBuf> {
     provider::fixtures_from_env(flags.fixtures.clone())
 }
 
+/// Load `[sources]` from `jetpack.toml` in `dir`, print any parse errors, and
+/// return the resulting `SourceTable`. Returns an empty table when the file is
+/// absent (not an error). Prints E1214/E1215 to stderr and returns `Err(2)` if
+/// the file exists but has errors; the non-error entries are still returned so
+/// the caller can decide whether to hard-exit or soft-degrade.
+fn load_toml_sources(dir: &Path) -> Result<refspec::SourceTable, (refspec::SourceTable, i32)> {
+    let Some((manifest, errors)) = manifest_toml::load(dir) else {
+        return Ok(refspec::SourceTable::empty());
+    };
+
+    // Convert `provider@target` entries in `[sources]` to SourceTable decls.
+    // We use `Infer` as the provider kind so U9 inference runs at realize time,
+    // matching the typed `module { … }` surface behaviour.
+    let decls = manifest.sources.into_iter().filter_map(|(name, raw_ref)| {
+        match refspec::classify_provider_ref(&raw_ref) {
+            Ok(pr) => {
+                let upstream = format!("{}:{}", pr.provider.label(), pr.target);
+                Some((name, upstream, ProviderKind::Infer))
+            }
+            Err(_) => None, // malformed ref: skip silently (E1214 covers the line)
+        }
+    });
+    let table = refspec::SourceTable::from_decls(decls);
+
+    if errors.is_empty() {
+        Ok(table)
+    } else {
+        let rendered = manifest_toml::render_errors(syntax::JETPACK_TOML, &errors);
+        eprint!("{}", rendered);
+        Err((table, 2))
+    }
+}
+
 /// The named-source table declared by the current project's env file (empty
 /// when there is none). Used so explicit CLI refs are project-aware.
+/// Also merges any `[sources]` declared in `jetpack.toml` (additive — env.jet
+/// inline declarations win on conflict).
 fn cwd_table() -> refspec::SourceTable {
-    envfile::load(&std::env::current_dir().unwrap_or_default())
+    let dir = std::env::current_dir().unwrap_or_default();
+    let mut table = envfile::load(&dir)
         .map(|ef| ef.source_table())
-        .unwrap_or_else(refspec::SourceTable::empty)
+        .unwrap_or_else(refspec::SourceTable::empty);
+    // Merge jetpack.toml [sources] as defaults (non-overriding).
+    // Ignore parse errors here — cwd_table is used for explicit CLI refs;
+    // load_project_plan handles the hard-exit case for project-scoped commands.
+    let toml_table = match load_toml_sources(&dir) {
+        Ok(t) | Err((t, _)) => t,
+    };
+    table.merge_defaults(toml_table);
+    table
 }
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
@@ -234,6 +279,14 @@ struct RunPlan {
 /// carries the exit code to return.
 fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     let dir = std::env::current_dir().unwrap_or_default();
+
+    // Load jetpack.toml [sources] first so they are available as defaults.
+    // If the file exists but is malformed, surface the diagnostics and bail out.
+    let toml_table = match load_toml_sources(&dir) {
+        Ok(t) => t,
+        Err((_, code)) => return Err(code),
+    };
+
     let Ok(src) = std::fs::read_to_string(envfile::path_in(&dir)) else {
         theme.error(
             "nothing to do",
@@ -250,11 +303,13 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     // (U3/U6/U8) is evaluated through `modeval`; the Phase-1 `pkg.*` directive
     // surface stays the fallback until the typed example fully replaces it.
     if modeval::is_module_surface(&src) {
-        return typed_plan(theme, &src, &dir);
+        return typed_plan_with_defaults(theme, &src, &dir, toml_table);
     }
 
     let ef = envfile::parse(&src);
-    let table = ef.source_table();
+    let mut table = ef.source_table();
+    // Fold jetpack.toml sources as defaults (env.jet inline declarations win).
+    table.merge_defaults(toml_table);
     let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         refs,
@@ -263,10 +318,16 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     })
 }
 
-/// Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan. Source
-/// refs merge across modules and `Pkg` sugar resolves to `<source>:<package>`
-/// refs; the merged `prompt` becomes the shell label.
-fn typed_plan(theme: &Theme, src: &str, dir: &Path) -> Result<RunPlan, i32> {
+/// Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan,
+/// optionally seeding `jetpack.toml` [sources] as defaults. Source refs merge
+/// across modules and `Pkg` sugar resolves to `<source>:<package>` refs; the
+/// merged `prompt` becomes the shell label.
+fn typed_plan_with_defaults(
+    theme: &Theme,
+    src: &str,
+    dir: &Path,
+    toml_defaults: refspec::SourceTable,
+) -> Result<RunPlan, i32> {
     let plan = modeval::evaluate_env(src, dir).map_err(|d| {
         eprint!(
             "{}",
@@ -274,10 +335,12 @@ fn typed_plan(theme: &Theme, src: &str, dir: &Path) -> Result<RunPlan, i32> {
         );
         2
     })?;
-    let refs = classify_all(theme, plan.package_refs.iter().map(String::as_str), &plan.table)?;
+    let mut table = plan.table;
+    table.merge_defaults(toml_defaults);
+    let refs = classify_all(theme, plan.package_refs.iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         refs,
-        table: plan.table,
+        table,
         label: plan
             .prompt
             .unwrap_or_else(|| syntax::JETPACK_PROMPT_LABEL.to_string()),

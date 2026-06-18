@@ -1019,7 +1019,7 @@ fn run_new(name: &str, annotated: bool) {
         eprintln!("error: couldn't write .jet/main.jet: {}", e);
         exit(exit_codes::USER_ERROR);
     });
-    fs::write(dir.join(".gitignore"), "build/\n.jet-build/\n").unwrap_or_else(|e| {
+    fs::write(dir.join(".gitignore"), "build/\n.jet-build/\n.jet/lock\n.jet/cache/\n").unwrap_or_else(|e| {
         eprintln!("error: couldn't write .gitignore: {}", e);
         exit(exit_codes::USER_ERROR);
     });
