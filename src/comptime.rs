@@ -30,6 +30,13 @@ const FUEL_BUDGET: u64 = 10_000_000;
 /// the watch loop. Compiler-internal, not a user knob.
 const DEV_FUEL_BUDGET: u64 = 1_000_000_000;
 
+/// Step budget for a single `jet repl` input (D-REPL-FUEL=A). Tighter than
+/// `jet dev` because REPL snippets should be short demos; a runaway loop
+/// surfaces as E1801 instead of hanging the session. The user can bypass
+/// with `:run` (unbounded but still finite — this constant then applies to
+/// the `:run`-spawned one-shot compile path, not the interpreter).
+pub const REPL_FUEL_BUDGET: u64 = 10_000_000;
+
 /// A fully-evaluated compile-time value. Self-describing: the Jet type is
 /// recovered by [`CtValue::jet_type`] and the Rust literal by
 /// [`CtValue::serialize`].
@@ -1642,6 +1649,93 @@ pub fn run_main(
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
     Ok(())
+}
+
+/// REPL variant of `run_main`: uses a caller-supplied fuel cap so the REPL
+/// can enforce D-REPL-FUEL without patching DEV_FUEL_BUDGET. Returns the
+/// same E2202 (dev fuel stop) or E0956 (unsupported) errors; the REPL
+/// intercepts E2202 and upgrades it to E1801 with REPL-specific wording.
+pub fn run_main_with_fuel(
+    main: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    fuel: u64,
+) -> Result<(), Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel,
+        sink: Some(sink),
+    };
+    let mut scope = HashMap::new();
+    interp.exec_block(&main.body, &mut scope)?;
+    Ok(())
+}
+
+/// REPL per-input step (E2-M18). Executes `stmts` inside a running REPL
+/// session. Differs from `run_main_with_fuel` in two ways:
+///
+/// 1. The scope is passed in *and mutated* — accumulated bindings survive
+///    across inputs (D-REPL7: one accumulating module).
+/// 2. If the last statement is a bare `Stmt::Expr` (not `Stmt::Val`), the
+///    evaluated value is returned so the caller can display
+///    `x: T = v` (D-REPL16=B).
+///
+/// The `suppress` flag implements `;` at end of input — the caller strips the
+/// trailing `;` to detect a bare expression and passes `suppress = false`; a
+/// statement ending in `;` passes `suppress = true`.
+pub fn run_repl_step(
+    stmts: &[crate::ast::Stmt],
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    scope: &mut HashMap<String, CtValue>,
+    fuel: u64,
+    suppress: bool,
+) -> Result<Option<CtValue>, Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel,
+        sink: Some(sink),
+    };
+    // Split: run all statements except the last; then handle the last specially
+    // if it is a bare expression (for display) and not suppressed.
+    let (last, head) = match stmts.split_last() {
+        Some(pair) => pair,
+        None => return Ok(None),
+    };
+    interp.exec_block(head, scope)?;
+    // Determine if the last statement should produce an echo value.
+    // Case 1: `Stmt::Val` named `__repl_echo__` — the sentinel that `classify`
+    //   injects for bare-expression inputs (e.g. `1 + 2` → `val __repl_echo__ = 1 + 2`).
+    //   Evaluate but don't add to the persistent scope.
+    // Case 2: bare `Stmt::Expr` — retained for forward-compat.
+    let echo_bare = !suppress && matches!(last, crate::ast::Stmt::Expr(_));
+    match last {
+        crate::ast::Stmt::Val(b) if !suppress && b.name == "__repl_echo__" => {
+            let v = interp.eval(&b.init, scope)?;
+            Ok(Some(v))
+        }
+        crate::ast::Stmt::Val(b) => {
+            let v = interp.eval(&b.init, scope)?;
+            if let Some(pat) = &b.pattern {
+                interp.bind_pattern(pat, v, scope)?;
+            } else {
+                scope.insert(b.name.clone(), v);
+            }
+            Ok(None)
+        }
+        crate::ast::Stmt::Expr(e) if echo_bare => {
+            let v = interp.eval(e, scope)?;
+            Ok(Some(v))
+        }
+        other => {
+            interp.exec_stmt(other, scope)?;
+            Ok(None)
+        }
+    }
 }
 
 /// Owned-function variant used while sema is mutating function bodies for

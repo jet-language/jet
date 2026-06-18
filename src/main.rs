@@ -81,6 +81,8 @@ usage:
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
+  {bin} repl                         start an interactive session (E2-M18)
+  {bin} repl  --project <dir>        same, with access to a project's imports
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
@@ -297,7 +299,7 @@ fn main() {
             cmd,
             "lsp" | "install" | "doctor" | "completions" | "man" | "dev"
                 | "publish" | "vendor" | "audit" | "sbom"
-                | "emit" | "bench"
+                | "emit" | "bench" | "repl"
         );
     if !known {
         if let Some(bin) = find_external(cmd) {
@@ -325,7 +327,7 @@ fn main() {
     let owns_flags = matches!(
         cmd,
         "env" | "dev" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
-            | "publish" | "vendor" | "audit" | "sbom"
+            | "publish" | "vendor" | "audit" | "sbom" | "repl"
     );
     if !owns_flags {
         check_flags(&raw);
@@ -417,6 +419,15 @@ fn main() {
             }
             fwd.insert(0, "enter".to_string());
             exit(jet::jetpack::run(fwd));
+        }
+        "repl" => {
+            // E2-M18: interactive REPL (D-REPL1=A, D-REPL3=A).
+            let project = raw
+                .iter()
+                .find_map(|a| a.strip_prefix("--project=").map(str::to_string))
+                .or_else(|| flag_value(&raw, "--project").map(str::to_string));
+            run_repl(project.as_deref());
+            return;
         }
         "dev" => {
             // E2-M4 (D-DEV4): the watch/interpret loop. Re-check and re-run the
@@ -764,6 +775,14 @@ fn run_dev(file: &str, try_anyway: bool, mode: OutputMode) {
             render_dev_iteration(file, try_anyway, mode);
         }
     }
+}
+
+/// `jet repl` — interactive REPL session (E2-M18, D-REPL3=A).
+/// `project_dir` sets the base for `:load` paths and (eventually) import
+/// context (D-REPL10=A sandbox; `--project <dir>` enables project mode).
+fn run_repl(project_dir: Option<&str>) {
+    let code = jet::repl::run(project_dir);
+    exit(code);
 }
 
 /// Last-modified time of a path, or `None` if it can't be read (treated as a

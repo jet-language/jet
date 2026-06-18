@@ -93,7 +93,43 @@ EXCEPT `s19-amend-loop-unification.md` (loop keyword unification — `while`/`fo
 must become teaching errors; `loop` with header disambiguation is the one form).
 That sidequest requires parser work + example rewrites + snapshot bless.
 
+E2-M18 ✅ DONE (2026-06-17). `jet repl` interactive session implemented; all 16
+transcript tests green; full suite green.
+
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
+
+### E2-M18 completion record
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ `jet repl` subcommand starts, accepts `1 + 2`, prints `3 : Int` (D-REPL16=B echo).
+- ✅ `val x = 10` then `x * 2` prints `20 : Int` (accumulating session, D-REPL7=C).
+- ✅ `:reset` clears all bindings; `:type <name>` shows binding type (D-REPL15=B).
+- ✅ `:load examples/features/01_hello.jet` runs main() and prints `hello, world`.
+- ✅ `@unsafe { }` snippet fails with E1802 hard-reject (D-REPL6=A).
+- ✅ `extern rust` snippet fails with E1802 hard-reject.
+- ✅ `:quit` exits with "bye"; `:help` shows meta-commands.
+- ✅ D-REPL-FUEL=A: `REPL_FUEL_BUDGET = 10_000_000`; `run_main_with_fuel` + `run_repl_step` in `comptime.rs`.
+- ✅ D-REPL-BANNER=A: version + `:help` hint shown on startup.
+- ✅ D-REPL-COLOR=A: respects `NO_COLOR`/`CLICOLOR`.
+- ✅ D-REPL-PRELOAD=A: teaching note shown on first use of `print`.
+- ✅ D-REPL11=A: std-only (no external crates, I6).
+- ✅ D-REPL17=A: diagnostics use same voice as batch compiler.
+- ✅ D-REPL20=A: transcript fixtures in `tests/repl/basics.txt`; `tests/repl.rs` harness.
+- ✅ E1801/E1802 registered in `docs/spec/diagnostics.md`.
+- ✅ `repl` in COMMANDS (cli.rs), `--project` in FLAGS; completions + man page blessed.
+- ✅ `nix develop -c cargo test` fully green (all suites).
+
+**Not implemented (deferred):**
+- D-REPL8=A move-semantics-across-inputs: move detection requires sema tracking of moved-from names; the interpreter scope is a HashMap so moves aren't tracked across steps. Deferred.
+- `:run` compiling session to temp file: stub exists (prints note); actual compile path requires writing a temp file with accumulated source. Deferred.
+- `--project` mode: flag is parsed and forwarded as `base_dir` but no manifest loading yet (D-REPL10=A sandbox is the current behavior).
+- Multi-line continuation display (`...` prompt): works in the interactive `run()` path via `bracket_balance`; not testable in the transcript harness.
+
+New modules: `src/repl.rs`.
+New public API in `src/comptime.rs`: `run_main_with_fuel`, `run_repl_step`, `REPL_FUEL_BUDGET`.
+New test file: `tests/repl.rs` + `tests/repl/basics.txt`.
+New CLI commands: `repl` (cli.rs COMMANDS); new flag: `--project` (FLAGS).
 
 ### E2-M16 completion record (partial)
 

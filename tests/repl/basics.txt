@@ -1,0 +1,64 @@
+# E2-M18 REPL transcript fixture — basics
+# Format: `> input` lines are user inputs; other lines are expected output.
+# Lines beginning with `#` are comments.
+# Each `> input` is run through run_transcript; output is compared line by line.
+
+# --- arithmetic expression (D-REPL16=B echo) ---
+> 1 + 2
+3 : Int
+
+# --- val binding (no echo for declaration) ---
+> val x = 10
+# no output expected
+
+# --- expression using binding ---
+> x * 2
+20 : Int
+
+# --- :type meta-command ---
+> :type x
+x : Int
+
+# --- print (std.io preload, D-REPL-PRELOAD=A) ---
+> print("hello, world")
+hello, world
+
+# --- string expression ---
+> "abc"
+"abc" : String
+
+# --- bool expression ---
+> 2 > 1
+true : Bool
+
+# --- suppress with semicolon: val declaration suppresses echo (D-REPL16=B) ---
+> val _ignored = 42;
+# no output expected (val declarations don't echo)
+
+# --- :reset clears bindings ---
+> :reset
+session reset
+
+# --- after reset, x is gone ---
+> :type x
+note: `x` isn't defined in this session
+
+# --- function declaration ---
+> fn double(n: Int) -> Int { return n * 2; }
+ok
+
+# --- call declared function ---
+> double(5)
+10 : Int
+
+# --- hard-reject: @unsafe ---
+> @unsafe { }
+error [E1802]: the REPL interpreter can't run `@unsafe`
+
+# --- :help shows meta-commands ---
+> :help
+REPL meta-commands
+
+# --- :quit exits ---
+> :quit
+bye

@@ -38,6 +38,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "test", summary: "compile and run top-level test blocks", headline: true },
     CommandSpec { name: "build", summary: "compile to a native binary in ./build/", headline: false },
     CommandSpec { name: "dev", summary: "watch a file and re-run it on every save", headline: false },
+    CommandSpec { name: "repl", summary: "interactive REPL — try Jet expressions without a file", headline: false },
     CommandSpec { name: "new", summary: "create a new project folder", headline: false },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", headline: false },
     CommandSpec { name: "fix", summary: "apply all auto-fixable diagnostics in place", headline: false },
@@ -86,6 +87,8 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
+    // E2-M18 REPL flags.
+    FlagSpec { long: "--project", help: "with repl: load pack.jet from this directory for import context (D-REPL10)" },
     // E2-M16 flags.
     FlagSpec { long: "--pure", help: "with eval: require the program to be pure (S60 / D-PURE2)" },
     FlagSpec { long: "--freestanding", help: "with build/run: no OS; rejects std-only APIs (E2-M15)" },

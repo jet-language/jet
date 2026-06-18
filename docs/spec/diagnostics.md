@@ -207,6 +207,8 @@ before continuing.
 | E3401 | sema  | impure call inside a `pure fn` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
+| E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
+| E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `@unsafe`, OS-level APIs) |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -529,6 +531,17 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3401 | `{pure_fn}` calls the impure function `{call}`. | A `pure fn` may only call other `pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). | Mark `{call}` as `pure fn`, or remove the call from `{pure_fn}`. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
 | E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `pure`. |
+
+## REPL diagnostics (E2-M18 `jet repl`)
+
+These are produced by `jet repl` — the interactive REPL session. They follow
+the same what/why/fix voice as all other diagnostics (D-REPL17=A), with the
+REPL step number in place of a file span (`<repl:N>`).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
+| E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `@unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 
