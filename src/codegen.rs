@@ -477,9 +477,12 @@ struct Cx {
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `user_` prefix in Rust (the trait impl owns the name).
     trait_methods: HashSet<(String, String)>,
+    /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
+    /// jet_panic_rich can include the function name in the panic report.
+    current_fn: std::cell::RefCell<String>,
 }
 
-const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
+const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_panic_rich, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
 
 fn is_json_type_name(name: &str) -> bool {
     name == syntax::TYPE_JSON || name == "Json"
@@ -720,6 +723,10 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
         "// If rustc rejects this file, that is a bug in {} (invariant I2).\n",
         syntax::BINARY_NAME
     ));
+    // E2-M12 D-OBS1: source-map marker lets tooling resolve generated Rust back to
+    // the originating Jet file. Panic reports carry Jet file+line directly via
+    // jet_panic/jet_panic_rich, so runtime error messages already show Jet terms.
+    out.push_str(&format!("// jet:source-map source={}\n", file));
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
     out.push('\n');
@@ -1057,6 +1064,7 @@ fn build_cx_items(
         unqualified_inline: HashMap::new(),
         unqualified_file: HashMap::new(),
         trait_methods: HashSet::new(),
+        current_fn: std::cell::RefCell::new(String::new()),
     };
 
     for item in items {
@@ -1909,6 +1917,8 @@ fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     // body may use gated ops directly (callers are gated to an `@unsafe` block
     // in sema, E3103). Codegen stays dumb.
     let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
+    // E2-M12 D-OBS1: track the current function name for rich panic reports.
+    *cx.current_fn.borrow_mut() = f.name.clone();
     out.push_str(&format!(
         "{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&f.name),
@@ -2579,14 +2589,72 @@ fn emit_or_fallback_rhs(cx: &Cx, fallback: &OrFallback, env: &HashMap<String, Sl
     }
 }
 
+/// E2-M12 D-OBS1: return the (source_line_text, line_number, col_1based) for a byte offset.
+fn src_line_at(src: &str, offset: usize) -> (&str, u32, u32) {
+    let (line, col) = span_line_col(src, offset);
+    let line_start = src[..offset].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let line_end = src[offset..].find('\n').map(|p| offset + p).unwrap_or(src.len());
+    (&src[line_start..line_end], line as u32, col as u32)
+}
+
+/// E2-M12 D-OBS2: build a Rust expression that evaluates to a comma-separated
+/// "name = value" string for all safe (Copy scalar: Int/Float/Bool) locals.
+/// Non-scalar locals are excluded because they might be moved before the panic
+/// site, which would cause a compile error in the generated Rust.
+/// In release builds the caller passes "" directly; this expression is only
+/// used inside `if cfg!(debug_assertions) { … }` blocks.
+fn safe_locals_expr(env: &HashMap<String, Slot>) -> String {
+    let mut parts: Vec<(String, String)> = env
+        .iter()
+        .filter_map(|(name, slot)| {
+            let safe = slot.jet_ty.as_ref().map_or(false, |t| {
+                matches!(t, Type::Int | Type::Float | Type::Bool)
+            });
+            if !safe {
+                return None;
+            }
+            let value_expr = if slot.deref {
+                format!("(*{}).jet_show()", slot.rust_name)
+            } else {
+                format!("({}).jet_show()", slot.rust_name)
+            };
+            Some((name.clone(), value_expr))
+        })
+        .collect();
+    // Stable sort so output is deterministic.
+    parts.sort_by(|a, b| a.0.cmp(&b.0));
+    if parts.is_empty() {
+        return "String::new()".to_string();
+    }
+    let fmt_str = parts
+        .iter()
+        .map(|(n, _)| format!("{} = {{}}", n))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let args = parts
+        .iter()
+        .map(|(_, e)| e.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("format!(\"{}\", {})", fmt_str, args)
+}
+
 fn emit_panic_stop(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -> String {
     let msg = emit_panic_message(cx, &call.args[0].expr, env);
-    let (line, _) = span_line_col(&cx.src, call.name_span.start);
+    let (src_line, line, col) = src_line_at(&cx.src, call.name_span.start);
+    let caret_len = (call.name_span.end - call.name_span.start) as u32;
+    let fn_name = cx.current_fn.borrow().clone();
+    let locals_expr = safe_locals_expr(env);
     format!(
-        "{{ jet_panic({}, {}, &{}); }}",
-        escape_rust_str(&cx.file),
-        line,
-        msg
+        "{{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+        file = escape_rust_str(&cx.file),
+        line = line,
+        fn_name_esc = escape_rust_str(&fn_name),
+        src_line_esc = escape_rust_str(src_line.trim_end()),
+        col = col,
+        caret = caret_len,
+        msg = msg,
+        locals = locals_expr,
     )
 }
 
@@ -2612,17 +2680,22 @@ fn emit_require(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>) -
         };
         return format!("{{ if !({}) {{ return Err({}); }} }}", cond, msg_expr);
     }
-    let (line, _) = span_line_col(&cx.src, call.name_span.start);
+    let (src_line, line, col) = src_line_at(&cx.src, call.name_span.start);
+    let caret_len = (call.name_span.end - call.name_span.start) as u32;
+    let fn_name = cx.current_fn.borrow().clone();
+    let locals_expr = safe_locals_expr(env);
+    let msg_used = if call.args.len() == 2 { msg } else { "\"condition failed\".to_string()".to_string() };
     format!(
-        "{{ if !({}) {{ jet_panic({}, {}, &{}); }} }}",
-        cond,
-        escape_rust_str(&cx.file),
-        line,
-        if call.args.len() == 2 {
-            msg
-        } else {
-            "\"condition failed\".to_string()".to_string()
-        }
+        "{{ if !({cond}) {{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        cond = cond,
+        file = escape_rust_str(&cx.file),
+        line = line,
+        fn_name_esc = escape_rust_str(&fn_name),
+        src_line_esc = escape_rust_str(src_line.trim_end()),
+        col = col,
+        caret = caret_len,
+        msg = msg_used,
+        locals = locals_expr,
     )
 }
 
@@ -2635,13 +2708,21 @@ fn emit_require_eq(cx: &Cx, call: &crate::ast::Call, env: &HashMap<String, Slot>
             left, right
         );
     }
-    let (line, _) = span_line_col(&cx.src, call.name_span.start);
+    let (src_line, line, col) = src_line_at(&cx.src, call.name_span.start);
+    let caret_len = (call.name_span.end - call.name_span.start) as u32;
+    let fn_name = cx.current_fn.borrow().clone();
+    let locals_expr = safe_locals_expr(env);
     format!(
-        "{{ if !({left} == {right}) {{ jet_panic({}, {}, &format!(\"left: {{}}, right: {{}}\", ({left}).jet_show(), ({right}).jet_show())); }} }}",
-        escape_rust_str(&cx.file),
-        line,
+        "{{ let _jet_left = ({left}); let _jet_right = ({right}); if !(_jet_left == _jet_right) {{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
         left = left,
         right = right,
+        file = escape_rust_str(&cx.file),
+        line = line,
+        fn_name_esc = escape_rust_str(&fn_name),
+        src_line_esc = escape_rust_str(src_line.trim_end()),
+        col = col,
+        caret = caret_len,
+        locals = locals_expr,
     )
 }
 
@@ -4093,6 +4174,8 @@ fn emit_std_call(
         ("jet.log", "error") => format!("{}(&({}))", helper("jet_ring_log_error"), arg(0)),
         ("jet.log", "debug") => format!("{}(&({}))", helper("jet_ring_log_debug"), arg(0)),
         ("jet.log", "set_level") => format!("{}(&({}))", helper("jet_ring_log_set_level"), arg(0)),
+        // E2-M12 D-OBS3: trace context for structured log records.
+        ("jet.log", "set_trace_id") => format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0)),
         ("jet.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
         ("jet.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
         ("jet.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
@@ -4644,6 +4727,8 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         syntax::BINARY_NAME,
         syntax::FILE_EXT
     ));
+    // E2-M12 D-OBS1: source-map marker for tooling and debuggers.
+    out.push_str(&format!("// jet:source-map source={}\n", entry.display));
     out.push_str("#![allow(warnings)]\n\n");
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));

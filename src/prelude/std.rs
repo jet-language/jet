@@ -69,7 +69,7 @@ mod jet_std {
             match self.handle.take().unwrap().join() {
                 Ok(v) => v,
                 Err(_) => {
-                    eprintln!("The program stopped: a task panicked");
+                    eprintln!("panic: a task panicked");
                     std::process::exit(70);
                 }
             }
@@ -732,9 +732,14 @@ fn jet_ring_yaml_render(data: &std::collections::BTreeMap<String, String>) -> St
 }
 
 // ── jet.log ───────────────────────────────────────────────────────────────────
+// E2-M12 D-OBS3: structured JSON logs (OTel-aligned field names).
+// Each log record is a JSON object on stderr:
+//   {"level":"info","body":"...","ts":<unix-ms>}
+// When a trace_id is set (log.set_trace_id), it appears as "trace_id":"...".
 // Log level: 0=debug, 1=info, 2=warn, 3=error. Default is info (1).
 thread_local! {
     static JET_LOG_LEVEL: std::cell::Cell<u8> = std::cell::Cell::new(1);
+    static JET_LOG_TRACE_ID: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
 }
 
 fn jet_ring_log_set_level(level: &String) {
@@ -744,24 +749,67 @@ fn jet_ring_log_set_level(level: &String) {
     JET_LOG_LEVEL.with(|l| l.set(n));
 }
 
+fn jet_ring_log_set_trace_id(id: &String) {
+    JET_LOG_TRACE_ID.with(|t| *t.borrow_mut() = id.clone());
+}
+
+fn jet_log_json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"'  => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c    => out.push(c),
+        }
+    }
+    out
+}
+
+fn jet_log_emit(level: &str, msg: &str) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let trace = JET_LOG_TRACE_ID.with(|t| t.borrow().clone());
+    if trace.is_empty() {
+        eprintln!(
+            "{{\"level\":\"{}\",\"body\":\"{}\",\"ts\":{}}}",
+            level,
+            jet_log_json_escape(msg),
+            ts,
+        );
+    } else {
+        eprintln!(
+            "{{\"level\":\"{}\",\"body\":\"{}\",\"trace_id\":\"{}\",\"ts\":{}}}",
+            level,
+            jet_log_json_escape(msg),
+            jet_log_json_escape(&trace),
+            ts,
+        );
+    }
+}
+
 fn jet_ring_log_debug(msg: &String) {
     if JET_LOG_LEVEL.with(|l| l.get()) <= 0 {
-        eprintln!("[DEBUG] {}", msg);
+        jet_log_emit("debug", msg);
     }
 }
 fn jet_ring_log_info(msg: &String) {
     if JET_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        eprintln!("[INFO] {}", msg);
+        jet_log_emit("info", msg);
     }
 }
 fn jet_ring_log_warn(msg: &String) {
     if JET_LOG_LEVEL.with(|l| l.get()) <= 2 {
-        eprintln!("[WARN] {}", msg);
+        jet_log_emit("warn", msg);
     }
 }
 fn jet_ring_log_error(msg: &String) {
     if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
-        eprintln!("[ERROR] {}", msg);
+        jet_log_emit("error", msg);
     }
 }
 

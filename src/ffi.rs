@@ -298,7 +298,7 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>) -> String 
 
 fn emit_wrapper_lib(entries: &[ExternEntry]) -> String {
     let mut out = String::from(
-        "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"The program stopped: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
+        "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
     );
     let mut names: HashSet<String> = HashSet::new();
     for e in entries {

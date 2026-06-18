@@ -9902,9 +9902,11 @@ fn std_fixed_sig(
             vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
             Some(Type::String),
         )),
-        // jet.log: structured logging to stderr.
+        // jet.log: structured JSON logging to stderr (E2-M12, D-OBS3).
         ("jet.log", "info" | "warn" | "error" | "debug") => Some((vec![(read, string)], None)),
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
+        // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
+        ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
         // jet.json: first-party JSON with coercion surfacing (D-JSON1).
         // Reuses core.json types; decode_verbose returns a plain map with coercions field.
         ("jet.json", "parse") => Some((
@@ -10024,7 +10026,7 @@ fn std_module_items(module: &str) -> Vec<String> {
         "jet.csv" => &["parse", "render"],
         "jet.toml" => &["parse", "render"],
         "jet.yaml" => &["parse", "render"],
-        "jet.log" => &["info", "warn", "error", "debug", "set_level"],
+        "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id"],
         "jet.json" => &["parse", "render", "render_pretty"],
         "jet.time" => &["now", "format"],
         "jet.crypto" => &["sha256", "sha256_bytes"],

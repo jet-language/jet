@@ -187,6 +187,8 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
+| E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `@unsafe` block (S58) |
 | E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
 | E3103 | sema  | `@unsafe fn` called without an enclosing `@unsafe` block (S58) |
@@ -468,6 +470,18 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | E2901 | Doctest output mismatch. Expected: `{expected}` Got: `{actual}` | The example in the doc comment claims a different result from what the code produces. Docs cannot lie (D-TEST4/I5 generalized to user code). | Run `jet test --update-snapshots` to update the golden output, or fix the code to match the claimed output. |
 | E2902 | `todo` at `{file}:{line}` — expected `{type}` | A `todo` typed hole was reached at runtime. The hole compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `todo` with a real implementation. |
 | L2901 | This `test` block has no assertions. | A test with no `require`, `require_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
+
+## Debugging and observability diagnostics (E2-M12, D-OBS1–3)
+
+Runtime panic reports and structured log shape. E30xx is the M12 block.
+E3001/E3002 are **runtime** reports, not compile-time diagnostics — the
+span is embedded in the message (Jet file + line + function name).
+`jet explain E3001` explains the report format and D-OBS2 safe-locals policy.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. | The program hit a `panic`, `require`, or `require_eq` call that failed, or a bounds/key check triggered at runtime. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; the source line and locals show what values were in play. |
+| E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 
 ## Low-level tier diagnostics (E2-M13, S58)
 

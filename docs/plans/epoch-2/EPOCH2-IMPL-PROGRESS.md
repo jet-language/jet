@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M13 ✅ M14 ✅
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -96,6 +96,28 @@ That sidequest requires parser work + example rewrites + snapshot bless.
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
 
 After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+
+### E2-M12 completion record (partial)
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ Source map marker (`// jet:source-map source={file}`) emitted in every generated Rust file via both `emit` and `emit_bundle` code paths. Tooling can resolve Rust spans back to the originating Jet file.
+- ✅ E3001: `jet_panic_rich` in `src/prelude/core.rs` — rich panic reports with Jet file, line, function name, source-line context box (caret highlights the `require`/`panic` call), and safe local variable values (Int/Float/Bool only) in debug builds (D-OBS1/D-OBS2). Codegen updated to use `jet_panic_rich` for `panic`/`require`/`require_eq` builtins; index/map bounds-check panics use the simpler `jet_panic`.
+- ✅ D-OBS2 safe-locals policy enforced structurally: `safe_locals_expr` only emits Copy scalars (Int/Float/Bool); String/List/Map/Ptr locals are never shown, preventing both moved-from panics and secret value leaks.
+- ✅ D-OBS3 structured JSON logs: `jet.log` now emits one JSON object per record (`{"level":"...","body":"...","ts":...}`); `trace_id` field added when `log.set_trace_id` called. `jet_log_emit` / `jet_log_json_escape` helpers in `src/prelude/std.rs`.
+- ✅ `log.set_trace_id(id: String)` API added to `jet.log` (sema + codegen + std.rs).
+- ✅ E3001/E3002 registered in `docs/spec/diagnostics.md`.
+- ✅ `examples/features/59_debug.jet` — demonstrates rich panic with Jet line, context box, and dev-mode locals; golden-pinned with `.err.out`.
+- ✅ `tests/observe.rs` — 8 tests covering JSON log fields/levels/trace_id/escaping, rich panic format, safe-locals policy, source-map marker.
+- ✅ `tests/observe/structured_log.txt` — JSON format documentation/reference.
+- ✅ `nix develop -c cargo test` fully green (all suites).
+
+**Not implemented (deferred):**
+- E3002 error-return traces for `?` propagation: registered but codegen not emitting trace entries. Requires wrapping the `?` result with file/line info at each propagation site. Non-trivial; deferred to a follow-up slot.
+- Full DAP step-through debugging (breakpoints, watch values in VS Code/Cursor): deferred to E2-M17 per D-OBS1 ratification split.
+- GDB/LLDB integration test resolving panics to Jet source lines: requires running a debugger in CI; deferred.
+
+Panic format changed: `"The program stopped:"` → `"panic:"` (all 3 golden `.err.out` files updated: 14_panic, 18_list_bounds, 19_map_key). FFI wrapper panic and task-join panic also updated.
 
 ### E2-M11 completion record (partial)
 

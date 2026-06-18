@@ -18,8 +18,37 @@ impl<T: JetShow> JetShow for Option<T> {
     }
 }
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
-    eprintln!("The program stopped: {}", msg);
+    eprintln!("panic: {}", msg);
     eprintln!("  --> {}:{}", file, line);
+    std::process::exit(70);
+}
+/// E3001 (E2-M12, D-OBS1/D-OBS2): rich panic report — includes the function name,
+/// a source-line context box, and (in debug builds only) safe local variable values.
+/// `col` is 1-based; `caret_len` covers the highlighted span in the source line.
+/// `locals` is an empty string in release builds; "x = 1, y = false" in debug builds.
+fn jet_panic_rich(
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    msg: &str,
+    locals: &str,
+) -> ! {
+    let line_s = line.to_string();
+    let margin = line_s.len();
+    let pad = " ".repeat(margin);
+    eprintln!("panic: {}", msg);
+    eprintln!("  --> {}:{} in {}", file, line, fn_name);
+    eprintln!("   {}|", pad);
+    eprintln!("{} | {}", line_s, src_line);
+    let col_offset = col.saturating_sub(1) as usize;
+    let caret = "^".repeat(caret_len.max(1) as usize);
+    eprintln!("   {}| {}{}", pad, " ".repeat(col_offset), caret);
+    if !locals.is_empty() {
+        eprintln!("locals: {}", locals);
+    }
     std::process::exit(70);
 }
 fn jet_index_vec<T: Clone>(xs: &Vec<T>, i: i64, file: &str, line: u32) -> T {

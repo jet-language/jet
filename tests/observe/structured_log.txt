@@ -1,0 +1,20 @@
+# jet.log — structured JSON log format (E2-M12, D-OBS3)
+#
+# Each log.info/warn/error/debug call emits one JSON object to stderr.
+# Field order is stable: level, body, [trace_id], ts.
+# ts is a Unix millisecond timestamp (non-deterministic; excluded from golden checks).
+#
+# Without trace context:
+{"level":"info","body":"server started on port 8080","ts":<NONDETERMINISTIC>}
+{"level":"warn","body":"connection pool below 10%","ts":<NONDETERMINISTIC>}
+{"level":"error","body":"disk full","ts":<NONDETERMINISTIC>}
+#
+# With trace_id set via log.set_trace_id:
+{"level":"info","body":"handled request","trace_id":"abc-123","ts":<NONDETERMINISTIC>}
+#
+# log.debug is suppressed at the default "info" log level.
+# Call log.set_level("debug") to enable debug records.
+#
+# String values are JSON-escaped (", \, \n, \r, \t).
+# The tests/observe.rs test verifies this shape by parsing JSON and
+# checking level/body fields (ts is stripped from assertions).
