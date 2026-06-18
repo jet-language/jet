@@ -36,10 +36,17 @@ newline). Rejected: `println` — recognized only as foreign syntax (S14).
 (industry uses `String`; `Text` recognized only as foreign syntax per
 S14), lowercase `int`/`text`.
 
-**S2 — Variable bindings (M1)** *(ratified 2026-06-11)*: `**val`** for
-immutable bindings, `**var**` for mutable bindings. Rejected: `set`
-(sounds like mutation), `let` / `let mut` (Rust; teaching errors only per
-S14).
+**S2 — Variable bindings (M1)** *(ratified 2026-06-11; **superseded 2026-06-18
+by D-BIND1**)*: bindings use **Odin-style sigils** — `**name :: expr`** for an
+immutable binding, `**name := expr**` for a mutable binding, with an optional
+type annotation before the sigil (`ratio: Float :: 3.14`, `count: Int := 0`).
+`=` stays reassignment of an existing `:=` binding (S17). The former keywords
+`**val**` / `**var**` are **retired to teaching errors** (E_KEYWORD_RETIRED →
+"use `name :: value` / `name := value`"). Rejected: `set` (sounds like
+mutation), `let` / `let mut` (Rust; teaching errors only per S14), and the
+partial `:=`-only adoption that kept `val` (D-BIND1 option B). The owner
+accepted **spending the `::` token** on immutable bindings — see D-BIND1; S83
+(external definitions) must now pick a different separator.
 
 **S18 — Visibility** *(ratified 2026-06-11)*: **private by default**;
 prefix `**pub`** to export an item. Applies to top-level functions (M0+),
@@ -59,10 +66,23 @@ only with post-v1 evidence of real boilerplate pain.
 `**ref**` (stored field, tier 2). Default parameter access has no keyword
 (shared read). Rejected: `read` / `write` / `owned` as canonical forms.
 
-**S6 — Statement separators** *(ratified 2026-06-11)*: **semicolons,
-required after every statement** — including the last statement before a
-closing `}`. One rule, no exceptions. Rejected: newline separators,
-optional-before-`}`.
+**S6 — Statement separators** *(ratified 2026-06-11; **superseded 2026-06-18 by
+S6-R = B**)*: **no visible semicolons.** A statement ends at the end of its
+line; the **lexer inserts** a synthetic terminator (Go-style) after any line
+whose last token can end a statement — identifier, literal, `break`,
+`continue`, `return`, `)`, `]`, `}`. The grammar and diagnostics stay
+terminator-based — the `;` token still exists internally; users just never type
+it. **One layout rule** replaces the per-line `;`: a `-> Type` return
+annotation and the opening `{` must stay on the same line as the parameter
+list's closing `)` (a newline before `->` would insert a terminator after `)`).
+**Continuation suppression (ratified 2026-06-18):** a terminator is **not**
+inserted when the **next non-blank line begins with `.`** (continues an S69
+method/field chain) or with a **binary/logical operator** (`&&`, `||`, `+`, `-`,
+`*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, …), so multi-line dot-chains
+(S69) and line-broken expressions keep parsing. With the `->`/`{` rule, these
+are the only suppression cases. Rejected: keeping required semicolons (S6-R
+option A — the original rule), significant indentation, optional-`;`-before-`}`.
+See S6-R.
 
 **S12 — Entry point** *(ratified 2026-06-11)*: `**fn main()`** — a special
 case; no `pub` required (the runtime always finds `main`). Canonical form
@@ -115,8 +135,14 @@ in type annotations, map literals, and trait bounds).
 the loop now) and `**continue**` (skip to the next turn). Rejected:
 plain-word `stop`/`skip`, omitting loop control from M1.
 
-**S24 — Many-way choice: `when` (M1)** *(ratified 2026-06-11; keyword amended
-to `when` 2026-06-15, D-SG1)*:
+**S24 — Many-way choice (M1)** *(ratified 2026-06-11; keyword amended to `when`
+2026-06-15, D-SG1; **superseded 2026-06-18 by D-IF1**)*: the `when` **keyword is
+retired** — multi-arm dispatch is now spelled `if subject { arm -> body … }`
+(S68), and `when` → teaching error E_KEYWORD_RETIRED pointing at `if`. The arm
+grammar described below is **unchanged** and now lives under `if` (S68); D-IF1
+additionally adds the **inferred comparator** (a bare value arm `200 -> …` means
+`subject == 200`), which reverses the bare-value-match rejection recorded here.
+Original entry retained for the arm semantics:
 
 ```
 when x {
@@ -366,10 +392,12 @@ defined in this program. Rejected: `impl Trait for Type`, `impl Type.Trait`,
 Go implicit interfaces, `::` in Jet paths. Jet defaults to PascalCase for
 types/traits/enums (S54); v1: signatures only —
 no default bodies, associated types, or trait inheritance.
-*Future relook (owner, 2026-06-15):* the owner may revisit trait-attach sugar
-post-v1 (e.g. a C++-ish `Type::Trait` feel). Constraint to carry into that
-discussion: `::` is already reserved for foreign Rust paths in `extern rust`
-(S50) and was rejected for Jet paths, so any new sugar must not collide with it.
+*Future relook (owner, 2026-06-15; updated 2026-06-18):* the owner may revisit
+trait-attach sugar post-v1 (e.g. a C++-ish `Type::Trait` feel). Constraint:
+`::` is **no longer available** — D-BIND1 (2026-06-18) made `name :: expr` the
+immutable-binding sigil, so any trait-attach (or S83 external-definition) sugar
+must pick a different separator. `::` inside `extern rust "rust::path"` strings
+(S50) is unaffected — it lives inside a string literal, not a bare token.
 
 **S48 — Dynamic dispatch (M9)** *(ratified 2026-06-12)*: writing a trait
 name in type position (`List<Shape>`, `fn f(s: Shape)`) means automatic
@@ -561,8 +589,8 @@ ignore test blocks; `jet test` runs them. Rejected: `#[test]` attributes,
 **S44 — Formatter style (M6)** *(ratified 2026-06-12)*: one true style,
 zero config — **4-space indent**, **same-line `{`**, **line width 100**,
 spaces around binary operators, one statement per line, single blank line
-max between items, no space before `;`/`,`/`(` of a call; trailing `;` per
-S6. `jet fmt` is the only formatter; no style knobs. Rejected:
+max between items, no space before `,`/`(` of a call; no visible `;`
+(S6/S6-R — the lexer inserts terminators). `jet fmt` is the only formatter; no style knobs. Rejected:
 configurable width/indent, significant-indent formatting.
 
 **S49 — Doc comments (M6/M13)** *(ratified 2026-06-12)*: `**///**`
@@ -1027,6 +1055,27 @@ position is E0003. The statement form is unchanged. **Optional parens:**
 paren-free form; `jet fmt` strips the redundant outer parens to the no-paren
 house style. This subsumes a ternary, so `?:` stays rejected (see gallery §29).
 Rejected: C `?:`, statement-only `if`.
+**Amended 2026-06-18 (D-IF1): `if` is the universal branching keyword.** Beyond
+the boolean two-arm form and the expression form above, `**if subject { arm ->
+body … }**` is **multi-arm dispatch** — the former `when` (S24), now folded into
+`if`. `when` is retired to a teaching error. **Inferred comparator (owner
+directive):** a bare value arm is implicitly compared against the subject, so
+`if code { 200 -> …; 404 -> …; }` means `code == 200` / `code == 404`; arms may
+be bare values *or* full `Bool` conditions (this reverses S24's bare-value-match
+rejection). **Surface (D-IF2, ratified 2026-06-18):**
+- **Catch-all arm: `else -> body`** (not `...`) — reuses the keyword the
+  two-arm `if`/`else` already owns; no new sigil, and `...` stays free for a
+  possible future spread/rest meaning.
+- **Braceless arm bodies allowed:** `200 -> print("ok")` for a single
+  expression; a `{ … }` block for a multi-statement body. Keep the simple case
+  clean.
+- **Bare-value vs condition — structural mix (Q3 = A):** an arm head with **no
+  top-level comparison/logical operator** is a bare value (the compiler prepends
+  `subject ==`); an arm containing one is a full `Bool` condition. The two mix
+  freely in one block.
+
+Arm termination follows S6-R = B (no semicolons). Exhaustiveness/type checks are
+unchanged from S24.
 
 **S69 — Newlines in dot-chains** *(ratified 2026-06-15, D-SG3; implemented)*: a
 method/field chain may break before a `.` (with an optional trailing line
@@ -1142,6 +1191,35 @@ selectors; `pkg#version` is the terse pin for simple semver. Rejected: option 2
 (version only inside the dep struct, no `#`), option 3 (push `#` onto the source
 selector too — discards the deliberate "don't look like Nix" rule and overloads
 `#` ambiguously).
+
+**D-JPK-FILES — Jetpack file structure** *(ratified 2026-06-18; revises U1/U10)*:
+the jetpack project layout is three named files plus one managed folder:
+
+| File | Format | Location | Role | Checked in? |
+|---|---|---|---|---|
+| `jetpack.toml` | TOML | repo root | monorepo manifest: `[repo]`, `[sources]`, `[packages]` index | yes |
+| `env.jet` | Jet | repo root | dev environment: sources + packages + shell prompt | yes |
+| `pkg.jet` | Jet | each package dir (user-chosen) | package identity: `payload: { name, version }` + `packages: { name: library\|executable }` | yes |
+| `.jet/lock` | TOML | `.jet/` | generated lockfile (resolved deps + fingerprints) | no |
+| `.jet/cache/` | — | `.jet/` | generated build cache | no |
+
+Rules:
+- `jetpack.toml` + `env.jet` live at **repo root** (convention parity with
+  `Cargo.toml`/`package.json`/`flake.nix`; discoverable, tool-findable).
+- `pkg.jet` files live wherever the user organizes packages (flat, nested, deep
+  monorepo); discovery is `find . -name pkg.jet`. One per publishable package.
+- `.jet/` holds **only generated state** (lock, cache); never source manifests.
+- Provider-kind inference (U9) probes for `pkg.jet` (was `payload.jet`).
+
+**Renames from U10:** package-manifest filename `payload.jet` → **`pkg.jet`**;
+new TOML monorepo manifest **`jetpack.toml`** added at root; `config.jet` (jetos
+tier) deferred to Epoch 3. The `payload: { … }` identity **block name inside
+`pkg.jet` is unchanged**. Implementation: `PAYLOAD_FILE` const in `src/syntax.rs`
+and the loader/manifest/jetpack modules retarget `payload.jet` → `pkg.jet`; a
+`jetpack.toml` TOML parser is new work (see the implementation note below).
+Rejected: keeping `payload.jet` (poorer parity, conflated with `payload:` block
+name), putting `jetpack.toml`/`env.jet` under `.jet/` (breaks root-manifest
+convention, hurts discoverability).
 
 **S77 — Struct field punning** *(ratified 2026-06-16; milestone pending)*: in a
 struct literal `Type { … }` (S29), a bare field name is shorthand for
@@ -1502,6 +1580,70 @@ type reaches a record literal. Rejected: requiring the type name at every
 constructor (the duplication the owner rejected); inferring a type for a value
 binding that has no contextual type (kept explicit).
 
+### Sidequest language features (ratified 2026-06-18)
+
+**D-ILE1 — Implicit lib/exec inference** *(ratified 2026-06-18, option A; amends
+U10 / D-JPK-FILES)*: a package's **kind is inferred from `fn main()`**, not
+required. Two levels:
+- **No `pkg.jet`** — a single file or directory with a top-level `fn main()`
+  compiles as an **executable**; without one, as a **library**. Two `fn main()`
+  in one inferred package is **E_DUPMAIN** (add a `pkg.jet` `packages:` block to
+  split them). Explicit `pkg.jet` always wins; `jet run file.jet` stays
+  zero-ceremony (U7).
+- **With `pkg.jet`** — in the `packages: { … }` block (U10) the **`kind` is
+  optional**: a module with `fn main()` is `executable`, otherwise `library`.
+  The user may still write the kind explicitly (`deploy: executable`) to
+  override or document intent. This is the package-definition surface the owner
+  asked for — `pkg.jet` *describes* the package(s); kind is inferred unless
+  stated.
+
+Rejected: requiring an explicit kind always (option B, U10 status quo) — walls
+off the one-file "just run it" path.
+
+**D-BIND1 — Binding sigils** *(ratified 2026-06-18, option A; amends S2)*: see
+**S2** — full Odin sigils `name :: expr` (immutable) / `name := expr` (mutable);
+`val` / `var` retired to teaching errors. The owner accepted **spending `::`**:
+it now means "immutable binding" everywhere, so S83's external-definition form
+and any `Type::Trait` sugar (S28) must choose a different separator. `::` inside
+`extern rust "rust::path"` strings (S50) is unaffected. Rejected: `:=`-only with
+`val` kept (option B), status quo (option C).
+
+**D-LABEL1 — Named loops & labeled break/continue** *(ratified 2026-06-18,
+option B; amends S19 / S23)*: a loop may carry an **`@name` label** —
+`@outer loop row in grid { … }` — and `**break @name**` / `**continue @name**`
+target it, escaping or continuing the named (possibly outer) loop. Reuses the
+S82 `@` marker sigil in a **new position** (inline, immediately before `loop`),
+so it can never be confused with a labeled argument (S61). Diagnostics
+`E_UNDEFINED_LABEL` (unknown label; lists labels in scope) and `E_LABEL_NOT_LOOP`
+(`@name` not before a `loop`). Codegen maps `@name` → Rust `'name:` labels.
+Rejected: bare `name: loop` (option A — visually collides with S61 labeled
+args); Rust-style `'outer` (S41 already makes `'x'` a char literal — lexer clash).
+
+**S6-R — No visible semicolons** *(ratified 2026-06-18, option B; supersedes
+S6's required-`;` rule)*: see **S6** — no `;` in source; the lexer inserts
+terminators Go-style after a line whose last token can end a statement. Layout
+rules: `-> Type` and `{` stay on the parameter list's closing-`)` line; and a
+terminator is **suppressed** when the next non-blank line begins with `.` (S69
+chain) or a binary/logical operator (line-broken expressions) — see S6 for the
+full list. `E_MISSING_SEMI` is retired (the lexer handles insertion); the grammar
+stays terminator-based internally. Rejected: keeping required semicolons (option
+A); significant indentation; optional-`;`.
+
+**D-IF1 — `if` as universal branching** *(ratified 2026-06-18, option A; amends
+S24 / S68)*: see **S68** — `if` is the one branching keyword; `when` is retired
+to a teaching error pointing at `if`. `if subject { arm -> body … }` is
+multi-arm dispatch (the former `when`), and a bare value arm is implicitly
+compared against the subject (**inferred comparator**, owner directive):
+`if code { 200 -> …; 404 -> …; }` ≡ `code == 200` / `code == 404`. This reverses
+S24's bare-value-match rejection. **Surface (D-IF2, ratified 2026-06-18):**
+catch-all arm is `else -> body` (`...` rejected, stays free for future spread);
+arm bodies may be **braceless** single expressions (`{ … }` for multi-statement
+bodies); bare-value-vs-condition is a **structural mix** — an arm head with no
+top-level comparison/logical operator is a bare value (compiler prepends
+`subject ==`), an arm with one is a full `Bool` condition, mixed freely. Rejected:
+keeping `if`/`when` separate (D-IF1 option B); `...` catch-all and mandatory arm
+braces (D-IF2 alternatives).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -1548,55 +1690,23 @@ implementation milestone is pending.
 | ID   | Question                                   | Needed by |
 | ---- | ------------------------------------------ | --------- |
 | S56  | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
-| S6-R | revisit statement terminators (see note below) | owner-paced |
-| S83  | external `::` definitions for structs and modules (see note below) | owner-paced |
+| S83  | external definitions for structs/modules — needs a **new separator** (`::` spent by D-BIND1); see note below | owner-paced |
 
-> **S6-R — Statement terminators, revisit (future).** S6 is ratified today
-> (semicolons required after every statement) and stays binding until the
-> owner decides otherwise. The owner has flagged this for a **future**
-> reconsideration narrowed to exactly **two finalists**:
->
-> 1. **Keep 100% semicolons** — the current S6 rule, one terminator, no
->    exceptions. Unambiguous parsing, hard error-recovery sync points, no
->    silent-newline surprises; cost is visual noise and a "missing `;`"
->    error class.
-> 2. **Go-style lexer insertion** — no semicolons in source; the *lexer*
->    inserts terminators at line ends when the last token can end a
->    statement. Clean source for beginners while the grammar and diagnostics
->    stay terminator-based; cost is that line-break placement becomes
->    style-constrained (e.g. `{` must sit on the opening line).
->
-> Significant-indent and optional-`;` schemes are **out of scope** for this
-> revisit. **Decision gate:** the owner wants to compare **multiple bigger
-> `.jet` files** (not toy snippets) rendered under each finalist — real
-> programs showing multi-line expressions, nested blocks, `switch` arms,
-> struct/enum literals, and what a *mistake* looks like under each — before
-> choosing. Build the side-by-side example set first; do not re-litigate
-> S6's text until then.
-
-> **S83 — External `::` definitions for structs and modules.** The philosophy
+> **S83 — External definitions for structs and modules.** The philosophy
 > (one mechanical path, flexible structure) permits methods and module items
 > to be defined either inline in the type/module body block, or externally
-> using a `TypeName::item` qualifier — analogous to C++ out-of-class
-> definitions. Both forms produce identical semantics; `jet fmt` may enforce
-> a project style.
+> with a `TypeName`-qualified definition — analogous to C++ out-of-class
+> definitions. Both forms would produce identical semantics; `jet fmt` may
+> enforce a project style.
 >
-> Options:
->
-> 1. **A — Allow both.** Inline body block and `TypeName::item(...)` external
->    form are both valid everywhere. The compiler treats them identically.
->    `jet fmt` can enforce one or the other per project. Widest flexibility;
->    the structural-freedom principle from philosophy.md.
-> 2. **B — Inline only.** All definitions must appear inside the body block.
->    Simpler grammar; no `::` sigil. Forces a single layout convention; can
->    feel constraining for large types split across a file.
->
-> **Recommendation: A.** The owner has explicitly called out C++-style
-> external definitions as a desired structural option. The mechanical
-> operation is identical; the flexibility is in arrangement only, which
-> does not violate the one-path principle.
->
-> **Decision gate:** owner ratification. No code changes until ratified.
+> **Blocked on a new separator (2026-06-18).** The original proposal used
+> `TypeName::item`, but D-BIND1 (ratified 2026-06-18) made `::` the
+> immutable-binding sigil — `::` is **spent**. D-MOD1 already took `.` for
+> module scoping. So S83 cannot reuse either; it must propose a fresh
+> separator (or be withdrawn). The owner has called out C++-style external
+> definitions as a desired structural option, so the feature stands —
+> only its spelling is reopened. **Decision gate:** owner picks a separator
+> and ratifies, or withdraws S83. No code until then.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
@@ -1837,3 +1947,10 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-18 | D-MOD4 | re-export surface: **Rust-exact `pub use`** (supersedes the 2026-06-17 auto-surface call). A directory module's `module.jet` must `pub use sub.Item;` to expose a submodule item; nothing auto-surfaces. A `pub`-but-not-re-exported item stays internal to the directory. | owner |
 | 2026-06-18 | D-MOD-DIR | directory-module summary file is **`module.jet`** (not Rust's `mod.jet`), matching the `module` keyword. `module foo;` resolves `foo.jet` then `foo/module.jet`. | owner |
 | 2026-06-18 | D-CBIND3 | `jet bind` backend: **native std-only C-prototype parser** in `src/cbind.rs` (supersedes the ratified bindgen-crate + I6-waiver route). No external crate, no libclang, no `cbind` feature. Binds the C subset Jet's FFI uses (scalars, `char*`→String, `void`); unbindable declarations are skipped and reported (never faked, I3). Anything beyond the subset stays a hand-written `@extern module c.<lib>` overlay. | owner |
+| 2026-06-18 | D-JPK-FILES | jetpack file structure: `jetpack.toml` (TOML monorepo manifest) + `env.jet` (dev env) at **repo root**; `pkg.jet` (package definition, renamed from `payload.jet`) in user-chosen package dirs; `.jet/` holds only generated `lock`+`cache/`. Revises U1/U10; `config.jet`/jetos tier deferred to E3. | owner |
+| 2026-06-18 | D-ILE1 | lib/exec **inferred from `fn main()`** (A): no `pkg.jet` → file with `main()` is executable else library (two `main()` = E_DUPMAIN); with `pkg.jet`, the `packages:` `kind` is optional/inferred, user-overridable. Amends U10/D-JPK-FILES | owner |
+| 2026-06-18 | D-BIND1 | full Odin binding sigils `name :: expr` (immutable) / `name := expr` (mutable) (A); `val`/`var` retired to teaching errors; **`::` spent** (S83 needs a new separator); amends S2 | owner |
+| 2026-06-18 | D-LABEL1 | labeled loops `@name loop { }` + `break @name`/`continue @name` (B); reuses S82 `@` in a new inline position; rejected bare `name:` (A) and `'outer` (S41 char-literal clash); amends S19/S23 | owner |
+| 2026-06-18 | S6-R | **no visible semicolons** (B); Go-style lexer terminator insertion; `-> Type {` stays on the param-close line; **continuation suppressed** when the next line starts with `.` (S69 chain) or a binary/logical operator; `E_MISSING_SEMI` retired; supersedes S6's required-`;` rule | owner |
+| 2026-06-18 | D-IF1 | `if` is the **universal branching keyword** (A); `when` retired to a teaching error; multi-arm `if subject { … }` with **inferred comparator** (bare `200 ->` ≡ `subject == 200`, reverses S24); amends S24/S68 | owner |
+| 2026-06-18 | D-IF2 | multi-arm `if` surface: catch-all is **`else ->`** (Q1-B; `...` rejected); **braceless arm bodies** allowed, `{ }` for multi-statement (Q2-A); bare-value-vs-condition is a **structural mix** (Q3-A — head with no top-level comparison op = bare value, prepend `subject ==`); amends S68/D-IF1 | owner |

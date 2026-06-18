@@ -25,79 +25,81 @@ All names below are **ratified** (see the Naming ledger). Open items are the
 depends on jetpack; jetpack never depends on jetos. This is what keeps "jet
 usable on its own" true forever.
 
-## 2. The three files — one mental model, three tiers
+## 2. Jetpack file structure (Phase 1)
 
-You write only the tier you need. All three share the **same** module /
-namespace / `find` / merge machinery; only the *fields* differ.
+**Ratified structure (2026-06-18):**
 
-| File | Tier | Analogy | Lives | Holds |
-|---|---|---|---|---|
-| **`payload.jet`** | package | `Cargo.toml` | project root | payload identity + Jet library deps (+ exported modules) |
-| **`env.jet`** | project environment | `devenv.nix` | project root | dev shells, tools, project module tree (`env` namespace) |
-| **`config.jet`** | system | `configuration.nix` | `~/.jet/` (default) | whole-machine config (`system`/`image` namespaces) |
+| File | Location | Holds | Checked In? |
+|---|---|---|---|
+| **`jetpack.toml`** | repo root | Monorepo manifest: sources, package index | Yes |
+| **`env.jet`** | repo root | Dev environment: sources, packages, shell config | Yes |
+| **`pkg.jet`** | each package dir (user-chosen location) | Package identity: name, version, kind | Yes |
+| **`.jet/lock`** | `.jet/` folder | Generated lockfile (resolved deps + fingerprints) | No |
+| **`.jet/cache/`** | `.jet/` folder | Generated build cache | No |
 
-A repo can have `payload.jet` + `env.jet` together. `config.jet` is the jetos
-tier and normally lives on its own in `~/.jet/`.
+A monorepo has one `jetpack.toml` (root) + one `env.jet` (root) + multiple `pkg.jet` 
+files (one per package, in user-organized locations). Single-file packages omit 
+`jetpack.toml` if they declare only themselves.
 
-### 2.1 `payload.jet` — the package manifest (Cargo.toml analog)
+### 2.1 `jetpack.toml` — monorepo manifest (Cargo.toml analog)
 
-Jet syntax, not TOML — one language everywhere. Replaces the old `jet.toml`.
-The manifest is `payload.jet` and its identity block is `payload: { … }` (U10,
-renamed from `pack.jet`/`package:` — a clean break, no alias).
+TOML format. Lives at repo root. Declares sources and package index.
+
+```toml
+[repo]
+name = "jetpack-core"
+version = "1.0.0"
+
+[sources]
+stable = "github:NixOS/nixpkgs#nixos-24.05"
+unstable = "github:NixOS/nixpkgs#nixpkgs-unstable"
+mine = "path:."
+
+[packages]
+util = "util/pkg.jet"
+http = "http/pkg.jet"
+```
+
+### 2.1a `pkg.jet` — package definition (one per package)
+
+Jet syntax. Lives in each package's root directory (user-chosen location). 
+One file per publishable package.
 
 ```jet
 payload: {
-    name:    "wordstats",
-    version: "0.1.0",
-    edition: "2026",
-    license: "MIT OR Apache-2.0",
+    name:    "util",
+    version: "1.0.0",
 }
-deps: {
-    textkit: "1.2.0",
-    helpers: path@../helpers,
+packages: {
+    core: library,
 }
-exports: [module web, module cli]   // optional: public modules this package ships
 ```
 
 ### 2.2 `env.jet` — the project environment (devenv analog)
 
+Jet code. Lives at repo root. Declares dev sources and packages for the environment.
+
 ```jet
-module dev {
-    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
-    imports: find("./modules")          // flake-parts-style auto-discovery
-    env.dev: Env {
-        packages: [default.[ripgrep, fd, jq, sqlite]],
-        vars:     [var("RUST_LOG", "debug")],
-        prompt:   "wordstats",
-    }
+use jetpack as pkg;
+
+pub fn shell() -> [JSON] {
+    return [
+        pkg.source("stable", "github:NixOS/nixpkgs#nixos-24.05"),
+        pkg.source("unstable", "github:NixOS/nixpkgs#nixpkgs-unstable"),
+        pkg.source("mine", "path:.", "core"),
+        pkg.packages(["mine:util", "mine:http"]),
+        pkg.prompt("jetpack"),
+    ];
 }
 ```
-`module` is the single outermost construct (U8): `sources:` and `imports:` nest
-inside the body as siblings of the `env.dev: Env { … }` contribution — like a
-flake's one `{}` holding both inputs and outputs. Sources merge by key across
-modules (§6).
-`jet dev` / `jetpack enter dev` uses it. Drop a file in `modules/` and it merges
-automatically — no edit here.
 
-### 2.3 `config.jet` — the master jetos config (configuration.nix analog)
+`jetpack enter` reads `env.jet` and activates the shell. Edit `env.jet` to add/remove 
+dev tools or change sources. The sources declared here reference `jetpack.toml` 
+definitions by name (or can be inline).
 
-```jet
-module laptop {
-    sources: {
-        default:  github@NixOS/nixpkgs/nixos-24.05,
-        unstable: github@NixOS/nixpkgs/nixpkgs-unstable,
-    }
-    imports: find("./modules")
-    system.laptop: System {
-        target:   "x86_64-linux",
-        packages: [default.[firefox, btop], unstable.neovim],
-        services: { pipewire: Service { enable: true } },
-        options:  [ set("net.hostName", "laptop") ],
-    }
-}
+### 2.3 Future: `config.jet` — jetos integration (deferred)
 
-module installer {
-    image.installer: Image { target: "x86_64-linux", from: system.laptop }
+Deferred to Epoch 3. Not part of Phase 1 jetpack design.
 }
 
 // module _gaming { … }   // disabled: leading underscore → not discovered
@@ -166,14 +168,14 @@ Packages are values of type **`Pkg`**. Source refs are `provider@target`:
 the escape hatch for refs the sugar doesn't cover.
 
 **Provider kind is inferred, not declared (U9).** A source is *only* ever
-`name: provider@target` — there is no `via:`/kind marker. How a source realizes
-is discovered from its target: a target carrying a **`payload.jet`** is a Jet
+`name: provider@target#version` — there is no `via:`/kind marker. How a source realizes
+is inferred from its target: a target carrying a **`pkg.jet`** is a Jet
 package repo and realizes through the first-party **core** provider (no nix);
 any other target **falls back to a nix flake**. So core is the default *when the
 target is one of ours*, and the entire nixpkgs ecosystem comes for free as the
 fallback. The probe never clones a nixpkgs-sized repo: `path@…` stats the dir,
 `nixpkgs@…` is unconditionally nix (never probed), and `github@…`/git URLs peek
-at **only** `payload.jet` (raw fetch / shallow `git archive`) before deciding
+at **only** `pkg.jet` (raw fetch / shallow `git archive`) before deciding
 whether to do a full fetch.
 
 ## 6. Merge rules (canonical — one table for all tiers)
@@ -212,9 +214,9 @@ Reconciles jetos-design §5.4 and the former pack-abi table into one referee:
 | Scale | You write | Tool |
 |---|---|---|
 | 0 — script | nothing — just `app.jet` | `jet run app.jet` |
-| 1 — package | `payload.jet` | `jet build` / `jetpack` |
-| 2 — project env | `payload.jet` + `env.jet` (+ `modules/`) | `jet dev` / `jetpack enter` |
-| 3 — system | `config.jet` (+ `modules/`) in `~/.jet/` | `jetos switch` / `build` |
+| 1 — package | `pkg.jet` (in package dir) | `jet build` / `jetpack` |
+| 2 — project env | `jetpack.toml` + `env.jet` (at root) | `jet dev` / `jetpack enter` |
+| 3 — system | `config.jet` (jetos, deferred) | `jetos switch` / `build` |
 
 Scale 0 never needs a manifest, `.jet/`, or anything — the hard line that keeps
 jet a beginner's first compiled language.
@@ -228,20 +230,20 @@ jet a beginner's first compiled language.
 - **Multi-machine / fleet** config from one `config.jet`.
 - **Signed hangar + generations/rollback** (ties to E2-M16 layer 3, S60).
 
-## 10. Ratified naming ledger (2026-06-16)
+## 10. Ratified naming ledger (ratified 2026-06-16, updated 2026-06-18)
 
 | Thing | Name |
 |---|---|
-| package manifest | `payload.jet` (Jet syntax; replaces `jet.toml`; U10, was `pack.jet`) |
-| project environment file | `env.jet` |
-| master system config | `config.jet` (default dir `~/.jet/`) |
-| module keyword | `module`; disable = leading `_` |
-| reserved namespaces | `env` · `system` · `image` |
-| namespace types | `Env` · `System` · `Image`; package = `Pkg` |
-| import-tree fn | `find("./path")` |
-| shared store | **hangar**, at `/etc/jet/hangar/` (single, global) |
-| project-managed folder | `.jet/` · lockfile `.jet/lock` (replaces `pack.lock`/`jet.lock`) |
-| source refs | `provider@target` (`github@owner/repo/rev`, `path@…`) |
+| monorepo manifest | `jetpack.toml` (TOML; at repo root; U1/U10 revised) |
+| package definition | `pkg.jet` (Jet syntax; one per package; in user-chosen location; U10 revised) |
+| project environment | `env.jet` (Jet syntax; at repo root; defines sources + packages + shell) |
+| system config | `config.jet` (jetos, deferred) |
+| lockfile | `.jet/lock` (generated; in `.jet/` folder; replaces `jet.lock`) |
+| build cache | `.jet/cache/` (generated; in `.jet/` folder) |
+| project-managed folder | `.jet/` (holds lock + cache only; source manifests at root or package level) |
+| hangar store | `~/.jet/store/` (Phase 1) or `/etc/jet/hangar/` (Phase 2 jetos) |
+| source refs | `provider@target#version` (U1/U9 revised; e.g. `github@owner/repo#tag`) |
+| provider@target separator | `@` for provider classifier; `#` for version/revision pin |
 
 ## 11. Decisions (U-series — RATIFIED 2026-06-16)
 
@@ -258,10 +260,8 @@ section + decision log) and `src/syntax.rs`; `tests/decisions.rs` enforces them.
 | U6 | `provider@target` source refs (was D-JPK18) + `Pkg` sugar (was D-JPK19) | ratified |
 | U7 | `jet run file.jet` stays zero-ceremony forever | ratified |
 | U8 | `sources:`/`imports:` nest inside `module {}` (siblings of contributions), not file top-level; amends U4 | ratified |
-| U9 | A source's provider kind is **inferred, never declared** — target with a `payload.jet` → core, else nix flake; `nixpkgs@…` always nix; manifest-only remote probe (no `via:` marker) | ratified |
-| U10 | Manifest is **`payload.jet`**, identity block **`payload: { … }`**; `packages: { name: library\|executable }` model; package = top-level `module` discovered by name; `env.jet` is the dev shell only. Amends U1 | ratified |
+| U9 | A source's provider kind is **inferred, never declared** — target with a `pkg.jet` → core provider, else nix flake fallback; `nixpkgs@…` always nix; manifest-only remote probe (no `via:` marker). Revised 2026-06-18: `pkg.jet` instead of `payload.jet` | ratified |
+| U10 | **File structure (ratified 2026-06-18):** Monorepo manifest **`jetpack.toml`** (TOML, at root); package definitions **`pkg.jet`** (Jet, one per package, user-chosen locations); dev environment **`env.jet`** (Jet, at root). Package identity: `payload: { name, version }` block + `packages: { name: library\|executable }` listing. Amended from earlier U1 | ratified |
 
-The downstream edits these decisions required (S52 amendment, this folder's
-`README.md`, and `jetos-design.md`) are **applied**; those docs now read in the
-ratified U1–U10 naming. The package manifest filename is `payload.jet`
-everywhere (U10); `pack.jet`/`pack.lock` no longer appear in the plan.
+U1–U10 now fully reflected in current docs. File names: `jetpack.toml` (root), 
+`env.jet` (root), `pkg.jet` (packages), `.jet/lock` (generated).

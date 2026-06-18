@@ -15,13 +15,9 @@ decision, add its examples in the same edit.
 
 ---
 
-## No open ballots
-
-The Jet language module system (D-MOD1–4) was ratified 2026-06-18 (Rust's model
-with `module`/`.` surface swaps and Rust-exact `pub use` re-export) and
-implemented; see the decision log in [`syntax-decisions.md`](syntax-decisions.md)
-and [`../plans/modules.md`](../plans/modules.md). Nothing else is currently
-waiting on the owner.
+**The queue is empty.** No decisions are awaiting the owner. New decisions get a
+row here (with worked examples per the house rule above) and leave the instant
+they are ratified.
 
 ---
 
@@ -40,3 +36,7 @@ Kept out of the queue deliberately so the owner sees only live decisions.
   D-TEST1, D-TOOL2/5, D-CROSS2/3) and all REPL refinements (D-REPL*)** — ratified
   2026-06-16/17; recorded in `syntax-decisions.md` and the relevant milestone
   plans. They left this queue per the house rule.
+- **Sidequest language features (D-ILE1, D-BIND1, D-LABEL1, S6-R, D-IF1, D-IF2)**
+  — ratified 2026-06-18; recorded in `syntax-decisions.md` and their sidequest
+  plans (`docs/plans/sidequests/`). D-IF2 settled D-IF1's multi-arm `if` surface
+  (`else` catch-all, braceless arm bodies, structural bare-value/condition mix).

@@ -10,11 +10,12 @@
 > (D-JPK*, U1–U10, D-OS1/7) live only in `docs/spec/syntax-decisions.md`; this
 > file no longer restates them.
 
-Ratified-naming reminder (full table in `unified-ecosystem.md` §10): package
-manifest **`payload.jet`** (block `payload:`), project env **`env.jet`**, system
-config **`config.jet`** (default `~/.jet/`), single lockfile **`.jet/lock`** in
-the **`.jet/`** managed folder, one global store the **hangar** at
-**`/etc/jet/hangar/`**, source refs **`provider@target`**, imports `use "<path>"`.
+Ratified file structure: monorepo manifest **`jetpack.toml`** (TOML), project env
+**`env.jet`** (Jet), both at repo root; package definitions **`pkg.jet`** (Jet, in
+package directories, user-chosen locations); single lockfile **`.jet/lock`**
+(generated), build cache **`.jet/cache/`** (generated), both in `.jet/` managed
+folder; one global store the **hangar** at **`~/.jet/store/`** (Phase 1) or
+**`/etc/jet/hangar/`** (Phase 2); source refs **`provider@target#version`**.
 
 ---
 
@@ -30,11 +31,11 @@ the **`.jet/`** managed folder, one global store the **hangar** at
 keeps "jet usable on its own" true forever.
 
 Rules of thumb:
-- "A library I `use` and compile into my program" → a `payload.jet` **package**;
-  a `library` package realizes as staged source.
+- "A library I `use` and compile into my program" → a `pkg.jet` **package**
+  (in any directory; user organizes); a `library` package realizes as staged source.
 - "A program/binary I want available in a shell" → `jetpack run nixpkgs:fastfetch`
-  / `jetpack run github@owner/repo`.
-- "My whole computer described in text, atomic upgrades, rollback, ISO" → jetos.
+  / `jetpack run github@owner/repo#tag`.
+- "My dev environment" → edit `env.jet` at repo root; `jetpack enter` activates it.
 
 ---
 
@@ -75,16 +76,17 @@ jetpack ~/work $ exit
   left the temporary shell. your machine is unchanged.
 ```
 
-A project's `env.jet` describes a richer environment (typed `module {}` surface,
-`unified-ecosystem.md` §2.2); `jetpack enter <name>` / `jet dev` enters it.
+A project's `env.jet` (at repo root) describes the dev environment (typed `module {}` 
+surface with sources and packages, `unified-ecosystem.md` §2.2); `jetpack enter` / 
+`jet dev` activates it.
 
 ### 3.2 Command surface
 
 `jetpack run/enter/build/list/clean/add/remove` (ratified D-JPK2). `add`/`remove`
-edit the manifest declaratively — never a hidden install DB. `jet dev` is the
-Scale-2 front door and delegates to `jetpack enter`. CLI refs accept the
-shorthand `source:package` (`nixpkgs:fastfetch`); the typed authoring surface in
-files uses `provider@target` (`github@owner/repo/rev`).
+edit `env.jet` declaratively — never a hidden install DB. `jet dev` is the
+entry point and delegates to `jetpack enter`. CLI refs accept shorthand
+`source:package` (`nixpkgs:fastfetch`); `env.jet` (Jet code) uses
+`provider@target#version` (`github@owner/repo#tag`) with typed `module {}` surface.
 
 ### 3.3 Architecture — core resolver, providers behind one seam
 
