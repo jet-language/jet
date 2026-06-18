@@ -189,6 +189,39 @@ fn namespace_type(ns: Namespace) -> &'static str {
     }
 }
 
+/// E3402: builtins that perform ambient I/O or network access. A sandboxed
+/// package build / module-field evaluation must reach none of them. The fs/net
+/// names are future-proofing for the build-from-source path; print/eprint/input
+/// are reachable today, so the diagnostic is live (I4).
+fn is_ambient_io_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "read_file"
+            | "write_file"
+            | "fetch"
+            | "http_get"
+            | "env_var"
+            | "print"
+            | "eprint"
+            | "input"
+            | "read_all_input"
+    )
+}
+
+/// Scan a field expression for an ambient-I/O call; the first one fires E3402.
+fn check_build_io(value: &Expr) -> Result<(), Diagnostic> {
+    let mut found: Option<(String, crate::diag::Span)> = None;
+    crate::comptime::walk_calls(value, &mut |name, span| {
+        if found.is_none() && is_ambient_io_builtin(name) {
+            found = Some((name.to_string(), span));
+        }
+    });
+    match found {
+        Some((name, span)) => Err(crate::sema::e3402(&name, Some(span))),
+        None => Ok(()),
+    }
+}
+
 fn evaluate_env_contribution(
     c: &Contribution,
     src: &str,
@@ -219,6 +252,7 @@ fn evaluate_env_contribution(
         if name == syntax::SYSTEM_FIELD_PACKAGES {
             entry.packages.extend(extract_packages(value, src)?);
         } else {
+            check_build_io(value)?;
             let v = comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
             entry
                 .settings
@@ -312,6 +346,7 @@ fn evaluate_service(
     let mut enable = None;
     let mut extra = Vec::new();
     for (name, span, value) in &entry.fields {
+        check_build_io(value)?;
         let v = comptime::evaluate(value, funcs, &HashSet::new(), base_dir, &HashMap::new())?;
         if name == syntax::SERVICE_FIELD_ENABLE {
             match v {
@@ -993,6 +1028,20 @@ module _gaming {
             rendered,
             "Error [E0966]: expected a `Env` literal here, found `System`\n  --> env.jet:3:14\n    |\n  3 |     env.dev: System {\n    |              ^^^^^^^^\n Why: a contribution to this namespace must use the matching type `Env`\n Fix: change `System { … }` to `Env { … }`\n"
         );
+    }
+
+    #[test]
+    fn ambient_io_in_build_is_e3402() {
+        let src = "\nmodule dev {\n    env.dev: Env {\n        prompt: read_file(\"/etc/hostname\"),\n    }\n}\n";
+        let err = evaluate_source(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E3402");
+        let rendered = crate::diag::render_all("env.jet", src, std::slice::from_ref(&err));
+        assert!(
+            rendered.contains("`read_file` is not allowed during a sandboxed package build"),
+            "unexpected render:\n{rendered}"
+        );
+        assert!(rendered
+            .contains("package builds run with ambient I/O and network access disabled (D-PURE2)"));
     }
 
     /// A fresh, empty directory under the system temp dir, unique per call.

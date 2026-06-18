@@ -1,5 +1,29 @@
 //! E2-M16 pure evaluation tests (S60, D-PURE1/D-PURE2/D-PURE3).
 
+use std::path::Path;
+use std::sync::Mutex;
+
+// Serialize all tests that mutate the process-global JET_STORE_DIR to prevent
+// concurrent set_var races under cargo's parallel runner.
+static STORE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Run `f` with `JET_STORE_DIR` pointed at a fresh `dir`, serializing concurrent
+/// calls and restoring the prior value afterward.
+fn with_store<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir).unwrap();
+    let prev = std::env::var("JET_STORE_DIR").ok();
+    std::env::set_var("JET_STORE_DIR", dir);
+    let result = f();
+    match prev {
+        Some(v) => std::env::set_var("JET_STORE_DIR", v),
+        None => std::env::remove_var("JET_STORE_DIR"),
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    result
+}
+
 /// `pure fn` parses and compiles without error.
 #[test]
 fn pure_fn_compiles() {
@@ -100,37 +124,30 @@ fn main() {
 #[test]
 fn store_generations_empty() {
     let dir = std::env::temp_dir().join("jet_pure_test_gen_empty");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("JET_STORE_DIR", dir.to_str().unwrap());
-    let gens = jet::store::list_generations();
-    // May or may not be empty depending on test ordering; just check it doesn't panic.
-    let _ = gens;
-    let _ = std::fs::remove_dir_all(&dir);
+    with_store(&dir, || {
+        // Just check it doesn't panic on a fresh store.
+        let _ = jet::store::list_generations();
+    });
 }
 
 /// Store generation tracking: record_generation writes a record.
 #[test]
 fn store_record_generation() {
     let dir = std::env::temp_dir().join("jet_pure_test_gen_record");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("JET_STORE_DIR", dir.to_str().unwrap());
-    let gen = jet::store::record_generation();
-    assert!(gen >= 1, "generation should be at least 1");
-    let gens = jet::store::list_generations();
-    assert!(!gens.is_empty(), "should have at least one generation recorded");
-    let _ = std::fs::remove_dir_all(&dir);
+    with_store(&dir, || {
+        let gen = jet::store::record_generation();
+        assert!(gen >= 1, "generation should be at least 1");
+        let gens = jet::store::list_generations();
+        assert!(!gens.is_empty(), "should have at least one generation recorded");
+    });
 }
 
 /// Store rollback: rolling back to a non-existent generation returns Err.
 #[test]
 fn store_rollback_invalid_gen() {
     let dir = std::env::temp_dir().join("jet_pure_test_gen_rollback_inv");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    std::env::set_var("JET_STORE_DIR", dir.to_str().unwrap());
-    let result = jet::store::rollback_to(9999);
-    assert!(result.is_err(), "rollback to non-existent gen should fail");
-    let _ = std::fs::remove_dir_all(&dir);
+    with_store(&dir, || {
+        let result = jet::store::rollback_to(9999);
+        assert!(result.is_err(), "rollback to non-existent gen should fail");
+    });
 }

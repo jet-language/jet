@@ -266,9 +266,9 @@ fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mut Vec<Diagn
 /// S59 (E2-M14): type rules at the **C** boundary. Stricter than Rust FFI: only
 /// scalars, `Char`, and `String` (D-CBIND5) cross by value, plus structs/enums
 /// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `T?`, `T ? E`) have
-/// no stable C ABI and are rejected (E3203). Pointers belong to the E2-M13 gated
-/// tier (E3202) — they cannot be written today (no `Ptr<T>` type), so E3202 is
-/// registered but unreachable from real source until that tier lands.
+/// no stable C ABI and are rejected (E3203). Pointers (`Ptr<T>`, M13/S58) belong
+/// to the gated tier: a `Ptr<T>` in a C signature fires E3202 unless it is behind
+/// `use core.mem` + `@unsafe`.
 fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
@@ -315,10 +315,10 @@ fn e3203(ty: &Type, span: Span) -> Diagnostic {
     )
 }
 
-/// E3202 — a pointer or other gated type crosses the C boundary outside an
-/// `@unsafe` / `core.mem` region. The pointer tier (E2-M13) is not implemented,
-/// so no real source can reach this yet; the constructor is registered (I4) and
-/// snapshot-tested so the diagnostic exists the moment that tier lands.
+/// E3202 — a pointer type (`Ptr<T>`, S58) appears by value in a C FFI signature
+/// outside an `@unsafe` / `core.mem` region. Ordinary C-FFI code passes by-value
+/// scalars and `String`; pointers must stay behind `use core.mem` + `@unsafe`.
+/// Reachable since the M13 pointer tier shipped (commit cd4713d).
 pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3202",
@@ -389,13 +389,19 @@ fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut Vec<Diagnos
                 ));
                 ok = false;
             }
-            if !is_c_abi_type(&p.ty, registry) {
+            if matches!(&p.ty, Type::Apply { name, .. } if name == syntax::TYPE_PTR) {
+                diags.push(e3202(&p.ty.name(), p.ty_span));
+                ok = false;
+            } else if !is_c_abi_type(&p.ty, registry) {
                 diags.push(e3203(&p.ty, p.ty_span));
                 ok = false;
             }
         }
         if let Some(rt) = &ef.return_type {
-            if !is_c_abi_type(rt, registry) {
+            if matches!(rt, Type::Apply { name, .. } if name == syntax::TYPE_PTR) {
+                diags.push(e3202(&rt.name(), ef.name_span));
+                ok = false;
+            } else if !is_c_abi_type(rt, registry) {
                 diags.push(e3203(rt, ef.name_span));
                 ok = false;
             }
@@ -1318,6 +1324,7 @@ fn check_func_body(
     let empty_code_modules = HashMap::new();
     let empty_unqualified: HashMap<String, String> = HashMap::new();
     let empty_unqualified_file: HashMap<String, (String, usize)> = HashMap::new();
+    let empty_func_pub: HashMap<String, bool> = HashMap::new();
     let mut ck = Checker {
         funcs,
         registry,
@@ -1330,6 +1337,7 @@ fn check_func_body(
         code_modules: &empty_code_modules,
         unqualified: &empty_unqualified,
         unqualified_file: &empty_unqualified_file,
+        func_pub: &empty_func_pub,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -1338,6 +1346,7 @@ fn check_func_body(
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
+        in_pure: f.is_pure,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
         fn_name: f.name.clone(),
@@ -1506,6 +1515,11 @@ struct ModuleState {
     /// D-MOD3: unqualified file-module items imported via `use alias.Item`.
     /// Maps name → (function_name, module_idx).
     unqualified_file: HashMap<String, (String, usize)>,
+    /// D-MOD4: `pub use alias.Item` re-exports — items this module exposes on its
+    /// own public surface even though they're defined elsewhere. Maps the
+    /// exported name → (target_function_name, target_module_idx). A caller doing
+    /// `thismod.Item` resolves through here to the real definition.
+    reexports: HashMap<String, (String, usize)>,
 }
 
 fn impl_type_exists(
@@ -1541,12 +1555,18 @@ struct Checker<'a> {
     unqualified: &'a HashMap<String, String>,
     /// D-MOD3: unqualified file-module items in scope (name → (fn_name, module_idx)).
     unqualified_file: &'a HashMap<String, (String, usize)>,
+    /// D-MOD2: pub flags for this module's functions, including inline-module
+    /// items mangled as `M__item`. Used to reject `M.private()` from outside.
+    func_pub: &'a HashMap<String, bool>,
     diags: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, LocalInfo>>,
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
     loop_depth: usize,
     in_unsafe: bool,
+    /// True while checking a `pure fn` body, so E3403 can fire on a
+    /// non-deterministic std call (time/random) reached from pure code.
+    in_pure: bool,
     ret: Option<Type>,
     /// `-> view T` on this function (borrowed return).
     view_return: bool,
@@ -5249,6 +5269,9 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_list_lit(&mut self, elems: &mut [Expr], span: Span) -> Option<Type> {
+        if self.freestanding {
+            self.diags.push(e3303(span));
+        }
         if elems.is_empty() {
             if let Some(expected) = self.expected_type.clone() {
                 if let Type::List(inner) = expected {
@@ -5457,6 +5480,9 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_map_lit(&mut self, entries: &mut [(Expr, Expr)], span: Span) -> Option<Type> {
+        if self.freestanding {
+            self.diags.push(e3303(span));
+        }
         if entries.is_empty() {
             if let Some(expected) = self.expected_type.clone() {
                 if let Type::Map { key, value } = expected {
@@ -6185,10 +6211,22 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
-        let is_pub = self.funcs.contains_key(mangled)
-            && self.func_pub_in_scope(mangled);
-        // pub check (inline modules share module_idx — always same file, always accessible)
-        let _ = is_pub;
+        // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
+        // its `pub` items — a bare private item escapes its module otherwise.
+        if !self.func_pub.get(mangled).copied().unwrap_or(false) {
+            let item = &mangled[alias.len() + 2..];
+            self.diags.push(Diagnostic::error(
+                "E0609",
+                format!("`{}` is private in module `{}`", item, alias),
+                "only `pub` items in an inline module are reachable from outside it".to_string(),
+                format!("add `pub` before `fn {}` in module `{}`", item, alias),
+                Some(alias_span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
         if args.len() != sig.params.len() {
             self.diags.push(Diagnostic::error(
                 "E0104",
@@ -6216,12 +6254,6 @@ impl<'a> Checker<'a> {
         sig.return_type
     }
 
-    fn func_pub_in_scope(&self, name: &str) -> bool {
-        // inline modules are in the same file — all items accessible
-        let _ = name;
-        true
-    }
-
     fn infer_import_call(
         &mut self,
         mod_idx: usize,
@@ -6234,6 +6266,12 @@ impl<'a> Checker<'a> {
             return None;
         };
         let target = &mods[mod_idx];
+        // D-MOD4: `pub use` re-export — `thismod.Item` where Item is defined in a
+        // submodule and re-exported. Redirect to the real definition.
+        if let Some((real_name, real_idx)) = target.reexports.get(name) {
+            let (real_name, real_idx) = (real_name.clone(), *real_idx);
+            return self.infer_import_call(real_idx, &real_name, alias_span, span, args);
+        }
         if target.funcs.contains_key(name) {
             let is_pub = target.func_pub.get(name).copied().unwrap_or(false);
             if !is_pub && mod_idx != self.module_idx {
@@ -6440,6 +6478,18 @@ impl<'a> Checker<'a> {
                 self.infer(&mut a.expr);
             }
             return None;
+        }
+        // E2-M16 / E3403: a `pure fn` cannot reach a non-deterministic std call
+        // (time/random). `jet eval --pure` requires every fn to be `pure`, so
+        // this covers the --pure path too.
+        if self.in_pure && is_nondeterministic_std(module, name) {
+            let api = format!("{}.{}", module_short_name(module), name);
+            self.diags.push(e3403(&api, Some(span)));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            // Return the declared type so the call site doesn't cascade.
+            return std_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
         let sig = std_fixed_sig(module, name);
         match (module, name) {
@@ -9199,6 +9249,210 @@ fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], taken: &mut Has
     }
 }
 
+/// D-MOD2: inside an inline `module M { … }`, a call to a sibling function
+/// `helper(x)` must lower to the mangled `M__helper`. This pre-pass rewrites
+/// such call names so registration, body-checking, and codegen all agree.
+/// Only callee names are rewritten (the unambiguous case); a sibling referenced
+/// as a value resolves through normal name lookup and yields a clean Jet error
+/// rather than leaking to rustc.
+fn mangle_inline_sibling_calls(bundle: &mut ProgramBundle) {
+    for module in bundle.modules.iter_mut() {
+        for item in module.items.iter_mut() {
+            let Item::CodeModule(cm) = item else { continue };
+            let Some(body) = &mut cm.body else { continue };
+            let siblings: HashSet<String> = body
+                .iter()
+                .filter_map(|i| match i {
+                    Item::Func(f) => Some(f.name.clone()),
+                    _ => None,
+                })
+                .collect();
+            if siblings.is_empty() {
+                continue;
+            }
+            for inner in body.iter_mut() {
+                if let Item::Func(f) = inner {
+                    rewrite_inline_calls_stmts(&mut f.body, &siblings, &cm.name);
+                }
+            }
+        }
+    }
+}
+
+fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<String>, modname: &str) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(e) => rewrite_inline_calls_expr(e, siblings, modname),
+            Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
+            Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
+            Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
+            Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::If(ifs) => rewrite_inline_calls_if(ifs, siblings, modname),
+            Stmt::While { cond, body, .. } => {
+                rewrite_inline_calls_expr(cond, siblings, modname);
+                rewrite_inline_calls_stmts(body, siblings, modname);
+            }
+            Stmt::For { kind, body, .. } => {
+                match kind {
+                    ForKind::Range { start, end, step } => {
+                        rewrite_inline_calls_expr(start, siblings, modname);
+                        rewrite_inline_calls_expr(end, siblings, modname);
+                        if let Some(step) = step {
+                            rewrite_inline_calls_expr(step, siblings, modname);
+                        }
+                    }
+                    ForKind::In { collection } => {
+                        rewrite_inline_calls_expr(collection, siblings, modname);
+                    }
+                }
+                rewrite_inline_calls_stmts(body, siblings, modname);
+            }
+            Stmt::Switch { subject, arms, else_body, .. } => {
+                rewrite_inline_calls_expr(subject, siblings, modname);
+                for a in arms.iter_mut() {
+                    rewrite_inline_calls_expr(&mut a.cond, siblings, modname);
+                    rewrite_inline_calls_stmts(&mut a.body, siblings, modname);
+                }
+                if let Some(eb) = else_body {
+                    rewrite_inline_calls_stmts(eb, siblings, modname);
+                }
+            }
+            Stmt::Loop(inner, _) | Stmt::Unsafe { body: inner, .. } => {
+                rewrite_inline_calls_stmts(inner, siblings, modname);
+            }
+        }
+    }
+}
+
+fn rewrite_inline_calls_if(ifs: &mut IfStmt, siblings: &HashSet<String>, modname: &str) {
+    rewrite_inline_calls_expr(&mut ifs.cond, siblings, modname);
+    rewrite_inline_calls_stmts(&mut ifs.then_body, siblings, modname);
+    match &mut ifs.else_branch {
+        Some(ElseBranch::Else(b)) => rewrite_inline_calls_stmts(b, siblings, modname),
+        Some(ElseBranch::ElseIf(next)) => rewrite_inline_calls_if(next, siblings, modname),
+        None => {}
+    }
+}
+
+fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<String>, modname: &str) {
+    match expr {
+        Expr::Call(c) => {
+            if siblings.contains(&c.name) {
+                c.name = format!("{}__{}", modname, c.name);
+            }
+            for a in c.args.iter_mut() {
+                rewrite_inline_calls_expr(&mut a.expr, siblings, modname);
+            }
+        }
+        Expr::PtrFromAddr { addr, .. } => rewrite_inline_calls_expr(addr, siblings, modname),
+        Expr::Ident(_, _)
+        | Expr::Char(_, _)
+        | Expr::Int(_, _)
+        | Expr::Float(_, _)
+        | Expr::Bool(_, _)
+        | Expr::Absent(_)
+        | Expr::Todo { .. } => {}
+        Expr::Str(parts, _) => {
+            for p in parts.iter_mut() {
+                if let StrPart::Interp(e) = p {
+                    rewrite_inline_calls_expr(e, siblings, modname);
+                }
+            }
+        }
+        Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::Field(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _)
+        | Expr::Try(inner, _, _) => rewrite_inline_calls_expr(inner, siblings, modname),
+        Expr::OptField { base, .. } => rewrite_inline_calls_expr(base, siblings, modname),
+        Expr::MethodCall { receiver, args, .. } => {
+            rewrite_inline_calls_expr(receiver, siblings, modname);
+            for a in args.iter_mut() {
+                rewrite_inline_calls_expr(&mut a.expr, siblings, modname);
+            }
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, _, e) in fields.iter_mut() {
+                rewrite_inline_calls_expr(e, siblings, modname);
+            }
+        }
+        Expr::EnumLit { args, .. } => {
+            for a in args.iter_mut() {
+                match a {
+                    EnumLitArg::Positional(e) | EnumLitArg::Named { expr: e, .. } => {
+                        rewrite_inline_calls_expr(e, siblings, modname);
+                    }
+                }
+            }
+        }
+        Expr::OrFallback { value, fallback, .. } => {
+            rewrite_inline_calls_expr(value, siblings, modname);
+            match fallback {
+                OrFallback::Value(e) => rewrite_inline_calls_expr(e, siblings, modname),
+                OrFallback::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
+                OrFallback::Return(None, _) | OrFallback::Panic { .. } => {}
+            }
+        }
+        Expr::PatternTest { subject, .. } => {
+            rewrite_inline_calls_expr(subject, siblings, modname)
+        }
+        Expr::Binary(_, l, r, _) => {
+            rewrite_inline_calls_expr(l, siblings, modname);
+            rewrite_inline_calls_expr(r, siblings, modname);
+        }
+        Expr::ListLit(elems, _) => {
+            for e in elems.iter_mut() {
+                rewrite_inline_calls_expr(e, siblings, modname);
+            }
+        }
+        Expr::TupleLit(fields, _, _) => {
+            for (_, e) in fields.iter_mut() {
+                rewrite_inline_calls_expr(e, siblings, modname);
+            }
+        }
+        Expr::MapLit(entries, _) => {
+            for (k, v) in entries.iter_mut() {
+                rewrite_inline_calls_expr(k, siblings, modname);
+                rewrite_inline_calls_expr(v, siblings, modname);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            rewrite_inline_calls_expr(base, siblings, modname);
+            rewrite_inline_calls_expr(index, siblings, modname);
+        }
+        Expr::Slice { base, start, end, .. } => {
+            rewrite_inline_calls_expr(base, siblings, modname);
+            rewrite_inline_calls_expr(start, siblings, modname);
+            rewrite_inline_calls_expr(end, siblings, modname);
+        }
+        Expr::CallValue { callee, args, .. } => {
+            rewrite_inline_calls_expr(callee, siblings, modname);
+            for a in args.iter_mut() {
+                rewrite_inline_calls_expr(&mut a.expr, siblings, modname);
+            }
+        }
+        Expr::Lambda(lam) => match &mut lam.body {
+            LambdaBody::Expr(e) => rewrite_inline_calls_expr(e, siblings, modname),
+            LambdaBody::Block(stmts) => rewrite_inline_calls_stmts(stmts, siblings, modname),
+        },
+        Expr::If { cond, then_body, then_value, else_body, else_value, .. } => {
+            rewrite_inline_calls_expr(cond, siblings, modname);
+            rewrite_inline_calls_stmts(then_body, siblings, modname);
+            rewrite_inline_calls_expr(then_value, siblings, modname);
+            rewrite_inline_calls_stmts(else_body, siblings, modname);
+            rewrite_inline_calls_expr(else_value, siblings, modname);
+        }
+        Expr::FanOut { callee, items, .. } => {
+            rewrite_inline_calls_expr(callee, siblings, modname);
+            for item in items.iter_mut() {
+                rewrite_inline_calls_expr(item, siblings, modname);
+            }
+        }
+    }
+}
+
 fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
     matches!(a, Expr::Ident(n, _) if n == name)
 }
@@ -10208,6 +10462,9 @@ pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) 
 
 fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding: bool) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
+    // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
+    // registration/checking/codegen sees the bodies.
+    mangle_inline_sibling_calls(bundle);
     let mut states: Vec<ModuleState> = (0..bundle.modules.len())
         .map(|_| ModuleState {
             funcs: HashMap::new(),
@@ -10227,6 +10484,7 @@ fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding
             code_modules: HashMap::new(),
             unqualified: HashMap::new(),
             unqualified_file: HashMap::new(),
+            reexports: HashMap::new(),
         })
         .collect();
 
@@ -10423,107 +10681,13 @@ fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding
         );
     }
 
-    // D-MOD3: second pass — process Unqualified imports after all module aliases and
-    // inline code-modules are registered (so we can validate item membership).
-    for (idx, module) in bundle.modules.iter().enumerate() {
-        for imp in &module.imports {
-            let ImportKind::Unqualified { module_alias, module_alias_span, items, .. } = &imp.kind else {
-                continue;
-            };
-            let st = &mut states[idx];
-            if st.code_modules.contains_key(module_alias.as_str()) {
-                // Inline module: items are mangled as `{alias}__{item}`.
-                for item in items {
-                    let mangled = format!("{}__{}", module_alias, item);
-                    if !st.funcs.contains_key(&mangled) {
-                        diags.push(Diagnostic::error(
-                            "E0611",
-                            format!("`{}` is not defined in module `{}`", item, module_alias),
-                            "check the module body for the item you're importing".to_string(),
-                            "make sure the name is spelled correctly".to_string(),
-                            Some(*module_alias_span),
-                        ));
-                    } else if !st.func_pub.get(&mangled).copied().unwrap_or(false) {
-                        diags.push(Diagnostic::error(
-                            "E0609",
-                            format!("`{}` is private in module `{}`", item, module_alias),
-                            "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!("add `pub` before `fn {}` in module `{}`", item, module_alias),
-                            Some(*module_alias_span),
-                        ));
-                    } else {
-                        st.unqualified.insert(item.clone(), mangled);
-                    }
-                }
-            } else if module_alias == "core" || module_alias == "jet" {
-                // Std namespace prefix: `use core.mem` → bind each item as a std import.
-                // Each item `x` becomes `core.x` in the known-modules table.
-                let st = &mut states[idx];
-                for item in items {
-                    let full = format!("core.{}", item);
-                    if !loader::is_known_std_module(&full) {
-                        diags.push(Diagnostic::error(
-                            "E1001",
-                            format!("there is no core module `{}`", full),
-                            "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
-                            format!("import one of: {}", loader::std_modules_list()),
-                            Some(*module_alias_span),
-                        ));
-                    } else if st.std_imports.contains_key(item) {
-                        diags.push(Diagnostic::error(
-                            "E0105",
-                            format!("the import name `{}` is used twice", item),
-                            "each import needs a unique namespace name in this file".to_string(),
-                            format!("rename one with `{} alias`", syntax::KW_AS),
-                            Some(imp.alias_span),
-                        ));
-                    } else {
-                        st.std_imports.insert(item.clone(), full);
-                    }
-                }
-            } else if st.imports.contains_key(module_alias.as_str()) {
-                // File module: look up items in the target module's state.
-                let target_idx = st.imports[module_alias.as_str()];
-                for item in items {
-                    let is_pub = states[target_idx].func_pub.get(item).copied().unwrap_or(false);
-                    let exists = states[target_idx].funcs.contains_key(item);
-                    if !exists {
-                        diags.push(Diagnostic::error(
-                            "E0611",
-                            format!("`{}` is not defined in module `{}`", item, module_alias),
-                            "check the module for the item you're importing".to_string(),
-                            "make sure the name is spelled correctly".to_string(),
-                            Some(*module_alias_span),
-                        ));
-                    } else if !is_pub {
-                        diags.push(Diagnostic::error(
-                            "E0609",
-                            format!("`{}` is private in module `{}`", item, module_alias),
-                            "only `pub` items can be brought into scope with `use`".to_string(),
-                            format!("add `pub` before `fn {}` in the imported file", item),
-                            Some(*module_alias_span),
-                        ));
-                    } else {
-                        states[idx].unqualified_file.insert(item.clone(), (item.clone(), target_idx));
-                    }
-                }
-            } else {
-                // Module alias not found — E0610.
-                diags.push(Diagnostic::error(
-                    "E0610",
-                    format!("no module named `{}` in scope", module_alias),
-                    "the alias must refer to a module imported earlier in this file".to_string(),
-                    format!("add `import … as {}`  before this `use`", module_alias),
-                    Some(*module_alias_span),
-                ));
-            }
-        }
-    }
+    // D-MOD3/4: Unqualified imports (`use alias.Item`) are processed in a
+    // dedicated pass *after* file-module aliases land in `st.imports` below.
 
     for (idx, module) in bundle.modules.iter().enumerate() {
         let st = &mut states[idx];
         for imp in &module.imports {
-            // Unqualified imports are handled in the dedicated pass above.
+            // Unqualified imports are handled in the dedicated pass below.
             if matches!(&imp.kind, ImportKind::Unqualified { .. }) {
                 continue;
             }
@@ -10592,6 +10756,111 @@ fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding
                     st.imports.insert(alias, target);
                 }
                 Err(d) => diags.push(d),
+            }
+        }
+    }
+
+    // D-MOD3/4: process `use alias.Item` unqualified imports now that file-module
+    // aliases are registered in `st.imports`. `pub use` additionally re-exports the
+    // item onto this module's public surface (`reexports`).
+    for (idx, module) in bundle.modules.iter().enumerate() {
+        for imp in &module.imports {
+            let ImportKind::Unqualified { module_alias, module_alias_span, items, .. } = &imp.kind else {
+                continue;
+            };
+            let st = &mut states[idx];
+            if st.code_modules.contains_key(module_alias.as_str()) {
+                // Inline module: items are mangled as `{alias}__{item}`.
+                for item in items {
+                    let mangled = format!("{}__{}", module_alias, item);
+                    if !st.funcs.contains_key(&mangled) {
+                        diags.push(Diagnostic::error(
+                            "E0611",
+                            format!("`{}` is not defined in module `{}`", item, module_alias),
+                            "check the module body for the item you're importing".to_string(),
+                            "make sure the name is spelled correctly".to_string(),
+                            Some(*module_alias_span),
+                        ));
+                    } else if !st.func_pub.get(&mangled).copied().unwrap_or(false) {
+                        diags.push(Diagnostic::error(
+                            "E0609",
+                            format!("`{}` is private in module `{}`", item, module_alias),
+                            "only `pub` items can be brought into scope with `use`".to_string(),
+                            format!("add `pub` before `fn {}` in module `{}`", item, module_alias),
+                            Some(*module_alias_span),
+                        ));
+                    } else {
+                        st.unqualified.insert(item.clone(), mangled.clone());
+                        if imp.is_pub {
+                            st.reexports.insert(item.clone(), (mangled, idx));
+                        }
+                    }
+                }
+            } else if module_alias == "core" || module_alias == "jet" {
+                // Std namespace prefix: `use core.mem` → bind each item as a std import.
+                // Each item `x` becomes `core.x` in the known-modules table.
+                let st = &mut states[idx];
+                for item in items {
+                    let full = format!("core.{}", item);
+                    if !loader::is_known_std_module(&full) {
+                        diags.push(Diagnostic::error(
+                            "E1001",
+                            format!("there is no core module `{}`", full),
+                            "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
+                            format!("import one of: {}", loader::std_modules_list()),
+                            Some(*module_alias_span),
+                        ));
+                    } else if st.std_imports.contains_key(item) {
+                        diags.push(Diagnostic::error(
+                            "E0105",
+                            format!("the import name `{}` is used twice", item),
+                            "each import needs a unique namespace name in this file".to_string(),
+                            format!("rename one with `{} alias`", syntax::KW_AS),
+                            Some(imp.alias_span),
+                        ));
+                    } else {
+                        st.std_imports.insert(item.clone(), full);
+                    }
+                }
+            } else if st.imports.contains_key(module_alias.as_str()) {
+                // File module: look up items in the target module's state.
+                let target_idx = st.imports[module_alias.as_str()];
+                let is_reexport = imp.is_pub;
+                for item in items {
+                    let is_pub = states[target_idx].func_pub.get(item).copied().unwrap_or(false);
+                    let exists = states[target_idx].funcs.contains_key(item);
+                    if !exists {
+                        diags.push(Diagnostic::error(
+                            "E0611",
+                            format!("`{}` is not defined in module `{}`", item, module_alias),
+                            "check the module for the item you're importing".to_string(),
+                            "make sure the name is spelled correctly".to_string(),
+                            Some(*module_alias_span),
+                        ));
+                    } else if !is_pub {
+                        diags.push(Diagnostic::error(
+                            "E0609",
+                            format!("`{}` is private in module `{}`", item, module_alias),
+                            "only `pub` items can be brought into scope with `use`".to_string(),
+                            format!("add `pub` before `fn {}` in the imported file", item),
+                            Some(*module_alias_span),
+                        ));
+                    } else {
+                        states[idx].unqualified_file.insert(item.clone(), (item.clone(), target_idx));
+                        if is_reexport {
+                            states[idx].reexports.insert(item.clone(), (item.clone(), target_idx));
+                        }
+                    }
+                }
+            } else {
+                // Module alias not found — E0610.
+                diags.push(Diagnostic::error(
+                    "E0610",
+                    format!("no module named `{}` in scope", module_alias),
+                    "the alias must refer to a module imported earlier in this file".to_string(),
+                    format!("add `import … as {}`  before this `use`", module_alias),
+                    Some(*module_alias_span),
+                ));
             }
         }
     }
@@ -11173,6 +11442,28 @@ fn check_module_bodies(
                 ));
                 t.body = synthetic.body;
             }
+            Item::CodeModule(cm) => {
+                // D-MOD2: type-check inline-module function bodies. Sibling calls were
+                // already rewritten to mangled names by `mangle_inline_sibling_calls`,
+                // and the mangled signatures are registered in `st.funcs`.
+                if let Some(body) = &mut cm.body {
+                    for inner in body.iter_mut() {
+                        if let Item::Func(f) = inner {
+                            diags.extend(check_func_body_bundle(
+                                f,
+                                module_idx,
+                                states,
+                                None,
+                                &ct_funcs,
+                                &ct_externs,
+                                &ct_base_dir,
+                                &ct_globals,
+                                freestanding,
+                            ));
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -11204,6 +11495,7 @@ fn check_func_body_bundle(
         code_modules: &st.code_modules,
         unqualified: &st.unqualified,
         unqualified_file: &st.unqualified_file,
+        func_pub: &st.func_pub,
         diags: Vec::new(),
         scopes: vec![HashMap::new()],
         moved: HashMap::new(),
@@ -11212,6 +11504,7 @@ fn check_func_body_bundle(
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
+        in_pure: f.is_pure,
         ret: f.return_type.clone(),
         view_return: f.is_view_return,
         fn_name: f.name.clone(),
@@ -12030,6 +12323,20 @@ fn is_impure_builtin(name: &str) -> bool {
     matches!(
         name,
         "print" | "eprint" | "input" | "read_all_input"
+    )
+}
+
+/// E3403: std calls that are non-deterministic — their result depends on wall
+/// clock or RNG, so they cannot appear in a pure evaluation. Keyed on the
+/// resolved `(module, method)` pair (std calls are method calls on a module
+/// alias, not bare names). `jet.time.format` is pure (Int + pattern → String)
+/// and intentionally excluded.
+fn is_nondeterministic_std(module: &str, method: &str) -> bool {
+    matches!(
+        (module, method),
+        ("core.time", "now" | "sleep" | "start")
+            | ("jet.time", "now")
+            | ("core.random", "int" | "float" | "pick" | "shuffle" | "seed")
     )
 }
 

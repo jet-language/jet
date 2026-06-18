@@ -17,6 +17,8 @@ Epoch 2 GA is [`../epoch-2/README.md`](../epoch-2/README.md) (E2-M17).
 | [`plugin-api.md`](plugin-api.md) | D-DX5-B | Formal `jet` plugin ABI (PATH discovery stays Epoch 2) |
 | [`user-derives-reflection.md`](user-derives-reflection.md) | S56, layer 3 | User-defined `@derive` / typed reflection |
 | [`c-header-bindings.md`](c-header-bindings.md) | D-CBIND2…6 ✅ ratified | `jet bind` engine — surface in **E2-M14** / S59 |
+| [`package-build-from-source.md`](package-build-from-source.md) | M9 wave-2 | jetpack compiles a dependency from its Jet source in `realize()`; then `jet.regex`/`jet.archive`/`jet.db` ship as real packages (owner, 2026-06-18: → Epoch 3) |
+| [`testing-docs-ergonomics.md`](testing-docs-ergonomics.md) | D-TEST1, D-TEST4 | property testing (w/ shrinking), doctests, coverage — syntax-gated M11 niceties (owner, 2026-06-18: → Epoch 3) |
 
 ---
 

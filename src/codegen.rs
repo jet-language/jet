@@ -456,6 +456,9 @@ struct Cx {
     test_mode: bool,
     /// Import alias -> Rust module name (`user_scoring`).
     import_mods: HashMap<String, String>,
+    /// D-MOD4: `(alias, item)` -> `(real Rust module, real fn)` for `pub use`
+    /// re-exports, so `text.wrap` lowers to the module that actually defines it.
+    reexport_calls: HashMap<(String, String), (String, String)>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
     /// Import alias -> compiler-known std module (`std.fs`, `std.json`, ...).
@@ -482,7 +485,7 @@ struct Cx {
     current_fn: std::cell::RefCell<String>,
 }
 
-const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_panic_rich, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
+const MOD_USE: &str = "use super::{JetShow, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
 
 fn is_json_type_name(name: &str) -> bool {
     name == syntax::TYPE_JSON || name == "Json"
@@ -1054,6 +1057,7 @@ fn build_cx_items(
         file: file.to_string(),
         test_mode: false,
         import_mods: HashMap::new(),
+        reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
         std_imports: HashMap::new(),
         used_std: HashSet::new(),
@@ -3429,12 +3433,30 @@ fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> String {
         }
         Expr::Ok(inner, _) => format!("Ok({})", emit_expr(cx, inner, env)),
         Expr::Err(inner, _) => format!("Err({})", emit_expr(cx, inner, env)),
-        Expr::Try(inner, _, via_fallible) => {
+        Expr::Try(inner, span, via_fallible) => {
+            // E3002 (E2-M12): wrap each `?` so a propagating Err prints one trace
+            // frame in debug builds. jet_trace_err returns the Result unchanged.
+            let (line, _col) = span_line_col(&cx.src, span.start);
+            let file = escape_rust_str(&cx.file);
+            let fn_name = cx.current_fn.borrow().clone();
+            let fn_name = escape_rust_str(&fn_name);
             if *via_fallible {
                 // S80/D-LIB3: error type implements Fallible; convert via .to_error()
-                format!("{}.map_err(|e| e.to_error())?", emit_expr(cx, inner, env))
+                format!(
+                    "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
+                    emit_expr(cx, inner, env),
+                    file,
+                    line,
+                    fn_name
+                )
             } else {
-                format!("{}?", emit_expr(cx, inner, env))
+                format!(
+                    "jet_trace_err({}, {}, {}, {})?",
+                    emit_expr(cx, inner, env),
+                    file,
+                    line,
+                    fn_name
+                )
             }
         }
         Expr::OrFallback {
@@ -4288,6 +4310,23 @@ fn emit_method_call(
         if let Some(module) = cx.std_imports.get(alias) {
             return emit_std_call(cx, module, method, args, env);
         }
+        // D-MOD4: `pub use` re-export — emit the module that really defines the item.
+        if let Some((real_mod, real_fn)) =
+            cx.reexport_calls.get(&(alias.clone(), method.to_string()))
+        {
+            let sig = cx
+                .import_sigs
+                .get(&(alias.clone(), method.to_string()))
+                .map(|s| s.as_slice());
+            let arg_str = emit_call_args(cx, sig, args, env);
+            return format!(
+                "{}{}::{}({})",
+                cx.root_prefix,
+                real_mod,
+                mangle(real_fn),
+                arg_str
+            );
+        }
         if let Some(mod_name) = cx.import_mods.get(alias) {
             let sig = cx
                 .import_sigs
@@ -4534,6 +4573,53 @@ fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, 
     map
 }
 
+/// D-MOD4: build the `pub use` re-export call map for `module_idx`. For each
+/// imported module `A` (e.g. a directory module `text`), scan its own imports for
+/// `pub use sub.Item` and map `(A, Item)` to the Rust module that really defines
+/// it (`user_wrap`, `wrap`). Resolution is one level (matches sema's `reexports`).
+fn reexport_call_map(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<(String, String), (String, String)> {
+    let mut map = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+            continue;
+        }
+        let alias = loader::import_alias(imp);
+        let Ok(target_idx) = loader::resolve_import_target(bundle, module_idx, imp) else {
+            continue;
+        };
+        let target = &bundle.modules[target_idx];
+        for reimp in &target.imports {
+            let ImportKind::Unqualified { module_alias, items, .. } = &reimp.kind else {
+                continue;
+            };
+            if !reimp.is_pub {
+                continue;
+            }
+            // Resolve `module_alias` within the target module's own imports.
+            let real_idx = target
+                .imports
+                .iter()
+                .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
+                .filter(|i2| loader::import_alias(i2) == *module_alias)
+                .find_map(|i2| loader::resolve_import_target(bundle, target_idx, i2).ok());
+            if let Some(real_idx) = real_idx {
+                let real_mod = format!("user_{}", bundle.modules[real_idx].alias);
+                for item in items {
+                    map.insert(
+                        (alias.clone(), item.clone()),
+                        (real_mod.clone(), item.clone()),
+                    );
+                }
+            }
+        }
+    }
+    map
+}
+
 fn std_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
@@ -4597,8 +4683,15 @@ fn unqualified_import_maps(
                 let key = format!("{}__{}", module_alias, item);
                 inline_map.insert(item.clone(), key);
             }
-        } else if let Ok(target) = loader::resolve_import_target(bundle, module_idx, imp) {
-            // File module.
+        } else if let Some(target) = module
+            .imports
+            .iter()
+            .filter(|i2| !matches!(i2.kind, ImportKind::Unqualified { .. }))
+            .filter(|i2| loader::import_alias(i2) == *module_alias)
+            .find_map(|i2| loader::resolve_import_target(bundle, module_idx, i2).ok())
+        {
+            // File module: resolve the file-import whose alias matches, then point
+            // each unqualified item at that Rust module.
             let rust_mod = format!("user_{}", bundle.modules[target].alias);
             for item in items {
                 file_map.insert(item.clone(), (rust_mod.clone(), item.clone()));
@@ -4651,6 +4744,27 @@ fn import_sig_map(
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+    // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
+    // function's parameter conventions under the re-exporting alias, or calls
+    // through the re-export would pass by value where a borrow is expected.
+    for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
+        let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
+        if let Some(real) = bundle.modules.iter().find(|m| m.alias == stem) {
+            for it in &real.items {
+                if let Item::Func(f) = it {
+                    if f.is_pub && f.name == real_fn {
+                        map.insert(
+                            (alias.clone(), item.clone()),
+                            f.params
+                                .iter()
+                                .map(|p| (p.convention, p.ty.clone()))
+                                .collect(),
+                        );
+                    }
+                }
             }
         }
     }
@@ -4757,6 +4871,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
             &extern_funcs,
         );
         cx.import_mods = import_mod_map(bundle, i);
+        cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
         cx.std_imports = std_import_map(bundle, i);
         cx.used_std = bundle.used_std.clone();
@@ -4776,6 +4891,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         &extern_funcs,
     );
     cx.import_mods = import_mods;
+    cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.std_imports = std_import_map(bundle, bundle.entry);
     cx.used_std = bundle.used_std.clone();
@@ -4836,6 +4952,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         );
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
+        cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
         cx.std_imports = std_import_map(bundle, i);
         cx.used_std = bundle.used_std.clone();
@@ -4856,6 +4973,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     );
     cx.test_mode = true;
     cx.import_mods = import_mods;
+    cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
     cx.std_imports = std_import_map(bundle, bundle.entry);
     cx.used_std = bundle.used_std.clone();

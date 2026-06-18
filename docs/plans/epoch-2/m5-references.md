@@ -4,7 +4,7 @@
 soundness matrix complete, E2301/E2302/E2303/E2304/L2301 registered+tested,
 `35_zerocopy.jet` golden-pinned, L2301 inlay hints wired, soundness fuzz target
 green. D-REF1/D-REF3 ✅ ratified; **D-REF2 (arenas) OPEN → not implemented** (I7);
-D-PAT1/2 deferred. See EPOCH2-IMPL-PROGRESS.md.
+D-PAT1/2 deferred. See EPOCH2-STATUS.md.
 Was: draft — **blocked on D-REF1…D-REF3** (Group M5). Pattern-matching
 ergonomics (Group 15: D-PAT1 nested patterns, D-PAT2 guards) may ride this
 window if ratified; otherwise they stay deferred.

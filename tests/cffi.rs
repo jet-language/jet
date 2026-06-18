@@ -55,6 +55,83 @@ const char *jetc_greeting(void) { return "hi from C"; }
     Some((dir.to_path_buf(), "jetc".to_string()))
 }
 
+/// E2-M14: the native `jet bind` backend turns a real C header into a working
+/// `@bindgen` cache that compiles, links against the C library, and runs.
+#[test]
+fn jet_bind_native_backend_end_to_end() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping jet_bind_native_backend (need rustc)");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cbind_e2e_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache).unwrap();
+
+    let Some((lib_dir, lib_name)) = build_c_lib(&root) else {
+        eprintln!("note: skipping jet_bind_native_backend (no C compiler)");
+        return;
+    };
+
+    // A real header for the C library — translated by the native backend.
+    let header = r#"
+        #include <stdint.h>
+        /* arithmetic */
+        long long jetc_add_ints(long long a, long long b);
+        const char *jetc_greeting(void);
+    "#;
+    let result = jet::cbind::generate(header, "jetc").expect("native bind backend");
+    assert!(result.skipped.is_empty(), "unexpected skips: {:?}", result.skipped);
+    assert_eq!(result.bound.len(), 2);
+    // The cache uses the real C symbol names verbatim (no aliasing).
+    assert!(result.source.contains("fn jetc_add_ints(a: Int, b: Int) -> Int = \"jetc_add_ints\";"));
+    assert!(result.source.contains("fn jetc_greeting() -> String = \"jetc_greeting\";"));
+    fs::write(cache.join("jetc.jet"), &result.source).unwrap();
+
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        r#"use c.jetc as jc;
+
+fn main() {
+    print(jc.jetc_add_ints(2, 40));
+    print(jc.jetc_greeting());
+}
+"#,
+    )
+    .unwrap();
+
+    let src = fs::read_to_string(&main).unwrap();
+    let out = jet::compile_with_path(&src, main.to_str().unwrap())
+        .unwrap_or_else(|d| panic!("front end rejected bind-generated program:\n{:?}", d));
+
+    let rs = root.join("main.rs");
+    fs::write(&rs, &out.rust).unwrap();
+    let bin = root.join("main_bin");
+    let status = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .arg("-L")
+        .arg(format!("native={}", lib_dir.display()))
+        .arg("-l")
+        .arg(&lib_name)
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "I2: rustc rejected bind-generated C-FFI code (jet bug):\n{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(run.status.success(), "bind-generated program failed at runtime");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\nhi from C\n");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn cffi_end_to_end_links_and_runs() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();

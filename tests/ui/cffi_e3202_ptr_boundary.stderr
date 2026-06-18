@@ -1,0 +1,7 @@
+Error [E3202]: Type `Ptr<Int>` cannot cross the C boundary here.
+  --> tests/ui/cffi_e3202_ptr_boundary.jet:2:19
+    |
+  2 |     fn use_ptr(p: Ptr<Int>) = "DemoUsePtr";
+    |                   ^^^
+ Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58).
+ Fix: Move the call inside `@unsafe`, or change the type to a C-safe value type.

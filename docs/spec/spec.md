@@ -386,6 +386,45 @@ on demand, keeping them offline and deterministic, the same flow as pre-fetched
 deps. Resolver: `src/loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
 (offline realize → `use` → call) and `tests/ui/use_unrealized_library/`.
 
+## Code module system (D-MOD1–4, done 2026-06-18)
+
+Jet's module system is **Rust's, with two surface swaps**: the keyword is
+`module` (not `mod`) and scoping uses `.` (not `::`). The `use "path" as alias`
+form above stays as the ceremony-free single-file entry point.
+
+**Declaration forms (D-MOD1).** `module math;` declares a file module — the
+loader searches the using file's directory for `math.jet`, then `math/module.jet`;
+neither found is **E0607**, both found is **E0606** (ambiguous). `module math
+{ … }` is an **inline module** — its items live in the `math` namespace of the
+containing file, no file lookup. `module` is shared with the JetOS declaration
+(U3); the parser disambiguates by peeking past `{` (a code module body opens with
+`fn`/`struct`/`pub`/… or `}`, a JetOS body with `sources`/`imports`/a
+contribution path) and by the `;` form, which is always a code module.
+
+**Access (D-MOD2).** Qualified `math.clamp(…)` always works. Optionally bring
+items unqualified with `use math.clamp;` or a group `use math.{clamp, lerp};`.
+Wildcards (`use math.*`) are rejected — **E0612**. Unqualified import of an
+undefined item is **E0611**; of an item in a module not in scope, **E0610**.
+
+**Visibility (D-MOD3).** Private by default; `pub` exports. A non-`pub` item is
+unreachable from outside its file or inline module: `math.helper()` where
+`helper` is private is **E0609** (inline) / **E0605** (cross-file). Inline-module
+function bodies are fully type-checked, and a sibling call (`area` → `square`)
+lowers to the module-mangled name (`geo__square`), so private siblings never
+leak into the file's namespace or to rustc.
+
+**Re-export (D-MOD4 — Rust-exact `pub use`).** A directory module's `module.jet`
+exposes a submodule item only by re-exporting it: `pub use wrap.wrap;`. Nothing
+auto-surfaces — a `pub`-but-not-re-exported item stays internal to the directory.
+`text.wrap(…)` then resolves through the re-export to the defining module, with
+the real function's borrow/move conventions preserved.
+
+Examples: `examples/features/42_inline_module`, `43_module_file`,
+`44_module_dir`, `45_module_use_unqualified`, `46_module_use_group`,
+`47_module_reexport`, `48_module_file_use`, `49_module_inline_sibling`. UI
+fixtures: `tests/ui/module_{missing,private,unknown_namespace,wildcard,
+inline_private,inline_type_error}`.
+
 ## M6 phase 4 — `--small` + LSP v0 (done)
 
 **`jet build --small`** (S15): `opt-level=z`, fat LTO, `panic=abort`, stripped symbols.

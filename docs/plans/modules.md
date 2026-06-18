@@ -1,7 +1,11 @@
 # Plan: Jet module system
 
-**Status:** design ratified (D-MOD1 A, D-MOD2 A, D-MOD3 A, D-MOD4 pending) — ready to plan, not yet ready to implement.
-**Blocks:** multi-file projects beyond the current `use "path" as alias` primitive.
+**Status:** ✅ implemented and verified 2026-06-18 (D-MOD1 A, D-MOD2 A, D-MOD3 A,
+D-MOD4 Rust-exact `pub use`). Inline modules (incl. sibling calls + body
+type-checking), file modules, directory modules, `use alias.Item` / group
+imports for both inline and file modules, and `pub use` re-export all work
+end-to-end; examples `42`–`49` in `examples/features/` are the executable spec.
+**Was:** design ratified — ready to plan, not yet ready to implement.
 **Depends on:** nothing — builds on existing loader infrastructure.
 
 ---
@@ -48,7 +52,7 @@ The parser disambiguates by peeking past the `{` before committing to a parse br
 `module math;` in `src/main.jet` searches in order:
 
 1. `src/math.jet` — file module
-2. `src/math/mod.jet` — directory module
+2. `src/math/module.jet` — directory module
 
 If neither exists, compile error pointing at the `module math;` line. If both exist, compile error (ambiguous).
 
@@ -113,7 +117,7 @@ Unqualified { module_alias: String, items: Vec<String>, is_reexport: bool },
 When the sema or loader encounters `Item::CodeModule { body: None, name }`:
 
 1. Compute the search paths relative to the current file's directory.
-2. Try `{dir}/{name}.jet`, then `{dir}/{name}/mod.jet`.
+2. Try `{dir}/{name}.jet`, then `{dir}/{name}/module.jet`.
 3. On success: load the file, parse it, attach it to the `ProgramBundle` as a new `LoadedModule` with `alias = name`.
 4. On failure: emit a new diagnostic (claim a code in `E05xx` block — module errors).
 
@@ -173,13 +177,19 @@ File-based modules (`module math;`) are already handled by the loader: they beco
 
 ## Diagnostics to register (claim codes)
 
+Implemented codes (the E0501–E0505 block was already taken by collection-literal
+errors, so the module diagnostics use the E0606–E0612 block):
+
 | Code | Message | Trigger |
 |---|---|---|
-| E0501 | `module 'math' not found` | `module math;` but neither `math.jet` nor `math/mod.jet` exists |
-| E0502 | `module 'math' is ambiguous` | both `math.jet` and `math/mod.jet` exist |
-| E0503 | `'clamp' is not exported by 'math'` | `use math.clamp` but `clamp` is private |
-| E0504 | `no module named 'math' in scope` | `use math.clamp` but `math` was never declared |
-| E0505 | `'math' is not a module` | `use math.clamp` but `math` is a variable |
+| E0605 | `secret` exists but is private to its file | cross-file access to a non-`pub` item |
+| E0606 | ambiguous module name | both `math.jet` and `math/module.jet` exist |
+| E0607 | `module 'math' not found` | `module math;` but neither `math.jet` nor `math/module.jet` exists |
+| E0608 | function not defined in inline code module | `math.nope()` where `math` is inline |
+| E0609 | `clamp` is private in module `math` | `use math.clamp` / `math.clamp()` but `clamp` not `pub` |
+| E0610 | no module named `math` in scope | `use math.clamp` but `math` was never imported |
+| E0611 | `clamp` is not defined in module `math` | `use math.clamp` but `clamp` doesn't exist |
+| E0612 | wildcard imports not supported | `use math.*` |
 
 ---
 
@@ -193,13 +203,13 @@ Each test is an `examples/` file + expected output, enforced by golden tests.
 
 3. **File module declaration** — `module math;` in `main.jet`, `math.jet` with `pub fn clamp`. Call `math.clamp`. Output: clamped value.
 
-4. **Directory module** — `module text;` → finds `text/mod.jet` which declares `module wrap;` → finds `text/wrap.jet`. Call `text.wrap`. Output: wrapped string.
+4. **Directory module** — `module text;` → finds `text/module.jet` which declares `module wrap;` → finds `text/wrap.jet`. Call `text.wrap`. Output: wrapped string.
 
 5. **`use` unqualified** — `use math.clamp;` after `module math;`, then call `clamp(…)` unqualified.
 
 6. **`use` group** — `use math.{clamp, lerp};`, call both unqualified.
 
-7. **`pub use` re-export** — `text/mod.jet` with `pub use wrap.wrap;`; caller imports `text` and calls `text.wrap` directly.
+7. **`pub use` re-export** — `text/module.jet` with `pub use wrap.wrap;`; caller imports `text` and calls `text.wrap` directly.
 
 8. **Missing module error** — `module missing;` with no matching file → E0501.
 

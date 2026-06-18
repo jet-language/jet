@@ -223,3 +223,45 @@ fn main() {
         &out.rust[..out.rust.len().min(500)]
     );
 }
+
+#[test]
+fn error_return_trace_frames() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc { return; }
+
+    // parse_age originates an Err; `?` in load and again in double each append
+    // one E3002 frame as the error propagates. main catches it, so exit is 0.
+    let src = r#"
+enum ParseError {
+    Empty;
+    BadDigit(String);
+}
+fn parse_age(raw: String) -> Int ? ParseError {
+    if raw == "" {
+        return err(ParseError.Empty);
+    }
+    return ok(42);
+}
+fn load(raw: String) -> Int ? ParseError {
+    val n = parse_age(raw)?;
+    return ok((n * 2));
+}
+fn double(raw: String) -> Int ? ParseError {
+    val n = load(raw)?;
+    return ok((n * 2));
+}
+fn main() {
+    when double("") {
+        | it == ok(n) { print(n); }
+        | it == err(e) { print("failed"); }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_debug("error_trace", src);
+    assert_eq!(code, 0, "program should exit 0 (error caught): {stderr}");
+    assert!(stdout.contains("failed"), "error not caught: {stdout}");
+    // Two propagation frames, innermost (load) first.
+    assert!(stderr.contains("error propagated from: load"), "missing load frame: {stderr}");
+    assert!(stderr.contains("error propagated from: double"), "missing double frame: {stderr}");
+    assert!(stderr.contains("via ?"), "missing `via ?` suffix: {stderr}");
+}

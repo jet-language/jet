@@ -7,6 +7,7 @@
 
 pub mod ast;
 pub mod build_cache;
+pub mod cbind;
 pub mod cffi;
 pub mod cli;
 pub mod codegen;

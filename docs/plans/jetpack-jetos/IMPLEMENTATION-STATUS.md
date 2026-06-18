@@ -50,13 +50,13 @@ Branch `jetos-ratified-arc` off `master` @ `3e6be24`. Not yet merged to `master`
 
 | Item | Status | Gated on |
 |---|---|---|
-| **C FFI real bind backend** — `jet bind`/auto-bind currently return **E3208** with a hand-overlay workaround | stubbed (honest) | **D-CBIND3** bindgen helper = an owner-approved crate added to `Cargo.toml`. Deliberately NOT added (I6). |
+| **C FFI real bind backend** — `jet bind` translates a C header into a `@bindgen` cache | ✅ done 2026-06-18 | owner superseded D-CBIND3=B (bindgen) with a **native std-only parser** (`src/cbind.rs`); no external crate, no libclang. `jet bind <hdr.h>` works; E3208 is now the honest parse-failure path. Compile-time auto-invoke on cache miss → E3. |
 | **C FFI Phase-3 cache hash-regen** — caches are read as-is; no header/cflags-hash invalidation | deferred | follows the real bind backend |
 | **E3202** (pointer crosses C boundary outside `@unsafe`/`core.mem`) — registered + snapshotted but unreachable from real source | unreachable | **E2-M13** (pointer / `@unsafe` / `core.mem` tier, S58) not yet built |
 | **Raylib pong showcase** (`examples/features/49_cffi.jet`, D-CFFI3) — replaced by a deterministic small-C-lib e2e in `tests/cffi.rs` (graphical app has no golden stdout / no headless run) | substituted | a non-graphical golden, or a CI display harness |
 | **gap #6 remainder** — richer interactive dev-shell beyond `jet dev`/`jetpack enter` | low priority | rides existing `shell::enter`; no new syntax |
 | **The real Jet→binary compiler** — both package kinds stage source/prebuilt bytes; no compile step | not started | its own architecture design pass |
-| **Cross-file language walls** (v1): a module file cannot (1) name another file's struct in a signature, (2) call another file's methods on an imported value, (3) `use`-import with `..` | open | a design pass; U17 library import did NOT hit these |
+| **Cross-file language walls** (v1) | ✅ resolved 2026-06-18 | the Jet module system landed (D-MOD1–4): `module name;` file/dir modules, inline modules, `use alias.Item` / group / `pub use` re-export, private-by-default visibility. See `docs/plans/modules.md` + examples `42`–`49`. |
 | **jetos D-OS2–D-OS6** — service/guard/option *declaration* syntax | open ballots | owner ratification (activation internals already shipped in gap #4) |
 
 ---

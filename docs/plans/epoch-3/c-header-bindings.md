@@ -1,6 +1,9 @@
 # C header auto-binding (`jet bind`)
 
-**Status:** bind **engine** — pairs with **E2-M14** (S59).
+**Status:** ✅ shipped in **E2-M14** (S59) — `jet bind` is functional with a
+**native std-only backend** (`src/cbind.rs`). The remaining E3 work here is
+optional: compile-time auto-invoke on cache miss (D-CBIND2's auto half) and
+widening the bound type subset beyond function prototypes + scalars/`char*`.
 
 **Spec:** [`m14-c-ffi.md`](../epoch-2/m14-c-ffi.md) · All CBIND picks ratified.
 
@@ -14,7 +17,10 @@ C header  →  jet bind  →  @bindgen module c.<lib>.__bindgen__ { … }
           →  merge @extern overlay  →  extern "C"  →  link
 ```
 
-Compile/build **auto-invokes** bind on cache miss; **`jet bind`** subcommand for manual refresh (**D-CBIND2**). Backend: **bindgen** helper crate (**D-CBIND3**, I6 waiver).
+**`jet bind`** subcommand generates the cache from a header (**D-CBIND2**);
+compile-time auto-invoke on cache miss is the remaining E3 half. Backend:
+**native std-only C-prototype parser** (`src/cbind.rs`) — owner 2026-06-18
+superseded the bindgen-crate route (**D-CBIND3**); no external crate, no libclang.
 
 ---
 
@@ -22,8 +28,8 @@ Compile/build **auto-invokes** bind on cache miss; **`jet bind`** subcommand for
 
 | ID | Decision |
 |---|---|
-| D-CBIND2 | Auto on compile + **`jet bind`** subcommand |
-| D-CBIND3 | Bindgen helper (I6) |
+| D-CBIND2 | Auto on compile + **`jet bind`** subcommand (`jet bind` ✅; auto-on-compile = E3) |
+| D-CBIND3 | ~~Bindgen helper (I6)~~ → **native std-only parser** `src/cbind.rs` (owner 2026-06-18) |
 | D-CBIND5 | **`String`** at C string boundary |
 | D-CBIND6 | **`#define` constants only**; skip function-like macros |
 | D-CBIND1 / 4 / 7 / 8 | Generated cache, `Ptr<T>`, `.jet/bindings/c/`, curated packages |

@@ -1174,17 +1174,63 @@ fn run_bind(args: &[&String]) {
         let base = header.rsplit('/').next().unwrap_or(header);
         base.strip_suffix(".h").unwrap_or(base).to_string()
     });
-    let _ = out;
 
-    // The bind backend (header parse + translate) is not wired in this build.
-    // Report E3208 honestly with the documented workaround.
-    eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
-    eprintln!(" Why: the header-to-Jet bind backend is not built into this `{}`; the bindgen helper (D-CBIND3) ships in a later milestone.", jet::syntax::BINARY_NAME);
-    eprintln!(
-        " Fix: hand-write `@extern module c.{} {{ … }}`, or place a generated cache at .jet/bindings/c/{}.{}.",
-        lib, lib, jet::syntax::FILE_EXT
+    let header_src = match std::fs::read_to_string(header) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
+            eprintln!(" Why: the header file could not be read ({}).", e);
+            eprintln!(" Fix: check the path, or install the library's dev headers.");
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+
+    // E2-M14 (owner 2026-06-18, supersedes D-CBIND3=B): native std-only backend.
+    let result = match jet::cbind::generate(&header_src, &lib) {
+        Ok(r) => r,
+        Err(why) => {
+            eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
+            eprintln!(" Why: {}.", why);
+            eprintln!(
+                " Fix: hand-write `@extern module c.{} {{ … }}` for the symbols you need.",
+                lib
+            );
+            exit(exit_codes::USER_ERROR);
+        }
+    };
+
+    // Default cache path follows D-CBIND7: .jet/bindings/c/<lib>.jet.
+    let out_path = out.unwrap_or_else(|| {
+        format!(".jet/bindings/c/{}.{}", lib, jet::syntax::FILE_EXT)
+    });
+    if let Some(parent) = std::path::Path::new(&out_path).parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("error: could not create `{}`: {}", parent.display(), e);
+            exit(exit_codes::USER_ERROR);
+        }
+    }
+    if let Err(e) = std::fs::write(&out_path, &result.source) {
+        eprintln!("error: could not write `{}`: {}", out_path, e);
+        exit(exit_codes::USER_ERROR);
+    }
+
+    println!(
+        "bound {} function{} from `{}` → {}",
+        result.bound.len(),
+        if result.bound.len() == 1 { "" } else { "s" },
+        header,
+        out_path
     );
-    exit(exit_codes::USER_ERROR);
+    if !result.skipped.is_empty() {
+        println!(
+            "skipped {} declaration{} outside the bindable subset (hand-write `@extern` for these):",
+            result.skipped.len(),
+            if result.skipped.len() == 1 { "" } else { "s" }
+        );
+        for (name, why) in &result.skipped {
+            println!("  - {} — {}", name, why);
+        }
+    }
 }
 
 fn run_fetch(locked: bool) {

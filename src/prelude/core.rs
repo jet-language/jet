@@ -51,6 +51,16 @@ fn jet_panic_rich(
     }
     std::process::exit(70);
 }
+/// E3002 (E2-M12, D-OBS1): error-return trace frame. In debug builds, when a `?`
+/// actually propagates an `Err`, print one Zig-style frame to stderr, then hand
+/// the `Result` back unchanged so the caller's `?` proceeds (incl. any
+/// `From`/`to_error` conversion). In release builds this is a no-op.
+fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
+    if cfg!(debug_assertions) && r.is_err() {
+        eprintln!("error propagated from: {} ({}:{}) via ?", fn_name, file, line);
+    }
+    r
+}
 fn jet_index_vec<T: Clone>(xs: &Vec<T>, i: i64, file: &str, line: u32) -> T {
     let len = xs.len() as i64;
     if i < 0 || i >= len {

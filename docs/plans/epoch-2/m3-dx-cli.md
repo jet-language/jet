@@ -3,7 +3,7 @@
 **Status:** ✅ IMPLEMENTED on branch `epoch-2-impl` (commits 7412fe7→44dc85f) —
 all D-DX1…D-DX6 + D-BUILD1/2 delivered, exit criteria met, full suite green.
 Only **D-SUGAR1** (digit separators) deferred: its ballot is still OPEN, so per
-I7 it is intentionally not implemented (see EPOCH2-IMPL-PROGRESS.md).
+I7 it is intentionally not implemented (see EPOCH2-STATUS.md).
 Was: draft — **blocked on D-DX1…D-DX6** (Group M3) and, for the free
 readability win, **D-SUGAR1** (digit separators). See
 docs/spec/decision-ballots.md.

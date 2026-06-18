@@ -554,7 +554,7 @@ fn load_file(
         // Add a synthetic import so sema can resolve `module_name.func()`.
         // Use the path relative to the importing file (without extension) so
         // that resolve_file_import can find it — for a directory module
-        // "text", target is ".../text/mod.jet" and we need "text/mod".
+        // "text", target is ".../text/module.jet" and we need "text/module".
         let importing_dir = path.parent().unwrap_or(Path::new("."));
         let rel_path = target
             .strip_prefix(importing_dir)
@@ -576,7 +576,7 @@ fn load_file(
 }
 
 /// D-MOD1: find the file for `module name;` — look in the same directory as
-/// `importing` for `{name}.jet` then `{name}/mod.jet`.
+/// `importing` for `{name}.jet` then `{name}/module.jet`.
 fn resolve_code_module_file(
     name: &str,
     name_span: Span,
@@ -587,15 +587,15 @@ fn resolve_code_module_file(
     if direct.is_file() {
         return Ok(direct);
     }
-    let mod_jet = normalize_path(&dir.join(name).join(format!("mod.{}", syntax::FILE_EXT)));
-    if mod_jet.is_file() {
-        return Ok(mod_jet);
+    let module_jet = normalize_path(&dir.join(name).join(format!("module.{}", syntax::FILE_EXT)));
+    if module_jet.is_file() {
+        return Ok(module_jet);
     }
     // E0607: neither search path found
     Err(Diagnostic::error(
         "E0607",
         format!("module `{}` not found", name),
-        format!("looked for `{name}.jet` and `{name}/mod.jet` next to this file"),
+        format!("looked for `{name}.jet` and `{name}/module.jet` next to this file"),
         format!("create `{}.{}` next to this file", name, syntax::FILE_EXT),
         Some(name_span),
     ))

@@ -1,7 +1,14 @@
 # E2-M14 — C FFI
 
-**Status:** ready to implement — owner decisions **D-CFFI1…3** and **D-CFFI2-SYN-1…4**
-ratified (2026-06-16). Canonical syntax: **S59** in
+**Status:** ✅ implemented. Phases 1–2 + the compile-time merge shipped earlier
+(hand-written `@bindgen`/`@extern` caches, link discovery). **`jet bind` is now
+functional** (2026-06-18) with a **native std-only backend** (`src/cbind.rs`,
+supersedes the D-CBIND3 bindgen route): it translates a C header's function
+prototypes (scalars, `char*`→String, `void`) into a `@bindgen module
+c.<lib>.__bindgen__` cache at `.jet/bindings/c/<lib>.jet`; unbindable
+declarations are skipped and reported. E2E: `tests/cffi.rs::jet_bind_native_backend_end_to_end`
+(header → cache → compile → link → run). Remaining (E3): compile-time
+auto-invoke on cache miss; wider type subset. Canonical syntax: **S59** in
 [`docs/spec/syntax-decisions.md`](../../spec/syntax-decisions.md).
 
 **Depends on:** E2-M13 (pointer rules + `@unsafe` gates at the boundary).

@@ -80,9 +80,9 @@ lowlevel, freestanding, http_service) and pass the front end. Hard size budgets
 (D-GA2=B) enforced in `tests/ga.rs`. Every E2 diagnostic has `jet explain`
 (enforced). Single-file `jet run` needs no manifest.
 
-Deferred from M17: DAP step-through debugger (VS Code extension work — out of
-compiler scope; `tests/observe.rs` has source-map markers and rich panics as
-the pre-cursor).
+Moved to Epoch 3 (owner, 2026-06-18): DAP step-through / full source-level
+debugger — out of compiler scope for the E2 GA bar. `tests/observe.rs` keeps the
+source-map markers and rich panics as the pre-cursor.
 
 **E2-M18 — REPL** verified 2026-06-17
 ([`m18-repl.md`](../plans/epoch-2/m18-repl.md)). `jet repl` interactive
@@ -97,13 +97,19 @@ session; 16 transcript tests green.
 Consolidated overview, dependency order, and ballot gates:
 [`docs/plans/epoch-2/README.md`](../plans/epoch-2/README.md).
 
-Most E2 milestones are done on `master` — check git history and
-`cargo test` rather than this file alone. The single remaining gate is
-DAP step-through debugging (deferred from E2-M17).
+**Epoch 2 GA is complete** (owner, 2026-06-18): all 18 milestones landed on
+`master`, and the last in-scope language gaps closed this session — the Jet
+**module system** (D-MOD1–4) and a functional **`jet bind`** (native std-only
+backend). Moved to Epoch 3: DAP step-through debugging, adoption documentation,
+**package build-from-source + M9 wave-2**, and **M11 property testing / doctests
+/ coverage** (syntax-gated ergonomics). Live status and the honest gap inventory:
+`docs/plans/epoch-2/EPOCH2-STATUS.md`.
 
 ### Jetpack & jetos
 
-Phase 1 environments and the typed `module { … }` surface: see
+**jetos is deferred to post-Epoch-3** (owner, 2026-06-18) — research track only;
+do not ratify its config/surface syntax during Epoch 2 or 3. **Jetpack** Phase 1
+environments and the typed `module { … }` surface stay active: see
 [`jetpack-jetos/README.md`](../plans/jetpack-jetos/README.md). **Live
 built-vs-pending status:**
 [`jetpack-jetos/IMPLEMENTATION-STATUS.md`](../plans/jetpack-jetos/IMPLEMENTATION-STATUS.md).
@@ -122,8 +128,12 @@ Items with Epoch 2/3 plans are tracked in those plan directories — not
 duplicated here:
 
 - Async/await, Go-scale networking → [`docs/plans/epoch-3/`](../plans/epoch-3/)
+- DAP step-through / full source-level debugger → Epoch 3 (owner, 2026-06-18)
+- Full adoption documentation (migration, services, debugging guides) → Epoch 3
+  (owner, 2026-06-18); per-milestone docs stay as written
 - User token macros (rejected by S26; sanctioned path is S56 comptime derives)
-- Self-hosting; JetOS as a shipped OS product (jetpack/jetos research track)
+- Self-hosting; jetos as a shipped OS product → **post-Epoch-3** research track
+  (owner, 2026-06-18); jetos surface syntax is not ratified in Epoch 2/3
 - Comptime layer 3 / user-defined derives (S56) → Epoch 3
 
 When a deferred item is promoted, add a milestone slot in the appropriate epoch
