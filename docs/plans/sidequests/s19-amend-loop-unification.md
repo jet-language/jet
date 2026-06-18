@@ -4,6 +4,12 @@ Ratified 2026-06-17 (S19-amend option A). `loop` is the one loop form; `while`
 and `for` become teaching errors. This file tracks the remaining implementation
 work.
 
+**Status: done 2026-06-18.** `while`/`for` emit teaching errors E0050/E0051
+(`src/parser.rs`); ui snapshots `tests/ui/foreign_while.*` and
+`tests/ui/foreign_for.*`; example `examples/features/loop_forms.jet`
+(+`expected/loop_forms.out`) covers infinite/conditional/iterator/two-name-map
+forms. S19 + S19-amend ratification dates recorded in `syntax-decisions.md`.
+
 ## What is decided
 
 - `loop { }` — infinite loop
