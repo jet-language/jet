@@ -134,8 +134,26 @@ fn compile_bundle_path(
     file: &str,
     mode: sema::CompileMode,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, mode, false)
+}
+
+/// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
+/// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
+pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts(file, sema::CompileMode::Run, true)
+}
+
+fn compile_bundle_path_opts(
+    file: &str,
+    mode: sema::CompileMode,
+    freestanding: bool,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     let mut bundle = loader::load_entry_with_overlay(file, None, false)?;
-    let diags = sema::check_bundle(&mut bundle, mode);
+    let diags = if freestanding {
+        sema::check_bundle_freestanding(&mut bundle, mode)
+    } else {
+        sema::check_bundle(&mut bundle, mode)
+    };
     let mut errors = Vec::new();
     let mut lints = Vec::new();
     for d in diags {

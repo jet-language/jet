@@ -10,7 +10,7 @@ All future epoch-2 work is directly on `master`. No separate worktrees.
 
 ## Completed milestones
 
-E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅
+E2-M1 ✅ M2 ✅ M3 ✅ M4 ✅ M5 ✅ M6 ✅ M8 ✅ M9 ✅ M11 (partial) M12 ✅ M13 ✅ M14 ✅ M15 (partial)
 
 The E2-M3/M5 work lives in commits `7412fe7`→`fd02646` (now on master).
 
@@ -96,6 +96,34 @@ That sidequest requires parser work + example rewrites + snapshot bless.
 **Next milestone to implement: E2-M2** (`m2-release-policy.md`) — collision-free parts.
 
 After M2: implement in dependency order per `docs/plans/EPOCH2-HANDOFF.md`.
+
+### E2-M15 completion record (partial)
+
+Implemented on `master` (2026-06-17). Exit criteria status:
+
+- ✅ `jet build --target=<triple>` — passes `--target <triple>` to rustc; cross-target validation (E3302) runs before compile.
+- ✅ `jet doctor --target=<triple>` — `check_cross_target` in `src/doctor.rs` checks `rustc --print target-list` and the sysroot dir for std library presence.
+- ✅ `--freestanding` flag — rejects `core.fs`, `core.io`, `core.net`, `core.tasks`, `core.process`, `core.time`, `jet.http`, `jet.log`, `jet.time` with E3301 via `is_freestanding_forbidden` in `src/sema.rs`.
+- ✅ Freestanding mode threads through `check_bundle_freestanding` → `check_module_bodies` → `check_func_body_bundle` → `Checker.freestanding`.
+- ✅ D-CROSS2: `BuildProfile::Freestanding` sets `panic=abort` (same as `--small`).
+- ✅ D-CROSS3: `docs/embedded.md` with exact QEMU commands for local harness.
+- ✅ E3301 registered in `docs/spec/diagnostics.md` + `tests/ui/freestanding_e3301.{jet,stderr}` snapshot.
+- ✅ E3302 registered in `docs/spec/diagnostics.md`; `sema::e3302` constructor in sema.rs; fired by `validate_target()` in main.rs.
+- ✅ E3303 registered in `docs/spec/diagnostics.md`; `sema::e3303` constructor in sema.rs.
+- ✅ `examples/features/60_cross.jet` and `examples/features/61_freestanding.jet` golden-pinned.
+- ✅ `tests/cross.rs` — 6 tests covering E3301 fire/no-fire for OS vs core modules + ui snapshot.
+- ✅ `nix develop -c cargo test` fully green (all suites).
+
+**Not implemented (deferred):**
+- E3302 ui snapshot: driver-level error (no source span); not in `tests/ui/`; tested by `validate_target()` codepath.
+- E3303 automatic emission: detecting allocation use in freestanding mode requires scanning for `List`/`Map`/`String` allocations; deferred. Registered and constructor in place.
+- Actual CI run on aarch64 hardware/QEMU (D-CROSS3 says local harness is the minimum; docs/embedded.md provides the commands).
+
+New modules: none (all changes in existing files).
+New functions: `sema::e3301`, `sema::e3302`, `sema::e3303`, `sema::is_freestanding_forbidden`, `sema::module_short_name`, `sema::freestanding_hint`; `lib::compile_freestanding`; `doctor::check_cross_target`; `main::validate_target`.
+New flags: `--freestanding`, `--target=<triple>`.
+New test file: `tests/cross.rs`.
+New docs: `docs/embedded.md`.
 
 ### E2-M12 completion record (partial)
 

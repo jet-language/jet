@@ -325,6 +325,46 @@ pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// E3301 — an OS-dependent std API was called in a `--freestanding` build.
+pub fn e3301(api: &str, hint: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3301",
+        format!("`{}` is not available in a freestanding build.", api),
+        "`--freestanding` targets have no OS; only `core`-level APIs are available.".to_string(),
+        hint.to_string(),
+        Some(span),
+    )
+}
+
+/// E3302 — the target triple is unknown or its toolchain component is missing.
+pub fn e3302(triple: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E3302",
+        format!("Target `{}` is not available.", triple),
+        "rustc doesn't have the standard library for this target compiled in, \
+         or the target triple is not recognised."
+            .to_string(),
+        "Run `jet doctor --target <triple>` to see what's missing, \
+         or `rustup target add <triple>` to install it."
+            .to_string(),
+        None,
+    )
+}
+
+/// E3303 — freestanding build needs an allocator but none is configured.
+pub fn e3303(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3303",
+        "This freestanding program allocates memory but has no global allocator configured."
+            .to_string(),
+        "`--freestanding` builds cannot use the OS heap; a custom allocator is required."
+            .to_string(),
+        "Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`."
+            .to_string(),
+        Some(span),
+    )
+}
+
 /// Validate one C FFI module's signatures (E3203/E3202). Registers nothing; the
 /// caller registers the functions after a clean check.
 fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut Vec<Diagnostic>) -> bool {
@@ -787,6 +827,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &ct_externs,
                     ct_base_dir,
                     &ct_globals,
+                    false,
                 ));
             }
             Item::Impl(i) => {
@@ -803,6 +844,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &ct_externs,
                         ct_base_dir,
                         &ct_globals,
+                        false,
                     ));
                 }
             }
@@ -820,6 +862,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &ct_externs,
                         ct_base_dir,
                         &ct_globals,
+                        false,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -836,6 +879,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             &ct_externs,
                             ct_base_dir,
                             &ct_globals,
+                            false,
                         ));
                     }
                 }
@@ -854,6 +898,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &ct_externs,
                         ct_base_dir,
                         &ct_globals,
+                        false,
                     ));
                 }
             }
@@ -881,6 +926,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &ct_externs,
                     ct_base_dir,
                     &ct_globals,
+                    false,
                 ));
                 t.body = synthetic.body;
             }
@@ -1259,6 +1305,7 @@ fn check_func_body(
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::comptime::CtValue>,
+    freestanding: bool,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_std_imports = HashMap::new();
@@ -1303,6 +1350,7 @@ fn check_func_body(
         ct_globals,
         ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
+        freestanding,
     };
     ck.check_params_and_body(f, owner_type);
     ck.diags
@@ -1521,6 +1569,8 @@ struct Checker<'a> {
     ct_scopes: Vec<HashMap<String, crate::comptime::CtValue>>,
     /// Active generic type parameters while checking a generic item.
     type_param_scope: Vec<crate::ast::TypeParam>,
+    /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
+    freestanding: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -6370,6 +6420,17 @@ impl<'a> Checker<'a> {
         span: Span,
         args: &mut [crate::ast::CallArg],
     ) -> Option<Type> {
+        // E2-M15 / E3301: reject OS-dependent APIs in freestanding builds.
+        if self.freestanding && is_freestanding_forbidden(module) {
+            let api = format!("{}.{}", module_short_name(module), name);
+            let hint = freestanding_hint(module);
+            self.diags.push(e3301(&api, hint, span));
+            // Still infer args to avoid cascading errors.
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
         let sig = std_fixed_sig(module, name);
         match (module, name) {
             ("core.mem", "volatile_read") => {
@@ -10042,6 +10103,45 @@ fn std_module_items(module: &str) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
+/// E2-M15: modules that require an OS and are forbidden in `--freestanding` builds.
+fn is_freestanding_forbidden(module: &str) -> bool {
+    matches!(
+        module,
+        "core.fs" | "core.files" | "core.io" | "core.net" | "core.tasks"
+            | "core.process" | "core.time" | "jet.http" | "jet.log" | "jet.time"
+    )
+}
+
+/// Return a short display name for the module alias (the part after the dot).
+fn module_short_name(module: &str) -> &str {
+    module.split('.').last().unwrap_or(module)
+}
+
+/// Fix hint for E3301 depending on the forbidden module.
+fn freestanding_hint(module: &str) -> &'static str {
+    match module {
+        "core.fs" | "core.files" => {
+            "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
+        }
+        "core.net" | "jet.http" => {
+            "Freestanding targets have no network stack. Build without `--freestanding`, or use a bare-metal driver."
+        }
+        "core.tasks" => {
+            "OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency."
+        }
+        "core.io" => {
+            "Standard I/O requires an OS. Use a platform-specific write routine or build without `--freestanding`."
+        }
+        "core.process" | "core.time" | "jet.time" => {
+            "System calls are not available in a freestanding build. Build without `--freestanding`."
+        }
+        "jet.log" => {
+            "The log module writes to stderr (an OS resource). Use a bare-metal write routine or build without `--freestanding`."
+        }
+        _ => "Build without `--freestanding`, or replace this call with a core-level alternative.",
+    }
+}
+
 fn unknown_std_item(module: &str, name: &str, span: Span) -> Diagnostic {
     let items = std_module_items(module);
     let mut fix = if items.is_empty() {
@@ -10088,6 +10188,15 @@ fn u8_range_error(span: Span) -> Diagnostic {
 }
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
+    check_bundle_opts(bundle, mode, false)
+}
+
+/// Like `check_bundle` but with extra build options (E2-M15).
+pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
+    check_bundle_opts(bundle, mode, true)
+}
+
+fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, freestanding: bool) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut states: Vec<ModuleState> = (0..bundle.modules.len())
         .map(|_| ModuleState {
@@ -10630,7 +10739,7 @@ pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagno
     }
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
-        diags.extend(check_module_bodies(module, idx, &states, mode));
+        diags.extend(check_module_bodies(module, idx, &states, mode, freestanding));
     }
     bundle.used_std = collect_used_std(bundle, &states);
     diags
@@ -10958,6 +11067,7 @@ fn check_module_bodies(
     module_idx: usize,
     states: &[ModuleState],
     mode: CompileMode,
+    freestanding: bool,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -10979,6 +11089,7 @@ fn check_module_bodies(
                     &ct_externs,
                     &ct_base_dir,
                     &ct_globals,
+                    freestanding,
                 ));
             }
             Item::Struct(s) => {
@@ -10992,6 +11103,7 @@ fn check_module_bodies(
                         &ct_externs,
                         &ct_base_dir,
                         &ct_globals,
+                        freestanding,
                     ));
                 }
             }
@@ -11006,6 +11118,7 @@ fn check_module_bodies(
                         &ct_externs,
                         &ct_base_dir,
                         &ct_globals,
+                        freestanding,
                     ));
                 }
             }
@@ -11020,6 +11133,7 @@ fn check_module_bodies(
                         &ct_externs,
                         &ct_base_dir,
                         &ct_globals,
+                        freestanding,
                     ));
                 }
             }
@@ -11044,6 +11158,7 @@ fn check_module_bodies(
                     &ct_externs,
                     &ct_base_dir,
                     &ct_globals,
+                    freestanding,
                 ));
                 t.body = synthetic.body;
             }
@@ -11063,6 +11178,7 @@ fn check_func_body_bundle(
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::comptime::CtValue>,
+    freestanding: bool,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -11103,6 +11219,7 @@ fn check_func_body_bundle(
         ct_globals,
         ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
+        freestanding,
     };
     ck.check_params_and_body(f, owner_type);
     ck.diags

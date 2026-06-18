@@ -62,6 +62,8 @@ enum BuildProfile {
     Default,
     /// S15: size-oriented (`opt-level=z`, fat LTO, `panic=abort`).
     Small,
+    /// E2-M15: freestanding / embedded — no OS, only core APIs; `panic=abort`.
+    Freestanding,
 }
 
 fn usage() -> String {
@@ -122,6 +124,8 @@ flags:
   --emit-rust                  also print the generated Rust code
   --check                      with fmt: exit 1 if file would change (CI)
   --small                      with build/run: smallest binary (S15)
+  --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
+  --target=<triple>            with build: cross-compile for a rustc target triple (E2-M15)
   --locked                     with fetch: verify only, refuse network
   --verbose, -v                with build: print the bridge steps
   --json                       emit machine-readable diagnostics
@@ -234,11 +238,16 @@ fn main() {
     let fmt_check = raw.iter().any(|a| a == "--check");
     let json = raw.iter().any(|a| a == "--json");
     let small = raw.iter().any(|a| a == "--small");
+    let freestanding = raw.iter().any(|a| a == "--freestanding");
     let locked = raw.iter().any(|a| a == "--locked");
     let annotated = raw.iter().any(|a| a == "--annotated");
     let verbose = raw.iter().any(|a| a == "--verbose" || a == "-v");
     // D-TOOL5 (E2-M11): capability summary flags.
     let capabilities_json = raw.iter().any(|a| a == "--capabilities-json");
+    // E2-M15: cross-compilation target triple (`--target=<triple>`).
+    let cross_target: Option<String> = raw
+        .iter()
+        .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
     let mode = OutputMode {
         json,
         color: parse_color(&raw),
@@ -464,6 +473,8 @@ fn main() {
                                     &entry_str,
                                     emit_rust,
                                     small,
+                                    freestanding,
+                                    cross_target.as_deref(),
                                     verbose,
                                     capabilities_json,
                                     &program_args,
@@ -525,7 +536,7 @@ fn main() {
         }
         _ => {
             let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
-            run_compile_cmd(cmd, target, emit_rust, small, verbose, capabilities_json, &program_args, mode);
+            run_compile_cmd(cmd, target, emit_rust, small, freestanding, cross_target.as_deref(), verbose, capabilities_json, &program_args, mode);
         }
     }
 }
@@ -558,12 +569,16 @@ fn run_compile_cmd(
     file: &str,
     emit_rust: bool,
     small: bool,
+    freestanding: bool,
+    cross_target: Option<&str>,
     verbose: bool,
     capabilities_json: bool,
     program_args: &[&String],
     mode: OutputMode,
 ) {
-    let profile = if small {
+    let profile = if freestanding {
+        BuildProfile::Freestanding
+    } else if small {
         BuildProfile::Small
     } else {
         BuildProfile::Default
@@ -598,7 +613,17 @@ fn run_compile_cmd(
         return;
     }
 
-    let (rust_code, ffi_link, clinks, capabilities) = match jet::compile_with_path(&src, file) {
+    // E2-M15: validate cross-compilation target before invoking rustc.
+    if let Some(triple) = cross_target {
+        validate_target(triple, mode);
+    }
+
+    let compile_result = if freestanding {
+        jet::compile_freestanding(file)
+    } else {
+        jet::compile_with_path(&src, file)
+    };
+    let (rust_code, ffi_link, clinks, capabilities) = match compile_result {
         Ok(out) => {
             if !out.lints.is_empty() {
                 if mode.json {
@@ -639,8 +664,11 @@ fn run_compile_cmd(
 
     match cmd {
         "build" => {
-            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose);
+            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose, cross_target);
             println!("built: {}", bin_path(file).display());
+            if let Some(triple) = cross_target {
+                println!("target: {}", triple);
+            }
             // D-TOOL5 (E2-M11): print capability summary after a successful build.
             if capabilities_json {
                 println!("{}", capabilities.to_json());
@@ -650,7 +678,11 @@ fn run_compile_cmd(
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks, verbose);
+            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks, verbose, cross_target);
+            if cross_target.is_some() {
+                eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
+                exit(exit_codes::OK);
+            }
             let mut run_cmd = Command::new(&out);
             for arg in program_args {
                 run_cmd.arg(arg.as_str());
@@ -785,7 +817,10 @@ fn run_completions(shell: Option<&str>) {
 /// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
 /// problems is L2101.
 fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
-    let checks = jet::doctor::run(jet::doctor::Options { online });
+    // E2-M15: `jet doctor --target=<triple>` checks cross-compilation readiness.
+    let cross_target = std::env::args()
+        .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    let checks = jet::doctor::run(jet::doctor::Options { online, cross_target });
     let color = mode.color_stderr_for(std::io::stdout().is_terminal());
 
     if apply {
@@ -1305,6 +1340,7 @@ fn run_test_file(path: &Path, mode: OutputMode) -> bool {
         ffi_link.as_ref(),
         &[],
         false,
+        None,
     );
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
@@ -1361,6 +1397,44 @@ fn test_bin_path(path: &Path) -> PathBuf {
     PathBuf::from("build").join(format!("test_{}", stem(&path.to_string_lossy())))
 }
 
+/// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
+/// Runs `rustc --print target-list` and exits with E3302 if the triple is absent.
+fn validate_target(triple: &str, mode: OutputMode) {
+    // rustc --print target-list gives the full list; if the output contains
+    // the triple exactly (one per line), the target is known.
+    let out = Command::new("rustc").arg("--print").arg("target-list").output();
+    let known = match out {
+        Ok(o) if o.status.success() => {
+            let list = String::from_utf8_lossy(&o.stdout);
+            list.lines().any(|l| l.trim() == triple)
+        }
+        _ => false, // rustc not found or failed; will fail later during compile
+    };
+    if !known {
+        let diag = jet::sema::e3302(triple);
+        let src = format!("// cross-build for {}", triple);
+        report_problems(mode, "<target>", &src, &[diag]);
+        exit(exit_codes::USER_ERROR);
+    }
+    // Check that the std library is installed for this target.
+    // `rustc --print sysroot` + check for lib/<triple>/ directory.
+    let sysroot = Command::new("rustc").arg("--print").arg("sysroot").output();
+    if let Ok(o) = sysroot {
+        let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        let target_lib = PathBuf::from(&root).join("lib").join("rustlib").join(triple);
+        if !target_lib.exists() {
+            let diag = jet::sema::e3302(triple);
+            let src = format!("// cross-build for {}", triple);
+            report_problems(mode, "<target>", &src, &[diag]);
+            eprintln!(
+                " why: `rustup target add {}` to install the standard library for this target",
+                triple
+            );
+            exit(exit_codes::USER_ERROR);
+        }
+    }
+}
+
 fn build(
     file: &str,
     rust_code: &str,
@@ -1369,6 +1443,7 @@ fn build(
     ffi: Option<&jet::ffi::FfiLink>,
     clinks: &[String],
     verbose: bool,
+    cross_target: Option<&str>,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
@@ -1389,10 +1464,11 @@ fn build(
         exit(exit_codes::USER_ERROR);
     });
 
-    let small = matches!(profile, BuildProfile::Small);
-    // C-linked builds depend on system/hangar link paths not captured by the
-    // source hash, so they bypass the binary cache (S59).
-    let use_cache = ffi.is_none() && clinks.is_empty();
+    let small = matches!(profile, BuildProfile::Small | BuildProfile::Freestanding);
+    // Cross-compiled or freestanding builds bypass the host binary cache
+    // (the binary is not executable on this host, and the target triple
+    // affects codegen choices that aren't captured by the source hash).
+    let use_cache = ffi.is_none() && clinks.is_empty() && cross_target.is_none();
     let cache_key = if use_cache {
         Some(jet::build_cache::cache_key(rust_code, small))
     } else {
@@ -1407,6 +1483,8 @@ fn build(
     if verbose {
         if cache_key.is_some() {
             step("cache miss -> compiling".to_string());
+        } else if cross_target.is_some() {
+            step("cache bypassed (cross-compiled build)".to_string());
         } else {
             step("cache bypassed (C-linked build)".to_string());
         }
@@ -1415,6 +1493,10 @@ fn build(
     step(format!("rustc      {} -> {}", rs_path.display(), bin.display()));
     let mut cmd = Command::new("rustc");
     cmd.arg("--edition").arg("2021");
+    // E2-M15: cross-compilation target triple.
+    if let Some(triple) = cross_target {
+        cmd.arg("--target").arg(triple);
+    }
     match profile {
         BuildProfile::Default => {
             cmd.arg("-O").arg("-C").arg("strip=symbols");
@@ -1424,6 +1506,19 @@ fn build(
             }
         }
         BuildProfile::Small => {
+            cmd.arg("-C")
+                .arg("opt-level=z")
+                .arg("-C")
+                .arg("panic=abort")
+                .arg("-C")
+                .arg("strip=symbols");
+            if ffi.is_none() {
+                cmd.arg("-C").arg("lto=fat");
+            }
+        }
+        // E2-M15: freestanding — like --small but std-gated APIs already
+        // rejected in sema; panic=abort matches D-CROSS2.
+        BuildProfile::Freestanding => {
             cmd.arg("-C")
                 .arg("opt-level=z")
                 .arg("-C")
@@ -1773,7 +1868,7 @@ fn run_bench(file: &str, mode: OutputMode) {
         }
     };
     let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
-    build(file, &rust_code, bin.clone(), BuildProfile::Default, ffi_link.as_ref(), &[], false);
+    build(file, &rust_code, bin.clone(), BuildProfile::Default, ffi_link.as_ref(), &[], false, None);
 
     let warmups = 5u32;
     let trials = 20u32;

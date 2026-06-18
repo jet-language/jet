@@ -68,9 +68,19 @@ fn ui_snapshots() {
         let src = fs::read_to_string(&path).unwrap();
 
         let file_arg = path.to_string_lossy();
-        let actual = match jet::compile_with_path(&src, &file_arg) {
-            Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
-            Ok(_) => "(no errors)\n".to_string(),
+        // E2-M15: files marked with `// @freestanding` are compiled with
+        // the freestanding profile (E3301 checks enabled).
+        let freestanding = src.lines().any(|l| l.trim() == "// @freestanding");
+        let actual = if freestanding {
+            match jet::compile_freestanding(&file_arg) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
+        } else {
+            match jet::compile_with_path(&src, &file_arg) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
         };
 
         let expect_path = if path.file_name().unwrap() == "main.jet" {

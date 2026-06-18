@@ -201,6 +201,9 @@ before continuing.
 | E3206 | parse | user declared reserved `__bindgen__` segment |
 | E3207 | parse | `@bindgen` outside generated `.jet/bindings/c/` file |
 | E3208 | jet   | `jet bind` / header translation failed |
+| E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
+| E3302 | jet   | target triple unknown or toolchain component missing |
+| E3303 | sema  | freestanding build allocates memory with no global allocator |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -507,6 +510,14 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `@extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `@extern module c.{lib} { … }`. |
 | E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
 | E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
+
+## Cross-compilation and freestanding diagnostics (E2-M15)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E3301 | `{api}` is not available in a freestanding build. | `--freestanding` targets have no OS; only `core`-level APIs are available. | Embed data at compile time with `@embed("file")`, or build without `--freestanding`. |
+| E3302 | Target `{triple}` is not available. | rustc doesn't have the standard library for this target compiled in, or the target triple is not recognised. | Run `jet doctor --target=<triple>` to see what's missing, or `rustup target add <triple>` to install it. |
+| E3303 | This freestanding program allocates memory but has no global allocator configured. | `--freestanding` builds cannot use the OS heap; a custom allocator is required. | Add `use core.mem;` and configure an arena or fixed allocator with `mem.set_allocator(…)`. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 

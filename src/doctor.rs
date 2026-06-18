@@ -54,10 +54,12 @@ impl Check {
 }
 
 /// What to check.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     /// Allow network checks (registry reachability).
     pub online: bool,
+    /// E2-M15: check that a specific cross-compilation target is installed.
+    pub cross_target: Option<String>,
 }
 
 /// Run every check and return them in report order.
@@ -73,6 +75,9 @@ pub fn run(opts: Options) -> Vec<Check> {
         out.push(Check::note("registry", "registry", "skipped (offline; pass --online to check)"));
     }
     out.extend(check_ffi());
+    if let Some(triple) = &opts.cross_target {
+        out.push(check_cross_target(triple));
+    }
     out
 }
 
@@ -217,6 +222,63 @@ pub fn apply_fixes(checks: &[Check]) -> Vec<String> {
 
 fn ffi_cache_dir() -> PathBuf {
     dirs_home().join(".cache").join("jet").join("ffi")
+}
+
+/// E2-M15: check that a cross-compilation target triple is installed.
+/// Reports whether `rustup target list --installed` contains the triple,
+/// and whether the target's std library directory exists under the sysroot.
+fn check_cross_target(triple: &str) -> Check {
+    // Step 1: is it a known rustc target at all?
+    let known = Command::new("rustc")
+        .arg("--print").arg("target-list")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            let list = String::from_utf8_lossy(&o.stdout);
+            list.lines().any(|l| l.trim() == triple)
+        })
+        .unwrap_or(false);
+
+    if !known {
+        return Check::problem(
+            "cross",
+            triple,
+            "not a recognised rustc target triple",
+            &format!(
+                "run `rustc --print target-list | grep {}` to search for similar names",
+                triple
+            ),
+            false,
+        );
+    }
+
+    // Step 2: is the std library installed for this target?
+    let sysroot = Command::new("rustc")
+        .arg("--print").arg("sysroot")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    if let Some(root) = sysroot {
+        let target_lib = std::path::PathBuf::from(&root)
+            .join("lib")
+            .join("rustlib")
+            .join(triple);
+        if !target_lib.exists() {
+            return Check::problem(
+                "cross",
+                triple,
+                "std library for this target is not installed",
+                &format!("run `rustup target add {}` to install it", triple),
+                false,
+            );
+        }
+        Check::ok("cross", triple, format!("installed ({})", target_lib.display()))
+    } else {
+        Check::note("cross", triple, "could not determine sysroot; target may or may not be installed")
+    }
 }
 
 fn dirs_home() -> PathBuf {
