@@ -419,7 +419,6 @@ impl<'a> Fmt<'a> {
                     f.write(" -> ");
                     f.fmt_return_type(ret);
                 }
-                f.write(";");
                 f.newline();
             }
         });
@@ -500,7 +499,6 @@ impl<'a> Fmt<'a> {
     fn fmt_derive_line(&mut self, trait_name: &str) {
         self.write("derive ");
         self.write(trait_name);
-        self.write(";");
     }
 
     fn fmt_trait_impl_block(&mut self, block: &TraitImplBlock) {
@@ -593,7 +591,6 @@ impl<'a> Fmt<'a> {
                     f.newline();
                 }
                 f.fmt_field(field);
-                f.write(";");
             }
             for (i, (trait_name, _)) in s.derives.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() {
@@ -638,7 +635,6 @@ impl<'a> Fmt<'a> {
                     f.newline();
                 }
                 f.fmt_variant(v);
-                f.write(";");
             }
             for (i, (trait_name, _)) in e.derives.iter().enumerate() {
                 if i > 0 || !e.variants.is_empty() {
@@ -720,7 +716,6 @@ impl<'a> Fmt<'a> {
             self.write(&c.name);
             self.write(" = ");
             self.fmt_expr(&c.value, Prec::OrFallback);
-            self.write(";");
             return;
         }
         for attr in &c.attrs {
@@ -733,7 +728,6 @@ impl<'a> Fmt<'a> {
         self.write(&c.name);
         self.write(" = ");
         self.fmt_expr(&c.value, Prec::OrFallback);
-        self.write(";");
     }
 
     fn fmt_import(&mut self, imp: &ImportDecl) {
@@ -778,7 +772,6 @@ impl<'a> Fmt<'a> {
                 }
             }
         }
-        self.write(";");
     }
 
     fn fmt_field(&mut self, field: &Field) {
@@ -814,11 +807,9 @@ impl<'a> Fmt<'a> {
         match stmt {
             Stmt::Expr(e) => {
                 self.fmt_expr(e, Prec::OrFallback);
-                self.write(";");
             }
             Stmt::Val(b) => {
                 self.fmt_binding(b);
-                self.write(";");
             }
             Stmt::Assign {
                 target, op, value, ..
@@ -831,7 +822,6 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(" ");
                 self.fmt_expr(value, Prec::OrFallback);
-                self.write(";");
             }
             Stmt::Return(expr, _) => {
                 self.write("return");
@@ -839,7 +829,6 @@ impl<'a> Fmt<'a> {
                     self.write(" ");
                     self.fmt_expr(e, Prec::OrFallback);
                 }
-                self.write(";");
             }
             Stmt::If(i) => self.fmt_if(i),
             Stmt::While { cond, body, label, .. } => {
@@ -917,10 +906,10 @@ impl<'a> Fmt<'a> {
                 });
                 self.end_block();
             }
-            Stmt::Break(_) => self.write("break;"),
-            Stmt::Continue(_) => self.write("continue;"),
-            Stmt::BreakLabel(name, _) => self.write(&format!("break @{};", name)),
-            Stmt::ContinueLabel(name, _) => self.write(&format!("continue @{};", name)),
+            Stmt::Break(_) => self.write("break"),
+            Stmt::Continue(_) => self.write("continue"),
+            Stmt::BreakLabel(name, _) => self.write(&format!("break @{}", name)),
+            Stmt::ContinueLabel(name, _) => self.write(&format!("continue @{}", name)),
             Stmt::Loop { body: inner, label, .. } => {
                 if let Some((_n, _)) = label {
                     self.write(&format!("@{} ", _n));

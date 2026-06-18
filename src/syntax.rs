@@ -52,7 +52,11 @@ pub const COMMENT_PREFIX: &str = "//";
 pub const BLOCK_COMMENT_OPEN: &str = "/*";
 pub const BLOCK_COMMENT_CLOSE: &str = "*/";
 
-/// S6 (ratified): separates statements inside a block.
+/// S6 / S6-R (ratified 2026-06-18): the statement terminator. Under S6-R it is
+/// **never user-typed** — the lexer inserts a synthetic `;` at each line end
+/// after a statement-ending token (Go-style), so the grammar stays
+/// terminator-based while source has no visible semicolons. `jet fmt` emits
+/// none. The constant remains because the token still exists internally.
 pub const STMT_SEP: &str = ";";
 
 /// S8 (ratified): string interpolation delimiters inside quoted text.

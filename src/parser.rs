@@ -639,6 +639,13 @@ impl<'a> Parser<'a> {
         loop {
             let r = match &self.peek().kind {
                 TokKind::Eof => break,
+                // S6-R: the lexer inserts a synthetic terminator after the `}`
+                // that closes an item (a `}` ends a statement). At the top level
+                // it is trivia between items — skip it.
+                TokKind::Semi => {
+                    self.bump();
+                    continue;
+                }
                 TokKind::KwUse => match self.import_decl() {
                     Ok(imp) => {
                         imports.push(imp);
@@ -939,6 +946,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the extern block")?;
         let mut functions = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             functions.push(self.extern_fn()?);
         }
         self.expect(TokKind::RBrace, "to close the extern block")?;
@@ -1043,6 +1051,11 @@ impl<'a> Parser<'a> {
             )?;
             self.expect(TokKind::RParen, "after the audit reason")?;
             audit = Some(reason);
+            // S6-R: `@audit("…")` ends a line; the synthetic terminator before
+            // the `@unsafe` it annotates is trivia — skip it.
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
         }
         // Required `@unsafe { … }`.
         if !(matches!(self.peek().kind, TokKind::At)
@@ -1292,6 +1305,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the C FFI module body")?;
         let mut functions = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             functions.push(self.extern_fn()?);
         }
         self.expect(TokKind::RBrace, "to close the C FFI module body")?;
@@ -1494,6 +1508,7 @@ impl<'a> Parser<'a> {
         let mut trait_impls = Vec::new();
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             if matches!(self.peek().kind, TokKind::KwDerive) {
                 derives.push(self.derive_line()?);
             } else if matches!(self.peek().kind, TokKind::KwImpl) {
@@ -1543,6 +1558,7 @@ impl<'a> Parser<'a> {
         let mut trait_impls = Vec::new();
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             if matches!(self.peek().kind, TokKind::KwDerive) {
                 derives.push(self.derive_line()?);
             } else if matches!(self.peek().kind, TokKind::KwImpl) {
@@ -1648,6 +1664,7 @@ impl<'a> Parser<'a> {
         let mut methods = Vec::new();
         let mut assoc_type_impls = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             // D-LIB2: `type Name = ConcreteType;` associated type implementation.
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
@@ -1682,6 +1699,7 @@ impl<'a> Parser<'a> {
         let mut methods = Vec::new();
         let mut assoc_type_impls = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             // D-LIB2: `type Name = ConcreteType;`
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
@@ -1729,6 +1747,7 @@ impl<'a> Parser<'a> {
         let mut methods = Vec::new();
         let mut assoc_types = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             // D-LIB2: `type Name;` associated type declaration.
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
@@ -1995,6 +2014,13 @@ impl<'a> Parser<'a> {
                 TokKind::RBrace => {
                     self.bump();
                     break;
+                }
+                // S6-R: a block statement (`if`/`loop`/`@unsafe`/nested `{}`)
+                // ends with `}`, after which the lexer inserts a synthetic
+                // terminator. Those statements don't consume their own
+                // terminator, so skip a stray one here.
+                TokKind::Semi => {
+                    self.bump();
                 }
                 TokKind::Eof => {
                     self.diags.push(Diagnostic::error(
@@ -2523,6 +2549,14 @@ impl<'a> Parser<'a> {
             let save = self.pos;
             let saved_diags = self.diags.len();
             if let Ok(e) = self.expr() {
+                // S6-R: the lexer inserts a synthetic terminator after the tail
+                // value too (it ends a line before `}`); accept `expr }` or
+                // `expr ; }` as the block's value.
+                if matches!(self.peek().kind, TokKind::Semi)
+                    && matches!(self.peek2().kind, TokKind::RBrace)
+                {
+                    self.bump(); // synthetic `;`
+                }
                 if matches!(self.peek().kind, TokKind::RBrace) {
                     self.bump();
                     return Ok((stmts, e));
@@ -4180,6 +4214,7 @@ impl<'a> Parser<'a> {
         // The first two are distinguished by their reserved name followed by
         // `:`; contributions begin with a namespace name followed by `.`.
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             match &self.peek().kind {
                 TokKind::Ident(n)
                     if n == syntax::MODULE_FIELD_SOURCES
@@ -4295,6 +4330,7 @@ impl<'a> Parser<'a> {
                 self.bump(); // consume `{`
                 let mut items = Vec::new();
                 while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
                     match self.top_level_item_in_code_module() {
                         Ok(item) => items.push(item),
                         Err(d) => {
@@ -4389,6 +4425,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the sources block")?;
         let mut out = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             let (name, name_span) = self.expect_ident("for a source name")?;
             self.expect(TokKind::Colon, "after a source name")?;
             // Consume the `provider@target` ref tokens up to the next `,`/`}`;
@@ -4503,6 +4540,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a `System` record")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             fields.push(self.system_field()?);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -4573,12 +4611,14 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the `services` map")?;
         let mut out = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             let (name, name_span) = self.expect_ident("for a service name")?;
             self.expect(TokKind::Colon, "after a service name")?;
             let explicit_type = self.opt_record_type(syntax::TYPE_SERVICE)?;
             self.expect(TokKind::LBrace, "to open a `Service` record")?;
             let mut fields = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
                 let (field, field_span) = self.expect_ident("for a `Service` field name")?;
                 self.expect(TokKind::Colon, "after a `Service` field name")?;
                 let value = self.expr()?;
@@ -4651,6 +4691,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open an `Image` record")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             fields.push(self.image_field()?);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -4714,6 +4755,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a struct literal")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             let (field, field_span) = self.expect_ident("for a field name")?;
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
@@ -4748,6 +4790,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a struct literal")?;
         let mut fields = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
             let (field, field_span) = self.expect_ident("for a field name")?;
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
@@ -5489,8 +5532,9 @@ impl<'a> Parser<'a> {
         Ok((base, start))
     }
 
-    /// S6 (ratified): every statement ends with `;` — no exceptions, not
-    /// even before a closing `}`.
+    /// S6-R (ratified 2026-06-18): statements are terminated by a synthetic
+    /// terminator the lexer inserts at line ends — users never type `;`. This
+    /// consumes that terminator; an error here means two statements share a line.
     fn finish_stmt(&mut self) -> Result<(), Diagnostic> {
         match &self.peek().kind {
             TokKind::Semi => {
@@ -5499,16 +5543,10 @@ impl<'a> Parser<'a> {
             }
             other => Err(Diagnostic::error(
                 "E0003",
-                format!(
-                    "expected `{}` after this statement, found {}",
-                    syntax::STMT_SEP,
-                    describe(other)
-                ),
-                format!(
-                    "every statement ends with `{}` — including the last one in a block",
-                    syntax::STMT_SEP
-                ),
-                format!("add `{}` after the statement", syntax::STMT_SEP),
+                format!("expected the end of this statement, found {}", describe(other)),
+                "each statement goes on its own line (no `;` — the line break ends it)"
+                    .to_string(),
+                "put the next statement on a new line".to_string(),
                 Some(self.peek().span),
             )),
         }

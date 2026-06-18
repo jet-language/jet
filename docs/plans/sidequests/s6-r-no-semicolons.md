@@ -1,7 +1,16 @@
 # S6-R — No visible semicolons
 
-**Status: ratified 2026-06-18 (option B — Go-style lexer insertion)** — recorded
-in `syntax-decisions.md` (supersedes S6's required-`;` rule); ready to implement.
+**Status: DONE (implemented 2026-06-18).** `lexer::lex` runs a post-pass
+(`insert_terminators`) over the top-level token stream: a synthetic `Semi` is
+inserted at each line end after a statement-ending token, suppressed when the
+next non-blank line starts with `.`/`?.` or a binary/logical operator, or when
+the next token is a closing `)`/`]`. Interpolation sub-streams use `lex_raw`
+(no insertion). `jet fmt` emits no `;`. E0986 flags `-> Type`/`{` split from
+the closing `)` (ui `return_arrow_split`). E_MISSING_SEMI retired (finish_stmt
+now reports "two statements share a line").
+
+**Ratified 2026-06-18 (option B — Go-style lexer insertion)** — recorded in
+`syntax-decisions.md` (supersedes S6's required-`;` rule).
 
 No `;` in source. The lexer inserts a synthetic terminator at line ends; the
 grammar and diagnostics stay terminator-based. This is a large, cross-cutting

@@ -45,14 +45,19 @@ func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params   = param { "," param } ;
 param    = [ "mut" | "take" ] ident ":" type ;
 block    = "{" { stmt } "}" ;            // S3: curly braces
+// S6-R: no visible `;` — the lexer inserts a synthetic terminator (NL below)
+// at each line end after a statement-ending token; the grammar stays
+// terminator-based. A leading `.` or binary/logical operator on the next line
+// suppresses insertion (continuation). `-> Type` / `{` must stay on the `)`
+// line (E0986). `NL` below denotes that synthetic terminator.
 stmt     = binding | assign | if | loop | when
-         | "break" ";" | "continue" ";" | "return" [ expr ] ";"
-         | expr ";" ;
-binding  = ( ident [ ":" type ] | destructure ) ( "::" | ":=" ) expr ";" ; // D-BIND1: `::` immutable, `:=` mutable (no keyword)
+         | "break" NL | "continue" NL | "return" [ expr ] NL
+         | expr NL ;
+binding  = ( ident [ ":" type ] | destructure ) ( "::" | ":=" ) expr NL ; // D-BIND1: `::` immutable, `:=` mutable (no keyword)
 destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
-                 | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr ";" ;
+                 | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 if       = "if" cond block { "else" "if" cond block } [ "else" block ] ;  // statement form
 loop     = [ "@" ident ] loop-body ;            // D-LABEL1: optional `@name` label
 loop-body= "loop" block                                                  // infinite
