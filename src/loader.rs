@@ -2,7 +2,7 @@
 //!
 //! Resolves the import graph from an entry `.jet` file, detects cycles and
 //! ambiguous module names, and returns a `ProgramBundle` for sema/codegen.
-//! When a `payload.jet` is found in the project root (walked upward from entry),
+//! When a `pkg.jet` is found in the project root (walked upward from entry),
 //! validates the manifest and wires package dep paths into module search (M12.1).
 
 use crate::ast::{ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
@@ -46,7 +46,7 @@ impl PkgResolution {
     }
 }
 
-/// Build the U17 package resolution from a project's `payload.jet` text and the
+/// Build the U17 package resolution from a project's `pkg.jet` text and the
 /// shared hangar store.
 ///
 /// Reading the hangar is a *pure lookup*: the compiler never realizes on demand
@@ -105,7 +105,7 @@ pub fn load_entry_with_overlay(
     };
     let entry_abs = normalize_path(&entry_abs);
 
-    // M12.1: walk upward from the entry file's directory to find payload.jet.
+    // M12.1: walk upward from the entry file's directory to find pkg.jet.
     // If found, use that directory as project_root and validate the manifest.
     // If none found, fall back to the entry file's directory (R9 — single-file mode).
     let entry_dir = entry_abs
@@ -115,7 +115,7 @@ pub fn load_entry_with_overlay(
     let (project_root, pkg_dep_dirs, pkg_resolution) = if let Some(manifest_dir) =
         find_manifest_root(&entry_dir)
     {
-        // Found a payload.jet — validate it and collect dep source paths.
+        // Found a pkg.jet — validate it and collect dep source paths.
         let pack_path = manifest_dir.join(syntax::PAYLOAD_FILE);
         let raw = fs::read_to_string(&pack_path).unwrap_or_default();
         match manifest::parse(&pack_path, &raw) {
@@ -258,7 +258,7 @@ pub fn load_entry_with_overlay(
     Ok(bundle)
 }
 
-/// Walk upward from `start` to find the nearest directory containing `payload.jet`.
+/// Walk upward from `start` to find the nearest directory containing `pkg.jet`.
 pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
@@ -359,7 +359,7 @@ fn collect_dep_dirs(mf: &manifest::Manifest, project_root: &Path) -> HashMap<Str
 }
 
 /// Rebuild a project's dependency source dirs (M12.1) and U17 package
-/// resolution from its `payload.jet`, for callers that only have the project
+/// resolution from its `pkg.jet`, for callers that only have the project
 /// root (e.g. `resolve_import_target`, run after the bundle is loaded). Returns
 /// empty maps when there is no manifest (R9 single-file mode).
 fn project_resolution(project_root: &Path) -> (HashMap<String, PathBuf>, PkgResolution) {

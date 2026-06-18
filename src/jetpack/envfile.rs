@@ -42,7 +42,7 @@ pub struct NamedSource {
 ///
 /// `env.jet` is **purely** the dev-shell descriptor (U10): the package index
 /// that maps a package name → its source lives in the source repo's
-/// `payload.jet` `packages:` block, read by the `core` provider — never here.
+/// `pkg.jet` `packages:` block, read by the `core` provider — never here.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct EnvFile {
     /// The default source for bare package entries (from a one-arg `pkg.source`).
@@ -383,7 +383,7 @@ pub fn shell() -> [JSON] {
     fn parses_core_source() {
         // U10: `env.jet` is purely the dev-shell descriptor. A `core` named
         // source still declares its provider via the `via` marker; the
-        // name→source package index lives in the repo's `payload.jet`, not here.
+        // name→source package index lives in the repo's `pkg.jet`, not here.
         let repo = r#"
 use jetpack as pkg;
 pub fn shell() -> [JSON] {

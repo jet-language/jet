@@ -1,4 +1,4 @@
-//! The Jet-syntax `payload.jet` package manifest (U1/U10 — Cargo.toml analog).
+//! The Jet-syntax `pkg.jet` package manifest (U1/U10 — Cargo.toml analog).
 //!
 //! Unified-ecosystem §2.1: the package tier. One language everywhere — the
 //! manifest is written in Jet syntax, not TOML. It holds payload identity, Jet
@@ -87,7 +87,7 @@ pub struct Dep {
     pub source: DepSource,
 }
 
-/// A parsed `payload.jet` package manifest.
+/// A parsed `pkg.jet` package manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackManifest {
     pub package: PackageMeta,
@@ -97,7 +97,7 @@ pub struct PackManifest {
     pub packages: Vec<PackageEntry>,
 }
 
-/// Why a `payload.jet` package manifest could not be parsed. These are internal
+/// Why a `pkg.jet` package manifest could not be parsed. These are internal
 /// (typed) errors for now; they become I4 diagnostics when the parser is wired
 /// into the loader.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +148,7 @@ impl PackManifest {
     }
 }
 
-/// Parse a `payload.jet` package manifest from its text (U1/U10).
+/// Parse a `pkg.jet` package manifest from its text (U1/U10).
 pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
     let text = strip_line_comments(text);
 
@@ -309,7 +309,7 @@ fn file_declares_module(text: &str, name: &str) -> bool {
 
 /// Convert a parsed `PackManifest` into the compiler's `manifest::Manifest`
 /// — the type `loader.rs`/`fetch.rs`/`lock.rs` operate on. `raw` is the
-/// original `payload.jet` text (kept for comment-preserving `jet add`/`remove`
+/// original `pkg.jet` text (kept for comment-preserving `jet add`/`remove`
 /// edits, mirroring the old `jet.toml` `Manifest::raw`).
 pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::manifest::Manifest, Diagnostic> {
     use crate::manifest::{DepSpec, GitSelector, Manifest, PackageMeta as MPackageMeta};
@@ -385,7 +385,7 @@ fn bad_dep_shape(name: &str, why: &str) -> Diagnostic {
     )
 }
 
-/// Generate a `payload.jet` template for `jet new`.
+/// Generate a `pkg.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
     let ver = crate::manifest::COMPILER_VERSION;
     if annotated {
@@ -424,7 +424,7 @@ deps: {{
     }
 }
 
-/// Render a compiler-side `DepSpec` back into `payload.jet` dep-value syntax.
+/// Render a compiler-side `DepSpec` back into `pkg.jet` dep-value syntax.
 fn render_dep_spec(spec: &crate::manifest::DepSpec) -> String {
     use crate::manifest::{DepSpec, GitSelector};
     match spec {
@@ -1323,10 +1323,10 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
 
     #[test]
     fn discovery_skips_payload_jet() {
-        // payload.jet should never be scanned for module declarations.
+        // pkg.jet should never be scanned for module declarations.
         let root = scratch_dir("disc-skip-payload");
         std::fs::write(
-            root.join("payload.jet"),
+            root.join("pkg.jet"),
             "payload: { name: \"x\", version: \"1\" }\n// module hello { }\n",
         )
         .unwrap();

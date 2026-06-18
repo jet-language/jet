@@ -74,7 +74,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     ));
     fs::create_dir_all(&root).unwrap();
     fs::write(
-        root.join("payload.jet"),
+        root.join("pkg.jet"),
         "payload: {\n    name: \"ffi_app\",\n    version: \"0.1.0\",\n}\n",
     )
     .unwrap();
@@ -85,7 +85,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     let shown = path.to_string_lossy();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
         panic!(
-            "inline FFI pin should work even when payload.jet exists:\n{}",
+            "inline FFI pin should work even when pkg.jet exists:\n{}",
             jet::render_diagnostics(&shown, src, &diags)
         );
     });

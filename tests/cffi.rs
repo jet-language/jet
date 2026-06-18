@@ -328,7 +328,7 @@ fn parse_c_dep_reads_dependencies_table() {
 
 #[test]
 fn resolve_link_unknown_lib_is_e3201() {
-    // No payload.jet dep and (in CI) no pkg-config → E3201.
+    // No pkg.jet dep and (in CI) no pkg-config → E3201.
     let root = std::env::temp_dir().join(format!("jet_cffi_e3201_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
@@ -341,7 +341,7 @@ fn resolve_link_unknown_lib_is_e3201() {
     let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
     let expected = "\
 Error [E3201]: C library `nolib` was not found.
- Why: Jet tried the hangar dep keyed `nolib` in `payload.jet`, then `pkg-config nolib` on the system; neither provided include/link paths.
+ Why: Jet tried the hangar dep keyed `nolib` in `pkg.jet`, then `pkg-config nolib` on the system; neither provided include/link paths.
  Fix: Install the system package (e.g. `pacman -S nolib`), or add `nolib` under `[dependencies:c]` with a pinned hangar ref.
 ";
     assert_eq!(rendered, expected);

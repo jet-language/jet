@@ -1053,7 +1053,7 @@ fn jet_http_request(url: &str, method: &str, extra_headers: &[(&str, &str)], bod
         let p = if slash < rest.len() { &rest[slash..] } else { "/" };
         (hp.to_string(), p.to_string())
     } else if let Some(rest) = url_str.strip_prefix("https://") {
-        return Err("HTTPS requires the `jet.tls` package; this is plain HTTP. Add `jet.tls` to your payload.jet to enable HTTPS.".to_string());
+        return Err("HTTPS requires the `jet.tls` package; this is plain HTTP. Add `jet.tls` to your pkg.jet to enable HTTPS.".to_string());
         // Keep the variable to silence unused warning in case we extend later.
         #[allow(unreachable_code)]
         { (rest.to_string(), "/".to_string()) }

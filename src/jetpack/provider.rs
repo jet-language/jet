@@ -136,7 +136,7 @@ impl Provider for NixProvider {
 
 /// The first-party Jet package provider (R2/U10). Realizes a Jet package with
 /// no Nix at all: it discovers the package's `module <name>` in the source repo
-/// (Chunk 3), reads the repo's `payload.jet` `packages:` index for the package's
+/// (Chunk 3), reads the repo's `pkg.jet` `packages:` index for the package's
 /// kind (Chunk 4), and materializes that source tree into the Jetpack store —
 /// staging a `bin/` for an `executable`, source-only for a `library`. R2
 /// supports local and git-backed remote source repos.
@@ -195,18 +195,18 @@ impl Provider for CoreProvider {
             copy_tree(&src_dir, &out_dir)
                 .map_err(|e| ProviderError::CoreBuild(format!("could not place package: {e}")))?;
         }
-        // U10 Chunk 4: the repo's `payload.jet` `packages:` index decides what
+        // U10 Chunk 4: the repo's `pkg.jet` `packages:` index decides what
         // goes on PATH. `executable` stages the prebuilt `bin/` (the devshell
         // case); `library` stages module source for import and contributes no
         // PATH entry (an empty `bin`). With no manifest entry — a bare `core`
-        // source declared by marker, no `payload.jet` — we default to
+        // source declared by marker, no `pkg.jet` — we default to
         // `executable`, today's behavior.
         let manifest = packmanifest::PackManifest::load(&repo).and_then(|r| r.ok());
         let kind = manifest
             .as_ref()
             .and_then(|pm| pm.package_kind(&spec.package))
             .unwrap_or(packmanifest::PackageKind::Executable);
-        // `payload.jet` carries the real version for core packages (U10).
+        // `pkg.jet` carries the real version for core packages (U10).
         let version = manifest
             .as_ref()
             .map(|pm| pm.package.version.clone())
@@ -483,7 +483,7 @@ pub fn resolve_kind(
     match table.provider(name) {
         ProviderKind::Core => ProviderKind::Core,
         ProviderKind::Nix => ProviderKind::Nix,
-        // U9: peek the remote's `payload.jet` to choose core vs nix.
+        // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
             Some(upstream) => infer_remote_kind(upstream, offline, cache_dir),
             None => ProviderKind::Nix,
@@ -510,7 +510,7 @@ pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realize
 }
 
 /// U9 remote probe: classify a `github@…`/git upstream as `Core` (it carries a
-/// `payload.jet`) or `Nix` (it does not), peeking **only** `payload.jet` — never
+/// `pkg.jet`) or `Nix` (it does not), peeking **only** `pkg.jet` — never
 /// cloning a nixpkgs-sized repo just to classify it.
 ///
 /// Resolution order:
@@ -519,7 +519,7 @@ pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realize
 /// 2. Offline with no cache: we can't probe, so default to `nix`.
 /// 3. Online: a lightweight `git` peek — a partial, no-checkout, depth-1 clone
 ///    (`--filter=tree:0`, so blobs/subtrees are never downloaded) into a temp
-///    dir, then `git ls-tree <rev> payload.jet`. Present → `Core`; absent or any
+///    dir, then `git ls-tree <rev> pkg.jet`. Present → `Core`; absent or any
 ///    peek failure → `Nix` (the safe default; a github flake still realizes
 ///    through nix).
 fn infer_remote_kind(upstream: &str, offline: bool, cache_dir: &Path) -> ProviderKind {
@@ -547,15 +547,15 @@ fn pack_kind(has_pack: bool) -> ProviderKind {
     }
 }
 
-/// Peek whether `remote` has a `payload.jet` at its root, without a full clone.
+/// Peek whether `remote` has a `pkg.jet` at its root, without a full clone.
 ///
 /// Fetches **only the named rev** into a throwaway repo, shallow (`--depth 1`)
 /// and partial (`--filter=tree:0`, so trees/blobs are deferred), then reads the
 /// root tree with `git ls-tree FETCH_HEAD`. Even a nixpkgs-sized repo transfers
 /// just the one commit object plus the lazily-fetched root tree. `git fetch`
 /// resolves a branch, tag, **or** commit SHA uniformly, so the rev's exact
-/// `payload.jet` is peeked regardless of how it was pinned. Any failure (no `git`,
-/// network error, unfetchable rev) is treated as "no payload.jet" by the caller
+/// `pkg.jet` is peeked regardless of how it was pinned. Any failure (no `git`,
+/// network error, unfetchable rev) is treated as "no pkg.jet" by the caller
 /// (→ nix), the safe default.
 fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     if Command::new("git").arg("--version").output().is_err() {
@@ -827,7 +827,7 @@ mod tests {
     #[test]
     fn core_provider_builds_local_package() {
         use super::super::refspec::{classify_in, ProviderKind, SourceTable};
-        // Repo with payload.jet + a `module hello` declaration + bin/. No env.jet
+        // Repo with pkg.jet + a `module hello` declaration + bin/. No env.jet
         // (U10 Chunk 3: CoreProvider discovers the package by module name).
         let base = unique_dir("jpk-core");
         let repo = base.join("jet-pkgs");
@@ -859,7 +859,7 @@ mod tests {
 
     #[test]
     fn core_provider_kind_decides_path_entry() {
-        // U10 Chunk 4: the repo's `payload.jet` `packages:` index decides what a
+        // U10 Chunk 4: the repo's `pkg.jet` `packages:` index decides what a
         // realized `core` package puts on PATH. `executable` → a `bin/` dir;
         // `library` → no bin (staged source only). Both stage the tree.
         use super::super::refspec::{classify_in, ProviderKind, SourceTable};
@@ -869,7 +869,7 @@ mod tests {
         std::fs::create_dir_all(&store).unwrap();
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
-            repo.join("payload.jet"),
+            repo.join("pkg.jet"),
             "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { hello: executable, mathlib: library }\n",
         )
         .unwrap();
@@ -1013,11 +1013,11 @@ mod tests {
         let store = base.join("store");
         std::fs::create_dir_all(&store).unwrap();
 
-        // A repo carrying `payload.jet` is a Jet package source → core.
+        // A repo carrying `pkg.jet` is a Jet package source → core.
         let with = base.join("with-pack");
         if !init_git_repo(
             &with,
-            &[("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
         ) {
             eprintln!("note: skipping remote probe test (git not found)");
             return;
@@ -1031,10 +1031,10 @@ mod tests {
         assert_eq!(
             resolve_kind(&with_spec, &with_table, false, &store),
             ProviderKind::Core,
-            "a remote carrying payload.jet must infer core"
+            "a remote carrying pkg.jet must infer core"
         );
 
-        // A repo with no `payload.jet` is a plain (nix) flake/source → nix.
+        // A repo with no `pkg.jet` is a plain (nix) flake/source → nix.
         let without = base.join("no-pack");
         init_git_repo(&without, &[("flake.nix", "{}\n")]);
         let without_table = SourceTable::from_decls([(
@@ -1046,11 +1046,11 @@ mod tests {
         assert_eq!(
             resolve_kind(&without_spec, &without_table, false, &store),
             ProviderKind::Nix,
-            "a remote with no payload.jet must infer nix"
+            "a remote with no pkg.jet must infer nix"
         );
 
         // Offline with no cached checkout can't probe → defaults to nix even for
-        // the payload.jet-bearing repo.
+        // the pkg.jet-bearing repo.
         let cold = base.join("cold-store");
         std::fs::create_dir_all(&cold).unwrap();
         assert_eq!(
@@ -1074,7 +1074,7 @@ mod tests {
         let repo = base.join("repo");
         if !init_git_repo(
             &repo,
-            &[("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
         ) {
             eprintln!("note: skipping commit-sha probe test (git not found)");
             return;
@@ -1098,7 +1098,7 @@ mod tests {
         assert_eq!(
             resolve_kind(&spec, &table, false, &store),
             ProviderKind::Core,
-            "a commit-SHA-pinned remote with payload.jet must infer core"
+            "a commit-SHA-pinned remote with pkg.jet must infer core"
         );
         std::fs::remove_dir_all(&base).ok();
     }
@@ -1106,7 +1106,7 @@ mod tests {
     #[test]
     fn realize_resolves_inferred_remote_to_core() {
         // U9 end-to-end at the realize boundary: an `Infer` source — the kind a
-        // typed `github@…` source carries — whose remote has a `payload.jet`
+        // typed `github@…` source carries — whose remote has a `pkg.jet`
         // resolves to the `core` provider and builds the first-party package,
         // with no nix and no declared marker.
         use super::super::refspec::{classify_in, ProviderKind, SourceTable};
@@ -1117,7 +1117,7 @@ mod tests {
         if !init_git_repo(
             &repo,
             &[
-                ("payload.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n"),
+                ("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n"),
                 ("pkgs/hello/hello.jet", "module hello { }\n"),
                 ("pkgs/hello/bin/hello", "#!/bin/sh\necho hi-infer\n"),
             ],

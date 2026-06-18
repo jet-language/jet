@@ -91,7 +91,7 @@ fn realized_library_is_consumed_with_use() {
     // top-level `pub fn` in the module file (S16 module form).
     let producer = s.join("jsonutil-src");
     write(
-        &producer.join("payload.jet"),
+        &producer.join("pkg.jet"),
         "payload: { name: \"jsonutil\", version: \"0.1.0\" }\npackages: { jsonutil: library }\n",
     );
     write(
@@ -108,7 +108,7 @@ fn realized_library_is_consumed_with_use() {
     // exercising the new extra search root rather than the M12.1 path-dep path.
     let consumer = s.join("app");
     write(
-        &consumer.join("payload.jet"),
+        &consumer.join("pkg.jet"),
         "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: github@acme/jsonutil/abc123 }\n",
     );
     write(
@@ -146,7 +146,7 @@ fn executable_is_not_importable() {
     // Producer repo: an `executable` package `deploy` with a prebuilt bin/.
     let producer = s.join("deploy-src");
     write(
-        &producer.join("payload.jet"),
+        &producer.join("pkg.jet"),
         "payload: { name: \"deploy\", version: \"0.1.0\" }\npackages: { deploy: executable }\n",
     );
     write(&producer.join("deploy.jet"), "module deploy { }\n");
@@ -157,7 +157,7 @@ fn executable_is_not_importable() {
 
     let consumer = s.join("app");
     write(
-        &consumer.join("payload.jet"),
+        &consumer.join("pkg.jet"),
         "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { deploy: github@acme/deploy/abc123 }\n",
     );
     write(
@@ -185,7 +185,7 @@ fn executable_is_not_importable() {
         "why line: {stderr}"
     );
     assert!(
-        stderr.contains("change `deploy` to `library` in `payload.jet`"),
+        stderr.contains("change `deploy` to `library` in `pkg.jet`"),
         "fix line: {stderr}"
     );
 }
@@ -203,7 +203,7 @@ fn unrealized_library_points_at_build() {
     // dep) its source isn't on disk either.
     let consumer = s.join("app");
     write(
-        &consumer.join("payload.jet"),
+        &consumer.join("pkg.jet"),
         "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: github@acme/jsonutil/abc123 }\n",
     );
     write(

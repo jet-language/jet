@@ -461,7 +461,7 @@ fn core_provider_runs_first_party_package_without_nix() {
 #[test]
 fn typed_core_source_inferred_from_pack_jet() {
     // U9/U10: a typed `module { … }` env declares `sources: { mine: path@<dir> }`
-    // with no provider marker. The kind is *inferred* from `payload.jet` in the
+    // with no provider marker. The kind is *inferred* from `pkg.jet` in the
     // target → realizes through the first-party `core` provider. U10 Chunk 3:
     // the package is discovered by module name — `module hello` in the source tree
     // — with no `env.jet` index. No nix on PATH proves no nix is involved.
@@ -473,9 +473,9 @@ fn typed_core_source_inferred_from_pack_jet() {
     let hello_bin = hello_pkg.join("bin");
     fs::create_dir_all(&hello_bin).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    // `payload.jet` is both the U9 probe marker and the U10 package index.
+    // `pkg.jet` is both the U9 probe marker and the U10 package index.
     fs::write(
-        repo.join("payload.jet"),
+        repo.join("pkg.jet"),
         "payload: {\n    name: \"jet-pkgs\",\n    version: \"0.1.0\",\n}\npackages: {\n    hello: executable,\n}\n",
     )
     .unwrap();
@@ -523,7 +523,7 @@ fn core_provider_builds_library_package_without_nix() {
     // U10 Chunk 4: a `library` package realizes through the `core` provider
     // (no nix), staging its module source. Unlike an `executable`, it puts no
     // `bin/` on PATH — but `jetpack build` realizes it just the same. The kind
-    // comes from the repo's `payload.jet` `packages:` index.
+    // comes from the repo's `pkg.jet` `packages:` index.
     let base = Scratch::new("core-library");
     let repo = base.join("jet-pkgs");
     let proj = base.join("proj");
@@ -531,9 +531,9 @@ fn core_provider_builds_library_package_without_nix() {
     let lib_pkg = repo.join("lib/mathlib");
     fs::create_dir_all(&lib_pkg).unwrap();
     fs::create_dir_all(&proj).unwrap();
-    // `payload.jet` declares the package as a `library` (the kind index).
+    // `pkg.jet` declares the package as a `library` (the kind index).
     fs::write(
-        repo.join("payload.jet"),
+        repo.join("pkg.jet"),
         "payload: {\n    name: \"jet-pkgs\",\n    version: \"0.1.0\",\n}\npackages: {\n    mathlib: library,\n}\n",
     )
     .unwrap();
@@ -545,7 +545,7 @@ fn core_provider_builds_library_package_without_nix() {
     )
     .unwrap();
     // A typed env references the library package; the source kind is inferred
-    // from `payload.jet` → core.
+    // from `pkg.jet` → core.
     fs::write(
         proj.join("env.jet"),
         format!(

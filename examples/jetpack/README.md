@@ -8,7 +8,7 @@ fixtures so the commands run without Nix or a network.
 
 - `env.jet` — the environment (Jet's `flake.nix` equivalent), using named
   sources `stable`, `unstable`, and a first-party `core` repo `mine`.
-- `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `payload.jet`
+- `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `pkg.jet`
   `packages:` block declares the `hello` package (an `executable`) that
   `mine:hello` resolves to; the package is the `module hello` discovered by name
   in its source tree (U10).

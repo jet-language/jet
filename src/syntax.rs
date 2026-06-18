@@ -422,8 +422,8 @@ pub const FN_TO_ERROR: &str = "to_error";
 
 // S52's `MANIFEST_FILE`/`LOCK_FILE` (`jet.toml`/`jet.lock`) were retired in the
 // manifest reshape chunk (U1/U2): the manifest is now `PAYLOAD_FILE`
-// (`payload.jet`, U10 — was `pack.jet`/`PACK_FILE`) and the lockfile is
-// `UNIFIED_LOCK_FILE` (`.jet/lock`). Clean break — no alias.
+// (`pkg.jet`, D-JPK-FILES — prior filename iterations retired) and
+// the lockfile is `UNIFIED_LOCK_FILE` (`.jet/lock`). Clean break — no alias.
 
 /// S52 (ratified M12): package source root directory inside a project.
 pub const SOURCE_ROOT_DIR: &str = ".jet";
@@ -443,10 +443,10 @@ pub const DEP_TABLE_C: &str = "dependencies:c";
 /// D-JPK1/9: the Jetpack package-manager binary name.
 pub const JETPACK_BINARY_NAME: &str = "jetpack";
 
-/// U1 (D-JPK20) / U10: the Jet **package manifest** is `payload.jet`
-/// (`PAYLOAD_FILE`; Cargo.toml analog, replaces `jet.toml`). The old
-/// `pack.jet`/`PACK_FILE` spelling was retired in the U10 rename (clean break,
-/// no alias). `PACK_LOCK_FILE` is superseded by `.jet/lock` (U2/S52).
+/// U1 (D-JPK20) / U10 / D-JPK-FILES: the Jet **package manifest** is `pkg.jet`
+/// (`PAYLOAD_FILE`; Cargo.toml analog, replaces `jet.toml`). Prior filenames
+/// (pack.jet, the U10 interim name) were retired (clean break, no alias).
+/// `PACK_LOCK_FILE` is superseded by `.jet/lock` (U2/S52).
 pub const PACK_LOCK_FILE: &str = "pack.lock";
 
 /// D-JPK7/15: the `<source>:<package/path>` ref separator. Users never type
@@ -598,10 +598,11 @@ pub const ENV_FIELD_PROMPT: &str = "prompt";
 pub const TYPE_PKG: &str = "Pkg";
 pub const REF_PROVIDER_AT: &str = "@";
 
-/// U10 (ratified 2026-06-16; amends U1): the package manifest is `payload.jet`
-/// (renamed from `pack.jet`/`PACK_FILE` — a clean break, no alias). A payload is
-/// a collection of packages; its identity block is `payload: { … }`.
-pub const PAYLOAD_FILE: &str = "payload.jet";
+/// U10 (ratified 2026-06-16; amends U1) / D-JPK-FILES (ratified 2026-06-18;
+/// amends U10): the package manifest is `pkg.jet` (D-JPK-FILES rename; prior
+/// interim names retired, clean break, no alias). A payload is a collection
+/// of packages; its identity block is `payload: { … }`.
+pub const PAYLOAD_FILE: &str = "pkg.jet";
 
 /// U10 (ratified 2026-06-16): manifest identity block keyword — `payload: { name,
 /// version, … }` (was `package:`).
@@ -623,7 +624,7 @@ pub const PACKAGE_KIND_EXECUTABLE: &str = "executable";
 pub const PACKAGE_FIELD_KIND: &str = "kind";
 
 /// D-REL3 (ratified 2026-06-16): the project compatibility marker —
-/// `edition: "2026"` in the `payload: { … }` block of `payload.jet`. An edition
+/// `edition: "2026"` in the `payload: { … }` block of `pkg.jet`. An edition
 /// opts a project into a specific era of Jet syntax; a toolchain advertises the
 /// editions it supports and rejects a future edition it can't provide (E2001).
 /// Single-file `jet run file.jet` has no edition marker and always uses the

@@ -58,7 +58,7 @@ fn version_banner() {
 
 #[test]
 fn edition_too_new() {
-    // A real payload.jet asking for a future edition triggers E2001 through the
+    // A real pkg.jet asking for a future edition triggers E2001 through the
     // manifest loader path. We render the diagnostic the way the CLI would.
     let raw = r#"payload: {
     name: "wordstats",
@@ -66,12 +66,12 @@ fn edition_too_new() {
     edition: "2099",
 }
 "#;
-    let path = std::path::Path::new("payload.jet");
+    let path = std::path::Path::new("pkg.jet");
     let mf = manifest::parse(path, raw).expect("manifest should parse");
-    let err = manifest::check_edition_support(&mf, "payload.jet")
+    let err = manifest::check_edition_support(&mf, "pkg.jet")
         .expect_err("a future edition must be rejected");
     assert_eq!(err.code, "E2001");
-    let rendered = jet::render_diagnostics("payload.jet", raw, std::slice::from_ref(&err));
+    let rendered = jet::render_diagnostics("pkg.jet", raw, std::slice::from_ref(&err));
     check_fixture("edition_too_new.txt", &rendered);
 }
 
@@ -81,17 +81,17 @@ fn supported_edition_is_accepted() {
         "payload: {{ name: \"x\", version: \"0.1.0\", edition: \"{}\" }}\n",
         manifest::latest_edition()
     );
-    let mf = manifest::parse(std::path::Path::new("payload.jet"), &raw).unwrap();
-    assert!(manifest::check_edition_support(&mf, "payload.jet").is_ok());
+    let mf = manifest::parse(std::path::Path::new("pkg.jet"), &raw).unwrap();
+    assert!(manifest::check_edition_support(&mf, "pkg.jet").is_ok());
 }
 
 #[test]
 fn no_edition_field_is_accepted() {
     // A manifest with no edition tracks the toolchain's newest stable edition.
     let raw = "payload: { name: \"x\", version: \"0.1.0\" }\n";
-    let mf = manifest::parse(std::path::Path::new("payload.jet"), raw).unwrap();
+    let mf = manifest::parse(std::path::Path::new("pkg.jet"), raw).unwrap();
     assert_eq!(mf.package.edition, None);
-    assert!(manifest::check_edition_support(&mf, "payload.jet").is_ok());
+    assert!(manifest::check_edition_support(&mf, "pkg.jet").is_ok());
 }
 
 #[test]

@@ -77,7 +77,7 @@ usage:
   {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
   {bin} run   <file.{ext}> a b      extra words become program arguments
   {bin} test  <file|dir>            compile and run top-level test blocks
-  {bin} new   <name>                create a new project folder with payload.jet
+  {bin} new   <name>                create a new project folder with pkg.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
@@ -522,7 +522,7 @@ fn main() {
                         }
                     }
                     eprintln!(
-                        "error: no file given and no `payload.jet` found in this directory or above"
+                        "error: no file given and no `pkg.jet` found in this directory or above"
                     );
                     eprintln!(
                         " fix: run `jet {} <file.{}>` or cd into a project",
@@ -568,7 +568,7 @@ fn main() {
         "install" => {
             eprintln!("Error [E0043]: `jet install` isn't a Jet command");
             eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
-            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in payload.jet");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
             exit(exit_codes::USER_ERROR);
         }
         _ => {
@@ -1003,7 +1003,7 @@ fn run_new(name: &str, annotated: bool) {
         eprintln!("error: `{}` already exists", name);
         exit(exit_codes::USER_ERROR);
     }
-    // Create: <name>/payload.jet, <name>/.jet/main.jet, <name>/.gitignore
+    // Create: <name>/pkg.jet, <name>/.jet/main.jet, <name>/.gitignore
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         eprintln!("error: couldn't create `{}`/.jet: {}", name, e);
@@ -1037,7 +1037,7 @@ fn run_new(name: &str, annotated: bool) {
 fn run_add(raw_args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found — run `jet add` inside a project");
+        eprintln!("error: no `pkg.jet` found — run `jet add` inside a project");
         eprintln!(" fix: run `jet new <name>` to create a project first");
         exit(exit_codes::USER_ERROR);
     });
@@ -1110,7 +1110,7 @@ fn run_add(raw_args: &[String]) {
 fn run_remove(dep_name: &str) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found");
+        eprintln!("error: no `pkg.jet` found");
         exit(exit_codes::USER_ERROR);
     });
 
@@ -1236,7 +1236,7 @@ fn run_bind(args: &[&String]) {
 fn run_fetch(locked: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found — run `jet fetch` inside a project");
+        eprintln!("error: no `pkg.jet` found — run `jet fetch` inside a project");
         exit(exit_codes::USER_ERROR);
     });
     do_fetch(&root, locked);
@@ -1245,7 +1245,7 @@ fn run_fetch(locked: bool) {
 fn run_update(dep: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found");
+        eprintln!("error: no `pkg.jet` found");
         exit(exit_codes::USER_ERROR);
     });
 
@@ -1800,7 +1800,7 @@ fn build(
 fn run_publish(force: bool, mode: OutputMode) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found — run `jet publish` inside a project");
+        eprintln!("error: no `pkg.jet` found — run `jet publish` inside a project");
         exit(exit_codes::USER_ERROR);
     });
 
@@ -1894,7 +1894,7 @@ fn run_publish(force: bool, mode: OutputMode) {
 fn run_vendor() {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found — run `jet vendor` inside a project");
+        eprintln!("error: no `pkg.jet` found — run `jet vendor` inside a project");
         exit(exit_codes::USER_ERROR);
     });
 
@@ -1940,7 +1940,7 @@ fn run_vendor() {
 fn run_audit(db_path: Option<&str>) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found — run `jet audit` inside a project");
+        eprintln!("error: no `pkg.jet` found — run `jet audit` inside a project");
         exit(exit_codes::USER_ERROR);
     });
 
@@ -1995,7 +1995,7 @@ fn run_audit(db_path: Option<&str>) {
 fn run_sbom(cyclonedx: bool) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = jet::loader::find_manifest_root(&cwd).unwrap_or_else(|| {
-        eprintln!("error: no `payload.jet` found — run `jet sbom` inside a project");
+        eprintln!("error: no `pkg.jet` found — run `jet sbom` inside a project");
         exit(exit_codes::USER_ERROR);
     });
 

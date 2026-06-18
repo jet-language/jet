@@ -1,11 +1,11 @@
-//! `payload.jet` package-manifest loading (M12.1, S52, U1/U10, D-JPK23).
+//! `pkg.jet` package-manifest loading (M12.1, S52, U1/U10, D-JPK23).
 //!
 //! The on-disk format is Jet syntax, not TOML — `src/jetpack/packmanifest.rs`
-//! is the structural parser for `payload.jet`'s `payload:`/`deps:`/`exports:`
+//! is the structural parser for `pkg.jet`'s `payload:`/`deps:`/`exports:`
 //! shape; this module owns the compiler-facing `Manifest` type that
 //! `loader.rs`/`fetch.rs`/`lock.rs`/`store.rs` operate on, the toolchain
 //! check (E1208), and the comment-preserving `jet add`/`jet remove` edits.
-//! `payload.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
+//! `pkg.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
 //! no back-compat alias.
 
 use crate::diag::{Diagnostic, Span};
@@ -45,7 +45,7 @@ pub fn edition_is_supported(edition: &str) -> bool {
     SUPPORTED_EDITIONS.contains(&edition.trim())
 }
 
-/// Validate the `edition:` field from `payload.jet` (D-REL3). A manifest that
+/// Validate the `edition:` field from `pkg.jet` (D-REL3). A manifest that
 /// asks for an edition this toolchain doesn't ship is E2001. A manifest with no
 /// `edition:` field is fine — it tracks the toolchain's newest stable edition.
 pub fn check_edition_support(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
@@ -171,9 +171,9 @@ pub struct Manifest {
     /// Rust crate dependencies for `extern rust` blocks. Always empty today:
     /// `extern rust "crate@version" { … }` (S50) carries its own version
     /// pin in source, so nothing has ever read this map — kept for shape
-    /// stability, not parsed from `payload.jet`.
+    /// stability, not parsed from `pkg.jet`.
     pub dependencies_rust: BTreeMap<String, String>,
-    /// Raw `payload.jet` text (preserved for comment-preserving edits).
+    /// Raw `pkg.jet` text (preserved for comment-preserving edits).
     pub raw: String,
 }
 
@@ -224,13 +224,13 @@ impl GitSelector {
 // Parser
 // ──────────────────────────────────────────────
 
-/// Parse a `payload.jet` package manifest from its text.
+/// Parse a `pkg.jet` package manifest from its text.
 pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     let pm = packmanifest::parse(raw).map_err(|e| to_diagnostic(path, &e))?;
     packmanifest::to_manifest(&pm, raw)
 }
 
-/// Load and parse the `payload.jet` manifest in a directory.
+/// Load and parse the `pkg.jet` manifest in a directory.
 pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
     let pack_path = dir.join(syntax::PAYLOAD_FILE);
     if !pack_path.is_file() {
@@ -248,7 +248,7 @@ pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
     Some(parse(&pack_path, &raw))
 }
 
-/// Validate the toolchain constraint from `payload.jet`. Returns E1208 on mismatch.
+/// Validate the toolchain constraint from `pkg.jet`. Returns E1208 on mismatch.
 pub fn check_toolchain(manifest: &Manifest, _file: &str) -> Result<(), Diagnostic> {
     let Some(constraint) = &manifest.package.jet_constraint else {
         return Ok(());
@@ -304,7 +304,7 @@ fn version_ge(a: &str, b: &str) -> bool {
 // ──────────────────────────────────────────────
 
 /// Insert or update a dependency in the `deps: { … }` block, preserving
-/// comments and existing entries. Returns the updated `payload.jet` text.
+/// comments and existing entries. Returns the updated `pkg.jet` text.
 pub fn add_dependency(raw: &str, name: &str, spec: &DepSpec) -> String {
     packmanifest::add_dep(raw, name, spec)
 }
@@ -314,7 +314,7 @@ pub fn remove_dependency(raw: &str, name: &str) -> String {
     packmanifest::remove_dep(raw, name)
 }
 
-/// Generate a `payload.jet` template for `jet new`.
+/// Generate a `pkg.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
     packmanifest::new_template(name, annotated)
 }

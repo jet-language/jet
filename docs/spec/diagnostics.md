@@ -271,13 +271,13 @@ before continuing.
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
 | E1207 | jet   | registry dependency not yet supported (M12.2) |
-| E1208 | jet   | toolchain `jet:` field in `payload.jet` incompatible (M12.1) |
+| E1208 | jet   | toolchain `jet:` field in `pkg.jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
 | E1210 | jet   | unknown package kind in `packages:` block (U10) |
 | E1211 | jet   | `packages:` block-form entry missing `kind` field (U10) |
 | E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
-| E2001 | jet   | `payload.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
+| E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
@@ -294,7 +294,7 @@ before continuing.
 These enforce the compatibility contract in docs/spec/release-policy.md. An
 **edition** opts a project into a specific era of Jet syntax (D-REL3); the
 toolchain advertises the editions it supports in `jet --version`. **E2001** is
-fully reachable from a real `payload.jet`. **E2002** and **L2001** read from the
+fully reachable from a real `pkg.jet`. **E2002** and **L2001** read from the
 deprecation registry in `src/manifest.rs` (`DEPRECATIONS`); that registry is
 empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
 codes are registered and snapshotted but not yet user-triggerable. They become
@@ -303,7 +303,7 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `payload.jet`. |
+| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `pkg.jet`. |
 | E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
 | L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
 
@@ -374,7 +374,7 @@ CLI.
 | E0979 | A `jetpack os` target was given with no `@host` selector. | U16: `jetpack os <verb>` takes `[<config-path>]@<host>`; the `@host` segment selects which `System` in the config to apply, and it is required. | Write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`. |
 | E0980 | A `jetpack os` `@host` selector names a system the config doesn't define. | U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
 | E0981 | The `jetpack os` config file (named, or the default `~/.jet/config.jet`) doesn't exist. | U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/config.jet`. | Create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`. |
-| E0982 | `use <pkg>` named a package that is realized as an `executable`. | U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code. | Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `payload.jet`. |
+| E0982 | `use <pkg>` named a package that is realized as an `executable`. | U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code. | Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `pkg.jet`. |
 | E0983 | `use <pkg>` named a `library` dependency the project declares but that hasn't been realized (its source isn't staged in the shared hangar store, and isn't on disk as a path dep). | U17: a `library` is consumed with the ordinary `use` form only after it is realized — `jet build`/`run` never realize on demand, keeping them offline and deterministic (the same flow as pre-fetched deps). | Run `jetpack build` to realize the library into the hangar, then `use <pkg>;` resolves it. |
 
 ## Concurrency diagnostics
@@ -507,7 +507,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3201 | C library `{lib}` was not found. | Jet tried the hangar dep keyed `{lib}` in `payload.jet` / `pack.jet`, then `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or add `{lib}` under `[dependencies:c]` with a pinned hangar ref. |
+| E3201 | C library `{lib}` was not found. | Jet tried the hangar dep keyed `{lib}` in `pkg.jet`, then `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or add `{lib}` under `[dependencies:c]` with a pinned hangar ref. |
 | E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58). | Move the call inside `@unsafe`, or change the type to a C-safe value type. |
 | E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `@extern` / `@bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |

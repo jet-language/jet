@@ -279,8 +279,8 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
     }
     out.push_str(".SH FILES\n");
     out.push_str(&format!(
-        ".TP\n.B payload.{ext}\nThe project manifest.\n",
-        ext = FILE_EXT
+        ".TP\n.B {manifest}\nThe project manifest.\n",
+        manifest = crate::syntax::PAYLOAD_FILE
     ));
     out.push_str(".SH SEE ALSO\n");
     out.push_str(&format!("{bin}-explain(1)\n", bin = BINARY_NAME));

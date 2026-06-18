@@ -464,7 +464,7 @@ pub fn resolve_link(
     lib: &str,
     project_root: &Path,
 ) -> Result<LinkFlags, Diagnostic> {
-    // 1. Hangar: a `[dependencies:c]` entry keyed by `<lib>` in payload.jet.
+    // 1. Hangar: a `[dependencies:c]` entry keyed by `<lib>` in pkg.jet.
     if let Some(flags) = hangar_link(lib, project_root) {
         return Ok(flags);
     }
@@ -501,7 +501,7 @@ fn e3201(lib: &str) -> Diagnostic {
     )
 }
 
-/// Look up a `[dependencies:c]` entry keyed by `<lib>` in `payload.jet`. The
+/// Look up a `[dependencies:c]` entry keyed by `<lib>` in `pkg.jet`. The
 /// hangar realization of C deps is a Jetpack concern (Phase 2 fixture-backed
 /// until jetpack parses C deps); here we only honor an explicit local override
 /// directory recorded in the manifest if present.
