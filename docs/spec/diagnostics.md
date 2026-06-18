@@ -277,6 +277,8 @@ before continuing.
 | E1211 | jet   | `packages:` block-form entry missing `kind` field (U10) |
 | E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
+| E1214 | jet   | `jetpack.toml` has a malformed line — not a valid `key = "value"` assignment or `[table]` header (D-JPK-FILES) |
+| E1215 | jet   | `jetpack.toml` contains an unknown table or key name, with a did-you-mean suggestion (D-JPK-FILES) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -574,6 +576,20 @@ use.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | L2101 | `jet doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet doctor --fix`. |
+
+## Package management diagnostics (M12, D-JPK-FILES)
+
+`jetpack.toml` is read by the `jetpack` CLI (never by `jet run`/`jet build` —
+R9). Malformed input is surfaced as E1214/E1215 before any resolution runs.
+These diagnostics have no source span (the file is not a Jet source file) and
+follow the same spanless voice as CLI diagnostics. Pinned as rendered-output
+snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
+`.jet` diagnostics).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1214 | `jetpack.toml` line {n} is not a valid assignment or table header. | Every line in `jetpack.toml` must be `key = "value"` (inside a table), a `[table]` header, or a blank/comment line. Anything else can't be interpreted. | Fix the line so it is either `[table]`, `key = "value"`, or a blank or `#`-comment line. |
+| E1215 | `jetpack.toml` {kind} `{name}` is not recognized. | `jetpack.toml` only accepts the tables `[repo]`, `[sources]`, and `[packages]`, and the keys listed for each. An unknown name is usually a typo. | Did you mean `{suggestion}`? Check the allowed names for this table. |
 
 ## Machine-readable diagnostics (`--json`)
 

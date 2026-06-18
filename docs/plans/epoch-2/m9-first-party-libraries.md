@@ -34,7 +34,7 @@ Ring libs that need a Rust internal (e.g. fast YAML parser, regex engine) follow
 D-DEP1 FFI-wrapping pattern:
 
 ```jet
-// In payload.jet — pin the Rust crate:
+// In pkg.jet — pin the Rust crate:
 [extern rust "some-crate@0.x.0"]
 
 // In src/lib.jet — wrap the API surface:

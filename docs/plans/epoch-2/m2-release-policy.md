@@ -1,7 +1,7 @@
 # E2-M2 — Release policy, editions, and the epoch contract
 
 **Status:** implemented 2026-06-16 — all five decisions ratified; edition marker
-in `payload.jet`, E2001/E2002/L2001 registered, version banner enriched, policy
+in `pkg.jet`, E2001/E2002/L2001 registered, version banner enriched, policy
 doc at docs/spec/release-policy.md. Mostly docs + manifest plumbing; little codegen.
 **Depends on:** E2-M1 (verified). Gates every later public-breaking milestone.
 **Error codes:** E20xx block (claim in docs/spec/diagnostics.md as implemented).
@@ -36,7 +36,7 @@ Substitute the owner's ratified option everywhere if it differs from the Rec.
   edition N keeps compiling on later toolchains that still support edition N.
 - **Deprecation policy + migration window.** How a feature is marked deprecated,
   how long it survives, and how `jet fix` assists the move.
-- **Edition marker.** `edition:` in the `payload: { … }` block of `payload.jet`
+- **Edition marker.** `edition:` in the `payload: { … }` block of `pkg.jet`
   (`jet.toml` was retired — the manifest is Jet syntax, U1/U10). A toolchain
   advertises the editions it supports; an unsupported future edition is **E2001**.
 - **Generated-code license.** State explicitly: generated Rust carries no
@@ -62,8 +62,8 @@ manifest-level diagnostic carries no source span, matching E1206–E1213):
 
 ```
 Error [E2001]: this package needs a newer Jet
- Why: editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to 2026, but `payload.jet` asks for `2099`.
- Fix: upgrade with `jet upgrade`, or set `edition: "2026"` in `payload.jet`.
+ Why: editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to 2026, but `pkg.jet` asks for `2099`.
+ Fix: upgrade with `jet upgrade`, or set `edition: "2026"` in `pkg.jet`.
 ```
 
 Single-file `jet run file.jet` has **no** edition marker and always uses the

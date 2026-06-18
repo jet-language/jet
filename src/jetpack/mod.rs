@@ -13,6 +13,7 @@ pub mod cli;
 pub mod envfile;
 pub mod jetos;
 pub mod json;
+pub mod manifest_toml;
 pub mod merge;
 pub mod modeval;
 pub mod output;

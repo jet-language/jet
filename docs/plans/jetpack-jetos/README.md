@@ -101,13 +101,13 @@ ref ─▶ classify source ─▶ pick provider ─▶ provider.realize(ref) ─
   one `Provider` trait (`src/jetpack/provider.rs`).
 - **`core` provider (first-party).** Realizes Jet-native packages with no Nix —
   the system we grow our own ecosystem on, designed to overtake nixpkgs as it
-  grows. A target carrying a `payload.jet` realizes through `core`.
+  grows. A target carrying a `pkg.jet` realizes through `core`.
 - **`nix` provider (compatibility).** Leverages nixpkgs so the whole ecosystem
   comes for free as the fallback. Today it orchestrates `nix build --json`; the
   no-installed-`nix` engine is staged as R3 below.
-- **Provider kind is inferred (U9)**, never declared: `payload.jet` present →
+- **Provider kind is inferred (U9)**, never declared: `pkg.jet` present →
   core; `nixpkgs@…` → always nix; any other target → nix flake fallback. The
-  probe never clones a nixpkgs-sized repo — it peeks at `payload.jet` only.
+  probe never clones a nixpkgs-sized repo — it peeks at `pkg.jet` only.
 - **No new compiler crates (I6).** Phase 1 core is `std::process::Command` + a
   generated shell rcfile. The R3 tvix engine is the **only** sanctioned crate,
   isolated to the `nix` provider (see D-JPK16).
@@ -149,7 +149,7 @@ that jetos cannot represent.** Audit source: `/home/nate/nixos`, 2026-06-15. If 
 future jetos design cannot express one of these, the design is incomplete; the
 escape is an explicit owner-approved exception.
 
-- **Root / inputs** (`flake.nix` → `payload.jet` + module roots): pinned inputs
+- **Root / inputs** (`flake.nix` → `pkg.jet` + module roots): pinned inputs
   (stable + unstable nixpkgs, plasma beta/master, flake-parts, import-tree,
   disko, Home Manager, plasma-manager, NUR, Stylix, nixcord, nix-gaming, CachyOS
   kernel, nix-flatpak, Ghostty, Vicinae, vscode-extensions, browser flakes,
@@ -208,7 +208,7 @@ Phase 2 (jetos)                   needs: M12 layer 3 + S60 pure-eval + the hanga
 ```
 
 Relationship to M12 (`docs/plans/epoch-1/m12-packages.md`): jetpack's
-`payload.jet` manifest + `.jet/lock` are the package mechanism (U1/U2/U10
+`pkg.jet` manifest + `.jet/lock` are the package mechanism (U1/U2/U10
 amended S52). Existing `jet add/remove` are transitional; later they may plumb to
 `jetpack add/remove`.
 
@@ -242,6 +242,6 @@ now **ratified and shipped** — see
 
 - Reimplementing the Nix builder/sandbox (Phase 2 / never if we keep orchestrating).
 - A native binary cache or signing (Phase 2; jetos-design layer 3).
-- Pure-eval enforcement of `payload.jet` (S60, Phase 2).
+- Pure-eval enforcement of `pkg.jet` (S60, Phase 2).
 - Whole-machine activation / bootloaders / generations (that's jetos, Phase 2).
 - Windows/macOS shells (Linux first; the VM/ISO target is x86_64 Linux).

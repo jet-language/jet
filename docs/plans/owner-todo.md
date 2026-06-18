@@ -74,3 +74,509 @@ switch c := 'j'; c {
     ```jet
     print.[e, f, g, a, b, c];
     ```
+
+
+## Memory Capability Model
+
+# Jet Capability Inference System
+
+You are implementing Jet’s ownership and memory-safety system.
+
+The goal is to provide Rust-level safety while exposing a dramatically simpler mental model to users.
+
+Users should think in terms of:
+
+```text
+view
+edit
+take
+share
+```
+
+Users should not need to think about:
+
+```text
+borrowing
+lifetimes
+ownership graphs
+&T
+&mut T
+```
+
+Those are implementation details of the compiler.
+
+---
+
+# Core Philosophy
+
+Jet tracks capabilities rather than ownership.
+
+Every access falls into one of four capabilities:
+
+```text
+view
+edit
+take
+share
+```
+
+Definitions:
+
+```text
+view  = read-only access
+edit  = exclusive temporary mutable access
+take  = ownership is consumed and retained
+share = multiple owners exist
+```
+
+Beginner explanation:
+
+```text
+view  = look at it
+edit  = change it
+take  = keep it
+share = multiple owners
+```
+
+The compiler guarantees:
+
+```text
+1. Data cannot disappear while being used.
+2. Two writers cannot modify the same value simultaneously.
+3. Readers cannot observe partially-written state.
+```
+
+---
+
+# Capability Ordering
+
+Capabilities form a hierarchy:
+
+```text
+view < edit < take < share
+```
+
+The compiler must always choose the weakest capability that safely supports the function body.
+
+Never choose a stronger capability merely for optimization.
+
+Semantic correctness comes first.
+
+Optimization comes second.
+
+---
+
+# Function Capability Inference
+
+Users may omit capabilities entirely.
+
+Example:
+
+```jet
+proc heal(player: Player, amount: Int) {
+    player.hp += amount
+}
+```
+
+Compiler infers:
+
+```jet
+proc heal(player: edit Player, amount: view Int)
+```
+
+---
+
+# Inference Rules
+
+Rule 1
+
+If a parameter is only read:
+
+```jet
+proc print_name(player: Player) {
+    print(player.name)
+}
+```
+
+Infer:
+
+```jet
+player: view Player
+```
+
+---
+
+Rule 2
+
+If a parameter or any reachable field is modified but does not escape:
+
+```jet
+proc heal(player: Player) {
+    player.hp += 10
+}
+```
+
+Infer:
+
+```jet
+player: edit Player
+```
+
+Mutation does not imply ownership transfer.
+
+---
+
+Rule 3
+
+If a value escapes the function:
+
+```jet
+saved.push(player)
+```
+
+or
+
+```jet
+return player
+```
+
+or
+
+```jet
+closure.capture(player)
+```
+
+Infer:
+
+```jet
+player: take Player
+```
+
+---
+
+Rule 4
+
+If multiple owners are required:
+
+```jet
+texture used by many sprites
+```
+
+Infer or require:
+
+```jet
+share Texture
+```
+
+---
+
+# Explicit Capability Syntax
+
+Experts may always override inference.
+
+Examples:
+
+```jet
+proc draw(scene: view Scene)
+
+proc heal(player: edit Player)
+
+proc add(player: take Player)
+
+proc cache(texture: share Texture)
+```
+
+Explicit capability annotations are promises.
+
+The compiler must enforce them.
+
+Example:
+
+```jet
+proc inspect(player: view Player) {
+    player.name = "Kai"
+}
+```
+
+Error:
+
+```text
+Cannot edit a value declared as view.
+```
+
+---
+
+# Package Types
+
+Jet supports:
+
+```text
+exe
+lib
+```
+
+---
+
+# Executable Packages
+
+Executable packages should prioritize ergonomics.
+
+Default:
+
+```text
+infer everything
+```
+
+Examples:
+
+```jet
+proc update(player: Player)
+proc render(scene: Scene)
+```
+
+Capabilities inferred automatically.
+
+Explicit capability annotations remain available but are optional.
+
+---
+
+# Library Packages
+
+Library packages should prioritize API stability.
+
+Default behavior:
+
+```text
+infer everything
+```
+
+Published packages emit inferred API metadata.
+
+Example:
+
+Source:
+
+```jet
+pub proc heal(player: Player) {
+    player.hp += 10
+}
+```
+
+Generated API metadata:
+
+```text
+heal(player: edit Player)
+```
+
+Consumers compile against the published capability metadata.
+
+Because Jet packages are hash-pinned, changing inferred capabilities is not a safety issue.
+
+It is a versioning issue.
+
+Existing users remain pinned to the previous package hash.
+
+---
+
+# Stable API Mode
+
+Optional:
+
+```jet
+package api = stable
+```
+
+Compiler records public capability signatures.
+
+Example:
+
+```text
+heal(player: edit Player)
+```
+
+Future changes may trigger API break diagnostics.
+
+---
+
+# Explicit API Mode
+
+Optional:
+
+```jet
+package api = explicit
+```
+
+All public functions must declare capabilities.
+
+Example:
+
+```jet
+pub proc write(file: edit File)
+```
+
+---
+
+# Internal Compiler Representation
+
+Capabilities lower to implementation-specific ownership mechanics.
+
+Users should not be required to understand these details.
+
+Conceptually:
+
+```text
+view  -> immutable view/reference
+
+edit  -> exclusive mutable view/reference
+
+take  -> ownership transfer/move
+
+share -> shared ownership
+```
+
+The source-level capability remains authoritative.
+
+---
+
+# Copying
+
+Jet must never silently duplicate expensive values.
+
+If duplication is required:
+
+```jet
+copy texture
+```
+
+If shared ownership is desired:
+
+```jet
+share texture
+```
+
+Ownership movement should be visible and intentional.
+
+---
+
+# Diagnostics
+
+Diagnostics should teach capability language.
+
+Preferred terminology:
+
+```text
+view
+edit
+take
+share
+value escapes
+this function keeps the value
+shared ownership
+```
+
+Avoid beginner-facing terminology such as:
+
+```text
+borrow checker
+lifetime
+&T
+&mut T
+```
+
+---
+
+# Required Examples
+
+Read-only:
+
+```jet
+proc print_name(player: Player) {
+    print(player.name)
+}
+```
+
+Infer:
+
+```jet
+player: view Player
+```
+
+---
+
+Mutable:
+
+```jet
+proc heal(player: Player) {
+    player.hp += 10
+}
+```
+
+Infer:
+
+```jet
+player: edit Player
+```
+
+---
+
+Ownership:
+
+```jet
+proc add_member(party: Party, player: Player) {
+    party.members.push(player)
+}
+```
+
+Infer:
+
+```jet
+party: edit Party
+player: take Player
+```
+
+---
+
+Post-take error:
+
+```jet
+player := Player{}
+
+party.add(player)
+
+print(player.name)
+```
+
+Diagnostic:
+
+```text
+player was taken by party.add
+
+Suggestions:
+
+- use copy player
+- use share player
+- use player before the call
+```
+
+---
+
+Final Goal:
+
+Jet code should look like:
+
+```jet
+heal(player)
+draw(scene)
+party.add(player)
+```
+
+while the compiler automatically derives:
+
+```text
+view
+edit
+take
+share
+```
+
+and enforces memory safety with minimal user-facing complexity.

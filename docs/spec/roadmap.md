@@ -37,7 +37,7 @@ criteria and examples.
 **E2-M2 — Release policy, editions, epoch contract** verified 2026-06-16
 ([`m2-release-policy.md`](../plans/epoch-2/m2-release-policy.md)). Ratified
 compatibility/release policy ([`release-policy.md`](release-policy.md));
-`edition:` marker in `payload.jet`; enriched `jet --version` banner; E2001
+`edition:` marker in `pkg.jet`; enriched `jet --version` banner; E2001
 reachable, E2002/L2001 registered (honestly empty pre-1.0 deprecation registry).
 
 **E2-M3 — Developer command UX** verified 2026-06-16

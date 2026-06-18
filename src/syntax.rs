@@ -642,6 +642,27 @@ pub const UNIFIED_LOCK_FILE: &str = ".jet/lock";
 /// addressed store ("hangar"), global and never relocated.
 pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 
+/// D-JPK-FILES (ratified 2026-06-18): the monorepo manifest at repo root.
+/// TOML format; holds `[repo]`, `[sources]`, and `[packages]` tables.
+pub const JETPACK_TOML: &str = "jetpack.toml";
+
+/// D-JPK-FILES (ratified 2026-06-18): `[repo]` table in `jetpack.toml`.
+pub const JTOML_TABLE_REPO: &str = "repo";
+
+/// D-JPK-FILES (ratified 2026-06-18): `[sources]` table in `jetpack.toml` —
+/// named source refs (`name = "provider@target#ver"`).
+pub const JTOML_TABLE_SOURCES: &str = "sources";
+
+/// D-JPK-FILES (ratified 2026-06-18): `[packages]` table in `jetpack.toml` —
+/// optional explicit index (`name = "relative/pkg.jet"`).
+pub const JTOML_TABLE_PACKAGES: &str = "packages";
+
+/// D-JPK-FILES (ratified 2026-06-18): `name` key in `[repo]`.
+pub const JTOML_KEY_NAME: &str = "name";
+
+/// D-JPK-FILES (ratified 2026-06-18): `version` key in `[repo]`.
+pub const JTOML_KEY_VERSION: &str = "version";
+
 /// S75 (ratified 2026-06-16): the fan-out operator — `f.[a, b, c]` desugars to
 /// `[f(a), f(b), f(c)]`. `.[` is a parser-level adjacency of `.` and `[`;
 /// there is no dedicated two-character lexer token (the parser detects `.`

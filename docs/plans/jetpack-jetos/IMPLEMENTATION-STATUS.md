@@ -1,6 +1,6 @@
 # Jetpack / jetos — implementation status
 
-**Updated:** 2026-06-17. Durable record of what the `jet` + `jetpack` + `jetos`
+**Updated:** 2026-06-18. Durable record of what the `jet` + `jetpack` + `jetos`
 ecosystem actually IMPLEMENTS, versus the ratified design. The design-of-record
 is [`unified-ecosystem.md`](unified-ecosystem.md) (target surface, U1–U18);
 sequencing/roadmap is [`README.md`](README.md); the jetos tier is
@@ -19,7 +19,7 @@ examples/features/01_hello.jet` prints `hello, world`.
 
 ### Bootstrap + typed env surface (pre-existing)
 - Two binaries `jet` + `jetpack` (Cargo.toml `[[bin]]`).
-- `payload.jet` manifest (U10): `payload:`/`deps:`/`packages: { name:
+- `pkg.jet` manifest (U10, D-JPK-FILES): `payload:`/`deps:`/`packages: { name:
   library|executable }`/`edition` — `src/jetpack/packmanifest.rs`. Diagnostics
   E1210–E1213.
 - Typed env eval (`src/jetpack/modeval.rs`): `module dev { sources imports
@@ -75,7 +75,7 @@ lexer change, no `a - b` ambiguity:
 2. Swapped at the name call sites: contribution name, the `from: system.<name>`
    reference in `image_field`, and the `module` declaration name. Code
    identifiers (variables/fields/types/functions) stay plain `expect_ident`. The
-   `payload.jet` manifest parser (`packmanifest.rs`) was already
+   `pkg.jet` manifest parser (`packmanifest.rs`) was already
    hyphen-transparent (it splits keys on `:` and keeps the name verbatim).
 3. `src/syntax.rs` (I7): `NAME_SEGMENT_SEP` records the dashed-name rule under S84
    (no new sigil — reuses the `-`/Minus token).
@@ -89,10 +89,33 @@ lexer change, no `a - b` ambiguity:
 
 ---
 
+## D-JPK-FILES — file structure rename + `jetpack.toml` (2026-06-18)
+
+Ratified 2026-06-18. Phase 1 committed; Phase 2 parser landed (wiring pending).
+
+**Phase 1 — `payload.jet` → `pkg.jet`** (commit `ca42fd0`): `PAYLOAD_FILE`
+constant in `src/syntax.rs` changed to `"pkg.jet"`; all hardcoded strings in
+`src/`, `tests/`, `examples/` updated; 12 fixture files renamed; 8 stderr
+snapshots re-blessed. Tests: all green.
+
+**Phase 2a — `jetpack.toml` parser** (this commit): `src/jetpack/manifest_toml.rs`
+— hand-written std-only TOML-subset parser (I6); tables `[repo]`, `[sources]`,
+`[packages]`; diagnostics E1214/E1215 with did-you-mean; rendered-form snapshots
+pinned inside `manifest_toml.rs` (I4 note: `tests/ui/` harness only renders
+front-end `.jet` diagnostics; the faithful what/why/fix snapshot awaits CLI
+wiring). New constants in `src/syntax.rs` (I7). Example at
+`examples/jetpack/jetpack.toml`.
+
+**Phase 2b — CLI wiring + discovery** (pending): wire `manifest_toml::load`
+into `jetpack list/build/enter`; fold `[sources]` into the source table; `find .
+-name pkg.jet` discovery; add ≥2 pkg.jet members to the example; `.gitignore`
+entries; integration test via real CLI path so E1214/E1215 fire from usage.
+
+---
+
 ## How to verify
 ```
-nix develop -c cargo test                         # 386 passed, 0 failed
+nix develop -c cargo test                         # all passed, 0 failed
 nix develop -c cargo test --test decisions        # ratification gate
 nix develop -c jet run examples/features/01_hello.jet
-git log --oneline 3e6be24..jetos-ratified-arc     # the arc's commits
 ```

@@ -35,7 +35,7 @@ else pkg-config). One command for scripts: `jet run pong.jet`.
 | ID | Decision |
 |---|---|
 | **D-CFFI1** | Import-only first — no Jet-export to C in M14 |
-| **D-CFFI2** | Link: hangar dep if `payload.jet` / `pack.jet` matches **`<lib>`** key → else **`pkg-config <lib>`** → **E3201** |
+| **D-CFFI2** | Link: hangar dep if `pkg.jet` / `pack.jet` matches **`<lib>`** key → else **`pkg-config <lib>`** → **E3201** |
 | **D-CFFI3** | Ship **raylib pong** showcase (`examples/features/49_cffi.jet`) |
 | **D-S16-USE** | **`use … as alias`** at call sites (S16; `import` is E0015) |
 | **D-CFFI2-SYN** | **`@bindgen module c.<lib>.__bindgen__`** (autogen) + **`@extern module c.<lib>`** (overlay) |
@@ -95,7 +95,7 @@ Empty overlay `{ }` contributes zero symbols — effective module equals bindgen
 
 **`<lib>`** = last segment of `c.<lib>` (e.g. `raylib`). Used for:
 
-- Hangar / `[dependencies:c]` lookup in `payload.jet` / `pack.jet`
+- Hangar / `[dependencies:c]` lookup in `pkg.jet` / `pack.jet`
 - **`pkg-config <lib>`** when no hangar dep
 - Cache filename `.jet/bindings/c/<lib>.jet`
 
@@ -130,13 +130,13 @@ fn main() {
 ```bash
 $ jet run pong.jet
 # cache miss → jet bind (or internal equivalent) → .jet/bindings/c/raylib.jet
-# link       → pkg-config raylib (or hangar if payload.jet pins raylib)
+# link       → pkg-config raylib (or hangar if pkg.jet pins raylib)
 ```
 
 ### Alex — team project, overlay trim
 
 ```jet
-// payload.jet
+// pkg.jet
 [dependencies:c]
 raylib = "nixpkgs:raylib#5.5.0"
 
@@ -178,7 +178,7 @@ jet bind raylib.h --pkg raylib -o .jet/bindings/c/raylib.jet   # manual refresh
 
 | Context | Linker finds `<lib>` via… |
 |---|---|
-| `payload.jet` / `pack.jet` has `[dependencies:c]` or `deps:` entry for `<lib>` | **Hangar** (content-hash pinned) |
+| `pkg.jet` / `pack.jet` has `[dependencies:c]` or `deps:` entry for `<lib>` | **Hangar** (content-hash pinned) |
 | Single file / no matching dep | **`pkg-config <lib>`** |
 | Neither | **E3201** — install system lib *or* add hangar dep |
 
@@ -210,7 +210,7 @@ Agents should land in order; each phase has tests before the next.
 
 ### Phase 2 — Link discovery
 
-- [x] Hangar dep → include/lib paths (`[dependencies:c]` reader in `payload.jet`;
+- [x] Hangar dep → include/lib paths (`[dependencies:c]` reader in `pkg.jet`;
       Jetpack realization of pinned refs is still fixture/manifest-text-backed).
 - [x] Fallback `pkg-config <lib>` (`parse_pkg_config`).
 - [x] **E3201** + snapshot (pinned in `tests/cffi.rs`; link-time, not in the ui harness).

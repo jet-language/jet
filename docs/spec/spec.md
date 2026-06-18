@@ -305,7 +305,7 @@ so calls resolve like any namespaced module call. Codegen emits an `extern "C"`
 block plus small per-function wrappers (the only place compiler-vetted `unsafe`
 is emitted, S58); `String`↔`*const c_char` and `Char`↔`u32` convert at the edge.
 
-Link key = last segment `<lib>`: hangar dep (`[dependencies:c]` in `payload.jet`)
+Link key = last segment `<lib>`: hangar dep (`[dependencies:c]` in `pkg.jet`)
 if declared → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
 `-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
@@ -711,7 +711,7 @@ val [a, b, c] = result;   // OK — 3 names for 3 elements
 
 ## Editions & release policy (E2-M2)
 
-A project pins an **edition** with `edition: "2026"` in its `payload.jet`
+A project pins an **edition** with `edition: "2026"` in its `pkg.jet`
 (D-REL3). An edition opts the project into a specific era of Jet syntax; the
 toolchain advertises the editions it supports in `jet --version` and rejects a
 future edition it can't provide (E2001). Single-file `jet run file.jet` carries

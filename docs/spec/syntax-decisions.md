@@ -688,7 +688,7 @@ rule is the whole safety mechanism: a spaced `a - b` stays **subtraction**, so
 there is **no lexer change and no expression-grammar change** — the hyphen
 handling lives entirely in the parser's `expect_dashed_name`, used only in name
 positions (contribution names, `from: system.<name>` references, the `module`
-declaration name; package names in `payload.jet` are already hyphen-transparent
+declaration name; package names in `pkg.jet` are already hyphen-transparent
 in the manifest parser). No leading, trailing, or doubled hyphen (`image.-iso`,
 `image.a--b` produce the ordinary teaching diagnostic, never an ICE). **Code
 identifiers** — variables, fields, types, functions — stay plain `ident`. No new
@@ -796,7 +796,7 @@ the S58 tier.
 
 **Link resolution (D-CFFI2, ratified):**
 
-1. **Jetpack project** — if `payload.jet` declares a matching dep (content-hash
+1. **Jetpack project** — if `pkg.jet` declares a matching dep (content-hash
    pinned in hangar), use hangar include/lib paths.
 2. **Otherwise** — `pkg-config <link-name>`.
 3. **Missing** — **E3201** naming both fixes.
@@ -1729,8 +1729,8 @@ Consumers depend on the *package*, never the crate. A later native port swaps
 the package body and keeps the public API — callers don't change. The version
 pin lives inline in the `extern rust "crate@version"` block (S50, authoritative);
 the Jet package itself is pinned with `pkg#version` (VERSION-#). The package
-manifest is **`payload.jet`** (`payload:` / `deps:` / `packages:`), never the
-retired `jet.toml`/`pack.jet`. **Exception:** the compiler's own internals
+manifest is **`pkg.jet`** (`payload:` / `deps:` / `packages:`), never the
+retired `jet.toml`/`payload.jet`/`pack.jet`. **Exception:** the compiler's own internals
 (e.g. the `jet repl` line reader) cannot consume a Jet package — bootstrapping —
 so those stay std-only or take a directly-vetted crate only by separate owner
 sign-off.

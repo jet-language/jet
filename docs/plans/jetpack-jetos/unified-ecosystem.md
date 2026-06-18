@@ -120,7 +120,7 @@ Deferred to Epoch 3. Not part of Phase 1 jetpack design.
 ```
 # A project (commits cleanly to GitHub):
 wordstats/
-  payload.jet  env.jet
+  pkg.jet  env.jet
   modules/tools/lint.jet        # auto-discovered by find()
   src/ main.jet
   .jet/

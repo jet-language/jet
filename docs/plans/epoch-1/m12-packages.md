@@ -5,7 +5,15 @@ D-MF1…5). Architecture **ratified** (D-PM1…8, owner 2026-06-13).
 M12.2 (registry, semver ranges, PubGrub resolver, jet publish/vendor/audit)
 is the next milestone.
 Depends on M6 (multi-file), M7 (FFI deps in manifest), M10 (std imports).
-**Error codes:** E1201–E1209 (claim in docs/spec/diagnostics.md as implemented).
+**Error codes:** E1201–E1213 (claimed in docs/spec/diagnostics.md), E1214–E1215
+(D-JPK-FILES, ratified 2026-06-18: `jetpack.toml` parse errors).
+
+> **Note (2026-06-18 — D-JPK-FILES):** The manifest filename has been renamed
+> `payload.jet` → `pkg.jet` (the `payload: { … }` block name is unchanged).
+> A new `jetpack.toml` monorepo manifest has been added at repo root.
+> The `jet.toml` references throughout this document describe the original M12
+> plan; U1/U10 superseded them with Jet-syntax `pkg.jet` (see
+> `docs/plans/jetpack-jetos/unified-ecosystem.md`).
 
 ## Goal
 

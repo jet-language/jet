@@ -29,7 +29,7 @@ not 100k-connection async workloads (E2-V5/V7).
 - **HTTP server** for small services; request limits, graceful shutdown.
 - **TLS (D-NET1).** Delivered as the `jet.tls` package — an FFI-wrapping Jet package
   using `extern rust "rustls@<ver>"` (D-DEP1). Users add `jet.tls#<ver>` to their
-  `payload.jet`; it is not ambient. `jet.http` takes `jet.tls` as an optional dep for
+  `pkg.jet`; it is not ambient. `jet.http` takes `jet.tls` as an optional dep for
   HTTPS. Never hand-roll crypto (cross-ref `jet.crypto` D-LR3).
 - **Worker patterns.** Channel-based workers; timeouts compose with `jet.time`.
 - **Structured logging.** Integrate `jet.log` (E2-M9).

@@ -8,7 +8,7 @@ Every decision below was ratified 2026-06-16 (D-REL1…D-REL5).
 
 - **Compiler** — the `jet` binary. Versioned with normal SemVer (D-REL1).
 - **Edition** — a per-project opt-in to a specific era of Jet *syntax*
-  (D-REL3), written `edition: "2026"` in `payload.jet`. A toolchain supports a
+  (D-REL3), written `edition: "2026"` in `pkg.jet`. A toolchain supports a
   fixed set of editions and prints them in `jet --version`.
 - **Epoch** — era storytelling for marketing/roadmap (e.g. "epoch 2"). It is
   **never** encoded into the compiler version (D-REL2); the owner bumps the

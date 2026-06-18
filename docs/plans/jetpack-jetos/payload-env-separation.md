@@ -1,16 +1,16 @@
-# Payload.jet vs. Env.jet: Design Rationale for Separation
+# pkg.jet vs. Env.jet: Design Rationale for Separation
 
 **Status:** Design codification (ratifies existing practice from U1–U10)
 
 ## Core Principle
 
-`payload.jet` and `env.jet` are **different artifacts with different audiences and lifecycles**. Merging them would violate the separation of concerns and create coupling between package definition and local development.
+`pkg.jet` and `env.jet` are **different artifacts with different audiences and lifecycles**. Merging them would violate the separation of concerns and create coupling between package definition and local development.
 
 ---
 
 ## What Each File Owns
 
-### `payload.jet` — Package Definition (Immutable, Publishable)
+### `pkg.jet` — Package Definition (Immutable, Publishable)
 
 **What it is:** The canonical declaration of what packages this repository ships.
 
@@ -30,7 +30,7 @@
 - Registry resolvers (phase 2) that index what's available
 - Build systems that consume the packages
 
-**Why immutable:** If `payload.jet` changes between commits, version pinning breaks. A user with lock entry `repo#abc123` must always get the same packages at that commit.
+**Why immutable:** If `pkg.jet` changes between commits, version pinning breaks. A user with lock entry `repo#abc123` must always get the same packages at that commit.
 
 ---
 
@@ -48,7 +48,7 @@
 - Local to the project; can differ per developer/branch
 - Not part of the published package
 - Changes frequently as developer workflow needs shift
-- Can reference `payload.jet` packages, but doesn't mandate them
+- Can reference `pkg.jet` packages, but doesn't mandate them
 
 **Audience:**
 - Local developers: `jetpack enter` or `jet dev` reads this to set up their shell
@@ -73,7 +73,7 @@ These are answered by different people, at different times, with different const
 Conflating them makes both harder.
 
 ### 2. Publishing Complexity
-If `env.jet` is merged into `payload.jet`:
+If `env.jet` is merged into `pkg.jet`:
 - Publishing a package requires editing the dev section (noise in the diff)
 - Users installing a package get the dev dependencies in the manifest (ceremony)
 - The package manifest becomes bloated and specific to one team's workflow
@@ -102,26 +102,26 @@ If the package definition and dev environment are the same file:
 Keeping them separate means the version tag locks only the package definition.
 
 ### 4. Provider Integration
-The `core` and `nix` providers (phase 1) read `payload.jet` to discover what's available. They never read `env.jet`. If they're merged:
+The `core` and `nix` providers (phase 1) read `pkg.jet` to discover what's available. They never read `env.jet`. If they're merged:
 - Providers need to parse dev-specific sections and ignore them
 - Future providers must know about all dev-tool conventions
 - The interface becomes unstable
 
 ### 5. Monorepo Clarity
-In a monorepo with multiple packages, each member has its own `payload.jet`:
+In a monorepo with multiple packages, each member has its own `pkg.jet`:
 
 ```
 repo/
   lib-a/
-    payload.jet (name: "lib-a", packages: { core: library })
+    pkg.jet (name: "lib-a", packages: { core: library })
   lib-b/
-    payload.jet (name: "lib-b", packages: { core: library })
+    pkg.jet (name: "lib-b", packages: { core: library })
   root/
-    payload.jet (name: "monorepo-core", packages: { a: library, b: library })
+    pkg.jet (name: "monorepo-core", packages: { a: library, b: library })
   env.jet (dev: [my tools])
 ```
 
-The monorepo has *one* `env.jet` at the root because developers have *one* dev environment. Multiple `payload.jet` files (one per publishable unit) because packages are independent. Merging them would require one giant file or create ambiguity about which `payload` each `env.jet` refers to.
+The monorepo has *one* `env.jet` at the root because developers have *one* dev environment. Multiple `pkg.jet` files (one per publishable unit) because packages are independent. Merging them would require one giant file or create ambiguity about which `payload` each `env.jet` refers to.
 
 ---
 
@@ -131,7 +131,7 @@ The monorepo has *one* `env.jet` at the root because developers have *one* dev e
 |--------|--------|----------|
 | **Files to manage** | 1 | 2 (but in different dirs) |
 | **Conceptual clarity** | Muddied | Clear |
-| **Publisher ceremony** | High (edit env section) | Low (edit `payload.jet` only) |
+| **Publisher ceremony** | High (edit env section) | Low (edit `pkg.jet` only) |
 | **Version stability** | Risky (dev changes affect tag) | Safe (tag locks package only) |
 | **Provider interface** | Coupled | Decoupled |
 | **Monorepo structure** | Ambiguous | Clear |
@@ -142,8 +142,8 @@ The monorepo has *one* `env.jet` at the root because developers have *one* dev e
 
 ## Decision (Ratified)
 
-- **`payload.jet`** is the package definition: immutable per version, publishable, provider-friendly.
+- **`pkg.jet`** is the package definition: immutable per version, publishable, provider-friendly.
 - **`env.jet`** is the dev shell: mutable, local, decoupled from versioning.
 - Never merge them.
-- A repo may have multiple `payload.jet` files (monorepo members); it has one `env.jet` at the project root.
+- A repo may have multiple `pkg.jet` files (monorepo members); it has one `env.jet` at the project root.
 
