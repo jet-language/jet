@@ -22,8 +22,12 @@ must now choose a different separator.
 5. **`src/syntax.rs`** — remove the S2 `KW_VAL` / `KW_VAR` constants; add the
    `::` / `:=` sigil constants tagged with decision **D-BIND1** (now ratified, so
    they may land in `syntax.rs` per `tests/decisions.rs`).
-6. **Update all examples and tests** — rewrite every `val`/`var` to the sigils;
-   re-bless golden + ui snapshots (`UPDATE_EXPECT=1`).
+6. **Teach `jet fmt` the canonicalization** (`src/fmt.rs`) — `val name = e` →
+   `name :: e`, `var name = e` → `name := e`. The example corpus is NOT
+   hand-migrated here; it is migrated mechanically in the shared final
+   consolidation phase by running `jet fmt` over `examples/`, then re-blessing
+   golden + ui snapshots once (owner: migrate via fmt, not by hand).
+7. **Diagnostic code: `E0985`** — retired binding keyword (`val`/`var`).
 7. **Cross-decision** — S83's `TypeName::item` external form is now blocked on a
    new separator (note already recorded in `syntax-decisions.md`); no action
    here beyond not reusing `::`. `extern rust "rust::path"` strings (S50) are
@@ -31,5 +35,7 @@ must now choose a different separator.
 
 ## Sequencing note
 
-D-BIND1 and S6-R = B both touch every example. Land them together (or back to
-back) so the example/snapshot re-bless happens once, not twice.
+D-BIND1, S6-R, and D-IF1 all touch every example. Implement each feature's
+grammar/sema/codegen/fmt + its own new tests first; defer the corpus migration
+to a single final phase that runs `jet fmt` over `examples/` once and re-blesses
+all snapshots together.

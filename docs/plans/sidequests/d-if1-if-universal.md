@@ -37,15 +37,16 @@
 3. **`when` keyword** — `E_KEYWORD_RETIRED` → "use `if scrutinee { arm -> body }`".
 4. **`src/syntax.rs`** — `KW_SWITCH` (`when`) becomes a teaching-only foreign
    keyword; the arm-arrow `->` constant stays. Tag the multi-arm `if` under D-IF1.
-5. **Diagnostics** — `E_KEYWORD_RETIRED` for `when`; claim in
-   `docs/spec/diagnostics.md` (I4) with a ui snapshot.
-6. **Examples/tests** — migrate every `when` to `if`; add an example exercising
-   bare-value arms, a full-condition arm, a braceless body, a block body, and
-   `else`. Re-bless golden + ui snapshots. Examples use the no-semicolon style
-   (S6-R = B).
+5. **Diagnostics — `E0984`**: `when` retired (teaching error → "use `if`").
+   Claim in `docs/spec/diagnostics.md` (I4) with a ui snapshot.
+6. **Teach `jet fmt`** (`src/fmt.rs`) `when X { … }` → `if X { … }`. Add a NEW
+   example exercising bare-value arms, a full-condition arm, a braceless body, a
+   block body, and `else` (its own golden test). The existing `when`-using
+   examples are migrated mechanically in the final `jet fmt` consolidation pass,
+   not by hand.
 
 ## Coupling
 
-D-IF1's examples assume S6-R = B (no semicolons) and D-BIND1 sigils. Sequence the
-`when → if` migration with the shared S6-R / D-BIND1 example + snapshot sweep so
-the re-bless happens once.
+D-IF1's arm termination assumes S6-R = B (no semicolons) and examples use
+D-BIND1 sigils — so land S6-R and D-BIND1 first, and let the single final
+`jet fmt` pass migrate the corpus (no per-feature example sweep).

@@ -28,11 +28,13 @@ change — it touches every example and many ui snapshots.
    part of the lexer change — test it directly (chain, broken boolean, broken
    arithmetic, and the negative case where a genuine statement follows).
 3. **Parser** — no changes; the synthetic `;` is transparent.
-4. **Diagnostics** — retire `E_MISSING_SEMI` (the lexer now handles insertion);
-   keep/repurpose only for malformed-insertion edge cases. Update
-   `docs/spec/diagnostics.md` (I4).
-5. **Examples** — strip all trailing `;` from `examples/`; re-bless golden tests
-   (`UPDATE_EXPECT=1`).
+4. **Diagnostics** — retire `E_MISSING_SEMI` (the lexer now handles insertion).
+   New code **`E0986`**: `-> Type`/`{` split from the closing `)` (the one layout
+   error). Claim in `docs/spec/diagnostics.md` (I4) with a ui snapshot.
+5. **Teach `jet fmt`** (`src/fmt.rs`) to emit no `;` (strip them on output). The
+   example corpus is migrated mechanically in the shared final consolidation
+   phase by running `jet fmt` over `examples/` and re-blessing snapshots once —
+   not hand-stripped here.
 6. **`src/syntax.rs`** — the `KW_SEMICOLON` constant stays (the token still
    exists internally); update its doc comment to cite S6-R (lexer-inserted, not
    user-typed).
@@ -41,6 +43,7 @@ change — it touches every example and many ui snapshots.
 
 ## Sequencing note
 
-S6-R and D-BIND1 both rewrite every example. Land them together so the
-example/snapshot re-bless happens once. D-IF1's worked example also assumes the
-no-semicolon style.
+S6-R, D-BIND1, and D-IF1 all change how every example is written. Implement the
+grammar/lexer/fmt + new tests for each, then migrate the whole corpus once via a
+`jet fmt` pass in the final consolidation phase. D-IF1's arm termination depends
+on S6-R, so land S6-R before D-IF1.

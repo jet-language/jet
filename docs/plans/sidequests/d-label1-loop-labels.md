@@ -22,8 +22,8 @@ Reuses the S82 `@` marker sigil in a **new inline position** (immediately before
    `break @outer` → `break 'outer`.
 5. **`src/syntax.rs`** — record the `@`-label usage under D-LABEL1 (ratified);
    note it extends S82's `@` positions.
-6. **Diagnostics** — `E_UNDEFINED_LABEL`, `E_LABEL_NOT_LOOP` (`@name` followed by
-   a non-loop construct). Claim in `docs/spec/diagnostics.md` (I4) with ui
-   snapshots.
+6. **Diagnostics — `E0987`** (undefined loop label) and **`E0988`** (`@name`
+   followed by a non-loop construct). Claim in `docs/spec/diagnostics.md` (I4)
+   with ui snapshots.
 7. **Example** — `examples/features/labeled_loops.jet` (nested grid scan,
    `break @outer`). Golden test + expected output.
