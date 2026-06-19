@@ -4,14 +4,12 @@ One home per kind of document. Start here.
 
 | If you want to… | Go to |
 |---|---|
-| Learn the language | [guide/](guide/) — the learner's guide, plus the [15-minute tour](guide/tour.md) |
 | Look up the standard library | [reference/stdlib.md](reference/stdlib.md) |
 | Understand an error code | [reference/errors/](reference/errors/) (generated from snapshots) |
+| Read embedded / freestanding builds | [reference/embedded.md](reference/embedded.md) |
 | Read the versioning / release policy | [reference/versioning.md](reference/versioning.md) |
 | Know the authoritative rules | [spec/](spec/) — see below |
-| See what's planned or in progress | [plans/](plans/) |
-| Read exploratory notes & idea banks | [research/](research/) |
-| Build / install with Nix | [dev/nix.md](dev/nix.md) |
+| See what's planned or in progress | [plans/](plans/) — or run the dashboard (below) |
 
 ## spec/ — the authoritative surface
 
@@ -26,18 +24,22 @@ These are binding. When they disagree with anything else, they win.
 - [diagnostics.md](spec/diagnostics.md) — error voice + exact render format;
   snapshot-pinned.
 - [roadmap.md](spec/roadmap.md) — what's active / not yet verified (completed work lives in epoch plans).
-- [decision-ballots.md](spec/decision-ballots.md) — the owner's *open* decision
-  queue only (ratified items live in syntax-decisions.md).
+- [decision-ballots.md](spec/decision-ballots.md) — the owner's open decision
+  queue (ratified items live in syntax-decisions.md).
 
 ## plans/ — implementation plans
 
-Milestone plans by epoch ([epoch-1/](plans/epoch-1/), [epoch-2/](plans/epoch-2/),
-[epoch-3/](plans/epoch-3/)) and the
-[jetpack & jetos](plans/jetpack-jetos/README.md) track (package manager + OS),
-which keeps its detailed design-of-record docs alongside the plan.
+Active epoch plans ([epoch-2/](plans/epoch-2/), [epoch-3/](plans/epoch-3/)), the
+[jetpack & jetos](plans/jetpack-jetos/README.md) track (package manager + OS), and
+[sidequests/](plans/sidequests/) (one reviewed plan per in-flight task, deleted
+once shipped). See [plans/README.md](plans/README.md) for the implementing-agent
+protocol.
 
-## research/ — exploratory, non-binding
+## The dashboard — tasks, decisions, bugs, scratch
 
-Cross-language idea banks ([syntax-gallery.md](research/syntax-gallery.md),
-[feature-considerations.md](research/feature-considerations.md)) and case
-studies. Nothing here is decided until it lands in `spec/`.
+The single management surface: tasks with live pipeline status, every open
+decision (grouped so nothing's hidden), bugs, and a scratch pad.
+
+```
+nix develop -c node tools/pipeline/pipeline.mjs serve --open
+```

@@ -16,7 +16,7 @@ executable spec: a milestone ships with new `examples/` programs and new
 | Ratified syntax & owner decisions | [`syntax-decisions.md`](syntax-decisions.md) |
 | Language behavior today | [`spec.md`](spec.md) |
 | Open owner ballots | [`decision-ballots.md`](decision-ballots.md) |
-| Epoch 1 milestone plans (done) | [`docs/plans/epoch-1/`](../plans/epoch-1/) |
+| Epoch 1 milestone plans (done) | shipped in v1.0; plans removed — see git history (behavior lives in [`spec.md`](spec.md) + `examples/`) |
 | Epoch 2 milestone plans (active) | [`docs/plans/epoch-2/`](../plans/epoch-2/) |
 | Jetpack & jetos sequencing + live status | [`docs/plans/jetpack-jetos/`](../plans/jetpack-jetos/) |
 | Implementing-agent protocol | [`docs/plans/README.md`](../plans/README.md) |
@@ -117,8 +117,7 @@ built-vs-pending status:**
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-([`m12-packages.md`](../plans/epoch-1/m12-packages.md)). M12.1 verified
-2026-06-13.
+(M12 plan shipped in v1.0; see git history). M12.1 verified 2026-06-13.
 
 ---
 
