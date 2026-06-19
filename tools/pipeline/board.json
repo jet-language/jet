@@ -1,34 +1,435 @@
 {
-  "scratch": "Migrated from owner-todo.md on 2026-06-19. Raw ideas live as 'idea' cards on the Board; defects in Bugs; open decisions in Decisions. This pad is free space — paste anything; it persists.\n\n",
+  "scratch": "1. Content-addressed definitions — kill the file, kill the name-as-identity.\n\nA function's true identity is the hash of its content, not its name or location. Names become local aliases you can change for free. Prior art: Unison, and it's the most underrated idea in language design. The revolution is what falls out of it: renaming is instant and global with zero risk; there are no merge conflicts on unrelated code because unrelated code has different hashes; \"dependency hell\" disappears because old code still resolves to the exact bytes it always did. Psychology: it kills naming anxiety (names stop being permanent global commitments) and loss aversion (you literally cannot break a downstream consumer—the old hash is immutable).\n\n5. Effects/capabilities so a signature tells you everything a function can do.\n\nIf a function isn't granted network or filesystem capability, it provably cannot touch them—visible right in the signature. Prior art: Koka, Unison's \"abilities,\" Eff, Frank, and capability-based security research. Still wildly niche in practice. Value prop: you can trust a dependency by reading its type instead of auditing its source. This is the foundation for a supply-chain-attack-resistant ecosystem.\n\n7. Uncertainty as a pervasive type dimension.\n\nNot just probabilistic programming (Stan, Church, Pyro do statistics). I mean a tracked axis on ordinary values: \"this might be null,\" \"this came from untrusted user input,\" \"this data is possibly stale,\" \"this is an estimate ±5%.\" The type system propagates the uncertainty and forces you to discharge it before it can cause harm. Value prop: the entire category of \"I assumed this was fresh/clean/present\" bugs becomes a type error.\n\n8. Negative-space types — declare what code must never do.\n\nEvery language lets you say what code does; almost none let you say what it's forbidden from doing (\"this module may never allocate,\" \"this path may never log PII,\" \"this loop may never block\"). First-class prohibitions, statically enforced. Psychology: humans reason about safety in terms of guarantees and red lines, not just behaviors. This matches how engineers actually think about risk.\n\n9. Cost/resource types.\n\nThe type tracks computational cost—time complexity, allocation, energy, latency budget. Prior art is fringe (some research languages, and Granule for resource semantics). Value prop: \"this function is O(n²)\" or \"this handler exceeds its 10ms budget\" becomes a compile error, not a 2 a.m. production incident. Increasingly urgent for embedded, real-time, and energy-conscious computing.\n\n10. Reactive/dataflow-by-default — the whole program is a spreadsheet. **Consider this as tooling**\n\nState synchronization is one of the largest sources of bugs and one of the most exhausting things to hold in your head. Make automatic recalculation the core model, not a framework you bolt on. Prior art: Eve, FRP, and the fact that spreadsheets are the most successful programming environment in history and almost no general-purpose language learned from them. Psychology: removes the entire cognitive burden of \"did I remember to update everything downstream?\"\n\n12. Maturity/confidence tiers in the type system.\n\nCode is tagged experimental, tested, or battle-hardened, and the compiler forbids battle-hardened code from silently depending on experimental code. You're encoding the social reality of a codebase into the language itself. Psychology: this matches the actual mental model every senior engineer carries informally (\"don't build on that, it's a prototype\") and makes it enforceable instead of tribal knowledge.",
   "cards": [
-    { "id": "c01", "type": "task", "title": "Attributes: @ → #", "body": "Move the attribute/marker sigil. Ratified 2026-06-19 (D-ATTR1=B, D-ATTR2=A, D-ATTR3=B: labels stay @).", "stage": "plan-review", "plan": "attr-at-to-hash", "notes": [{ "t": "ratified — awaiting your 'go' to implement", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c02", "type": "task", "title": "Named args + defaults on methods", "body": "Close the S61 method gap. Ratified 2026-06-19 (D-NARG1=A, D-NARG2=A).", "stage": "plan-review", "plan": "named-args-defaults", "notes": [{ "t": "ratified — awaiting your 'go'", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c03", "type": "task", "title": "Flush constructor block Point{x: 1}", "body": "Formatter-canonical flush construction + destructuring. Ratified 2026-06-19 (S29-FLUSH=A).", "stage": "plan-review", "plan": "constructor-no-space", "notes": [{ "t": "ratified — awaiting your 'go'", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c04", "type": "task", "title": "Multiple constructor shapes", "body": "Named constructors vs overloading.", "stage": "review", "plan": "multiple-constructor-shapes", "notes": [{ "t": "blocked on D-CTOR1 (open in Decisions)", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c05", "type": "task", "title": "Arena allocators in stdlib", "body": "core.mem arena (+ pool/bump/fixed staged).", "stage": "review", "plan": "stdlib-allocators-arena", "notes": [{ "t": "blocked on D-ALLOC1 (open in Decisions)", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c06", "type": "task", "title": "Memory capability model", "body": "User-facing ownership via view/edit/take/share instead of borrow-checker vocabulary. Large design.", "stage": "plan", "plan": "memory-capability-model", "notes": [{ "t": "promoted from owner-todo; plan drafted, needs your review", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c07", "type": "task", "title": "lib vs exe → targets model", "body": "Replace rigid lib/exe with fine-grained targets (library/binary/test/example/benchmark/plugin).", "stage": "plan", "plan": "lib-exe-targets-model", "notes": [{ "t": "promoted from owner-todo; plan drafted, needs your review", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c08", "type": "task", "title": "Split lsp / fmt / lint into separate tools", "body": "Structural: separate binaries/plugins vs one bundled jet binary. Also tracked as decision D-TOOL-SPLIT.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c09", "type": "task", "title": "Reconsider @audit / @unsafe syntax", "body": "Simplify @audit(\"text\") @unsafe { } toward @unsafe(\"audit text\") { }?", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c10", "type": "task", "title": "Surface JSON coercions from lenient decode", "body": "D-JSON1 coerces \"8080\"→8080; show what was coerced. Tracked as decision D-JSON3.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c11", "type": "task", "title": "CLI arg passthrough convention", "body": "How jet run passes --flags to the program; -- separator?", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c12", "type": "task", "title": "Reduce L0201 implicit-clone warning noise", "body": "Fires on every String passed to stdlib that stores it. Smarter ownership model or suppression.", "stage": "backlog", "plan": null, "notes": [{ "t": "revisit post-v1 with evidence", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c13", "type": "task", "title": "REPL: make print 'just work'", "body": "Put print in core/prelude rather than auto-importing std.io magically.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-
-    { "id": "c20", "type": "idea", "title": "Structural pattern matching", "body": "Nested enum/record destructuring, exhaustiveness, guards, wildcards, or-patterns, range patterns, unreachable-arm diagnostics.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c21", "type": "idea", "title": "defer for deterministic cleanup", "body": "Lexical scope-exit, LIFO, runs on all exit paths, infallible.", "stage": "backlog", "plan": null, "notes": [{ "t": "note: D-SUGAR5 declined defer once; RAII (S63) is current story", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c22", "type": "idea", "title": "Typed error families + IntoError conversion", "body": "Convert error types across module boundaries (today ? needs same E).", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c23", "type": "idea", "title": "Distinct types & units", "body": "newtype-style distinct types (Haskell newtype / F# units / Odin distinct).", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c24", "type": "idea", "title": "Odin-style when (compile-time if)", "body": "Compile-time conditional; relates to comptime.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c25", "type": "idea", "title": "Range-based switch arms", "body": "Odin-style range arms in if/match dispatch.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c26", "type": "idea", "title": "Arena allocator compiler inference (far horizon)", "body": "Compiler infers arena placement.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c27", "type": "idea", "title": "jetos with nameable generations (far horizon)", "body": "Named OS generations.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-
-    { "id": "c40", "type": "bug", "title": "LSP keyword recognition broken (substring / wrong position)", "body": "Keywords highlighted inside identifiers (e.g. 'print'); can't use keyword-like names as variables. LSP needs an audit toward flagship quality.", "stage": "plan", "plan": "lsp-keyword-highlighting", "notes": [{ "t": "plan exists; needs review", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c41", "type": "bug", "title": "LSP highlighting broken in Zed (works in VSCodium)", "body": "Editor-specific: Zed highlighting not working as expected.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c42", "type": "bug", "title": "@test fn parser out of sync with spec", "body": "Parser accepts only test \"name\" { }; spec also allows @test fn name. Reconcile.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c43", "type": "bug", "title": "FFI u32→Int boundary mapping untested", "body": "Unsigned-int FFI boundary coercions unclear/untested.", "stage": "backlog", "plan": null, "notes": [], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" },
-    { "id": "c44", "type": "bug", "title": "Eliminate remaining multiple-sources-of-truth", "body": "Docs cleanup: one home per fact. Being addressed by the 2026-06-19 doc cleanup.", "stage": "implementing", "plan": null, "notes": [{ "t": "in progress this session", "at": "2026-06-19" }], "created": "2026-06-19T00:00:00Z", "updated": "2026-06-19T00:00:00Z" }
+    {
+      "id": "c01",
+      "type": "task",
+      "title": "Attributes: @ → #",
+      "body": "Move the attribute/marker sigil. Ratified 2026-06-19 (D-ATTR1=B, D-ATTR2=A, D-ATTR3=B: labels stay @).",
+      "stage": "plan-review",
+      "plan": "attr-at-to-hash",
+      "notes": [
+        {
+          "t": "ratified — awaiting your 'go' to implement",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c02",
+      "type": "task",
+      "title": "Named args + defaults on methods",
+      "body": "Close the S61 method gap. Ratified 2026-06-19 (D-NARG1=A, D-NARG2=A).",
+      "stage": "plan-review",
+      "plan": "named-args-defaults",
+      "notes": [
+        {
+          "t": "ratified — awaiting your 'go'",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c03",
+      "type": "task",
+      "title": "Flush constructor block Point{x: 1}",
+      "body": "Formatter-canonical flush construction + destructuring. Ratified 2026-06-19 (S29-FLUSH=A).",
+      "stage": "plan-review",
+      "plan": "constructor-no-space",
+      "notes": [
+        {
+          "t": "ratified — awaiting your 'go'",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c04",
+      "type": "task",
+      "title": "Multiple constructor shapes",
+      "body": "Named constructors vs overloading.",
+      "stage": "review",
+      "plan": "multiple-constructor-shapes",
+      "notes": [
+        {
+          "t": "blocked on D-CTOR1 (open in Decisions)",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c05",
+      "type": "task",
+      "title": "Arena allocators in stdlib",
+      "body": "core.mem arena (+ pool/bump/fixed staged).",
+      "stage": "review",
+      "plan": "stdlib-allocators-arena",
+      "notes": [
+        {
+          "t": "blocked on D-ALLOC1 (open in Decisions)",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c06",
+      "type": "task",
+      "title": "Memory capability model",
+      "body": "User-facing ownership via view/edit/take/share instead of borrow-checker vocabulary. Large design.",
+      "stage": "plan",
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "promoted from owner-todo; plan drafted, needs your review",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c07",
+      "type": "task",
+      "title": "lib vs exe → targets model",
+      "body": "Replace rigid lib/exe with fine-grained targets (library/binary/test/example/benchmark/plugin).",
+      "stage": "plan",
+      "plan": "lib-exe-targets-model",
+      "notes": [
+        {
+          "t": "promoted from owner-todo; plan drafted, needs your review",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c08",
+      "type": "task",
+      "title": "Split lsp / fmt / lint into separate tools",
+      "body": "Structural: separate binaries/plugins vs one bundled jet binary. Also tracked as decision D-TOOL-SPLIT.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c09",
+      "type": "task",
+      "title": "Reconsider @audit / @unsafe syntax",
+      "body": "Simplify @audit(\"text\") @unsafe { } toward @unsafe(\"audit text\") { }?",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c10",
+      "type": "task",
+      "title": "Surface JSON coercions from lenient decode",
+      "body": "D-JSON1 coerces \"8080\"→8080; show what was coerced. Tracked as decision D-JSON3.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c11",
+      "type": "task",
+      "title": "CLI arg passthrough convention",
+      "body": "How jet run passes --flags to the program; -- separator?",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c12",
+      "type": "task",
+      "title": "Reduce L0201 implicit-clone warning noise",
+      "body": "Fires on every String passed to stdlib that stores it. Smarter ownership model or suppression.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [
+        {
+          "t": "revisit post-v1 with evidence",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c13",
+      "type": "task",
+      "title": "REPL: make print 'just work'",
+      "body": "Put print in core/prelude rather than auto-importing std.io magically.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c20",
+      "type": "idea",
+      "title": "Structural pattern matching",
+      "body": "Nested enum/record destructuring, exhaustiveness, guards, wildcards, or-patterns, range patterns, unreachable-arm diagnostics.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c21",
+      "type": "idea",
+      "title": "defer for deterministic cleanup",
+      "body": "Lexical scope-exit, LIFO, runs on all exit paths, infallible.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [
+        {
+          "t": "note: D-SUGAR5 declined defer once; RAII (S63) is current story",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c22",
+      "type": "idea",
+      "title": "Typed error families + IntoError conversion",
+      "body": "Convert error types across module boundaries (today ? needs same E).",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c23",
+      "type": "idea",
+      "title": "Distinct types & units",
+      "body": "newtype-style distinct types (Haskell newtype / F# units / Odin distinct).",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c24",
+      "type": "idea",
+      "title": "Odin-style when (compile-time if)",
+      "body": "Compile-time conditional; relates to comptime.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c25",
+      "type": "idea",
+      "title": "Range-based switch arms",
+      "body": "Odin-style range arms in if/match dispatch.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c26",
+      "type": "idea",
+      "title": "Arena allocator compiler inference (far horizon)",
+      "body": "Compiler infers arena placement.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c27",
+      "type": "idea",
+      "title": "jetos with nameable generations (far horizon)",
+      "body": "Named OS generations.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c40",
+      "type": "bug",
+      "title": "LSP keyword recognition broken (substring / wrong position)",
+      "body": "Keywords highlighted inside identifiers (e.g. 'print'); can't use keyword-like names as variables. LSP needs an audit toward flagship quality.",
+      "stage": "plan",
+      "plan": "lsp-keyword-highlighting",
+      "notes": [
+        {
+          "t": "plan exists; needs review",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c41",
+      "type": "bug",
+      "title": "LSP highlighting broken in Zed (works in VSCodium)",
+      "body": "Editor-specific: Zed highlighting not working as expected.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c42",
+      "type": "bug",
+      "title": "@test fn parser out of sync with spec",
+      "body": "Parser accepts only test \"name\" { }; spec also allows @test fn name. Reconcile.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c43",
+      "type": "bug",
+      "title": "FFI u32→Int boundary mapping untested",
+      "body": "Unsigned-int FFI boundary coercions unclear/untested.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c44",
+      "type": "bug",
+      "title": "Eliminate remaining multiple-sources-of-truth",
+      "body": "Docs cleanup: one home per fact. Being addressed by the 2026-06-19 doc cleanup.",
+      "stage": "implementing",
+      "plan": null,
+      "notes": [
+        {
+          "t": "in progress this session",
+          "at": "2026-06-19"
+        }
+      ],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c50",
+      "type": "task",
+      "title": "Package build-from-source + M9 wave-2 (regex/archive/db)",
+      "body": "E2 loose end → E3. jetpack step to compile a dependency from its Jet source (provider.rs realize()); wave-2 rings ship on top. Plan: docs/plans/epoch-3/package-build-from-source.md.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → Epoch 3", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c51",
+      "type": "task",
+      "title": "Testing ergonomics: property tests, doctests, coverage",
+      "body": "E2 loose end → E3. Syntax-gated (needs property-test surface + shrinking; /// doc-comment convention). Plan: docs/plans/epoch-3/testing-docs-ergonomics.md.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → Epoch 3", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c52",
+      "type": "task",
+      "title": "DAP step-through debugger + adoption docs",
+      "body": "E2 loose end → E3. Source maps + rich panics (E3001) + ? traces (E3002) shipped; full source-level debugging and the adoption-story doc move to E3.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → Epoch 3", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c53",
+      "type": "task",
+      "title": "jet bind: auto-invoke on cache miss + hash invalidation",
+      "body": "E2 loose end → E3. Native bind backend (src/cbind.rs) shipped; compile-time auto-invoke and Phase-3 header/cflags hash invalidation deferred. Plan: docs/plans/epoch-3/c-header-bindings.md.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → Epoch 3", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c54",
+      "type": "task",
+      "title": "Pure-eval: transitive impurity traces + rich --pure rendering",
+      "body": "E2 loose end → E3. E3401 shows one level (direct impure callee); transitive chains deferred. jet eval --pure rich struct/list rendering deferred.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → Epoch 3", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c55",
+      "type": "task",
+      "title": "REPL v2 polish: move across inputs, :run, --project",
+      "body": "E2 loose end → E3. jet repl shipped (16 transcript tests); move-semantics across inputs, :run (compile session to temp file), and --project manifest mode deferred.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → Epoch 3", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c56",
+      "type": "task",
+      "title": "Signed binary/source package cache",
+      "body": "E2 loose end. Live git-registry upload validates locally + explains the push path; signed binary/source cache was design-only (M8, out of scope per plan).",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → revisit when promoted", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    },
+    {
+      "id": "c57",
+      "type": "task",
+      "title": "Real aarch64/QEMU freestanding CI run",
+      "body": "E2 loose end. E3303 done; D-CROSS3 makes the local QEMU harness the minimum. A real aarch64/QEMU CI run + E3303-via-allocator-config stay doc-only/deferred.",
+      "stage": "backlog",
+      "plan": null,
+      "notes": [{ "t": "Epoch 2 wrap → deferred", "at": "2026-06-19" }],
+      "created": "2026-06-19T00:00:00Z",
+      "updated": "2026-06-19T00:00:00Z"
+    }
   ],
   "questions": []
 }

@@ -43,8 +43,8 @@ or *edit*, and frees everything at scope end via S63 RAII.
   existing "handle" precedent).
 - **Known-module list** in `src/loader.rs` (~695, 715) already includes
   `core.mem`; no submodule needed (D-REF2 says flat).
-- **Ratified placement (D-REF2, 2026-06-17,
-  `docs/plans/epoch-2/m5-references.md:27`):** "ship arenas; live directly in
+- **Ratified placement (D-REF2, 2026-06-17, recorded in
+  `docs/spec/syntax-decisions.md`):** "ship arenas; live directly in
   `core.mem` (not a submodule); surface the API as `core.mem.Arena` or
   equivalent flat path." **D-LL3 (ratified):** narrow mem core PLUS an opt-in
   wider expert API, name TBD — the pool/bump/fixed breadth lands under that wider

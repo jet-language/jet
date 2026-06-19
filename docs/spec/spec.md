@@ -309,7 +309,7 @@ Integration: `tests/ffi.rs` (gated on `cargo`).
 ## E2-M14 — C FFI (implemented: overlay + merge + link; bind backend deferred)
 
 **S59** — C import with auto-generated bindings (default) and optional user
-overlay. Spec: [`docs/plans/epoch-2/m14-c-ffi.md`](../plans/epoch-2/m14-c-ffi.md).
+overlay. (Full spec follows in this section.)
 
 | Layer | Shape |
 |---|---|

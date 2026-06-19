@@ -5,7 +5,7 @@
 optional: compile-time auto-invoke on cache miss (D-CBIND2's auto half) and
 widening the bound type subset beyond function prototypes + scalars/`char*`.
 
-**Spec:** [`m14-c-ffi.md`](../epoch-2/m14-c-ffi.md) · All CBIND picks ratified.
+**Spec:** the C FFI section of [`spec.md`](../../spec/spec.md) · All CBIND picks ratified.
 
 ---
 

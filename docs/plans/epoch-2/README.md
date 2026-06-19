@@ -138,7 +138,7 @@ agent workflow should still implement one detailed plan at a time.
 
 ## E2-M1 - Concurrency (verified 2026-06-14)
 
-**Existing plan:** `docs/plans/epoch-2/m1-concurrency.md`.
+Shipped; details consolidated here and in `EPOCH2-STATUS.md`.
 
 Goal: tasks and channels without data races, using ownership as the proof.
 The surface is `tasks.spawn`, `Task<T>.join`, `tasks.channel<T>()`,
@@ -513,8 +513,8 @@ Exit criteria:
 Goal: let users try Jet without creating a file — a teaching surface that
 reuses the E2-M4 interpreter and the same diagnostics as batch compilation.
 
-**Status:** plan only; **blocked on D-REPL1…D-REPL21** (Group 12). Full
-decision tables and recommendations: docs/plans/epoch-2/m18-repl.md.
+**Status:** shipped (`jet repl`, 16 transcript tests). The detailed D-REPL1…21
+decision tables were in the M18 plan; see git history if needed.
 
 Scope (after ratification):
 

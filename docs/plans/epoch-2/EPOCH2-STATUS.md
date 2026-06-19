@@ -4,6 +4,13 @@ The one live status file for Epoch 2. High-level state first, per-milestone
 deferrals at the bottom. Branch is `master`; check git history + `cargo test`
 over prose.
 
+> **Epoch 2 officially wrapped — 2026-06-19.** The 18 per-milestone plan files
+> (`m1-…`–`m18-…`) were removed; their decisions live in `syntax-decisions.md`,
+> behavior in `spec.md` + `examples/`, errors in `diagnostics.md`, and this file is
+> the durable record (`README.md` keeps the consolidated overview + dependency
+> order). Every remaining loose end is tracked as an Epoch-3 card in the dashboard
+> board (`tools/pipeline/board.json`); see the "Moved to Epoch 3" list below.
+
 **Date:** 2026-06-18. **Verdict: Epoch 2 GA complete.** All 18 milestones have
 landed on `master`, and the two real remaining language gaps closed this session:
 the **Jet module system** (D-MOD1–4) and a functional **`jet bind`** (native

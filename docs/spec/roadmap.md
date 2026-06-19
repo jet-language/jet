@@ -31,25 +31,21 @@ Plans are gated on ratified decisions in `syntax-decisions.md` (see
 **Epoch 1 — v1.0** verified 2026-06-14 (M0–M14). See epoch-1 plans for exit
 criteria and examples.
 
-**E2-M1 — Concurrency** verified 2026-06-14
-([`m1-concurrency.md`](../plans/epoch-2/m1-concurrency.md)).
+**E2-M1 — Concurrency** verified 2026-06-14.
 
-**E2-M2 — Release policy, editions, epoch contract** verified 2026-06-16
-([`m2-release-policy.md`](../plans/epoch-2/m2-release-policy.md)). Ratified
+**E2-M2 — Release policy, editions, epoch contract** verified 2026-06-16. Ratified
 compatibility/release policy ([`release-policy.md`](release-policy.md));
 `edition:` marker in `pkg.jet`; enriched `jet --version` banner; E2001
 reachable, E2002/L2001 registered (honestly empty pre-1.0 deprecation registry).
 
-**E2-M3 — Developer command UX** verified 2026-06-16
-([`m3-dx-cli.md`](../plans/epoch-2/m3-dx-cli.md)). Stable exit-code table,
+**E2-M3 — Developer command UX** verified 2026-06-16. Stable exit-code table,
 TTY-aware color (NO_COLOR/FORCE_COLOR/--color), versioned `--json` schema,
 `jet explain` for every code, `jet doctor` (offline + `--fix` + C-FFI section),
 no-args greeting + did-you-mean (E2101/E2102/L2101), completions + man page
 from one registry, unified CLI/LSP fix engine, external `jet-<name>` discovery,
 OSC 8 hyperlinks, `jet build -v`. Digit separators (S67) already shipped.
 
-**E2-M4 — `jet dev` (watch + interpreter loop)** verified 2026-06-17
-([`m4-jet-dev.md`](../plans/epoch-2/m4-jet-dev.md)). `jet dev <file>` (D-DEV4)
+**E2-M4 — `jet dev` (watch + interpreter loop)** verified 2026-06-17. `jet dev <file>` (D-DEV4)
 watches and re-runs on save via the M9.5 comptime evaluator extended to whole
 programs; a 15-program differential battery proves interpreted stdout ==
 compiled stdout byte-for-byte (I2); honest boundaries E2201/E2202 name
@@ -58,8 +54,7 @@ anyway, D-DEV1); <200ms latency budget tested (D-DEV3). No release path uses the
 interpreter (I2/I3); JIT deferred to Epoch 3 (D-DEV2). Std-only file watching
 (I6).
 
-**E2-M13 — Expert low-level tier (S58)** verified 2026-06-17
-([`m13-low-level-tier.md`](../plans/epoch-2/m13-low-level-tier.md)). `use
+**E2-M13 — Expert low-level tier (S58)** verified 2026-06-17. `use
 core.mem` discovery gate, `@audit("…")` + `@unsafe { … }` / `@unsafe fn` audit
 gate, `Ptr<T>` (→ `*mut`), `mem.volatile_read`/`address_of`/`from_addr`;
 diagnostics E3101/E3102/E3103 + lint L3101; the I1 amendment (D-LL1) recorded in
@@ -73,8 +68,7 @@ and fixed-size lists `[T#N]` (S76) — ratified and implemented 2026-06-16; see
 
 ---
 
-**E2-M17 — Epoch 2 GA** partial 2026-06-17
-([`m17-epoch2-ga.md`](../plans/epoch-2/m17-epoch2-ga.md)). All 6 D-GA1=B
+**E2-M17 — Epoch 2 GA** partial 2026-06-17. All 6 D-GA1=B
 showcases exist in `examples/showcase/` (jetgrep, jsonfmt, wordfreq, library,
 lowlevel, freestanding, http_service) and pass the front end. Hard size budgets
 (D-GA2=B) enforced in `tests/ga.rs`. Every E2 diagnostic has `jet explain`
@@ -84,8 +78,7 @@ Moved to Epoch 3 (owner, 2026-06-18): DAP step-through / full source-level
 debugger — out of compiler scope for the E2 GA bar. `tests/observe.rs` keeps the
 source-map markers and rich panics as the pre-cursor.
 
-**E2-M18 — REPL** verified 2026-06-17
-([`m18-repl.md`](../plans/epoch-2/m18-repl.md)). `jet repl` interactive
+**E2-M18 — REPL** verified 2026-06-17. `jet repl` interactive
 session; 16 transcript tests green.
 
 ---

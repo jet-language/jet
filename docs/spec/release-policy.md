@@ -1,7 +1,7 @@
 # Compatibility & release policy (ratified)
 
 This is the promise an enterprise adopts before it depends on Jet. It is the
-ratified output of milestone E2-M2 (docs/plans/epoch-2/m2-release-policy.md).
+ratified output of milestone E2-M2.
 Every decision below was ratified 2026-06-16 (D-REL1…D-REL5).
 
 ## Glossary first
