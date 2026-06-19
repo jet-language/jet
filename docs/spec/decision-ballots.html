@@ -1,243 +1,34 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Jet — Owner Decision Ballot</title>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jet — Decision Ballot (launcher)</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#e6edf3;font:14px/1.6 ui-monospace,monospace;padding:32px 24px;max-width:1200px;margin:0 auto}
-h1{font-size:20px;font-weight:700;color:#f0f6fc;margin-bottom:4px}
-.subtitle{color:#8b949e;margin-bottom:32px;font-size:13px}
-h2{font-size:13px;font-weight:700;color:#8b949e;letter-spacing:.08em;text-transform:uppercase;margin:40px 0 16px;border-bottom:1px solid #21262d;padding-bottom:8px}
-.card{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:20px}
-.card-id{font-size:11px;color:#58a6ff;font-weight:700;letter-spacing:.05em;margin-bottom:6px}
-.card-title{font-size:15px;font-weight:700;color:#f0f6fc;margin-bottom:8px}
-.card-desc{color:#8b949e;font-size:13px;margin-bottom:16px;font-family:ui-sans-serif,sans-serif}
-.options-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px}
-.opt{border:2px solid #21262d;border-radius:6px;padding:14px;cursor:pointer;transition:border-color .15s}
-.opt:hover{border-color:#388bfd}
-.opt.selected{border-color:#58a6ff;background:#0d2044}
-.opt label{display:flex;align-items:flex-start;gap:10px;cursor:pointer}
-.opt input[type=radio]{accent-color:#58a6ff;flex-shrink:0;margin-top:3px}
-.opt-name{font-weight:700;color:#f0f6fc;font-size:13px}
-.opt-desc{color:#8b949e;font-size:12px;margin-top:4px;font-family:ui-sans-serif,sans-serif}
-pre{background:#010409;border:1px solid #30363d;border-radius:5px;padding:12px;overflow-x:auto;font-size:11px;line-height:1.5;margin-top:8px;color:#e6edf3;white-space:pre-wrap;word-break:break-word}
-.nix-label{font-size:10px;color:#f78166;font-weight:700;letter-spacing:.05em;margin-top:10px;margin-bottom:4px}
-.comment-row{display:flex;flex-direction:column;gap:6px}
-.comment-row label{font-size:12px;color:#8b949e}
-.comment-row textarea{background:#010409;border:1px solid #30363d;border-radius:5px;color:#e6edf3;font:12px/1.5 ui-monospace,monospace;padding:8px;resize:vertical;min-height:52px;outline:none;width:100%}
-.comment-row textarea:focus{border-color:#388bfd}
-.rec-badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;padding:1px 7px;border-radius:20px;background:#1a3a1a;color:#3fb950;border:1px solid #3fb950;margin-left:8px;vertical-align:middle}
-.no-rec-badge{background:#2d2000;color:#e3b341;border-color:#e3b341}
-.status-bar{position:sticky;bottom:0;background:#0d1117;border-top:1px solid #21262d;padding:14px 0;margin-top:40px;display:flex;align-items:center;gap:16px}
-.progress{color:#8b949e;font-size:13px;flex:1}
-.progress span{color:#3fb950;font-weight:700}
-button.copy-btn{background:#238636;border:1px solid #2ea043;color:#f0f6fc;border-radius:6px;padding:10px 20px;font:13px/1 ui-monospace,monospace;cursor:pointer;transition:background .15s;font-weight:700}
-button.copy-btn:hover{background:#2ea043}
-button.copy-btn:active{background:#1a7f31}
-.copied{background:#1a7f31 !important}
-.separator{border:none;border-top:1px solid #21262d;margin:8px 0}
-</style>
-</head>
-<body>
-<h1>Jet — Owner Decision Ballot</h1>
-<p class="subtitle">8 open decisions blocking the five queued "Next Tasks" sidequests (attribute sigil, named args on methods, flush constructor block, constructor shapes, allocator API). Each card shows worked before/after per option. See <code>decision-ballots.md</code> for the full examples.</p>
+body{background:#0d1117;color:#e6edf3;font:15px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:760px;margin:0 auto;padding:64px 24px}
+h1{font-size:22px;color:#f0f6fc;margin-bottom:6px}
+p{color:#adbac7;margin:14px 0}
+.sub{color:#8b949e;font-size:13px;margin-bottom:28px}
+pre{background:#010409;border:1px solid #30363d;border-radius:6px;padding:14px 16px;font-size:13px;color:#a5d6ff;overflow-x:auto}
+code{background:#1b2330;border-radius:4px;padding:1px 5px}
+.note{font-size:12px;color:#8b949e;margin-top:8px}
+a{color:#58a6ff}
+#status{margin-top:24px;padding:12px 14px;border-radius:6px;border:1px solid #21262d;background:#161b22;font-size:13px}
+.ok{border-color:#2ea043!important;color:#3fb950}
+.k{color:#ff7b72}.t{color:#79c0ff}
+</style></head><body>
+<h1>Jet — Decision Ballot</h1>
+<p class="sub">The ballot is now a live dashboard so you can <b>submit</b> decisions instead of copy-pasting, and <b>undo</b> a selection. It renders straight from <code>docs/spec/decision-ballots.md</code> — one source of truth, no duplicated card data.</p>
 
-<div id="ballot"></div>
+<p>Start it from the repo root (one command):</p>
+<pre><span class="k">nix</span> develop -c <span class="k">node</span> tools/pipeline/pipeline.mjs serve --open</pre>
+<p class="note">That serves the dashboard at <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a> and opens your browser. Decide, hit <b>Submit</b> — your choices are written to <code>docs/spec/ballot-results.md</code>; then tell Claude <b>"go"</b> to ratify &amp; implement. <code>↻ improve examples</code> on any card queues a Claude review of that card's examples.</p>
 
-<div class="status-bar">
-  <div class="progress" id="progress">0 of 0 answered</div>
-  <button class="copy-btn" id="copyBtn" onclick="copyResults()">Copy All Answers</button>
-</div>
+<div id="status">Checking whether the dashboard is already running…</div>
 
 <script>
-const DECISIONS = [
-  {
-    section: "Next Tasks",
-    id: "D-ATTR1",
-    rec: "no-rec",
-    title: "Move the attribute sigil @ → #?",
-    desc: "Reverses ratified S55 + S82 and resurrects the rejected Rust-style spelling; # is already a live Hash token.",
-    options: [
-      { key: "A", name: "Keep @ (status quo)", desc: "No reversal, no churn.", code: "// BEFORE and AFTER (unchanged):\n@unsafe\nfn raw() { ... }\n\n@Serialize\nstruct Point { ... }" },
-      { key: "B", name: "Move to #", desc: "Re-allows #-prefixed markers; positional disambiguation keeps [T#N] and name#ver.", code: "// BEFORE (@):        AFTER (#):\n@unsafe             #unsafe\nfn raw() {}         fn raw() {}\n\n@Serialize          #Serialize\nstruct Point {}     struct Point {}" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "D-ATTR2",
-    rec: "no-rec",
-    title: "List form: bare #Name vs Rust-literal #[derive(...)]?",
-    desc: "Only live if D-ATTR1 = B. Picks the multi-marker spelling and whether to resurrect the literal #[derive(...)] S55 rejected.",
-    options: [
-      { key: "A", name: "Bare #[Marker, ...]", desc: "Markers listed plainly inside brackets.", code: "// BEFORE (@[...]):            AFTER (bare):\n@[Serialize, Comparable]      #[Serialize, Comparable]\nstruct Point {}               struct Point {}" },
-      { key: "B", name: "Rust-literal #[derive(...)]", desc: "The exact spelling S55 rejected, with the derive(...) wrapper.", code: "// BEFORE (@[...]):            AFTER (Rust-literal):\n@[Serialize, Comparable]      #[derive(Serialize, Comparable)]\nstruct Point {}               struct Point {}" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "D-ATTR3",
-    rec: "no-rec",
-    title: "Move loop labels to # too, or leave them @?",
-    desc: "Only live if D-ATTR1 = B. Labels (D-LABEL1) reuse @; if attributes move but labels stay, source carries two marker sigils (the trap).",
-    options: [
-      { key: "A", name: "Move labels too (one sigil)", desc: "Uniform #; ref/host @ (U6/U16) stays — it lives in CLI strings, not source.", code: "#unsafe\n#outer loop {\n    break #outer\n}" },
-      { key: "B", name: "Attributes only (mixed sigils)", desc: "Labels keep @; two marker sigils coexist in source — the flagged trap.", code: "#unsafe\n@outer loop {\n    break @outer\n}" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "D-NARG1",
-    rec: "a",
-    title: "Named args + defaults on methods/constructors now?",
-    desc: "S61 is built for free fns but methods get nothing — the label is parsed then dropped and method defaults never fill. A silent footgun.",
-    options: [
-      { key: "A", name: "Yes, methods in scope", desc: "Method calls behave like free functions: labels checked, defaults filled.", code: "fn draw(self, filled: Bool = false) {}\nrect.draw(filled: true)  // label checked\nrect.draw()              // filled defaults to false" },
-      { key: "B", name: "No, free functions only", desc: "Methods keep today's behavior: label ignored, default never fills.", code: "fn draw(self, filled: Bool = false) {}\nrect.draw(filled: true)  // label dropped; default unsupported" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "D-NARG2",
-    rec: "a",
-    title: "Does fmt preserve or canonicalize call-site labels?",
-    desc: "Labels are optional (S61). fmt either leaves the user's choice as written or rewrites it (add/remove) on every format.",
-    options: [
-      { key: "A", name: "Preserve as written", desc: "Label presence is the user's documentation choice; fmt never adds or strips.", code: "greet(\"world\", loud: true)  // stays labeled\ngreet(\"world\", true)        // stays unlabeled — no auto-add" },
-      { key: "B", name: "Canonicalize", desc: "fmt enforces one form (always label, or always strip), rewriting calls.", code: "greet(\"world\", true)\n// canonicalize-to-labeled → greet(\"world\", loud: true)" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "S29-FLUSH",
-    rec: "a",
-    title: "Flush constructor block Point{x: 1} (no space)?",
-    desc: "Amends ratified S29 (which shows the space). Parser already accepts both — this is a formatter-canonical-style change behind an S29 amendment.",
-    options: [
-      { key: "A", name: "Flush construction", desc: "Type name hugs its field block like a call hugs its callee. Colon spacing (x: 1) unchanged.", code: "// BEFORE (S29 today):        AFTER (flush):\np :: Point {x: 3.0, y: 4.0}   p :: Point{x: 3.0, y: 4.0}\n// plan also recs flush destructuring: Point{x, y} :: make()" },
-      { key: "B", name: "Keep the space (status quo)", desc: "Reject the request; Point {...} stays canonical.", code: "p :: Point {x: 3.0, y: 4.0}   // unchanged" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "D-CTOR1",
-    rec: "a",
-    title: "Named constructors vs. true overloading?",
-    desc: "Today a no-self static IS a named ctor (Point.unit() ships); duplicate name = hard E0105. Overloading adds name-mangling + resolution machinery.",
-    options: [
-      { key: "A", name: "Named constructors only", desc: "Many shapes = many distinct static names. Already works; zero codegen change.", code: "fn cartesian(x: Float, y: Float) -> Point {}\nfn polar(r: Float, theta: Float) -> Point {}\n// Point.cartesian(3,4)  Point.polar(5,0.9)\nfn from(x,y) {}\nfn from(r) {}  // Error [E0105]: from defined twice" },
-      { key: "B", name: "Overload by arity only", desc: "One name; candidates differ in param count; resolve by counting args.", code: "fn make(x: Float, y: Float) -> Point {}  // 2 args\nfn make(r: Float) -> Point {}            // 1 arg\n// two 1-arg shapes still collide → named ctors anyway" },
-      { key: "C", name: "Overload by full signature", desc: "One name; differ by arity or param types; resolve by matching arg types.", code: "fn of(n: Int) -> Id {}\nfn of(s: String) -> Id {}\n// Id.of(7) → Int; Id.of(\"x7\") → String\n// Id.of(3.0) → E0112: no overload accepts Float" }
-    ]
-  },
-  {
-    section: "Next Tasks",
-    id: "D-ALLOC1",
-    rec: "no-rec",
-    title: "Allocator constructor + allocate spelling?",
-    desc: "Arena placement is ratified (flat core.mem.Arena, D-REF2). This picks the surface tokens for constructing an allocator and allocating from it.",
-    options: [
-      { key: "A", name: "Method style", desc: "Construct with .new(), allocate with a method.", code: "use core.mem\narena :: mem.Arena.new()\nnode :: arena.alloc(value)  // freed at scope end" },
-      { key: "B", name: "Allocator-parameter style", desc: "Allocate via a builtin taking the allocator as a named argument.", code: "use core.mem\narena :: mem.Arena.new()\nnode :: make(Node, in: arena)" },
-      { key: "C", name: "Capacity-typed constructor", desc: "Bake capacity/shape into the constructor type.", code: "use core.mem\narena :: mem.Arena(capacity: 4096)\nnode :: arena.alloc(value)" }
-    ]
-  }
-];
-
-const answers = {};
-
-function recLabel(rec) {
-  if (rec === "no-rec") return '<span class="rec-badge no-rec-badge">NO REC</span>';
-  return `<span class="rec-badge">REC: ${rec.toUpperCase()}</span>`;
-}
-
-function renderDecisions() {
-  const container = document.getElementById('ballot');
-  let currentSection = '';
-  let html = '';
-
-  DECISIONS.forEach((d, di) => {
-    if (d.section !== currentSection) {
-      currentSection = d.section;
-      html += `<h2>${currentSection}</h2>`;
-    }
-
-    const optHtml = d.options.map((opt, oi) => {
-      const radioId = `${di}_${oi}`;
-      return `
-        <div class="opt" id="opt-${radioId}" onclick="selectOpt(${di},${oi})">
-          <label>
-            <input type="radio" name="d${di}" id="${radioId}" value="${opt.key}" onchange="selectOpt(${di},${oi})">
-            <div>
-              <div class="opt-name">${opt.name}</div>
-              <div class="opt-desc">${opt.desc}</div>
-              ${opt.nix ? `<div class="nix-label">NixOS today</div><pre>${opt.nix}</pre>` : ''}
-              ${opt.code ? `<pre>${opt.code}</pre>` : ''}
-            </div>
-          </label>
-        </div>`;
-    }).join('');
-
-    html += `
-      <div class="card" id="card-${di}">
-        <div class="card-id">${d.id} ${recLabel(d.rec)}</div>
-        <div class="card-title">${d.title}</div>
-        <div class="card-desc">${d.desc}</div>
-        <div class="options-grid">${optHtml}</div>
-        <div class="comment-row">
-          <label for="comment-${di}">Comment (optional)</label>
-          <textarea id="comment-${di}" placeholder="Your rationale or caveats…" oninput="updateProgress()"></textarea>
-        </div>
-      </div>`;
-  });
-
-  container.innerHTML = html;
-  updateProgress();
-}
-
-function selectOpt(di, oi) {
-  const opt = DECISIONS[di].options[oi];
-  answers[di] = opt.key;
-  document.querySelector(`input[name="d${di}"][value="${opt.key}"]`).checked = true;
-  DECISIONS[di].options.forEach((_, i) => {
-    const el = document.getElementById(`opt-${di}_${i}`);
-    if (el) el.classList.toggle('selected', i === oi);
-  });
-  updateProgress();
-}
-
-function updateProgress() {
-  const answered = Object.keys(answers).length;
-  const total = DECISIONS.length;
-  document.getElementById('progress').innerHTML = `<span>${answered}</span> of ${total} answered`;
-}
-
-function copyResults() {
-  const lines = ['## Owner ballot results\n'];
-  let section = '';
-  DECISIONS.forEach((d, di) => {
-    if (d.section !== section) {
-      section = d.section;
-      lines.push(`\n### ${section}`);
-    }
-    const choice = answers[di] || '(no answer)';
-    const comment = (document.getElementById(`comment-${di}`)?.value || '').trim();
-    lines.push(`\n**${d.id}** — ${d.title}`);
-    lines.push(`Decision: **${choice}**`);
-    if (comment) lines.push(`Comment: ${comment}`);
-  });
-
-  const text = lines.join('\n');
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.getElementById('copyBtn');
-    btn.textContent = 'Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'Copy All Answers'; btn.classList.remove('copied'); }, 2000);
-  });
-}
-
-renderDecisions();
-</script>
-</body>
-</html>
+// If the server is up, jump straight to it.
+fetch('http://127.0.0.1:4173/api/state').then(r=>{
+  if(r.ok){location.href='http://127.0.0.1:4173/';}
+}).catch(()=>{
+  document.getElementById('status').textContent='Dashboard not running yet — run the command above, then reload this page (it will auto-redirect).';
+});
+</script></body></html>
