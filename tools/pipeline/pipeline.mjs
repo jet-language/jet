@@ -615,7 +615,7 @@ function renderDecisions(){
       '<textarea id="c-'+s.id+'" placeholder="Comment (optional)" oninput="comments[\\''+s.id+'\\']=this.value">'+(comments[s.id]||'')+'</textarea>'+
       '<div class="drow"><span class="clr" id="clr-'+s.id+'" onclick="clearPick(\\''+s.id+'\\')">✕ clear selection</span>'+
       '<button class="ghost sm" onclick="ask(\\''+s.id+'\\')">Ask a question</button>'+
-      '<button class="ghost sm" onclick="regen(\\''+s.id+'\\',\\''+jq(s.title)+'\\')">↻ Improve examples</button></div>'+
+      '<button class="ghost sm" onclick="regen(\\''+s.id+'\\')">↻ Improve examples</button></div>'+
       (qhtml?'<div class="qbox">'+qhtml+'</div>':'')+'</div>';
     if(answers[s.id])setTimeout(()=>markPick(s.id,answers[s.id]),0);
   }
@@ -634,7 +634,7 @@ function pick(id,key){answers[id]=key;markPick(id,key);progress();}
 function clearPick(id){delete answers[id];const s=S.ballot.find(x=>x.id===id);for(const o of s.options)document.getElementById('o-'+id+'-'+o.key)?.classList.remove('sel');document.getElementById('clr-'+id)?.classList.remove('on');progress();}
 function progress(){const dec=S.ballot.filter(x=>x.kind==='decision');document.getElementById('prog').innerHTML='<b>'+Object.keys(answers).length+'</b> of '+dec.length+' decided';}
 async function ask(id){const t=prompt('What do you want to know about '+id+'? (e.g. "what are the tradeoffs?")');if(t&&t.trim()){const j=await api('/api/ask',{decisionId:id,text:t});if(j.ok){await load();toast('Question saved — Claude will answer on this card.');}}}
-async function regen(id,title){const j=await api('/api/regen',{id,title});if(j.ok)toast('Queued — Claude will improve this card\\'s examples.');}
+async function regen(id){const s=S.ballot.find(x=>x.id===id);const title=s?s.title:id;const j=await api('/api/regen',{id,title});if(j.ok)toast('Queued — Claude will improve this card\\'s examples.');}
 async function submitBallot(){
   const dec=S.ballot.filter(x=>x.kind==='decision');
   const results=dec.map(s=>({id:s.id,title:s.title,choice:answers[s.id]||'',comment:comments[s.id]||''}));
