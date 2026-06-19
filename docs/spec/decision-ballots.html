@@ -42,7 +42,7 @@ button.copy-btn:active{background:#1a7f31}
 </head>
 <body>
 <h1>Jet — Owner Decision Ballot</h1>
-<p class="subtitle">No open decisions. The sidequest decisions (D-ILE1, D-BIND1, D-LABEL1, S6-R, D-IF1) and the D-IF2 surface follow-up were all ratified 2026-06-18 and have left the queue. See <code>decision-ballots.md</code> / <code>syntax-decisions.md</code>.</p>
+<p class="subtitle">8 open decisions blocking the five queued "Next Tasks" sidequests (attribute sigil, named args on methods, flush constructor block, constructor shapes, allocator API). Each card shows worked before/after per option. See <code>decision-ballots.md</code> for the full examples.</p>
 
 <div id="ballot"></div>
 
@@ -52,7 +52,98 @@ button.copy-btn:active{background:#1a7f31}
 </div>
 
 <script>
-const DECISIONS = [];
+const DECISIONS = [
+  {
+    section: "Next Tasks",
+    id: "D-ATTR1",
+    rec: "no-rec",
+    title: "Move the attribute sigil @ → #?",
+    desc: "Reverses ratified S55 + S82 and resurrects the rejected Rust-style spelling; # is already a live Hash token.",
+    options: [
+      { key: "A", name: "Keep @ (status quo)", desc: "No reversal, no churn.", code: "// BEFORE and AFTER (unchanged):\n@unsafe\nfn raw() { ... }\n\n@Serialize\nstruct Point { ... }" },
+      { key: "B", name: "Move to #", desc: "Re-allows #-prefixed markers; positional disambiguation keeps [T#N] and name#ver.", code: "// BEFORE (@):        AFTER (#):\n@unsafe             #unsafe\nfn raw() {}         fn raw() {}\n\n@Serialize          #Serialize\nstruct Point {}     struct Point {}" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "D-ATTR2",
+    rec: "no-rec",
+    title: "List form: bare #Name vs Rust-literal #[derive(...)]?",
+    desc: "Only live if D-ATTR1 = B. Picks the multi-marker spelling and whether to resurrect the literal #[derive(...)] S55 rejected.",
+    options: [
+      { key: "A", name: "Bare #[Marker, ...]", desc: "Markers listed plainly inside brackets.", code: "// BEFORE (@[...]):            AFTER (bare):\n@[Serialize, Comparable]      #[Serialize, Comparable]\nstruct Point {}               struct Point {}" },
+      { key: "B", name: "Rust-literal #[derive(...)]", desc: "The exact spelling S55 rejected, with the derive(...) wrapper.", code: "// BEFORE (@[...]):            AFTER (Rust-literal):\n@[Serialize, Comparable]      #[derive(Serialize, Comparable)]\nstruct Point {}               struct Point {}" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "D-ATTR3",
+    rec: "no-rec",
+    title: "Move loop labels to # too, or leave them @?",
+    desc: "Only live if D-ATTR1 = B. Labels (D-LABEL1) reuse @; if attributes move but labels stay, source carries two marker sigils (the trap).",
+    options: [
+      { key: "A", name: "Move labels too (one sigil)", desc: "Uniform #; ref/host @ (U6/U16) stays — it lives in CLI strings, not source.", code: "#unsafe\n#outer loop {\n    break #outer\n}" },
+      { key: "B", name: "Attributes only (mixed sigils)", desc: "Labels keep @; two marker sigils coexist in source — the flagged trap.", code: "#unsafe\n@outer loop {\n    break @outer\n}" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "D-NARG1",
+    rec: "a",
+    title: "Named args + defaults on methods/constructors now?",
+    desc: "S61 is built for free fns but methods get nothing — the label is parsed then dropped and method defaults never fill. A silent footgun.",
+    options: [
+      { key: "A", name: "Yes, methods in scope", desc: "Method calls behave like free functions: labels checked, defaults filled.", code: "fn draw(self, filled: Bool = false) {}\nrect.draw(filled: true)  // label checked\nrect.draw()              // filled defaults to false" },
+      { key: "B", name: "No, free functions only", desc: "Methods keep today's behavior: label ignored, default never fills.", code: "fn draw(self, filled: Bool = false) {}\nrect.draw(filled: true)  // label dropped; default unsupported" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "D-NARG2",
+    rec: "a",
+    title: "Does fmt preserve or canonicalize call-site labels?",
+    desc: "Labels are optional (S61). fmt either leaves the user's choice as written or rewrites it (add/remove) on every format.",
+    options: [
+      { key: "A", name: "Preserve as written", desc: "Label presence is the user's documentation choice; fmt never adds or strips.", code: "greet(\"world\", loud: true)  // stays labeled\ngreet(\"world\", true)        // stays unlabeled — no auto-add" },
+      { key: "B", name: "Canonicalize", desc: "fmt enforces one form (always label, or always strip), rewriting calls.", code: "greet(\"world\", true)\n// canonicalize-to-labeled → greet(\"world\", loud: true)" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "S29-FLUSH",
+    rec: "a",
+    title: "Flush constructor block Point{x: 1} (no space)?",
+    desc: "Amends ratified S29 (which shows the space). Parser already accepts both — this is a formatter-canonical-style change behind an S29 amendment.",
+    options: [
+      { key: "A", name: "Flush construction", desc: "Type name hugs its field block like a call hugs its callee. Colon spacing (x: 1) unchanged.", code: "// BEFORE (S29 today):        AFTER (flush):\np :: Point {x: 3.0, y: 4.0}   p :: Point{x: 3.0, y: 4.0}\n// plan also recs flush destructuring: Point{x, y} :: make()" },
+      { key: "B", name: "Keep the space (status quo)", desc: "Reject the request; Point {...} stays canonical.", code: "p :: Point {x: 3.0, y: 4.0}   // unchanged" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "D-CTOR1",
+    rec: "a",
+    title: "Named constructors vs. true overloading?",
+    desc: "Today a no-self static IS a named ctor (Point.unit() ships); duplicate name = hard E0105. Overloading adds name-mangling + resolution machinery.",
+    options: [
+      { key: "A", name: "Named constructors only", desc: "Many shapes = many distinct static names. Already works; zero codegen change.", code: "fn cartesian(x: Float, y: Float) -> Point {}\nfn polar(r: Float, theta: Float) -> Point {}\n// Point.cartesian(3,4)  Point.polar(5,0.9)\nfn from(x,y) {}\nfn from(r) {}  // Error [E0105]: from defined twice" },
+      { key: "B", name: "Overload by arity only", desc: "One name; candidates differ in param count; resolve by counting args.", code: "fn make(x: Float, y: Float) -> Point {}  // 2 args\nfn make(r: Float) -> Point {}            // 1 arg\n// two 1-arg shapes still collide → named ctors anyway" },
+      { key: "C", name: "Overload by full signature", desc: "One name; differ by arity or param types; resolve by matching arg types.", code: "fn of(n: Int) -> Id {}\nfn of(s: String) -> Id {}\n// Id.of(7) → Int; Id.of(\"x7\") → String\n// Id.of(3.0) → E0112: no overload accepts Float" }
+    ]
+  },
+  {
+    section: "Next Tasks",
+    id: "D-ALLOC1",
+    rec: "no-rec",
+    title: "Allocator constructor + allocate spelling?",
+    desc: "Arena placement is ratified (flat core.mem.Arena, D-REF2). This picks the surface tokens for constructing an allocator and allocating from it.",
+    options: [
+      { key: "A", name: "Method style", desc: "Construct with .new(), allocate with a method.", code: "use core.mem\narena :: mem.Arena.new()\nnode :: arena.alloc(value)  // freed at scope end" },
+      { key: "B", name: "Allocator-parameter style", desc: "Allocate via a builtin taking the allocator as a named argument.", code: "use core.mem\narena :: mem.Arena.new()\nnode :: make(Node, in: arena)" },
+      { key: "C", name: "Capacity-typed constructor", desc: "Bake capacity/shape into the constructor type.", code: "use core.mem\narena :: mem.Arena(capacity: 4096)\nnode :: arena.alloc(value)" }
+    ]
+  }
+];
 
 const answers = {};
 
