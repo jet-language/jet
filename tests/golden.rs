@@ -15,7 +15,7 @@ use std::process::Command;
 fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ex_dir = root.join("examples/features");
-    let ext = jet::syntax::FILE_EXT;
+    let ext = jet::Syntax::FILE_EXT;
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
     if !have_rustc {

@@ -14,30 +14,30 @@ before any code lands.
 
 ## Current state (verified)
 
-- **Static methods already are named constructors.** `src/ast.rs:563` `Func`
+- **Static methods already are named constructors.** `Source/AST.rs:563` `Func`
   carries `name`, `params`, `return_type`. A method with no `self` param is a
-  static on the type: `src/sema.rs:121` `func_to_method_sig` sets
+  static on the type: `Source/Sema.rs:121` `func_to_method_sig` sets
   `is_static = self_param.is_none()`. `examples/features/10_structs.jet` ships
   `fn unit() -> Point { … }` called as `Point.unit()`. So `Point.cartesian(…)` /
   `Point.polar(…)` **already work today** as ordinary distinct-named statics —
   the only thing missing is the owner blessing them as *the* constructor story
   and (optionally) one shared name.
 - **Methods are keyed by name; same name twice is a hard error.** Both struct
-  bodies (`src/sema.rs:600` `StructDef.methods: Vec<Func>`) and `impl` blocks
-  (`src/ast.rs:650`) feed `register_type_methods` / `register_impl_methods`
-  (`src/sema.rs:1256`, `1282`). The store is `HashMap<String, MethodSig>`
-  (`src/sema.rs:62`,`68`); a duplicate name pushes `method_defined_twice`
-  (`src/sema.rs:1487`, code **E0105**) instead of overwriting. So **overloading
+  bodies (`Source/Sema.rs:600` `StructDef.methods: Vec<Func>`) and `impl` blocks
+  (`Source/AST.rs:650`) feed `register_type_methods` / `register_impl_methods`
+  (`Source/Sema.rs:1256`, `1282`). The store is `HashMap<String, MethodSig>`
+  (`Source/Sema.rs:62`,`68`); a duplicate name pushes `method_defined_twice`
+  (`Source/Sema.rs:1487`, code **E0105**) instead of overwriting. So **overloading
   is currently rejected** at registration — adding it means changing the key
   from `name` to `(name, arity/signature)` and threading overload-set resolution
-  through `check_static_method` (`src/sema.rs:7073`) and the instance path.
+  through `check_static_method` (`Source/Sema.rs:7073`) and the instance path.
 - **Call resolution is name-only, single-sig.** `check_static_method`
-  (`src/sema.rs:7080`) does `registry.method(type_name, method).cloned()` — one
-  `MethodSig`, then `check_method_args` (`src/sema.rs:7105`) checks arity
+  (`Source/Sema.rs:7080`) does `registry.method(type_name, method).cloned()` — one
+  `MethodSig`, then `check_method_args` (`Source/Sema.rs:7105`) checks arity
   (E0104) and per-arg types (E0112). There is no candidate-set / best-match
   machinery anywhere.
 - **Codegen lowers methods to Rust `impl` methods keyed by name**
-  (`src/codegen/items.rs`, `mangle(&f.name)`). Rust has no overloading, so any
+  (`Source/Codegen/Items.rs`, `mangle(&f.name)`). Rust has no overloading, so any
   same-name overload model **requires name-mangling in codegen** (e.g.
   `Point.from(Int)` → `Point__from__Int`) plus a dispatch rewrite at every call
   site. Named constructors need **zero codegen change** — they already lower as
@@ -45,11 +45,11 @@ before any code lands.
 - **S61 (labels + defaults) is the cheaper expressivity lever.** Ratified
   (`syntax-decisions.md:667`): optional `name: value` labels, positional order
   fixed, trailing defaults — `fn f(x: Int, urgent: Bool = false)`. `Param.default`
-  exists (`src/ast.rs:589`). One function with defaulted trailing params already
+  exists (`Source/AST.rs:589`). One function with defaulted trailing params already
   covers many "two shapes" cases without overloading or extra names. S61 is
   marked "post-1.0 pending," so confirm its status alongside this.
 - **U18 is unrelated to type constructors.** Memory and `syntax-decisions.md:1568`
-  / `src/ast.rs:377` show U18 "inferred constructors" = the *module-config*
+  / `Source/AST.rs:377` show U18 "inferred constructors" = the *module-config*
   feature (bare `{ … }` typed by expected type for `System`/`Service`/`Env`
   records). It does **not** touch struct/`impl` constructors. Don't conflate.
 - **Struct literals stay the field-by-field path** (S29,
@@ -147,7 +147,7 @@ no-`self` statics?
 
 **Option A — No marker; a no-`self` static *is* a constructor (recommended).**
 Status quo. `fn cartesian(…) -> Point` inside `Point` is a constructor by
-position + return type. Nothing new in `src/syntax.rs`.
+position + return type. Nothing new in `Source/Syntax.rs`.
 
 ```jet
 struct Point { fn cartesian(x: Float, y: Float) -> Point { … } }   // ctor, no keyword
@@ -203,7 +203,7 @@ Mostly docs + one teaching diagnostic; near-zero engine change.
    is the field-wise builder; same-name shapes are rejected (E0105) pointing at
    distinct names + S61 defaults.
 3. **Parser.** No change (statics already parse).
-4. **Sema.** Reuse E0105 (`method_defined_twice`, `src/sema.rs:1487`); optionally
+4. **Sema.** Reuse E0105 (`method_defined_twice`, `Source/Sema.rs:1487`); optionally
    enrich its `fix` to mention "give each constructor a distinct name, or use a
    default parameter (S61)." Snapshot-bless.
 5. **Codegen / fmt.** No change.
@@ -217,13 +217,13 @@ Mostly docs + one teaching diagnostic; near-zero engine change.
 3. **Parser:** no grammar change (same `fn`); the change is downstream.
 4. **Sema:** change the method store key from `String` to an overload set
    (`HashMap<String, Vec<MethodSig>>`); update `register_type_methods` /
-   `register_impl_methods` (`src/sema.rs:1256`/`1282`) to *append* unless a
+   `register_impl_methods` (`Source/Sema.rs:1256`/`1282`) to *append* unless a
    true duplicate (same arity for B; same arity+types for C). Rewrite
-   `check_static_method` (`src/sema.rs:7073`) + the instance path into
+   `check_static_method` (`Source/Sema.rs:7073`) + the instance path into
    candidate resolution: filter by arity (B) or arity+arg-type assignability
    (C), then 0 → E0102/E0104, 1 → check, >1 → new ambiguity diagnostic
    (needs a new E-code in `diagnostics.md`, I4). Decide D-CTOR3.
-5. **Codegen:** name-mangle overloaded methods (`src/codegen/items.rs`) and
+5. **Codegen:** name-mangle overloaded methods (`Source/Codegen/Items.rs`) and
    rewrite call sites to the resolved mangled name (sema must annotate which
    candidate won so codegen stays dumb, I3).
 6. **fmt:** unchanged (each `fn` formats independently).
@@ -238,7 +238,7 @@ Mostly docs + one teaching diagnostic; near-zero engine change.
       `E_AMBIG` ambiguity + no-match snapshots. (I4)
 - [ ] No `unsafe` in generated code; no rustc error on generated output (I2).
 - [ ] `docs/spec/spec.md` + `docs/spec/diagnostics.md` describe the chosen model;
-      any new keyword/sigil recorded in `src/syntax.rs` with a decision ID (I7).
+      any new keyword/sigil recorded in `Source/Syntax.rs` with a decision ID (I7).
 - [ ] `tests/decisions.rs` ratification check passes for any new D-CTOR row.
 - [ ] If Track B: a struct method and an `impl`-block method with the same name
       participate in **one** overload set (both registration paths agree).

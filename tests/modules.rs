@@ -3,12 +3,12 @@
 //! typed namespace contributions (`env.dev: Env { … }`). Contribution *values*
 //! reuse the existing struct-literal expression parser.
 
-use jet::ast::{Call, Contribution, Expr, Item, Namespace, StrPart};
+use jet::AST::{Call, Contribution, Expr, Item, Namespace, StrPart};
 
 fn parse_items(src: &str) -> Vec<Item> {
-    let (toks, lex_diags) = jet::lexer::lex(src);
+    let (toks, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
-    jet::parser::parse(&toks).expect("parse").items
+    jet::Parser::parse(&toks).expect("parse").items
 }
 
 #[test]

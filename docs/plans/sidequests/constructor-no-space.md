@@ -14,24 +14,24 @@ so no grammar work is needed.
 ## Current state (verified)
 
 - **Parser is whitespace-insensitive already.** `Point{x:1}` and `Point {x:1}`
-  parse identically. `expr_primary` (src/parser/exprs.rs, `TokKind::Ident` arm)
+  parse identically. `expr_primary` (Source/Parser/Expressions.rs, `TokKind::Ident` arm)
   recognizes a struct literal purely by token lookahead — `Ident` followed by
   `LBrace` when `allow_struct_lit` is true — then calls `struct_lit_after_name`
-  (src/parser/exprs.rs). There is **no span-adjacency check** between the name and
+  (Source/Parser/Expressions.rs). There is **no span-adjacency check** between the name and
   the `{`, so spacing never affects parsing. **No parser change is required.**
 - **The space lives in exactly one formatter site.** The `Expr::StructLit` arm in
-  `fmt_expr` (src/fmt/exprs.rs) writes `self.write(" {")` (the leading space is
+  `fmt_expr` (Source/Formatter/Expressions.rs) writes `self.write(" {")` (the leading space is
   the whole bug). This one arm covers both plain literals and the
   `import_ns`-qualified form (`ns.Point { … }`). Inner fields already emit **no**
   space after `{` (`{x: 1.0}`) and `": "` after each field name.
 - **Declaration/block `{` sites must NOT change.** fmt has many `" {"` writes
-  across src/fmt/{items,stmts}.rs; all the others are declaration or block
+  across Source/Formatter/{items,stmts}.rs; all the others are declaration or block
   openers — `struct X {`, `enum {`, `fn f() {`, `impl X {`, `trait {`,
   lambda/`if`/`loop` blocks. S44 ratifies **same-line `{`** for these; they stay
-  spaced. Only the `Expr::StructLit` arm in src/fmt/exprs.rs is in scope.
+  spaced. Only the `Expr::StructLit` arm in Source/Formatter/Expressions.rs is in scope.
 - **Destructuring is a separate path that still has the space.** A bind pattern
   `Point { x, y } :: make()` is formatted by `fmt_bind_pattern`
-  (`BindPattern::Struct`) in **src/fmt/stmts.rs** — `self.write(" { ")` …
+  (`BindPattern::Struct`) in **Source/Formatter/Statements.rs** — `self.write(" { ")` …
   `self.write(" }")` — and is round-trip-asserted by
   **`fmt_preserves_destructuring_targets`** (tests/fmt.rs). This is *matching*, not
   *construction*; see Decision 1.
@@ -45,7 +45,7 @@ so no grammar work is needed.
   (their fixture `.jet` was hand-written). They change **only if the fixture
   `.jet` is rewritten**, which is a separate choice (Decision 3).
 - **No ambiguity is introduced.** Condition position parses with
-  `expr_no_struct_lit` (src/parser/exprs.rs), so `if Point{x:1} { … }` still
+  `expr_no_struct_lit` (Source/Parser/Expressions.rs), so `if Point{x:1} { … }` still
   requires parens around the literal regardless of spacing — flush spacing
   changes nothing here.
 - **Out of scope / pre-existing:** the `as_trait` field on `Expr::StructLit` is
@@ -68,9 +68,9 @@ Then, following the loop:
 3. **Parser** — no change (verified). Record "no parser change" in the commit.
 4. **Sema** — no change.
 5. **Codegen** — no change (codegen emits Rust, not Jet surface text).
-6. **fmt** — in the `Expr::StructLit` arm (src/fmt/exprs.rs) change
+6. **fmt** — in the `Expr::StructLit` arm (Source/Formatter/Expressions.rs) change
    `self.write(" {")` → `self.write("{")`. Also change `fmt_bind_pattern`'s
-   `BindPattern::Struct` arm (src/fmt/stmts.rs) `" { "` → `"{"` and `" }"` →
+   `BindPattern::Struct` arm (Source/Formatter/Statements.rs) `" { "` → `"{"` and `" }"` →
    `"}"`, and update `fmt_preserves_destructuring_targets`'s expected string
    (tests/fmt.rs). Both construction and destructuring go flush (S29-FLUSH = A).
 7. **Diagnostics** — no new diagnostic. Any diagnostic text that quotes a
@@ -88,8 +88,8 @@ S29 is amended. Canonical form:
 - Before: `p :: Point {x: 3.0, y: 4.0}` / `Point { x, y } :: make()`
 - After:  `p :: Point{x: 3.0, y: 4.0}` / `Point{x, y} :: make()`
 
-Flush applies to both construction (`Expr::StructLit` in src/fmt/exprs.rs) and
-destructuring (`BindPattern::Struct` in src/fmt/stmts.rs). This is option 1B —
+Flush applies to both construction (`Expr::StructLit` in Source/Formatter/Expressions.rs) and
+destructuring (`BindPattern::Struct` in Source/Formatter/Statements.rs). This is option 1B —
 build-vs-match use the same flush shape.
 
 ### Colon spacing unchanged — RESOLVED.
@@ -117,9 +117,9 @@ follow-up.
       formatter section note the flush rule for literals and destructuring.
 - [ ] New tests/fmt.rs round-trip: `Point{x: 1.0, y: 2.0}` is canonical output;
       `fmt(fmt(src)) == fmt(src)` (idempotent).
-- [ ] The `Expr::StructLit` arm (src/fmt/exprs.rs) emits `{` not ` {`; the
+- [ ] The `Expr::StructLit` arm (Source/Formatter/Expressions.rs) emits `{` not ` {`; the
       `import_ns` path (`ns.Point{…}`) also flush.
-- [ ] `BindPattern::Struct` arm (src/fmt/stmts.rs) flush (`"{"`/`"}"`);
+- [ ] `BindPattern::Struct` arm (Source/Formatter/Statements.rs) flush (`"{"`/`"}"`);
       `fmt_preserves_destructuring_targets` expectation updated (tests/fmt.rs);
       destructure round-trip still idempotent.
 - [ ] Declaration/block `{` sites unchanged — spot-check `struct`, `enum`, `fn`,

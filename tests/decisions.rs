@@ -1,7 +1,7 @@
 //! Ratification enforcement (invariant I7 + docs/spec/syntax-decisions.md).
 //!
 //! Every `cargo test` run verifies that `docs/spec/syntax-decisions.md` and
-//! `src/syntax.rs` stay in sync — ratified decisions cannot drift back to
+//! `Source/Syntax.rs` stay in sync — ratified decisions cannot drift back to
 //! "provisional" in code, and open/deferred decisions cannot land in
 //! syntax.rs without owner sign-off.
 
@@ -12,7 +12,7 @@ use std::fs;
 fn ratified_decisions_enforced() {
     let docs =
         fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
-    let syntax = fs::read_to_string("src/syntax.rs").expect("src/syntax.rs");
+    let syntax = fs::read_to_string("Source/Syntax.rs").expect("Source/Syntax.rs");
     let diag = fs::read_to_string("docs/spec/diagnostics.md").expect("docs/spec/diagnostics.md");
 
     let ratified = extract_section_ids(&docs, "## Ratified", "## Provisional");
@@ -35,15 +35,15 @@ fn ratified_decisions_enforced() {
     for id in &syntax_ids {
         assert!(
             ratified.contains(id.as_str()),
-            "{id} is in src/syntax.rs but not ratified in docs/spec/syntax-decisions.md Ratified section"
+            "{id} is in Source/Syntax.rs but not ratified in docs/spec/syntax-decisions.md Ratified section"
         );
         assert!(
             !open.contains(id.as_str()),
-            "{id} is open in docs/spec/syntax-decisions.md but already present in src/syntax.rs — ratify or remove"
+            "{id} is open in docs/spec/syntax-decisions.md but already present in Source/Syntax.rs — ratify or remove"
         );
         assert!(
             !deferred.contains(id.as_str()),
-            "{id} is deferred in docs/spec/syntax-decisions.md but present in src/syntax.rs"
+            "{id} is deferred in docs/spec/syntax-decisions.md but present in Source/Syntax.rs"
         );
     }
 
@@ -53,7 +53,7 @@ fn ratified_decisions_enforced() {
             assert_ne!(
                 status.as_str(),
                 "provisional",
-                "{id} is ratified in docs/spec/syntax-decisions.md but still provisional in src/syntax.rs"
+                "{id} is ratified in docs/spec/syntax-decisions.md but still provisional in Source/Syntax.rs"
             );
         }
     }
@@ -68,7 +68,7 @@ fn ratified_decisions_enforced() {
         if ratified.contains(*id) {
             assert!(
                 syntax_ids.contains(*id),
-                "ratified surface decision {id} must have an entry in src/syntax.rs"
+                "ratified surface decision {id} must have an entry in Source/Syntax.rs"
             );
         }
     }

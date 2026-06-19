@@ -2,7 +2,7 @@
 
 **Status:** plan, ready to implement. Hand this file to an implementing agent;
 follow the [protocol](README.md) and the invariants in `CLAUDE.md`. Every API and
-syntax form below was verified against `src/prelude/*.rs` and the
+syntax form below was verified against `Source/*.rs` and the
 `examples/features/*` sources on 2026-06-18 — see the verified appendix (§9).
 
 **One-line:** index a directory of markdown notes that carry YAML-ish frontmatter
@@ -502,7 +502,7 @@ delegations once shapes are fixed; keep phase 3 (the actor fan-out) and phase 7
 ## 8. Notes for the implementer
 
 - The §3 sketches use verified syntax (§9) but are illustrative, not final code —
-  spell-check each call against §9 / `src/prelude/*.rs` as you write it. Two
+  spell-check each call against §9 / `Source/*.rs` as you write it. Two
   build-time confirmations are flagged inline: the `Channel<Parsed>` type
   annotation (§3.2 fallback to `Task`/`join`) and the `std::process::id` boundary
   mapping (§3.8 fallback to another std fn or drop).
@@ -519,7 +519,7 @@ delegations once shapes are fixed; keep phase 3 (the actor fan-out) and phase 7
 
 ## 9. Verified API & syntax appendix (source of truth for the implementer)
 
-Confirmed 2026-06-18 against `src/prelude/*.rs` and `examples/features/*`. Where a
+Confirmed 2026-06-18 against `Source/*.rs` and `examples/features/*`. Where a
 sketch above and this appendix disagree, **this appendix wins**; where it's silent,
 the smallest `examples/features/*` using that API is the reference.
 

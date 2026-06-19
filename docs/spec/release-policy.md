@@ -43,7 +43,7 @@ A toolchain advertises the editions it supports in `jet --version`.
    item still compiles and emits **L2001** (a lint) suggesting `jet fix`.
 2. The item is **removed** in a later edition (the end of the window). Using it
    then is **E2002**, which names the replacement.
-3. The registry of deprecations lives in the compiler (`src/manifest.rs`,
+3. The registry of deprecations lives in the compiler (`Source/Manifest.rs`,
    `DEPRECATIONS`). It is empty pre-1.0 by design — nothing post-1.0 has been
    deprecated yet — so E2002/L2001 are registered and snapshotted but not yet
    user-triggerable. The first real deprecation makes them reachable with no
@@ -87,7 +87,7 @@ registry protocol: v1
 
 `jet` returns a stable, documented exit code so shells and CI gates can branch
 on the outcome without parsing text. The numbers never change meaning. The
-single source of truth is `src/exit_codes.rs`.
+single source of truth is `Source/ExitCodes.rs`.
 
 | Code | Name           | Meaning                                                |
 |------|----------------|--------------------------------------------------------|
@@ -102,11 +102,11 @@ bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.
 
 ## Where this is enforced
 
-- `edition:` field — parsed in `src/jetpack/packmanifest.rs`, surfaced on
-  `manifest::PackageMeta`, recorded in `src/syntax.rs` (`MANIFEST_FIELD_EDITION`,
+- `edition:` field — parsed in `Source/Jetpack/PackageManifest.rs`, surfaced on
+  `manifest::PackageMeta`, recorded in `Source/Syntax.rs` (`MANIFEST_FIELD_EDITION`,
   D-REL3).
 - Supported editions — `manifest::SUPPORTED_EDITIONS`; the check is
-  `manifest::check_edition_support` (E2001), called from `src/loader.rs`.
+  `manifest::check_edition_support` (E2001), called from `Source/Loader.rs`.
 - Banner — `manifest::version_banner`, printed by `jet --version`.
 - Diagnostics — E2001/E2002/L2001 in docs/spec/diagnostics.md, snapshotted in
   `tests/release/`.

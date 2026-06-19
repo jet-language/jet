@@ -126,7 +126,7 @@ fn store_generations_empty() {
     let dir = std::env::temp_dir().join("jet_pure_test_gen_empty");
     with_store(&dir, || {
         // Just check it doesn't panic on a fresh store.
-        let _ = jet::store::list_generations();
+        let _ = jet::Store::list_generations();
     });
 }
 
@@ -135,9 +135,9 @@ fn store_generations_empty() {
 fn store_record_generation() {
     let dir = std::env::temp_dir().join("jet_pure_test_gen_record");
     with_store(&dir, || {
-        let gen = jet::store::record_generation();
+        let gen = jet::Store::record_generation();
         assert!(gen >= 1, "generation should be at least 1");
-        let gens = jet::store::list_generations();
+        let gens = jet::Store::list_generations();
         assert!(!gens.is_empty(), "should have at least one generation recorded");
     });
 }
@@ -147,7 +147,7 @@ fn store_record_generation() {
 fn store_rollback_invalid_gen() {
     let dir = std::env::temp_dir().join("jet_pure_test_gen_rollback_inv");
     with_store(&dir, || {
-        let result = jet::store::rollback_to(9999);
+        let result = jet::Store::rollback_to(9999);
         assert!(result.is_err(), "rollback to non-existent gen should fail");
     });
 }

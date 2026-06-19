@@ -1,9 +1,9 @@
 #[test]
 fn enum_is_keyword() {
-    let (toks, diags) = jet::lexer::lex("enum x { A; }");
+    let (toks, diags) = jet::Lexer::lex("enum x { A; }");
     assert!(diags.is_empty(), "{diags:?}");
     assert!(
-        matches!(toks[0].kind, jet::lexer::TokKind::KwEnum),
+        matches!(toks[0].kind, jet::Lexer::TokKind::KwEnum),
         "{:?}",
         toks[0].kind
     );
@@ -15,9 +15,9 @@ fn enum_is_keyword() {
 /// the negative case (a genuine statement on the next line gets a terminator).
 #[test]
 fn s6r_terminator_insertion_and_suppression() {
-    use jet::lexer::TokKind;
+    use jet::Lexer::TokKind;
     let count_semis = |src: &str| -> usize {
-        let (toks, diags) = jet::lexer::lex(src);
+        let (toks, diags) = jet::Lexer::lex(src);
         assert!(diags.is_empty(), "lex diags for {src:?}: {diags:?}");
         toks.iter()
             .filter(|t| matches!(t.kind, TokKind::Semi))
@@ -45,14 +45,14 @@ fn s6r_terminator_insertion_and_suppression() {
 
 #[test]
 fn dot_zero_in_statement_lexes_as_dot_then_int() {
-    let (toks, diags) = jet::lexer::lex("fn main() { val x = p.0; }");
+    let (toks, diags) = jet::Lexer::lex("fn main() { val x = p.0; }");
     assert!(diags.is_empty(), "{diags:?}");
     let dot = toks
         .iter()
-        .position(|t| matches!(t.kind, jet::lexer::TokKind::Dot))
+        .position(|t| matches!(t.kind, jet::Lexer::TokKind::Dot))
         .expect("dot");
     assert!(
-        matches!(toks[dot + 1].kind, jet::lexer::TokKind::Int(0)),
+        matches!(toks[dot + 1].kind, jet::Lexer::TokKind::Int(0)),
         "{:?}",
         toks[dot + 1].kind
     );

@@ -38,7 +38,7 @@ fn fuzz_seed() -> u64 {
 
 fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
     let ex_dir = root.join("examples/features");
-    let ext = jet::syntax::FILE_EXT;
+    let ext = jet::Syntax::FILE_EXT;
     let mut seeds = Vec::new();
     for e in fs::read_dir(&ex_dir).unwrap().flatten() {
         let path = e.path();
@@ -65,7 +65,7 @@ fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
     }
 }
 
-fn is_jet_diagnostic(d: &jet::diag::Diagnostic) -> bool {
+fn is_jet_diagnostic(d: &jet::Diagnostics::Diagnostic) -> bool {
     let c = d.code;
     c.starts_with('E') || c.starts_with('L') || c.starts_with('W')
 }

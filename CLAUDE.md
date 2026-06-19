@@ -24,7 +24,7 @@ the same Rust, C toolchain, Node, Jet wrapper, and repo utilities:
 nix develop -c cargo build
 nix develop -c cargo test
 nix develop -c jet run examples/features/01_hello.jet
-nix develop -c rg "pattern" docs src tests
+nix develop -c rg "pattern" docs Source tests
 ```
 
 Do not rely on host-installed `cargo`, `rustc`, `jet`, `node`, or search
@@ -54,18 +54,18 @@ Commit that as "M0 verified" before anything else.
   `unsafe` only inside those gate regions. No `unsafe` in generated code without
   a corresponding `@unsafe` gate in the source.
 - **I2** rustc never speaks to users. rustc rejecting generated code is an
-  internal compiler error (exit 101, banner in src/main.rs) and a P0 bug.
+  internal compiler error (exit 101, banner in Source/main.rs) and a P0 bug.
 - **I3** Codegen is dumb. All checking lives in sema. Never "try rustc and
   see" as a checking strategy.
 - **I4** Every diagnostic has a code in docs/spec/diagnostics.md, what/why/fix, and a
   tests/ui snapshot. No snapshot → the diagnostic doesn't exist.
 - **I5** Examples are the executable spec. Every feature ships with an
   example + expected output that golden tests enforce.
-- **I6** Zero external crates in the compiler (`src/`), ever. Stdlib sub-libraries
+- **I6** Zero external crates in the compiler (`Source/`), ever. Stdlib sub-libraries
   and modules may use external crates to bootstrap until end of Epoch 3; after
   that, all external deps must be replaced with native Jet/Rust implementations.
   Any new stdlib external dep requires owner approval.
-- **I7** Every user-typeable keyword/sigil lives in src/syntax.rs with a
+- **I7** Every user-typeable keyword/sigil lives in Source/Syntax.rs with a
   decision ID.
 - **I8** Simplicity ratchet: prefer rejecting a program with a great
   error + workaround over adding a feature. New features need a roadmap
@@ -84,7 +84,7 @@ Need syntax that isn't Ratified or Provisional in docs/spec/syntax-decisions.md?
 its Open Decisions table — options, one-line tradeoffs, your
 recommendation — and **stop work on that feature** until the owner
 decides. Build something else meanwhile. When the owner ratifies: update
-src/syntax.rs / parser, re-bless snapshots, log it in the decision table.
+Source/Syntax.rs / parser, re-bless snapshots, log it in the decision table.
 
 ## Sub-agent delegation
 

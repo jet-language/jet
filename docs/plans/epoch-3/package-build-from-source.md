@@ -39,4 +39,4 @@ wave-1 rings.
 
 `jet bind` real backend (E2-M14) for `jet.db`/sqlite. The compile-step design
 itself has no language prerequisite — it builds on the existing
-`src/jetpack/provider.rs` + hangar store.
+`Source/Jetpack/Provider.rs` + hangar store.

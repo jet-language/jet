@@ -1,7 +1,7 @@
 # C header auto-binding (`jet bind`)
 
 **Status:** ✅ shipped in **E2-M14** (S59) — `jet bind` is functional with a
-**native std-only backend** (`src/cbind.rs`). The remaining E3 work here is
+**native std-only backend** (`Source/CBind.rs`). The remaining E3 work here is
 optional: compile-time auto-invoke on cache miss (D-CBIND2's auto half) and
 widening the bound type subset beyond function prototypes + scalars/`char*`.
 
@@ -19,7 +19,7 @@ C header  →  jet bind  →  @bindgen module c.<lib>.__bindgen__ { … }
 
 **`jet bind`** subcommand generates the cache from a header (**D-CBIND2**);
 compile-time auto-invoke on cache miss is the remaining E3 half. Backend:
-**native std-only C-prototype parser** (`src/cbind.rs`) — owner 2026-06-18
+**native std-only C-prototype parser** (`Source/CBind.rs`) — owner 2026-06-18
 superseded the bindgen-crate route (**D-CBIND3**); no external crate, no libclang.
 
 ---
@@ -29,7 +29,7 @@ superseded the bindgen-crate route (**D-CBIND3**); no external crate, no libclan
 | ID | Decision |
 |---|---|
 | D-CBIND2 | Auto on compile + **`jet bind`** subcommand (`jet bind` ✅; auto-on-compile = E3) |
-| D-CBIND3 | ~~Bindgen helper (I6)~~ → **native std-only parser** `src/cbind.rs` (owner 2026-06-18) |
+| D-CBIND3 | ~~Bindgen helper (I6)~~ → **native std-only parser** `Source/CBind.rs` (owner 2026-06-18) |
 | D-CBIND5 | **`String`** at C string boundary |
 | D-CBIND6 | **`#define` constants only**; skip function-like macros |
 | D-CBIND1 / 4 / 7 / 8 | Generated cache, `Ptr<T>`, `.jet/bindings/c/`, curated packages |

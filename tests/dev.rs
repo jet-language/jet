@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
 
-use jet::interp::{dev_iteration, RunOutcome};
+use jet::Interpreter::{dev_iteration, RunOutcome};
 
 /// Supported programs whose interpreted stdout must equal compiled stdout.
 /// These use only the deterministic, pure-enough subset the dev interpreter
@@ -201,7 +201,7 @@ fn front_end_errors_surface_in_dev_iteration() {
         RunOutcome::Problems(diags) => {
             assert!(!diags.is_empty(), "broken program must report problems");
             assert!(
-                diags.iter().all(|d| matches!(d.severity, jet::diag::Severity::Error)),
+                diags.iter().all(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
                 "dev should surface errors"
             );
         }

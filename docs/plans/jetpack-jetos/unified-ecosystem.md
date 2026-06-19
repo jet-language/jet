@@ -285,7 +285,7 @@ The v1 source-library package manager design was ratified as D-PM1…8. File nam
 ## 12. Decisions (U-series — RATIFIED 2026-06-16)
 
 U1–U10 are **ratified** and recorded in `docs/spec/syntax-decisions.md` (Ratified
-section + decision log) and `src/syntax.rs`; `tests/decisions.rs` enforces them.
+section + decision log) and `Source/Syntax.rs`; `tests/decisions.rs` enforces them.
 
 | ID | Decision | Status |
 |---|---|---|

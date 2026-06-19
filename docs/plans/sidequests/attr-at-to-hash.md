@@ -8,7 +8,7 @@ Migrate Jet's attribute/marker sigil from `@` to `#` — `@unsafe` → `#unsafe`
 `@audit("…")` → `#audit("…")`, `@Serialize` → `#Serialize`, `@[a, b]` →
 `#[a, b]`. Loop labels keep `@` (D-ATTR3 = B): two marker sigils coexist in
 source. This is a pervasive user-facing syntax change: it touches I7
-(`src/syntax.rs` decision IDs), the lexer/parser, fmt, the teaching-error that
+(`Source/Syntax.rs` decision IDs), the lexer/parser, fmt, the teaching-error that
 today steers users *away* from `#`, plus every example and ui snapshot. It
 reverses two prior decisions (S55, S82) that rejected the `#[…]` spelling.
 
@@ -30,7 +30,7 @@ whether it moves to `#` or stays `@`:
 |---|---|---|---|
 | Attribute prefix | S82 (`syntax::ATTR_PREFIX`) | parser, fmt | `@unsafe`, `@Serialize`, `@audit("…")` |
 | Attribute list delimiters | S82 (`syntax::ATTR_LIST_OPEN`/`CLOSE`) | parser | `@[a, b]` |
-| Loop label | D-LABEL1 | parser, fmt (`fmt_stmt` label arms in src/fmt/stmts.rs) | `@outer loop { … }`, `break @outer` |
+| Loop label | D-LABEL1 | parser, fmt (`fmt_stmt` label arms in Source/Formatter/Statements.rs) | `@outer loop { … }`, `break @outer` |
 | `os` host selector | U16 (`syntax::OS_HOST_SELECTOR`) | cmd_pkg / cmd_supply | `jetpack os switch ./config.jet@web-1` |
 | Provider/target ref sep | U6 (`syntax::REF_PROVIDER_AT`) | manifest/fetch | `github@owner/repo/rev`, `nixpkgs@…` |
 
@@ -46,10 +46,10 @@ prefix position before a loop/block keyword is always a label. fmt will emit
 ### `#` is already a live `Hash` token (the collision)
 
 `#` is not free. The lexer already emits `TokKind::Hash` for a bare `#`
-(src/lexer/scan.rs — the `'#'` one-char arm). It has two existing jobs, both
+(Source/Lexer/Scan.rs — the `'#'` one-char arm). It has two existing jobs, both
 **S76**:
 
-- `[T#N]` fixed-size list, parsed in src/parser/types.rs (the `TokKind::Hash`
+- `[T#N]` fixed-size list, parsed in Source/Parser/Types.rs (the `TokKind::Hash`
   branch inside a bracket type → `E0963` if no integer follows).
   `TYPE_FIXED_SIZE_SEP = "#"` (`syntax::TYPE_FIXED_SIZE_SEP`).
 - `name#ver` package version-pin (`pkg#1.2.0`). Same constant; resolved by
@@ -61,9 +61,9 @@ Feasibility hinges on **positional disambiguation**: a prefix `#Name` /
 *bracket-interior*, after a type) or `name#ver` (always *infix*, between two
 name parts, and only inside ref strings). The parser would consume `Hash`
 instead of `At` in prefix position exactly where it consumes `At` today — the
-`TokKind::At` arms in src/parser/items.rs (item dispatch, `at_unsafe_fn`,
-`at_c_module`, `const_def`'s attr loop), in src/parser/stmts.rs (statement
-`@`-marker / `@unsafe`-block arms), and in src/parser/modules.rs (the
+`TokKind::At` arms in Source/Parser/Items.rs (item dispatch, `at_unsafe_fn`,
+`at_c_module`, `const_def`'s attr loop), in Source/Parser/Statements.rs (statement
+`@`-marker / `@unsafe`-block arms), and in Source/Parser/Modules.rs (the
 `KwConst | At` const-item arm). **The lexer barely changes** — both `At` and
 `Hash` tokens already exist; the work is parser dispatch + fmt output + the
 teaching-error flip.
@@ -81,9 +81,9 @@ must instead reject `@unsafe` and teach `#unsafe`.
 
 ### Const attributes and aspirational forms
 
-- `@static` / `@inline` const attrs: parsed in src/parser/items.rs (`const_def`'s
+- `@static` / `@inline` const attrs: parsed in Source/Parser/Items.rs (`const_def`'s
   `while … TokKind::At` attr loop → `ConstAttr::ForceStatic`/`ForceInline`),
-  emitted in src/fmt/items.rs (`fmt_const`, the `ConstAttr` match — `@static `/
+  emitted in Source/Formatter/Items.rs (`fmt_const`, the `ConstAttr` match — `@static `/
   `@inline `). The unknown-attr error in that parser loop hard-codes the `@` in
   its message text.
 - `@bindgen` / `@extern module` (S59, `syntax::ATTR_BINDGEN`/`ATTR_EXTERN_MODULE`):
@@ -97,10 +97,10 @@ must instead reject `@unsafe` and teach `#unsafe`.
 
 ### Footprint (counted)
 
-- `src/syntax.rs`: 4 constants (`ATTR_PREFIX`, `ATTR_LIST_OPEN`,
+- `Source/Syntax.rs`: 4 constants (`ATTR_PREFIX`, `ATTR_LIST_OPEN`,
   `ATTR_LIST_CLOSE`, `FOREIGN_HASH_ATTR`) + decision-ID comments on S82 / S55 /
   S58 / S59 / D-LABEL1.
-- `src/parser/{items,stmts,modules,types}.rs`, `src/fmt/{items,stmts}.rs`:
+- `Source/Parser/{items,stmts,modules,types}.rs`, `Source/Formatter/{items,stmts}.rs`:
   dispatch + emit sites above (the parser/lexer/fmt single files were split into
   these dirs).
 - Docs: ~31 `@` mentions in spec.md; S82/S55/S58/S59/D-LABEL1 blocks in
@@ -171,9 +171,9 @@ Follow the workflow loop: failing test first → spec → parser → sema → co
    carve-out *if* a `#!` shebang is planned (see open questions) — skip a `#!`
    on source line 1 before tokenizing. Otherwise lexer is untouched.
 5. **Parser.** Replace `TokKind::At` with `TokKind::Hash` in every prefix
-   attribute dispatch (the `TokKind::At` arms in src/parser/items.rs,
-   src/parser/stmts.rs, src/parser/modules.rs, and `const_def`'s attr loop). Keep
-   `Hash`'s `[T#N]` branch (src/parser/types.rs) intact — it is bracket-interior,
+   attribute dispatch (the `TokKind::At` arms in Source/Parser/Items.rs,
+   Source/Parser/Statements.rs, Source/Parser/Modules.rs, and `const_def`'s attr loop). Keep
+   `Hash`'s `[T#N]` branch (Source/Parser/Types.rs) intact — it is bracket-interior,
    never prefix, so no ambiguity. Labels stay `@` (D-ATTR3 = B), so the existing
    following-keyword disambiguation (label-vs-attribute by keyword after `@`)
    **disappears** — `@` always means label now, `#` always means attribute.
@@ -182,10 +182,10 @@ Follow the workflow loop: failing test first → spec → parser → sema → co
    token feeding sema changes. Verify S58 gate checks (E3101/E3103/L3101) and
    S59 C-binding checks read the new token.
 7. **Codegen.** None (I3) — attributes already lower the same way.
-8. **fmt.** Swap attribute `@`-emitting writes to `#`: src/fmt/items.rs
-   (`fmt_func` `@unsafe`, `fmt_const` `@static`/`@inline`) and src/fmt/stmts.rs
+8. **fmt.** Swap attribute `@`-emitting writes to `#`: Source/Formatter/Items.rs
+   (`fmt_func` `@unsafe`, `fmt_const` `@static`/`@inline`) and Source/Formatter/Statements.rs
    (`@audit`, `@unsafe {` block). Label arms (`@outer`, `break @outer`,
-   `continue @outer`) in src/fmt/stmts.rs stay `@` — D-ATTR3 = B. `jet fmt`
+   `continue @outer`) in Source/Formatter/Statements.rs stay `@` — D-ATTR3 = B. `jet fmt`
    then canonicalizes any `@unsafe` / `@audit` / `@Marker` in user source to
    the `#` form.
 9. **Diagnostics.** Update every attribute-bearing row in diagnostics.md

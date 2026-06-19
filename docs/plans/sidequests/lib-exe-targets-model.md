@@ -12,15 +12,15 @@ targets let both co-exist explicitly.
 
 ## Current state
 
-`PackageKind` in `src/jetpack/packmanifest/mod.rs:66-69` has two variants:
+`PackageKind` in `Source/Jetpack/PackageManifest/mod.rs:66-69` has two variants:
 `Library` and `Executable`. `PackageEntry` (`mod.rs:75-78`) carries
 `kind: Option<PackageKind>`. Parsing lives in `parse_packages()` in
-`src/jetpack/packmanifest/parse_blocks.rs:116-171`; it accepts bare name (kind
+`Source/Jetpack/PackageManifest/ParseBlocks.rs:116-171`; it accepts bare name (kind
 inferred as `None`), `name: library`, `name: executable`, or `name: { kind:
 library/executable }`. The manifest constants `PACKAGE_KIND_LIBRARY = "library"`
-and `PACKAGE_KIND_EXECUTABLE = "executable"` live in `src/syntax.rs`.
+and `PACKAGE_KIND_EXECUTABLE = "executable"` live in `Source/Syntax.rs`.
 
-At build time, `src/loader.rs:58-86` re-classifies realized packages by whether
+At build time, `Source/Loader.rs:58-86` re-classifies realized packages by whether
 `StoreEntry.bin` is empty: empty → `PkgResolution.realized_libs: HashMap<String,
 PathBuf>` (loader.rs:32); non-empty → `PkgResolution.realized_exes: HashSet<String>`
 (loader.rs:35). Module resolution (`loader.rs:808-858`) enforces that `use <pkg>`
@@ -120,16 +120,16 @@ D-CAP5 in `memory-capability-model.md`.
 
 ### Implementation sketch
 
-1. Replace `PackageKind` with a `Target` enum in `src/jetpack/packmanifest/mod.rs`.
+1. Replace `PackageKind` with a `Target` enum in `Source/Jetpack/PackageManifest/mod.rs`.
 2. `PackageEntry` gains `targets: Vec<Target>` (replaces `kind: Option<PackageKind>`).
 3. `parse_packages()` in `parse_blocks.rs` grows target-block parsing; old `kind:`
    key is parsed and translated to a single-element `targets` list with a
    deprecation lint.
-4. `PkgResolution` (`src/loader.rs`) changes `realized_libs`/`realized_exes` to a
+4. `PkgResolution` (`Source/Loader.rs`) changes `realized_libs`/`realized_exes` to a
    map from package name to `Vec<ResolvedTarget>`, where each `ResolvedTarget`
    carries kind + artifact path. E0982/E0983 still enforce that only `library`
    targets are importable.
-5. `src/syntax.rs` gets `TARGET_LIBRARY`, `TARGET_BINARY`, `TARGET_TEST`, etc.
+5. `Source/Syntax.rs` gets `TARGET_LIBRARY`, `TARGET_BINARY`, `TARGET_TEST`, etc.
    with decision IDs (I7).
 
 ## Decisions for the owner
@@ -242,12 +242,12 @@ source tree. Both may coexist.
 - [ ] Failing example: a pack.jet with `targets: [library, binary]` builds both
       artifacts; `jet test` runs `@test fn`s without a separate target declaration.
 - [ ] D-TGT1 through D-TGT5 resolved by owner.
-- [ ] `src/syntax.rs` updated with target keyword constants + decision IDs (I7).
+- [ ] `Source/Syntax.rs` updated with target keyword constants + decision IDs (I7).
 - [ ] `PackageKind` replaced (or extended) with `Target` enum in
-      `src/jetpack/packmanifest/mod.rs`.
-- [ ] `parse_packages()` in `src/jetpack/packmanifest/parse_blocks.rs` handles
+      `Source/Jetpack/PackageManifest/mod.rs`.
+- [ ] `parse_packages()` in `Source/Jetpack/PackageManifest/ParseBlocks.rs` handles
       `targets:` block; old `kind:` key emits deprecation lint.
-- [ ] `PkgResolution` in `src/loader.rs` updated; E0982/E0983 still enforce
+- [ ] `PkgResolution` in `Source/Loader.rs` updated; E0982/E0983 still enforce
       library-only imports.
 - [ ] `docs/spec/syntax-decisions.md` row added for each new target keyword.
 - [ ] `docs/spec/spec.md` section updated for package manifest shape.

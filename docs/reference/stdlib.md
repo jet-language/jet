@@ -470,7 +470,7 @@ Core std stays the eight modules above. The ring ships as versioned `jet.*` pack
 ## Writing std in Jet (future)
 
 Today, std lives in the compiler as typed signatures plus Rust prelude templates
-(`src/prelude/std.rs`). The **API** is Jet; the **implementation** is Rust until
+(`Source/Prelude/Std.rs`). The **API** is Jet; the **implementation** is Rust until
 packages land.
 
 To ship a Jet-source standard library, these prerequisites are still open:

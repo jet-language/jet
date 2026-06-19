@@ -98,7 +98,7 @@ ref ─▶ classify source ─▶ pick provider ─▶ provider.realize(ref) ─
 ```
 
 - **Jetpack's core owns resolution; a provider is a pluggable backend** behind
-  one `Provider` trait (`src/jetpack/provider.rs`).
+  one `Provider` trait (`Source/Jetpack/Provider.rs`).
 - **`core` provider (first-party).** Realizes Jet-native packages with no Nix —
   the system we grow our own ecosystem on, designed to overtake nixpkgs as it
   grows. A target carrying a `pkg.jet` realizes through `core`.

@@ -14,7 +14,7 @@ word boundaries / without token awareness.
 This plan triages where that can happen across every highlighter Jet ships,
 fixes the reachable gap, and closes the underlying cause: the keyword lists in
 the LSP and the TextMate grammars are **hand-maintained copies** that drift from
-the single source of truth (`src/syntax.rs`, invariant **I7**). The drift is the
+the single source of truth (`Source/Syntax.rs`, invariant **I7**). The drift is the
 real defect; the substring symptom is one of its surface forms.
 
 This is a **SMALL, well-scoped fix**, not the "substantial LSP improvements"
@@ -25,32 +25,32 @@ plan.
 
 Four code paths can color a `print` token. Three are already boundary-safe; one
 table is stale; and all four duplicate keyword knowledge that belongs only in
-`src/syntax.rs`.
+`Source/Syntax.rs`.
 
 ### 1. LSP semantic tokens (server) — CORRECT, rule it out
 
-`src/lsp/features.rs::semantic_token_type_for` (lines 263–345) and
+`Source/LSP/Features.rs::semantic_token_type_for` (lines 263–345) and
 `encode_semantic_tokens` (348–392) classify by **`TokKind`**, driven by the real
 lexer. The lexer yields a single `TokKind::Ident("print")` token, classified
 `st::VARIABLE` (features.rs:303–311). It never emits a `KwIn` span *inside*
-`print`. The delta-encoding (`byte_offset_to_lsp`, `src/lsp/position.rs:24`) is
+`print`. The delta-encoding (`byte_offset_to_lsp`, `Source/LSP/Position.rs:24`) is
 UTF-16-correct. **This path cannot produce the symptom** — do not touch it and do
 not re-litigate the encoding.
 
 ### 2. `JET_KEYWORDS` / `is_keyword` (rename + completion) — STALE, but whole-word
 
-`src/lsp/completion.rs:81` (`JET_KEYWORDS`) and `:89` (`JET_TYPES`) are consumed
+`Source/LSP/Completion.rs:81` (`JET_KEYWORDS`) and `:89` (`JET_TYPES`) are consumed
 by:
 
-- `src/lsp/features.rs:184` `is_keyword` → `JET_KEYWORDS.contains(&name)` (slice
+- `Source/LSP/Features.rs:184` `is_keyword` → `JET_KEYWORDS.contains(&name)` (slice
   `.contains`, **whole-word**, no substring risk), used by rename validation
   (features.rs:211, 221).
-- `src/lsp/completion.rs:395, 409` completion list assembly.
+- `Source/LSP/Completion.rs:395, 409` completion list assembly.
 
 No substring matching here, so this is **not** the highlight bug. But the table
-is **demonstrably drifted** from `src/syntax.rs`:
+is **demonstrably drifted** from `Source/Syntax.rs`:
 
-| `JET_KEYWORDS` lists | Reality in `src/syntax.rs` |
+| `JET_KEYWORDS` lists | Reality in `Source/Syntax.rs` |
 |---|---|
 | `switch` | `KW_SWITCH = "when"` (syntax.rs:181) — `switch` is not a keyword |
 | `val`, `var` | retired to `FOREIGN_VAL`/`FOREIGN_VAR` teaching-errors (syntax.rs:37–38) — not keywords |
@@ -92,7 +92,7 @@ a second drifting copy of the keyword set.
 (`editors/tree-sitter/grammar.js`, `editors/zed/grammar-repo/grammar.js`) list
 `"in"` as a real token (grammar.js:256) parsed by the tree-sitter lexer, which is
 token-boundary-aware by construction. No substring risk. Both grammar headers
-even say they are *"Generated from src/syntax.rs keyword/sigil constants"* —
+even say they are *"Generated from Source/Syntax.rs keyword/sigil constants"* —
 i.e. the intended source-of-truth flow already exists in spirit here.
 
 ### Root cause
@@ -103,9 +103,9 @@ shipped grammar is boundary-safe. The report reflects either a stale editor
 install or an earlier grammar state.
 
 The *underlying, still-live* defect is **source-of-truth drift (I7 violation in
-spirit)**: keyword sets are hand-copied into `src/lsp/completion.rs`
+spirit)**: keyword sets are hand-copied into `Source/LSP/Completion.rs`
 (`JET_KEYWORDS`/`JET_TYPES`) and into both `.tmLanguage`/`.tmGrammar` files, and
-they have drifted from `src/syntax.rs` (`switch` vs `when`, retired `val`/`var`,
+they have drifted from `Source/Syntax.rs` (`switch` vs `when`, retired `val`/`var`,
 `import` vs `use`, `value` as a keyword). That drift is what makes
 keyword-highlighting and rename-validation wrong, and the regex-with-`\b` form in
 the TextMate grammars is the latent mechanism by which the exact reported
@@ -114,11 +114,11 @@ substring symptom recurs.
 ## Proposed fix (small, across the pipeline)
 
 Two independent, low-risk changes. Neither needs an owner syntax decision (no new
-keyword/sigil; this is making existing tables agree with `src/syntax.rs`).
+keyword/sigil; this is making existing tables agree with `Source/Syntax.rs`).
 
-### Fix A — make the LSP keyword set track `src/syntax.rs` (correctness)
+### Fix A — make the LSP keyword set track `Source/Syntax.rs` (correctness)
 
-In `src/lsp/completion.rs`, replace the hand-typed `JET_KEYWORDS`/`JET_TYPES`
+In `Source/LSP/Completion.rs`, replace the hand-typed `JET_KEYWORDS`/`JET_TYPES`
 literals with values sourced from the `syntax::KW_*` / `TYPE_*` constants, so the
 list cannot drift again. Minimal mechanical form:
 
@@ -144,7 +144,7 @@ correct and stays.
 In `editors/vscode/syntaxes/jet.tmLanguage.json` (the active grammar) and the
 `editors/jet.tmGrammar` twin:
 
-- Update the keyword alternations to match `src/syntax.rs`: `switch` → `when`;
+- Update the keyword alternations to match `Source/Syntax.rs`: `switch` → `when`;
   remove retired `val`/`var`; ensure `use` is present; move `value` out of the
   keyword group (it is a literal). Keep `ref` only if `KW_STORED` is still `ref`.
 - Confirm every keyword alternation keeps its `\b…\b` (or `(?<![A-Za-z0-9_])` /
@@ -155,7 +155,7 @@ These two files are duplicate sources of truth for the same grammar; per the
 "single source of truth" bug, the twin (`editors/jet.tmGrammar`) should either be
 generated from / kept identical to the registered one, or deleted if unused.
 Decide and note which in the PR. (The tree-sitter grammars already declare they
-are generated from `src/syntax.rs`; the TextMate pair should follow the same
+are generated from `Source/Syntax.rs`; the TextMate pair should follow the same
 discipline.)
 
 ### Out of scope

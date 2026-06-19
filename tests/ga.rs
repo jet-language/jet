@@ -37,7 +37,7 @@ fn root() -> PathBuf {
 fn ga_every_diagnostic_has_explain() {
     let md =
         fs::read_to_string(root().join("docs/spec/diagnostics.md")).expect("diagnostics.md");
-    let index = jet::explain::index();
+    let index = jet::Explain::index();
 
     let mut missing = Vec::new();
     for line in md.lines() {

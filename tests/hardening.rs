@@ -396,7 +396,7 @@ fn temp_project(name: &str) -> PathBuf {
     dir
 }
 
-fn compile_bundle(entry: &PathBuf) -> Result<String, Vec<jet::diag::Diagnostic>> {
+fn compile_bundle(entry: &PathBuf) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
     let src = fs::read_to_string(entry).unwrap();
     jet::compile_with_path(&src, entry.to_str().unwrap()).map(|o| o.rust)
 }

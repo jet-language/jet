@@ -15,8 +15,8 @@
 //! empty pre-1.0 — see docs/spec/diagnostics.md). The deprecation fixture is
 //! rendered from a synthetic registry entry so the wording is still pinned.
 
-use jet::diag::Diagnostic;
-use jet::manifest::{self, Deprecation};
+use jet::Diagnostics::Diagnostic;
+use jet::Manifest::{self, Deprecation};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -52,7 +52,7 @@ fn version_banner() {
     assert!(out.status.success(), "jet --version exited non-zero");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     // The library banner and the CLI must agree.
-    assert_eq!(stdout, manifest::version_banner());
+    assert_eq!(stdout, Manifest::version_banner());
     check_fixture("version_banner.txt", &stdout);
 }
 
@@ -67,8 +67,8 @@ fn edition_too_new() {
 }
 "#;
     let path = std::path::Path::new("pkg.jet");
-    let mf = manifest::parse(path, raw).expect("manifest should parse");
-    let err = manifest::check_edition_support(&mf, "pkg.jet")
+    let mf = Manifest::parse(path, raw).expect("manifest should parse");
+    let err = Manifest::check_edition_support(&mf, "pkg.jet")
         .expect_err("a future edition must be rejected");
     assert_eq!(err.code, "E2001");
     let rendered = jet::render_diagnostics("pkg.jet", raw, std::slice::from_ref(&err));
@@ -79,19 +79,19 @@ fn edition_too_new() {
 fn supported_edition_is_accepted() {
     let raw = format!(
         "payload: {{ name: \"x\", version: \"0.1.0\", edition: \"{}\" }}\n",
-        manifest::latest_edition()
+        Manifest::latest_edition()
     );
-    let mf = manifest::parse(std::path::Path::new("pkg.jet"), &raw).unwrap();
-    assert!(manifest::check_edition_support(&mf, "pkg.jet").is_ok());
+    let mf = Manifest::parse(std::path::Path::new("pkg.jet"), &raw).unwrap();
+    assert!(Manifest::check_edition_support(&mf, "pkg.jet").is_ok());
 }
 
 #[test]
 fn no_edition_field_is_accepted() {
     // A manifest with no edition tracks the toolchain's newest stable edition.
     let raw = "payload: { name: \"x\", version: \"0.1.0\" }\n";
-    let mf = manifest::parse(std::path::Path::new("pkg.jet"), raw).unwrap();
+    let mf = Manifest::parse(std::path::Path::new("pkg.jet"), raw).unwrap();
     assert_eq!(mf.package.edition, None);
-    assert!(manifest::check_edition_support(&mf, "pkg.jet").is_ok());
+    assert!(Manifest::check_edition_support(&mf, "pkg.jet").is_ok());
 }
 
 #[test]
@@ -104,8 +104,8 @@ fn deprecation_e2002_and_l2001() {
         replacement: "new_keyword",
         removed_in_edition: "2027",
     };
-    let lint = manifest::l2001(&synth, None);
-    let err = manifest::e2002(&synth, None);
+    let lint = Manifest::l2001(&synth, None);
+    let err = Manifest::e2002(&synth, None);
     assert_eq!(lint.code, "L2001");
     assert_eq!(err.code, "E2002");
 
@@ -125,7 +125,7 @@ fn render_standalone(d: &Diagnostic) -> String {
 fn registry_is_honestly_empty_pre_1_0() {
     // Guards the doc claim: the deprecation registry has no entries yet.
     assert!(
-        manifest::DEPRECATIONS.is_empty(),
+        Manifest::DEPRECATIONS.is_empty(),
         "DEPRECATIONS is no longer empty — make E2002/L2001 reachable and update docs/spec/diagnostics.md to drop the not-yet-triggerable note"
     );
 }

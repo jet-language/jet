@@ -36,7 +36,7 @@ fn write(dir: &Path, rel: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
-fn first_diag_code(diags: &[jet::diag::Diagnostic]) -> &str {
+fn first_diag_code(diags: &[jet::Diagnostics::Diagnostic]) -> &str {
     diags.first().map(|d| d.code).unwrap_or("")
 }
 
@@ -105,7 +105,7 @@ deps: {
 }
 "#;
     let path = PathBuf::from("pkg.jet");
-    let mf = jet::manifest::parse(&path, raw).expect("valid manifest should parse");
+    let mf = jet::Manifest::parse(&path, raw).expect("valid manifest should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "1.2.3");
     assert_eq!(mf.package.jet_constraint.as_deref(), Some(">=0.1.0"));
@@ -118,9 +118,9 @@ deps: {
 fn manifest_parse_dep_path() {
     let raw = manifest_with_deps("root", "0.1.0", "    helpers: path@../helpers,");
     let mf =
-        jet::manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("path dep should parse");
+        jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("path dep should parse");
     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
-    assert!(matches!(dep, jet::manifest::DepSpec::Path { path } if path == "../helpers"));
+    assert!(matches!(dep, jet::Manifest::DepSpec::Path { path } if path == "../helpers"));
 }
 
 #[test]
@@ -131,13 +131,13 @@ fn manifest_parse_dep_git_tag() {
         "    parsekit: { git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" },",
     );
     let mf =
-        jet::manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("git tag dep should parse");
+        jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("git tag dep should parse");
     let dep = mf.dependencies.get("parsekit").expect("missing parsekit");
     assert!(matches!(
         dep,
-        jet::manifest::DepSpec::Git {
+        jet::Manifest::DepSpec::Git {
             url,
-            selector: jet::manifest::GitSelector::Tag(t)
+            selector: jet::Manifest::GitSelector::Tag(t)
         } if url.contains("parsekit") && t == "v0.4.1"
     ));
 }
@@ -146,7 +146,7 @@ fn manifest_parse_dep_git_tag() {
 fn manifest_parse_e1206_missing_required_field() {
     // `package` with no `version` is a shape error (E1206).
     let raw = "payload: {\n    name: \"myapp\",\n}\n";
-    let err = jet::manifest::parse(&PathBuf::from("pkg.jet"), raw)
+    let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw)
         .expect_err("missing version should fail");
     assert_eq!(err.code, "E1206");
 }
@@ -155,7 +155,7 @@ fn manifest_parse_e1206_missing_required_field() {
 fn manifest_parse_e1209_reserved_nonempty() {
     let raw = min_manifest("myapp", "0.1.0")
         + "\ndev_deps: {\n    testlib: path@../testlib,\n}\n";
-    let err = jet::manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+    let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect_err("non-empty dev_deps should fail E1209");
     assert_eq!(err.code, "E1209");
 }
@@ -163,15 +163,15 @@ fn manifest_parse_e1209_reserved_nonempty() {
 #[test]
 fn manifest_toolchain_ok() {
     let raw = min_manifest("myapp", "0.1.0");
-    let mf = jet::manifest::parse(&PathBuf::from("pkg.jet"), &raw).unwrap();
-    assert!(jet::manifest::check_toolchain(&mf, "pkg.jet").is_ok());
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).unwrap();
+    assert!(jet::Manifest::check_toolchain(&mf, "pkg.jet").is_ok());
 }
 
 #[test]
 fn manifest_toolchain_e1208_future_version() {
     let raw = "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n    jet: \">=99.0.0\",\n}\n";
-    let mf = jet::manifest::parse(&PathBuf::from("pkg.jet"), raw).unwrap();
-    let err = jet::manifest::check_toolchain(&mf, "pkg.jet").expect_err("E1208");
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw).unwrap();
+    let err = jet::Manifest::check_toolchain(&mf, "pkg.jet").expect_err("E1208");
     assert_eq!(err.code, "E1208");
 }
 
@@ -181,8 +181,8 @@ fn manifest_toolchain_e1208_future_version() {
 
 #[test]
 fn manifest_template_plain_parses() {
-    let raw = jet::manifest::new_template("myapp", false);
-    let mf = jet::manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+    let raw = jet::Manifest::new_template("myapp", false);
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect("plain template should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "0.1.0");
@@ -194,14 +194,14 @@ fn manifest_template_plain_parses() {
 
 #[test]
 fn manifest_template_annotated_has_dep_comments() {
-    let raw = jet::manifest::new_template("myapp", true);
+    let raw = jet::Manifest::new_template("myapp", true);
     assert!(
         raw.contains("// Jet package dependencies:"),
         "annotated template should have dep comment block: {}",
         raw
     );
     // Must still parse cleanly.
-    jet::manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+    jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect("annotated template should parse");
 }
 
@@ -212,35 +212,35 @@ fn manifest_template_annotated_has_dep_comments() {
 #[test]
 fn manifest_add_dep_inserts_in_existing_table() {
     let raw = min_manifest("root", "0.1.0") + "\ndeps: {\n}\n";
-    let updated = jet::manifest::add_dependency(
+    let updated = jet::Manifest::add_dependency(
         &raw,
         "helpers",
-        &jet::manifest::DepSpec::Path {
+        &jet::Manifest::DepSpec::Path {
             path: "../helpers".to_string(),
         },
     );
-    let mf = jet::manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
     assert!(matches!(
         mf.dependencies.get("helpers"),
-        Some(jet::manifest::DepSpec::Path { path }) if path == "../helpers"
+        Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
     ));
 }
 
 #[test]
 fn manifest_add_dep_creates_table_when_absent() {
     let raw = min_manifest("root", "0.1.0");
-    let updated = jet::manifest::add_dependency(
+    let updated = jet::Manifest::add_dependency(
         &raw,
         "helpers",
-        &jet::manifest::DepSpec::Path {
+        &jet::Manifest::DepSpec::Path {
             path: "../helpers".to_string(),
         },
     );
     assert!(updated.contains("deps:"), "should create deps: block");
-    let mf = jet::manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
     assert!(matches!(
         mf.dependencies.get("helpers"),
-        Some(jet::manifest::DepSpec::Path { path }) if path == "../helpers"
+        Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
     ));
 }
 
@@ -248,8 +248,8 @@ fn manifest_add_dep_creates_table_when_absent() {
 fn manifest_remove_dep_removes_correct_entry() {
     let raw = min_manifest("root", "0.1.0")
         + "\ndeps: {\n    helpers: path@../helpers,\n    other: path@../other,\n}\n";
-    let updated = jet::manifest::remove_dependency(&raw, "helpers");
-    let mf = jet::manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
+    let updated = jet::Manifest::remove_dependency(&raw, "helpers");
+    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
     assert!(
         mf.dependencies.get("helpers").is_none(),
         "helpers should be removed"
@@ -267,7 +267,7 @@ fn manifest_remove_dep_removes_correct_entry() {
 #[test]
 fn sha256_empty_vector() {
     // SHA-256 of the empty string — matches FIPS 180-4 test vector.
-    let hash = jet::sha256::sha256_hex(b"");
+    let hash = jet::SHA256::sha256_hex(b"");
     assert_eq!(
         hash,
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -278,7 +278,7 @@ fn sha256_empty_vector() {
 fn sha256_known_vector_matches_self() {
     // The internal sha256.rs unit test asserts a specific hash for "abc".
     // Cross-check here to catch any accidental changes to the implementation.
-    let hash = jet::sha256::sha256_hex(b"abc");
+    let hash = jet::SHA256::sha256_hex(b"abc");
     assert_eq!(hash.len(), 64, "sha256 hex must be exactly 64 chars");
     // NIST FIPS 180-4 first 16 hex chars of SHA-256("abc").
     assert!(
@@ -293,8 +293,8 @@ fn tree_hash_deterministic() {
     write(&tmp, "a.jet", "fn foo() {}");
     write(&tmp, "b.jet", "fn bar() {}");
 
-    let h1 = jet::sha256::tree_hash(&tmp);
-    let h2 = jet::sha256::tree_hash(&tmp);
+    let h1 = jet::SHA256::tree_hash(&tmp);
+    let h2 = jet::SHA256::tree_hash(&tmp);
     assert_eq!(h1, h2, "tree hash must be deterministic");
     assert!(
         h1.starts_with("sha256-"),
@@ -308,10 +308,10 @@ fn tree_hash_deterministic() {
 fn tree_hash_changes_on_content_change() {
     let tmp = tmp_dir("tree_hash_chg");
     write(&tmp, "a.jet", "fn foo() {}");
-    let h1 = jet::sha256::tree_hash(&tmp);
+    let h1 = jet::SHA256::tree_hash(&tmp);
 
     write(&tmp, "a.jet", "fn foo() { print(\"hello\"); }");
-    let h2 = jet::sha256::tree_hash(&tmp);
+    let h2 = jet::SHA256::tree_hash(&tmp);
     assert_ne!(h1, h2, "tree hash must change when file content changes");
 
     let _ = fs::remove_dir_all(&tmp);
@@ -323,16 +323,16 @@ fn tree_hash_changes_on_content_change() {
 
 #[test]
 fn fingerprint_is_deterministic() {
-    let fp1 = jet::lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
-    let fp2 = jet::lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
+    let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
+    let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
     assert_eq!(fp1, fp2);
     assert!(fp1.starts_with("sha256-"));
 }
 
 #[test]
 fn fingerprint_changes_with_deps() {
-    let fp1 = jet::lock::compute_fingerprint("sha256-aabbcc", &[]);
-    let fp2 = jet::lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
+    let fp1 = jet::Lock::compute_fingerprint("sha256-aabbcc", &[]);
+    let fp2 = jet::Lock::compute_fingerprint("sha256-aabbcc", &["sha256-ddeeff"]);
     assert_ne!(
         fp1, fp2,
         "fingerprint must change when dep fingerprints differ"
@@ -345,7 +345,7 @@ fn fingerprint_changes_with_deps() {
 
 #[test]
 fn store_path_format_name_version_fp() {
-    let p = jet::store::store_path("mylib", "1.0.0", "sha256-deadbeef");
+    let p = jet::Store::store_path("mylib", "1.0.0", "sha256-deadbeef");
     let name = p.file_name().unwrap().to_str().unwrap();
     assert_eq!(
         name, "mylib-1.0.0-deadbeef",
@@ -359,8 +359,8 @@ fn store_path_strips_sha256_prefix() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
     with_store(&store, || {
-        let with_pfx = jet::store::store_path("mylib", "1.0.0", "sha256-deadbeef");
-        let without = jet::store::store_path("mylib", "1.0.0", "deadbeef");
+        let with_pfx = jet::Store::store_path("mylib", "1.0.0", "sha256-deadbeef");
+        let without = jet::Store::store_path("mylib", "1.0.0", "deadbeef");
         assert_eq!(with_pfx, without);
     });
 }
@@ -386,7 +386,7 @@ fn store_ensure_path_dep_creates_entry() {
     let fp = "sha256-0000000000000000000000000000000000000000000000000000000000000000";
 
     let entry = with_store(&store, || {
-        jet::store::ensure_path_dep("mylib", "0.1.0", fp, &src)
+        jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src)
             .expect("ensure_path_dep should succeed")
     });
 
@@ -412,8 +412,8 @@ fn store_ensure_is_idempotent() {
     let fp = "sha256-1111111111111111111111111111111111111111111111111111111111111111";
 
     let (p1, p2) = with_store(&store, || {
-        let a = jet::store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
-        let b = jet::store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        let a = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        let b = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
         (a, b)
     });
 
@@ -438,8 +438,8 @@ fn store_tamper_detected_e1204() {
     let fp = "sha256-2222222222222222222222222222222222222222222222222222222222222222";
 
     let (entry, genuine_hash) = with_store(&store, || {
-        let e = jet::store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
-        let h = jet::sha256::tree_hash(&e);
+        let e = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        let h = jet::SHA256::tree_hash(&e);
         (e, h)
     });
 
@@ -450,7 +450,7 @@ fn store_tamper_detected_e1204() {
     )
     .unwrap();
 
-    let result = jet::store::verify_entry("mylib", &entry, &genuine_hash);
+    let result = jet::Store::verify_entry("mylib", &entry, &genuine_hash);
     let diag = result.expect_err("verify_entry must return E1204 after tampering");
     assert_eq!(diag.code, "E1204");
 
@@ -478,9 +478,9 @@ fn hardlink_projects_share_store_inode() {
     let link2 = tmp.join("proj2/deps/mylib");
 
     let store_entry = with_store(&store, || {
-        let e = jet::store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
-        jet::store::link_into_project(&e, &link1).unwrap();
-        jet::store::link_into_project(&e, &link2).unwrap();
+        let e = jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap();
+        jet::Store::link_into_project(&e, &link1).unwrap();
+        jet::Store::link_into_project(&e, &link2).unwrap();
         e
     });
 
@@ -651,14 +651,14 @@ fn fetch_locked_rejects_missing_lock() {
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,");
     write(&tmp, "pkg.jet", &raw);
 
-    let mf = jet::manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
-    let opts = jet::fetch::FetchOptions {
+    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
         locked: true,
         update: false,
         update_dep: None,
     };
 
-    let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
+    let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
     let diags = result.expect_err("--locked with no lock file should fail");
     assert_eq!(first_diag_code(&diags), "E1202");
 
@@ -743,14 +743,14 @@ fn git_dep_local_bare_repo_fetches_ok() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    let mf = jet::manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
-    let opts = jet::fetch::FetchOptions {
+    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
         locked: false,
         update: false,
         update_dep: None,
     };
 
-    let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
+    let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
     assert!(
         result.is_ok(),
         "git dep fetch should succeed: {:?}",
@@ -842,15 +842,15 @@ fn git_dep_branch_update_rewrites_lock() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    let mf = jet::manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
 
     // Initial fetch (no lock yet) — writes the lock file.
-    let opts = jet::fetch::FetchOptions {
+    let opts = jet::Fetch::FetchOptions {
         locked: false,
         update: false,
         update_dep: None,
     };
-    let result = with_store(&store, || jet::fetch::fetch(&tmp, &mf, None, &opts));
+    let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
     assert!(
         result.is_ok(),
         "initial git branch fetch should succeed: {:?}",
@@ -889,14 +889,14 @@ fn git_dep_branch_update_rewrites_lock() {
 
     // Re-fetch with update = true — should re-resolve the branch and update the lock.
     let lock_str = fs::read_to_string(tmp.join(".jet/lock")).unwrap();
-    let existing_lock = jet::lock::parse(&lock_str).expect("initial lock must parse");
-    let update_opts = jet::fetch::FetchOptions {
+    let existing_lock = jet::Lock::parse(&lock_str).expect("initial lock must parse");
+    let update_opts = jet::Fetch::FetchOptions {
         locked: false,
         update: true,
         update_dep: None,
     };
     let result2 = with_store(&store, || {
-        jet::fetch::fetch(&tmp, &mf, Some(&existing_lock), &update_opts)
+        jet::Fetch::fetch(&tmp, &mf, Some(&existing_lock), &update_opts)
     });
     assert!(
         result2.is_ok(),
@@ -1053,7 +1053,7 @@ fn cli_end_to_end_new_then_add_path() {
 #[test]
 fn semver_break_e2601() {
     // A minor bump that removes a public API item must produce E2601.
-    use jet::publish::{ApiItem, BumpKind, diff_public_api, e2601};
+    use jet::Publish::{ApiItem, BumpKind, diff_public_api, e2601};
 
     let old_api = vec![ApiItem {
         kind: "fn".into(),
@@ -1077,7 +1077,7 @@ fn semver_break_e2601() {
 #[test]
 fn resolver_conflict_e2602() {
     // Two packages requiring incompatible versions of a shared dep → E2602.
-    use jet::publish::{VersionConstraint, VersionReq, check_conflicts};
+    use jet::Publish::{VersionConstraint, VersionReq, check_conflicts};
     use std::collections::BTreeMap;
 
     let constraints = vec![
@@ -1124,16 +1124,16 @@ fn vendored_offline_locked_build() {
     let pack_path = tmp.join("pkg.jet");
 
     // Fetch to create the lock.
-    let mf = jet::manifest::parse(&pack_path, &fs::read_to_string(&pack_path).unwrap()).unwrap();
-    let opts = jet::fetch::FetchOptions { locked: false, update: false, update_dep: None };
+    let mf = jet::Manifest::parse(&pack_path, &fs::read_to_string(&pack_path).unwrap()).unwrap();
+    let opts = jet::Fetch::FetchOptions { locked: false, update: false, update_dep: None };
     let result = with_store(&store, || {
-        jet::fetch::fetch(&tmp, &mf, None, &opts)
+        jet::Fetch::fetch(&tmp, &mf, None, &opts)
     });
     assert!(result.is_ok(), "initial fetch must succeed");
     let (lock, dep_dirs) = result.unwrap();
 
     // Vendor the dependency.
-    let vendor_result = jet::publish::vendor(&tmp, &lock, &dep_dirs);
+    let vendor_result = jet::Publish::vendor(&tmp, &lock, &dep_dirs);
     assert!(vendor_result.is_ok(), "vendor must succeed");
     let copied = vendor_result.unwrap();
     assert!(copied.contains(&"greeter".to_string()), "greeter must be vendored");
@@ -1152,8 +1152,8 @@ fn vendored_offline_locked_build() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
-fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::lock::LockFile {
-    use jet::lock::{LockFile, LockedPackage, LockSource};
+fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
+    use jet::Lock::{LockFile, LockedPackage, LockSource};
     LockFile {
         version: 1,
         packages: vec![LockedPackage {
@@ -1171,7 +1171,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::lock::LockFile {
 #[test]
 fn sbom_spdx_golden() {
     // SBOM emitted from a known lockfile has the expected SPDX structure.
-    use jet::publish::emit_spdx;
+    use jet::Publish::emit_spdx;
 
     let lock = make_test_lock(
         "logger",
@@ -1191,7 +1191,7 @@ fn sbom_spdx_golden() {
 
 #[test]
 fn sbom_cyclonedx_golden() {
-    use jet::publish::emit_cyclonedx;
+    use jet::Publish::emit_cyclonedx;
 
     let lock = make_test_lock(
         "logger",
@@ -1209,7 +1209,7 @@ fn sbom_cyclonedx_golden() {
 
 #[test]
 fn audit_e2603_on_vulnerable_dep() {
-    use jet::publish::{parse_advisory_db, audit_lockfile};
+    use jet::Publish::{parse_advisory_db, audit_lockfile};
 
     let lock = make_test_lock("crypto-lib", "0.9.0", "sha256-aabb");
     // Advisory: crypto-lib ^0 (pre-1.0) has a critical issue fixed in 0.9.5.
@@ -1226,7 +1226,7 @@ fn audit_e2603_on_vulnerable_dep() {
 
 #[test]
 fn integrity_e2604_on_tampered_store() {
-    use jet::publish::e2604;
+    use jet::Publish::e2604;
 
     let diag = e2604("mylib", "1.0.0", "sha256-expected", "sha256-actual");
     assert_eq!(diag.code, "E2604");
@@ -1238,7 +1238,7 @@ fn integrity_e2604_on_tampered_store() {
 
 #[test]
 fn private_registry_from_env() {
-    use jet::publish::parse_registries_from_env;
+    use jet::Publish::parse_registries_from_env;
     let mut env = std::collections::HashMap::new();
     env.insert("JET_REGISTRY_INTERNAL_URL".into(), "https://registry.acme.corp/jet".into());
     let regs = parse_registries_from_env(&env);
@@ -1250,7 +1250,7 @@ fn private_registry_from_env() {
 
 #[test]
 fn pre_publish_gate_blocks_on_build_failure() {
-    use jet::publish::{PrePublishGate, BumpKind};
+    use jet::Publish::{PrePublishGate, BumpKind};
     let gate = PrePublishGate {
         build_ok: false,
         tests_ok: true,
@@ -1264,7 +1264,7 @@ fn pre_publish_gate_blocks_on_build_failure() {
 
 #[test]
 fn pre_publish_gate_passes_with_no_breaks_and_minor_bump() {
-    use jet::publish::{PrePublishGate, BumpKind};
+    use jet::Publish::{PrePublishGate, BumpKind};
     let gate = PrePublishGate {
         build_ok: true,
         tests_ok: true,

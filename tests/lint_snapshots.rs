@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[test]
 fn lint_snapshots() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui_lint");
-    let ext = jet::syntax::FILE_EXT;
+    let ext = jet::Syntax::FILE_EXT;
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().path())

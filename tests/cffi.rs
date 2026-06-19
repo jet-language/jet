@@ -81,7 +81,7 @@ fn jet_bind_native_backend_end_to_end() {
         long long jetc_add_ints(long long a, long long b);
         const char *jetc_greeting(void);
     "#;
-    let result = jet::cbind::generate(header, "jetc").expect("native bind backend");
+    let result = jet::CBind::generate(header, "jetc").expect("native bind backend");
     assert!(result.skipped.is_empty(), "unexpected skips: {:?}", result.skipped);
     assert_eq!(result.bound.len(), 2);
     // The cache uses the real C symbol names verbatim (no aliasing).
@@ -301,7 +301,7 @@ fn cffi_header_use_form_lowers_to_lib() {
 
 #[test]
 fn parse_pkg_config_extracts_flags() {
-    let flags = jet::cffi::parse_pkg_config("-I/usr/include/foo -L/usr/lib -lfoo -lbar", "foo");
+    let flags = jet::CFFI::parse_pkg_config("-I/usr/include/foo -L/usr/lib -lfoo -lbar", "foo");
     assert_eq!(flags.include_dirs, vec!["/usr/include/foo"]);
     assert_eq!(flags.lib_dirs, vec!["/usr/lib"]);
     assert_eq!(flags.link_names, vec!["foo", "bar"]);
@@ -309,19 +309,19 @@ fn parse_pkg_config_extracts_flags() {
 
 #[test]
 fn parse_pkg_config_defaults_link_name() {
-    let flags = jet::cffi::parse_pkg_config("-I/usr/include/foo", "foo");
+    let flags = jet::CFFI::parse_pkg_config("-I/usr/include/foo", "foo");
     assert_eq!(flags.link_names, vec!["foo"]);
 }
 
 #[test]
 fn parse_c_dep_reads_dependencies_table() {
     let manifest = "[dependencies:c]\nraylib = \"nixpkgs:raylib#5.5.0\"\n";
-    assert_eq!(jet::cffi::parse_c_dep(manifest, "raylib"), Some(None));
-    assert_eq!(jet::cffi::parse_c_dep(manifest, "sqlite3"), None);
+    assert_eq!(jet::CFFI::parse_c_dep(manifest, "raylib"), Some(None));
+    assert_eq!(jet::CFFI::parse_c_dep(manifest, "sqlite3"), None);
 
     let with_path = "[dependencies:c]\nfoo = { path = \"/opt/foo\" }\n";
     assert_eq!(
-        jet::cffi::parse_c_dep(with_path, "foo"),
+        jet::CFFI::parse_c_dep(with_path, "foo"),
         Some(Some("/opt/foo".to_string()))
     );
 }
@@ -332,7 +332,7 @@ fn resolve_link_unknown_lib_is_e3201() {
     let root = std::env::temp_dir().join(format!("jet_cffi_e3201_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
-    let err = jet::cffi::resolve_link("nolib", &root);
+    let err = jet::CFFI::resolve_link("nolib", &root);
     assert!(err.is_err(), "unknown lib without pkg-config must fail");
     let d = err.unwrap_err();
     assert_eq!(d.code, "E3201");
@@ -354,9 +354,9 @@ fn e3202_pointer_boundary_snapshot() {
     // real source can reach it. Per I4 the diagnostic must still exist with a
     // pinned snapshot; this is it. When E2-M13 lands, a `tests/ui/` fixture that
     // actually triggers it should replace this rendered-form pin.
-    use jet::diag::Span;
+    use jet::Diagnostics::Span;
     let src = "fn f(p: Ptr<Int>) = \"f\";\n";
-    let d = jet::sema::e3202("Ptr<Int>", Span::new(8, 16));
+    let d = jet::Sema::e3202("Ptr<Int>", Span::new(8, 16));
     assert_eq!(d.code, "E3202");
     let rendered = jet::render_diagnostics("main.jet", src, std::slice::from_ref(&d));
     let expected = "\

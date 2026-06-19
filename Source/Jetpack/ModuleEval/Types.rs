@@ -1,0 +1,88 @@
+//! Captured plans (derive-only data) produced by module evaluation: the
+//! per-module `EvaluatedModule`, the jetos-tier `SystemPlan`/`ServicePlan`/
+//! `OptionPlan`/`ImagePlan`, and the runnable `EnvPlan`.
+
+use crate::AST::Namespace;
+
+use super::super::Merge::{self, EntryContribution};
+use super::super::RefSpec::SourceTable;
+
+/// One module's contributions, keyed by `(namespace, path)` so `merge_all`
+/// can combine same-keyed contributions from different modules.
+#[derive(Debug)]
+pub struct EvaluatedModule {
+    pub name: String,
+    pub entries: Vec<((Namespace, String), EntryContribution)>,
+    /// U11: `system.<name>:` contributions, captured for the jetos tier (gap #4
+    /// realizes them; gap #5 only field-checks + captures).
+    pub systems: Vec<SystemPlan>,
+    /// U14: `image.<name>:` contributions, captured for the jetos tier.
+    pub images: Vec<ImagePlan>,
+}
+
+/// U11: a field-checked `system.<name>: { … }` contribution, captured so the
+/// jetos tier (gap #4) can realize it. Pure data — no realize logic here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemPlan {
+    /// The contribution path — the `<name>` in `system.<name>`.
+    pub name: String,
+    /// U13: the typed target platform, e.g. `linux.x64`.
+    pub target: String,
+    /// U6: the packages to install, as `Pkg`s (source-qualified).
+    pub packages: Vec<Merge::Pkg>,
+    /// U12: the enabled/typed services, in source order.
+    pub services: Vec<ServicePlan>,
+    /// U13: the ordered option entries (`net.hostName: laptop`), in source order.
+    pub options: Vec<OptionPlan>,
+}
+
+/// U12: one captured `Service` record under a `System`'s `services:` map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServicePlan {
+    /// The service name (the map key), e.g. `openssh`.
+    pub name: String,
+    /// The required `enable` flag (U12).
+    pub enable: bool,
+    /// Any further open-record fields, rendered to display strings, in source
+    /// order. (e.g. `ports: [22]`.)
+    pub extra: Vec<(String, String)>,
+}
+
+/// U13: one captured `options:` entry — a dotted key path and its value, rendered
+/// to a display string.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionPlan {
+    pub key: String,
+    pub value: String,
+}
+
+/// U14: a field-checked `image.<name>: { … }` contribution, captured for the
+/// jetos tier. `target`/`packages`/`services`/`options` are inherited from the
+/// referenced `System` at realize time (gap #4), so they are not stored here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImagePlan {
+    /// The contribution path — the `<name>` in `image.<name>`.
+    pub name: String,
+    /// U14: the source system this image is built from (`from: system.<name>`).
+    pub from: String,
+    /// U14: the disk-image format (`iso` default / `qcow` / `raw`).
+    pub format: String,
+    /// U14: an explicit cross-compile target, if any (else inherited from system).
+    pub target: Option<String>,
+}
+
+/// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
+/// the named-source table, the package refs to realize (`<source>:<package>`),
+/// and the prompt label. Only the `env` namespace is consulted — `system`/`image`
+/// are the jetos tiers and have no meaning for `jetpack`.
+#[derive(Debug)]
+pub struct EnvPlan {
+    pub table: SourceTable,
+    pub package_refs: Vec<String>,
+    pub prompt: Option<String>,
+    /// U11: every captured `System` across all evaluated modules, in source order.
+    /// The jetos tier (gap #4) realizes these; the dev-shell path ignores them.
+    pub systems: Vec<SystemPlan>,
+    /// U14: every captured `Image`, validated so each `from` names a known system.
+    pub images: Vec<ImagePlan>,
+}

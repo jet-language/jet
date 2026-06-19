@@ -93,7 +93,7 @@ toolchain in `jet.toml` and read [versioning](docs/reference/versioning.md).
 | [examples/showcase/](examples/showcase/) | Real CLI tools (jetgrep, jsonfmt, wordfreq) |
 | [editors/](editors/) | VS Code / Zed extensions + tree-sitter grammar |
 | [tests/ui/](tests/ui/) | Snapshot-pinned diagnostics |
-| `src/` | Compiler: lexer → parser → sema → codegen |
+| `Source/` | Compiler: lexer → parser → sema → codegen |
 
 ## Nix / NixOS
 

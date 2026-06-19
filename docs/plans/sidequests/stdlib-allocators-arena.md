@@ -16,32 +16,32 @@ or *edit*, and frees everything at scope end via S63 RAII.
 
 ## Current state (verified)
 
-- **`core.mem` tier is live** (S58, E2-M13). Constants in `src/syntax.rs`:
+- **`core.mem` tier is live** (S58, E2-M13). Constants in `Source/Syntax.rs`:
   `CORE_MEM_MODULE = "core.mem"` (123-124), `TYPE_PTR = "Ptr"`,
   `MEM_FROM_ADDR`, `MEM_VOLATILE_READ`, `MEM_ADDRESS_OF` (126-138). No allocator
   constant exists yet.
 - **Existing mem operations** are special-cased in the `core.mem` match arm in
-  `src/sema.rs` (~6556-6592): `volatile_read` (gate E3101 if not `in_unsafe`),
+  `Source/Sema.rs` (~6556-6592): `volatile_read` (gate E3101 if not `in_unsafe`),
   `address_of` (inert, ungated). Discovery gate E3102 lives at
   `Checker::e3102` / the alias check ~6479-6519.
-- **Codegen dispatch** for `core.mem` is in `src/codegen/expr.rs` (~979-980):
+- **Codegen dispatch** for `core.mem` is in `Source/Codegen/Expression.rs` (~979-980):
   `address_of` → `(&(x) as *const _ as usize as i64)`, `volatile_read` →
-  `std::ptr::read_volatile(p)`. `Ptr<T>` lowers to `*mut T` (`src/codegen/cx.rs`
+  `std::ptr::read_volatile(p)`. `Ptr<T>` lowers to `*mut T` (`Source/Codegen/Context.rs`
   ~209). No allocator codegen.
 - **`set_allocator` is referenced but unimplemented.** It appears *only* in the
-  E3303 fix-text (`src/sema.rs` ~367: "configure an arena or fixed allocator
+  E3303 fix-text (`Source/Sema.rs` ~367: "configure an arena or fixed allocator
   with `mem.set_allocator(…)`"). There is no signature, no codegen, no example.
   E3303 (freestanding-needs-allocator, ~359-373) is the one diagnostic that
   already presumes this API.
 - **No `mem` module file or `Arena` type exists.** `find … -name '*alloc*'`
   hits only the C tree-sitter `alloc.h`. The Rust runtime prelude is
-  `src/prelude/core.rs` + `src/prelude/std.rs`; there is no allocator helper.
+  `Source/Prelude/Core.rs` + `Source/Prelude/Std.rs`; there is no allocator helper.
 - **Std signatures** are a flat `match (module, name)` in `std_fixed_sig`
-  (`src/sema.rs` ~10225+). Return/param types are `ast::Type` values; there is
+  (`Source/Sema.rs` ~10225+). Return/param types are `ast::Type` values; there is
   no `Arena`/handle variant — opaque std types would be `Type::Named("Arena")`
-  (the `Type` enum is `src/ast.rs:18`; `Shared(Box<Type>)` at 30 is the closest
+  (the `Type` enum is `Source/AST.rs:18`; `Shared(Box<Type>)` at 30 is the closest
   existing "handle" precedent).
-- **Known-module list** in `src/loader.rs` (~695, 715) already includes
+- **Known-module list** in `Source/Loader.rs` (~695, 715) already includes
   `core.mem`; no submodule needed (D-REF2 says flat).
 - **Ratified placement (D-REF2, 2026-06-17, recorded in
   `docs/spec/syntax-decisions.md`):** "ship arenas; live directly in
@@ -65,14 +65,14 @@ blocking one), then `Fixed`, `Bump`, `Pool` behind the same gate.
    which today says allocators are "deferred (unratified)") to record the
    ratified `Arena` and the wider-API allocators, the capability story, and the
    freestanding link to E3303.
-3. **`src/syntax.rs`** (I7). Add constants under the S58 block: `MEM_ARENA =
+3. **`Source/Syntax.rs`** (I7). Add constants under the S58 block: `MEM_ARENA =
    "Arena"`, `MEM_BUMP`, `MEM_POOL`, `MEM_FIXED`, and method names
    (`MEM_ALLOC_NEW`, `MEM_ALLOC_ALLOC`, `MEM_ALLOC_RESET`, `MEM_SET_ALLOCATOR`)
    — **only after the owner ratifies the names** (see Decisions). Each carries
    its decision ID in a doc comment.
 4. **Parser.** Likely **zero grammar change**: `mem.Arena.new(...)` reuses the
    same `alias.Type.method(...)` path the existing `mem.Ptr<T>.from_addr` tail
-   uses (`src/parser.rs` ~3716, ~4264) and ordinary method calls. Confirm
+   uses (`Source/Parser.rs` ~3716, ~4264) and ordinary method calls. Confirm
    `arena.alloc(...)` parses as a normal method call on a `Named("Arena")`
    value. If `Arena` needs a generic slot (`Arena.alloc<T>()`), that is the only
    parser-touch risk — prefer inferring `T` from the initializer to avoid it.
@@ -86,7 +86,7 @@ blocking one), then `Fixed`, `Bump`, `Pool` behind the same gate.
    core.mem` (E3102). Only raw `Ptr` ops keep E3101. (d) Wire E3303's promised
    `set_allocator` for freestanding.
 6. **Codegen (dumb, I3).** Map each handle to a vetted Rust impl in a new
-   `src/prelude/mem.rs` (emitted like `core.rs`/`std.rs`). The internal Rust may
+   `Source/Prelude/mem.rs` (emitted like `core.rs`/`std.rs`). The internal Rust may
    use `unsafe`/an external crate (I6 allows stdlib externals until end of
    Epoch 3; the I1 amendment D-LL1 allows generated `unsafe` in vetted std/mem
    internals). `mem.Arena.new()` → `JetArena::new()`; `arena.alloc(v)` →
@@ -94,7 +94,7 @@ blocking one), then `Fixed`, `Bump`, `Pool` behind the same gate.
    contract). No `unsafe` leaks into user-visible generated code outside the
    helper module.
 7. **fmt.** Allocator calls are ordinary method calls → covered by existing
-   formatting. Only if a new path/generic form is added does `src/fmt.rs`
+   formatting. Only if a new path/generic form is added does `Source/Formatter.rs`
    (~1560-1567, the `Ptr` tail) need a sibling arm.
 8. **Diagnostics.** Reuse E3102 (discovery gate) for naming an allocator without
    `use core.mem`; reuse E3303 for the freestanding case. Likely **one new**
@@ -143,6 +143,6 @@ Summary of what needs a ruling:
 - [ ] Scope-end free verified (RAII/Drop, S63) — no leak, value unusable after.
 - [ ] `jet fmt` round-trips allocator calls unchanged.
 - [ ] No `unsafe` in user-visible generated code; only inside the vetted
-      `src/prelude/mem.rs` helper (I1 amendment D-LL1).
-- [ ] All allocator type/method tokens live in `src/syntax.rs` with decision IDs
+      `Source/Prelude/mem.rs` helper (I1 amendment D-LL1).
+- [ ] All allocator type/method tokens live in `Source/Syntax.rs` with decision IDs
       (I7); every new diagnostic in `docs/spec/diagnostics.md` (I4).

@@ -1,10 +1,10 @@
 // tree-sitter grammar for Jet (M13 C11).
 //
-// Generated from src/syntax.rs keyword/sigil constants.
+// Generated from Source/Syntax.rs keyword/sigil constants.
 // Run `tree-sitter generate` inside this directory after installing the CLI.
 //
 // Keywords (S1–S10, S16–S24, S26–S30, S37, S41, S50, S55, S57): every
-// user-typeable keyword lives in src/syntax.rs with a decision ID (I7).
+// user-typeable keyword lives in Source/Syntax.rs with a decision ID (I7).
 // This file is the single derived artifact from that source; do not edit
 // keyword lists here independently.
 

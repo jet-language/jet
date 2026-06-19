@@ -64,7 +64,7 @@ If neither exists, compile error pointing at the `module math;` line. If both ex
 
 ### Phase 1 — AST + parser
 
-**New AST node** in `src/ast.rs`:
+**New AST node** in `Source/AST.rs`:
 
 ```rust
 pub struct CodeModule {
@@ -78,7 +78,7 @@ pub struct CodeModule {
 
 Add `Item::CodeModule(CodeModule)` alongside the existing `Item::Module(ModuleDecl)` (JetOS).
 
-**Parser changes** in `src/parser.rs`:
+**Parser changes** in `Source/Parser.rs`:
 
 In `top_level_item`, when the next token is `KwModule`:
 1. Consume `module`.
@@ -89,7 +89,7 @@ In `top_level_item`, when the next token is `KwModule`:
      - If `sources`, `imports`, or `ident` followed by `.` → existing `module_decl()` path (JetOS)
      - Otherwise → parse items until `}`, return `CodeModule { body: Some(items) }`
 
-**`use` statement extension** in `src/parser.rs`:
+**`use` statement extension** in `Source/Parser.rs`:
 
 Current `import_decl` already handles `use "path"` and `use module_name`. Extend it to also parse:
 
@@ -112,7 +112,7 @@ Unqualified { module_alias: String, items: Vec<String>, is_reexport: bool },
 
 ### Phase 2 — Loader / file resolution
 
-**File:** `src/loader.rs`
+**File:** `Source/Loader.rs`
 
 When the sema or loader encounters `Item::CodeModule { body: None, name }`:
 
@@ -127,7 +127,7 @@ Inline `CodeModule { body: Some(items) }` needs no file I/O — its items are in
 
 ### Phase 3 — Sema: inline module scoping
 
-**File:** `src/sema.rs`
+**File:** `Source/Sema.rs`
 
 Inline modules (`module math { … }`) need a nested scope. When sema visits `Item::CodeModule { body: Some(items) }`:
 
@@ -142,7 +142,7 @@ Path resolution: `math.clamp` in an expression position is currently parsed as a
 
 ### Phase 4 — Sema: `use alias.Item` unqualified imports
 
-**File:** `src/sema.rs`
+**File:** `Source/Sema.rs`
 
 When sema encounters `ImportKind::Unqualified { module_alias, items, is_reexport }`:
 
@@ -159,7 +159,7 @@ Error cases:
 
 ### Phase 5 — Visibility enforcement for inline modules
 
-**File:** `src/sema.rs`
+**File:** `Source/Sema.rs`
 
 The existing cross-file `pub` checks in sema already work when `module_idx` differs. Inline modules get a synthetic `module_idx` so the same checks apply. Items inside `module math { … }` that are not `pub` are inaccessible from outside — same error message as the file-module case.
 
@@ -167,7 +167,7 @@ The existing cross-file `pub` checks in sema already work when `module_idx` diff
 
 ### Phase 6 — Codegen
 
-**File:** `src/codegen.rs`
+**File:** `Source/Codegen.rs`
 
 Inline `module math { fn clamp(…) … }` lowers as: emit all items directly into the Rust output, but mangle their names as `user_math__clamp` (double-underscore separator) to avoid collisions with items of the same name in other modules. The access path `math.clamp` in expressions is already emitted as a field/method lookup — sema will have resolved it to a concrete function name by codegen time.
 

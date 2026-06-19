@@ -7,7 +7,7 @@ fn collect_jet_files(dir: &PathBuf) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) == Some(jet::syntax::FILE_EXT) {
+        if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT) {
             out.push(path);
         }
     }

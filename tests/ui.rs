@@ -16,7 +16,7 @@ use std::process::Command;
 fn ui_snapshots() {
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui");
-    let ext = jet::syntax::FILE_EXT;
+    let ext = jet::Syntax::FILE_EXT;
     let mut entries: Vec<(PathBuf, String)> = Vec::new();
     for e in fs::read_dir(&dir).unwrap().flatten() {
         let path = e.path();

@@ -72,7 +72,7 @@ fn jet_stem(path: &Path) -> String {
 
 fn collect_ui_cases(ui_dir: &Path) -> BTreeMap<String, (PathBuf, Vec<ParsedDiag>)> {
     let mut by_code: BTreeMap<String, (PathBuf, Vec<ParsedDiag>)> = BTreeMap::new();
-    let ext = jet::syntax::FILE_EXT;
+    let ext = jet::Syntax::FILE_EXT;
 
     fn walk(
         dir: &Path,

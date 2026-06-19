@@ -6,7 +6,7 @@ reversible), and must never invent surface syntax. To propose something
 new: add a row to Open Decisions with options and tradeoffs, and stop.
 
 How to ratify: move the row to Ratified with your chosen option. Agents
-then update `src/syntax.rs` (and parser if structural), re-bless ui
+then update `Source/Syntax.rs` (and parser if structural), re-bless ui
 snapshots (`UPDATE_EXPECT=1 cargo test`), and update docs/spec/spec.md.
 
 ## Ratified
@@ -693,7 +693,7 @@ in the manifest parser). No leading, trailing, or doubled hyphen (`image.-iso`,
 `image.a--b` produce the ordinary teaching diagnostic, never an ICE). **Code
 identifiers** — variables, fields, types, functions — stay plain `ident`. No new
 sigil (reuses the `-`/Minus token; recorded as `NAME_SEGMENT_SEP` in
-`src/syntax.rs` per I7). Rejected: finalist 1 (underscores only, status quo) —
+`Source/Syntax.rs` per I7). Rejected: finalist 1 (underscores only, status quo) —
 the ratified worked `config.jet` and the nixpkgs/npm convention both write
 hyphens; a lexer-level identifier change (would break `a - b`).
 
@@ -777,7 +777,7 @@ becomes the single **`.jet/lock`** (replacing `jet.lock` and `pack.lock`) inside
 the already-ratified `.jet/` managed folder; realized packages live in the
 shared **hangar** store at **`/etc/jet/hangar/`**. The manifest reshape chunk
 has since retired the old TOML constants (`jet.toml` / `jet.lock`) from
-`src/syntax.rs` — a clean break, no alias; `PACK_FILE` (`pack.jet`) and
+`Source/Syntax.rs` — a clean break, no alias; `PACK_FILE` (`pack.jet`) and
 `UNIFIED_LOCK_FILE` (`.jet/lock`) are the only manifest/lock paths the compiler
 knows. See `docs/plans/jetpack-jetos/unified-ecosystem.md`.
 
@@ -1214,7 +1214,7 @@ Rules:
 **Renames from U10:** package-manifest filename `payload.jet` → **`pkg.jet`**;
 new TOML monorepo manifest **`jetpack.toml`** added at root; `config.jet` (jetos
 tier) deferred to Epoch 3. The `payload: { … }` identity **block name inside
-`pkg.jet` is unchanged**. Implementation: `PAYLOAD_FILE` const in `src/syntax.rs`
+`pkg.jet` is unchanged**. Implementation: `PAYLOAD_FILE` const in `Source/Syntax.rs`
 and the loader/manifest/jetpack modules retarget `payload.jet` → `pkg.jet`; a
 `jetpack.toml` TOML parser is new work (see the implementation note below).
 Rejected: keeping `payload.jet` (poorer parity, conflated with `payload:` block
@@ -1717,8 +1717,8 @@ Ships with the `core.mem` arena work (D-REF2).
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
 which fails if:
 
-- any `src/syntax.rs` entry is `(provisional)` while ratified in this file;
-- any open or deferred decision ID appears in `src/syntax.rs`;
+- any `Source/Syntax.rs` entry is `(provisional)` while ratified in this file;
+- any open or deferred decision ID appears in `Source/Syntax.rs`;
 - the Provisional table below lists a real decision ID;
 - a staged decision loses its pinned error code in docs/spec/diagnostics.md.
 
@@ -1733,7 +1733,7 @@ implementation milestone is pending.
 
 | ID  | Milestone | Enforcement today                                                | Code  |
 | --- | --------- | ---------------------------------------------------------------- | ----- |
-| S15 | M6        | default unwind in `src/main.rs`; `--small` + `panic=abort` in M6 | —     |
+| S15 | M6        | default unwind in `Source/main.rs`; `--small` + `panic=abort` in M6 | —     |
 
 
 ## Provisional — currently in the code
@@ -2014,7 +2014,7 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-18 | D-MOD3 | visibility: **private by default, `pub` to export** — items don't escape their file/inline module unless `pub`; `M.private()` from outside is E0609; cross-file private access is E0605/E0102. | owner |
 | 2026-06-18 | D-MOD4 | re-export surface: **Rust-exact `pub use`** (supersedes the 2026-06-17 auto-surface call). A directory module's `module.jet` must `pub use sub.Item;` to expose a submodule item; nothing auto-surfaces. A `pub`-but-not-re-exported item stays internal to the directory. | owner |
 | 2026-06-18 | D-MOD-DIR | directory-module summary file is **`module.jet`** (not Rust's `mod.jet`), matching the `module` keyword. `module foo;` resolves `foo.jet` then `foo/module.jet`. | owner |
-| 2026-06-18 | D-CBIND3 | `jet bind` backend: **native std-only C-prototype parser** in `src/cbind.rs` (supersedes the ratified bindgen-crate + I6-waiver route). No external crate, no libclang, no `cbind` feature. Binds the C subset Jet's FFI uses (scalars, `char*`→String, `void`); unbindable declarations are skipped and reported (never faked, I3). Anything beyond the subset stays a hand-written `@extern module c.<lib>` overlay. | owner |
+| 2026-06-18 | D-CBIND3 | `jet bind` backend: **native std-only C-prototype parser** in `Source/CBind.rs` (supersedes the ratified bindgen-crate + I6-waiver route). No external crate, no libclang, no `cbind` feature. Binds the C subset Jet's FFI uses (scalars, `char*`→String, `void`); unbindable declarations are skipped and reported (never faked, I3). Anything beyond the subset stays a hand-written `@extern module c.<lib>` overlay. | owner |
 | 2026-06-18 | D-JPK-FILES | jetpack file structure: `jetpack.toml` (TOML monorepo manifest) + `env.jet` (dev env) at **repo root**; `pkg.jet` (package definition, renamed from `payload.jet`) in user-chosen package dirs; `.jet/` holds only generated `lock`+`cache/`. Revises U1/U10; `config.jet`/jetos tier deferred to E3. | owner |
 | 2026-06-18 | D-ILE1 | lib/exec **inferred from `fn main()`** (A): no `pkg.jet` → file with `main()` is executable else library (two `main()` = E_DUPMAIN); with `pkg.jet`, the `packages:` `kind` is optional/inferred, user-overridable. Amends U10/D-JPK-FILES | owner |
 | 2026-06-18 | D-BIND1 | full Odin binding sigils `name :: expr` (immutable) / `name := expr` (mutable) (A); `val`/`var` retired to teaching errors; **`::` spent** (S83 needs a new separator); amends S2 | owner |
@@ -2027,6 +2027,6 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-19 | D-ATTR3 | loop labels **stay `@`** (B): attributes move to `#`, labels keep `@outer loop { break @outer }`; two marker sigils coexist in source (the flagged trap, chosen knowingly). **Ratified, not yet implemented** | owner |
 | 2026-06-19 | D-NARG1 | named args + defaults **on methods/constructors** (A): call-site labels checked, trailing defaults fill; closes the S61 method gap (label parsed then dropped). **Ratified, not yet implemented** | owner |
 | 2026-06-19 | D-NARG2 | fmt **preserves** call-site labels (A): never adds or strips; canonicalization deferred to the LSP quick-fix (S14/M6). **Ratified, not yet implemented** | owner |
-| 2026-06-19 | S29-FLUSH | **flush constructor block** `Point{x: 3.0, y: 4.0}` (A; amends S29); flush also for destructuring `Point{x, y} :: make()`; `: ` colon spacing unchanged; formatter-canonical change. **Implemented 2026-06-19** (src/fmt: StructLit + fmt_bind_pattern; tests/fmt.rs) | owner |
+| 2026-06-19 | S29-FLUSH | **flush constructor block** `Point{x: 3.0, y: 4.0}` (A; amends S29); flush also for destructuring `Point{x, y} :: make()`; `: ` colon spacing unchanged; formatter-canonical change. **Implemented 2026-06-19** (Source/Formatter: StructLit + fmt_bind_pattern; tests/fmt.rs) | owner |
 | 2026-06-19 | D-CTOR1 | **named constructors only** (A): many shapes = many named no-`self` statics returning the type; duplicate name = E0105 (teach naming each); overloading rejected (only disambiguates when sigs differ). Zero codegen change; formalizes `Point.unit()`. D-CTOR2: no marker keyword. **Ratified, not yet implemented** | owner |
 | 2026-06-19 | D-ALLOC1 | **allocator method style** (A): `mem.Arena.new()` + `arena.alloc(value)`; capacity as optional S61 default (subsumes C); free-builtin form (B) rejected; arena not `@unsafe` (`use core.mem` gate, D-ALLOC-B); ships with D-REF2. **Ratified, not yet implemented** | owner |

@@ -23,7 +23,7 @@ core language, and each is gated on a syntax decision Jet hasn't made.
    `diagnostics.md`.
 
 3. **Coverage** — per-line / per-function coverage from a `jet test` run. No new
-   syntax; tooling only. Couples to the test runner in `src/main.rs`
+   syntax; tooling only. Couples to the test runner in `Source/main.rs`
    (`run_test`).
 
 ## Exit criteria

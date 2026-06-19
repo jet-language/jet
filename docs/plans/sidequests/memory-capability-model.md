@@ -13,18 +13,18 @@ checker or lifetime terminology visible at the Jet layer.
 
 ## Current state
 
-The compiler tracks a three-variant `AccessConvention` enum (`src/ast.rs:8`):
+The compiler tracks a three-variant `AccessConvention` enum (`Source/AST.rs:8`):
 `Read`, `Mutate`, `Move`. `LocalInfo.param_conv: Option<AccessConvention>`
-(`src/sema/mod.rs:181`) marks parameters; a `moved` map tracks consumed values.
-`rust_param_type` in `src/codegen/cx.rs:259` lowers conventions to Rust: `Read` →
+(`Source/Sema/mod.rs:181`) marks parameters; a `moved` map tracks consumed values.
+`rust_param_type` in `Source/Codegen/Context.rs:259` lowers conventions to Rust: `Read` →
 `&T` (non-scalar by-value for scalars), `Mutate` → `&mut T`, `Move` → `T`.
 
 Two surface keywords exist: `KW_MOVE = "take"` (S10, M2) at call sites, and `KW_VIEW =
-"view"` (S10, M2) for return-type borrow annotations — both in `src/syntax.rs:80,83`.
+"view"` (S10, M2) for return-type borrow annotations — both in `Source/Syntax.rs:80,83`.
 These are caller-side only; there is no `edit` or `share` keyword, no parameter-position
 capability annotation syntax, and no inference rule set.
 
-The implicit-clone warning **L0201** (`src/sema/checker_ownership.rs:515`,
+The implicit-clone warning **L0201** (`Source/Sema/CheckerOwnership.rs:515`,
 `checker_infer.rs`, `checker_stdlib.rs`) fires when a `Move`-convention parameter
 receives a `Read`-convention argument that the compiler silently `.clone()`s. The
 message already suggests `take name` — a sign the vocabulary is partway there.
@@ -293,7 +293,7 @@ rules above are recommendations; the owner has final say on all syntax (I7, I8).
 **D-CAP1 — Capability keyword spellings (I7)**
 
 Are `view`, `edit`, `take`, `share` the ratified Jet keywords for parameter annotations?
-`take` and `view` already exist in `src/syntax.rs` as S10/M2 caller-site keywords; this
+`take` and `view` already exist in `Source/Syntax.rs` as S10/M2 caller-site keywords; this
 would extend them to parameter-position annotations and introduce `edit` and `share` as
 new ratified sigils.
 
@@ -398,18 +398,18 @@ want to make contracts visible in source.
 - [ ] Failing golden example: a feature file exercises all four capabilities
       inferred, compiles, produces expected output.
 - [ ] D-CAP1 through D-CAP6 resolved by owner.
-- [ ] `src/syntax.rs` updated with ratified capability keywords + decision IDs (I7).
+- [ ] `Source/Syntax.rs` updated with ratified capability keywords + decision IDs (I7).
 - [ ] `docs/spec/spec.md` section added / updated for capability model.
-- [ ] `src/ast.rs` `AccessConvention` extended or replaced with four-variant enum.
-- [ ] Inference rules implemented in `src/sema/checker_ownership.rs` (replace or
+- [ ] `Source/AST.rs` `AccessConvention` extended or replaced with four-variant enum.
+- [ ] Inference rules implemented in `Source/Sema/CheckerOwnership.rs` (replace or
       extend current `Read`/`Mutate`/`Move` logic).
 - [ ] `edit` and `share` lowering added to `rust_param_type`
-      (`src/codegen/cx.rs:259`).
+      (`Source/Codegen/Context.rs:259`).
 - [ ] L0201 implicit-clone warning eliminated or rephrased in capability vocabulary;
       `copy`/`share` are the new user-facing paths.
 - [ ] Post-take diagnostic uses capability wording (no `borrow`/`lifetime` terms).
 - [ ] `package api = stable` / `package api = explicit` parsed in
-      `src/jetpack/packmanifest/parse_blocks.rs`; manifest-level behavior wired.
+      `Source/Jetpack/PackageManifest/ParseBlocks.rs`; manifest-level behavior wired.
 - [ ] `nix develop -c cargo test` green; no new `unsafe` in generated user-visible
       code (I1).
 - [ ] All new diagnostics in `docs/spec/diagnostics.md` with codes; ui snapshots

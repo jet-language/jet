@@ -26,13 +26,13 @@
 
 | File           | Job                                  | May emit diagnostics? |
 |----------------|--------------------------------------|-----------------------|
-| src/syntax.rs  | every user-typeable keyword/sigil    | no                    |
-| src/diag.rs    | Span, Diagnostic, rendering          | renders them          |
-| src/lexer.rs   | text → tokens                        | yes (E00xx)           |
-| src/parser.rs  | tokens → AST, fail-fast              | yes (E00xx)           |
-| src/sema.rs    | all semantic checks, collects all    | yes (E01xx, M2: E02xx)|
-| src/codegen.rs | AST → Rust text                      | **never**             |
-| src/main.rs    | CLI, rustc invocation, ICE policy    | only I/O + ICE        |
+| Source/Syntax.rs  | every user-typeable keyword/sigil    | no                    |
+| Source/Diagnostics.rs    | Span, Diagnostic, rendering          | renders them          |
+| Source/Lexer.rs   | text → tokens                        | yes (E00xx)           |
+| Source/Parser.rs  | tokens → AST, fail-fast              | yes (E00xx)           |
+| Source/Sema.rs    | all semantic checks, collects all    | yes (E01xx, M2: E02xx)|
+| Source/Codegen.rs | AST → Rust text                      | **never**             |
+| Source/main.rs    | CLI, rustc invocation, ICE policy    | only I/O + ICE        |
 
 ## Rules
 
@@ -55,12 +55,12 @@
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must
   produce Rust that compiles. New language features land as: spec →
   parser → sema checks → codegen → tests, in that order.
-- **R3 — Single surface.** User-typeable strings live in src/syntax.rs
+- **R3 — Single surface.** User-typeable strings live in Source/Syntax.rs
   only. Renaming a keyword is a one-file change plus snapshot re-bless.
 - **R4 — Spans everywhere.** Any AST node an error might point at carries
   its span. Adding a node without a span is a review-blocker.
 - **R5 — ICE policy.** rustc failing on generated code prints the
-  internal-compiler-error banner (src/main.rs), exits 101, and is treated
+  internal-compiler-error banner (Source/main.rs), exits 101, and is treated
   as a P0 bug. rustc's stderr is shown only inside that banner.
 - **R6 — Name mangling.** User identifiers are emitted as `user_<name>`
   (`main` excepted) so user code can never collide with Rust keywords,

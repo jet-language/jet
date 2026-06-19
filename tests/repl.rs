@@ -1,12 +1,12 @@
 //! E2-M18 — REPL transcript tests (D-REPL20=A).
 //!
-//! Each transcript in `tests/repl/*.txt` is run through `jet::repl::run_transcript`.
+//! Each transcript in `tests/repl/*.txt` is run through `jet::REPL::run_transcript`.
 //! Lines starting with `> ` are REPL inputs; other non-comment lines are
 //! expected output. Lines starting with `# ` are ignored.
 //!
 //! Test failures show the first diverging expected/actual line.
 
-use jet::repl::run_transcript;
+use jet::REPL::run_transcript;
 
 /// Parse a transcript file: return `(inputs, expected_outputs)`.
 /// Lines `> input` become inputs; non-comment, non-`>` lines become expected.

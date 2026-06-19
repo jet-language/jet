@@ -536,7 +536,7 @@ fn main() {
     edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
     let mut fixed = src.to_string();
     for edit in edits {
-        fixed = jet::lsp::apply_edit(&fixed, &edit);
+        fixed = jet::LSP::apply_edit(&fixed, &edit);
     }
     // D-BIND1: E0009 (`let`) carries no token-swap edit — migrating to `count :: 1`
     // moves tokens, so `jet fmt` handles it and the LSP leaves `let` in place.

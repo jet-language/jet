@@ -409,7 +409,7 @@ a `bin/` or declares a top-level `fn main`, otherwise `library`; an explicit
 executable-requiring (R9; E0101 if it has no `main`). A `library` dependency the project declares but hasn't
 realized yet is **E0983** (run `jetpack build`) — `jet build`/`run` never realize
 on demand, keeping them offline and deterministic, the same flow as pre-fetched
-deps. Resolver: `src/loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
+deps. Resolver: `Source/Loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
 (offline realize → `use` → call) and `tests/ui/use_unrealized_library/`.
 
 ## Code module system (D-MOD1–4, done 2026-06-18)
@@ -603,7 +603,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   expression grammar.
 
 Stage 1a is parser-only for the AST shape; the jetpack module evaluator
-(`src/jetpack/modeval.rs`) gives these contributions meaning (field-checking +
+(`Source/Jetpack/ModuleEval.rs`) gives these contributions meaning (field-checking +
 capture into a plan model). The U5 merge engine consumes `env` contributions.
 
 ### `System` / `Service` / `Image` (U11–U14, U18; modeval field-check + capture)
@@ -650,7 +650,7 @@ image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name 
   `System { … }` / `Image { … }` / `Service { … }` / `Env { … }` form stays legal.
 
 The evaluator captures each `system.<name>:` into a `SystemPlan` and each
-`image.<name>:` into an `ImagePlan` (`src/jetpack/modeval.rs`), carried on
+`image.<name>:` into an `ImagePlan` (`Source/Jetpack/ModuleEval.rs`), carried on
 `EnvPlan` so the jetos realize tier can consume them; the dev-shell path ignores
 them.
 

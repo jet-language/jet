@@ -213,7 +213,7 @@ fn every_registered_code_has_an_explain_entry() {
     }
     assert!(codes.len() > 150, "expected the full code registry, found {}", codes.len());
 
-    let index = jet::explain::index();
+    let index = jet::Explain::index();
     for code in &codes {
         assert!(
             index.contains_key(code),
@@ -401,12 +401,12 @@ fn osc8_hyperlinks_only_when_forced_on() {
     // The hyperlink layer is gated behind a real TTY; since tests run piped,
     // we exercise the renderer directly to prove the escape appears when asked.
     let src = "fn main() {}\n";
-    let d = jet::diag::Diagnostic::error(
+    let d = jet::Diagnostics::Diagnostic::error(
         "E0001",
         "x".into(),
         "y".into(),
         "z".into(),
-        Some(jet::diag::Span::new(3, 7)),
+        Some(jet::Diagnostics::Span::new(3, 7)),
     );
     let linked = d.render_linked("a.jet", src, true, true);
     assert!(linked.contains("\x1b]8;;"), "render_linked(hyperlinks=true) should emit OSC 8");

@@ -1,0 +1,1417 @@
+use super::*;
+
+impl<'a> Parser<'a> {
+    /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
+    fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
+        let start = self.bump().span; // consume `use`
+        match &self.peek().kind {
+            TokKind::Str(parts) => {
+                let path = string_literal_value(parts)?;
+                let path_span = self.bump().span;
+                let alias_default = path.rsplit('/').next().unwrap_or("module").to_string();
+                let (alias, alias_span) = if matches!(
+                    &self.peek().kind,
+                    TokKind::Ident(n) if n == Syntax::KW_AS
+                ) {
+                    self.bump();
+                    let (name, span) = self.expect_ident("after `as`")?;
+                    (name, span)
+                } else {
+                    (alias_default, start)
+                };
+                self.expect(TokKind::Semi, "after an import")?;
+                let end = self.toks[self.pos - 1].span.end;
+                Ok(crate::AST::ImportDecl {
+                    kind: crate::AST::ImportKind::File(path, path_span),
+                    alias,
+                    alias_span,
+                    span: Span::new(start.start, end),
+                    is_pub: false,
+                })
+            }
+            TokKind::Ident(_) => {
+                // Peek ahead to decide which import form this is:
+                //   use ident.{A, B}    → Unqualified group
+                //   use ident.ident ;   → Unqualified single (no `as`)
+                //   use ident.ident.*   → error: wildcard
+                //   use ident ...       → Module (may have dots + `as alias`)
+                let (first, first_span) = self.expect_ident("after `use`")?;
+                if matches!(self.peek().kind, TokKind::Dot) {
+                    // Look two tokens ahead (past the dot).
+                    let after_dot = &self.peek2().kind;
+                    match after_dot {
+                        TokKind::LBrace => {
+                            // use alias.{A, B, ...}
+                            self.bump(); // consume `.`
+                            let lbrace_span = self.bump().span; // consume `{`
+                            let mut items = Vec::new();
+                            loop {
+                                if matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                                    break;
+                                }
+                                let (item, _) = self.expect_ident("inside `use alias.{…}`")?;
+                                items.push(item);
+                                if matches!(self.peek().kind, TokKind::Comma) {
+                                    self.bump();
+                                } else {
+                                    break;
+                                }
+                            }
+                            let rbrace_span = self.peek().span;
+                            self.expect(TokKind::RBrace, "to close `use alias.{…}`")?;
+                            let items_span = Span::new(lbrace_span.start, rbrace_span.end);
+                            self.expect(TokKind::Semi, "after an import")?;
+                            let end = self.toks[self.pos - 1].span.end;
+                            Ok(crate::AST::ImportDecl {
+                                kind: crate::AST::ImportKind::Unqualified {
+                                    module_alias: first.clone(),
+                                    module_alias_span: first_span,
+                                    items,
+                                    items_span,
+                                    span: Span::new(start.start, end),
+                                },
+                                alias: first,
+                                alias_span: first_span,
+                                span: Span::new(start.start, end),
+                                is_pub: false,
+                            })
+                        }
+                        TokKind::Star => {
+                            // use alias.* — wildcard: reject
+                            self.bump(); // consume `.`
+                            let star_span = self.bump().span; // consume `*`
+                            return Err(Diagnostic::error(
+                                "E0612",
+                                "wildcard imports are not supported".to_string(),
+                                "`use math.*` would hide where each name comes from".to_string(),
+                                "list each item instead: `use math.{clamp, lerp}`".to_string(),
+                                Some(star_span),
+                            ));
+                        }
+                        TokKind::Ident(_) => {
+                            // Check if token after the item ident is `;` (no `as`).
+                            // peek3() is now 2 positions past current (dot + ident).
+                            let after_item = &self.peek3().kind;
+                            if matches!(after_item, TokKind::Semi | TokKind::Eof) {
+                                // use alias.item ; — Unqualified single
+                                self.bump(); // consume `.`
+                                let (item, item_span) =
+                                    self.expect_ident("after `.` in a `use` import")?;
+                                let items_span = item_span;
+                                self.expect(TokKind::Semi, "after an import")?;
+                                let end = self.toks[self.pos - 1].span.end;
+                                Ok(crate::AST::ImportDecl {
+                                    kind: crate::AST::ImportKind::Unqualified {
+                                        module_alias: first,
+                                        module_alias_span: first_span,
+                                        items: vec![item.clone()],
+                                        items_span,
+                                        span: Span::new(start.start, end),
+                                    },
+                                    alias: item.clone(),
+                                    alias_span: item_span,
+                                    span: Span::new(start.start, end),
+                                    is_pub: false,
+                                })
+                            } else {
+                                // use core.fs as fs — Module path with dots
+                                self.import_decl_module_path(start, first, first_span)
+                            }
+                        }
+                        _ => {
+                            // use alias. <something unexpected> — fall through to module path
+                            self.import_decl_module_path(start, first, first_span)
+                        }
+                    }
+                } else {
+                    // No dot: use module_name (optionally `as alias`)
+                    if matches!(self.peek().kind, TokKind::LBrace) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "selective imports aren't part of Jet".to_string(),
+                            "modules keep their namespace so call sites show where a library function comes from"
+                                .to_string(),
+                            "import the module with `as`, then call items through the alias: `use core.math as math; math.clamp(x, lo, hi);`"
+                                .to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
+                    let (alias, alias_span) = if matches!(
+                        &self.peek().kind,
+                        TokKind::Ident(n) if n == Syntax::KW_AS
+                    ) {
+                        self.bump();
+                        let (name, span) = self.expect_ident("after `as`")?;
+                        (name, span)
+                    } else {
+                        (first.clone(), first_span)
+                    };
+                    self.expect(TokKind::Semi, "after an import")?;
+                    let end = self.toks[self.pos - 1].span.end;
+                    Ok(crate::AST::ImportDecl {
+                        kind: crate::AST::ImportKind::Module(first, first_span),
+                        alias,
+                        alias_span,
+                        span: Span::new(start.start, end),
+                        is_pub: false,
+                    })
+                }
+            }
+            other => {
+                let other = other.clone();
+                Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a file path in quotes or a module name after `{}`, found {}",
+                        Syntax::KW_USE,
+                        describe(&other)
+                    ),
+                    format!(
+                        "write `{} \"path/to/file\";` or `{} module_name;`",
+                        Syntax::KW_USE,
+                        Syntax::KW_USE
+                    ),
+                    format!(
+                        "e.g. `{} \"util/helpers\";` or `{} scoring;`",
+                        Syntax::KW_USE,
+                        Syntax::KW_USE
+                    ),
+                    Some(self.peek().span),
+                ))
+            }
+        }
+    }
+
+    /// Helper: finish parsing a module import whose first ident is already consumed.
+    /// Handles `use first.sub.module [as alias];`.
+    fn import_decl_module_path(
+        &mut self,
+        start: Span,
+        first: String,
+        first_span: Span,
+    ) -> Result<crate::AST::ImportDecl, Diagnostic> {
+        // Continue eating dots to build the full dotted name.
+        let mut name = first;
+        let mut end = first_span.end;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (part, span) = self.expect_ident("after `.` in an import")?;
+            name.push('.');
+            name.push_str(&part);
+            end = span.end;
+        }
+        let module_span = Span::new(first_span.start, end);
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            return Err(Diagnostic::error(
+                "E0003",
+                "selective imports aren't part of Jet".to_string(),
+                "modules keep their namespace so call sites show where a library function comes from"
+                    .to_string(),
+                "import the module with `as`, then call items through the alias: `use core.math as math; math.clamp(x, lo, hi);`"
+                    .to_string(),
+                Some(self.peek().span),
+            ));
+        }
+        let alias_default = name.rsplit('.').next().unwrap_or(name.as_str()).to_string();
+        let (alias, alias_span) = if matches!(
+            &self.peek().kind,
+            TokKind::Ident(n) if n == Syntax::KW_AS
+        ) {
+            self.bump();
+            let (n, s) = self.expect_ident("after `as`")?;
+            (n, s)
+        } else {
+            (alias_default, start)
+        };
+        self.expect(TokKind::Semi, "after an import")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::ImportDecl {
+            kind: crate::AST::ImportKind::Module(name, module_span),
+            alias,
+            alias_span,
+            span: Span::new(start.start, end),
+            is_pub: false,
+        })
+    }
+
+    fn module_path(&mut self) -> Result<(String, Span), Diagnostic> {
+        let (first, first_span) = self.expect_ident("after `import`")?;
+        let mut name = first;
+        let mut end = first_span.end;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (part, span) = self.expect_ident("after `.` in an import")?;
+            name.push('.');
+            name.push_str(&part);
+            end = span.end;
+        }
+        Ok((name, Span::new(first_span.start, end)))
+    }
+
+    pub(super) fn program(&mut self) -> Program {
+        let mut imports = Vec::new();
+        let mut items = Vec::new();
+        loop {
+            let r = match &self.peek().kind {
+                TokKind::Eof => break,
+                // S6-R: the lexer inserts a synthetic terminator after the `}`
+                // that closes an item (a `}` ends a statement). At the top level
+                // it is trivia between items — skip it.
+                TokKind::Semi => {
+                    self.bump();
+                    continue;
+                }
+                TokKind::KwUse => match self.import_decl() {
+                    Ok(imp) => {
+                        imports.push(imp);
+                        continue;
+                    }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_stmt();
+                        continue;
+                    }
+                },
+                TokKind::KwUnsafe => {
+                    let t = self.bump();
+                    let ffi_attempt = matches!(&self.peek().kind, TokKind::KwExtern);
+                    self.diags.push(Diagnostic::error(
+                        "E0031",
+                        format!(
+                            "{} doesn't use `{}` to call Rust crates",
+                            Syntax::LANG_NAME,
+                            Syntax::KW_UNSAFE
+                        ),
+                        "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
+                            .to_string(),
+                        format!(
+                            "write: {} {} \"crate@version\" {{ fn name(...) -> T = \"rust::path\"; }}",
+                            Syntax::KW_EXTERN,
+                            Syntax::KW_RUST
+                        ),
+                        Some(t.span),
+                    ));
+                    if ffi_attempt {
+                        self.extern_rust_block().map(Item::ExternRust)
+                    } else {
+                        self.sync_top();
+                        continue;
+                    }
+                }
+                TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
+                TokKind::KwFn => self.func().map(Item::Func),
+                // S60 (E2-M16): `pure fn name(…)` or at file level.
+                TokKind::KwPure => self.func().map(Item::Func),
+                TokKind::KwPub => match self.peek2().kind {
+                    TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                    TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                    TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                    TokKind::KwModule if self.is_code_module_at(2) => {
+                        self.code_module(true).map(Item::CodeModule)
+                    }
+                    TokKind::KwUse => {
+                        self.bump(); // consume `pub`
+                        match self.import_decl() {
+                            Ok(mut imp) => {
+                                imp.is_pub = true;
+                                imports.push(imp);
+                                continue;
+                            }
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_stmt();
+                                continue;
+                            }
+                        }
+                    }
+                    _ => self.func().map(Item::Func),
+                },
+                TokKind::KwTest => self.test_def().map(Item::Test),
+                TokKind::KwModule if self.is_code_module_at(1) => {
+                    self.code_module(false).map(Item::CodeModule)
+                }
+                TokKind::KwModule => self.module_decl().map(Item::Module),
+                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
+                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                TokKind::KwImpl => self.impl_def().map(Item::Impl),
+                TokKind::At if self.at_c_module() => self.c_module().map(Item::CModule),
+                TokKind::At if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
+                TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
+                TokKind::KwComptime => self.comptime_def().map(Item::Const),
+                TokKind::Ident(name) if name == Syntax::FOREIGN_CLASS => {
+                    let t = self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0021",
+                        format!(
+                            "types are written with `{}`, not `{}`",
+                            Syntax::KW_STRUCT,
+                            Syntax::FOREIGN_CLASS
+                        ),
+                        format!(
+                            "{} uses exactly one spelling for each thing, so all code reads the same",
+                            Syntax::LANG_NAME
+                        ),
+                        format!(
+                            "replace `{}` with `{}`",
+                            Syntax::FOREIGN_CLASS,
+                            Syntax::KW_STRUCT
+                        ),
+                        Some(t.span),
+                    ));
+                    self.struct_def(false).map(Item::Struct)
+                }
+                TokKind::Ident(name) if name == Syntax::FOREIGN_INTERFACE => {
+                    let t = self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0022",
+                        format!(
+                            "`{}` is spelled `{}` in {}",
+                            Syntax::FOREIGN_INTERFACE,
+                            Syntax::KW_TRAIT,
+                            Syntax::LANG_NAME
+                        ),
+                        format!(
+                            "traits are written with `{}` — see docs for `trait Name {{ … }}`",
+                            Syntax::KW_TRAIT
+                        ),
+                        format!(
+                            "replace `{}` with `{}`",
+                            Syntax::FOREIGN_INTERFACE,
+                            Syntax::KW_TRAIT
+                        ),
+                        Some(t.span),
+                    ));
+                    self.sync_top();
+                    continue;
+                }
+                TokKind::Ident(name)
+                    if name == Syntax::FOREIGN_DEF || name == Syntax::FOREIGN_FUNC =>
+                {
+                    // S14 teaching error E0008, then parse as if `fn`.
+                    let t = self.bump();
+                    let foreign = if let TokKind::Ident(n) = &t.kind {
+                        n.clone()
+                    } else {
+                        unreachable!()
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E0008",
+                        format!(
+                            "functions are written with `{}`, not `{}`",
+                            Syntax::KW_FN,
+                            foreign
+                        ),
+                        "Jet has exactly one spelling for each thing, so all code reads the same"
+                            .to_string(),
+                        format!("replace `{}` with `{}`", foreign, Syntax::KW_FN),
+                        Some(t.span),
+                    ));
+                    self.func_after_fn(false, false, false).map(Item::Func)
+                }
+                TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
+                    let t = self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0015",
+                        format!(
+                            "{} uses `{}`, not `{}`",
+                            Syntax::LANG_NAME,
+                            Syntax::KW_USE,
+                            Syntax::FOREIGN_IMPORT
+                        ),
+                        format!(
+                            "other files are brought in with `{} \"path\"` or `{} name` (S16; M6)",
+                            Syntax::KW_USE,
+                            Syntax::KW_USE
+                        ),
+                        format!(
+                            "replace with `{} \"path\";`, `{} name;`, or `{} \"path\" {} alias;`",
+                            Syntax::KW_USE,
+                            Syntax::KW_USE,
+                            Syntax::KW_USE,
+                            Syntax::KW_AS
+                        ),
+                        Some(t.span),
+                    ));
+                    self.sync_stmt();
+                    continue;
+                }
+                other => {
+                    let d = Diagnostic::error(
+                        "E0003",
+                        format!(
+                            "expected `{}`, `{}`, `{}`, or `{}` here, found {}",
+                            Syntax::KW_FN,
+                            Syntax::KW_TEST,
+                            Syntax::KW_STRUCT,
+                            Syntax::KW_CONST,
+                            describe(other)
+                        ),
+                        "at the top level of a file, only definitions can appear".to_string(),
+                        format!(
+                            "define a function ({} main() {{ ... }}), {} block, struct, or const",
+                            Syntax::KW_FN,
+                            Syntax::KW_TEST
+                        ),
+                        Some(self.peek().span),
+                    );
+                    self.diags.push(d);
+                    self.bump();
+                    self.sync_top();
+                    continue;
+                }
+            };
+            match r {
+                Ok(item) => items.push(item),
+                Err(d) => {
+                    self.diags.push(d);
+                    self.sync_top();
+                }
+            }
+        }
+        Program { imports, items }
+    }
+
+    pub(super) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
+        self.expect_kw(TokKind::KwTest, "to start a test block")?;
+        let (name, name_span) = self.expect_test_name()?;
+        self.expect(TokKind::LBrace, "to open the test body")?;
+        let body = self.block_stmts();
+        Ok(crate::AST::TestDef {
+            name,
+            name_span,
+            body,
+        })
+    }
+
+    /// Test names are plain string literals — no interpolation (S43).
+    fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
+        let parts = match &self.peek().kind {
+            TokKind::Str(parts) => parts.clone(),
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a test name in quotes after `{}`, found {}",
+                        Syntax::KW_TEST,
+                        describe(other)
+                    ),
+                    "each test block needs a name so failures are easy to find".to_string(),
+                    format!(
+                        "write: {} \"describes what this checks\" {{ ... }}",
+                        Syntax::KW_TEST
+                    ),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let span = self.bump().span;
+        if parts.len() != 1 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a test name must be one piece of quoted text".to_string(),
+                "test names are labels, not interpolated messages".to_string(),
+                format!("write: {} \"my test name\" {{ ... }}", Syntax::KW_TEST),
+                Some(span),
+            ));
+        }
+        match &parts[0] {
+            StrTokPart::Lit(s) => Ok((s.clone(), span)),
+            StrTokPart::Interp(_) => Err(Diagnostic::error(
+                "E0003",
+                "a test name can't contain `{ }` interpolation".to_string(),
+                "test names are fixed labels".to_string(),
+                format!("write: {} \"my test name\" {{ ... }}", Syntax::KW_TEST),
+                Some(span),
+            )),
+        }
+    }
+
+    /// S50 (M7): `extern rust "crate@version" { fn … = "rust::path"; }`
+    fn extern_rust_block(&mut self) -> Result<crate::AST::ExternRustBlock, Diagnostic> {
+        let start = self.bump().span;
+        if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RUST) {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected `{}` after `{}`, found {}",
+                    Syntax::KW_RUST,
+                    Syntax::KW_EXTERN,
+                    describe(&self.peek().kind)
+                ),
+                format!(
+                    "foreign Rust functions are declared in `{} {} \"crate@version\" {{ … }}`",
+                    Syntax::KW_EXTERN,
+                    Syntax::KW_RUST
+                ),
+                format!(
+                    "write: {} {} \"std\" {{ fn name() -> Int = \"std::path\"; }}",
+                    Syntax::KW_EXTERN,
+                    Syntax::KW_RUST
+                ),
+                Some(self.peek().span),
+            ));
+        }
+        self.bump();
+        let (crate_spec, crate_span) = self.expect_plain_string(
+            "after `extern rust`",
+            "the crate name must be one piece of quoted text",
+            "write: extern rust \"base64@0.22\" { ... }",
+        )?;
+        self.expect(TokKind::LBrace, "to open the extern block")?;
+        let mut functions = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            functions.push(self.extern_fn()?);
+        }
+        self.expect(TokKind::RBrace, "to close the extern block")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::ExternRustBlock {
+            crate_spec,
+            crate_span,
+            functions,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
+        let fn_span = self.peek().span;
+        self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;
+        let fn_start = fn_span.start;
+        let (name, name_span) = self.expect_ident("after `fn`")?;
+        self.expect(TokKind::LParen, "after the function name")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                params.push(self.param()?);
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between parameters")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the parameter list")?;
+
+        let mut return_type = None;
+        let mut is_view_return = false;
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::KwView) {
+                is_view_return = true;
+                self.bump();
+            }
+            let (ty, _) = self.return_type()?;
+            return_type = Some(ty);
+        }
+
+        self.expect(TokKind::Eq, "before the Rust path")?;
+        let (rust_path, rust_path_span) = self.expect_plain_string(
+            "after `=`",
+            "the Rust path must be one piece of quoted text",
+            "write: = \"crate::function\"",
+        )?;
+        self.expect(TokKind::Semi, "after the foreign path")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::ExternFn {
+            name,
+            name_span,
+            params,
+            return_type,
+            is_view_return,
+            rust_path,
+            rust_path_span,
+            span: Span::new(fn_start, end),
+        })
+    }
+
+    /// S58 (E2-M13): is the cursor at `@unsafe fn …`? The whole-function
+    /// unsafe contract — `@` then the `unsafe` keyword then `fn`/`pub fn`.
+    fn at_unsafe_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::At)
+            && matches!(self.peek2().kind, TokKind::KwUnsafe)
+            && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// S58 (E2-M13): parse `@unsafe fn name(...) { ... }`. The body is checked
+    /// like any other; the contract is enforced at call sites (E3103).
+    fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
+        self.expect(TokKind::At, "before `unsafe`")?;
+        self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwFn, "after `@unsafe`")?;
+        self.func_after_fn(is_pub, true, false)
+    }
+
+    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `@extern
+    /// module …` or `@bindgen module …`? (Distinguishes from `@static const`,
+    /// and from bare `extern rust`.)
+    fn at_c_module(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::At) {
+            return false;
+        }
+        let intro_is_c = match &self.peek2().kind {
+            TokKind::KwExtern => true,
+            TokKind::Ident(n) => n == Syntax::ATTR_BINDGEN,
+            _ => false,
+        };
+        intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
+    }
+
+    /// S59 (E2-M14): parse `@extern module c.<lib> { … }` (overlay) or
+    /// `@bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
+    /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
+    fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
+        use crate::AST::CModuleKind;
+        let start = self.bump().span; // `@`
+        let kind = match &self.peek().kind {
+            TokKind::KwExtern => {
+                self.bump();
+                CModuleKind::Extern
+            }
+            TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN => {
+                self.bump();
+                CModuleKind::Bindgen
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected `{}` or `{}` after `@`, found {}",
+                        Syntax::ATTR_EXTERN_MODULE,
+                        Syntax::ATTR_BINDGEN,
+                        describe(other)
+                    ),
+                    "a C FFI module begins with `@extern module c.<lib>` or `@bindgen module c.<lib>.__bindgen__`".to_string(),
+                    "write: @extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        self.expect_kw(TokKind::KwModule, "to declare a C FFI module")?;
+
+        // Parse the dotted module path: `c` `.` `<lib>` [ `.` `__bindgen__` ].
+        let path_start = self.peek().span;
+        let (root, _) = self.expect_ident("after `module`")?;
+        if root != Syntax::C_MODULE_ROOT {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "a C FFI module path starts with `{}.`, found `{}`",
+                    Syntax::C_MODULE_ROOT, root
+                ),
+                "C libraries live under the `c.` module root — `c.raylib`, `c.sqlite3`".to_string(),
+                format!("write: {} module {}.<lib> {{ … }}",
+                    match kind { CModuleKind::Extern => "@extern", CModuleKind::Bindgen => "@bindgen" },
+                    Syntax::C_MODULE_ROOT),
+                Some(path_start),
+            ));
+        }
+        self.expect(TokKind::Dot, "after `c` in a C FFI module path")?;
+        let (lib, lib_span) = self.expect_ident("for the C library name")?;
+        let mut has_bindgen_seg = false;
+        let mut path_end = lib_span.end;
+        if matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (seg, seg_span) = self.expect_ident("after `.` in a C FFI module path")?;
+            path_end = seg_span.end;
+            if seg == Syntax::C_BINDGEN_SEGMENT {
+                has_bindgen_seg = true;
+            } else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("a C FFI module path can't have a `.{}` segment", seg),
+                    "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
+                    format!("write: @extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
+                    Some(seg_span),
+                ));
+            }
+        }
+        let path_span = Span::new(path_start.start, path_end);
+
+        // E3206: a user overlay must not name the reserved `__bindgen__` segment.
+        if kind == CModuleKind::Extern && has_bindgen_seg {
+            return Err(Diagnostic::error(
+                "E3206",
+                format!(
+                    "module path `{}.{}.{}` uses the reserved segment `{}`",
+                    Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT, Syntax::C_BINDGEN_SEGMENT
+                ),
+                format!(
+                    "autogen lives in `{}.<lib>.{}`; users declare overlays as `@{} module {}.<lib>` only",
+                    Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT
+                ),
+                format!(
+                    "drop `{}` from your module path, or use `@{} module {}.{} {{ … }}`",
+                    Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib
+                ),
+                Some(path_span),
+            ));
+        }
+        // A `@bindgen` module must carry the `__bindgen__` segment (it is the
+        // generated surface). Without it the path is malformed.
+        if kind == CModuleKind::Bindgen && !has_bindgen_seg {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "a `@bindgen` module path must end in `.{}`",
+                    Syntax::C_BINDGEN_SEGMENT
+                ),
+                "the compiler generates `@bindgen module c.<lib>.__bindgen__` cache files".to_string(),
+                format!(
+                    "write: @bindgen module {}.{}.{} {{ … }}",
+                    Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT
+                ),
+                Some(path_span),
+            ));
+        }
+
+        self.expect(TokKind::LBrace, "to open the C FFI module body")?;
+        let mut functions = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            functions.push(self.extern_fn()?);
+        }
+        self.expect(TokKind::RBrace, "to close the C FFI module body")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::CModule {
+            kind,
+            lib,
+            path_span,
+            functions,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    pub(super) fn expect_plain_string(
+        &mut self,
+        context: &str,
+        why_interp: &str,
+        fix: &str,
+    ) -> Result<(String, Span), Diagnostic> {
+        let parts = match &self.peek().kind {
+            TokKind::Str(parts) => parts.clone(),
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected a piece of quoted text {}, found {}",
+                        context,
+                        describe(other)
+                    ),
+                    why_interp.to_string(),
+                    fix.to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        let span = self.bump().span;
+        if parts.len() != 1 {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected a piece of quoted text {}, found interpolation",
+                    context
+                ),
+                why_interp.to_string(),
+                fix.to_string(),
+                Some(span),
+            ));
+        }
+        match &parts[0] {
+            StrTokPart::Lit(s) => Ok((s.clone(), span)),
+            StrTokPart::Interp(_) => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected a piece of quoted text {}, found interpolation",
+                    context
+                ),
+                why_interp.to_string(),
+                fix.to_string(),
+                Some(span),
+            )),
+        }
+    }
+
+    pub(super) fn func(&mut self) -> Result<Func, Diagnostic> {
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        // S60 (E2-M16): `pure fn` or `pub pure fn`.
+        let is_pure = matches!(self.peek().kind, TokKind::KwPure);
+        if is_pure {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwFn, "to start a function definition")?;
+        self.func_after_fn(is_pub, false, is_pure)
+    }
+
+    fn func_after_fn(&mut self, is_pub: bool, is_unsafe: bool, is_pure: bool) -> Result<Func, Diagnostic> {
+        let (name, name_span) = self.expect_ident("after `fn`")?;
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::LParen, "after the function name")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                params.push(self.param()?);
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between parameters")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the parameter list")?;
+
+        let mut return_type = None;
+        let mut is_view_return = false;
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::KwView) {
+                is_view_return = true;
+                self.bump();
+            }
+            let (ty, _) = self.return_type()?;
+            return_type = Some(ty);
+        }
+
+        // Single-expression body: `fn name(...) -> T = expr;`
+        // Desugars to `return expr;` so the "path must return" check is satisfied.
+        if matches!(self.peek().kind, TokKind::Eq) {
+            let start = self.bump().span.start;
+            let expr = self.expr_no_struct_lit()?;
+            let expr_end = expr.span().end;
+            self.expect(TokKind::Semi, "after the single-expression function body")?;
+            let end = if self.pos > 0 { self.toks[self.pos - 1].span.end } else { expr_end };
+            let ret_span = Span::new(start, end);
+            let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
+            return Ok(Func {
+                is_pub,
+                name,
+                name_span,
+                type_params,
+                params,
+                return_type,
+                is_view_return,
+                is_unsafe,
+                is_pure,
+                body,
+            });
+        }
+        self.expect(TokKind::LBrace, "to open the function body")?;
+        let body = self.block_stmts();
+        Ok(Func {
+            is_pub,
+            name,
+            name_span,
+            type_params,
+            params,
+            return_type,
+            is_view_return,
+            is_unsafe,
+            is_pure,
+            body,
+        })
+    }
+
+    fn param(&mut self) -> Result<Param, Diagnostic> {
+        let convention = self.parse_access_prefix();
+        let (name, name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
+            let span = self.bump().span;
+            (Syntax::KW_SELF.to_string(), span)
+        } else {
+            self.expect_ident("for a parameter name")?
+        };
+        let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            self.type_()?
+        } else if name == Syntax::KW_SELF {
+            // S27: receiver type is the owning struct/enum; sema fills it in.
+            (Type::Named(String::new()), name_span)
+        } else {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("expected `:` after the parameter `{}`", name),
+                "every parameter except `self` needs a type after its name".to_string(),
+                format!("write `{}: Type`", name),
+                Some(name_span),
+            ));
+        };
+        // S61: optional trailing `= expr` default value.
+        let default = if matches!(self.peek().kind, TokKind::Eq) {
+            self.bump();
+            Some(Box::new(self.expr_no_struct_lit()?))
+        } else {
+            None
+        };
+        Ok(Param {
+            convention,
+            name,
+            name_span,
+            ty,
+            ty_span,
+            default,
+        })
+    }
+
+    pub(super) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
+        let is_pub = if nested {
+            false
+        } else {
+            matches!(self.peek().kind, TokKind::KwPub)
+        };
+        if is_pub {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
+        let (name, name_span) = self.expect_ident("after `struct`")?;
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::LBrace, "to open the struct body")?;
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut trait_impls = Vec::new();
+        let mut derives = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::KwDerive) {
+                derives.push(self.derive_line()?);
+            } else if matches!(self.peek().kind, TokKind::KwImpl) {
+                trait_impls.push(self.trait_impl_block()?);
+            } else {
+                let is_method = matches!(self.peek().kind, TokKind::KwFn)
+                    || (matches!(self.peek().kind, TokKind::KwPub)
+                        && matches!(self.peek2().kind, TokKind::KwFn));
+                if is_method {
+                    methods.push(self.method_in_type()?);
+                } else {
+                    fields.push(self.field()?);
+                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                        self.bump();
+                    }
+                }
+            }
+        }
+        self.bump(); // }
+        Ok(StructDef {
+            is_pub,
+            name,
+            name_span,
+            type_params,
+            fields,
+            methods,
+            trait_impls,
+            derives,
+        })
+    }
+
+    pub(super) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
+        let is_pub = if nested {
+            false
+        } else {
+            matches!(self.peek().kind, TokKind::KwPub)
+        };
+        if is_pub {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwEnum, "to start an enum definition")?;
+        let (name, name_span) = self.expect_ident("after `enum`")?;
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::LBrace, "to open the enum body")?;
+        let mut variants = Vec::new();
+        let mut methods = Vec::new();
+        let mut trait_impls = Vec::new();
+        let mut derives = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::KwDerive) {
+                derives.push(self.derive_line()?);
+            } else if matches!(self.peek().kind, TokKind::KwImpl) {
+                trait_impls.push(self.trait_impl_block()?);
+            } else if matches!(self.peek().kind, TokKind::KwFn | TokKind::KwPub) {
+                methods.push(self.method_in_type()?);
+            } else {
+                variants.push(self.variant()?);
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+            }
+        }
+        self.bump();
+        Ok(EnumDef {
+            is_pub,
+            name,
+            name_span,
+            type_params,
+            variants,
+            methods,
+            trait_impls,
+            derives,
+        })
+    }
+
+    fn variant(&mut self) -> Result<Variant, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for a variant name")?;
+        let payload = if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump();
+            let payload = self.variant_payload()?;
+            self.expect(TokKind::RParen, "after a variant's payload")?;
+            payload
+        } else {
+            VariantPayload::Unit
+        };
+        Ok(Variant {
+            name,
+            name_span,
+            payload,
+        })
+    }
+
+    fn variant_payload(&mut self) -> Result<VariantPayload, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::Ident(_)) {
+            let peek2 = self.peek2().kind.clone();
+            if matches!(peek2, TokKind::Colon) {
+                let mut fields = Vec::new();
+                loop {
+                    let (name, name_span) = self.expect_ident("for a variant field name")?;
+                    self.expect(TokKind::Colon, "after a variant field name")?;
+                    let (ty, ty_span) = self.type_()?;
+                    fields.push(VariantField {
+                        name,
+                        name_span,
+                        ty,
+                        ty_span,
+                    });
+                    if !matches!(self.peek().kind, TokKind::Comma) {
+                        break;
+                    }
+                    self.bump();
+                }
+                Ok(VariantPayload::Named(fields))
+            } else {
+                let (ty, ty_span) = self.type_()?;
+                Ok(VariantPayload::Single(ty, ty_span))
+            }
+        } else {
+            let (ty, ty_span) = self.type_()?;
+            Ok(VariantPayload::Single(ty, ty_span))
+        }
+    }
+
+    pub(super) fn impl_def(&mut self) -> Result<ImplDef, Diagnostic> {
+        self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
+        let (type_name, type_span) = self.parse_type_path("after `impl`")?;
+        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
+            (Some(t), Some(ts))
+        } else {
+            (None, None)
+        };
+        // S62: `impl Type: Trait using field_name;` — delegation form.
+        if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+            if kw == "using" && trait_name.is_some() {
+                self.bump(); // consume `using`
+                let (field, _) = self.expect_ident("after `using` for the delegation field")?;
+                self.finish_stmt()?; // consume `;`
+                return Ok(ImplDef {
+                    type_name,
+                    type_span,
+                    trait_name,
+                    trait_span,
+                    methods: Vec::new(),
+                    delegation_field: Some(field),
+                    assoc_type_impls: Vec::new(),
+                });
+            }
+        }
+        self.expect(TokKind::LBrace, "to open the `impl` body")?;
+        let mut methods = Vec::new();
+        let mut assoc_type_impls = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            // D-LIB2: `type Name = ConcreteType;` associated type implementation.
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+                    self.expect(TokKind::Eq, "after associated type name")?;
+                    let (assoc_ty, _) = self.type_()?;
+                    self.finish_stmt()?;
+                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    continue;
+                }
+            }
+            methods.push(self.method_in_type()?);
+        }
+        self.bump();
+        Ok(ImplDef {
+            type_name,
+            type_span,
+            trait_name,
+            trait_span,
+            methods,
+            delegation_field: None,
+            assoc_type_impls,
+        })
+    }
+
+    /// S28: `impl Trait { … }` inside a struct/enum body.
+    fn trait_impl_block(&mut self) -> Result<TraitImplBlock, Diagnostic> {
+        self.expect_kw(TokKind::KwImpl, "to start a trait impl block")?;
+        let (trait_name, trait_span) = self.expect_ident("after `impl`")?;
+        self.expect(TokKind::LBrace, "to open the trait impl body")?;
+        let mut methods = Vec::new();
+        let mut assoc_type_impls = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            // D-LIB2: `type Name = ConcreteType;`
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+                    self.expect(TokKind::Eq, "after associated type name")?;
+                    let (assoc_ty, _) = self.type_()?;
+                    self.finish_stmt()?;
+                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    continue;
+                }
+            }
+            methods.push(self.method_in_type()?);
+        }
+        self.bump();
+        Ok(TraitImplBlock {
+            trait_name,
+            trait_span,
+            methods,
+            assoc_type_impls,
+        })
+    }
+
+    /// S55: `derive Comparable;` inside a type body.
+    fn derive_line(&mut self) -> Result<(String, Span), Diagnostic> {
+        let start = self.bump().span;
+        let (trait_name, _) = self.expect_ident("after `derive`")?;
+        self.finish_stmt()?;
+        Ok((trait_name, start))
+    }
+
+    /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
+    pub(super) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
+        let is_pub = if nested {
+            false
+        } else {
+            matches!(self.peek().kind, TokKind::KwPub)
+        };
+        if is_pub {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwTrait, "to start a trait definition")?;
+        let (name, name_span) = self.expect_ident("after `trait`")?;
+        self.expect(TokKind::LBrace, "to open the trait body")?;
+        let mut methods = Vec::new();
+        let mut assoc_types = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            // D-LIB2: `type Name;` associated type declaration.
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) =
+                        self.expect_ident("after `type` in trait body")?;
+                    self.finish_stmt()?;
+                    assoc_types.push((assoc_name, Span::new(kw_span.start, name_span.end)));
+                    continue;
+                }
+            }
+            methods.push(self.trait_method_sig()?);
+        }
+        self.bump();
+        Ok(TraitDef {
+            is_pub,
+            name,
+            name_span,
+            assoc_types,
+            methods,
+        })
+    }
+
+    fn trait_method_sig(&mut self) -> Result<TraitMethodSig, Diagnostic> {
+        let start = self.peek().span;
+        self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
+        let (name, name_span) = self.expect_ident("after `fn`")?;
+        self.expect(TokKind::LParen, "after the method name")?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                params.push(self.param()?);
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between parameters")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the parameter list")?;
+        let mut return_type = None;
+        let mut is_view_return = false;
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::KwView) {
+                is_view_return = true;
+                self.bump();
+            }
+            let (ty, _) = self.return_type()?;
+            return_type = Some(ty);
+        }
+        // D-LIB2: optional default body `{ … }` instead of `;`.
+        let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            let stmts = self.block_stmts();
+            Some(stmts)
+        } else {
+            let end = self.peek().span.end;
+            self.finish_stmt()?;
+            let _ = end;
+            None
+        };
+        let end = self.peek().span.end;
+        Ok(TraitMethodSig {
+            name,
+            name_span,
+            params,
+            return_type,
+            is_view_return,
+            span: Span::new(start.start, end),
+            default_body,
+        })
+    }
+
+    /// S27: method inside a type body or `impl` block.
+    fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        // S60: allow `pure fn` on methods too.
+        let is_pure = matches!(self.peek().kind, TokKind::KwPure);
+        if is_pure {
+            self.bump();
+        }
+        self.expect_kw(TokKind::KwFn, "to start a method")?;
+        self.func_after_fn(is_pub, false, is_pure)
+    }
+
+    fn field(&mut self) -> Result<Field, Diagnostic> {
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        let mut is_stored_ref = false;
+        let mut stored_ref_label = None;
+        if matches!(self.peek().kind, TokKind::KwStored) {
+            is_stored_ref = true;
+            self.bump();
+            if matches!(self.peek().kind, TokKind::LBracket) {
+                self.bump();
+                let (label, _) = self.expect_ident("inside `ref[...]`")?;
+                stored_ref_label = Some(label);
+                self.expect(TokKind::RBracket, "after a ref label")?;
+            }
+        }
+        let (name, name_span) = self.expect_ident("for a field name")?;
+        self.expect(TokKind::Colon, "after a field name")?;
+        let (ty, ty_span) = self.type_()?;
+        Ok(Field {
+            is_pub,
+            is_stored_ref,
+            stored_ref_label,
+            name,
+            name_span,
+            ty,
+            ty_span,
+        })
+    }
+
+    pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let mut attrs = Vec::new();
+        while matches!(self.peek().kind, TokKind::At) {
+            self.bump();
+            let (attr_name, _) = self.expect_ident("after `@`")?;
+            match attr_name.as_str() {
+                "static" => attrs.push(ConstAttr::ForceStatic),
+                "inline" => attrs.push(ConstAttr::ForceInline),
+                other => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("`@{}` isn't a known attribute on a const", other),
+                        "only `@static` and `@inline` are supported on const declarations"
+                            .to_string(),
+                        "remove the attribute or use `@static` or `@inline`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+            }
+        }
+        self.expect_kw(TokKind::KwConst, "to start a const declaration")?;
+        let (name, name_span) = self.expect_ident("after `const`")?;
+        self.expect(TokKind::Eq, "after the const name")?;
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after a const value")?;
+        Ok(ConstDef {
+            name,
+            name_span,
+            value,
+            attrs,
+            rust_kind: crate::AST::RustConstKind::Const,
+            is_comptime: false,
+            ct: None,
+        })
+    }
+
+    /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
+    pub(super) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let kw = self.peek().span;
+        self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+        // E0954: `comptime val` / `comptime var` — one keyword suffices.
+        if let TokKind::Ident(n) = &self.peek().kind {
+            if (n == Syntax::FOREIGN_VAL || n == Syntax::FOREIGN_VAR)
+                && matches!(self.peek2().kind, TokKind::Ident(_))
+            {
+                let foreign = n.clone();
+                let extra = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E0954",
+                    format!(
+                        "write `{} NAME = ...`, not `{} {} NAME = ...`",
+                        Syntax::KW_COMPTIME,
+                        Syntax::KW_COMPTIME,
+                        foreign
+                    ),
+                    format!(
+                        "`{}` is already the binding keyword, and a comptime value is always a constant",
+                        Syntax::KW_COMPTIME
+                    ),
+                    format!("remove the extra keyword: `{} NAME = ...`", Syntax::KW_COMPTIME),
+                    Some(Span::new(kw.start, extra.end)),
+                ));
+            }
+        }
+        let (name, name_span) = self.expect_ident("after `comptime`")?;
+        self.expect(TokKind::Eq, "after the comptime name")?;
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after a comptime value")?;
+        Ok(ConstDef {
+            name,
+            name_span,
+            value,
+            attrs: Vec::new(),
+            rust_kind: crate::AST::RustConstKind::Const,
+            is_comptime: true,
+            ct: None,
+        })
+    }
+
+    // --- statements ------------------------------------------------------
+
+}

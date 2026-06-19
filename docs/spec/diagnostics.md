@@ -302,7 +302,7 @@ These enforce the compatibility contract in docs/spec/release-policy.md. An
 **edition** opts a project into a specific era of Jet syntax (D-REL3); the
 toolchain advertises the editions it supports in `jet --version`. **E2001** is
 fully reachable from a real `pkg.jet`. **E2002** and **L2001** read from the
-deprecation registry in `src/manifest.rs` (`DEPRECATIONS`); that registry is
+deprecation registry in `Source/Manifest.rs` (`DEPRECATIONS`); that registry is
 empty pre-1.0 by design — Jet has deprecated nothing post-1.0 yet — so these two
 codes are registered and snapshotted but not yet user-triggerable. They become
 reachable the moment the first real deprecation is added, with no change to the
@@ -316,7 +316,7 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 
 ## Command-line diagnostics (E2-M3)
 
-These come from the CLI driver (`src/main.rs`, `src/cli.rs`), not the language
+These come from the CLI driver (`Source/main.rs`, `Source/CLI.rs`), not the language
 front end. They use the same `Error [E####]` / `Why:` / `Fix:` voice so the
 command line teaches the same way the compiler does. The "did you mean"
 suggestion reuses the edit-distance muscle behind the S14 teaching errors.
@@ -356,7 +356,7 @@ build path; it never silently falls back to a different answer.
 
 ## Module evaluation diagnostics (jetpack)
 
-These come from the jetpack module evaluator (`src/jetpack/modeval.rs`,
+These come from the jetpack module evaluator (`Source/Jetpack/ModuleEval.rs`,
 computed-modules arc), which gives `module name { … }` contributions meaning
 by reducing them via pure-eval (M9.5) and feeding them through the §6 merge
 table. Not (yet) reachable through `jet build`/`jet run` — `Item::Module` is a
@@ -602,7 +602,7 @@ Passing `--json` to `jet check`, `jet build`, or `jet test` makes the
 driver emit diagnostics as **data** instead of prose, for scripts, CI,
 and editors. This is decision **D-DX1** (ratified 2026-06-16): a single,
 **stable, versioned** schema, shared by the `--json` CLI flag, the future
-`jet fix` engine, and the LSP. The serializer lives in `src/diagjson.rs`
+`jet fix` engine, and the LSP. The serializer lives in `Source/DiagnosticsJSON.rs`
 (`to_json` / `render_all_json`); this section is its single source of
 truth. Adding a field is allowed any time; **removing or repurposing one
 requires bumping `schema_version`.**

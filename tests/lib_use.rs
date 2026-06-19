@@ -10,9 +10,9 @@
 //! the way a user would, with `JETPACK_ROOT` pointed at a throwaway hangar so
 //! the compiler's loader finds the staged source.
 
-use jet::jetpack::provider::{self, Ctx};
-use jet::jetpack::refspec::{classify_in, ProviderKind, SourceTable};
-use jet::jetpack::store::{self, Roots};
+use jet::Jetpack::Provider::{self, Ctx};
+use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
+use jet::Jetpack::Store::{self, Roots};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -59,7 +59,7 @@ fn write(path: &Path, body: &str) {
 
 /// Realize a `core` package from a local `path:` source repo into `hangar`,
 /// recording it in the store exactly as `jetpack build` would. Offline; no Nix.
-fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> store::StoreEntry {
+fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEntry {
     let store_dir = roots.hangar_dir();
     fs::create_dir_all(&store_dir).unwrap();
     let upstream = format!("path:{}", repo.to_string_lossy());
@@ -70,8 +70,8 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> store::StoreEnt
         store_dir: &store_dir,
         offline: true,
     };
-    let r = provider::realize(&spec, &table, &ctx).expect("library realizes offline");
-    store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin)
+    let r = Provider::realize(&spec, &table, &ctx).expect("library realizes offline");
+    Store::record(roots, &r.name, &r.version, &r.reference, &r.out, &r.bin)
         .expect("records into hangar")
 }
 
