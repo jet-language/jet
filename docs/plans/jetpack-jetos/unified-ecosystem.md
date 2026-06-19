@@ -230,7 +230,44 @@ jet a beginner's first compiled language.
 - **Multi-machine / fleet** config from one `config.jet`.
 - **Signed hangar + generations/rollback** (ties to E2-M16 layer 3, S60).
 
-## 10. Ratified naming ledger (ratified 2026-06-16, updated 2026-06-18)
+## 10. Package manager architecture (D-PM1…8 — ratified 2026-06-13, superseded naming only by U-series)
+
+The v1 source-library package manager design was ratified as D-PM1…8. File names (`jet.toml`, `jet.lock`, `~/.jet/store`) were later renamed by U1/U2/U10 to the current surface (`pkg.jet`, `.jet/lock`, hangar store); the architecture decisions below remain authoritative.
+
+**Package manager invariants (PM-I1…PM-I8):**
+
+- **PM-I1** No code execution at install/fetch time.
+- **PM-I2** Store append-only; verify fingerprint on create and on demand.
+- **PM-I3** Lockfile + store (or network) reproduces exact tree byte-for-byte.
+- **PM-I4** Resolution downloads metadata only; packages fetched after version selection.
+- **PM-I5** Registry entries immutable; yank flags, never deletes bytes.
+- **PM-I6** One mechanism per job: one manifest, one lockfile, one store layout.
+- **PM-I7** Every diagnostic: E12xx code, what/why/fix, ui snapshot.
+- **PM-I8** R9 forever: `jet run file.jet` with no manifest works as today.
+
+**D-PM1 — Store path layout:** Content-addressed store with human-readable names first: `<store-root>/<name>-<version>-<full-fingerprint>/`. The full plan fingerprint disambiguates when the same name+version could differ. Identity for correctness is always the lockfile entry, not parsing the directory name. Phase 1 stores source trees only; Phase 2 adds compiled artifact cache.
+
+**D-PM2 — Manifest language:** `pkg.jet` (Jet syntax, U10) is the only manifest for dependencies and package identity. A future `build.jet` (layer 3, separate ballot) may describe build steps; it never merges with manifest duties.
+
+**D-PM3 — Resolver phasing:** Phase 1 (M12.1): exact pins only; E1201 on version conflicts. Phase 2 (M12.2): registry, semver ranges, PubGrub resolver — one version per package name in the graph.
+
+**D-PM4 — Tooling binary:** M12.1 implements fetch/store/lock in `jet`. For source-library workflow, users use `jet add`/`jet fetch`/`jet update`. Layer 3 (`jetpack`) owns binary packages/environments and is invoked directly; later `jet add/remove` may plumb to it.
+
+**D-PM5 — Store location:** Phase 1: `~/.jet/store/`; Phase 2 (jetos): `/etc/jet/hangar/`. No root daemon. `jet gc` removes unreferenced entries; `jet store verify` re-checks hashes.
+
+**D-PM6 — Registry (Phase 2):** Append-only git repo; `--as-of <date>` = older commit; sema-enforced API diff at `jet publish`.
+
+**D-PM7 — Generations:** Layer 3 for global tools; projects use git on `.jet/lock`.
+
+**D-PM8 — Cross-machine cache:** Local reuse Phase 2; signed remote cache at layer 3.
+
+**Lockfile schema:** Graph-shaped TOML (`version = 1`), schema versioned, original selector + locked identity per node (source echoes manifest selector; locked holds exact rev + tree-hash), plan fingerprint per node, stable key order.
+
+**Fingerprint:** Covers the whole dependency ancestry — change a deep dep, new identity for everything above it; old and new coexist; nothing mutated in place.
+
+## 11. Ratified naming ledger (ratified 2026-06-16, updated 2026-06-18)
+
+> **Section 10** above holds the still-authoritative D-PM1…8 package architecture decisions (ratified 2026-06-13). File names in those decisions were superseded by U1/U2/U10; the architecture stands.
 
 | Thing | Name |
 |---|---|
@@ -245,7 +282,7 @@ jet a beginner's first compiled language.
 | source refs | `provider@target#version` (U1/U9 revised; e.g. `github@owner/repo#tag`) |
 | provider@target separator | `@` for provider classifier; `#` for version/revision pin |
 
-## 11. Decisions (U-series — RATIFIED 2026-06-16)
+## 12. Decisions (U-series — RATIFIED 2026-06-16)
 
 U1–U10 are **ratified** and recorded in `docs/spec/syntax-decisions.md` (Ratified
 section + decision log) and `src/syntax.rs`; `tests/decisions.rs` enforces them.

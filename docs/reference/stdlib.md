@@ -450,7 +450,20 @@ first-party packages later:
 - Open file handles and streaming I/O (whole-file reads only)
 - Async / threads (concurrency is v2)
 
-See `docs/plans/epoch-1/m10-stdlib.md` for the exact frozen API and ring build order.
+### First-party ring (post-core, adoption priority)
+
+Core std stays the eight modules above. The ring ships as versioned `jet.*` packages with reserved short import names.
+
+| Order | Package | Unlocks |
+|---|---|---|
+| 1 | `jet.http` (client) | API calls — blocking on streaming I/O + error conversion |
+| 2 | `jet.regex` | grep-class tools, validation |
+| 3 | `jet.csv` + `jet.toml` | data files, configs |
+| 4 | `jet.http` (server) | small services — after tasks |
+| 5 | `jet.time` (calendar) | dates/timezones |
+| 6 | `jet.crypto` | hash/random/hmac — vetted primitives only |
+| 7 | `jet.archive` | zip/tar/gzip |
+| 8 | `jet.db` (sqlite) | FFI-tier machinery |
 
 ---
 

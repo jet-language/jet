@@ -23,17 +23,18 @@ These are binding. When they disagree with anything else, they win.
   codegen) + rules R1–R7.
 - [diagnostics.md](spec/diagnostics.md) — error voice + exact render format;
   snapshot-pinned.
-- [roadmap.md](spec/roadmap.md) — what's active / not yet verified (completed work lives in epoch plans).
+- [roadmap.md](spec/roadmap.md) — what's active / not yet verified, plus Epoch 1 & 2 development highlights (completed work).
 - [decision-ballots.md](spec/decision-ballots.md) — the owner's open decision
   queue (ratified items live in syntax-decisions.md).
 
 ## plans/ — implementation plans
 
-Active epoch plans ([epoch-2/](plans/epoch-2/), [epoch-3/](plans/epoch-3/)), the
+Active epoch plan ([epoch-3/](plans/epoch-3/)), the
 [jetpack & jetos](plans/jetpack-jetos/README.md) track (package manager + OS), and
 [sidequests/](plans/sidequests/) (one reviewed plan per in-flight task, deleted
-once shipped). See [plans/README.md](plans/README.md) for the implementing-agent
-protocol.
+once shipped). Epoch 1 & 2 shipped — their highlights are in
+[roadmap.md](spec/roadmap.md). See [plans/README.md](plans/README.md) for the
+implementing-agent protocol.
 
 ## The dashboard — tasks, decisions, bugs, scratch
 
@@ -41,5 +42,5 @@ The single management surface: tasks with live pipeline status, every open
 decision (grouped so nothing's hidden), bugs, and a scratch pad.
 
 ```
-nix develop -c node tools/pipeline/pipeline.mjs serve --open
+nix develop -c node tools/Tower/Tower.mjs serve --open
 ```

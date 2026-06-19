@@ -207,7 +207,7 @@ Phase 2 (jetos)                   needs: M12 layer 3 + S60 pure-eval + the hanga
   OS0 ─▶ OS1 ─▶ OS2 ─▶ OS3 ─▶ OS4 ─▶ OS-ISO ─▶ OS-VM
 ```
 
-Relationship to M12 (`docs/plans/epoch-1/m12-packages.md`): jetpack's
+Relationship to M12 (architecture in `docs/plans/jetpack-jetos/unified-ecosystem.md` §10: D-PM1…8): jetpack's
 `pkg.jet` manifest + `.jet/lock` are the package mechanism (U1/U2/U10
 amended S52). Existing `jet add/remove` are transitional; later they may plumb to
 `jetpack add/remove`.

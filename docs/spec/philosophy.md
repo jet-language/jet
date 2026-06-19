@@ -151,7 +151,7 @@ loved by experts.
   is owner-gated and not yet drafted.
 
 **2026-06-15:** v1 Jet source-library package management is consolidated
-in docs/plans/epoch-1/m12-packages.md. Public binary/dev-shell package
+in docs/plans/jetpack-jetos/unified-ecosystem.md (§10: D-PM1…8). Public binary/dev-shell package
 management is the owner-gated `jetpack` track in
 docs/plans/jetpack-jetos/README.md; jetos is Phase 2 on top of jetpack.
 

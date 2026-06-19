@@ -500,8 +500,7 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 
 ## M10 — Standard library (done)
 
-Full user-facing reference: **docs/reference/stdlib.md**. Implementation plan and frozen
-API inventory: **docs/plans/epoch-1/m10-stdlib.md**.
+Full user-facing reference: **docs/reference/stdlib.md**.
 
 M10 standard library modules are compiler-known namespaces backed by Rust std
 helpers in the generated prelude. Import the short `core` spelling or the

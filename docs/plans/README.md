@@ -5,9 +5,7 @@ are the *how*; `docs/spec/` remains the *what* and *why* and always wins on conf
 
 ## Where work lives
 
-- **Active epochs** — [`epoch-2/`](epoch-2/README.md) (status of record:
-  [`epoch-2/EPOCH2-STATUS.md`](epoch-2/EPOCH2-STATUS.md)) and
-  [`epoch-3/`](epoch-3/README.md) for future pillars.
+- **Active epochs** — [`epoch-3/`](epoch-3/README.md) for future pillars. Epoch 2 is complete; development highlights are in `docs/spec/roadmap.md`.
 - **Sidequests** — [`sidequests/`](sidequests/): one agent-reviewed plan per
   in-flight task. A sidequest is deleted the moment its feature ships (behavior
   then lives in `docs/spec/spec.md` + golden examples). Plans are scaffolding,
@@ -18,7 +16,7 @@ are the *how*; `docs/spec/` remains the *what* and *why* and always wins on conf
   [`IMPLEMENTATION-STATUS.md`](jetpack-jetos/IMPLEMENTATION-STATUS.md).
 
 Tasks, their live pipeline stage, every open decision, and bugs are managed in the
-dashboard (`node tools/pipeline/pipeline.mjs serve`), not in a checked-in to-do file.
+dashboard (`node tools/Tower/Tower.mjs serve`), not in a checked-in to-do file.
 
 ## Protocol for the implementing agent (read this first, every time)
 

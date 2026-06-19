@@ -280,7 +280,7 @@ selective uses (`use module { item }`, `from module use item`). Former
 name required exactly once; order may differ from the declaration.
 Rejected: call-style `Point(x: 1.0, y: 2.0)` (B), required factory
 `new` (C). Parser disambiguates `ident {` from blocks in condition
-position (see docs/plans/epoch-1/m03-data.md).
+position.
 
 **S30 — Enum declaration & variants (M3)** *(ratified 2026-06-11)*:
 
@@ -752,7 +752,7 @@ mandatory snake_case lint; all-PascalCase for every identifier kind.
 
 **S52 — Package manifest (M12)** *(ratified 2026-06-12; amended
 2026-06-13)*: `**jet.toml`** — tiny TOML subset, hand-parsed in the
-compiler (I6). Full layout ratified in docs/plans/epoch-1/m12-packages.md.
+compiler (I6). Full layout and architecture in docs/plans/jetpack-jetos/unified-ecosystem.md (§10–11).
 
 `[package]`: `name`, `version`, `jet` (toolchain constraint), `description`,
 `license`, `repository`. `[dependencies]`: Jet deps, name-as-key, git/path/

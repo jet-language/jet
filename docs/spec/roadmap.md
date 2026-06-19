@@ -16,8 +16,8 @@ executable spec: a milestone ships with new `examples/` programs and new
 | Ratified syntax & owner decisions | [`syntax-decisions.md`](syntax-decisions.md) |
 | Language behavior today | [`spec.md`](spec.md) |
 | Open owner ballots | [`decision-ballots.md`](decision-ballots.md) |
-| Epoch 1 milestone plans (done) | [`docs/plans/epoch-1/`](../plans/epoch-1/) |
-| Epoch 2 milestone plans (active) | [`docs/plans/epoch-2/`](../plans/epoch-2/) |
+| Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
+| Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
 | Jetpack & jetos sequencing + live status | [`docs/plans/jetpack-jetos/`](../plans/jetpack-jetos/) |
 | Implementing-agent protocol | [`docs/plans/README.md`](../plans/README.md) |
 
@@ -28,8 +28,7 @@ Plans are gated on ratified decisions in `syntax-decisions.md` (see
 
 ## Completed
 
-**Epoch 1 — v1.0** verified 2026-06-14 (M0–M14). See epoch-1 plans for exit
-criteria and examples.
+**Epoch 1 — v1.0** verified 2026-06-14 (M0–M14).
 
 **E2-M1 — Concurrency** verified 2026-06-14.
 
@@ -83,20 +82,62 @@ session; 16 transcript tests green.
 
 ---
 
+## Epoch 1 — development highlights
+
+M0–M14, v1.0 arc, verified 2026-06-14.
+
+- **M0** — bootstrap: lexer, parser, Rust codegen, `jet run`, hello-world golden test.
+- **M1–M2** — functions, variables, control flow, basic types.
+- **M3** — structs and enums (data types).
+- **M4** — error handling: `T ? E`, `?` propagation, `??`, `panic`.
+- **M5** — collections: lists, maps, strings.
+- **M6** — tooling: `jet fmt`, `jet test`, multi-file imports.
+- **M7** — FFI: `extern rust` inline crate deps.
+- **M8** — closures and lambdas.
+- **M9** — generics and traits; **M9.5** — comptime evaluation and `@embed`.
+- **M10** — standard library: `core.fs`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.json`. Frozen API in `docs/reference/stdlib.md`.
+- **M11** — tasks and channels (Epoch-2 concurrency work; shipped as part of the v1 arc).
+- **M12** — package manager: `pkg.jet`, `.jet/lock`, content-addressed store (D-PM1…8). M12.1 verified; M12.2 (registry/semver) is Epoch 1 tail.
+- **M13** — LSP: incremental front end, go-to-definition, diagnostics, hover.
+- **M14** — v1.0 GA: showcase programs, diagnostics polish, binary size budgets.
+
+---
+
+## Epoch 2 — development highlights
+
+18 milestones, production-platform arc, GA verified 2026-06-18.
+
+- **E2-M1** — tasks and channels without data races; ownership proves sendability.
+- **E2-M2** — release policy, editions/epochs, `edition:` in `pkg.jet`, deprecation policy.
+- **E2-M3** — developer CLI polish: TTY color, `jet explain`, `jet doctor`, fix engine, man pages, completions.
+- **E2-M4** — `jet dev`: watch server, interpreter-backed dev loop, <200ms latency budget.
+- **E2-M5** — tier-2 references: `view`/`ref` hardening, zero-copy patterns.
+- **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
+- **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
+- **E2-M8** — supply chain: M12.2 registry, PubGrub resolver, `jet publish`/`vendor`/`audit`, SBOM.
+- **E2-M9** — first-party library ring: `jet.regex`, `jet.csv`, `jet.toml`, `jet.log`, `jet.time`, `jet.crypto`, `jet.archive`, `jet.db`.
+- **E2-M10** — networking: blocking TCP/UDP, HTTP client/server, TLS (rustls).
+- **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
+- **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.
+- **E2-M13** — expert low-level tier: `use core.mem`, `@audit`/`@unsafe` gates, `Ptr<T>`, volatile; I1 amendment (D-LL1).
+- **E2-M14** — C FFI: `@bindgen`/`@extern module`, `use c.<lib>`, link discovery.
+- **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
+- **E2-M16** — pure evaluation + layer 3: `pure fn`, `jet eval --pure`, package recipes, sandboxed builds.
+- **E2-M17** — Epoch 2 GA: six showcase programs, diagnostics audit, size/perf budgets.
+- **E2-M18** — REPL: `jet repl`, interpreter-backed, 16 transcript tests.
+
+---
+
 ## Active / not yet verified
 
 ### Epoch 2 — production platform
-
-Consolidated overview, dependency order, and ballot gates:
-[`docs/plans/epoch-2/README.md`](../plans/epoch-2/README.md).
 
 **Epoch 2 GA is complete** (owner, 2026-06-18): all 18 milestones landed on
 `master`, and the last in-scope language gaps closed this session — the Jet
 **module system** (D-MOD1–4) and a functional **`jet bind`** (native std-only
 backend). Moved to Epoch 3: DAP step-through debugging, adoption documentation,
 **package build-from-source + M9 wave-2**, and **M11 property testing / doctests
-/ coverage** (syntax-gated ergonomics). Live status and the honest gap inventory:
-`docs/plans/epoch-2/EPOCH2-STATUS.md`.
+/ coverage** (syntax-gated ergonomics).
 
 ### Jetpack & jetos
 
@@ -110,7 +151,7 @@ built-vs-pending status:**
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-([`m12-packages.md`](../plans/epoch-1/m12-packages.md)). M12.1 verified
+(architecture: [`unified-ecosystem.md`](../plans/jetpack-jetos/unified-ecosystem.md) §10). M12.1 verified
 2026-06-13.
 
 ---

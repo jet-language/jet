@@ -4,7 +4,7 @@
 may start as design notes during Epoch 2 but do not ship until Epoch 3 unless
 promoted.
 
-Epoch 2 GA is [`../epoch-2/README.md`](../epoch-2/README.md) (E2-M17).
+Epoch 2 GA (E2-M17) is complete; development highlights are in `docs/spec/roadmap.md`.
 
 ---
 

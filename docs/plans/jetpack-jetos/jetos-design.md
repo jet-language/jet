@@ -2,7 +2,7 @@
 
 > **STATUS: DESIGN-OF-RECORD — post-v1, do not implement yet.**
 > Depends on M12 layer 3 (`jet eval --pure`, sandboxed builds, signed
-> caches) on the same store as docs/plans/epoch-1/m12-packages.md.
+> caches) on the same store as docs/plans/jetpack-jetos/unified-ecosystem.md (§10: D-PM1…8).
 >
 > **All D-OS and D-NX decisions ratified 2026-06-17 (owner ballot):**
 > D-OS2=B · D-OS3=B · D-OS4=C (priority map; bare assignment = default priority) · D-OS5=A · D-OS6=A · D-NX1=A · D-NX2=A · D-NX3=A · D-NX4=A · D-NX5=deferred to Epoch 3 · D-NX6=A
@@ -28,7 +28,7 @@
 > near-term, buildable-now work.
 
 Audience: the project owner and implementing agents. v1 Jet source-library
-package management is docs/plans/epoch-1/m12-packages.md; the active
+package management architecture (D-PM1…8) is in docs/plans/jetpack-jetos/unified-ecosystem.md (§10); the active
 Jetpack/JetOS sequencing source is docs/plans/jetpack-jetos/README.md.
 
 ---
@@ -353,7 +353,7 @@ sandboxed activation verb are the honest mitigations (see D-NX review notes).
 `D-OS1` (module file shape) is superseded by U3 — modules are explicit
 `module name { }`, disabled with a leading `_`. `D-OS7` (entrypoint) is
 superseded by U4 — `find("./modules")` auto-discovery. The D-NX rows are
-prerequisited on D-PM1…8 (docs/plans/epoch-1/m12-packages.md) and M12.
+prerequisited on D-PM1…8 (docs/plans/jetpack-jetos/unified-ecosystem.md §10) and M12.
 
 ### Config surface (D-OS2…6) — ratified 2026-06-17
 
