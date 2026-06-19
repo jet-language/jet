@@ -1,5 +1,11 @@
 # Roadmap
 
+**Current epoch: Epoch 3.** (owner, 2026-06-19) Epoch 1 (v1.0) and Epoch 2 (GA)
+are complete — their development highlights are below under "Completed"; nothing
+in the Epoch 2 GA scope remained open. Active work is now Epoch 3
+([`docs/plans/epoch-3/`](../plans/epoch-3/)); its remaining-from-E2 loose ends are
+tracked as cards in the Tower dashboard board.
+
 Each milestone is done when its exit criteria pass as tests. Examples are the
 executable spec: a milestone ships with new `examples/` programs and new
 `tests/ui` fixtures, all green.
