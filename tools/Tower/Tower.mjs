@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// jet pipeline — the single management tool for the language workflow:
-//   scratch → todo → review → plan → plan-review → implementing → done
+// Tower — the command surface for building Jet. Sequences the workflow:
+//   backlog → todo → review → plan → plan-review → implementing → done
 // plus the decision ballot and a bug list. No dependencies; pure node.
 //
 // Usage:
-//   node tools/pipeline/pipeline.mjs serve [port] [--open]   # the dashboard (main UI)
-//   node tools/pipeline/pipeline.mjs status                  # console snapshot
-//   node tools/pipeline/pipeline.mjs new <slug> "Title"      # scaffold a sidequest plan
+//   node tools/Tower/Tower.mjs serve [port] [--open]   # the dashboard (main UI)
+//   node tools/Tower/Tower.mjs status                  # console snapshot
+//   node tools/Tower/Tower.mjs new <slug> "Title"      # scaffold a sidequest plan
 //
 // State the owner inputs (tasks/bugs/notes/decision answers/questions) lives in
-// tools/pipeline/board.json — management state only; it references plan files by
+// tools/Tower/board.json — management state only; it references plan files by
 // slug and never copies their content, so the docs stay the single source of
 // truth. The ballot renders straight from docs/spec/decision-ballots.md.
 
@@ -25,9 +25,9 @@ const P = {
   ballotMd: join(ROOT, "docs/spec/decision-ballots.md"),
   ratified: join(ROOT, "docs/spec/syntax-decisions.md"),
   results: join(ROOT, "docs/spec/ballot-results.md"),
-  board: join(ROOT, "tools/pipeline/board.json"),
-  regenQueue: join(ROOT, "tools/pipeline/regen-queue.md"),
-  askQueue: join(ROOT, "tools/pipeline/questions-queue.md"),
+  board: join(ROOT, "tools/Tower/board.json"),
+  regenQueue: join(ROOT, "tools/Tower/regen-queue.md"),
+  askQueue: join(ROOT, "tools/Tower/questions-queue.md"),
 };
 
 const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : "");
@@ -74,84 +74,76 @@ function ratifiedCount() {
 
 // ---- ballot parser (single source: decision-ballots.md) --------------------
 
-const DECISION_ID = /^(D-[A-Z0-9]+|S\d+-[A-Z]+|S\d+|N\d+|U\d+)$/;
+const DECISION_ID = /^(D-[A-Z0-9-]+|S\d+-[A-Z]+|S\d+|N\d+|U\d+)$/;
 
-function ballotSection(md) {
-  const start = md.indexOf("## Next Tasks — open ballots");
-  if (start < 0) return "";
-  const rest = md.slice(start);
-  const end = rest.indexOf("\n## Parked");
-  return end >= 0 ? rest.slice(0, end) : rest;
+// The "## Open decisions" section. Everything open lives here — no other
+// sections to hide things behind.
+function openSection(md) {
+  const m = md.match(/^## Open decisions\s*$/m);
+  if (!m) return "";
+  const body = md.slice(m.index + m[0].length);
+  const next = body.search(/^## /m);
+  return next >= 0 ? body.slice(0, next) : body;
 }
 
-// Open ballot cards + explainer blocks.
+// Parse the open section into a flat, ordered list of entries. Tolerant of two
+// shapes mixed freely:
+//   • Full card:   "### <ID> — <title> (rec X)" with intro / Option bullets / Recommendation
+//                  → kind:"decision", selectable.
+//   • Group head:  "### <group name>" (no leading ID) whose "- **<ID>** — …"
+//                  bullets each become kind:"open" (visible, ask-to-expand).
+// Loose intro prose before the first "###" renders as a kind:"explainer".
 function parseBallot(md) {
-  const body = ballotSection(md);
+  const body = openSection(md);
   if (!body) return [];
   const blocks = [];
-  let cur = null;
+  let pre = [], cur = null;
   for (const line of body.split("\n")) {
     if (line.startsWith("### ")) {
-      if (cur) blocks.push(cur);
-      cur = { header: line.slice(4).trim(), lines: [] };
+      if (cur) blocks.push(cur); else if (pre.join("").trim()) blocks.push({ header: null, lines: pre });
+      pre = null; cur = { header: line.slice(4).trim(), lines: [] };
     } else if (cur) cur.lines.push(line);
+    else if (pre) pre.push(line);
   }
   if (cur) blocks.push(cur);
 
-  return blocks.map((blk) => {
+  const out = [];
+  for (const blk of blocks) {
+    if (blk.header === null) {
+      const html = renderMd(blk.lines.join("\n"));
+      if (html.trim()) out.push({ kind: "explainer", title: "", html });
+      continue;
+    }
     const dash = blk.header.indexOf(" — ");
     const maybeId = dash > 0 ? blk.header.slice(0, dash).trim() : "";
     if (dash > 0 && DECISION_ID.test(maybeId)) {
+      // full decision card
       let title = blk.header.slice(dash + 3).trim();
       let rec = "";
       const rm = title.match(/\(([^)]*)\)\s*$/);
       if (rm) { rec = rm[1].trim(); title = title.slice(0, rm.index).trim(); }
-      return { kind: "decision", id: maybeId, title, rec, ...splitCard(blk.lines) };
-    }
-    return { kind: "explainer", title: blk.header, html: renderMd(blk.lines.join("\n")) };
-  });
-}
-
-// "## Parked — not open ballots" → read-only deferred items (nothing hidden).
-function parseParked(md) {
-  const i = md.indexOf("## Parked — not open ballots");
-  if (i < 0) return [];
-  let body = md.slice(i).replace("## Parked — not open ballots", "");
-  const next = body.indexOf("\n## ");
-  if (next >= 0) body = body.slice(0, next);
-  // top-level bullets only (lines starting "- ")
-  const items = [];
-  for (const raw of body.split("\n")) {
-    if (/^- /.test(raw)) items.push(raw.replace(/^- /, ""));
-    else if (items.length && /^\s+\S/.test(raw)) items[items.length - 1] += " " + raw.trim();
-  }
-  return items.map((t) => renderMd("- " + t));
-}
-
-// "## Open — captured, not yet drafted as full cards" → rendered list (visibility).
-function parseOpenList(md) {
-  const head = "## Open — captured, not yet drafted as full cards";
-  const i = md.indexOf(head);
-  if (i < 0) return "";
-  let body = md.slice(i).replace(head, "");
-  const next = body.indexOf("\n## ");
-  if (next >= 0) body = body.slice(0, next);
-  return renderMd(body.trim());
-}
-
-// Ratified-but-not-yet-implemented rows from the syntax-decisions decision log.
-function ratifiedPending() {
-  const md = read(P.ratified);
-  const out = [];
-  for (const line of md.split("\n")) {
-    if (!/^\|/.test(line) || !/not yet implemented/i.test(line)) continue;
-    const cols = line.split("|").map((s) => s.trim()).filter(Boolean);
-    if (cols.length >= 3) {
-      const text = cols[2].replace(/\.?\s*\*\*Ratified, not yet implemented\*\*\.?/i, "").trim();
-      out.push({ id: cols[1], text: text.length > 150 ? text.slice(0, 149) + "…" : text });
+      out.push({ kind: "decision", id: maybeId, title, rec, ...splitCard(blk.lines) });
+    } else {
+      // group header → emit its open one-liners as ask-to-expand entries
+      for (const item of bulletItems(blk.lines)) {
+        const m = item.match(/^\*\*([^*]+)\*\*\s*(?:—|-)?\s*([\s\S]*)$/);
+        const id = m ? m[1].trim() : "";
+        const rest = m ? m[2].trim() : item;
+        out.push({ kind: "open", group: blk.header, id, html: renderMd("- " + rest) });
+      }
     }
   }
   return out;
+}
+
+// Collect top-level "- " bullets, folding continuation/indented lines into them.
+function bulletItems(lines) {
+  const items = [];
+  for (const raw of lines) {
+    if (/^- /.test(raw)) items.push(raw.replace(/^- /, ""));
+    else if (items.length && /^\s+\S/.test(raw)) items[items.length - 1] += " " + raw.trim();
+  }
+  return items;
 }
 
 function splitCard(lines) {
@@ -281,17 +273,42 @@ function highlightCode(s) {
     .replace(/\b(\d+\.?\d*)\b/g, '<span class="n">$1</span>');
 }
 
+// ---- ballot-results parser (the merge target) ------------------------------
+
+// Parse ballot-results.md into an ordered map: id → {id, title, choice, comment}.
+// Keyed off the "**<ID>** — <title>" / "Decision: **<choice>**" / "Comment: …"
+// blocks that writeResults emits — same shape, round-trips cleanly.
+function parseResults(md) {
+  const map = new Map();
+  let cur = null;
+  for (const raw of md.split("\n")) {
+    const idm = raw.match(/^\*\*([^*]+)\*\*\s*—\s*(.*)$/);
+    if (idm) { cur = { id: idm[1].trim(), title: idm[2].trim(), choice: "", comment: "" }; map.set(cur.id, cur); continue; }
+    if (!cur) continue;
+    const dm = raw.match(/^Decision:\s*\*\*(.+?)\*\*\s*$/);
+    if (dm) { cur.choice = dm[1].trim(); continue; }
+    const cm = raw.match(/^Comment:\s*(.*)$/);
+    if (cm) { cur.comment = cm[1].trim(); continue; }
+  }
+  return map;
+}
+
+function answeredIds() {
+  return new Set([...parseResults(read(P.results)).keys()]);
+}
+
 // ---- state for the page ----------------------------------------------------
 
 function buildState() {
   const md = read(P.ballotMd);
+  const answered = answeredIds();
+  // Hide already-submitted decisions/open items so the ballot only shows the
+  // outstanding ones. ballot-results.md is the answered record (cleared by Claude).
+  const ballot = parseBallot(md).filter((x) => !(x.id && answered.has(x.id)));
   return {
     board: loadBoard(),
     stages: STAGES,
-    ballot: parseBallot(md),
-    openCaptured: parseOpenList(md),
-    pendingImpl: ratifiedPending(),
-    deferred: parseParked(md),
+    ballot,
     plans: readPlans(),
     ratified: ratifiedCount(),
     lastSubmit: existsSync(P.results) ? (read(P.results).match(/_submitted (.+?)_/) || [, ""])[1] : "",
@@ -300,16 +317,23 @@ function buildState() {
 
 // ---- write-backs -----------------------------------------------------------
 
+// Submit MERGES into ballot-results.md — never overwrites. Existing decisions
+// not in this submission are preserved; incoming ones add or replace by id.
 function writeResults(payload) {
+  const map = parseResults(read(P.results));
+  for (const r of payload.results || []) {
+    if (!r.id || !r.choice) continue; // client sends only answered, but guard anyway
+    map.set(r.id, { id: r.id, title: r.title || r.id, choice: r.choice, comment: (r.comment || "").trim() });
+  }
   const lines = [
     "# Owner ballot results", "", `_submitted ${stamp()}_`, "",
-    'Decisions captured from the dashboard. Tell Claude **"go"** to ratify these',
-    "into syntax-decisions.md, strip the cards, and implement the plans.", "", "## Next Tasks", "",
+    'Decisions captured from Tower. Tell Claude **"go"** to ratify these',
+    "into syntax-decisions.md, strip the cards, and implement the plans.", "", "## Decisions", "",
   ];
-  for (const r of payload.results) {
+  for (const r of map.values()) {
     lines.push(`**${r.id}** — ${r.title}`);
-    lines.push(`Decision: **${r.choice || "(no answer)"}**`);
-    if (r.comment && r.comment.trim()) lines.push(`Comment: ${r.comment.trim()}`);
+    lines.push(`Decision: **${r.choice}**`);
+    if (r.comment) lines.push(`Comment: ${r.comment}`);
     lines.push("");
   }
   writeFileSync(P.results, lines.join("\n"));
@@ -364,8 +388,8 @@ function serve(port) {
   });
   server.listen(port, "127.0.0.1", () => {
     const url = `http://127.0.0.1:${port}`;
-    out(`${C.grn}Jet dashboard${C.rst} → ${C.b}${url}${C.rst}`);
-    out(`${C.dim}board: tools/pipeline/board.json · ballot: docs/spec/decision-ballots.md · Ctrl-C to stop${C.rst}`);
+    out(`${C.grn}Tower${C.rst} → ${C.b}${url}${C.rst}`);
+    out(`${C.dim}board: tools/Tower/board.json · ballot: docs/spec/decision-ballots.md · Ctrl-C to stop${C.rst}`);
     if (process.argv.includes("--open") || process.argv.includes("-o")) openBrowser(url);
   });
 }
@@ -536,7 +560,7 @@ async function load(){S=await (await fetch('/api/state')).json();render();}
 function render(){
   const dec=S.ballot.filter(x=>x.kind==='decision');
   const bugs=S.board.cards.filter(c=>c.type==='bug');
-  const counts={board:S.board.cards.filter(c=>c.type!=='bug').length,decisions:dec.length+S.deferred.length,bugs:bugs.length,scratch:0};
+  const counts={board:S.board.cards.filter(c=>c.type!=='bug').length,decisions:S.ballot.filter(x=>x.kind==='decision'||x.kind==='list').length||S.ballot.length,bugs:bugs.length,scratch:0};
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
     '<div class="tab'+(id===active?' on':'')+'" onclick="go(\\''+id+'\\')">'+label+
     (counts[id]?'<span class="b">'+counts[id]+'</span>':'')+'</div>').join('');
@@ -601,10 +625,22 @@ function renderBugs(){
 /* ---- decisions ---- */
 function renderDecisions(){
   let h='<div class="hint">Every open decision is here — nothing hidden. Pick an option (click again or ✕ to undo), ask a question if something\\'s missing, then <b>Submit</b>. Tell Claude “go” to ratify + implement.</div>';
+  let curGroup='';
   for(const s of S.ballot){
-    if(s.kind==='explainer'){h+='<div class="dcard explain"><div class="dttl">'+esc(s.title)+'</div><div class="body">'+s.html+'</div></div>';continue;}
+    if(s.kind==='explainer'){h+='<div class="dcard explain"><div class="body">'+s.html+'</div></div>';continue;}
+    if(s.kind==='open'){
+      if(s.group&&s.group!==curGroup){curGroup=s.group;h+='<h2>'+esc(s.group)+'</h2>';}
+      const oqs=S.board.questions.filter(q=>q.decisionId===s.id);
+      const oqh=oqs.length?oqs.map(q=>'<div class="q">'+esc(q.text)+'<span class="st '+q.status+'">'+q.status+'</span>'+(q.answer?'<div class="ans">'+esc(q.answer)+'</div>':'<div class="qa">awaiting Claude</div>')+'</div>').join(''):'';
+      h+='<div class="dcard open"><div class="did">'+esc(s.id)+' <span class="rec no">OPEN</span></div>'+
+        '<div class="body">'+strip(s.html)+'</div>'+
+        '<div class="drow"><button class="ghost sm" onclick="ask(\\''+s.id+'\\')">Ask / expand into a full card</button>'+
+        '<button class="ghost sm" onclick="regen(\\''+s.id+'\\')">↻ Improve examples</button></div>'+
+        (oqh?'<div class="qbox">'+oqh+'</div>':'')+'</div>';
+      continue;
+    }
     const rec=s.rec?(/no rec/i.test(s.rec)?'<span class="rec no">NO REC</span>':'<span class="rec">'+s.rec.toUpperCase()+'</span>'):'';
-    const opts=s.options.map(o=>'<div class="opt" id="o-'+s.id+'-'+o.key+'" onclick="pick(\\''+s.id+'\\',\\''+o.key+'\\')">'+
+    const opts=(s.options||[]).map(o=>'<div class="opt" id="o-'+s.id+'-'+o.key+'" onclick="pick(\\''+s.id+'\\',\\''+o.key+'\\')">'+
       '<div class="opt-h"><span class="dot"></span>Option '+o.key+' — '+esc(o.name)+'</div><div class="body">'+o.html+'</div></div>').join('');
     const qs=S.board.questions.filter(q=>q.decisionId===s.id);
     const qhtml=qs.length?qs.map(q=>'<div class="q">'+esc(q.text)+'<span class="st '+q.status+'">'+q.status+'</span>'+
@@ -619,12 +655,6 @@ function renderDecisions(){
       (qhtml?'<div class="qbox">'+qhtml+'</div>':'')+'</div>';
     if(answers[s.id])setTimeout(()=>markPick(s.id,answers[s.id]),0);
   }
-  if(S.openCaptured){h+='<h2>Open — captured, not yet drafted as full cards</h2>'+
-    '<div class="parked">'+S.openCaptured+'</div>';}
-  if(S.pendingImpl&&S.pendingImpl.length){h+='<h2>Ratified — awaiting your “go” to implement</h2><ul class="parked">'+
-    S.pendingImpl.map(p=>'<li><b>'+esc(p.id)+'</b> — '+esc(p.text)+'</li>').join('')+'</ul>';}
-  if(S.deferred.length){h+='<h2>Deferred / parked (E3+) — visible, not for decision now</h2><ul class="parked">'+
-    S.deferred.map(d=>strip(d)).join('')+'</ul>';}
   document.getElementById('v-decisions').innerHTML=h;
   progress();
 }
@@ -664,9 +694,10 @@ window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(h&&h
 function status() {
   const s = buildState();
   const dec = s.ballot.filter((x) => x.kind === "decision");
+  const open = s.ballot.filter((x) => x.kind === "open");
   const cards = s.board.cards;
   const line = "─".repeat(64);
-  out(`${C.b}Jet pipeline${C.rst}  ${C.dim}scratch → todo → review → plan → plan-review → implementing → done${C.rst}`);
+  out(`${C.b}Tower${C.rst}  ${C.dim}backlog → todo → review → plan → plan-review → implementing → done${C.rst}`);
   out(line);
   out(`${C.cyn}BOARD${C.rst}  ${cards.length} card${cards.length === 1 ? "" : "s"} (${cards.filter((c) => c.type === "bug").length} bugs)`);
   for (const st of STAGES) {
@@ -677,10 +708,11 @@ function status() {
   out(`${C.cyn}PLANS${C.rst}  ${s.plans.length} sidequest${s.plans.length === 1 ? "" : "s"}`);
   s.plans.forEach((p) => out(`  • ${C.b}${p.slug}${C.rst} ${C.dim}— ${truncate(p.status || p.title, 54)}${C.rst}`));
   out("");
-  out(`${C.cyn}DECISIONS${C.rst}  ${dec.length} open · ${s.deferred.length} parked/deferred`);
+  out(`${C.cyn}DECISIONS${C.rst}  ${dec.length} carded · ${open.length} open (ask to expand)`);
   dec.forEach((d) => out(`  • ${C.b}${d.id}${C.rst} ${truncate(d.title, 52)}  ${/no rec/i.test(d.rec) ? C.yel + "NO REC" : C.grn + (d.rec || "").toUpperCase()}${C.rst}`));
+  open.forEach((d) => out(`  ${C.dim}· ${d.id || "—"}${C.rst}`));
   out(line);
-  out(`${C.grn}▸ node tools/pipeline/pipeline.mjs serve --open${C.rst}`);
+  out(`${C.grn}▸ node tools/Tower/Tower.mjs serve --open${C.rst}`);
 }
 
 // ---- scaffold --------------------------------------------------------------

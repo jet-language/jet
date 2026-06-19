@@ -1,4 +1,4 @@
-# `pipeline` — task pipeline dashboard
+# `Tower` — task pipeline dashboard
 
 A tiny, dependency-free tool over the owner workflow:
 
@@ -13,13 +13,13 @@ never drift from the docs that are the source of truth.
 
 ```sh
 # Dashboard + decision ballot in the browser (the main way to work):
-nix develop -c node tools/pipeline/pipeline.mjs serve --open
+nix develop -c node tools/Tower/Tower.mjs serve --open
 
 # Same view in the console:
-nix develop -c node tools/pipeline/pipeline.mjs status
+nix develop -c node tools/Tower/Tower.mjs status
 
 # Scaffold a new sidequest plan:
-nix develop -c node tools/pipeline/pipeline.mjs new <slug> "Title"
+nix develop -c node tools/Tower/Tower.mjs new <slug> "Title"
 ```
 
 Opening `docs/spec/decision-ballots.html` is a shortcut: if the server is
@@ -40,7 +40,7 @@ running it redirects to the dashboard; otherwise it shows the command above.
   copy/paste. Then tell Claude **"go"** and it ratifies them into
   `syntax-decisions.md`, strips the decided cards, and implements the plans;
 - **↻ improve examples** on a card appends a request to
-  `tools/pipeline/regen-queue.md`; Claude reviews that card's examples against the
+  `tools/Tower/regen-queue.md`; Claude reviews that card's examples against the
   house criteria (human voice, plain language, a user-story scenario, inline
   cross-language comparison) and improves it before you re-read.
 
