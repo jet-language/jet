@@ -27,19 +27,24 @@ running it redirects to the dashboard; otherwise it shows the command above.
 
 ## The dashboard
 
-The look is an air-traffic-control board: tasks and decisions are **flight
-progress strips** that slide between **bays** (the pipeline stages). Bays and
-decision groups start **collapsed** — open the one you want.
+A dark mission-control surface. The hero is a **pipeline ribbon** — the seven
+workflow stages flow across the top with live counts; click a stage to jump to
+it. Sections start **collapsed** but stay informative: each header shows a count
+and a preview of what's inside, so you open only what you want.
 
 `serve` starts a local server (default `http://127.0.0.1:4173`) that:
 
-- shows the pipeline at a glance — tasks, sidequest plans, open ballots,
-  ratified count, last submission, and any queued example-improvement requests;
-- **renders the ballot from `docs/spec/decision-ballots.md`** — the cards are
-  parsed out of the markdown, so there is exactly one source of truth and no
-  duplicated card data to keep in sync. Every open decision is a full card with
-  selectable options, grouped and collapsed by section;
-- lets you **tick** an option, **undo** it (click again or "✕ clear"), and add a
+- shows the whole pipeline at a glance in the ribbon, plus ratified count and
+  last submission in the status line;
+- **Board / Bugs:** each card moves down the pipeline with inline **◀ ▶**
+  buttons (no dropdown) and carries its plan link, notes, and delete;
+- **Decisions:** **renders the ballot from `docs/spec/decision-ballots.md`** —
+  cards are parsed out of the markdown, so there is one source of truth and no
+  duplicated card data. Every open decision is a full card with selectable
+  options, grouped by section. A sticky meter shows **how many are decided**,
+  each group header shows its **decided / total**, and **Next undecided** jumps
+  to the first unanswered one;
+- you **tick** an option, **undo** it (click again or "✕ clear"), and add a
   per-decision comment;
 - on **Sign & file**, writes your decisions to `docs/spec/ballot-results.md` —
   no copy/paste, and it **merges**: a new submission adds to or replaces by id,

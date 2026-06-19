@@ -3,43 +3,37 @@
 <title>Tower — Decision ballot (launcher)</title>
 <style>
 :root{
-  --board:#23271d;--board2:#1b1e16;--rail:#2c3025;--lip:#15170f;
-  --strip:#f3efe2;--ink:#22251c;--ink2:#5d6152;--rule:#cdc6b1;
-  --enr:#c98a1e;--arr:#3f8f56;--pen:#1f4d8f;--on-board:#cdd2bf;--on-board-dim:#8f9580;
+  --bg:#0b0e13;--s1:#151a22;--s2:#1d2531;--line:#262f3d;--line2:#384354;
+  --ink:#eef2f8;--ink2:#aab7c8;--ink3:#6f7c8e;--accent:#74a9ff;--green:#67c97a;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{
-  background:var(--board);
-  background-image:repeating-linear-gradient(90deg,#0000 0 38px,#ffffff05 38px 39px),radial-gradient(120% 80% at 50% -10%,#2e3326 0%,#1d2018 70%);
-  color:var(--on-board);font:14px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
-  max-width:720px;margin:0 auto;padding:72px 24px;letter-spacing:.1px;
-}
-.wm{font:800 19px/1 ui-monospace,monospace;letter-spacing:.32em;color:#f3efe2;text-transform:uppercase;padding:5px 11px;border:2px solid #f3efe2;border-radius:2px;display:inline-block;box-shadow:inset 0 0 0 2px var(--board)}
-h1{font:800 22px/1.2 ui-monospace,monospace;color:#f3efe2;margin:20px 0 6px;letter-spacing:-.3px}
-.sub{color:var(--on-board-dim);font:600 12px/1.6 ui-monospace,monospace;letter-spacing:.04em;margin-bottom:28px}
-p{color:var(--on-board);margin:14px 0}
-pre{background:#1c1f17;border:1px solid var(--rail);border-left:3px solid var(--enr);border-radius:2px;padding:14px 16px;font:13px/1.5 ui-monospace,monospace;color:#d7d2c2;overflow-x:auto}
-code{background:#e6e0cd;border-radius:2px;padding:1px 5px;color:#3a3d30;font-family:ui-monospace,monospace}
-.note{font-size:12px;color:var(--on-board-dim);margin-top:8px}
-a{color:#8fbef0}
-#status{margin-top:26px;padding:13px 15px;border-radius:2px;border:1px solid var(--paper-edge,#d8d2bf);border-left:4px solid var(--enr);background:var(--strip);color:var(--ink);font:600 13px/1.5 ui-monospace,monospace}
-#status.ok{border-left-color:var(--arr)}
-.k{color:#e89b6c}
+body{background:var(--bg);color:var(--ink);font:14px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:720px;margin:0 auto;padding:72px 24px;-webkit-font-smoothing:antialiased}
+.wm{font:800 16px/1 ui-monospace,monospace;letter-spacing:.36em;color:var(--ink);text-transform:uppercase;padding:6px 11px 6px 14px;border:1px solid var(--line2);border-radius:6px;background:var(--s1);display:inline-block}
+h1{font:800 22px/1.2 ui-monospace,monospace;color:var(--ink);margin:20px 0 6px;letter-spacing:-.3px}
+.sub{color:var(--ink3);font:600 12px/1.6 ui-monospace,monospace;letter-spacing:.03em;margin-bottom:28px}
+p{color:var(--ink2);margin:14px 0}
+pre{background:#0f141c;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:7px;padding:14px 16px;font:13px/1.5 ui-monospace,monospace;color:#cdd6e2;overflow-x:auto}
+code{background:var(--s2);border-radius:5px;padding:1px 5px;color:#cdd6e2;font-family:ui-monospace,monospace}
+.note{font-size:12px;color:var(--ink3);margin-top:8px}
+a{color:var(--accent)}
+#status{margin-top:26px;padding:13px 15px;border-radius:7px;border:1px solid var(--line2);border-left:4px solid var(--accent);background:var(--s1);color:var(--ink2);font:600 13px/1.5 ui-monospace,monospace}
+#status.ok{border-left-color:var(--green)}
+.k{color:#ff9e7a}
 </style></head><body>
 <span class="wm">TOWER</span>
 <h1>Jet — Decision ballot</h1>
-<p class="sub">An air-traffic-control board for building Jet. Decisions are flight strips you tick and <b>sign &amp; file</b> — it renders straight from <code>docs/spec/decision-ballots.md</code>, one source of truth.</p>
+<p class="sub">Mission control for building Jet. Decisions are full cards you tick and <b>sign &amp; file</b> — rendered straight from <code>docs/spec/decision-ballots.md</code>, one source of truth.</p>
 
 <p>Start it from the repo root (one command):</p>
 <pre><span class="k">nix</span> develop -c <span class="k">node</span> tools/Tower/Tower.mjs serve --open</pre>
-<p class="note">That serves the board at <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a> and opens your browser. Tick an option, hit <b>Sign &amp; file</b> — choices are written (and merged) into <code>docs/spec/ballot-results.md</code>; then tell Claude <b>"go"</b> to ratify &amp; implement. <code>↻ improve examples</code> on any card queues a Claude review of that card's examples.</p>
+<p class="note">That serves the dashboard at <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a> and opens your browser. Tick an option, hit <b>Sign &amp; file</b> — choices are written (and merged) into <code>docs/spec/ballot-results.md</code>; then tell Claude <b>"go"</b> to ratify &amp; implement. <code>↻ improve examples</code> on any card queues a Claude review of that card's examples.</p>
 
-<div id="status">Checking whether the board is already on station…</div>
+<div id="status">Checking whether the dashboard is already running…</div>
 
 <script>
 fetch('http://127.0.0.1:4173/api/state').then(r=>{
   if(r.ok){location.href='http://127.0.0.1:4173/';}
 }).catch(()=>{
-  document.getElementById('status').textContent='Board not on station yet — run the command above, then reload this page (it auto-redirects).';
+  document.getElementById('status').textContent='Dashboard not running yet — run the command above, then reload this page (it auto-redirects).';
 });
 </script></body></html>

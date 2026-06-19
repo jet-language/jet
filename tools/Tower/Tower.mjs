@@ -437,295 +437,241 @@ function handlePost(url, p, res, json) {
 function page() {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tower — Jet flight deck</title>
+<title>Tower — Jet mission control</title>
 <style>
 /* ============================================================
-   TOWER — air-traffic-control flight-progress-strip board.
-   Cohesive dark theme: layered ink-slate surfaces, one cool
-   indigo accent, restrained signal colors (amber caution,
-   green confirm, red defect). No gradients, no light blocks.
-   The strip / bay / clearance structure stays; only the surface
-   reads as a quiet night-shift control room.
+   TOWER — mission control for building Jet.
+   Coherent dark UI. Layered ink surfaces, one indigo accent,
+   restrained signal colors. The signature is a horizontal
+   PIPELINE RIBBON: the seven workflow stages flow across the
+   hero as live, jumpable chevrons — the whole product at a
+   glance. Collapsed sections stay informative (counts + preview).
    ============================================================ */
 :root{
-  --bg:#0d1014;             /* page — deep neutral ink             */
-  --s1:#161a21;             /* raised surface (strips, forms)      */
-  --s2:#1b2029;            /* nested surface (options, notes)      */
-  --s3:#10141a;            /* recessed well (bay/group container)  */
-  --line:#262d39;          /* hairline divider                    */
-  --line2:#323b4a;         /* stronger border / control edge      */
-  --ink:#e6edf4;           /* primary text                        */
-  --ink2:#9aa6b6;          /* secondary text                      */
-  --ink3:#677488;          /* tertiary / faint labels             */
-  --accent:#6ea8fe;        /* the one accent — cool indigo        */
-  --accent-dim:#2b4a77;    /* accent at low energy (fills)        */
-  --amber:#e3b341;         /* caution / en-route                  */
-  --green:#5bbd6b;         /* confirm / selected / arrival        */
-  --green-dim:#1d3d27;
-  --red:#f0726a;           /* defect / destructive                */
-  --red-dim:#3a1f1f;
+  --bg:#0b0e13;
+  --s1:#151a22;        /* panel / card                 */
+  --s2:#1d2531;        /* inset / option / nested       */
+  --s3:#10141b;        /* recessed section shell        */
+  --code:#0f141c;      /* code well (near bg, not black)*/
+  --line:#262f3d;
+  --line2:#384354;
+  --ink:#eef2f8;        /* bright primary                */
+  --ink2:#aab7c8;
+  --ink3:#6f7c8e;
+  --accent:#74a9ff;     /* the one accent — indigo       */
+  --accent2:#1d3358;    /* accent fill                   */
+  --amber:#f0c562;
+  --amber2:#352a10;
+  --green:#67c97a;
+  --green2:#163524;
+  --red:#ff7c72;
+  --red2:#3a1d1d;
+  --r:9px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 body{
-  background:var(--bg);
-  color:var(--ink);
+  background:var(--bg);color:var(--ink);
   font:14px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
-  padding:0 0 96px;
-  letter-spacing:.1px;
+  padding:0 0 92px;-webkit-font-smoothing:antialiased;
 }
 .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+::selection{background:#2c4a78}
 
-/* ---- header: the ATC status banner ---- */
-header{
-  position:sticky;top:0;z-index:30;
-  background:linear-gradient(#22271cf2,#1a1e15f2);
-  backdrop-filter:blur(6px);
-  border-bottom:2px solid var(--lip);
-  box-shadow:0 2px 0 #ffffff08, 0 6px 18px #0006;
-  padding:0;
-}
-.banner{display:flex;align-items:center;gap:18px;padding:11px 24px 0;flex-wrap:wrap}
-.callsign{display:flex;align-items:baseline;gap:11px}
-.callsign .wm{
-  font:800 19px/1 ui-monospace,monospace;letter-spacing:.32em;
-  color:#f3efe2;text-transform:uppercase;
-  padding:5px 11px;border:2px solid #f3efe2;border-radius:2px;
-  background:#0000;box-shadow:inset 0 0 0 2px var(--board);
-}
-.callsign .sub{font:600 10.5px/1 ui-monospace,monospace;letter-spacing:.22em;color:var(--on-board-dim);text-transform:uppercase}
-.atc{margin-left:auto;display:flex;align-items:center;gap:18px;font:600 10.5px/1 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--on-board-dim)}
-.atc b{color:#e7e4d4;font-weight:800}
-.atc .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--arr);box-shadow:0 0 0 3px #3f8f5633;margin-right:6px;vertical-align:middle;animation:beat 2.4s infinite}
-@keyframes beat{0%,100%{opacity:1}50%{opacity:.35}}
+/* ---------- hero: callsign + pipeline ribbon ---------- */
+header{position:sticky;top:0;z-index:30;background:#0b0e13f2;backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hero{max-width:1180px;margin:0 auto;padding:15px 26px 0}
+.brandrow{display:flex;align-items:center;gap:13px;flex-wrap:wrap}
+.wm{font:800 16px/1 ui-monospace,monospace;letter-spacing:.36em;color:var(--ink);text-transform:uppercase;padding:6px 11px 6px 14px;border:1px solid var(--line2);border-radius:6px;background:var(--s1)}
+.tagline{font:600 11px/1 ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3)}
+.status{margin-left:auto;display:flex;align-items:center;gap:20px;font:600 10.5px/1 ui-monospace,monospace;letter-spacing:.13em;text-transform:uppercase;color:var(--ink3)}
+.status b{color:var(--ink);font-weight:800}
+.live{display:inline-flex;align-items:center;gap:7px}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px #67c97a22;animation:beat 2.6s infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
 
-/* ---- the bay-selector strip (nav) ---- */
-.bays{display:flex;gap:0;padding:0 18px;margin-top:11px}
-.bay{
-  position:relative;
-  padding:10px 20px 11px;
-  font:700 11.5px/1 ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--on-board-dim);cursor:pointer;
-  border:2px solid transparent;border-bottom:none;
-  background:#0000;
-}
-.bay:hover{color:#e7e4d4}
-.bay.on{
-  color:var(--ink);background:var(--strip);
-  border-color:var(--lip);border-radius:5px 5px 0 0;
-  box-shadow:0 -2px 0 #00000022 inset;
-}
-.bay .n{
-  display:inline-block;min-width:17px;text-align:center;margin-left:8px;
-  font-size:10px;font-weight:800;color:var(--ink2);
-  background:var(--rule);border-radius:2px;padding:1px 5px;
-}
-.bay.on .n{background:var(--enr);color:#fff}
+/* the signature: a flowing pipeline of the seven stages */
+.ribbon{display:flex;gap:0;margin:14px 0 0;overflow-x:auto;scrollbar-width:none}
+.ribbon::-webkit-scrollbar{display:none}
+.seg{flex:1 1 0;min-width:104px;position:relative;padding:9px 14px 11px;cursor:pointer;background:#0000;border:none;text-align:left;color:inherit;font:inherit}
+.seg:not(:last-child):after{content:"";position:absolute;right:-7px;top:50%;transform:translateY(-50%);border-left:7px solid var(--s3);border-top:7px solid #0000;border-bottom:7px solid #0000;z-index:2}
+.seg .sg{display:block;font:700 9.5px/1.2 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg .sc{display:block;font:800 19px/1 ui-monospace,monospace;color:var(--ink2);margin-top:5px}
+.seg{background:var(--s3);border-right:1px solid var(--line)}
+.seg:hover .sg{color:var(--ink2)}
+.seg:hover .sc{color:var(--ink)}
+.seg.hot .sc{color:var(--accent)}
+.seg.hot .sg{color:var(--accent)}
+.seg.done .sc{color:var(--green)}
+.seg:first-child{border-radius:7px 0 0 7px}
+.seg:last-child{border-radius:0 7px 7px 0;border-right:none}
 
-main{max-width:1140px;margin:0 auto;padding:26px 24px}
-.view{display:none}.view.on{display:block;animation:slidein .22s ease}
-@keyframes slidein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:2px;padding:13px 26px 0;max-width:1180px;margin:0 auto}
+.tab{padding:10px 16px 12px;font:700 11.5px/1 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);cursor:pointer;border-bottom:2px solid transparent;background:#0000}
+.tab:hover{color:var(--ink2)}
+.tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .n{display:inline-block;min-width:16px;text-align:center;margin-left:8px;font-size:10px;font-weight:800;color:var(--ink2);background:var(--s2);border-radius:9px;padding:1px 6px}
+.tab.on .n{background:var(--accent2);color:var(--accent)}
 
-/* directive line printed onto the board */
-.hint{
-  font:600 12px/1.5 ui-monospace,monospace;letter-spacing:.04em;
-  color:var(--on-board-dim);margin:2px 0 20px;
-  padding-left:13px;border-left:2px solid var(--rail);
-}
-.hint b{color:#d6e0c2}
+main{max-width:1180px;margin:0 auto;padding:24px 26px}
+.view{display:none}.view.on{display:block;animation:fade .2s ease}
+@keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 
-/* ============================================================
-   FLIGHT STRIP — the core object. Paper slip with a phase tab on
-   its left edge and printed field dividers.
-   ============================================================ */
-.strip{
-  position:relative;display:flex;
-  background:var(--strip);
-  background-image:linear-gradient(var(--strip),var(--strip2));
-  border:1px solid var(--paper-edge);border-radius:2px;
-  color:var(--ink);
-  box-shadow:0 1px 0 #fff8 inset, 0 1px 2px #0004, 0 3px 7px #0003;
-  overflow:hidden;
-}
-.strip .tab{flex:0 0 9px;background:var(--hold)}
-.strip.task .tab{background:var(--dep)}
-.strip.idea .tab{background:var(--enr)}
-.strip.bug  .tab{background:var(--stamp)}
-.strip .face{flex:1;padding:11px 13px 12px;min-width:0}
-.strip .top{display:flex;align-items:flex-start;gap:9px}
-.strip .ttl{font-weight:700;font-size:13.5px;line-height:1.3;flex:1;color:var(--ink);word-break:break-word}
-.strip .type{
-  font:800 9px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;
-  padding:3px 6px;border-radius:2px;flex-shrink:0;color:#fff;
-}
-.strip.task .type{background:var(--dep)}
-.strip.idea .type{background:var(--enr)}
-.strip.bug  .type{background:var(--stamp)}
-.strip .bd{font-size:12px;color:var(--ink2);margin-top:6px;white-space:pre-wrap;line-height:1.5}
-.strip .meta{display:flex;align-items:center;gap:8px;margin-top:11px;padding-top:9px;border-top:1px dashed var(--rule);flex-wrap:wrap}
-.strip select{font:600 10.5px/1 ui-monospace,monospace;background:var(--pen-fill);border:1px solid #b9c6da;color:var(--pen);border-radius:2px;padding:3px 5px;letter-spacing:.06em;text-transform:uppercase}
-.strip .plan{font:600 10.5px/1 ui-monospace,monospace;color:var(--pen);text-decoration:none;border-bottom:1px solid #aebfd6}
-.strip .x{margin-left:auto;color:var(--ink2);cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
-.strip .x:hover{color:var(--stamp)}
-.strip .note-in{font:600 10.5px/1 ui-monospace,monospace;color:var(--pen);cursor:pointer;border-bottom:1px dotted #aebfd6;opacity:0}
-.strip:hover .note-in{opacity:1}
-.strip .notes{margin-top:8px;border-top:1px solid var(--rule);padding-top:7px}
-.strip .notes div{font-size:11px;color:var(--ink2);margin-top:3px;font-family:ui-monospace,monospace}
-.strip .notes .at{color:#9a9a86}
+.hint{font:600 12px/1.55 ui-monospace,monospace;letter-spacing:.02em;color:var(--ink3);margin:0 0 18px;padding-left:13px;border-left:2px solid var(--line2)}
+.hint b{color:var(--ink2)}
 
-/* ---- a bay (stage lane) of strips with a holder lip ---- */
-.bayrow{margin-bottom:13px;border:1px solid var(--lip);border-radius:6px;background:var(--board2);box-shadow:0 1px 2px #0005 inset}
-.bayhead{
-  display:flex;align-items:center;gap:11px;cursor:pointer;
-  padding:11px 15px;user-select:none;
-}
-.bayhead:hover .bname{color:#fff}
-.bayhead .caret{font:700 11px/1 monospace;color:var(--enr);transition:transform .15s;width:11px}
-.bayrow.open .bayhead .caret{transform:rotate(90deg)}
-.bname{font:700 12px/1 ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--on-board)}
-.bcount{font:700 10px/1 ui-monospace,monospace;color:var(--ink2);background:var(--rail);padding:2px 7px;border-radius:10px}
-.bayhead .fill{flex:1;height:1px;background:repeating-linear-gradient(90deg,#ffffff14 0 6px,#0000 6px 11px)}
-.baybody{display:none;padding:0 13px 14px}
-.bayrow.open .baybody{display:block}
-.strips{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:11px}
-.empty{font:600 11px/1 ui-monospace,monospace;color:var(--on-board-dim);padding:4px 2px 8px;letter-spacing:.04em}
-
-/* ---- write-a-strip form ---- */
-.filebox{
-  background:var(--board2);border:1px dashed var(--rail);border-radius:6px;
-  padding:14px;margin-bottom:18px;
-}
-.filebox .lbl{font:700 10px/1 ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--on-board-dim);margin-bottom:9px;display:block}
+/* ---------- file form ---------- */
+.filebox{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:15px;margin-bottom:20px}
+.filebox .lbl{font:700 10px/1 ui-monospace,monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--ink3);margin-bottom:11px;display:block}
 .filebox .r{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
-input,textarea,select.sel{
-  background:var(--strip);border:1px solid var(--paper-edge);color:var(--ink);
-  border-radius:2px;padding:8px 10px;font:13px/1.4 ui-monospace,monospace;outline:none;
-}
-input::placeholder,textarea::placeholder{color:#9a9a86}
-input:focus,textarea:focus,select.sel:focus{border-color:var(--pen);box-shadow:0 0 0 2px #2f6fb033}
+input,textarea,select.sel{background:var(--bg);border:1px solid var(--line2);color:var(--ink);border-radius:7px;padding:9px 11px;font:13px/1.4 ui-monospace,monospace;outline:none}
+input::placeholder,textarea::placeholder{color:var(--ink3)}
+input:focus,textarea:focus,select.sel:focus{border-color:var(--accent);box-shadow:0 0 0 3px #74a9ff22}
 input.grow{flex:1;min-width:200px}
-select.sel{text-transform:uppercase;font-weight:600;font-size:11px;letter-spacing:.06em}
-textarea{width:100%;margin-top:9px;resize:vertical;min-height:42px}
-button{
-  background:var(--ink);border:none;color:var(--strip);border-radius:2px;
-  padding:8px 17px;font:800 11.5px/1 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;
-}
-button:hover{background:#000}
-button.ghost{background:#0000;color:var(--on-board);border:1px solid var(--rail)}
-button.ghost:hover{background:var(--rail);color:#fff}
-button.sm{padding:6px 12px;font-size:10.5px}
-button:disabled{opacity:.5;cursor:default}
-button.file{background:var(--stamp);color:#fff}
-button.file:hover{background:var(--stamp2)}
+select.sel{text-transform:uppercase;font-weight:600;font-size:11px;letter-spacing:.05em;cursor:pointer}
+textarea{width:100%;margin-top:9px;resize:vertical;min-height:44px}
+button{background:var(--accent);border:none;color:#06101f;border-radius:7px;padding:9px 16px;font:800 11.5px/1 ui-monospace,monospace;letter-spacing:.09em;text-transform:uppercase;cursor:pointer;transition:filter .12s}
+button:hover{filter:brightness(1.1)}
+button.ghost{background:var(--s2);color:var(--ink2);border:1px solid var(--line2)}
+button.ghost:hover{background:var(--line2);color:var(--ink)}
+button.sm{padding:7px 12px;font-size:10.5px}
+button:disabled{opacity:.45;cursor:default;filter:none}
+button.go{background:var(--green);color:#04130a}
 
-/* ============================================================
-   DECISION STRIP — a longer flight strip = a clearance to sign.
-   ============================================================ */
-.dstrip{
-  position:relative;
-  background:var(--strip);background-image:linear-gradient(var(--strip),#efe9d8);
-  border:1px solid var(--paper-edge);border-radius:3px;
-  color:var(--ink);margin-bottom:16px;
-  box-shadow:0 1px 0 #fff9 inset,0 2px 4px #0004,0 6px 14px #0003;
-}
-.dstrip:before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--enr);border-radius:3px 0 0 3px}
-.dstrip.explain{background:var(--board2);color:var(--on-board);border-color:var(--lip)}
-.dstrip.explain:before{display:none}
-.dstrip .dhead{display:flex;align-items:center;gap:11px;padding:15px 22px 0}
-.did{font:800 12px/1 ui-monospace,monospace;letter-spacing:.1em;color:var(--ink);background:var(--rule);padding:4px 9px;border-radius:2px}
-.rec{font:800 9.5px/1 ui-monospace,monospace;letter-spacing:.1em;padding:4px 8px;border-radius:2px;color:#fff;background:var(--arr)}
-.rec.no{background:var(--hold)}
-.dttl{font-size:18px;font-weight:800;color:var(--ink);padding:9px 22px 2px;letter-spacing:-.2px}
-.dbody{padding:4px 22px;font-size:13.5px;color:#33372b;line-height:1.6}
-.dbody p{margin:9px 0}.dbody ul{margin:9px 0 9px 20px}.dbody li{margin:4px 0}
+/* ---------- section (collapsible, informative when shut) ---------- */
+.sec{margin-bottom:11px;border:1px solid var(--line);border-radius:var(--r);background:var(--s3);overflow:hidden}
+.sec.hot{border-color:var(--accent2)}
+.sechead{display:flex;align-items:center;gap:12px;cursor:pointer;padding:13px 16px;user-select:none}
+.sechead:hover{background:#ffffff05}
+.caret{font:700 11px/1 monospace;color:var(--ink3);transition:transform .15s,color .15s;flex-shrink:0}
+.sec.open .caret{transform:rotate(90deg);color:var(--accent)}
+.sname{font:700 12px/1 ui-monospace,monospace;letter-spacing:.13em;text-transform:uppercase;color:var(--ink2);flex-shrink:0}
+.sec:hover .sname,.sec.open .sname{color:var(--ink)}
+.count{font:700 10px/1 ui-monospace,monospace;color:var(--ink2);background:var(--s2);padding:3px 9px;border-radius:10px;flex-shrink:0}
+.count.ok{background:var(--green2);color:var(--green)}
+.preview{flex:1;font:500 11.5px/1.4 ui-monospace,monospace;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sec.open .preview{opacity:0}
+.secbody{display:none;padding:2px 14px 15px}
+.sec.open .secbody{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:11px}
+.empty{font:600 11px/1 ui-monospace,monospace;color:var(--ink3);padding:6px 2px;letter-spacing:.03em}
+
+/* ---------- task / bug card ---------- */
+.card{background:var(--s1);border:1px solid var(--line);border-radius:8px;padding:0;overflow:hidden;transition:border-color .12s;display:flex}
+.card:hover{border-color:var(--line2)}
+.card .edge{flex:0 0 3px}
+.card.task .edge{background:var(--accent)}
+.card.idea .edge{background:var(--amber)}
+.card.bug .edge{background:var(--red)}
+.card .body{flex:1;padding:12px 13px 11px;min-width:0}
+.card .top{display:flex;align-items:flex-start;gap:8px}
+.card .ttl{font-weight:600;font-size:13px;line-height:1.35;flex:1;color:var(--ink);word-break:break-word}
+.card .type{font:700 8.5px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;border-radius:5px;flex-shrink:0}
+.card.task .type{background:var(--accent2);color:var(--accent)}
+.card.idea .type{background:var(--amber2);color:var(--amber)}
+.card.bug .type{background:var(--red2);color:var(--red)}
+.card .bd{font-size:11.5px;color:var(--ink2);margin-top:6px;white-space:pre-wrap;line-height:1.5}
+.card .meta{display:flex;align-items:center;gap:7px;margin-top:11px;padding-top:9px;border-top:1px solid var(--line)}
+/* direct-manipulation advance controls instead of a dropdown */
+.nav{display:flex;align-items:center;gap:2px}
+.nav button{background:var(--s2);border:1px solid var(--line2);color:var(--ink2);border-radius:6px;padding:4px 8px;font:700 11px/1 monospace;letter-spacing:0}
+.nav button:hover:not(:disabled){background:var(--accent2);color:var(--accent);border-color:var(--accent2);filter:none}
+.nav .here{font:700 9.5px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);padding:0 5px;min-width:78px;text-align:center}
+.card .plan{font:600 10px/1 ui-monospace,monospace;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent2);margin-left:2px}
+.card .x{margin-left:auto;color:var(--ink3);cursor:pointer;font-size:13px;line-height:1;padding:2px 3px}
+.card .x:hover{color:var(--red)}
+.card .note-in{font:600 10px/1 ui-monospace,monospace;color:var(--accent);cursor:pointer;border-bottom:1px dotted var(--accent2)}
+.card .notes{margin-top:8px;border-top:1px solid var(--line);padding-top:7px}
+.card .notes div{font-size:10.5px;color:var(--ink2);margin-top:3px;font-family:ui-monospace,monospace}
+.card .notes .at{color:var(--ink3)}
+
+/* ---------- decisions ---------- */
+.ballotbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:13px 16px;margin-bottom:18px}
+.ballotbar .meter{flex:1;min-width:120px}
+.ballotbar .mtop{display:flex;justify-content:space-between;font:700 11px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);margin-bottom:7px}
+.ballotbar .mtop b{color:var(--accent)}
+.track{height:6px;border-radius:3px;background:var(--s2);overflow:hidden}
+.track i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .25s}
+.dgroup{margin-bottom:11px;border:1px solid var(--line);border-radius:var(--r);background:var(--s3);overflow:hidden}
+.dcard{background:var(--s1);border:1px solid var(--line);border-radius:8px;margin-top:11px;overflow:hidden}
+.dcard:first-child{margin-top:2px}
+.dcard.decided{border-color:var(--green2)}
+.dcard.explain{background:var(--s2);border-style:dashed}
+.dhead{display:flex;align-items:center;gap:11px;padding:15px 18px 0;flex-wrap:wrap}
+.did{font:800 11.5px/1 ui-monospace,monospace;letter-spacing:.08em;color:var(--ink);background:var(--s2);padding:5px 9px;border-radius:6px}
+.rec{font:800 9px/1 ui-monospace,monospace;letter-spacing:.1em;padding:4px 8px;border-radius:5px;background:var(--green2);color:var(--green)}
+.rec.no{background:var(--s2);color:var(--ink3)}
+.ddecided{margin-left:auto;font:800 9px/1 ui-monospace,monospace;letter-spacing:.1em;color:var(--green);background:var(--green2);padding:4px 9px;border-radius:5px;display:none}
+.dcard.decided .ddecided{display:inline-block}
+.dttl{font-size:17px;font-weight:700;color:var(--ink);padding:10px 18px 2px;letter-spacing:-.2px}
+.dbody{padding:4px 18px;font-size:13px;color:var(--ink2);line-height:1.6}
+.dbody p{margin:9px 0}.dbody ul{margin:9px 0 9px 19px}.dbody li{margin:4px 0}
 .dbody strong{color:var(--ink)}
-.dbody table{border-collapse:collapse;margin:13px 0;width:100%;font-size:12.5px}
-.dbody th,.dbody td{border:1px solid var(--rule);padding:7px 10px;text-align:left;vertical-align:top}
-.dbody th{background:#e6e0cd;color:var(--ink)}
-
-/* options = boxes you tick on the strip */
-.opts{display:flex;flex-direction:column;gap:10px;padding:6px 22px 4px}
-.opt{
-  border:1px solid var(--rule);border-left:4px solid var(--rule);border-radius:2px;
-  padding:12px 15px;cursor:pointer;background:#fbf9f1;transition:border-color .12s,background .12s;
-}
-.opt:hover{border-left-color:var(--enr);background:#fff}
-.opt.sel{border-color:var(--arr);border-left-color:var(--arr);background:#eef6ec}
-.opt-h{display:flex;align-items:center;gap:11px;font-weight:800;color:var(--ink);font-size:13.5px}
-.box{
-  width:16px;height:16px;border:2px solid #9a9a86;border-radius:2px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;font:800 12px/1 monospace;color:#0000;background:#fff;
-}
-.opt.sel .box{border-color:var(--arr);background:var(--arr);color:#fff}
-.opt.sel .box:after{content:"✓"}
-.opt .dbody{padding:7px 0 0}
+.dbody table{border-collapse:collapse;margin:12px 0;width:100%;font-size:12px}
+.dbody th,.dbody td{border:1px solid var(--line2);padding:7px 10px;text-align:left;vertical-align:top}
+.dbody th{background:var(--s2);color:var(--ink)}
+.opts{display:flex;flex-direction:column;gap:9px;padding:8px 18px 4px}
+.opt{border:1px solid var(--line2);border-radius:8px;padding:13px 15px;cursor:pointer;background:var(--s2);transition:border-color .12s,background .12s}
+.opt:hover{border-color:var(--accent)}
+.opt.sel{border-color:var(--green);background:#13241a}
+.opt-h{display:flex;align-items:center;gap:11px;font-weight:700;color:var(--ink);font-size:13.5px}
+.radio{width:17px;height:17px;border:2px solid var(--ink3);border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.opt.sel .radio{border-color:var(--green)}
+.opt.sel .radio:after{content:"";width:9px;height:9px;border-radius:50%;background:var(--green)}
+.opt .dbody{padding:8px 0 0;color:var(--ink2)}
 .opt .dbody p:first-child{margin-top:0}
-
-pre.code{
-  background:#1c1f17;border:1px solid #2c3025;border-left:3px solid var(--enr);
-  border-radius:2px;padding:12px 14px;overflow-x:auto;margin:9px 0;line-height:1.55;
-}
-pre.code code{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;color:#d7d2c2}
-code{background:#e6e0cd;border-radius:2px;padding:1px 5px;font-family:ui-monospace,monospace;font-size:.88em;color:#3a3d30}
-.dbody p code,.opt code{background:#e6e0cd}
-/* phosphor-free code highlight, tuned to the dark code well */
-.k{color:#e89b6c}.t{color:#8fc7e8}.s{color:#bfe09a}.c{color:#7f8870;font-style:italic}.n{color:#d6b3e8}
-
-.drow{display:flex;align-items:center;gap:10px;padding:13px 22px;flex-wrap:wrap;border-top:1px dashed var(--rule);margin-top:8px}
-.recline{padding:6px 22px 2px;font-size:12.5px;color:var(--ink2)}
+pre.code{background:var(--code);border:1px solid var(--line);border-radius:7px;padding:12px 14px;overflow-x:auto;margin:9px 0;line-height:1.55}
+pre.code code{font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre;color:#cdd6e2}
+code{background:var(--s2);border-radius:5px;padding:1px 5px;font-family:ui-monospace,monospace;font-size:.87em;color:#cdd6e2}
+.k{color:#ff9e7a}.t{color:#82c8ff}.s{color:#9fe0a0}.c{color:#5d6b7d;font-style:italic}.n{color:#d4a8ff}
+.recline{padding:8px 18px 2px;font-size:12.5px;color:var(--ink2)}
 .recline strong{color:var(--ink)}
-.clr{font:700 10.5px/1 ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--stamp);cursor:pointer;border-bottom:1px solid #d8a59e;display:none}
+textarea.comment{margin:6px 18px 0;width:calc(100% - 36px);background:var(--bg)}
+.drow{display:flex;align-items:center;gap:10px;padding:13px 18px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:9px}
+.clr{font:700 10.5px/1 ui-monospace,monospace;letter-spacing:.05em;text-transform:uppercase;color:var(--red);cursor:pointer;border-bottom:1px solid var(--red2);display:none}
 .clr.on{display:inline-block}
-textarea.comment{margin:4px 22px 0;width:calc(100% - 44px);background:#fbf9f1}
-.qbox{padding:4px 22px 14px}
-.q{background:#fbf9f1;border:1px solid var(--rule);border-radius:2px;padding:10px 12px;margin-top:8px;font-size:12.5px;color:var(--ink)}
-.q .qa{color:var(--ink2);font-style:italic}
-.q .st{font:800 9px/1 ui-monospace,monospace;letter-spacing:.08em;padding:2px 6px;border-radius:2px;margin-left:8px;color:#fff}
-.q .st.open{background:var(--enr)}.q .st.answered{background:var(--arr)}
-.q .ans{margin-top:6px;color:#33372b;border-left:2px solid var(--arr);padding-left:9px}
+.qbox{padding:4px 18px 14px}
+.q{background:var(--s2);border:1px solid var(--line);border-radius:7px;padding:10px 12px;margin-top:8px;font-size:12px;color:var(--ink)}
+.q .qa{color:var(--ink3);font-style:italic}
+.q .st{font:800 8.5px/1 ui-monospace,monospace;letter-spacing:.08em;padding:2px 6px;border-radius:4px;margin-left:8px}
+.q .st.open{background:var(--amber2);color:var(--amber)}.q .st.answered{background:var(--green2);color:var(--green)}
+.q .ans{margin-top:6px;color:var(--ink2);border-left:2px solid var(--green);padding-left:9px}
 
-/* collapsible decision group = a board section */
-.dgroup{margin-bottom:14px;border:1px solid var(--lip);border-radius:6px;background:var(--board2);box-shadow:0 1px 2px #0005 inset}
-.ghead{display:flex;align-items:center;gap:11px;cursor:pointer;padding:12px 16px;user-select:none}
-.ghead:hover .gname{color:#fff}
-.ghead .caret{font:700 11px/1 monospace;color:var(--enr);transition:transform .15s;width:11px}
-.dgroup.open .ghead .caret{transform:rotate(90deg)}
-.gname{font:700 12px/1 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--on-board)}
-.gcount{font:700 10px/1 ui-monospace,monospace;color:var(--ink2);background:var(--rail);padding:2px 7px;border-radius:10px}
-.ghead .fill{flex:1;height:1px;background:repeating-linear-gradient(90deg,#ffffff14 0 6px,#0000 6px 11px)}
-.gbody{display:none;padding:4px 13px 13px}
-.dgroup.open .gbody{display:block}
-
-/* scratch = a clipboard pad */
-#scratch{width:100%;min-height:440px;font-family:ui-monospace,monospace;font-size:13px;line-height:1.65;background:var(--strip);color:var(--ink)}
+/* ---------- scratch ---------- */
+#scratch{width:100%;min-height:460px;font-family:ui-monospace,monospace;font-size:13px;line-height:1.65;background:var(--s1);color:var(--ink)}
 .savebar{display:flex;align-items:center;gap:13px;margin-top:11px}
-.savebar .s{font:600 11px/1 ui-monospace,monospace;color:var(--on-board-dim);letter-spacing:.06em}
+.savebar .s{font:600 11px/1 ui-monospace,monospace;color:var(--ink3);letter-spacing:.05em}
 
-/* the sign-and-file bar */
-.bar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:linear-gradient(#1a1e15f7,#14170f f7);backdrop-filter:blur(6px);border-top:2px solid var(--lip);box-shadow:0 -4px 14px #0006;padding:13px 24px;display:none;align-items:center;gap:18px}
+/* ---------- submit bar / toast ---------- */
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:35;background:#0b0e13f7;backdrop-filter:blur(10px);border-top:1px solid var(--line);padding:13px 26px;display:none;align-items:center;gap:18px}
 .bar.on{display:flex}
-.bar .p{flex:1;font:700 12px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--on-board-dim)}
-.bar .p b{color:var(--arr);font-size:15px}
-.toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:var(--strip);border:1px solid var(--paper-edge);border-left:4px solid var(--arr);color:var(--ink);padding:11px 18px;border-radius:2px;font:600 12px/1.4 ui-monospace,monospace;opacity:0;transition:opacity .2s;pointer-events:none;max-width:92%;z-index:50;box-shadow:0 4px 14px #0006}
+.bar .inner{max-width:1180px;margin:0 auto;width:100%;display:flex;align-items:center;gap:16px}
+.bar .p{flex:1;font:700 12px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)}
+.bar .p b{color:var(--accent);font-size:15px}
+.toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:var(--s1);border:1px solid var(--line2);border-left:4px solid var(--green);color:var(--ink);padding:12px 18px;border-radius:7px;font:600 12px/1.4 ui-monospace,monospace;opacity:0;transition:opacity .2s;pointer-events:none;max-width:92%;z-index:50;box-shadow:0 8px 30px #0008}
 .toast.on{opacity:1}
 
 @media (max-width:640px){
-  .strips{grid-template-columns:1fr}
-  main{padding:18px 14px}
-  .banner{padding:10px 14px 0}.bays{padding:0 8px}
+  .grid{grid-template-columns:1fr}
+  main,.hero,.tabs{padding-left:14px;padding-right:14px}
+  .ribbon .seg{min-width:88px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
 <header>
-  <div class="banner">
-    <div class="callsign"><span class="wm">TOWER</span><span class="sub">JET&nbsp;FLIGHT&nbsp;DECK</span></div>
-    <div class="atc">
-      <span><span class="dot"></span>ON STATION</span>
-      <span>RATIFIED <b id="rat">—</b></span>
-      <span>LAST FILE <b id="last">—</b></span>
+  <div class="hero">
+    <div class="brandrow">
+      <span class="wm">TOWER</span><span class="tagline">jet · mission control</span>
+      <div class="status">
+        <span class="live"><i></i>on station</span>
+        <span>ratified <b id="rat">—</b></span>
+        <span>last file <b id="last">—</b></span>
+      </div>
     </div>
+    <div class="ribbon" id="ribbon"></div>
   </div>
-  <div class="bays" id="tabs"></div>
+  <div class="tabs" id="tabs"></div>
 </header>
 <main>
   <section class="view" id="v-board"></section>
@@ -733,63 +679,76 @@ textarea.comment{margin:4px 22px 0;width:calc(100% - 44px);background:#fbf9f1}
   <section class="view" id="v-bugs"></section>
   <section class="view" id="v-scratch"></section>
 </main>
-<div class="bar" id="bar"><div class="p" id="prog"></div><button class="file" id="submit" onclick="submitBallot()">Sign &amp; file decisions</button></div>
+<div class="bar" id="bar"><div class="inner"><div class="p" id="prog"></div><button class="ghost sm" onclick="jumpNext()">Next undecided ↓</button><button class="go" id="submit" onclick="submitBallot()">Sign &amp; file</button></div></div>
 <div class="toast" id="toast"></div>
 <script>
 let S=null;
 const TABS=[['board','Board'],['decisions','Decisions'],['bugs','Bugs'],['scratch','Scratch']];
 const answers={},comments={};
-const open={stage:{},group:{}};         /* collapse state, default closed */
+const sec={};                 /* collapse state by key — default closed */
 let active=location.hash.slice(1)||'board';
 
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function key(s){return (s||'').replace(/[^a-z0-9]+/gi,'_');}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');clearTimeout(t._);t._=setTimeout(()=>t.classList.remove('on'),3400);}
 async function api(url,body){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return r.json();}
 async function load(){S=await (await fetch('/api/state')).json();render();}
 
 function render(){
   const dec=S.ballot.filter(x=>x.kind==='decision');
+  const tasks=S.board.cards.filter(c=>c.type!=='bug');
   const bugs=S.board.cards.filter(c=>c.type==='bug');
-  const counts={board:S.board.cards.filter(c=>c.type!=='bug').length,decisions:dec.length,bugs:bugs.length,scratch:0};
+  const counts={board:tasks.length,decisions:dec.length,bugs:bugs.length,scratch:0};
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
-    '<div class="bay'+(id===active?' on':'')+'" onclick="go(\\''+id+'\\')">'+label+
+    '<div class="tab'+(id===active?' on':'')+'" onclick="go(\\''+id+'\\')">'+label+
     (counts[id]?'<span class="n">'+counts[id]+'</span>':'')+'</div>').join('');
   TABS.forEach(([id])=>document.getElementById('v-'+id).classList.toggle('on',id===active));
   document.getElementById('bar').classList.toggle('on',active==='decisions');
-  const rat=document.getElementById('rat');if(rat)rat.textContent=S.ratified||'—';
-  const last=document.getElementById('last');if(last)last.textContent=S.lastSubmit||'—';
-  renderBoard();renderDecisions();renderBugs();renderScratch();
+  document.getElementById('rat').textContent=S.ratified||'—';
+  document.getElementById('last').textContent=S.lastSubmit||'—';
+  renderRibbon(tasks);renderBoard();renderDecisions();renderBugs();renderScratch();
 }
-function go(id){active=id;location.hash=id;render();}
+function go(id){active=id;location.hash=id;render();window.scrollTo(0,0);}
 
-/* ---- collapsible bay (stage / group) ---- */
-function bay(kind,key,name,count,inner){
-  const isOpen=!!open[kind][key];
-  return '<div class="'+(kind==='group'?'dgroup':'bayrow')+(isOpen?' open':'')+'" id="'+kind+'-'+key+'">'+
-    '<div class="'+(kind==='group'?'ghead':'bayhead')+'" onclick="toggle(\\''+kind+'\\',\\''+key+'\\')">'+
-      '<span class="caret">&#9656;</span>'+
-      '<span class="'+(kind==='group'?'gname':'bname')+'">'+esc(name)+'</span>'+
-      '<span class="'+(kind==='group'?'gcount':'bcount')+'">'+count+'</span>'+
-      '<span class="fill"></span></div>'+
-    '<div class="'+(kind==='group'?'gbody':'baybody')+'">'+inner+'</div></div>';
+/* ---- pipeline ribbon (the signature) ---- */
+function renderRibbon(tasks){
+  const h=S.stages.map((st,i)=>{
+    const n=tasks.filter(c=>c.stage===st).length;
+    const cls=st==='done'?'done':(n>0&&st!=='backlog'&&st!=='done'?'hot':'');
+    return '<button class="seg '+cls+'" title="jump to '+st+'" onclick="jumpStage(\\''+st+'\\')">'+
+      '<span class="sg">'+esc(st.replace(/-/g,' '))+'</span><span class="sc">'+n+'</span></button>';
+  }).join('');
+  document.getElementById('ribbon').innerHTML=h;
 }
-function toggle(kind,key){open[kind][key]=!open[kind][key];const el=document.getElementById(kind+'-'+key);if(el)el.classList.toggle('open',open[kind][key]);}
+function jumpStage(st){if(active!=='board')go('board');sec['stage_'+key(st)]=true;render();setTimeout(()=>{const el=document.getElementById('sec-stage_'+key(st));if(el)el.scrollIntoView({behavior:'smooth',block:'start'});},30);}
+
+/* ---- collapsible section shell ---- */
+function section(skey,name,countHtml,preview,inner,extraCls){
+  const isOpen=!!sec[skey];
+  return '<div class="sec'+(isOpen?' open':'')+(extraCls?' '+extraCls:'')+'" id="sec-'+skey+'">'+
+    '<div class="sechead" onclick="toggleSec(\\''+skey+'\\')">'+
+      '<span class="caret">&#9656;</span><span class="sname">'+esc(name)+'</span>'+countHtml+
+      '<span class="preview">'+preview+'</span></div>'+
+    '<div class="secbody">'+inner+'</div></div>';
+}
+function toggleSec(k){sec[k]=!sec[k];const el=document.getElementById('sec-'+k);if(el)el.classList.toggle('open',sec[k]);}
 
 /* ---- board ---- */
 function renderBoard(){
   const cards=S.board.cards.filter(c=>c.type!=='bug');
-  let h='<div class="hint">File a task or idea below. I slide strips through the bays as I work — <b>this is live status</b>; refresh to see movement.</div>';
+  let h='<div class="hint">File a task or idea, then move it down the pipeline with <b>◀ ▶</b>. I advance strips as I work — this is live status.</div>';
   h+=fileForm('task');
   for(const st of S.stages){
     const inSt=cards.filter(c=>c.stage===st);
-    const inner=inSt.length?'<div class="strips">'+inSt.map(strip).join('')+'</div>':'<div class="empty">— bay empty —</div>';
-    h+=bay('stage',st,st.replace('-',' '),inSt.length,inner);
+    const inner=inSt.length?'<div class="grid">'+inSt.map(card).join('')+'</div>':'<div class="empty">— empty —</div>';
+    const prev=inSt.length?esc(inSt.slice(0,2).map(c=>c.title).join(' · ')+(inSt.length>2?' +'+(inSt.length-2):'')):'';
+    h+=section('stage_'+key(st),st.replace(/-/g,' '),'<span class="count">'+inSt.length+'</span>',prev,inner);
   }
   document.getElementById('v-board').innerHTML=h;
 }
 function fileForm(type){
-  return '<div class="filebox"><span class="lbl">'+(type==='bug'?'File a defect':'File a strip')+'</span><div class="r">'+
-    '<input class="grow" id="add-ttl-'+type+'" placeholder="'+(type==='bug'?'Describe a bug\\u2026':'New task or idea\\u2026')+'">'+
+  return '<div class="filebox"><span class="lbl">'+(type==='bug'?'Report a defect':'File new work')+'</span><div class="r">'+
+    '<input class="grow" id="add-ttl-'+type+'" placeholder="'+(type==='bug'?'What\\u2019s broken?':'Task or idea\\u2026')+'">'+
     (type==='bug'?'':'<select class="sel" id="add-type"><option value="task">task</option><option value="idea">idea</option></select>')+
     '<select class="sel" id="add-stage-'+type+'">'+S.stages.map(s=>'<option'+(s==='backlog'?' selected':'')+'>'+s+'</option>').join('')+'</select>'+
     '<button class="sm" onclick="addCard(\\''+type+'\\')">File</button></div>'+
@@ -800,104 +759,117 @@ async function addCard(type){
   if(!t.value.trim())return;
   const realType=type==='bug'?'bug':(document.getElementById('add-type').value);
   const j=await api('/api/card/add',{type:realType,title:t.value,body:document.getElementById('add-body-'+type).value,stage:document.getElementById('add-stage-'+type).value});
-  if(j.ok){t.value='';document.getElementById('add-body-'+type).value='';await load();toast('Strip filed.');}
+  if(j.ok){t.value='';document.getElementById('add-body-'+type).value='';await load();toast('Filed.');}
 }
-function strip(c){
-  const planLink=c.plan?'<a class="plan" href="#" title="sidequest plan">\\u25a4 '+esc(c.plan)+'</a>':'';
-  const notes=c.notes&&c.notes.length?'<div class="notes">'+c.notes.map(n=>'<div>\\u2022 '+esc(n.t)+' <span class="at">'+esc(n.at)+'</span></div>').join('')+'</div>':'';
-  return '<div class="strip '+c.type+'"><div class="tab"></div><div class="face"><div class="top"><span class="ttl">'+esc(c.title)+'</span><span class="type">'+c.type+'</span></div>'+
+function card(c){
+  const i=S.stages.indexOf(c.stage);
+  const back=i>0?S.stages[i-1]:null,fwd=i<S.stages.length-1?S.stages[i+1]:null;
+  const planLink=c.plan?'<a class="plan" href="#" title="sidequest plan">▤ '+esc(c.plan)+'</a>':'';
+  const notes=c.notes&&c.notes.length?'<div class="notes">'+c.notes.map(n=>'<div>• '+esc(n.t)+' <span class="at">'+esc(n.at)+'</span></div>').join('')+'</div>':'';
+  return '<div class="card '+c.type+'"><div class="edge"></div><div class="body">'+
+    '<div class="top"><span class="ttl">'+esc(c.title)+'</span><span class="type">'+c.type+'</span></div>'+
     (c.body?'<div class="bd">'+esc(c.body)+'</div>':'')+
-    '<div class="meta"><select onchange="moveCard(\\''+c.id+'\\',this.value)">'+
-      S.stages.map(s=>'<option'+(s===c.stage?' selected':'')+'>'+s+'</option>').join('')+'</select>'+
-      planLink+'<span class="note-in" onclick="addNote(\\''+c.id+'\\')">+ note</span>'+
-      '<span class="x" title="delete" onclick="delCard(\\''+c.id+'\\')">\\u2715</span></div>'+notes+'</div></div>';
+    '<div class="meta"><div class="nav">'+
+      '<button onclick="moveCard(\\''+c.id+'\\',\\''+(back||'')+'\\')" '+(back?'':'disabled')+' title="'+(back||'')+'">◀</button>'+
+      '<span class="here">'+esc(c.stage.replace(/-/g,' '))+'</span>'+
+      '<button onclick="moveCard(\\''+c.id+'\\',\\''+(fwd||'')+'\\')" '+(fwd?'':'disabled')+' title="'+(fwd||'')+'">▶</button></div>'+
+      planLink+'<span class="note-in" onclick="addNote(\\''+c.id+'\\')">+note</span>'+
+      '<span class="x" title="delete" onclick="delCard(\\''+c.id+'\\')">✕</span></div>'+notes+'</div></div>';
 }
-async function moveCard(id,stage){await api('/api/card/update',{id,stage});await load();}
-async function delCard(id){if(confirm('Delete this strip?')){await api('/api/card/delete',{id});await load();toast('Strip removed.');}}
-async function addNote(id){const n=prompt('Annotate (note):');if(n&&n.trim()){await api('/api/card/update',{id,note:n});await load();}}
+async function moveCard(id,stage){if(!stage)return;await api('/api/card/update',{id,stage});await load();}
+async function delCard(id){if(confirm('Delete this card?')){await api('/api/card/delete',{id});await load();toast('Deleted.');}}
+async function addNote(id){const n=prompt('Add a note:');if(n&&n.trim()){await api('/api/card/update',{id,note:n});await load();}}
 
 /* ---- bugs ---- */
 function renderBugs(){
   const bugs=S.board.cards.filter(c=>c.type==='bug');
-  let h='<div class="hint">Known defects. Same bays as tasks; I slide them as they get fixed.</div>'+fileForm('bug');
+  let h='<div class="hint">Known defects. Same pipeline; move them with <b>◀ ▶</b> as they get fixed.</div>'+fileForm('bug');
   if(!bugs.length){h+='<div class="empty">— no open defects —</div>';document.getElementById('v-bugs').innerHTML=h;return;}
   for(const st of S.stages){
     const inSt=bugs.filter(b=>b.stage===st);if(!inSt.length)continue;
-    h+=bay('stage','bug-'+st,st.replace('-',' '),inSt.length,'<div class="strips">'+inSt.map(strip).join('')+'</div>');
+    const prev=esc(inSt.slice(0,2).map(c=>c.title).join(' · ')+(inSt.length>2?' +'+(inSt.length-2):''));
+    h+=section('bug_'+key(st),st.replace(/-/g,' '),'<span class="count">'+inSt.length+'</span>',prev,'<div class="grid">'+inSt.map(card).join('')+'</div>');
   }
   document.getElementById('v-bugs').innerHTML=h;
 }
 
 /* ---- decisions ---- */
 function renderDecisions(){
-  let h='<div class="hint">Every open decision is here, grouped and <b>collapsed</b> — open a section to read it. Tick an option (click again or clear to undo), ask a question if something\\u2019s missing, then <b>sign &amp; file</b>. Tell Claude \\u201cgo\\u201d to ratify + implement.</div>';
-  // explainers first (loose intro prose)
-  for(const s of S.ballot){if(s.kind==='explainer')h+='<div class="dstrip explain"><div class="dbody">'+s.html+'</div></div>';}
-  // group decisions + open one-liners under their group heading
-  const groups=[];const byGroup={};
-  for(const s of S.ballot){
-    if(s.kind!=='decision'&&s.kind!=='open')continue;
-    const g=s.group||'Other';
-    if(!byGroup[g]){byGroup[g]=[];groups.push(g);}
-    byGroup[g].push(s);
-  }
+  const dec=S.ballot.filter(x=>x.kind==='decision');
+  const done=Object.keys(answers).length;
+  let h='<div class="ballotbar"><div class="meter"><div class="mtop"><span>Decisions</span><span><b>'+done+'</b> / '+dec.length+' decided</span></div>'+
+    '<div class="track"><i style="width:'+(dec.length?Math.round(done/dec.length*100):0)+'%"></i></div></div></div>';
+  h+='<div class="hint">Open a group, tick an option (click again or clear to undo), ask if something\\u2019s missing, then <b>sign &amp; file</b>. Tell Claude \\u201cgo\\u201d to ratify + implement.</div>';
+  for(const s of S.ballot){if(s.kind==='explainer')h+='<div class="dcard explain"><div class="dbody">'+s.html+'</div></div>';}
+  const groups=[],byG={};
+  for(const s of S.ballot){if(s.kind!=='decision'&&s.kind!=='open')continue;const g=s.group||'Other';if(!byG[g]){byG[g]=[];groups.push(g);}byG[g].push(s);}
   for(const g of groups){
-    const items=byGroup[g];
+    const items=byG[g];
+    const ids=items.filter(s=>s.kind==='decision').map(s=>s.id);
+    const gdone=ids.filter(id=>answers[id]).length;
+    const all=ids.length&&gdone===ids.length;
+    const cnt='<span class="count'+(all?' ok':'')+'">'+gdone+' / '+ids.length+'</span>';
+    const prev=esc(items.map(s=>s.id).filter(Boolean).join('  '));
     const inner=items.map(s=>s.kind==='decision'?decisionCard(s):openCard(s)).join('');
-    h+=bay('group',g.replace(/[^a-z0-9]+/gi,'_'),g,items.length,inner);
+    h+=section('grp_'+key(g),g,cnt,prev,inner,'dgroup');
   }
   document.getElementById('v-decisions').innerHTML=h;
-  // re-apply ticks for already-picked options
   for(const s of S.ballot){if(s.id&&answers[s.id])markPick(s.id,answers[s.id]);}
-  progress();
 }
 function decisionCard(s){
-  const rec=s.rec?(/no rec/i.test(s.rec)?'<span class="rec no">NO REC</span>':'<span class="rec">REC '+esc(s.rec.replace(/^rec\\s+/i,'').toUpperCase())+'</span>'):'';
+  const rec=s.rec?(/no rec/i.test(s.rec)?'<span class="rec no">no rec</span>':'<span class="rec">rec '+esc(s.rec.replace(/^rec\\s+/i,'').toUpperCase())+'</span>'):'';
   const opts=(s.options||[]).map(o=>'<div class="opt" id="o-'+s.id+'-'+o.key+'" onclick="pick(\\''+s.id+'\\',\\''+o.key+'\\')">'+
-    '<div class="opt-h"><span class="box"></span>Option '+o.key+' \\u2014 '+esc(o.name)+'</div><div class="dbody">'+o.html+'</div></div>').join('');
+    '<div class="opt-h"><span class="radio"></span>Option '+o.key+' \\u2014 '+esc(o.name)+'</div><div class="dbody">'+o.html+'</div></div>').join('');
   const qs=S.board.questions.filter(q=>q.decisionId===s.id);
   const qhtml=qs.length?'<div class="qbox">'+qs.map(q=>'<div class="q">'+esc(q.text)+'<span class="st '+q.status+'">'+q.status+'</span>'+
-    (q.answer?'<div class="ans">'+esc(q.answer)+'</div>':'<div class="qa">awaiting Claude \\u2014 appears here or updates the card</div>')+'</div>').join('')+'</div>':'';
-  return '<div class="dstrip"><div class="dhead"><span class="did">'+esc(s.id)+'</span>'+rec+'</div>'+
-    '<div class="dttl">'+esc(s.title)+'</div>'+
-    '<div class="dbody">'+s.intro+'</div><div class="opts">'+opts+'</div>'+
+    (q.answer?'<div class="ans">'+esc(q.answer)+'</div>':'<div class="qa">awaiting Claude</div>')+'</div>').join('')+'</div>':'';
+  return '<div class="dcard'+(answers[s.id]?' decided':'')+'" id="d-'+s.id+'"><div class="dhead"><span class="did">'+esc(s.id)+'</span>'+rec+
+    '<span class="ddecided">✓ chosen</span></div>'+
+    '<div class="dttl">'+esc(s.title)+'</div><div class="dbody">'+s.intro+'</div><div class="opts">'+opts+'</div>'+
     (s.recommendation?'<div class="recline"><strong>Recommendation:</strong> '+strip2(s.recommendation)+'</div>':'')+
     '<textarea class="comment" id="c-'+s.id+'" placeholder="Comment (optional)" oninput="comments[\\''+s.id+'\\']=this.value">'+esc(comments[s.id]||'')+'</textarea>'+
-    '<div class="drow"><span class="clr" id="clr-'+s.id+'" onclick="clearPick(\\''+s.id+'\\')">\\u2715 clear</span>'+
+    '<div class="drow"><span class="clr" id="clr-'+s.id+'" onclick="clearPick(\\''+s.id+'\\')">✕ clear</span>'+
     '<button class="ghost sm" onclick="ask(\\''+s.id+'\\')">Ask a question</button>'+
-    '<button class="ghost sm" onclick="regen(\\''+s.id+'\\')">\\u21bb Improve examples</button></div>'+qhtml+'</div>';
+    '<button class="ghost sm" onclick="regen(\\''+s.id+'\\')">↻ Improve examples</button></div>'+qhtml+'</div>';
 }
 function openCard(s){
   const qs=S.board.questions.filter(q=>q.decisionId===s.id);
   const qhtml=qs.length?'<div class="qbox">'+qs.map(q=>'<div class="q">'+esc(q.text)+'<span class="st '+q.status+'">'+q.status+'</span>'+
     (q.answer?'<div class="ans">'+esc(q.answer)+'</div>':'<div class="qa">awaiting Claude</div>')+'</div>').join('')+'</div>':'';
-  return '<div class="dstrip"><div class="dhead"><span class="did">'+esc(s.id||'\\u2014')+'</span><span class="rec no">OPEN</span></div>'+
+  return '<div class="dcard"><div class="dhead"><span class="did">'+esc(s.id||'\\u2014')+'</span><span class="rec no">open</span></div>'+
     '<div class="dbody">'+strip2(s.html)+'</div>'+
     '<div class="drow"><button class="ghost sm" onclick="ask(\\''+s.id+'\\')">Ask / expand into a full card</button>'+
-    '<button class="ghost sm" onclick="regen(\\''+s.id+'\\')">\\u21bb Improve examples</button></div>'+qhtml+'</div>';
+    '<button class="ghost sm" onclick="regen(\\''+s.id+'\\')">↻ Improve examples</button></div>'+qhtml+'</div>';
 }
 function strip2(html){return (html||'').replace(/^<p>/,'').replace(/<\\/p>$/,'').replace(/^<ul>/,'').replace(/<\\/ul>$/,'');}
-function markPick(id,key){const s=S.ballot.find(x=>x.id===id);if(!s||!s.options)return;for(const o of s.options){const el=document.getElementById('o-'+id+'-'+o.key);if(el)el.classList.toggle('sel',o.key===key);}document.getElementById('clr-'+id)?.classList.add('on');}
-function pick(id,key){answers[id]=key;markPick(id,key);progress();}
-function clearPick(id){delete answers[id];const s=S.ballot.find(x=>x.id===id);if(s&&s.options)for(const o of s.options)document.getElementById('o-'+id+'-'+o.key)?.classList.remove('sel');document.getElementById('clr-'+id)?.classList.remove('on');progress();}
-function progress(){const dec=S.ballot.filter(x=>x.kind==='decision');const p=document.getElementById('prog');if(p)p.innerHTML='<b>'+Object.keys(answers).length+'</b> / '+dec.length+' decided';}
-async function ask(id){const t=prompt('What do you want to know about '+id+'? (e.g. "what are the tradeoffs?")');if(t&&t.trim()){const j=await api('/api/ask',{decisionId:id,text:t});if(j.ok){await load();toast('Question saved \\u2014 Claude will answer on this card.');}}}
-async function regen(id){const s=S.ballot.find(x=>x.id===id);const title=s?s.title:id;const j=await api('/api/regen',{id,title});if(j.ok)toast('Queued \\u2014 Claude will improve this card\\u2019s examples.');}
+function markPick(id,k){const s=S.ballot.find(x=>x.id===id);if(!s||!s.options)return;for(const o of s.options){const el=document.getElementById('o-'+id+'-'+o.key);if(el)el.classList.toggle('sel',o.key===k);}document.getElementById('clr-'+id)?.classList.add('on');document.getElementById('d-'+id)?.classList.add('decided');}
+function pick(id,k){answers[id]=k;markPick(id,k);refreshProgress();}
+function clearPick(id){delete answers[id];const s=S.ballot.find(x=>x.id===id);if(s&&s.options)for(const o of s.options)document.getElementById('o-'+id+'-'+o.key)?.classList.remove('sel');document.getElementById('clr-'+id)?.classList.remove('on');document.getElementById('d-'+id)?.classList.remove('decided');refreshProgress();}
+function refreshProgress(){renderDecisions();}
+function jumpNext(){
+  const dec=S.ballot.filter(x=>x.kind==='decision');
+  const next=dec.find(s=>!answers[s.id]);
+  if(!next){toast('All decisions made — sign & file.');return;}
+  const g=next.group||'Other';sec['grp_'+key(g)]=true;renderDecisions();
+  setTimeout(()=>{const el=document.getElementById('d-'+next.id);if(el)el.scrollIntoView({behavior:'smooth',block:'center'});},40);
+}
+async function ask(id){const t=prompt('What do you want to know about '+id+'?');if(t&&t.trim()){const j=await api('/api/ask',{decisionId:id,text:t});if(j.ok){await load();toast('Question saved — Claude will answer on this card.');}}}
+async function regen(id){const s=S.ballot.find(x=>x.id===id);const title=s?s.title:id;const j=await api('/api/regen',{id,title});if(j.ok)toast('Queued — Claude will improve this card\\u2019s examples.');}
 async function submitBallot(){
   const dec=S.ballot.filter(x=>x.kind==='decision');
   const results=dec.map(s=>({id:s.id,title:s.title,choice:answers[s.id]||'',comment:comments[s.id]||''}));
-  const btn=document.getElementById('submit');btn.disabled=true;btn.textContent='Filing\\u2026';
+  const btn=document.getElementById('submit');btn.disabled=true;btn.textContent='Filing…';
   const j=await api('/api/submit',{results});
-  toast(j.ok?'Filed to '+j.path+' \\u2014 tell Claude \\u201cgo\\u201d to ratify + implement.':'Error');
-  btn.textContent='Filed \\u2713';setTimeout(()=>{btn.textContent='Sign & file decisions';btn.disabled=false;},2200);
+  toast(j.ok?'Filed to '+j.path+' — tell Claude “go” to ratify + implement.':'Error');
+  btn.textContent='Filed ✓';setTimeout(()=>{btn.textContent='Sign & file';btn.disabled=false;},2200);
 }
 
 /* ---- scratch ---- */
 function renderScratch(){
   const v=document.getElementById('v-scratch');
   if(v.dataset.init)return; v.dataset.init='1';
-  v.innerHTML='<div class="hint">A free scratch pad \\u2014 anything goes. Saved to board.json; persists across restarts.</div>'+
-    '<textarea id="scratch" placeholder="Notes, half-thoughts, paste anything\\u2026">'+esc(S.board.scratch)+'</textarea>'+
+  v.innerHTML='<div class="hint">A free scratch pad — anything goes. Saved to board.json; persists across restarts.</div>'+
+    '<textarea id="scratch" placeholder="Notes, half-thoughts, paste anything…">'+esc(S.board.scratch)+'</textarea>'+
     '<div class="savebar"><button class="sm" onclick="saveScratch()">Save</button><span class="s" id="scratch-s"></span></div>';
 }
 async function saveScratch(){const t=document.getElementById('scratch').value;const j=await api('/api/scratch',{text:t});if(j.ok){document.getElementById('scratch-s').textContent='saved '+new Date().toLocaleTimeString();S.board.scratch=t;}}
