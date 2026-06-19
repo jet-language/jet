@@ -33,6 +33,21 @@ fn fmt_is_idempotent_on_examples() {
 }
 
 #[test]
+fn fmt_preserves_s61_call_labels() {
+    // S61: call-site argument labels (`name:`) must survive fmt — previously
+    // `fmt_call_args` dropped them, so `area(width: 3, height: 4)` round-tripped
+    // to `area(3, 4)`, silently losing the labels.
+    let src = "fn area(width: Int, height: Int) -> Int {\n    return width * height\n}\n\nfn main() {\n    print(area(width: 3, height: 4))\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on labeled calls");
+    assert!(
+        out.contains("width: 3") && out.contains("height: 4"),
+        "fmt must preserve S61 call labels, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("labeled-call fmt should re-fmt");
+    assert_eq!(out, twice, "labeled-call fmt must be idempotent");
+}
+
+#[test]
 fn fmt_preserves_block_comments() {
     // S5: `/* … */` block comments, nesting allowed.
     let src = r#"/* a leading block comment */

@@ -516,6 +516,12 @@ impl<'a> Fmt<'a> {
             if i > 0 {
                 self.write(", ");
             }
+            // S61: preserve the call-site argument label `name:` (canonical
+            // `name: value` spacing, matching struct-literal field init).
+            if let Some((name, _)) = &arg.label {
+                self.write(name);
+                self.write(": ");
+            }
             match arg.convention {
                 AccessConvention::Read => {}
                 AccessConvention::Mutate => {
