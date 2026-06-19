@@ -3,7 +3,7 @@
 **Current epoch: Epoch 3.** (owner, 2026-06-19) Epoch 1 (v1.0) and Epoch 2 (GA)
 are complete — their development highlights are below under "Completed"; nothing
 in the Epoch 2 GA scope remained open. Active work is now Epoch 3
-([`docs/plans/epoch-3/`](../plans/epoch-3/)); its remaining-from-E2 loose ends are
+([`tools/Tower/docs/plans/epoch-3/`](../../tools/Tower/docs/plans/epoch-3/)); its remaining-from-E2 loose ends are
 tracked as cards in the Tower dashboard board.
 
 Each milestone is done when its exit criteria pass as tests. Examples are the
@@ -24,8 +24,8 @@ executable spec: a milestone ships with new `examples/` programs and new
 | Open owner ballots | [`decision-ballots.md`](decision-ballots.md) |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
-| Jetpack & jetos sequencing + live status | [`docs/plans/jetpack-jetos/`](../plans/jetpack-jetos/) |
-| Implementing-agent protocol | [`docs/plans/README.md`](../plans/README.md) |
+| Jetpack & jetos sequencing + live status | [`tools/Tower/docs/plans/jetpack-jetos/`](../../tools/Tower/docs/plans/jetpack-jetos/) |
+| Implementing-agent protocol | [`tools/Tower/docs/plans/README.md`](../../tools/Tower/docs/plans/README.md) |
 
 Plans are gated on ratified decisions in `syntax-decisions.md` (see
 `decision-ballots.md` for what is still open).
@@ -150,14 +150,14 @@ backend). Moved to Epoch 3: DAP step-through debugging, adoption documentation,
 **jetos is deferred to post-Epoch-3** (owner, 2026-06-18) — research track only;
 do not ratify its config/surface syntax during Epoch 2 or 3. **Jetpack** Phase 1
 environments and the typed `module { … }` surface stay active: see
-[`jetpack-jetos/README.md`](../plans/jetpack-jetos/README.md). **Live
+[`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/jetpack-jetos/README.md). **Live
 built-vs-pending status:**
-[`jetpack-jetos/IMPLEMENTATION-STATUS.md`](../plans/jetpack-jetos/IMPLEMENTATION-STATUS.md).
+[`jetpack-jetos/IMPLEMENTATION-STATUS.md`](../../tools/Tower/docs/plans/jetpack-jetos/IMPLEMENTATION-STATUS.md).
 
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-(architecture: [`unified-ecosystem.md`](../plans/jetpack-jetos/unified-ecosystem.md) §10). M12.1 verified
+(architecture: [`unified-ecosystem.md`](../../tools/Tower/docs/plans/jetpack-jetos/unified-ecosystem.md) §10). M12.1 verified
 2026-06-13.
 
 ---
@@ -167,7 +167,7 @@ built-vs-pending status:**
 Items with Epoch 2/3 plans are tracked in those plan directories — not
 duplicated here:
 
-- Async/await, Go-scale networking → [`docs/plans/epoch-3/`](../plans/epoch-3/)
+- Async/await, Go-scale networking → [`tools/Tower/docs/plans/epoch-3/`](../../tools/Tower/docs/plans/epoch-3/)
 - DAP step-through / full source-level debugger → Epoch 3 (owner, 2026-06-18)
 - Full adoption documentation (migration, services, debugging guides) → Epoch 3
   (owner, 2026-06-18); per-milestone docs stay as written

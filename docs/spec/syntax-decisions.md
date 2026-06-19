@@ -628,7 +628,7 @@ plain Rust constant data (codegen stays dumb, I3). Requires the permanent
 differential CI battery: the comptime interpreter and the compiled
 runtime must agree bit-for-bit on every evaluable expression. **Layer 2
 (M9):** built-in derives (S55 hybrid policy). **Layer 3 (Epoch 3):** typed reflection / user derives (S56) — see
-[`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md).
+[`tools/Tower/docs/plans/epoch-3/user-derives-reflection.md`](../../tools/Tower/docs/plans/epoch-3/user-derives-reflection.md).
 **Rejected forever:** token/AST macros, custom syntax, attribute macros, comptime
 types (types-as-values), const generics in v1. Rejected: closing comptime
 entirely (prior recommendation), full Zig-style comptime (imports
@@ -752,7 +752,7 @@ mandatory snake_case lint; all-PascalCase for every identifier kind.
 
 **S52 — Package manifest (M12)** *(ratified 2026-06-12; amended
 2026-06-13)*: `**jet.toml`** — tiny TOML subset, hand-parsed in the
-compiler (I6). Full layout and architecture in docs/plans/jetpack-jetos/unified-ecosystem.md (§10–11).
+compiler (I6). Full layout and architecture in tools/Tower/docs/plans/jetpack-jetos/unified-ecosystem.md (§10–11).
 
 `[package]`: `name`, `version`, `jet` (toolchain constraint), `description`,
 `license`, `repository`. `[dependencies]`: Jet deps, name-as-key, git/path/
@@ -779,7 +779,7 @@ shared **hangar** store at **`/etc/jet/hangar/`**. The manifest reshape chunk
 has since retired the old TOML constants (`jet.toml` / `jet.lock`) from
 `Source/Syntax.rs` — a clean break, no alias; `PACK_FILE` (`pack.jet`) and
 `UNIFIED_LOCK_FILE` (`.jet/lock`) are the only manifest/lock paths the compiler
-knows. See `docs/plans/jetpack-jetos/unified-ecosystem.md`.
+knows. See `tools/Tower/docs/plans/jetpack-jetos/unified-ecosystem.md`.
 
 **S53 — Concurrency surface** *(ratified 2026-06-12; deferred past v1.0)*:
 **deferred to v2** — no tasks, channels, or `std/tasks` in v1. When
@@ -917,7 +917,7 @@ the Nix provider.
 Salvage useful Forge ideas into Jetpack planning, then remove
 `examples/capstone/forge/` so there is not a competing package-manager capstone.
 The salvage record was folded into the jetpack plan and retired; its detail
-lives in git history (`docs/plans/jetpack-jetos/forge-salvage.md`).
+lives in git history (`tools/Tower/docs/plans/jetpack-jetos/forge-salvage.md`).
 
 **D-JPK7 — Jetpack priority and ref syntax** *(ratified 2026-06-15)*:
 Jetpack Phase 1 is the next implementation track. Public package refs use
@@ -967,7 +967,7 @@ source for bare (unprefixed) package entries. The realizing provider is inferred
 from the upstream (R1 routes all named sources through the `nix` provider; the
 first-party `core` provider and explicit `via:` override arrive with R2). An
 unknown source name is a friendly error listing the built-ins plus any declared
-names. Provider roadmap: `docs/plans/jetpack-jetos/README.md` §3.3 (the
+names. Provider roadmap: `tools/Tower/docs/plans/jetpack-jetos/README.md` §3.3 (the
 native-resolver design doc was folded in and retired; detail in git history).
 Rejected: a separate `packages_from("name", [...])` grouping (introduces a second
 way to attach a source; the inline `<source>:<package>` form is preferred).
@@ -1366,7 +1366,7 @@ multi-head forever (owner prefers the math/recursion ergonomics).
 ### Unified ecosystem — `jet` + `jetpack` + `jetos` (U-series)
 
 The owner-ratified design-of-record is
-`docs/plans/jetpack-jetos/unified-ecosystem.md` (status: owner-ratified,
+`tools/Tower/docs/plans/jetpack-jetos/unified-ecosystem.md` (status: owner-ratified,
 2026-06-16). Its naming ledger (§10) and the U-series below are **ratified**.
 These records establish the authoring-surface tokens; behavior lands in the
 Jetpack/Jetos implementation chunks (no syntax is invented beyond this).
@@ -1748,16 +1748,16 @@ implementation milestone is pending.
 
 > **Ballots:** every open decision below (and all new ones for M3–M14)
 > has a full ballot — options, how Rust does it, expert lean, beginner
-> lean, recommendation — in **docs/spec/decision-ballots.md**, grouped so
+> lean, recommendation — in **tools/Tower/docs/ballots/decision-ballots.md**, grouped so
 > the owner decides one milestone-sized batch at a time. The rows here
 > are the registry; the ballots are the briefing.
 
-### Registered for M3–M14 (see docs/spec/decision-ballots.md for options)
+### Registered for M3–M14 (see tools/Tower/docs/ballots/decision-ballots.md for options)
 
 
 | ID   | Question                                   | Needed by |
 | ---- | ------------------------------------------ | --------- |
-| S56  | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../plans/epoch-3/user-derives-reflection.md) |
+| S56  | typed reflection / user derives | **Epoch 3** — [`tools/Tower/docs/plans/epoch-3/user-derives-reflection.md`](../../tools/Tower/docs/plans/epoch-3/user-derives-reflection.md) |
 | S83  | external definitions for structs/modules — needs a **new separator** (`::` spent by D-BIND1); see note below | owner-paced |
 
 > **S83 — External definitions for structs and modules.** The philosophy
@@ -1778,7 +1778,7 @@ implementation milestone is pending.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
-> section above and `docs/plans/jetpack-jetos/README.md` §3.3 (provider roadmap).
+> section above and `tools/Tower/docs/plans/jetpack-jetos/README.md` §3.3 (provider roadmap).
 
 
 Group 6 (S26–S28, S45–S48, S46–S47, S55, S57) and Group 7 (S51–S54, S52)

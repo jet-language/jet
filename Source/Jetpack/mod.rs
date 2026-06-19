@@ -7,7 +7,7 @@
 //! is a compatibility provider (D-JPK5).
 //!
 //! Built std-only (I6) and independent from the `jet` binary (D-JPK1). The
-//! consolidated plan lives in `docs/plans/jetpack-jetos/README.md`.
+//! consolidated plan lives in `tools/Tower/docs/plans/jetpack-jetos/README.md`.
 
 pub mod CLI;
 pub mod EnvFile;

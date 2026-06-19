@@ -87,7 +87,7 @@ toolchain in `jet.toml` and read [versioning](docs/reference/versioning.md).
 | [docs/guide/](docs/guide/) | Learner's guide + 15-minute tour |
 | [docs/spec/](docs/spec/) | Authoritative: philosophy, syntax decisions, diagnostics, roadmap |
 | [docs/reference/](docs/reference/) | Stdlib, versioning, generated error pages |
-| [docs/plans/](docs/plans/) | Milestone implementation plans |
+| [tools/Tower/docs/](tools/Tower/docs/) | Milestone implementation plans |
 | [docs/research/](docs/research/) | Exploratory notes & cross-language idea banks |
 | [examples/features/](examples/features/) | Executable spec with golden expected output |
 | [examples/showcase/](examples/showcase/) | Real CLI tools (jetgrep, jsonfmt, wordfreq) |

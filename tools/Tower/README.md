@@ -22,7 +22,7 @@ nix develop -c node tools/Tower/Tower.mjs status
 nix develop -c node tools/Tower/Tower.mjs new <slug> "Title"
 ```
 
-Opening `docs/spec/decision-ballots.html` is a shortcut: if the server is
+Opening `tools/Tower/docs/ballots/decision-ballots.html` is a shortcut: if the server is
 running it redirects to the dashboard; otherwise it shows the command above.
 
 ## The dashboard
@@ -38,7 +38,7 @@ and a preview of what's inside, so you open only what you want.
   last submission in the status line;
 - **Board / Bugs:** each card moves down the pipeline with inline **◀ ▶**
   buttons (no dropdown) and carries its plan link, notes, and delete;
-- **Decisions:** **renders the ballot from `docs/spec/decision-ballots.md`** —
+- **Decisions:** **renders the ballot from `tools/Tower/docs/ballots/decision-ballots.md`** —
   cards are parsed out of the markdown, so there is one source of truth and no
   duplicated card data. Every open decision is a full card with selectable
   options, grouped by section. A sticky meter shows **how many are decided**,
@@ -46,7 +46,7 @@ and a preview of what's inside, so you open only what you want.
   to the first unanswered one;
 - you **tick** an option, **undo** it (click again or "✕ clear"), and add a
   per-decision comment;
-- on **Sign & file**, writes your decisions to `docs/spec/ballot-results.md` —
+- on **Sign & file**, writes your decisions to `tools/Tower/docs/ballots/ballot-results.md` —
   no copy/paste, and it **merges**: a new submission adds to or replaces by id,
   never wiping earlier decisions. Then tell Claude **"go"** and it ratifies them
   into `syntax-decisions.md`, strips the decided cards, and implements the plans;

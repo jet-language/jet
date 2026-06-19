@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Tower — the command surface for building Jet. Sequences the workflow:
-//   backlog → todo → review → plan → plan-review → implementing → done
+//   far-horizon → pre-plan → planned → decisions → implementation → done
 // plus the decision ballot and a bug list. No dependencies; pure node.
 //
 // Usage:
@@ -11,7 +11,7 @@
 // State the owner inputs (tasks/bugs/notes/decision answers/questions) lives in
 // tools/Tower/board.json — management state only; it references plan files by
 // slug and never copies their content, so the docs stay the single source of
-// truth. The ballot renders straight from docs/spec/decision-ballots.md.
+// truth. The ballot renders straight from tools/Tower/docs/ballots/decision-ballots.md.
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -21,10 +21,12 @@ import { spawn } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const P = {
-  sidequests: join(ROOT, "docs/plans/sidequests"),
-  ballotMd: join(ROOT, "docs/spec/decision-ballots.md"),
+  sidequests: join(ROOT, "tools/Tower/docs/sidequests"),
+  proposals: join(ROOT, "tools/Tower/docs/proposals"),
+  plansDir: join(ROOT, "tools/Tower/docs/plans"),
+  ballotMd: join(ROOT, "tools/Tower/docs/ballots/decision-ballots.md"),
   ratified: join(ROOT, "docs/spec/syntax-decisions.md"),
-  results: join(ROOT, "docs/spec/ballot-results.md"),
+  results: join(ROOT, "tools/Tower/docs/ballots/ballot-results.md"),
   board: join(ROOT, "tools/Tower/board.json"),
   regenQueue: join(ROOT, "tools/Tower/regen-queue.md"),
   askQueue: join(ROOT, "tools/Tower/questions-queue.md"),
@@ -37,7 +39,14 @@ const stamp = () => now().replace("T", " ").slice(0, 16);
 
 // ---- board store -----------------------------------------------------------
 
-const STAGES = ["backlog", "todo", "review", "plan", "plan-review", "implementing", "done"];
+// Pipeline stages, in order. Each is a distinct holding state:
+//   far-horizon    — ideas kept for reference; not being pursued
+//   pre-plan       — wanted, but a plan still needs to be generated
+//   planned        — has an existing plan, not yet locked in for implementation
+//   decisions      — blocked on a pending owner decision (see the Decisions tab)
+//   implementation — actively being implemented
+//   done           — shipped
+const STAGES = ["far-horizon", "pre-plan", "planned", "decisions", "implementation", "done"];
 
 function loadBoard() {
   if (!existsSync(P.board)) return { scratch: "", cards: [], questions: [] };
@@ -65,6 +74,32 @@ function readPlans() {
       const status = (md.match(/^\*\*Status:\*\*\s*(.+)$/m) || [, ""])[1].trim();
       return { slug: f.replace(/\.md$/, ""), title, status };
     });
+}
+
+// Generic markdown-doc listing (proposals, etc.) — slug, title, status line.
+function readDocList(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".md") && f.toLowerCase() !== "readme.md")
+    .sort()
+    .map((f) => {
+      const md = read(join(dir, f));
+      const title = (md.match(/^#\s+(.+)$/m) || [, f.replace(/\.md$/, "")])[1].trim();
+      const status = (md.match(/^\*\*Status:\*\*\s*(.+)$/m) || [, ""])[1].trim();
+      return { slug: f.replace(/\.md$/, ""), file: f, title, status };
+    });
+}
+
+// Map a doc "kind" to its base dir. Only these are reachable from the web UI;
+// resolveDoc refuses any slug that escapes its base (no "../" traversal).
+const DOC_DIRS = { sidequest: P.sidequests, proposal: P.proposals, plan: P.plansDir };
+function resolveDoc(kind, slug) {
+  const base = DOC_DIRS[kind];
+  if (!base || !slug) return null;
+  const clean = String(slug).replace(/\.md$/, "");
+  const file = resolve(base, clean + ".md");
+  if (file !== base && !file.startsWith(base + "/")) return null; // containment
+  return file;
 }
 
 function ratifiedCount() {
@@ -315,6 +350,7 @@ function buildState() {
     stages: STAGES,
     ballot,
     plans: readPlans(),
+    proposals: readDocList(P.proposals),
     ratified: ratifiedCount(),
     lastSubmit: existsSync(P.results) ? (read(P.results).match(/_submitted (.+?)_/) || [, ""])[1] : "",
   };
@@ -394,7 +430,7 @@ function serve(port) {
   server.listen(port, "127.0.0.1", () => {
     const url = `http://127.0.0.1:${port}`;
     out(`${C.grn}Tower${C.rst} → ${C.b}${url}${C.rst}`);
-    out(`${C.dim}board: tools/Tower/board.json · ballot: docs/spec/decision-ballots.md · Ctrl-C to stop${C.rst}`);
+    out(`${C.dim}board: tools/Tower/board.json · ballot: tools/Tower/docs/ballots/decision-ballots.md · Ctrl-C to stop${C.rst}`);
     if (process.argv.includes("--open") || process.argv.includes("-o")) openBrowser(url);
   });
 }
@@ -404,7 +440,7 @@ function handlePost(url, p, res, json) {
   switch (url) {
     case "/api/card/add": {
       const card = { id: newId(), type: p.type || "task", title: (p.title || "").trim(),
-        body: (p.body || "").trim(), stage: STAGES.includes(p.stage) ? p.stage : "backlog",
+        body: (p.body || "").trim(), stage: STAGES.includes(p.stage) ? p.stage : "far-horizon",
         plan: p.plan || null, notes: [], created: now(), updated: now() };
       if (!card.title) return json(res, 400, { ok: false, error: "title required" });
       b.cards.push(card); saveBoard(b); return json(res, 200, { ok: true, card });
@@ -413,8 +449,16 @@ function handlePost(url, p, res, json) {
       const c = b.cards.find((x) => x.id === p.id);
       if (!c) return json(res, 404, { ok: false, error: "no card" });
       if (p.stage && STAGES.includes(p.stage)) c.stage = p.stage;
-      if (typeof p.title === "string") c.title = p.title.trim();
+      if (p.type && ["task", "idea", "bug"].includes(p.type)) c.type = p.type;
+      if (typeof p.title === "string" && p.title.trim()) c.title = p.title.trim();
       if (typeof p.body === "string") c.body = p.body.trim();
+      // Full replace lets the UI edit/delete past notes; empty notes drop out.
+      if (Array.isArray(p.notes)) {
+        c.notes = p.notes
+          .filter((n) => n && typeof n.t === "string")
+          .map((n) => ({ t: n.t.trim(), at: n.at || stamp() }))
+          .filter((n) => n.t);
+      }
       if (p.note && p.note.trim()) c.notes.push({ t: p.note.trim(), at: stamp() });
       c.updated = now(); saveBoard(b); return json(res, 200, { ok: true, card: c });
     }
@@ -427,6 +471,21 @@ function handlePost(url, p, res, json) {
     case "/api/ask": {
       if (!p.text || !p.text.trim()) return json(res, 400, { ok: false, error: "empty" });
       const q = recordQuestion(p.decisionId, p.text.trim()); return json(res, 200, { ok: true, q });
+    }
+    case "/api/doc/get": {
+      const f = resolveDoc(p.kind, p.slug);
+      if (!f || !existsSync(f)) return json(res, 404, { ok: false, error: "no such doc" });
+      const raw = read(f);
+      const title = (raw.match(/^#\s+(.+)$/m) || [, p.slug])[1].trim();
+      return json(res, 200, { ok: true, kind: p.kind, slug: p.slug, title,
+        path: f.replace(ROOT + "/", ""), raw, html: renderMd(raw) });
+    }
+    case "/api/doc/save": {
+      const f = resolveDoc(p.kind, p.slug);
+      if (!f) return json(res, 400, { ok: false, error: "bad doc id" });
+      if (typeof p.text !== "string") return json(res, 400, { ok: false, error: "no text" });
+      writeFileSync(f, p.text);
+      return json(res, 200, { ok: true, html: renderMd(p.text), path: f.replace(ROOT + "/", "") });
     }
     default: return json(res, 404, { ok: false, error: "unknown endpoint" });
   }
@@ -443,7 +502,7 @@ function page() {
    TOWER — mission control for building Jet.
    Coherent dark UI. Layered ink surfaces, one indigo accent,
    restrained signal colors. The signature is a horizontal
-   PIPELINE RIBBON: the seven workflow stages flow across the
+   PIPELINE RIBBON: the six workflow stages flow across the
    hero as live, jumpable chevrons — the whole product at a
    glance. Collapsed sections stay informative (counts + preview).
    ============================================================ */
@@ -566,25 +625,41 @@ button.go{background:var(--green);color:#04130a}
 .card.bug .edge{background:var(--red)}
 .card .body{flex:1;padding:12px 13px 11px;min-width:0}
 .card .top{display:flex;align-items:flex-start;gap:8px}
-.card .ttl{font-weight:600;font-size:13px;line-height:1.35;flex:1;color:var(--ink);word-break:break-word}
-.card .type{font:700 8.5px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;border-radius:5px;flex-shrink:0}
-.card.task .type{background:var(--accent2);color:var(--accent)}
-.card.idea .type{background:var(--amber2);color:var(--amber)}
-.card.bug .type{background:var(--red2);color:var(--red)}
-.card .bd{font-size:11.5px;color:var(--ink2);margin-top:6px;white-space:pre-wrap;line-height:1.5}
+.card .ttl{font-weight:600;font-size:13px;line-height:1.35;flex:1;color:var(--ink);word-break:break-word;border-radius:4px}
+/* type picker (replaces the static badge — change a card's type inline) */
+.card .typesel{font:700 8.5px/1 ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;border-radius:5px;flex-shrink:0;border:1px solid transparent;cursor:pointer;appearance:none;-webkit-appearance:none}
+.card.task .typesel{background:var(--accent2);color:var(--accent)}
+.card.idea .typesel{background:var(--amber2);color:var(--amber)}
+.card.bug .typesel{background:var(--red2);color:var(--red)}
+.card .typesel:focus{outline:none;border-color:currentColor}
+.card .bd{font-size:11.5px;color:var(--ink2);margin-top:6px;white-space:pre-wrap;line-height:1.5;border-radius:4px;min-height:1.2em}
+/* inline-editable fields show their edge only on hover/focus */
+.card .ttl[contenteditable]:hover,.card .bd[contenteditable]:hover,.card .nt[contenteditable]:hover{box-shadow:inset 0 0 0 1px var(--line2)}
+.card .ttl[contenteditable]:focus,.card .bd[contenteditable]:focus,.card .nt[contenteditable]:focus{outline:none;box-shadow:inset 0 0 0 1px var(--accent);background:var(--bg)}
+.card .bd:empty:before{content:attr(data-ph);color:var(--ink3);font-style:italic}
 .card .meta{display:flex;align-items:center;gap:7px;margin-top:11px;padding-top:9px;border-top:1px solid var(--line)}
 /* direct-manipulation advance controls instead of a dropdown */
 .nav{display:flex;align-items:center;gap:2px}
 .nav button{background:var(--s2);border:1px solid var(--line2);color:var(--ink2);border-radius:6px;padding:4px 8px;font:700 11px/1 monospace;letter-spacing:0}
 .nav button:hover:not(:disabled){background:var(--accent2);color:var(--accent);border-color:var(--accent2);filter:none}
-.nav .here{font:700 9.5px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);padding:0 5px;min-width:78px;text-align:center}
+/* stage jump dropdown sits between the arrows — pick a stage directly */
+.nav .stagesel{font:700 9px/1 ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);background:var(--s2);border:1px solid var(--line2);border-radius:6px;padding:4px 5px;min-width:96px;text-align:center;cursor:pointer;appearance:none;-webkit-appearance:none}
+.nav .stagesel:hover{color:var(--accent);border-color:var(--accent2)}
+.nav .stagesel:focus{outline:none;border-color:var(--accent)}
 .card .plan{font:600 10px/1 ui-monospace,monospace;color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent2);margin-left:2px}
 .card .x{margin-left:auto;color:var(--ink3);cursor:pointer;font-size:13px;line-height:1;padding:2px 3px}
 .card .x:hover{color:var(--red)}
 .card .note-in{font:600 10px/1 ui-monospace,monospace;color:var(--accent);cursor:pointer;border-bottom:1px dotted var(--accent2)}
 .card .notes{margin-top:8px;border-top:1px solid var(--line);padding-top:7px}
-.card .notes div{font-size:10.5px;color:var(--ink2);margin-top:3px;font-family:ui-monospace,monospace}
-.card .notes .at{color:var(--ink3)}
+.card .note{display:flex;align-items:baseline;gap:5px;font-size:10.5px;color:var(--ink2);margin-top:3px;font-family:ui-monospace,monospace}
+.card .note .nt{flex:1;border-radius:3px;word-break:break-word}
+.card .notes .at{color:var(--ink3);flex-shrink:0}
+.card .note .ndel{color:var(--ink3);cursor:pointer;flex-shrink:0;padding:0 2px}
+.card .note .ndel:hover{color:var(--red)}
+
+/* ---------- board filter bar ---------- */
+.filterbar{display:flex;gap:9px;align-items:center;margin-bottom:16px}
+.filterbar .grow{flex:1;min-width:160px}
 
 /* ---------- decisions ---------- */
 .ballotbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:13px 16px;margin-bottom:18px}
@@ -658,6 +733,29 @@ textarea.comment{margin:6px 18px 0;width:calc(100% - 36px);background:var(--bg)}
   .ribbon .seg{min-width:88px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* ---------- markdown doc viewer / editor (pops over everything) ---------- */
+.docback{position:fixed;inset:0;z-index:60;background:#06080cdd;backdrop-filter:blur(5px);display:none;align-items:flex-start;justify-content:center;padding:38px 18px;overflow-y:auto}
+.docback.on{display:flex}
+.docmodal{background:var(--s1);border:1px solid var(--line2);border-radius:12px;width:100%;max-width:920px;margin:auto;box-shadow:0 26px 90px #000b;display:flex;flex-direction:column;max-height:calc(100vh - 76px);overflow:hidden;animation:pop .16s ease}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+.dochead{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--s1);flex-shrink:0}
+.docmeta{flex:1;min-width:0}
+.doctitle{display:block;font:700 15px/1.3 ui-sans-serif,-apple-system,sans-serif;color:var(--ink)}
+.docpath{display:block;font-size:10.5px;color:var(--ink3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doctools{display:flex;gap:8px;flex-shrink:0}
+.docbody{padding:22px 28px 34px;overflow-y:auto;font-size:13.5px;line-height:1.68;color:var(--ink2)}
+.docbody>:first-child{margin-top:0}
+.docbody h4{color:var(--ink);margin:20px 0 9px;font-size:15px;font-weight:700;letter-spacing:-.2px}
+.docbody p{margin:10px 0}.docbody ul{margin:10px 0 10px 20px}.docbody li{margin:5px 0}
+.docbody strong{color:var(--ink)}.docbody a{color:var(--accent)}
+.docbody table{border-collapse:collapse;margin:13px 0;width:100%;font-size:12px}
+.docbody th,.docbody td{border:1px solid var(--line2);padding:7px 10px;text-align:left;vertical-align:top}
+.docbody th{background:var(--s2);color:var(--ink)}
+.docedit{display:block;width:100%;margin:0;border:none;border-top:1px solid var(--line);border-radius:0;min-height:58vh;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.6;background:var(--code);color:var(--ink);padding:18px 22px}
+.docedit:focus{box-shadow:none;border-color:var(--line)}
+.pcard{cursor:pointer}.pcard .ttl{font-size:13.5px}.pcard:hover{border-color:var(--accent)}
+.card .plan{cursor:pointer}
 </style></head><body>
 <header>
   <div class="hero">
@@ -675,30 +773,47 @@ textarea.comment{margin:6px 18px 0;width:calc(100% - 36px);background:var(--bg)}
 </header>
 <main>
   <section class="view" id="v-board"></section>
+  <section class="view" id="v-proposals"></section>
   <section class="view" id="v-decisions"></section>
-  <section class="view" id="v-bugs"></section>
   <section class="view" id="v-scratch"></section>
 </main>
 <div class="bar" id="bar"><div class="inner"><div class="p" id="prog"></div><button class="ghost sm" onclick="jumpNext()">Next undecided ↓</button><button class="go" id="submit" onclick="submitBallot()">Sign &amp; file</button></div></div>
+<div class="docback" id="docback" onclick="closeDoc(event)">
+  <div class="docmodal" onclick="event.stopPropagation()">
+    <div class="dochead">
+      <div class="docmeta"><span class="doctitle" id="doc-title">—</span><span class="docpath mono" id="doc-path"></span></div>
+      <div class="doctools">
+        <button class="ghost sm" id="doc-edit" onclick="toggleEdit()">Edit</button>
+        <button class="go sm" id="doc-save" onclick="saveDoc()" style="display:none">Save</button>
+        <button class="ghost sm" id="doc-cancel" onclick="cancelEdit()" style="display:none">Cancel</button>
+        <button class="ghost sm" onclick="closeDoc()">✕ Close</button>
+      </div>
+    </div>
+    <div class="docbody" id="doc-view"></div>
+    <textarea class="docedit" id="doc-edit-area" style="display:none" spellcheck="false"></textarea>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 <script>
 let S=null;
-const TABS=[['board','Board'],['decisions','Decisions'],['bugs','Bugs'],['scratch','Scratch']];
+const TABS=[['board','Board'],['proposals','Proposals'],['decisions','Decisions'],['scratch','Scratch']];
 const answers={},comments={};
 const sec={};                 /* collapse state by key — default closed */
+const filter={q:'',type:'all'};   /* board filter — by name + type */
 let active=location.hash.slice(1)||'board';
 
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function attr(s){return esc(s).replace(/"/g,'&quot;');}
 function key(s){return (s||'').replace(/[^a-z0-9]+/gi,'_');}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');clearTimeout(t._);t._=setTimeout(()=>t.classList.remove('on'),3400);}
 async function api(url,body){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return r.json();}
 async function load(){S=await (await fetch('/api/state')).json();render();}
 
 function render(){
+  if(!TABS.some(t=>t[0]===active))active='board';
   const dec=S.ballot.filter(x=>x.kind==='decision');
-  const tasks=S.board.cards.filter(c=>c.type!=='bug');
-  const bugs=S.board.cards.filter(c=>c.type==='bug');
-  const counts={board:tasks.length,decisions:dec.length,bugs:bugs.length,scratch:0};
+  const cards=S.board.cards;
+  const counts={board:cards.length,proposals:(S.proposals||[]).length,decisions:dec.length,scratch:0};
   document.getElementById('tabs').innerHTML=TABS.map(([id,label])=>
     '<div class="tab'+(id===active?' on':'')+'" onclick="go(\\''+id+'\\')">'+label+
     (counts[id]?'<span class="n">'+counts[id]+'</span>':'')+'</div>').join('');
@@ -706,15 +821,15 @@ function render(){
   document.getElementById('bar').classList.toggle('on',active==='decisions');
   document.getElementById('rat').textContent=S.ratified||'—';
   document.getElementById('last').textContent=S.lastSubmit||'—';
-  renderRibbon(tasks);renderBoard();renderDecisions();renderBugs();renderScratch();
+  renderRibbon(cards);renderBoard();renderProposals();renderDecisions();renderScratch();
 }
 function go(id){active=id;location.hash=id;render();window.scrollTo(0,0);}
 
 /* ---- pipeline ribbon (the signature) ---- */
-function renderRibbon(tasks){
+function renderRibbon(cards){
   const h=S.stages.map((st,i)=>{
-    const n=tasks.filter(c=>c.stage===st).length;
-    const cls=st==='done'?'done':(n>0&&st!=='backlog'&&st!=='done'?'hot':'');
+    const n=cards.filter(c=>c.stage===st).length;
+    const cls=st==='done'?'done':(n>0&&st!=='far-horizon'&&st!=='done'?'hot':'');
     return '<button class="seg '+cls+'" title="jump to '+st+'" onclick="jumpStage(\\''+st+'\\')">'+
       '<span class="sg">'+esc(st.replace(/-/g,' '))+'</span><span class="sc">'+n+'</span></button>';
   }).join('');
@@ -735,62 +850,104 @@ function toggleSec(k){sec[k]=!sec[k];const el=document.getElementById('sec-'+k);
 
 /* ---- board ---- */
 function renderBoard(){
-  const cards=S.board.cards.filter(c=>c.type!=='bug');
-  let h='<div class="hint">File a task or idea, then move it down the pipeline with <b>◀ ▶</b>. I advance strips as I work — this is live status.</div>';
-  h+=fileForm('task');
+  let h='<div class="hint">File a task, idea, or bug, then move it down the pipeline. Click any <b>title, description, or note</b> to edit it; use the dropdowns to change a card\\u2019s <b>type</b> or jump its <b>stage</b>.</div>';
+  h+=filterBar();
+  h+=fileForm();
+  h+='<div id="board-stages"></div>';
+  document.getElementById('v-board').innerHTML=h;
+  renderStages();
+}
+function filterBar(){
+  const types=['all','task','idea','bug'];
+  return '<div class="filterbar">'+
+    '<input class="grow" id="filter-q" placeholder="Filter by name\\u2026" value="'+attr(filter.q)+'" oninput="filter.q=this.value;renderStages()">'+
+    '<select class="sel" id="filter-type" onchange="filter.type=this.value;renderStages()">'+
+      types.map(t=>'<option value="'+t+'"'+(filter.type===t?' selected':'')+'>'+(t==='all'?'all types':t)+'</option>').join('')+
+    '</select></div>';
+}
+function matchFilter(c){
+  if(filter.type!=='all'&&c.type!==filter.type)return false;
+  if(filter.q){const q=filter.q.toLowerCase();if(!((c.title||'').toLowerCase().includes(q)||(c.body||'').toLowerCase().includes(q)))return false;}
+  return true;
+}
+function renderStages(){
+  const cards=S.board.cards.filter(matchFilter);
+  let h='';
   for(const st of S.stages){
     const inSt=cards.filter(c=>c.stage===st);
     const inner=inSt.length?'<div class="grid">'+inSt.map(card).join('')+'</div>':'<div class="empty">— empty —</div>';
     const prev=inSt.length?esc(inSt.slice(0,2).map(c=>c.title).join(' · ')+(inSt.length>2?' +'+(inSt.length-2):'')):'';
     h+=section('stage_'+key(st),st.replace(/-/g,' '),'<span class="count">'+inSt.length+'</span>',prev,inner);
   }
-  document.getElementById('v-board').innerHTML=h;
+  const el=document.getElementById('board-stages');if(el)el.innerHTML=h;
 }
-function fileForm(type){
-  return '<div class="filebox"><span class="lbl">'+(type==='bug'?'Report a defect':'File new work')+'</span><div class="r">'+
-    '<input class="grow" id="add-ttl-'+type+'" placeholder="'+(type==='bug'?'What\\u2019s broken?':'Task or idea\\u2026')+'">'+
-    (type==='bug'?'':'<select class="sel" id="add-type"><option value="task">task</option><option value="idea">idea</option></select>')+
-    '<select class="sel" id="add-stage-'+type+'">'+S.stages.map(s=>'<option'+(s==='backlog'?' selected':'')+'>'+s+'</option>').join('')+'</select>'+
-    '<button class="sm" onclick="addCard(\\''+type+'\\')">File</button></div>'+
-    '<textarea id="add-body-'+type+'" placeholder="Details (optional)"></textarea></div>';
+function fileForm(){
+  return '<div class="filebox"><span class="lbl">File new work</span><div class="r">'+
+    '<input class="grow" id="add-ttl" placeholder="Task, idea, or bug\\u2026">'+
+    '<select class="sel" id="add-type"><option value="task">task</option><option value="idea">idea</option><option value="bug">bug</option></select>'+
+    '<select class="sel" id="add-stage">'+S.stages.map(s=>'<option'+(s==='far-horizon'?' selected':'')+'>'+s+'</option>').join('')+'</select>'+
+    '<button class="sm" onclick="addCard()">File</button></div>'+
+    '<textarea id="add-body" placeholder="Details (optional)"></textarea></div>';
 }
-async function addCard(type){
-  const t=document.getElementById('add-ttl-'+type);
+async function addCard(){
+  const t=document.getElementById('add-ttl');
   if(!t.value.trim())return;
-  const realType=type==='bug'?'bug':(document.getElementById('add-type').value);
-  const j=await api('/api/card/add',{type:realType,title:t.value,body:document.getElementById('add-body-'+type).value,stage:document.getElementById('add-stage-'+type).value});
-  if(j.ok){t.value='';document.getElementById('add-body-'+type).value='';await load();toast('Filed.');}
+  const j=await api('/api/card/add',{type:document.getElementById('add-type').value,title:t.value,body:document.getElementById('add-body').value,stage:document.getElementById('add-stage').value});
+  if(j.ok){t.value='';document.getElementById('add-body').value='';await load();toast('Filed.');}
 }
+function findCard(id){return S.board.cards.find(c=>c.id===id);}
 function card(c){
   const i=S.stages.indexOf(c.stage);
   const back=i>0?S.stages[i-1]:null,fwd=i<S.stages.length-1?S.stages[i+1]:null;
-  const planLink=c.plan?'<a class="plan" href="#" title="sidequest plan">▤ '+esc(c.plan)+'</a>':'';
-  const notes=c.notes&&c.notes.length?'<div class="notes">'+c.notes.map(n=>'<div>• '+esc(n.t)+' <span class="at">'+esc(n.at)+'</span></div>').join('')+'</div>':'';
+  const planLink=c.plan?'<a class="plan" href="#" title="open plan" onclick="openDoc(\\'sidequest\\',\\''+attr(c.plan)+'\\');return false;">▤ '+esc(c.plan)+'</a>':'';
+  const typeSel='<select class="typesel" title="change type" onchange="changeType(\\''+c.id+'\\',this.value)">'+
+    ['task','idea','bug'].map(t=>'<option'+(c.type===t?' selected':'')+'>'+t+'</option>').join('')+'</select>';
+  const stageSel='<select class="stagesel" title="jump to stage" onchange="moveCard(\\''+c.id+'\\',this.value)">'+
+    S.stages.map(s=>'<option value="'+s+'"'+(s===c.stage?' selected':'')+'>'+esc(s.replace(/-/g,' '))+'</option>').join('')+'</select>';
+  const notes=(c.notes&&c.notes.length)?'<div class="notes">'+c.notes.map((n,idx)=>
+    '<div class="note">•&nbsp;<span class="nt" contenteditable="true" spellcheck="false" data-id="'+c.id+'" data-i="'+idx+'" data-orig="'+attr(n.t)+'" onblur="saveNote(this)" onkeydown="fieldKey(event,this)">'+esc(n.t)+'</span>'+
+    '<span class="at">'+esc(n.at)+'</span><span class="ndel" title="delete note" onclick="delNote(\\''+c.id+'\\','+idx+')">✕</span></div>').join('')+'</div>':'';
   return '<div class="card '+c.type+'"><div class="edge"></div><div class="body">'+
-    '<div class="top"><span class="ttl">'+esc(c.title)+'</span><span class="type">'+c.type+'</span></div>'+
-    (c.body?'<div class="bd">'+esc(c.body)+'</div>':'')+
+    '<div class="top"><span class="ttl" contenteditable="true" spellcheck="false" data-id="'+c.id+'" data-orig="'+attr(c.title)+'" onblur="saveField(this,\\'title\\')" onkeydown="fieldKey(event,this)">'+esc(c.title)+'</span>'+typeSel+'</div>'+
+    '<div class="bd" contenteditable="true" spellcheck="false" data-ph="'+(c.type==='bug'?'Describe the defect\\u2026':'Add a description\\u2026')+'" data-id="'+c.id+'" data-orig="'+attr(c.body||'')+'" onblur="saveField(this,\\'body\\')" onkeydown="fieldKey(event,this)">'+esc(c.body||'')+'</div>'+
     '<div class="meta"><div class="nav">'+
       '<button onclick="moveCard(\\''+c.id+'\\',\\''+(back||'')+'\\')" '+(back?'':'disabled')+' title="'+(back||'')+'">◀</button>'+
-      '<span class="here">'+esc(c.stage.replace(/-/g,' '))+'</span>'+
+      stageSel+
       '<button onclick="moveCard(\\''+c.id+'\\',\\''+(fwd||'')+'\\')" '+(fwd?'':'disabled')+' title="'+(fwd||'')+'">▶</button></div>'+
       planLink+'<span class="note-in" onclick="addNote(\\''+c.id+'\\')">+note</span>'+
       '<span class="x" title="delete" onclick="delCard(\\''+c.id+'\\')">✕</span></div>'+notes+'</div></div>';
 }
-async function moveCard(id,stage){if(!stage)return;await api('/api/card/update',{id,stage});await load();}
+async function moveCard(id,stage){if(!stage)return;const c=findCard(id);if(c)c.stage=stage;await api('/api/card/update',{id,stage});await load();}
+async function changeType(id,type){const c=findCard(id);if(c)c.type=type;await api('/api/card/update',{id,type});await load();}
 async function delCard(id){if(confirm('Delete this card?')){await api('/api/card/delete',{id});await load();toast('Deleted.');}}
 async function addNote(id){const n=prompt('Add a note:');if(n&&n.trim()){await api('/api/card/update',{id,note:n});await load();}}
-
-/* ---- bugs ---- */
-function renderBugs(){
-  const bugs=S.board.cards.filter(c=>c.type==='bug');
-  let h='<div class="hint">Known defects. Same pipeline; move them with <b>◀ ▶</b> as they get fixed.</div>'+fileForm('bug');
-  if(!bugs.length){h+='<div class="empty">— no open defects —</div>';document.getElementById('v-bugs').innerHTML=h;return;}
-  for(const st of S.stages){
-    const inSt=bugs.filter(b=>b.stage===st);if(!inSt.length)continue;
-    const prev=esc(inSt.slice(0,2).map(c=>c.title).join(' · ')+(inSt.length>2?' +'+(inSt.length-2):''));
-    h+=section('bug_'+key(st),st.replace(/-/g,' '),'<span class="count">'+inSt.length+'</span>',prev,'<div class="grid">'+inSt.map(card).join('')+'</div>');
-  }
-  document.getElementById('v-bugs').innerHTML=h;
+async function saveField(el,field){
+  const id=el.dataset.id,val=el.innerText.trim(),orig=el.dataset.orig||'';
+  if(val===orig)return;
+  if(field==='title'&&!val){el.innerText=orig;return;}
+  const j=await api('/api/card/update',{id,[field]:val});
+  if(j.ok){el.dataset.orig=val;const c=findCard(id);if(c)c[field]=val;toast('Saved.');}
+  else{el.innerText=orig;toast('Save failed.');}
+}
+async function saveNote(el){
+  const id=el.dataset.id,i=+el.dataset.i,val=el.innerText.trim(),orig=el.dataset.orig||'';
+  if(val===orig)return;
+  const c=findCard(id);if(!c)return;
+  const notes=(c.notes||[]).map((n,idx)=>idx===i?{t:val,at:n.at}:n).filter(n=>n.t);
+  const j=await api('/api/card/update',{id,notes});
+  if(j.ok){c.notes=notes;el.dataset.orig=val;if(!val)await load();toast('Saved.');}
+  else{el.innerText=orig;toast('Save failed.');}
+}
+async function delNote(id,i){
+  const c=findCard(id);if(!c)return;
+  if(!confirm('Delete this note?'))return;
+  const notes=(c.notes||[]).filter((_,idx)=>idx!==i);
+  const j=await api('/api/card/update',{id,notes});
+  if(j.ok){c.notes=notes;await load();toast('Note deleted.');}
+}
+function fieldKey(e,el){
+  if(e.key==='Enter'&&!e.shiftKey&&el.classList.contains('ttl')){e.preventDefault();el.blur();}
+  else if(e.key==='Escape'){el.innerText=el.dataset.orig||'';el.blur();}
 }
 
 /* ---- decisions ---- */
@@ -860,19 +1017,82 @@ async function submitBallot(){
   const results=dec.map(s=>({id:s.id,title:s.title,choice:answers[s.id]||'',comment:comments[s.id]||''}));
   const btn=document.getElementById('submit');btn.disabled=true;btn.textContent='Filing…';
   const j=await api('/api/submit',{results});
-  toast(j.ok?'Filed to '+j.path+' — tell Claude “go” to ratify + implement.':'Error');
-  btn.textContent='Filed ✓';setTimeout(()=>{btn.textContent='Sign & file';btn.disabled=false;},2200);
+  if(!j.ok){toast('Error');btn.textContent='Sign & file';btn.disabled=false;return;}
+  toast('Filed to '+j.path+' — reloading…');
+  btn.textContent='Filed ✓';
+  setTimeout(()=>location.reload(),900);
 }
 
-/* ---- scratch ---- */
+/* ---- scratch (autosaves: debounced while typing + on blur) ---- */
+let scratchT=null;
 function renderScratch(){
   const v=document.getElementById('v-scratch');
   if(v.dataset.init)return; v.dataset.init='1';
-  v.innerHTML='<div class="hint">A free scratch pad — anything goes. Saved to board.json; persists across restarts.</div>'+
-    '<textarea id="scratch" placeholder="Notes, half-thoughts, paste anything…">'+esc(S.board.scratch)+'</textarea>'+
-    '<div class="savebar"><button class="sm" onclick="saveScratch()">Save</button><span class="s" id="scratch-s"></span></div>';
+  v.innerHTML='<div class="hint">A free scratch pad — anything goes. Autosaves to board.json as you type; persists across restarts.</div>'+
+    '<textarea id="scratch" placeholder="Notes, half-thoughts, paste anything…" oninput="scratchChanged()" onblur="saveScratch()">'+esc(S.board.scratch)+'</textarea>'+
+    '<div class="savebar"><span class="s" id="scratch-s">saved</span></div>';
 }
-async function saveScratch(){const t=document.getElementById('scratch').value;const j=await api('/api/scratch',{text:t});if(j.ok){document.getElementById('scratch-s').textContent='saved '+new Date().toLocaleTimeString();S.board.scratch=t;}}
+function scratchChanged(){const s=document.getElementById('scratch-s');if(s)s.textContent='editing…';clearTimeout(scratchT);scratchT=setTimeout(saveScratch,1500);}
+async function saveScratch(){
+  clearTimeout(scratchT);
+  const el=document.getElementById('scratch');if(!el)return;
+  const t=el.value,s=document.getElementById('scratch-s');
+  if(t===S.board.scratch){if(s)s.textContent='saved';return;}
+  const j=await api('/api/scratch',{text:t});
+  if(j.ok){S.board.scratch=t;if(s)s.textContent='saved '+new Date().toLocaleTimeString();}
+  else if(s)s.textContent='save failed';
+}
+
+/* ---- proposals tab ---- */
+function renderProposals(){
+  const v=document.getElementById('v-proposals');if(!v)return;
+  const ps=S.proposals||[];
+  let h='<div class="hint">Feature <b>proposals</b> — exploratory ideas being shaped into plans. Click any card to read or edit it inline.</div>';
+  h+=ps.length?'<div class="grid">'+ps.map(p=>
+    '<div class="card task pcard" onclick="openDoc(\\'proposal\\',\\''+attr(p.slug)+'\\')"><div class="edge"></div><div class="body">'+
+    '<div class="top"><span class="ttl">'+esc(p.title)+'</span></div>'+
+    (p.status?'<div class="bd">'+esc(p.status)+'</div>':'')+
+    '<div class="meta"><span class="plan">▤ '+esc(p.slug)+'.md</span></div></div></div>').join('')+'</div>'
+    :'<div class="empty">— no proposals yet —</div>';
+  v.innerHTML=h;
+}
+
+/* ---- markdown doc viewer / editor (shared by plan links + proposal cards) ---- */
+let curDoc=null,curDocRaw='';
+const dEl=(id)=>document.getElementById(id);
+async function openDoc(kind,slug){
+  if(!slug)return;
+  const j=await api('/api/doc/get',{kind,slug});
+  if(!j.ok){toast('Could not open '+slug);return;}
+  curDoc={kind,slug};curDocRaw=j.raw;
+  dEl('doc-title').textContent=j.title||slug;
+  dEl('doc-path').textContent=j.path||'';
+  dEl('doc-view').innerHTML=j.html;
+  dEl('doc-edit-area').value=j.raw;
+  setDocMode(false);
+  dEl('docback').classList.add('on');
+  dEl('doc-view').scrollTop=0;
+}
+function setDocMode(edit){
+  dEl('doc-view').style.display=edit?'none':'block';
+  dEl('doc-edit-area').style.display=edit?'block':'none';
+  dEl('doc-save').style.display=edit?'inline-block':'none';
+  dEl('doc-cancel').style.display=edit?'inline-block':'none';
+  dEl('doc-edit').style.display=edit?'none':'inline-block';
+}
+function toggleEdit(){setDocMode(true);dEl('doc-edit-area').focus();}
+function cancelEdit(){dEl('doc-edit-area').value=curDocRaw;setDocMode(false);}
+async function saveDoc(){
+  if(!curDoc)return;
+  const text=dEl('doc-edit-area').value,b=dEl('doc-save');
+  b.disabled=true;b.textContent='Saving…';
+  const j=await api('/api/doc/save',{kind:curDoc.kind,slug:curDoc.slug,text});
+  b.disabled=false;b.textContent='Save';
+  if(!j.ok){toast('Save failed');return;}
+  curDocRaw=text;dEl('doc-view').innerHTML=j.html;setDocMode(false);toast('Saved '+(j.path||''));
+}
+function closeDoc(){dEl('docback').classList.remove('on');curDoc=null;}
+document.addEventListener('keydown',(e)=>{if(e.key==='Escape'&&dEl('docback')&&dEl('docback').classList.contains('on'))closeDoc();});
 
 load();
 window.addEventListener('hashchange',()=>{const h=location.hash.slice(1);if(h&&h!==active){active=h;render();}});
@@ -887,7 +1107,7 @@ function status() {
   const open = s.ballot.filter((x) => x.kind === "open");
   const cards = s.board.cards;
   const line = "─".repeat(64);
-  out(`${C.b}Tower${C.rst}  ${C.dim}backlog → todo → review → plan → plan-review → implementing → done${C.rst}`);
+  out(`${C.b}Tower${C.rst}  ${C.dim}far-horizon → pre-plan → planned → decisions → implementation → done${C.rst}`);
   out(line);
   out(`${C.cyn}BOARD${C.rst}  ${cards.length} card${cards.length === 1 ? "" : "s"} (${cards.filter((c) => c.type === "bug").length} bugs)`);
   for (const st of STAGES) {
@@ -932,7 +1152,7 @@ function scaffold(slug, title) {
 ## Decisions for the owner
 
 <each needs a before/after Jet example per option + a recommendation; these
-feed docs/spec/decision-ballots.md per the house rule>
+feed tools/Tower/docs/ballots/decision-ballots.md per the house rule>
 
 ## Acceptance checklist
 
