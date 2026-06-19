@@ -805,8 +805,30 @@ pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry,
                 diags.push(method_field_clash(&m.name, type_name, m.name_span));
             }
             if methods_map.contains_key(&m.name) {
-                diags.push(method_defined_twice(&m.name, type_name, m.name_span));
+                let is_ctor = m.self_param().is_none();
+                diags.push(method_defined_twice(&m.name, type_name, m.name_span, is_ctor));
             } else {
+                // L2401 (D-NARG1): pub method with a positional Bool param.
+                if m.is_pub {
+                    for p in m.params.iter().filter(|p| p.name != "self") {
+                        if matches!(p.ty, Type::Bool) && p.default.is_none() {
+                            diags.push(Diagnostic::lint(
+                                "L2401",
+                                format!(
+                                    "public method `{}` has a positional `Bool` parameter `{}`",
+                                    m.name, p.name
+                                ),
+                                "positional booleans are easy to transpose at the call site"
+                                    .to_string(),
+                                format!(
+                                    "callers can write `{}: true` to make the intent clear (S61 labels)",
+                                    p.name
+                                ),
+                                Some(p.name_span),
+                            ));
+                        }
+                    }
+                }
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
         }
@@ -831,8 +853,30 @@ pub(crate) fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry,
                 diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
             }
             if methods_map.contains_key(&m.name) {
-                diags.push(method_defined_twice(&m.name, &i.type_name, m.name_span));
+                let is_ctor = m.self_param().is_none();
+                diags.push(method_defined_twice(&m.name, &i.type_name, m.name_span, is_ctor));
             } else {
+                // L2401 (D-NARG1): pub method with a positional Bool param.
+                if m.is_pub {
+                    for p in m.params.iter().filter(|p| p.name != "self") {
+                        if matches!(p.ty, Type::Bool) && p.default.is_none() {
+                            diags.push(Diagnostic::lint(
+                                "L2401",
+                                format!(
+                                    "public method `{}` has a positional `Bool` parameter `{}`",
+                                    m.name, p.name
+                                ),
+                                "positional booleans are easy to transpose at the call site"
+                                    .to_string(),
+                                format!(
+                                    "callers can write `{}: true` to make the intent clear (S61 labels)",
+                                    p.name
+                                ),
+                                Some(p.name_span),
+                            ));
+                        }
+                    }
+                }
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
         }
@@ -951,12 +995,22 @@ pub(crate) fn method_field_clash(method: &str, type_name: &str, span: Span) -> D
 }
 
 /// E0105: a method name appears twice on the same type.
-pub(crate) fn method_defined_twice(method: &str, type_name: &str, span: Span) -> Diagnostic {
+/// `is_ctor` is true when the duplicate is a no-`self` static (a named
+/// constructor per D-CTOR1), so the fix hint teaches constructor naming.
+pub(crate) fn method_defined_twice(method: &str, type_name: &str, span: Span, is_ctor: bool) -> Diagnostic {
+    let fix = if is_ctor {
+        format!(
+            "named constructors must each have a unique name — call them `{}.{}` and `{}.other_name`",
+            type_name, method, type_name
+        )
+    } else {
+        "rename or remove one of the definitions".to_string()
+    };
     Diagnostic::error(
         "E0105",
         format!("method `{}` is defined twice on `{}`", method, type_name),
         "each method name may appear only once on a type".to_string(),
-        "rename or remove one of the definitions".to_string(),
+        fix,
         Some(span),
     )
 }

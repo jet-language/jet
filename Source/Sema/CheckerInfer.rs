@@ -1883,7 +1883,7 @@ impl<'a> Checker<'a> {
         receiver: &mut Box<Expr>,
         method: &str,
         span: Span,
-        args: &mut [crate::AST::CallArg],
+        args: &mut Vec<crate::AST::CallArg>,
         recv_type_out: &mut Option<String>,
     ) -> Option<Type> {
         if method == "clone" {

@@ -43,6 +43,13 @@ pub(crate) struct MethodSig {
     is_view_return: bool,
     is_static: bool,
     self_conv: Option<AccessConvention>,
+    /// D-NARG1 (S61): parameter names and default-value presence, parallel to
+    /// `params`. Excludes `self` (index 0 of params is self when self_conv is
+    /// Some; param_info starts from the first non-self param).
+    pub(crate) param_info: Vec<(String, bool)>,
+    /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
+    /// `None` when no default; only trailing params may have defaults.
+    pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +118,9 @@ impl TypeRegistry {
 
 fn func_to_method_sig(f: &Func) -> MethodSig {
     let self_param = f.self_param();
+    // param_info and defaults exclude `self` — they parallel the args a
+    // caller provides (no `self` in the call-site arg list).
+    let non_self_params = f.params.iter().filter(|p| p.name != "self");
     MethodSig {
         params: f
             .params
@@ -121,6 +131,13 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
         is_view_return: f.is_view_return,
         is_static: self_param.is_none(),
         self_conv: self_param.map(|p| p.convention),
+        param_info: non_self_params
+            .clone()
+            .map(|p| (p.name.clone(), p.default.is_some()))
+            .collect(),
+        defaults: non_self_params
+            .map(|p| p.default.as_ref().map(|d| *d.clone()))
+            .collect(),
     }
 }
 

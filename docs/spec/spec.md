@@ -119,6 +119,14 @@ expr     = precedence climbing over:
 - Functions: multi-argument calls, checked arity (E0104) and argument
   types (E0112). A function with a return type must return on every path
   (E0114). Unknown names are E0102/E0107 with did-you-mean suggestions.
+- **Named args and defaults (S61, D-NARG1):** parameters may carry a
+  default value (`fn f(x: Int = 0)`); call sites may use a label to
+  document intent (`f(x: 1)`). Labels must match the parameter name at
+  that position — they never reorder arguments. Trailing defaults fill
+  when omitted. Both rules apply equally to free functions **and methods**
+  (D-NARG1). `jet fmt` preserves call-site labels as written (D-NARG2).
+  A positional `Bool` parameter on a `pub` fn or `pub` method triggers the
+  advisory L2401 lint.
 - Definitions are unique (E0105), can't shadow built-ins (E0106), and
   unknown type names are E0119.
 
@@ -186,6 +194,10 @@ impl Circle {
 - Invoke with **`c.area()`** (not `area(c)`).
 - Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
 - Static methods omit `self` (e.g. `Circle.unit()`).
+- **Named constructors (D-CTOR1):** multiple construction shapes = multiple
+  distinctly-named no-`self` statics returning the type (`Point.cartesian`,
+  `Point.polar`). Overloading is rejected; a duplicate name is E0105 with
+  a teaching message pointing at constructor naming.
 - Enum `when` arms must be exhaustive; missing cases are a compile error.
 - **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as

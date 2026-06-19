@@ -13,7 +13,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
         span: Span,
-        args: &mut [crate::AST::CallArg],
+        args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         let Some(msig) = self.registry.method(type_name, method).cloned() else {
             self.diags.push(Diagnostic::error(
@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
         sig: &MethodSig,
-        args: &mut [crate::AST::CallArg],
+        args: &mut Vec<crate::AST::CallArg>,
         span: Span,
     ) -> Option<Type> {
         let _ = (type_name, method, span);
@@ -54,6 +54,62 @@ impl<'a> Checker<'a> {
         } else {
             sig.params.len()
         };
+
+        // D-NARG1 (S61): label validation — if a call arg has `name: val`,
+        // verify it matches the parameter name at that position. Labels never
+        // reorder. param_info is already self-excluded.
+        if !sig.param_info.is_empty() {
+            for (i, arg) in args.iter().enumerate() {
+                if let Some((label, label_span)) = &arg.label {
+                    if let Some((param_name, _)) = sig.param_info.get(i) {
+                        if label != param_name {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "label `{}:` doesn't match the parameter `{}` at position {}",
+                                    label,
+                                    param_name,
+                                    i + 1
+                                ),
+                                "labels are checked documentation — they must match the parameter name at that position; arguments stay in declaration order"
+                                    .to_string(),
+                                format!(
+                                    "write `{}:` instead, or remove the label",
+                                    param_name
+                                ),
+                                Some(*label_span),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // D-NARG1 (S61): default-value filling — append defaults for omitted
+        // trailing params.
+        if args.len() < expected_args && !sig.defaults.is_empty() {
+            let provided = args.len();
+            let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
+            if provided >= required {
+                for i in provided..expected_args {
+                    if let Some(Some(default_expr)) = sig.defaults.get(i) {
+                        // Use the first non-self param conv (offset by self).
+                        let param_idx = if sig.self_conv.is_some() { i + 1 } else { i };
+                        let conv = sig.params.get(param_idx)
+                            .map(|(c, _)| *c)
+                            .unwrap_or(crate::AST::AccessConvention::Read);
+                        args.push(crate::AST::CallArg {
+                            convention: conv,
+                            expr: default_expr.clone(),
+                            span,
+                            flags: Default::default(),
+                            label: None,
+                        });
+                    }
+                }
+            }
+        }
+
         if args.len() != expected_args {
             self.diags.push(Diagnostic::error(
                 "E0104",
