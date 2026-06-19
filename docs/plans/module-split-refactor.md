@@ -1,6 +1,12 @@
 # Module-split refactor — narrow the giant files
 
-**Status:** plan, awaiting owner sign-off. No code moved yet.
+**Status: COMPLETE (2026-06-19).** All 11 phases executed and committed
+(`91bc5d1`…`ae8bd01`), each a pure move verified by `cargo test` green (41/41
+suites) with **zero snapshot reblessing**. Every giant file is now a
+submodule directory; largest file dropped from 12,799 lines (`sema.rs`) to
+3,052 (`sema/checker_infer.rs`). ~+1% LOC overhead (module scaffolding). The
+plan below is retained as the executed record; per the workspace-structure
+proposal it can be archived/deleted now that the work has landed.
 **Goal:** break the few oversized source files into navigable submodule
 directories of ~200–600 lines each, grouped by concern, with **zero feature
 change**. Produced by a 15-agent read-only audit; adversarially reviewed.
