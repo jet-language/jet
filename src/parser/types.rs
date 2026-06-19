@@ -1,0 +1,542 @@
+use super::*;
+
+impl<'a> Parser<'a> {
+    fn enter_generic_type_layer(&mut self, label: &str, span: Span) -> bool {
+        self.type_generic_depth += 1;
+        self.type_generic_chain.push(label.to_string());
+        if self.type_generic_depth > generics::MAX_GENERIC_DEPTH {
+            let chain = self.type_generic_chain.join(" → ");
+            self.type_generic_depth = self.type_generic_depth.saturating_sub(1);
+            self.type_generic_chain.pop();
+            self.diags.push(generics::e0909(&chain, span));
+            self.type_generic_truncated = true;
+            return false;
+        }
+        true
+    }
+
+    fn leave_generic_type_layer(&mut self) {
+        self.type_generic_depth = self.type_generic_depth.saturating_sub(1);
+        self.type_generic_chain.pop();
+    }
+
+    fn type_generic_arg(&mut self, label: &str) -> Result<Type, Diagnostic> {
+        let span = self.peek().span;
+        if !self.enter_generic_type_layer(label, span) {
+            self.sync_type_arg();
+            return Ok(Type::Int);
+        }
+        let (inner, _) = self.type_()?;
+        self.leave_generic_type_layer();
+        Ok(inner)
+    }
+
+    fn type_starts_here(&self) -> bool {
+        matches!(
+            self.peek().kind,
+            TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
+        )
+    }
+
+    pub(super) fn return_type(&mut self) -> Result<(Type, Span), Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LParen) {
+            let start = self.bump().span;
+            if self.looks_like_named_tuple(true) {
+                let ty = self.parse_tuple_type(start)?;
+                return Ok((ty, start));
+            }
+            let (ty, _) = self.type_()?;
+            self.expect(TokKind::RParen, "to close this parenthesized return type")?;
+            return Ok((ty, start));
+        }
+
+        let (ty, span) = self.type_()?;
+        if let Type::Option(ok_ty) = ty {
+            if self.type_starts_here() {
+                let (err_ty, _) = self.type_()?;
+                Ok((
+                    Type::Result {
+                        ok: ok_ty,
+                        err: Box::new(err_ty),
+                    },
+                    span,
+                ))
+            } else {
+                Ok((
+                    Type::Result {
+                        ok: ok_ty,
+                        err: Box::new(Type::Named(syntax::TYPE_ERROR.to_string())),
+                    },
+                    span,
+                ))
+            }
+        } else {
+            Ok((ty, span))
+        }
+    }
+
+    /// Skip tokens until the enclosing `Type<…>` or `[T]` argument ends.
+    fn sync_type_arg(&mut self) {
+        while self.pos < self.toks.len() {
+            match &self.peek().kind {
+                TokKind::Eq
+                | TokKind::Semi
+                | TokKind::Comma
+                | TokKind::RParen
+                | TokKind::RBrace
+                | TokKind::RBracket => {
+                    break;
+                }
+                _ => {
+                    self.bump();
+                }
+            }
+        }
+    }
+
+    pub(super) fn parse_opt_type_params(&mut self) -> Result<Vec<TypeParam>, Diagnostic> {
+        if !matches!(self.peek().kind, TokKind::Lt) {
+            return Ok(Vec::new());
+        }
+        self.parse_type_params()
+    }
+
+    fn parse_type_params(&mut self) -> Result<Vec<TypeParam>, Diagnostic> {
+        self.expect_type_args_open("type")?;
+        let mut params = Vec::new();
+        loop {
+            let (name, name_span) = self.expect_ident("for a type parameter name")?;
+            let mut bounds = Vec::new();
+            if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                bounds = self.parse_trait_bounds()?;
+            }
+            params.push(TypeParam {
+                name,
+                name_span,
+                bounds,
+            });
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect_type_args_close("after type parameters")?;
+        Ok(params)
+    }
+
+    fn parse_trait_bounds(&mut self) -> Result<Vec<String>, Diagnostic> {
+        let mut bounds = Vec::new();
+        loop {
+            let (name, _) = self.expect_ident("for a trait bound")?;
+            bounds.push(name);
+            if matches!(self.peek().kind, TokKind::Plus) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        Ok(bounds)
+    }
+
+    pub(super) fn parse_type_path(&mut self, where_: &str) -> Result<(String, Span), Diagnostic> {
+        let (first, span) = self.expect_ident(where_)?;
+        let mut name = first;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (part, _) = self.expect_ident("after `.` in a type path")?;
+            name = format!("{name}.{part}");
+        }
+        Ok((name, span))
+    }
+
+    /// S73: `(x: Type, y: Type)` in type position after the opening `(`.
+    fn parse_tuple_type(&mut self, open: Span) -> Result<Type, Diagnostic> {
+        let mut fields = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, _) = self.expect_ident("for a tuple member name")?;
+                self.expect(TokKind::Colon, "after each tuple member name")?;
+                let (ty, _) = self.type_()?;
+                fields.push((name, ty));
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        let close = self.peek().span;
+        self.expect(TokKind::RParen, "to close this tuple type")?;
+        if fields.len() < 2 {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a tuple type needs at least two named members".to_string(),
+                "a single `(name: Type)` would be ambiguous with a grouped type — use a one-field `struct` instead"
+                    .to_string(),
+                "add another member: `(x: Int, y: Int)`".to_string(),
+                Some(Span::new(open.start, close.end)),
+            ));
+        }
+        Ok(Type::Tuple(
+            crate::ast::canonicalize_tuple_fields(fields)
+                .into_iter()
+                .map(|(n, t)| (n, Box::new(t)))
+                .collect(),
+        ))
+    }
+
+    /// S33: open `Type<…>` — teach square brackets used for value lists.
+    pub(super) fn expect_type_args_open(&mut self, type_name: &str) -> Result<(), Diagnostic> {
+        match &self.peek().kind {
+            TokKind::Lt => {
+                self.bump();
+                Ok(())
+            }
+            TokKind::LBracket => Err(Diagnostic::error(
+                "E0034",
+                format!("`{type_name}[...]` isn't how Jet writes generic types"),
+                "square brackets start collection types like `[Int]` or `[String, Int]`, and collection values like `[1, 2]`"
+                    .to_string(),
+                format!("write `{type_name}<...>`, or use `[Int]` for a list type"),
+                Some(self.peek().span),
+            )),
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected `<` after `{type_name}`, found {}",
+                    describe(other)
+                ),
+                format!("generic types use angle brackets, like `{type_name}<Int>`"),
+                format!("write `{type_name}<` here"),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
+    /// S33: close `Type<…>`; splits `>>` when nested generics end with `>`.
+    fn maybe_close_type_args(&mut self, context: &str) -> Result<(), Diagnostic> {
+        if self.type_generic_truncated {
+            Ok(())
+        } else {
+            self.expect_type_args_close(context)
+        }
+    }
+
+    pub(super) fn expect_type_args_close(&mut self, context: &str) -> Result<(), Diagnostic> {
+        if self.pending_type_gt {
+            self.pending_type_gt = false;
+            return Ok(());
+        }
+        match &self.peek().kind {
+            TokKind::Gt => {
+                self.bump();
+                Ok(())
+            }
+            TokKind::Shr => {
+                self.bump();
+                self.pending_type_gt = true;
+                Ok(())
+            }
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!("expected `>` {context}, found {}", describe(other)),
+                "close a generic type with `>` — nested types may end with `>>`".to_string(),
+                "add `>` here".to_string(),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
+    pub(super) fn type_(&mut self) -> Result<(Type, Span), Diagnostic> {
+        let span = self.peek().span;
+        self.with_nesting(span, |p| p.type_inner())
+    }
+
+    fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
+        let start = self.peek().span;
+        let base = match self.peek().kind.clone() {
+            TokKind::KwFn => {
+                self.bump();
+                self.expect(TokKind::LParen, "after `fn` in a function type")?;
+                let mut params = Vec::new();
+                if !matches!(self.peek().kind, TokKind::RParen) {
+                    loop {
+                        let (pty, _) = self.type_()?;
+                        params.push(pty);
+                        if matches!(self.peek().kind, TokKind::RParen) {
+                            break;
+                        }
+                        self.expect(TokKind::Comma, "between parameter types in `fn(...)`")?;
+                    }
+                }
+                self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
+                let ret = if matches!(self.peek().kind, TokKind::Arrow) {
+                    self.bump();
+                    let (r, _) = self.type_()?;
+                    Some(Box::new(r))
+                } else {
+                    None
+                };
+                Type::Fn { params, ret }
+            }
+            TokKind::LBracket => {
+                self.bump();
+                let first = self.type_generic_arg("list/map type")?;
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    let value = self.type_generic_arg("map value")?;
+                    self.expect(TokKind::RBracket, "after the value type in `[K, V]`")?;
+                    Type::Map {
+                        key: Box::new(first),
+                        value: Box::new(value),
+                    }
+                } else if matches!(self.peek().kind, TokKind::Hash) {
+                    // S76 (2026-06-16): `[T#N]` fixed-size list.
+                    self.bump(); // consume `#`
+                    let len = match &self.peek().kind {
+                        TokKind::Int(n) => {
+                            let n = *n;
+                            self.bump();
+                            n as u64
+                        }
+                        _ => {
+                            let sp = self.peek().span;
+                            self.diags.push(Diagnostic::error(
+                                "E0963",
+                                "expected a literal integer size after `#` in `[T#N]`".to_string(),
+                                "the size must be a non-negative integer literal".to_string(),
+                                "write `[T#4]` for a fixed-size list of 4 elements".to_string(),
+                                Some(sp),
+                            ));
+                            0
+                        }
+                    };
+                    self.expect(TokKind::RBracket, "after the size in `[T#N]`")?;
+                    Type::FixedList { elem: Box::new(first), len }
+                } else {
+                    self.expect(TokKind::RBracket, "after the element type in `[T]`")?;
+                    Type::List(Box::new(first))
+                }
+            }
+            TokKind::LParen if self.looks_like_named_tuple(false) => {
+                self.bump();
+                self.parse_tuple_type(start)?
+            }
+            TokKind::LParen => {
+                self.bump();
+                let (inner, _) = self.type_()?;
+                self.expect(TokKind::RParen, "to close this parenthesized type")?;
+                inner
+            }
+            TokKind::Ident(name) => {
+                self.bump();
+                match name.as_str() {
+                    syntax::TYPE_INT => Type::Int,
+                    syntax::TYPE_FLOAT => Type::Float,
+                    syntax::TYPE_BOOL => Type::Bool,
+                    syntax::TYPE_STRING => Type::String,
+                    syntax::FOREIGN_TEXT => {
+                        // S14 teaching error E0013; recover as String.
+                        self.diags.push(Diagnostic::error(
+                            "E0013",
+                            format!(
+                                "the text type is called `{}`, not `{}`",
+                                syntax::TYPE_STRING,
+                                syntax::FOREIGN_TEXT
+                            ),
+                            format!("`{}` is the one and only text type", syntax::TYPE_STRING),
+                            format!(
+                                "replace `{}` with `{}`",
+                                syntax::FOREIGN_TEXT,
+                                syntax::TYPE_STRING
+                            ),
+                            Some(start),
+                        ));
+                        Type::String
+                    }
+                    syntax::TYPE_LIST => {
+                        self.expect_type_args_open("List")?;
+                        let inner = self.type_generic_arg("List")?;
+                        if !self.type_generic_truncated {
+                            self.maybe_close_type_args("after a list element type")?;
+                        }
+                        Type::List(Box::new(inner))
+                    }
+                    syntax::TYPE_MAP => {
+                        self.expect_type_args_open("Map")?;
+                        let key = self.type_generic_arg("Map key")?;
+                        self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
+                        let value = self.type_generic_arg("Map value")?;
+                        self.maybe_close_type_args("after the value type in `Map<K, V>`")?;
+                        Type::Map {
+                            key: Box::new(key),
+                            value: Box::new(value),
+                        }
+                    }
+                    syntax::TYPE_CHAR => Type::Char,
+                    syntax::FOREIGN_DYN => {
+                        self.diags.push(generics::e0036(syntax::FOREIGN_DYN, start));
+                        let (trait_name, _) = self.expect_ident("after `dyn`")?;
+                        Type::TraitObject(trait_name)
+                    }
+                    syntax::FOREIGN_BOX => {
+                        self.diags.push(generics::e0036(syntax::FOREIGN_BOX, start));
+                        if matches!(self.peek().kind, TokKind::Lt) {
+                            self.expect_type_args_open("Box")?;
+                            if matches!(self.peek().kind, TokKind::Ident(ref n) if n == syntax::FOREIGN_DYN)
+                            {
+                                self.bump();
+                                let (trait_name, _) =
+                                    self.expect_ident("after `dyn` in `Box<dyn …>`")?;
+                                self.maybe_close_type_args("after `Box<dyn …>`")?;
+                                Type::TraitObject(trait_name)
+                            } else {
+                                let (inner, _) = self.type_()?;
+                                self.maybe_close_type_args("after `Box<…>`")?;
+                                inner
+                            }
+                        } else {
+                            Type::Named("Box".to_string())
+                        }
+                    }
+                    syntax::FOREIGN_VEC => {
+                        self.diags.push(Diagnostic::error(
+                            "E0028",
+                            format!(
+                                "{} uses `{}`, not `{}`",
+                                syntax::LANG_NAME,
+                                syntax::TYPE_LIST,
+                                syntax::FOREIGN_VEC
+                            ),
+                            format!("`{}` is the list type", syntax::TYPE_LIST),
+                            format!(
+                                "replace `{}` with `{}<...>`",
+                                syntax::FOREIGN_VEC,
+                                syntax::TYPE_LIST
+                            ),
+                            Some(start),
+                        ));
+                        self.expect_type_args_open("List")?;
+                        let inner = self.type_generic_arg("List")?;
+                        self.maybe_close_type_args("after a list element type")?;
+                        Type::List(Box::new(inner))
+                    }
+                    syntax::FOREIGN_HASHMAP | syntax::FOREIGN_DICT => {
+                        let foreign = name.clone();
+                        self.diags.push(Diagnostic::error(
+                            "E0028",
+                            format!(
+                                "{} uses `{}`, not `{}`",
+                                syntax::LANG_NAME,
+                                syntax::TYPE_MAP,
+                                foreign
+                            ),
+                            format!("`{}` is the map type", syntax::TYPE_MAP),
+                            format!("replace `{}` with `{}<K, V>`", foreign, syntax::TYPE_MAP),
+                            Some(start),
+                        ));
+                        self.expect_type_args_open("Map")?;
+                        let key = self.type_generic_arg("Map key")?;
+                        self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
+                        let value = self.type_generic_arg("Map value")?;
+                        self.maybe_close_type_args("after the value type in `Map<K, V>`")?;
+                        Type::Map {
+                            key: Box::new(key),
+                            value: Box::new(value),
+                        }
+                    }
+                    syntax::TYPE_SHARED => {
+                        self.expect_type_args_open("Shared")?;
+                        let inner = self.type_generic_arg("Shared")?;
+                        self.maybe_close_type_args("after a shared element type")?;
+                        Type::Shared(Box::new(inner))
+                    }
+                    syntax::TYPE_RESULT => {
+                        self.diags.push(Diagnostic::error(
+                            "E0406",
+                            "`Result<T, E>` is old Jet error syntax".to_string(),
+                            "fallible Jet types are written as `T ? E`".to_string(),
+                            "write the return type as `T ? E`, or `T ?` for the default Error type"
+                                .to_string(),
+                            Some(start),
+                        ));
+                        self.expect_type_args_open("Result")?;
+                        let ok_ty = self.type_generic_arg("Result ok")?;
+                        self.expect(
+                            TokKind::Comma,
+                            "between the two types in old `Result<T, E>` syntax",
+                        )?;
+                        let err_ty = self.type_generic_arg("Result err")?;
+                        self.maybe_close_type_args(
+                            "after the error type in old `Result<T, E>` syntax",
+                        )?;
+                        Type::Result {
+                            ok: Box::new(ok_ty),
+                            err: Box::new(err_ty),
+                        }
+                    }
+                    other => {
+                        let name = other.to_string();
+                        if matches!(self.peek().kind, TokKind::Lt) {
+                            self.expect_type_args_open(&name)?;
+                            let mut args = Vec::new();
+                            loop {
+                                args.push(self.type_generic_arg(&name)?);
+                                if matches!(self.peek().kind, TokKind::Comma) {
+                                    self.bump();
+                                    continue;
+                                }
+                                break;
+                            }
+                            self.maybe_close_type_args(&format!("after `{name}<…>`"))?;
+                            Type::Apply { name, args }
+                        } else {
+                            Type::Named(name)
+                        }
+                    }
+                }
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected a type name, found {}", describe(&other)),
+                    "types look like `Int`, `String`, or `[Int]`".to_string(),
+                    "e.g. `x: Int` or `items: [String]`".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        if matches!(self.peek().kind, TokKind::QuestionQuestion) {
+            let qspan = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0309",
+                "`??` isn't allowed on a type".to_string(),
+                "an optional value is written `T?` once — there's no optional optional"
+                    .to_string(),
+                "use a single `?`, like `Int?`".to_string(),
+                Some(qspan),
+            ));
+        }
+        if matches!(self.peek().kind, TokKind::Question) {
+            self.bump();
+            if self.type_starts_here() {
+                let (err_ty, _) = self.type_()?;
+                return Ok((
+                    Type::Result {
+                        ok: Box::new(base),
+                        err: Box::new(err_ty),
+                    },
+                    start,
+                ));
+            }
+            return Ok((Type::Option(Box::new(base)), start));
+        }
+        Ok((base, start))
+    }
+
+}
