@@ -137,6 +137,13 @@ fn later_breaking_milestones_name_their_gate() {
     // that calls itself "breaking"/"public-breaking" must also mention an
     // edition or epoch gate. m2 itself defines the gate, so it is exempt.
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/plans/epoch-2");
+    // Epoch 2 is wrapped (2026-06-19): the per-milestone plan folder was removed,
+    // its decisions recorded in syntax-decisions.md and highlights in roadmap.md.
+    // The m2 gate criterion was met at GA; with no plans left to scan this check
+    // is a no-op. If the folder ever returns, the scan resumes.
+    if !dir.exists() {
+        return;
+    }
     let mut checked = 0;
     for entry in fs::read_dir(&dir).unwrap().flatten() {
         let path = entry.path();
