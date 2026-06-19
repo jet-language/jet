@@ -1644,6 +1644,56 @@ top-level comparison/logical operator is a bare value (compiler prepends
 keeping `if`/`when` separate (D-IF1 option B); `...` catch-all and mandatory arm
 braces (D-IF2 alternatives).
 
+### Next-Tasks wave (ratified 2026-06-19)
+
+Six of the eight Next-Tasks ballots. The constructor-shapes (D-CTOR1) and
+allocator-spelling (D-ALLOC1) cards stay open pending owner explanations.
+**Ratified but not yet implemented** — the parser / sema / codegen / fmt changes
+land on the owner's word; `src/` is untouched until then.
+
+**D-ATTR1 — Attribute sigil `@` → `#`** *(ratified 2026-06-19, option B; reverses
+the S55 / S82 marker spelling)*: attributes and markers are written `#unsafe`,
+`#Serialize`, `#audit("…")`. Positional disambiguation keeps the existing `#`
+uses — fixed-size `[T#N]` and version-pin `name#ver` — working, since those never
+sit in the marker (item/statement-prefix) position. The teaching error flips to
+reject `@unsafe` and point at `#unsafe`. Reverses the *spelling* the owner picked
+in S55 (derive policy) and S82 (marker sigil), not their semantics.
+
+**D-ATTR2 — Multi-marker list form** *(ratified 2026-06-19, option A; live with
+D-ATTR1 = B)*: multiple markers list plainly inside brackets —
+`#[Serialize, Comparable]`. The Rust-literal `#[derive(…)]` wrapper (option B)
+stays rejected, as S55 already declined it; only the sigil changed, not the list
+shape.
+
+**D-ATTR3 — Loop labels stay `@`** *(ratified 2026-06-19, option B; live with
+D-ATTR1 = B)*: attributes move to `#` but labels (D-LABEL1) keep `@` —
+`@outer loop { break @outer }`. Source therefore carries two marker sigils: `#`
+for attributes/markers, `@` for loop labels (and the U6/U16 ref/host `@`, which
+lives in CLI/manifest strings, not source). The plan flagged the mixed-sigil
+outcome as a trap; the owner chose it with that flag visible. fmt prints each in
+its own position.
+
+**D-NARG1 — Named args + defaults on methods** *(ratified 2026-06-19, option A;
+extends S61)*: method and constructor calls behave like free-function calls —
+call-site labels (`rect.draw(filled: true)`) are checked against parameter names,
+and trailing defaults fill when omitted (`rect.draw()` → `filled = false`). Closes
+the S61 gap where a method label was parsed then silently dropped and method
+defaults never filled.
+
+**D-NARG2 — fmt preserves call-site labels** *(ratified 2026-06-19, option A;
+refines S61)*: label presence is the author's documentation choice; fmt never
+adds a missing label nor strips a present one. Canonicalization is revisited only
+with the LSP quick-fix (S14 / M6), not in v1.
+
+**S29-FLUSH — Flush constructor block** *(ratified 2026-06-19, option A; amends
+S29)*: the canonical construction style is flush — `Point{x: 3.0, y: 4.0}`, the
+type name hugging its field block the way a call's `(` hugs its callee; colon
+spacing (`x: 1`) keeps the language-wide `: ` rule. The flush rule extends to
+destructuring patterns (`Point{x, y} :: make()`) for build-vs-match symmetry. The
+parser already accepts both forms, so this is a formatter-canonical-style change.
+S29's canonical example above still shows the spaced form and is corrected when
+the fmt change lands.
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -1954,3 +2004,9 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-18 | S6-R | **no visible semicolons** (B); Go-style lexer terminator insertion; `-> Type {` stays on the param-close line; **continuation suppressed** when the next line starts with `.` (S69 chain) or a binary/logical operator; `E_MISSING_SEMI` retired; supersedes S6's required-`;` rule | owner |
 | 2026-06-18 | D-IF1 | `if` is the **universal branching keyword** (A); `when` retired to a teaching error; multi-arm `if subject { … }` with **inferred comparator** (bare `200 ->` ≡ `subject == 200`, reverses S24); amends S24/S68 | owner |
 | 2026-06-18 | D-IF2 | multi-arm `if` surface: catch-all is **`else ->`** (Q1-B; `...` rejected); **braceless arm bodies** allowed, `{ }` for multi-statement (Q2-A); bare-value-vs-condition is a **structural mix** (Q3-A — head with no top-level comparison op = bare value, prepend `subject ==`); amends S68/D-IF1 | owner |
+| 2026-06-19 | D-ATTR1 | attribute/marker sigil **`@` → `#`** (B): `#unsafe`, `#Serialize`, `#audit("…")`; `[T#N]` and `name#ver` keep `#` (non-marker position); teaching error rejects `@unsafe`→`#unsafe`; reverses S55/S82 spelling, not semantics. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-ATTR2 | multi-marker list **bare `#[Serialize, Comparable]`** (A); Rust-literal `#[derive(…)]` (B) stays rejected per S55; only the sigil changed. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-ATTR3 | loop labels **stay `@`** (B): attributes move to `#`, labels keep `@outer loop { break @outer }`; two marker sigils coexist in source (the flagged trap, chosen knowingly). **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-NARG1 | named args + defaults **on methods/constructors** (A): call-site labels checked, trailing defaults fill; closes the S61 method gap (label parsed then dropped). **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-NARG2 | fmt **preserves** call-site labels (A): never adds or strips; canonicalization deferred to the LSP quick-fix (S14/M6). **Ratified, not yet implemented** | owner |
+| 2026-06-19 | S29-FLUSH | **flush constructor block** `Point{x: 3.0, y: 4.0}` (A; amends S29); flush also for destructuring `Point{x, y} :: make()`; `: ` colon spacing unchanged; formatter-canonical change. **Ratified, not yet implemented** | owner |

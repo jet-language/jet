@@ -1,5 +1,7 @@
 # Sidequest: Named function inputs & default values (S61)
 
+**Status:** ratified 2026-06-19 (D-NARG1 = A, D-NARG2 = A) — ready to implement on owner's word.
+
 ## Goal
 
 Finish S61 — optional call-site argument labels (`f(x: 1, y: 2)`) and trailing
@@ -38,18 +40,18 @@ S61 is ~70% implemented, not greenfield. What exists:
 
 Gaps (the actual work):
 
-1. **Methods get nothing.** `MethodSig` (src/sema/mod.rs) has no
-   `param_info`/`defaults`; `check_method_args` (src/sema/checker_items.rs) does
-   plain positional arity + type checks and ignores `arg.label` entirely. So
-   `obj.m(x: 1)` and method defaults are silently unsupported (label is parsed,
-   then dropped). Same for the static-method and enum-variant-constructor call
-   paths that route through `check_method_args`. **This is the real remaining
-   gap** — the free-function path is fully built.
+1. **Methods get nothing (ratified to fix — D-NARG1 = A).** `MethodSig`
+   (src/sema/mod.rs) has no `param_info`/`defaults`; `check_method_args`
+   (src/sema/checker_items.rs) does plain positional arity + type checks and
+   ignores `arg.label` entirely. So `obj.m(x: 1)` and method defaults are
+   silently unsupported (label is parsed, then dropped). Same for the
+   static-method and enum-variant-constructor call paths that route through
+   `check_method_args`. D-NARG1 = A ratifies closing this gap.
 2. **Fmt label-drop is FIXED.** `fmt_call_args` (src/fmt/exprs.rs) now emits
    `arg.label` — when `arg.label` is `Some`, it writes `name: ` before the expr
    (canonical `name: value` spacing). So `f(x: 1)` round-trips correctly; the
-   earlier label-loss bug no longer exists. No fmt work remains here except the
-   D3 preserve-vs-canonicalize decision.
+   earlier label-loss bug no longer exists. No fmt work remains here — D-NARG2 = A
+   (preserve-as-written) is ratified.
 3. **Default injection is span-poor.** Synthetic default `CallArg`s use
    `call.name_span` (the default-fill loop in src/sema/checker_infer.rs); a type
    error inside a default expression points at the call name, not the `fn`'s
@@ -107,8 +109,8 @@ lowers to the right positional Rust call. (R1: codegen stays dumb.)
 ### Fmt
 Label emission already works: `fmt_call_args` (src/fmt/exprs.rs) writes `name: `
 before the expr when `arg.label` is `Some` (S44 spacing — space after `:`, none
-before). The only open fmt question is whether fmt **preserves** user labels
-as-written or **canonicalizes** (adds/removes them) — see decision D3.
+before). fmt **preserves** user labels as-written and never adds or strips them
+(D-NARG2 = A, ratified). No fmt work remains for the free-function path.
 
 ### Diagnostics
 - Reuse **E0104** for arity, or split label-mismatch into its own code (D4).
@@ -125,46 +127,43 @@ as-written or **canonicalizes** (adds/removes them) — see decision D3.
   output.
 - Add ui fixtures under `tests/ui/` for each diagnostic above.
 
-## Decisions needing owner approval BEFORE coding
+## Decisions (D-NARG1/D-NARG2 resolved 2026-06-19; D2/D4/D5 still open)
 
-S61 already ratifies the big questions (label spelling `name:`, fixed order,
-labels-never-reorder, trailing defaults). These remaining points are genuinely
-open or under-specified. See the structured summary for full before/after
-examples; in brief:
+S61 already ratified the big questions (label spelling `name:`, fixed order,
+labels-never-reorder, trailing defaults). D-NARG1 and D-NARG2 are now also
+resolved. D2/D4/D5 remain open.
 
-- **D1 — Methods/constructors in scope now?** Recommend yes (parser already
-  accepts the syntax; leaving methods unsupported is a silent footgun).
+- **D-NARG1 = A — Methods/constructors in scope.** RESOLVED. Named args and
+  defaults apply to methods and constructors, not just free functions.
 
   ```jet
-  // Today: label parsed then dropped, default unsupported on the method.
+  // Before (today): label parsed then dropped, default unsupported on the method.
   fn draw(self, filled: Bool = false) { … }   // default never fills
   rect.draw(filled: true)                      // label silently ignored
-  // D1 = yes: both behave like a free fn.
+  // D-NARG1 = A: both behave like a free fn.
   ```
 
 - **D2 — May a default reference earlier params?** (`fn f(x: Int, y: Int = x)`).
-  Recommend no in v1 — defaults are self-contained constant-ish exprs; reject
-  param refs with a teaching error. Smaller, predictable, matches comptime-const
-  feel.
+  OPEN. Recommend no in v1 — defaults are self-contained; reject param refs with
+  a teaching error.
 
   ```jet
   fn box(w: Int, h: Int = 1)   { … }   // OK: self-contained default
   fn box(w: Int, h: Int = w)   { … }   // rejected in v1 (refs earlier param)
   ```
 
-- **D3 — Does fmt preserve or canonicalize call-site labels?** Recommend
-  preserve-as-written in v1 (label presence is the user's documentation choice;
-  S61 calls labels optional). Revisit canonicalization with LSP quick-fix (S14
-  M6).
+- **D-NARG2 = A — fmt preserves call-site labels as written.** RESOLVED. fmt
+  never adds or strips labels; canonicalization deferred to the LSP quick-fix
+  (S14/M6).
 
   ```jet
   greet("world", loud: true)   // preserve: stays as written
   greet("world", true)         // preserve: stays unlabeled (no auto-add)
   ```
 
-- **D4 — Own diagnostic code for label-mismatch?** Currently folded into E0104.
-  Recommend a dedicated code (clearer "transposed argument" teaching) — but this
-  is owner copy, surfaced not decided.
+- **D4 — Own diagnostic code for label-mismatch?** OPEN. Currently folded into
+  E0104. Recommend a dedicated code (clearer "transposed argument" teaching) —
+  owner copy, surfaced not decided.
 
   ```jet
   fn move_to(x: Int, y: Int) { … }
@@ -172,11 +171,9 @@ examples; in brief:
                         //        doesn't match parameter at this position" code
   ```
 
-- **D5 — Interaction with multiple-constructor-shapes (owner-todo) and any
-  future overloads.** S61 assumes one signature per name; named args do **not**
-  enable overload resolution by label. Recommend keeping it that way and
-  resolving the constructor-shapes design first, since it may reuse this label
-  machinery. Surface, don't decide.
+- **D5 — Interaction with multiple-constructor-shapes and future overloads.**
+  OPEN. S61 assumes one signature per name; named args do not enable overload
+  resolution by label. Resolve constructor-shapes design first.
 
   ```jet
   // S61 does NOT make these two distinct overloads:

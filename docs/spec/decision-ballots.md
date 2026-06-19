@@ -17,256 +17,194 @@ decision, add its examples in the same edit.
 
 ## Next Tasks — open ballots
 
-Eight decisions block the five queued "Next Tasks" sidequests. Each carries a
-worked before/after per option. Recommendations follow the plan; where the plan
-deliberately surfaces a choice without a pick, the card is marked **(no rec)**.
+Two decisions remain open. Both are about **how you build a value in Jet**, so
+they share one explainer below — read it first, then the two cards. The other
+six Next-Tasks ballots were decided 2026-06-19 and recorded in
+[`syntax-decisions.md`](syntax-decisions.md); they ratified but are not yet
+implemented (the code lands on your word).
 
-### D-ATTR1 — Move the attribute sigil `@` → `#`? (no rec)
+---
 
-Why it matters: reverses two ratified rejections (**S55** derive policy, **S82**
-marker sigil) and resurrects the Rust-style spelling we already declined; `#` is
-also already a live `Hash` token (`[T#N]`, `name#ver`). Pervasive user-facing
-swap. The plan surfaces this; the owner picks.
+### How Jet builds a value today (read before D-CTOR1 / D-ALLOC1)
 
-- **Option A — Keep `@` (status quo).** No reversal, no churn; `#` stays the
-  fixed-size/version-pin char only.
+Right now Jet gives you two ways to make a `Point`, and no `new` keyword:
 
-  ```jet
-  // BEFORE and AFTER (unchanged):
-  @unsafe
-  fn raw() { … }
+```jet
+struct Point { x: Float, y: Float }
 
-  @Serialize
-  struct Point { … }
-  ```
+p :: Point{x: 3.0, y: 4.0}   // 1. struct literal — name + its fields
+u :: Point.unit()            // 2. named constructor — a plain fn that returns Point
+```
 
-- **Option B — Move to `#`.** Re-allows `#`-prefixed markers; positional
-  disambiguation keeps `[T#N]` and `name#ver` working; teaching error flips to
-  reject `@unsafe` and teach `#unsafe`.
+The literal *is* the constructor: you name every field, you get the value. A
+"constructor" like `unit()` is nothing magic — it's just a function with no
+`self` that hands back a `Point`, named after what it makes. When the expected
+type is already known (a field, a return, a call argument) you can even drop the
+name and write the bare `{x: 3.0, y: 4.0}`.
 
-  ```jet
-  // BEFORE (@):           // AFTER (#):
-  @unsafe                  #unsafe
-  fn raw() { … }           fn raw() { … }
+(Spacing note: the flush `Point{…}` shown here is the form you just ratified in
+S29-FLUSH; today's formatter still emits the spaced `Point {…}` until that change
+lands. It doesn't affect either decision below.)
 
-  @Serialize               #Serialize
-  struct Point { … }       struct Point { … }
-  ```
+Languages split into two camps on this:
 
-**Recommendation:** none — the plan states "agent surfaces the decision; owner
-picks." Decisions D-ATTR2/D-ATTR3 only apply if this is Option B.
+| Camp | How you construct | Examples |
+|------|-------------------|----------|
+| **Literal-first** — the record literal builds the value; "constructors" are ordinary named functions | `Point{x: 1, y: 2}`, `Point.unit()` | **Jet**, Zig (`Point{ .x = 1 }`), Go (`Point{X: 1}` + `NewPoint()`), Rust (`Point { x, y }` + `Point::new()` by convention) |
+| **Constructor-method** — the type owns one or more special `init`/`new` members, often overloaded by signature | `Point(3, 4)` (Swift/Python), `new Point(r)` (C++/Java) | Swift (`init`), C++/Java (overloaded ctors), Python (`__init__`) |
 
-### D-ATTR2 — List form: bare `#Name` vs Rust-literal `#[derive(…)]`? (no rec)
+Jet is literal-first and stays there. Both open decisions are spelling questions
+inside that camp:
 
-Why it matters: only live if D-ATTR1 = B. Picks the multi-marker spelling, and
-whether to resurrect the literal `#[derive(…)]` form S55 rejected.
+- **D-CTOR1** — when you want *several* ways to build a `Point`, do you give each
+  one its own name (literal-first all the way), or let one name carry several
+  shapes (borrow overloading from the other camp)?
+- **D-ALLOC1** — an allocator is just a value you construct and use; which of the
+  literal-first spellings should `Arena` wear?
 
-- **Option A — Bare `#[Marker, …]`.** Markers listed plainly inside brackets.
+---
 
-  ```jet
-  // BEFORE (@[…]):              // AFTER (bare):
-  @[Serialize, Comparable]       #[Serialize, Comparable]
-  struct Point { … }             struct Point { … }
-  ```
+### D-CTOR1 — When a type has several constructors, name each one or overload one name? (rec A)
 
-- **Option B — Rust-literal `#[derive(…)]`.** The exact spelling S55 rejected,
-  with the `derive(…)` wrapper.
+**The scenario.** You're writing a `Point` and you want two ways to build it:
+from x/y coordinates, and from a radius/angle. Both take two `Float`s. How do
+callers tell them apart?
 
-  ```jet
-  // BEFORE (@[…]):              // AFTER (Rust-literal):
-  @[Serialize, Comparable]       #[derive(Serialize, Comparable)]
-  struct Point { … }             struct Point { … }
-  ```
+```jet
+// You want both of these to exist:
+a :: Point.cartesian(3.0, 4.0)   // x, y
+b :: Point.polar(5.0, 0.9)       // radius, angle
+```
 
-**Recommendation:** none — surfaced with D-ATTR1.
+The fork is whether the *name* does the disambiguating (you write `cartesian`
+and `polar`) or the *signature* does it (you write `make` twice and the compiler
+picks by the argument types). This is the one place Jet could borrow the
+"constructor-method" camp's overloading.
 
-### D-ATTR3 — Move loop labels to `#` too, or leave them `@`? (no rec)
+**The tradeoff, plainly:**
 
-Why it matters: only live if D-ATTR1 = B. Labels (D-LABEL1) reuse the `@` sigil.
-If attributes move but labels stay, Jet source carries two marker sigils and fmt
-prints both — the load-bearing "trap" the plan flags.
+| | Named constructors (A) | Overloading (B / C) |
+|---|---|---|
+| Reading a call | `Point.polar(5, 0.9)` says what it does | `Point.make(5, 0.9)` — you must know the overload set to know what you got |
+| Two shapes with the *same* types (polar `(r, θ)` vs a hypothetical `(width, height)`) | Just works — different names | **Ambiguous** — overloading can't separate them; you're forced back to names anyway |
+| Error when you get it wrong | "no constructor `poler`" — a typo'd name | "no `make` overload takes `(Float, Float, Float)`" — a resolution failure that's harder to teach |
+| Compiler cost | Zero — already how Jet works | New name-mangling + overload-resolution pass in sema/codegen; every call site does candidate matching |
+| Fits Jet's camp | Literal-first, names carry meaning | Imports the constructor-method camp's main complication |
 
-- **Option A — Move labels too (one sigil).** Uniform `#`; ref/host `@` (U6/U16)
-  stays, since it lives in CLI/manifest strings, not source.
+The catch that sinks overloading: it only disambiguates when the signatures
+*differ*. The moment you have two same-typed shapes (very common — `(Float,
+Float)` is both cartesian and polar) you must name them anyway. So overloading
+doesn't remove the need for names; it just adds a second, costlier mechanism
+beside them.
 
-  ```jet
-  #unsafe
-  #outer loop {
-      break #outer
-  }
-  ```
-
-- **Option B — Attributes only (mixed sigils).** Labels keep `@`; two marker
-  sigils coexist in source.
-
-  ```jet
-  #unsafe
-  @outer loop {
-      break @outer
-  }
-  ```
-
-**Recommendation:** none — surfaced with D-ATTR1. The plan flags the mixed-sigil
-outcome (Option B) as a trap but does not pick.
-
-### D-NARG1 — Named args + defaults on methods/constructors now? (rec A)
-
-Why it matters: S61 (labels + trailing defaults) is built for free functions but
-methods get nothing — the label is parsed then silently dropped and method
-defaults never fill. A real footgun, since the parser already accepts the syntax.
-
-- **Option A — Yes, methods in scope (recommended).** Method calls behave like
-  free functions: labels checked, defaults filled.
-
-  ```jet
-  fn draw(self, filled: Bool = false) { … }
-  rect.draw(filled: true)   // label checked; default fills when omitted
-  rect.draw()               // filled defaults to false
-  ```
-
-- **Option B — No, free functions only.** Methods keep today's behavior: label
-  silently ignored, default never fills.
-
-  ```jet
-  fn draw(self, filled: Bool = false) { … }
-  rect.draw(filled: true)   // label dropped; default unsupported on the method
-  ```
-
-**Recommendation:** A — leaving methods unsupported is a silent footgun and the
-parser already accepts the syntax.
-
-### D-NARG2 — Does fmt preserve or canonicalize call-site labels? (rec A)
-
-Why it matters: labels are optional (S61). fmt must either leave the user's
-choice as written or rewrite it (add/remove labels) on every format.
-
-- **Option A — Preserve as written (recommended).** Label presence is the user's
-  documentation choice; fmt never adds or strips.
-
-  ```jet
-  greet("world", loud: true)   // stays labeled
-  greet("world", true)         // stays unlabeled — no auto-add
-  ```
-
-- **Option B — Canonicalize.** fmt enforces one form (e.g. always label, or
-  always strip), rewriting calls.
-
-  ```jet
-  greet("world", true)         // canonicalize-to-labeled → greet("world", loud: true)
-  ```
-
-**Recommendation:** A — preserve in v1; revisit canonicalization with the LSP
-quick-fix (S14 M6).
-
-### S29-FLUSH — Flush constructor block `Point{x: 1}` (no space)? (rec A)
-
-Why it matters: amends ratified **S29** (which shows `Point {x: 1}` with a
-space). Owner asked for the flush form; the parser already accepts both, so this
-is a formatter-canonical-style change behind an S29 amendment.
-
-- **Option A — Flush construction (recommended).** Type name hugs its field
-  block, the way a call's `(` hugs the callee. Colon spacing (`x: 1`) keeps the
-  language-wide `: ` rule.
-
-  ```jet
-  // BEFORE (S29 today):        // AFTER (flush):
-  p :: Point {x: 3.0, y: 4.0}   p :: Point{x: 3.0, y: 4.0}
-  ```
-
-- **Option B — Keep the space (status quo).** Reject the request; `Point {…}`
-  stays canonical.
-
-  ```jet
-  p :: Point {x: 3.0, y: 4.0}   // unchanged
-  ```
-
-**Recommendation:** A — reads like a call, one canonical style, isolated fmt
-change. Note: the plan also recommends extending the flush rule to destructuring
-patterns (`Point{x, y} :: make()`) for build-vs-match symmetry; folded here as a
-sub-point rather than its own card.
-
-### D-CTOR1 — Named constructors vs. true overloading? (rec A)
-
-Why it matters: the constructor-shapes fork. Today a no-`self` static *is* a
-named constructor (`Point.unit()` ships already); a duplicate name is a hard
-E0105. Overloading means changing the method key and adding name-mangling +
-resolution machinery in codegen.
-
-- **Option A — Named constructors only (recommended).** Many shapes = many
-  distinct static names. Already works; formalize it and teach it on E0105.
+- **Option A — Named constructors only (recommended).** Each shape is a plainly
+  named function that returns the type. This already ships today.
 
   ```jet
   struct Point {
-      fn cartesian(x: Float, y: Float) -> Point { … }
-      fn polar(r: Float, theta: Float) -> Point { … }
+      fn cartesian(x: Float, y: Float) -> Point { Point{x: x, y: y} }
+      fn polar(r: Float, theta: Float) -> Point { … }   // r, θ → x, y
   }
-  // Point.cartesian(3.0, 4.0)   Point.polar(5.0, 0.9)
 
-  // Attempting overload → teaching error:
+  a :: Point.cartesian(3.0, 4.0)
+  b :: Point.polar(5.0, 0.9)
+
+  // Two ctors sharing a name is a clear, early error:
   fn from(x: Float, y: Float) -> Point { … }
   fn from(r: Float) -> Point { … }   // Error [E0105]: `from` is defined twice
-                                     // Fix: name each ctor, e.g. cartesian / unit
+                                     //   fix: name each one (cartesian / polar)
   ```
 
-- **Option B — Overload by arity only.** One name; candidates differ in
-  parameter count; resolve by counting args.
+- **Option B — Overload by argument count.** One name, the compiler picks by how
+  many arguments you pass.
 
   ```jet
   fn make(x: Float, y: Float) -> Point { … }   // 2 args
   fn make(r: Float) -> Point { … }             // 1 arg
-  // Point.make(3.0, 4.0) → 2-arg; Point.make(5.0) → 1-arg
-  // two 1-arg shapes (polar(r) vs radius(r)) still collide → named ctors anyway
+  // Point.make(3.0, 4.0) → the 2-arg one;  Point.make(5.0) → the 1-arg one
+  // but polar(r) and radius(r) are both 1-arg → still collide → name them anyway
   ```
 
-- **Option C — Overload by full signature (type-directed).** One name;
-  candidates differ by arity or param types; resolve by matching arg types.
+- **Option C — Overload by full signature.** One name, the compiler picks by
+  argument *types* (this is the C++/Swift model).
 
   ```jet
   fn of(n: Int) -> Id { … }
   fn of(s: String) -> Id { … }
-  // Id.of(7) → Int overload; Id.of("x7") → String overload
-  // Id.of(3.0) → Error [E0112]: no `of` overload accepts Float
+  Id.of(7)       // → the Int one
+  Id.of("x7")    // → the String one
+  Id.of(3.0)     // Error: no `of` overload accepts Float (hypothetical — Jet has no overloading)
   ```
 
-**Recommendation:** A — already works, zero codegen change, one mechanical path,
-matches the `Point.unit()` precedent. Reject overloading with a teaching error
-pointing at named ctors + S61 defaults.
+**Recommendation:** A. It already works, costs no compiler machinery, keeps call
+sites self-describing, and overloading wouldn't even let you delete the named
+constructors (same-typed shapes still need names). Reject overloading with a
+teaching error that points at named constructors plus S61 defaults.
 
-### D-ALLOC1 — Allocator constructor + allocate spelling? (no rec)
+### D-ALLOC1 — How should you spell "make an allocator" and "allocate from it"? (rec A)
 
-Why it matters: `Arena` placement is ratified (flat `core.mem.Arena`, D-REF2);
-this picks the surface tokens for constructing an allocator and allocating from
-it. The plan surfaces three spellings without a pick.
+**The scenario.** You're parsing a big file and want every node freed together
+when you're done, so you reach for an arena (`core.mem.Arena`, already placed by
+D-REF2). You need to (1) construct the arena and (2) allocate a value in it. The
+only open question is what those two lines *look like*.
 
-- **Option A — Method style.** Construct with `.new()`, allocate with a method.
+You asked for the philosophy behind `Type.new()` vs `Type{}` — here it is, with
+where each leads:
+
+- **`Type{...}` (record literal).** "A value is its fields." Building the value
+  means listing what it's made of. Great when the fields *are* the value
+  (`Point{x, y}`); awkward when construction does real work (open a file, grab
+  memory from the OS) — there are no honest "fields" to list, so the literal
+  would expose internals you shouldn't touch. Jet uses this for plain data.
+- **`Type.new()` (named constructor).** "Building is an action, not a field
+  list." A plain function runs the setup and hands back a ready value, hiding
+  internals. This is what `Point.unit()` already is. It's the right fit when
+  construction *does* something — exactly the allocator case. (`new` here is just
+  a conventional function name, not a keyword; D-CTOR1 decides whether the name
+  can be reused.)
+- **`Type(...)` (call-the-type).** "The type name *is* the constructor." Compact,
+  but it's a third construction syntax Jet doesn't have today, and it blurs the
+  line between "a type" and "a function" — adopting it is a real language
+  addition, not just a stdlib choice.
+
+An allocator is the textbook "construction does work" case, so it wants the
+named-constructor spelling, not a literal. The options differ only in how you
+spell the two lines:
+
+- **Option A — Method style (recommended).** Construct with a named constructor,
+  allocate with a method on the arena. Reads like the rest of Jet.
 
   ```jet
   use core.mem
   arena :: mem.Arena.new()
-  node :: arena.alloc(value)   // returns the stored value, freed at scope end
+  node  :: arena.alloc(value)   // value lives in the arena, freed at scope end
   ```
 
-- **Option B — Allocator-parameter style.** Allocate via a builtin that takes the
-  allocator as a named argument.
+- **Option B — Allocator-parameter style.** Construct the same way, but allocate
+  through a free `make` builtin that takes the allocator as a labeled argument
+  (the Zig-flavored "allocator is a parameter you pass around" style).
 
   ```jet
   use core.mem
   arena :: mem.Arena.new()
-  node :: make(Node, in: arena)
+  node  :: make(Node, in: arena)
   ```
 
-- **Option C — Capacity-typed constructor.** Bake capacity/shape into the
-  constructor type.
+- **Option C — Capacity-typed constructor.** Same method style, but bake the
+  capacity into construction so the size is visible at the call site.
 
   ```jet
   use core.mem
-  arena :: mem.Arena(capacity: 4096)
-  node :: arena.alloc(value)
+  arena :: mem.Arena(capacity: 4096)   // note: this is the "call-the-type" spelling
+  node  :: arena.alloc(value)
   ```
 
-**Recommendation:** none — the plan lists three spellings without a pick. (The
-related D-ALLOC-B — does an arena value need `@unsafe`? — recommends **no**, gate
-only with `use core.mem`; it is a confirm, not surfaced as a card here.)
+**Recommendation:** A. It's the plain named-constructor + method shape Jet
+already uses everywhere, nothing new to learn. Capacity (C's idea) can ride along
+as an optional argument with an S61 default — `Arena.new(capacity: 4096)` — so you
+don't have to choose between A and C. (Related confirm, **D-ALLOC-B**: an arena
+value does *not* need `@unsafe` — reaching for `use core.mem` is the opt-in. Not
+a card, just noting the recommendation is "no gate.")
 
 ---
 
