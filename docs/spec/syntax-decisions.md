@@ -1694,6 +1694,24 @@ parser already accepts both forms, so this is a formatter-canonical-style change
 S29's canonical example above still shows the spaced form and is corrected when
 the fmt change lands.
 
+**D-CTOR1 — Named constructors only** *(ratified 2026-06-19, option A; formalizes
+existing behavior)*: many ways to build a type = many distinctly-named no-`self`
+statics that return it (`Point.cartesian(…)`, `Point.polar(…)`); a duplicate name
+stays a hard **E0105**, whose teaching text points at naming each constructor.
+Overloading (options B/C) is rejected: it only disambiguates when signatures
+differ, so same-typed shapes still need names — it adds name-mangling +
+resolution machinery without removing the need for names. Zero codegen change;
+this is the `Point.unit()` precedent made policy. Related: **D-CTOR2** (no marker
+keyword — return-type-is-the-type identifies a constructor) follows from this.
+
+**D-ALLOC1 — Allocator method style** *(ratified 2026-06-19, option A)*: construct
+an allocator with a named constructor and allocate with a method —
+`arena :: mem.Arena.new()` then `node :: arena.alloc(value)` (freed at scope end).
+Capacity rides as an optional S61 default (`mem.Arena.new(capacity: 4096)`), so
+A subsumes option C; the free-builtin `make(Node, in: arena)` form (B) is rejected.
+An arena value is **not** `@unsafe` — `use core.mem` is the opt-in gate (D-ALLOC-B).
+Ships with the `core.mem` arena work (D-REF2).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -2010,3 +2028,5 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-19 | D-NARG1 | named args + defaults **on methods/constructors** (A): call-site labels checked, trailing defaults fill; closes the S61 method gap (label parsed then dropped). **Ratified, not yet implemented** | owner |
 | 2026-06-19 | D-NARG2 | fmt **preserves** call-site labels (A): never adds or strips; canonicalization deferred to the LSP quick-fix (S14/M6). **Ratified, not yet implemented** | owner |
 | 2026-06-19 | S29-FLUSH | **flush constructor block** `Point{x: 3.0, y: 4.0}` (A; amends S29); flush also for destructuring `Point{x, y} :: make()`; `: ` colon spacing unchanged; formatter-canonical change. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-CTOR1 | **named constructors only** (A): many shapes = many named no-`self` statics returning the type; duplicate name = E0105 (teach naming each); overloading rejected (only disambiguates when sigs differ). Zero codegen change; formalizes `Point.unit()`. D-CTOR2: no marker keyword. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-ALLOC1 | **allocator method style** (A): `mem.Arena.new()` + `arena.alloc(value)`; capacity as optional S61 default (subsumes C); free-builtin form (B) rejected; arena not `@unsafe` (`use core.mem` gate, D-ALLOC-B); ships with D-REF2. **Ratified, not yet implemented** | owner |
