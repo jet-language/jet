@@ -27,18 +27,24 @@ running it redirects to the dashboard; otherwise it shows the command above.
 
 ## The dashboard
 
+The look is an air-traffic-control board: tasks and decisions are **flight
+progress strips** that slide between **bays** (the pipeline stages). Bays and
+decision groups start **collapsed** — open the one you want.
+
 `serve` starts a local server (default `http://127.0.0.1:4173`) that:
 
-- shows the pipeline at a glance — inbox tasks, sidequest plans, open ballots,
+- shows the pipeline at a glance — tasks, sidequest plans, open ballots,
   ratified count, last submission, and any queued example-improvement requests;
 - **renders the ballot from `docs/spec/decision-ballots.md`** — the cards are
   parsed out of the markdown, so there is exactly one source of truth and no
-  duplicated card data to keep in sync;
-- lets you **pick** an option, **undo** it (click again or "✕ clear"), and add a
+  duplicated card data to keep in sync. Every open decision is a full card with
+  selectable options, grouped and collapsed by section;
+- lets you **tick** an option, **undo** it (click again or "✕ clear"), and add a
   per-decision comment;
-- on **Submit**, writes your decisions to `docs/spec/ballot-results.md` — no
-  copy/paste. Then tell Claude **"go"** and it ratifies them into
-  `syntax-decisions.md`, strips the decided cards, and implements the plans;
+- on **Sign & file**, writes your decisions to `docs/spec/ballot-results.md` —
+  no copy/paste, and it **merges**: a new submission adds to or replaces by id,
+  never wiping earlier decisions. Then tell Claude **"go"** and it ratifies them
+  into `syntax-decisions.md`, strips the decided cards, and implements the plans;
 - **↻ improve examples** on a card appends a request to
   `tools/Tower/regen-queue.md`; Claude reviews that card's examples against the
   house criteria (human voice, plain language, a user-story scenario, inline
