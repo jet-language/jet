@@ -9,8 +9,9 @@ behind the existing `use core.mem` discovery gate. This is stdlib work (sema
 signature tables + codegen dispatch + a Rust runtime helper module), not new
 core syntax — the only surface tokens are the allocator type names and their
 method names, which need owner ratification before code. The API must read in
-the view/edit/take/share capability vocabulary (owner-todo Memory Capability
-Model): an arena *owns* its backing store (`take`), hands out values you *view*
+the view/edit/take/share capability vocabulary (see
+`sidequests/memory-capability-model.md`): an arena *owns* its backing store
+(`take`), hands out values you *view*
 or *edit*, and frees everything at scope end via S63 RAII.
 
 ## Current state (verified)

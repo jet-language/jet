@@ -35,8 +35,8 @@ the low-level tier stays gated and never leaks into normal Jet.
   in the generated Rust. `--small` (S15) also implies `panic = "abort"`. Normal hosted
   Jet builds may still use unwind; document the difference.
 - **Embedded/freestanding smoke (D-CROSS3)** — documented local QEMU harness; no
-  physical hardware required in CI. The repo ships `docs/embedded.md` with exact QEMU
-  commands to run the freestanding example.
+  physical hardware required in CI. The repo ships `docs/reference/embedded.md` with exact
+  QEMU commands to run the freestanding example.
 
 ## Freestanding diagnostic (example)
 
