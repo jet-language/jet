@@ -296,14 +296,14 @@ impl<'a> Fmt<'a> {
                 type_name, fields, ..
             } => {
                 self.write(type_name);
-                self.write(" { ");
+                self.write("{");
                 for (i, f) in fields.iter().enumerate() {
                     if i > 0 {
                         self.write(", ");
                     }
                     self.write(&f.name);
                 }
-                self.write(" }");
+                self.write("}");
             }
             BindPattern::List { elems, .. } => {
                 self.write("[");

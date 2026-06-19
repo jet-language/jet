@@ -299,7 +299,7 @@ impl<'a> Fmt<'a> {
                     }
                     self.write(">");
                 }
-                self.write(" {");
+                self.write("{");
                 for (i, (name, _, expr)) in fields.iter().enumerate() {
                     if i > 0 {
                         self.write(", ");

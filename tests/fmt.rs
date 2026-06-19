@@ -242,6 +242,8 @@ fn fmt_rewrites_retired_or_fallback_to_question_question() {
 #[test]
 fn fmt_preserves_destructuring_targets() {
     // S74: `val`/`var` destructuring of a struct and a list round-trips.
+    // S29-FLUSH: the canonical destructuring form is flush — `Point{x, y}` — so a
+    // spaced input normalizes to the flush form on format.
     let src = r#"struct Point { x: Int, y: Int }
 
 fn main() {
@@ -252,8 +254,8 @@ fn main() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept destructuring targets");
     assert!(
-        out.contains("Point { x, y } :: make()"),
-        "expected struct destructuring preserved, got:\n{out}"
+        out.contains("Point{x, y} :: make()"),
+        "expected flush struct destructuring (S29-FLUSH), got:\n{out}"
     );
     assert!(
         out.contains("[a, b, c] := nums()"),
@@ -261,6 +263,30 @@ fn main() {
     );
     let twice = jet::format_source(&out).expect("destructuring output should re-fmt");
     assert_eq!(out, twice, "destructuring formatting must be idempotent");
+}
+
+#[test]
+fn fmt_flush_construction() {
+    // S29-FLUSH: a struct literal hugs its field block — `Point{x: 1, y: 2}`, no
+    // space before the brace. A spaced input normalizes to the flush form.
+    let src = r#"struct Point { x: Int, y: Int }
+
+fn main() {
+    p :: Point { x: 1, y: 2 }
+    print("{p.x}")
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept struct construction");
+    assert!(
+        out.contains("Point{x: 1, y: 2}"),
+        "expected flush construction (S29-FLUSH), got:\n{out}"
+    );
+    assert!(
+        !out.contains("Point {x: 1"),
+        "construction must not keep the space before the brace, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("construction output should re-fmt");
+    assert_eq!(out, twice, "construction formatting must be idempotent");
 }
 
 #[test]

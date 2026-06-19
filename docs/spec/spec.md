@@ -161,7 +161,7 @@ back a parameter, a scalar local, or a const — not fresh text (**E0206**).
 ## M3 — data & methods (done)
 
 Structs and enums carry fields; methods attach behavior (S27). Ratified
-surface (Group 2): struct literals **`Type { f: v }`** (S29); enums with
+surface (Group 2): struct literals **`Type{f: v}`** (S29; flush, S29-FLUSH); enums with
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
 **`T?`** with **`value(v)`** / **`null`** (S32); generic args
 **`Type<Args>`** (S33). `null` is only legal for `T?`, never plain `T`.
