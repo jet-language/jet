@@ -516,12 +516,9 @@ impl<'a> Fmt<'a> {
             if i > 0 {
                 self.write(", ");
             }
-            // S61: preserve the call-site argument label `name:` (canonical
-            // `name: value` spacing, matching struct-literal field init).
-            if let Some((name, _)) = &arg.label {
-                self.write(name);
-                self.write(": ");
-            }
+            // Convention prefix comes first: the parser reads `mut`/`take`
+            // before the label (`f(mut x: v)`), so fmt must emit it in that
+            // order or the output won't re-parse.
             match arg.convention {
                 AccessConvention::Read => {}
                 AccessConvention::Mutate => {
@@ -530,6 +527,12 @@ impl<'a> Fmt<'a> {
                 AccessConvention::Move => {
                     self.write("take ");
                 }
+            }
+            // S61: preserve the call-site argument label `name:` (canonical
+            // `name: value` spacing, matching struct-literal field init).
+            if let Some((name, _)) = &arg.label {
+                self.write(name);
+                self.write(": ");
             }
             self.fmt_expr(&arg.expr, Prec::OrFallback);
         }
