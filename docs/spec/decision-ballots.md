@@ -208,9 +208,32 @@ a card, just noting the recommendation is "no gate.")
 
 ---
 
+## Open — captured, not yet drafted as full cards
+
+Real open decisions found across the plans, surfaced here so none stays hidden in
+prose. Each is a one-liner plus a recommendation; ask the dashboard to draft any
+of these into a full worked card when you want to decide it. Format:
+`ID — title — status — one-liner (rec).`
+
+- **S83** — External definitions for structs/modules — *blocked* — define methods/items out-of-body, identical semantics; needs a fresh separator (`::` spent by D-BIND1, `.` by D-MOD1). Owner picks a separator or withdraws.
+- **D-CTOR2** — Constructor marker — *open, ready* — none vs `new`/`init`/`@constructor`. (rec: none — a no-`self` static returning the type already *is* a constructor.)
+- **D-CTOR3** — Overload × defaults collision — *conditional on D-CTOR1=B/C* — if overloading lands, forbid defaults on overloaded names so `make(5)` can't match two candidates. (rec: forbid; moot if D-CTOR1=A.)
+- **D-ALLOC-C** — Which allocators ship + wider-API namespace — *open* — `Arena` is in; bundle `Bump`/`Pool`/`Fixed` now or stage them, and is the expert API flat in `core.mem` or grouped under `core.mem.alloc`? (rec: Arena now, others staged; flat.)
+- **D-ALLOC-D** — Reset/free verb + use-after-reset wording — *open* — capability-vocabulary for cleanup (`reset`/`free`) and the diagnostic when you touch freed memory. (rec: settle with D-ALLOC1.)
+- **D-NARG-D2** — Default referencing earlier params — *open* — allow `fn box(w: Int, h: Int = w)`? (rec: no in v1 — defaults are self-contained; teaching error.)
+- **D-NARG-D4** — Dedicated label-mismatch diagnostic — *open* — transposed/unknown labels fold into E0104 today; give them their own teaching code? (rec: yes.)
+- **D-NARG-D5** — Labels × future overloading — *blocked on D-CTOR1* — labels don't drive overload resolution; resolve constructor shapes first. (rec: revisit after D-CTOR1.)
+- **D-JSON3** — Surface lenient JSON coercions — *open* — D-JSON1 coerces `"8080"`→`8080`; how is what-got-coerced shown (per-decode report? build log?). (rec: pick a surfacing, then card it.)
+- **D-TOOL-SPLIT** — Split lsp/fmt/lint from the `jet` binary — *open, needs owner thought* — separate binaries/plugins vs one bundled tool. (no rec — owner call.)
+
 ## Parked — not open ballots
 
 Kept out of the queue deliberately so the owner sees only live decisions.
+
+- **Deferred-by-design language decisions** — **S53** (concurrency: tasks/channels,
+  v2), **S56** (typed reflection / user derives, E3 — S26 Layer 3), **S60**
+  (compile-time pure eval + data embedding, post-1.0). Ratified as deferred;
+  recorded in `syntax-decisions.md`. No action — listed so they stay visible.
 
 - **Loop unification (amends S19)** — decided: `loop` is the one form;
   `while`/`for` become teaching errors. No longer a decision — it is an
