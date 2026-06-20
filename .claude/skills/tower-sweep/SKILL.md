@@ -72,10 +72,26 @@ decision that no agent has reviewed. Concretely:
 
 ## Decision-card house rules (or Tower can't show it / the owner can't trust it)
 
-- Format exactly: `### <ID> — <title> (rec X)`, an intro, then
-  `- **Option A — <name>.**` bullets **each with a worked user-story example** in a
-  fenced ```jet (or ```shell) block — what a real person types, sees, and hits as an
-  error — then `**Recommendation:**`. No abstract option tables.
+The owner decides from the card alone — he should never have to open the plan to
+understand the choice. **Every card MUST carry all three of these, or it is not
+ballot-ready:**
+
+1. **A user story** — one short paragraph naming a real person and what they are
+   trying to do, so the owner knows *why this decision exists* before he sees syntax.
+2. **A short tradeoff comparison** — a compact table (or tight bullet list) with one
+   row per option and 3–4 columns that actually differ (e.g. ceremony, failure mode,
+   ratification cost, familiarity). The owner must be able to weigh options at a
+   glance without reverse-engineering them from prose.
+3. **A worked example of *every* option** — each `- **Option X — <name>.**` bullet
+   carries its own fenced ```jet (or ```shell) block showing what the real person
+   from the user story types and sees (including the error they hit). No option may
+   be described abstractly; if it's an option, it has a code block.
+
+Then close with `**Recommendation:**` and a one-line *why*.
+
+- Format exactly: `### <ID> — <title> (rec X)`, the user story, the tradeoff table,
+  then the `- **Option A — <name>.**` bullets each with their worked example, then
+  `**Recommendation:**`. No abstract option tables standing in for examples.
 - **ID must be Tower-parseable**: `D-…` or `S<digits>-…` (the parser regex rejects
   `S-DBG1`-style ids). Check the new id does **not** collide with a ratified id:
   `rg "\bD-XXX\b" docs/spec/syntax-decisions.md`.

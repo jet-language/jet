@@ -72,6 +72,8 @@ impl JetExpect {
 }
 "#;
 const STD_PRELUDE: &str = include_str!("../Prelude/Std.rs");
+/// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
+const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 
 pub(crate) fn mangle(name: &str) -> String {
     if name == "main" {
@@ -98,6 +100,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     out.push_str(&format!("// jet:source-map source={}\n", file));
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
+    out.push_str(MEM_PRELUDE);
     out.push('\n');
 
     let cx = build_cx(prog, src, file);
@@ -109,6 +112,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Trait(t) => M9::emit_trait_def(t, &mut out),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
+            Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
@@ -169,6 +173,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     ));
     out.push_str("#![allow(warnings)]\n\n");
     out.push_str(PRELUDE);
+    out.push_str(MEM_PRELUDE);
     out.push_str(TEST_PRELUDE);
     out.push('\n');
 
@@ -182,6 +187,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Trait(t) => M9::emit_trait_def(t, &mut out),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
+            Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
@@ -274,6 +280,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    out.push_str(MEM_PRELUDE);
     if !bundle.used_std.is_empty() {
         out.push_str(STD_PRELUDE);
     }
@@ -359,6 +366,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
     out.push_str(PRELUDE);
+    out.push_str(MEM_PRELUDE);
     out.push_str(TEST_PRELUDE);
     if !bundle.used_std.is_empty() {
         out.push_str(STD_PRELUDE);

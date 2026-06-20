@@ -65,6 +65,14 @@ pub(crate) enum TypeDef {
         variant_order: Vec<String>,
         methods: HashMap<String, MethodSig>,
     },
+    /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
+    /// a base type. No implicit coercion either direction (E0128). Arithmetic
+    /// only when `is_numeric` (D-DIST3, E0127).
+    Distinct {
+        name_span: Span,
+        base: Type,
+        is_numeric: bool,
+    },
 }
 
 pub(crate) struct TypeRegistry {
@@ -113,6 +121,24 @@ impl TypeRegistry {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// D-DIST1: true when `name` is a registered distinct type.
+    pub(crate) fn is_distinct(&self, name: &str) -> bool {
+        matches!(self.types.get(name), Some(TypeDef::Distinct { .. }))
+    }
+
+    /// D-DIST1: the base type of a distinct type (None if `name` is not distinct).
+    pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
+        match self.types.get(name) {
+            Some(TypeDef::Distinct { base, .. }) => Some(base),
+            _ => None,
+        }
+    }
+
+    /// D-DIST3: true when the distinct type has `#Numeric`.
+    pub(crate) fn distinct_is_numeric(&self, name: &str) -> bool {
+        matches!(self.types.get(name), Some(TypeDef::Distinct { is_numeric: true, .. }))
     }
 }
 
@@ -192,6 +218,92 @@ fn extern_to_sig(ef: &ExternFn) -> FuncSig {
         is_extern: true,
         is_unsafe: false,
         is_pure: false, // extern functions are always considered impure
+    }
+}
+
+/// D-NARG-D2: Walk a default expression and substitute any `Ident` that names
+/// an earlier parameter with the corresponding supplied argument expression.
+/// `param_names` is the slice of earlier param names (index-aligned with `args`).
+/// Returns the rewritten expression.
+pub(crate) fn substitute_param_refs(
+    expr: crate::AST::Expr,
+    param_names: &[String],
+    args: &[crate::AST::CallArg],
+) -> crate::AST::Expr {
+    use crate::AST::Expr;
+    match expr {
+        Expr::Ident(ref name, _) => {
+            if let Some(idx) = param_names.iter().position(|n| n == name) {
+                if let Some(arg) = args.get(idx) {
+                    return arg.expr.clone();
+                }
+            }
+            expr
+        }
+        Expr::Unary(op, inner, span) => {
+            Expr::Unary(op, Box::new(substitute_param_refs(*inner, param_names, args)), span)
+        }
+        Expr::Binary(op, lhs, rhs, span) => Expr::Binary(
+            op,
+            Box::new(substitute_param_refs(*lhs, param_names, args)),
+            Box::new(substitute_param_refs(*rhs, param_names, args)),
+            span,
+        ),
+        Expr::Field(base, field, span) => {
+            Expr::Field(Box::new(substitute_param_refs(*base, param_names, args)), field, span)
+        }
+        // All other expression forms don't mention parameter names directly
+        // (calls, literals, etc.) — leave them as-is. A complex default
+        // expression containing a nested call with a param ident would need
+        // recursive handling, but the parser only allows simple expressions in
+        // defaults (literals, idents, field access, arithmetic).
+        other => other,
+    }
+}
+
+/// D-NARG-D2: Check whether a default expression references any parameter
+/// that appears *after* the current parameter index. Collects the names of
+/// any forward-referenced parameters found. `all_param_names` is the full
+/// list of non-self parameter names for this function (in order).
+/// `default_param_idx` is the index of the parameter whose default we're checking.
+pub(crate) fn find_forward_refs(
+    expr: &crate::AST::Expr,
+    all_param_names: &[String],
+    default_param_idx: usize,
+) -> Vec<(String, crate::Diagnostics::Span)> {
+    use crate::AST::Expr;
+    let mut found = Vec::new();
+    find_forward_refs_inner(expr, all_param_names, default_param_idx, &mut found);
+    found
+}
+
+fn find_forward_refs_inner(
+    expr: &crate::AST::Expr,
+    all_param_names: &[String],
+    default_param_idx: usize,
+    found: &mut Vec<(String, crate::Diagnostics::Span)>,
+) {
+    use crate::AST::Expr;
+    match expr {
+        Expr::Ident(name, span) => {
+            // A forward ref: name is in param list at an index >= default_param_idx
+            if let Some(idx) = all_param_names.iter().position(|n| n == name) {
+                if idx >= default_param_idx {
+                    found.push((name.clone(), *span));
+                }
+            }
+        }
+        Expr::Unary(_, inner, _) => {
+            find_forward_refs_inner(inner, all_param_names, default_param_idx, found);
+        }
+        Expr::Binary(_, lhs, rhs, _) => {
+            find_forward_refs_inner(lhs, all_param_names, default_param_idx, found);
+            find_forward_refs_inner(rhs, all_param_names, default_param_idx, found);
+        }
+        Expr::Field(base, _, _) => {
+            find_forward_refs_inner(base, all_param_names, default_param_idx, found);
+        }
+        _ => {}
     }
 }
 
@@ -313,6 +425,10 @@ pub(crate) struct Checker<'a> {
     owner_type: Option<String>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
+    /// D-ALLOC-D (ratified 2026-06-19): allocator names that have been freed
+    /// or reset in this scope — maps name → verb ("free"/"reset").
+    /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
+    freed_allocators: HashMap<String, String>,
     /// True while inferring an expression that the generated Rust will only
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
@@ -337,6 +453,21 @@ pub(crate) struct Checker<'a> {
     type_param_scope: Vec<crate::AST::TypeParam>,
     /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
     freestanding: bool,
+    /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
+    /// `comptime if` arm — name-resolution runs normally (so unknown-name
+    /// typos are caught) but all other diagnostics are suppressed and the arm
+    /// is never lowered to codegen.
+    in_dropped_comptime_arm: bool,
+    /// D-L0201: liveness gate — pointer to the statements that follow the
+    /// currently-executing statement in the innermost block, plus the count.
+    /// Set by `check_block` before each call to `check_stmt`; reset to empty
+    /// when entering a nested block (so the lint can only see the current
+    /// frame's tail, which is conservative: if the name is *not* in the tail
+    /// we fire; if uncertain we stay silent).
+    /// Safety: valid for the duration of `check_stmt` — the slice lives in
+    /// the `Program` AST which outlives the checker.
+    stmt_tail_ptr: *const crate::AST::Stmt,
+    stmt_tail_len: usize,
 }
 
 

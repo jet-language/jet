@@ -482,3 +482,80 @@ fn simple_exec_runs_without_a_manifest() {
         String::from_utf8_lossy(&out.stdout)
     );
 }
+
+// ── D-CLI1: `--` separator passthrough (c11) ──────────────────────────────
+
+/// Write a Jet fixture that prints its argument count via `io.args()`.
+fn args_fixture(tag: &str) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
+    fs::write(&p,
+        "use core.io as io\nfn main() {\n    args :: io.args()\n    print(args.len())\n}\n",
+    ).unwrap();
+    p
+}
+
+#[test]
+fn passthrough_forwards_tokens_after_separator() {
+    // `jet run file.jet -- --port 8080 x` — program sees 4 args: argv[0] +
+    // three forwarded tokens. io.args().len() == 4.
+    let p = args_fixture(&line!().to_string());
+    let out = Command::new(jet())
+        .args(["run", p.to_str().unwrap(), "--", "--port", "8080", "x"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.trim() == "4",
+        "expected 4 args (argv[0] + 3 forwarded), got: {stdout}"
+    );
+}
+
+#[test]
+fn bare_separator_gives_empty_passthrough() {
+    // `jet run file.jet --` — bare `--` with nothing after; program sees 1 arg.
+    let p = args_fixture(&line!().to_string());
+    let out = Command::new(jet())
+        .args(["run", p.to_str().unwrap(), "--"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.trim() == "1",
+        "expected 1 arg (just argv[0]), got: {stdout}"
+    );
+}
+
+#[test]
+fn no_separator_positional_regression() {
+    // Plain positional words with no `--` still reach the program (regression
+    // guard). `jet run file.jet hello` → len == 2.
+    let p = args_fixture(&line!().to_string());
+    let out = Command::new(jet())
+        .args(["run", p.to_str().unwrap(), "hello"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.trim() == "2",
+        "expected 2 args (argv[0] + hello), got: {stdout}"
+    );
+}
+
+#[test]
+fn unknown_flag_before_separator_is_e2102_with_passthrough_hint() {
+    // `jet run file.jet --port` (no `--`) — unknown flag before `--` is E2102
+    // and the Fix line teaches the `--` form (D-CLI1=A).
+    let p = args_fixture(&line!().to_string());
+    let out = Command::new(jet())
+        .args(["run", p.to_str().unwrap(), "--port"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "unknown flag before -- should exit 2");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E2102"), "should cite E2102:\n{stderr}");
+    assert!(stderr.contains("--"), "Fix should mention `--` separator:\n{stderr}");
+}

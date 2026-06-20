@@ -136,4 +136,20 @@ fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) ->
 fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F) where F: Fn(K, V) {
     for (k, v) in m { f(k, v); }
 }
+// ── D-DEFER1 option B: core.scope.guard ──────────────────────────────────────
+// A ScopeGuard stores a zero-argument closure and runs it in Drop — on every
+// exit path (normal fall-through, early `return`, `?` propagation).
+// LIFO ordering is guaranteed by Rust's reverse-declaration drop order.
+// Generic over F: avoids boxing and allows non-'static captures. Purely safe.
+struct JetScopeGuard<F: FnOnce()> {
+    f: Option<F>,
+}
+fn jet_scope_guard<F: FnOnce()>(f: F) -> JetScopeGuard<F> {
+    JetScopeGuard { f: Some(f) }
+}
+impl<F: FnOnce()> Drop for JetScopeGuard<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.f.take() { f(); }
+    }
+}
 trait user_Serialize { fn to_json(&self) -> String; }

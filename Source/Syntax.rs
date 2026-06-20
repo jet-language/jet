@@ -66,6 +66,15 @@ pub const INTERP_CLOSE: &str = "}";
 /// S9 (ratified): the built-in print function (adds a newline).
 pub const BUILTIN_PRINT: &str = "print";
 
+/// D-PRELUDE1 option B (ratified): `input` is ambient (no `use core.io` required).
+/// Both `print` and `input` form the prelude set — the two symbols a first interactive
+/// program reaches for. All other core.io members stay qualified behind `use core.io`.
+pub const BUILTIN_INPUT: &str = "input";
+
+/// The full prelude set (D-PRELUDE1 = B). Kept as a constant slice so sema and
+/// codegen can agree on membership without drifting from each other.
+pub const PRELUDE_IDENTS: &[&str] = &["print", "input"];
+
 /// S11 (ratified): built-in type names (M1).
 pub const TYPE_INT: &str = "Int";
 pub const TYPE_FLOAT: &str = "Float";
@@ -136,6 +145,36 @@ pub const MEM_VOLATILE_READ: &str = "volatile_read";
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
 /// an Int (taking a pointer is inert; using it needs `@unsafe`).
 pub const MEM_ADDRESS_OF: &str = "address_of";
+
+/// D-ALLOC1 (ratified 2026-06-19): arena allocator type name.
+/// Construct with `mem.Arena.new()`, allocate with `arena.alloc(value)`.
+/// Gated by `use core.mem` (E3102); no `#unsafe` needed.
+pub const MEM_ARENA: &str = "Arena";
+
+/// D-ALLOC-C (ratified 2026-06-19): bump allocator (append-only, O(1)).
+/// Grouped under `core.mem.alloc` together with Arena/Pool/Fixed.
+pub const MEM_BUMP: &str = "Bump";
+
+/// D-ALLOC-C (ratified 2026-06-19): pool allocator (fixed-slot slab).
+pub const MEM_POOL: &str = "Pool";
+
+/// D-ALLOC-C (ratified 2026-06-19): fixed allocator (static backing buffer).
+pub const MEM_FIXED: &str = "Fixed";
+
+/// D-ALLOC1 (ratified 2026-06-19): allocator constructor method name.
+pub const MEM_ALLOC_NEW: &str = "new";
+
+/// D-ALLOC1 (ratified 2026-06-19): allocate a value into an arena/bump/pool/fixed.
+pub const MEM_ALLOC_ALLOC: &str = "alloc";
+
+/// D-ALLOC-D (ratified 2026-06-19): reset the allocator, keeping the backing buffer.
+pub const MEM_ALLOC_RESET: &str = "reset";
+
+/// D-ALLOC-D (ratified 2026-06-19): free the backing memory, returning it to the OS.
+pub const MEM_ALLOC_FREE: &str = "free";
+
+/// D-ALLOC-C (ratified 2026-06-19): wider allocator API namespace.
+pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
@@ -271,17 +310,17 @@ pub const KW_RUST: &str = "rust"; // S50
 pub const C_MODULE_ROOT: &str = "c"; // S59
 /// S59: reserved final segment for compiler-generated bindgen modules.
 pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
-/// S59 (S82): attribute on generated C binding modules — `@bindgen module c.….__bindgen__`.
+/// S59 (S82): attribute on generated C binding modules — `#bindgen module c.….__bindgen__`.
 pub const ATTR_BINDGEN: &str = "bindgen"; // S59
-/// S59 (S82): attribute on user C overlay modules — `@extern module c.…`.
-pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `@extern module`, not `extern rust`
-/// S58 / D-LL2: required reason on `@unsafe { … }` — `@audit("…")`.
+/// S59 (S82): attribute on user C overlay modules — `#extern module c.…`.
+pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `#extern module`, not `extern rust`
+/// S58 / D-LL2: required reason on `#unsafe { … }` — `#audit("…")`.
 pub const ATTR_AUDIT: &str = "audit"; // S58
 // D-LABEL1: a loop label is `@name` immediately before `loop`
-// (`@outer loop { … }`); `break @name` / `continue @name` target it. This
-// reuses the S82 `@` marker sigil in a new inline (pre-`loop`) position — no
-// new token; the `@` and identifier already lex. The parser disambiguates a
-// label from an `@audit`/`@unsafe`/`@Marker` form by the following keyword.
+// (`@outer loop { … }`); `break @name` / `continue @name` target it.
+// D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
+// No disambiguation by following keyword needed — `#` is always an attribute,
+// `@` in prefix position before `loop` is always a label.
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
 
@@ -323,6 +362,9 @@ pub const KW_TRAIT: &str = "trait";
 pub const KW_DERIVE: &str = "derive";
 
 /// S57 (ratified M9.5): compile-time constant binding keyword.
+/// Also used in `comptime if` (D-WHEN1, ratified 2026-06-19) — the two-word
+/// sequence `comptime if` is parsed as a compile-time conditional; no new
+/// keyword is required. The unselected arm gets name-resolution only (D-WHEN2).
 pub const KW_COMPTIME: &str = "comptime";
 
 /// S28: foreign trait spellings for teaching error E0022.
@@ -423,15 +465,16 @@ pub const FOREIGN_AWAIT: &str = "await";
 pub const FOREIGN_MUTEX: &str = "Mutex";
 pub const FOREIGN_LOCK: &str = "lock";
 
-/// S82 (ratified 2026-06-16): attribute prefix sigil — `@Marker` / `@[a, b]`.
-pub const ATTR_PREFIX: &str = "@";
+/// D-ATTR1 (ratified 2026-06-19): attribute prefix sigil — `#Marker` / `#[a, b]`.
+/// Replaces S82's `@` spelling. Loop labels keep `@` (D-ATTR3 = B).
+pub const ATTR_PREFIX: &str = "#";
 
 /// S82 (ratified 2026-06-16): multi-attribute list delimiters after `@`.
 pub const ATTR_LIST_OPEN: &str = "[";
 pub const ATTR_LIST_CLOSE: &str = "]";
 
-/// S82: rejected Rust-style attribute spelling (teaching error).
-pub const FOREIGN_HASH_ATTR: &str = "#[";
+/// D-ATTR1: rejected old `@` attribute spelling (teaching error). S82 reversed.
+pub const FOREIGN_AT_ATTR: &str = "@";
 
 /// S80 (ratified 2026-06-16): cross-type `?` conversion trait (D-ERR2).
 pub const TRAIT_FALLIBLE: &str = "Fallible";
@@ -702,3 +745,18 @@ pub const TYPE_FIXED_SIZE_SEP: &str = "#";
 /// loops. Written as a single two-char token `?continue` (the `?` is part of
 /// the keyword, not a standalone operator).
 pub const KW_QUESTION_CONTINUE: &str = "?continue";
+
+/// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — declares a
+/// distinct type (a separate nominal type sharing the base's representation).
+/// Used in the value position of a `::` immutable binding at item level;
+/// `distinct`-over-`distinct` chaining is rejected in v1.
+pub const KW_DISTINCT: &str = "distinct";
+
+/// D-DIST3 (ratified 2026-06-20): unwrap method for a distinct type —
+/// `value.raw()` yields the base value. Named-cast family (S42).
+pub const METHOD_DISTINCT_RAW: &str = "raw";
+
+/// D-ATTR1 / D-DIST3 (ratified): `#Numeric` marker enables same-type
+/// arithmetic on a distinct type. Written `#Numeric` on the same line
+/// before the distinct-type name (uses the `#` attribute prefix D-ATTR1).
+pub const ATTR_NUMERIC: &str = "Numeric";

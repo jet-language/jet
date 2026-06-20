@@ -309,9 +309,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0208",
                         "`*` isn't allowed here".to_string(),
-                        "dereferencing with `*` is only for expert code inside an `@unsafe` block"
+                        "dereferencing with `*` is only for expert code inside an `#unsafe` block"
                             .to_string(),
-                        "remove `*`, or wrap this code in `@unsafe { ... }`".to_string(),
+                        "remove `*`, or wrap this code in `#unsafe { ... }`".to_string(),
                         Some(*span),
                     ));
                 }
@@ -1890,6 +1890,33 @@ impl<'a> Checker<'a> {
             self.borrow_ctx = true;
             return self.infer(receiver);
         }
+        // D-DIST3 (ratified 2026-06-20): `.raw()` unwraps a distinct type.
+        if method == crate::Syntax::METHOD_DISTINCT_RAW {
+            self.borrow_ctx = true;
+            let recv_ty = self.infer(receiver)?;
+            if let Type::Named(ref n) = recv_ty {
+                if let Some(base) = self.registry.distinct_base(n).cloned() {
+                    if !args.is_empty() {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!("`.{}()` takes no arguments", crate::Syntax::METHOD_DISTINCT_RAW),
+                            "`.raw()` simply unwraps the base value — no arguments needed".to_string(),
+                            "write `.raw()` with no arguments".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    return Some(base);
+                }
+            }
+            self.diags.push(Diagnostic::error(
+                "E0311",
+                format!("`.{}()` is only valid on a distinct type value", crate::Syntax::METHOD_DISTINCT_RAW),
+                "`.raw()` unwraps a distinct type to its base representation".to_string(),
+                "only call `.raw()` on a value whose type was declared with `:: distinct`".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         // D-TOOL4 (E2-M11): `expect(x).snapshot()` — the special snapshot
         // assertion. Recognized by checking the receiver type.
         if method == Syntax::BUILTIN_SNAPSHOT {
@@ -2010,6 +2037,41 @@ impl<'a> Checker<'a> {
             if let Some(ret) = net_method_return(handle_ty, method, args.len(), span, &mut self.diags) {
                 for a in args.iter_mut() { self.infer(&mut a.expr); }
                 *recv_type_out = Some(handle_ty.clone());
+                return ret;
+            }
+        }
+        // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on
+        // Arena/Bump/Pool/Fixed allocators. E3104: use-after-free/reset.
+        if let Type::Named(handle_ty) = &recv_ty {
+            let handle_ty_s = handle_ty.clone();
+            if let Some(ret) = alloc_method_return(&handle_ty_s, method, args, span, &mut self.diags) {
+                // E3104: check for use-after-free/reset before inferring args.
+                let recv_name = if let Expr::Ident(n, _) = &**receiver { Some(n.clone()) } else { None };
+                // D-ALLOC-D: E3104 — `alloc` after `free` is always wrong (the allocator
+                // is consumed). After `reset`, further `alloc` is valid (buffer is reused).
+                if method == "alloc" {
+                    if let Some(ref name) = recv_name {
+                        if self.freed_allocators.contains_key(name.as_str()) {
+                            self.diags.push(e3104(name, "free", span));
+                        }
+                    }
+                }
+                // Mark the allocator as freed only on `free`. `reset` keeps it alive.
+                if method == "free" {
+                    if let Some(ref name) = recv_name {
+                        self.freed_allocators.insert(name.clone(), "free".to_string());
+                    }
+                }
+                *recv_type_out = Some(handle_ty_s.clone());
+                // For `alloc`, infer the argument and return its type.
+                if method == "alloc" {
+                    if let Some(arg) = args.get_mut(0) {
+                        let inferred = self.infer(&mut arg.expr);
+                        return inferred;
+                    }
+                    return None;
+                }
+                for a in args.iter_mut() { self.infer(&mut a.expr); }
                 return ret;
             }
         }
@@ -2311,6 +2373,77 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         let (lt, rt) = (lt?, rt?);
 
+        // D-DIST3 (ratified 2026-06-20): distinct type arithmetic rules (E0127/E0128).
+        {
+            let lt_is_distinct = if let Type::Named(n) = &lt { self.registry.is_distinct(n) } else { false };
+            let rt_is_distinct = if let Type::Named(n) = &rt { self.registry.is_distinct(n) } else { false };
+            let is_arith = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr);
+            let is_eq = matches!(op, BinOp::Eq | BinOp::Ne);
+            if (lt_is_distinct || rt_is_distinct) && is_arith {
+                let distinct_name = if lt_is_distinct {
+                    if let Type::Named(n) = &lt { n.as_str() } else { "" }
+                } else {
+                    if let Type::Named(n) = &rt { n.as_str() } else { "" }
+                };
+                if lt != rt {
+                    // Arithmetic between different types (or distinct + base) — E0127/E0128.
+                    // Primary error is E0127 when the distinct type isn't numeric.
+                    if !self.registry.distinct_is_numeric(distinct_name) {
+                        self.diags.push(Diagnostic::error(
+                            "E0127",
+                            format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
+                            format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+                            format!("add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
+                            Some(span),
+                        ));
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0127",
+                            format!("operator `{}` is not available between `{}` and `{}`", op.spell(), lt.name(), rt.name()),
+                            format!("`#Numeric` distinct types only support arithmetic between the same type"),
+                            format!("both sides must be `{}`", distinct_name),
+                            Some(span),
+                        ));
+                    }
+                    return None;
+                }
+                // Same distinct type — check numeric marker.
+                if !self.registry.distinct_is_numeric(distinct_name) {
+                    self.diags.push(Diagnostic::error(
+                        "E0127",
+                        format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
+                        format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+                        "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                // Same #Numeric distinct type — arithmetic is allowed, returns the same type.
+                return Some(lt);
+            }
+            if (lt_is_distinct || rt_is_distinct) && is_eq {
+                // Equality between two values of the same distinct type: allowed.
+                // Equality between distinct and different type: E0128.
+                if lt != rt {
+                    let dt_name = if lt_is_distinct {
+                        if let Type::Named(n) = &lt { n.clone() } else { lt.name() }
+                    } else {
+                        if let Type::Named(n) = &rt { n.clone() } else { rt.name() }
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E0128",
+                        format!("a `{}` can't be compared with a `{}`", lt.name(), rt.name()),
+                        format!("`{}` is a distinct type; it only compares equal to another `{}`", dt_name, dt_name),
+                        format!("use `.raw()` to compare the underlying values, or construct a `{}`", dt_name),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                return Some(Type::Bool);
+            }
+            // Implicit coercion check (non-arithmetic, non-eq): handled at assignment.
+        }
+
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                 if lt == rt && matches!(lt, Type::Int | Type::Float) {
@@ -2574,6 +2707,23 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
+        // D-PRELUDE1 = B: `input` is ambient — no `use core.io` needed.
+        // Resolves to the same semantics as `io.input`: optional String prompt,
+        // returns Result(String, IoError). Shadowed by any user-defined `input`.
+        if call.name == Syntax::BUILTIN_INPUT
+            && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
+            && self.lookup(Syntax::BUILTIN_INPUT).is_none()
+        {
+            if call.args.len() > 1 {
+                self.diags
+                    .push(wrong_std_arity(Syntax::BUILTIN_INPUT, 1, call.args.len(), call.name_span));
+            }
+            if let Some(arg) = call.args.get_mut(0) {
+                self.expect_std_arg(Syntax::BUILTIN_INPUT, 0, &Type::String, arg);
+            }
+            return Some(Some(result_ty(Type::String, io_error_ty())));
+        }
+
         if call.name == Syntax::BUILTIN_PANIC {
             self.check_panic_call(call);
             return Some(None);
@@ -2637,6 +2787,49 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // D-DIST3 (ratified 2026-06-20): `DistinctType(expr)` — construct a distinct value.
+        if self.funcs.get(&call.name).is_none() {
+            if let Some(base_ty) = self.registry.distinct_base(&call.name).cloned() {
+                if call.args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!(
+                            "`{}` takes exactly one argument, got {}",
+                            call.name,
+                            call.args.len()
+                        ),
+                        format!("`{}` is a distinct type; construct it with `{}(value)`", call.name, call.name),
+                        format!("write `{}(expr)` with a single value of type `{}`", call.name, base_ty.name()),
+                        Some(call.name_span),
+                    ));
+                    for a in call.args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                let old_expected = self.expected_type.replace(base_ty.clone());
+                let arg_ty = self.infer(&mut call.args[0].expr);
+                self.expected_type = old_expected;
+                if let Some(at) = arg_ty {
+                    if at != base_ty {
+                        self.diags.push(Diagnostic::error(
+                            "E0128",
+                            format!(
+                                "a `{}` can't be used where a `{}` is expected",
+                                at.name(), call.name
+                            ),
+                            format!(
+                                "`{}` and `{}` are different types — even though `{}` is built on `{}`, one is never accepted in place of the other",
+                                call.name, at.name(), call.name, base_ty.name()
+                            ),
+                            format!("construct a `{}`: `{}({})`", call.name, call.name, "expr"),
+                            Some(call.args[0].expr.span()),
+                        ));
+                        return None;
+                    }
+                }
+                return Some(Some(Type::Named(call.name.clone())));
+            }
+        }
+
         let Some(sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
                 "define it first ({} {}() {{ ... }}), or call one that exists",
@@ -2648,7 +2841,7 @@ impl<'a> Checker<'a> {
                 .funcs
                 .keys()
                 .map(|s| s.as_str())
-                .chain([Syntax::BUILTIN_PRINT])
+                .chain([Syntax::BUILTIN_PRINT, Syntax::BUILTIN_INPUT])
             {
                 let d = edit_distance(&call.name, cand);
                 if d <= 2 && best.map_or(true, |(_, bd)| d < bd) {
@@ -2662,8 +2855,8 @@ impl<'a> Checker<'a> {
                 "E0102",
                 format!("nothing named `{}` exists here", call.name),
                 format!(
-                    "only functions that have been defined (or built in, like `{}`) can be called",
-                    Syntax::BUILTIN_PRINT
+                    "only functions that have been defined (or built in, like `{}` / `{}`) can be called",
+                    Syntax::BUILTIN_PRINT, Syntax::BUILTIN_INPUT
                 ),
                 fix,
                 Some(call.name_span),
@@ -2674,16 +2867,16 @@ impl<'a> Checker<'a> {
             return None;
         };
 
-        // E3103 (S58): an `@unsafe fn` is a whole-function contract; callers
-        // must take responsibility inside their own `@unsafe` block.
+        // E3103 (S58): an `#unsafe fn` is a whole-function contract; callers
+        // must take responsibility inside their own `#unsafe` block.
         if sig.is_unsafe && !self.in_unsafe {
             self.diags.push(Diagnostic::error(
                 "E3103",
-                format!("`{}` is an `@unsafe` function", call.name),
+                format!("`{}` is an `#unsafe` function", call.name),
                 "its contract can't be checked by the compiler, so the caller must vouch for it"
                     .to_string(),
                 format!(
-                    "call it inside `@{}(\"…\") @{} {{ … }}`",
+                    "call it inside `#{}(\"…\") #{} {{ … }}`",
                     Syntax::ATTR_AUDIT,
                     Syntax::KW_UNSAFE
                 ),
@@ -2691,29 +2884,52 @@ impl<'a> Checker<'a> {
             ));
         }
 
-        // S61: label validation — if a call arg has `name: val`, verify it matches
-        // the parameter name at that position. Labels never reorder.
+        // D-NARG-D4 (S61, E0125): label validation — if a call arg has
+        // `name: val`, verify it matches the parameter name at that position.
+        // Labels never reorder.
         if !sig.param_info.is_empty() {
+            let all_param_names: Vec<&str> =
+                sig.param_info.iter().map(|(n, _)| n.as_str()).collect();
             for (i, arg) in call.args.iter().enumerate() {
                 if let Some((label, label_span)) = &arg.label {
                     if let Some((param_name, _)) = sig.param_info.get(i) {
                         if label != param_name {
-                            self.diags.push(Diagnostic::error(
-                                "E0104",
-                                format!(
-                                    "label `{}:` doesn't match the parameter `{}` at position {}",
-                                    label,
-                                    param_name,
-                                    i + 1
-                                ),
-                                "labels are checked documentation — they must match the parameter name at that position; arguments stay in declaration order"
-                                    .to_string(),
-                                format!(
-                                    "write `{}:` instead, or remove the label",
-                                    param_name
-                                ),
-                                Some(*label_span),
-                            ));
+                            // Is the label a real param name at a different position?
+                            if all_param_names.contains(&label.as_str()) {
+                                // Transposed: label names a real param, but wrong position.
+                                self.diags.push(Diagnostic::error(
+                                    "E0125",
+                                    format!(
+                                        "label `{}:` doesn't match the parameter `{}` here",
+                                        label, param_name
+                                    ),
+                                    "labels are checked documentation — each names the parameter at its own position, and arguments stay in the order they're declared".to_string(),
+                                    format!(
+                                        "write `{}:` here, or drop the label",
+                                        param_name
+                                    ),
+                                    Some(*label_span),
+                                ));
+                            } else {
+                                // Unknown: label doesn't name any parameter.
+                                self.diags.push(Diagnostic::error(
+                                    "E0125",
+                                    format!(
+                                        "`{}` has no parameter named `{}`",
+                                        call.name, label
+                                    ),
+                                    format!(
+                                        "a label must name the parameter at its position; `{}` takes {}",
+                                        call.name,
+                                        all_param_names.join(", ")
+                                    ),
+                                    format!(
+                                        "use one of `{}`'s parameter names, or drop the label",
+                                        call.name
+                                    ),
+                                    Some(*label_span),
+                                ));
+                            }
                         }
                     }
                 }
@@ -2722,7 +2938,10 @@ impl<'a> Checker<'a> {
             // (Only warn on the callee definition side, not every call site.)
         }
 
-        // S61: default-value filling — append defaults for omitted trailing params.
+        // D-NARG-D2 (S61): default-value filling — append defaults for omitted
+        // trailing params. Earlier-param refs in defaults are substituted with
+        // the supplied argument expression so codegen never sees an unresolved
+        // identifier (invariant I2).
         if call.args.len() < sig.params.len() && !sig.defaults.is_empty() {
             let provided = call.args.len();
             let required: usize = sig
@@ -2731,12 +2950,26 @@ impl<'a> Checker<'a> {
                 .take_while(|d| d.is_none())
                 .count();
             if provided >= required {
-                // fill trailing omitted params with their defaults
+                // fill trailing omitted params with their defaults. We build
+                // `earlier_names` incrementally so a default like `d: Int = h`
+                // can reference an earlier-defaulted param `h` that was already
+                // filled (and is now in call.args at position 1).
+                let all_param_names: Vec<String> =
+                    sig.param_info.iter().map(|(n, _)| n.clone()).collect();
                 for i in provided..sig.params.len() {
                     if let Some(Some(default_expr)) = sig.defaults.get(i) {
+                        // earlier_names covers all params up to (not including) i.
+                        let earlier_names: Vec<String> =
+                            all_param_names.iter().take(i).cloned().collect();
+                        // Substitute any earlier-param idents with the supplied arg.
+                        let resolved = super::substitute_param_refs(
+                            default_expr.clone(),
+                            &earlier_names,
+                            &call.args,
+                        );
                         call.args.push(crate::AST::CallArg {
                             convention: sig.params[i].0,
-                            expr: default_expr.clone(),
+                            expr: resolved,
                             span: call.name_span,
                             flags: Default::default(),
                             label: None,
@@ -2886,26 +3119,30 @@ impl<'a> Checker<'a> {
                     if let Expr::Ident(name, span) = &arg.expr {
                         if is_cloneable(param_ty, self.registry, self.structs) {
                             arg.flags.implicit_clone = true;
-                            self.diags.push(Diagnostic::lint(
-                                "L0201",
-                                format!(
-                                    "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
-                                    name,
-                                    Syntax::KW_MOVE,
-                                    name
-                                ),
-                                format!(
-                                    "`{}` expects to take ownership of this value",
-                                    call.name
-                                ),
-                                format!(
-                                    "write `{} {}` to move, or `{} .clone()` to copy explicitly",
-                                    Syntax::KW_MOVE,
-                                    name,
-                                    name
-                                ),
-                                Some(*span),
-                            ));
+                            // D-L0201: only warn when the value is dead after
+                            // this call (a wasteful clone).
+                            if !self.is_name_live_after(name) {
+                                self.diags.push(Diagnostic::lint(
+                                    "L0201",
+                                    format!(
+                                        "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                        name,
+                                        Syntax::KW_MOVE,
+                                        name
+                                    ),
+                                    format!(
+                                        "`{}` expects to take ownership of this value",
+                                        call.name
+                                    ),
+                                    format!(
+                                        "write `{} {}` to move, or `{} .clone()` to copy explicitly",
+                                        Syntax::KW_MOVE,
+                                        name,
+                                        name
+                                    ),
+                                    Some(*span),
+                                ));
+                            }
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0201",

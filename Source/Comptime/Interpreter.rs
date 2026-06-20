@@ -279,13 +279,32 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Unsafe { span, .. } => Err(unsupported("an `@unsafe` block", *span)),
+            Stmt::Unsafe { span, .. } => Err(unsupported("an `#unsafe` block", *span)),
             // D-LABEL1: labeled `break @name`/`continue @name` need the compiled
             // backend's multi-level loop control; the interpreter declines them
             // honestly (like `@unsafe`) rather than approximate them.
             Stmt::BreakLabel(_, span) | Stmt::ContinueLabel(_, span) => {
                 Err(unsupported("a labeled `break`/`continue`", *span))
             }
+            // D-WHEN1 (ratified 2026-06-19): sema already selected the arm
+            // (selected_then = Some(…)); execute only that arm. If sema didn't
+            // run (None), skip both — matching codegen's dumb-emit behaviour.
+            Stmt::ComptimeIf {
+                then_body,
+                else_body,
+                selected_then,
+                ..
+            } => match selected_then {
+                Some(true) => self.exec_block(then_body, scope),
+                Some(false) => {
+                    if let Some(eb) = else_body {
+                        self.exec_block(eb, scope)
+                    } else {
+                        Ok(Flow::Normal)
+                    }
+                }
+                None => Ok(Flow::Normal),
+            },
         }
     }
 

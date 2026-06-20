@@ -407,6 +407,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::CModule(_) => {}
         // Code modules aren't yet indexed for symbols/hover.
         Item::CodeModule(_) => {}
+        // D-DIST1: distinct types aren't yet indexed for symbols/hover.
+        Item::Distinct(_) => {}
     }
 }
 
@@ -571,6 +573,13 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
         | AST::Stmt::Continue(_)
         | AST::Stmt::BreakLabel(..)
         | AST::Stmt::ContinueLabel(..) => {}
+        AST::Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            collect_expr(cond, mp, db);
+            collect_stmts(then_body, mp, module, db);
+            if let Some(eb) = else_body {
+                collect_stmts(eb, mp, module, db);
+            }
+        }
     }
 }
 

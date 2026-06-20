@@ -693,6 +693,8 @@ pub fn is_known_std_module(name: &str) -> bool {
             | "core.json"
             | "core.tasks"
             | "core.mem"
+            // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
+            | "core.mem.alloc"
             // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
             | "core.files"
             | "core.path"
@@ -708,11 +710,13 @@ pub fn is_known_std_module(name: &str) -> bool {
             | "jet.crypto"
             // E2-M10: HTTP client/server ring package.
             | "jet.http"
+            // D-DEFER1 option B: scope-exit guard (RAII cleanup via closure).
+            | "core.scope"
     )
 }
 
 pub fn std_modules_list() -> &'static str {
-    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.files, core.path, core.net, jet.csv, jet.toml, jet.yaml, jet.log, jet.json, jet.time, jet.crypto, jet.http"
+    "core, core.fs, core.io, core.env, core.process, core.math, core.random, core.time, core.json, core.tasks, core.mem, core.mem.alloc, core.files, core.path, core.net, core.scope, jet.csv, jet.toml, jet.yaml, jet.log, jet.json, jet.time, jet.crypto, jet.http"
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {

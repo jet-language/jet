@@ -248,6 +248,18 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
             }
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Loop { .. } | Stmt::Unsafe { .. } => {}
+        // D-WHEN1: collect tuple shapes from both arms (conservative).
+        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            collect_tuple_shapes_from_expr(cond, out);
+            for s in then_body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+            if let Some(eb) = else_body {
+                for s in eb {
+                    collect_tuple_shapes_from_stmt(s, out);
+                }
+            }
+        }
     }
 }
 
@@ -333,7 +345,7 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
                 }
             }
             Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
-            | Item::CodeModule(_) => {}
+            | Item::CodeModule(_) | Item::Distinct(_) => {}
         }
     }
     out

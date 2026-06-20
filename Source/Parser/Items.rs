@@ -335,10 +335,28 @@ impl<'a> Parser<'a> {
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwImpl => self.impl_def().map(Item::Impl),
-                TokKind::At if self.at_c_module() => self.c_module().map(Item::CModule),
-                TokKind::At if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
-                TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
+                TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
+                TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
+                TokKind::Hash if self.at_numeric_distinct_def() => {
+                    self.distinct_def(false).map(Item::Distinct)
+                }
+                TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
+                TokKind::At => {
+                    let t = self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0990",
+                        format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
+                        "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
+                        "write `#unsafe`, `#audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                        Some(t.span),
+                    ));
+                    self.sync_top();
+                    continue;
+                }
                 TokKind::KwComptime => self.comptime_def().map(Item::Const),
+                TokKind::Ident(_) if self.at_distinct_def() => {
+                    self.distinct_def(false).map(Item::Distinct)
+                }
                 TokKind::Ident(name) if name == Syntax::FOREIGN_CLASS => {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
@@ -624,32 +642,32 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S58 (E2-M13): is the cursor at `@unsafe fn …`? The whole-function
-    /// unsafe contract — `@` then the `unsafe` keyword then `fn`/`pub fn`.
+    /// S58 (E2-M13): is the cursor at `#unsafe fn …`? The whole-function
+    /// unsafe contract — `#` then the `unsafe` keyword then `fn`/`pub fn`.
     fn at_unsafe_fn(&self) -> bool {
-        matches!(self.peek().kind, TokKind::At)
+        matches!(self.peek().kind, TokKind::Hash)
             && matches!(self.peek2().kind, TokKind::KwUnsafe)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
 
-    /// S58 (E2-M13): parse `@unsafe fn name(...) { ... }`. The body is checked
+    /// S58 (E2-M13): parse `#unsafe fn name(...) { ... }`. The body is checked
     /// like any other; the contract is enforced at call sites (E3103).
     fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
-        self.expect(TokKind::At, "before `unsafe`")?;
+        self.expect(TokKind::Hash, "before `unsafe`")?;
         self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
             self.bump();
         }
-        self.expect_kw(TokKind::KwFn, "after `@unsafe`")?;
+        self.expect_kw(TokKind::KwFn, "after `#unsafe`")?;
         self.func_after_fn(is_pub, true, false)
     }
 
-    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `@extern
-    /// module …` or `@bindgen module …`? (Distinguishes from `@static const`,
+    /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#extern
+    /// module …` or `#bindgen module …`? (Distinguishes from `#static const`,
     /// and from bare `extern rust`.)
     fn at_c_module(&self) -> bool {
-        if !matches!(self.peek().kind, TokKind::At) {
+        if !matches!(self.peek().kind, TokKind::Hash) {
             return false;
         }
         let intro_is_c = match &self.peek2().kind {
@@ -660,12 +678,12 @@ impl<'a> Parser<'a> {
         intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
     }
 
-    /// S59 (E2-M14): parse `@extern module c.<lib> { … }` (overlay) or
-    /// `@bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
+    /// S59 (E2-M14): parse `#extern module c.<lib> { … }` (overlay) or
+    /// `#bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
     /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
     fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
         use crate::AST::CModuleKind;
-        let start = self.bump().span; // `@`
+        let start = self.bump().span; // `#`
         let kind = match &self.peek().kind {
             TokKind::KwExtern => {
                 self.bump();
@@ -679,13 +697,13 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "expected `{}` or `{}` after `@`, found {}",
+                        "expected `{}` or `{}` after `#`, found {}",
                         Syntax::ATTR_EXTERN_MODULE,
                         Syntax::ATTR_BINDGEN,
                         describe(other)
                     ),
-                    "a C FFI module begins with `@extern module c.<lib>` or `@bindgen module c.<lib>.__bindgen__`".to_string(),
-                    "write: @extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
+                    "a C FFI module begins with `#extern module c.<lib>` or `#bindgen module c.<lib>.__bindgen__`".to_string(),
+                    "write: #extern module c.raylib { fn init_window(w: Int, h: Int, title: String) = \"InitWindow\"; }".to_string(),
                     Some(self.peek().span),
                 ));
             }
@@ -704,7 +722,7 @@ impl<'a> Parser<'a> {
                 ),
                 "C libraries live under the `c.` module root — `c.raylib`, `c.sqlite3`".to_string(),
                 format!("write: {} module {}.<lib> {{ … }}",
-                    match kind { CModuleKind::Extern => "@extern", CModuleKind::Bindgen => "@bindgen" },
+                    match kind { CModuleKind::Extern => "#extern", CModuleKind::Bindgen => "#bindgen" },
                     Syntax::C_MODULE_ROOT),
                 Some(path_start),
             ));
@@ -724,7 +742,7 @@ impl<'a> Parser<'a> {
                     "E0003",
                     format!("a C FFI module path can't have a `.{}` segment", seg),
                     "the only legal third segment is the reserved `__bindgen__` on a generated cache module".to_string(),
-                    format!("write: @extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
+                    format!("write: #extern module {}.{} {{ … }}", Syntax::C_MODULE_ROOT, lib),
                     Some(seg_span),
                 ));
             }
@@ -740,28 +758,28 @@ impl<'a> Parser<'a> {
                     Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT, Syntax::C_BINDGEN_SEGMENT
                 ),
                 format!(
-                    "autogen lives in `{}.<lib>.{}`; users declare overlays as `@{} module {}.<lib>` only",
+                    "autogen lives in `{}.<lib>.{}`; users declare overlays as `#{} module {}.<lib>` only",
                     Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT
                 ),
                 format!(
-                    "drop `{}` from your module path, or use `@{} module {}.{} {{ … }}`",
+                    "drop `{}` from your module path, or use `#{} module {}.{} {{ … }}`",
                     Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib
                 ),
                 Some(path_span),
             ));
         }
-        // A `@bindgen` module must carry the `__bindgen__` segment (it is the
+        // A `#bindgen` module must carry the `__bindgen__` segment (it is the
         // generated surface). Without it the path is malformed.
         if kind == CModuleKind::Bindgen && !has_bindgen_seg {
             return Err(Diagnostic::error(
                 "E0003",
                 format!(
-                    "a `@bindgen` module path must end in `.{}`",
+                    "a `#bindgen` module path must end in `.{}`",
                     Syntax::C_BINDGEN_SEGMENT
                 ),
-                "the compiler generates `@bindgen module c.<lib>.__bindgen__` cache files".to_string(),
+                "the compiler generates `#bindgen module c.<lib>.__bindgen__` cache files".to_string(),
                 format!(
-                    "write: @bindgen module {}.{}.{} {{ … }}",
+                    "write: #bindgen module {}.{}.{} {{ … }}",
                     Syntax::C_MODULE_ROOT, lib, Syntax::C_BINDGEN_SEGMENT
                 ),
                 Some(path_span),
@@ -1335,19 +1353,19 @@ impl<'a> Parser<'a> {
 
     pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
         let mut attrs = Vec::new();
-        while matches!(self.peek().kind, TokKind::At) {
+        while matches!(self.peek().kind, TokKind::Hash) {
             self.bump();
-            let (attr_name, _) = self.expect_ident("after `@`")?;
+            let (attr_name, _) = self.expect_ident("after `#`")?;
             match attr_name.as_str() {
                 "static" => attrs.push(ConstAttr::ForceStatic),
                 "inline" => attrs.push(ConstAttr::ForceInline),
                 other => {
                     return Err(Diagnostic::error(
                         "E0003",
-                        format!("`@{}` isn't a known attribute on a const", other),
-                        "only `@static` and `@inline` are supported on const declarations"
+                        format!("`#{}` isn't a known attribute on a const", other),
+                        "only `#static` and `#inline` are supported on const declarations"
                             .to_string(),
-                        "remove the attribute or use `@static` or `@inline`".to_string(),
+                        "remove the attribute or use `#static` or `#inline`".to_string(),
                         Some(self.peek().span),
                     ));
                 }
@@ -1414,4 +1432,78 @@ impl<'a> Parser<'a> {
 
     // --- statements ------------------------------------------------------
 
+    // --- distinct types --------------------------------------------------
+
+    /// D-DIST1 (ratified 2026-06-19): true when the cursor is at `Name :: distinct`.
+    fn at_distinct_def(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(_))
+            && matches!(&self.peek2().kind, TokKind::ColonColon)
+            && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
+    }
+
+    /// D-DIST3 (ratified 2026-06-20): true when `#Numeric Name :: distinct` is at
+    /// the cursor — the `#Numeric` marker followed by a distinct type declaration.
+    fn at_numeric_distinct_def(&self) -> bool {
+        if !matches!(&self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        // peek2 = Numeric, peek3 = name, peek4 = ::, peek5 = distinct
+        let peek4 = &self.toks[(self.pos + 3).min(self.toks.len() - 1)].kind;
+        let peek5 = &self.toks[(self.pos + 4).min(self.toks.len() - 1)].kind;
+        matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NUMERIC)
+            && matches!(&self.peek3().kind, TokKind::Ident(_))
+            && matches!(peek4, TokKind::ColonColon)
+            && matches!(peek5, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
+    }
+
+    /// D-DIST1/D-DIST3: parse `[#Numeric] Name :: distinct BaseType`.
+    pub(super) fn distinct_def(&mut self, is_pub: bool) -> Result<crate::AST::DistinctDef, Diagnostic> {
+        let start = self.peek().span;
+        // optional `#Numeric` attribute
+        let is_numeric = if matches!(&self.peek().kind, TokKind::Hash) {
+            self.bump(); // consume `#`
+            let (attr, _) = self.expect_ident("after `#`")?;
+            if attr != Syntax::ATTR_NUMERIC {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("`#{}` isn't a valid attribute on a distinct type declaration", attr),
+                    "only `#Numeric` is supported before a distinct type".to_string(),
+                    "write `#Numeric` before the declaration, or remove the attribute".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+            true
+        } else {
+            false
+        };
+        let (name, name_span) = self.expect_ident("as the distinct type name")?;
+        self.expect(TokKind::ColonColon, "after the distinct type name")?;
+        // consume `distinct` keyword
+        match &self.peek().kind {
+            TokKind::Ident(n) if n == Syntax::KW_DISTINCT => { self.bump(); }
+            other => {
+                let other = other.clone();
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected `{}` here, found {}", Syntax::KW_DISTINCT, describe(&other)),
+                    "a distinct type declaration is `Name :: distinct BaseType`".to_string(),
+                    format!("write: {} :: {} Int", name, Syntax::KW_DISTINCT),
+                    Some(self.peek().span),
+                ));
+            }
+        }
+        let (base, base_ty_span) = self.type_()?;
+        let base_span = base_ty_span;
+        self.expect(TokKind::Semi, "after a distinct type declaration")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::DistinctDef {
+            is_pub,
+            is_numeric,
+            name,
+            name_span,
+            base,
+            base_span,
+            span: Span::new(start.start, end),
+        })
+    }
 }

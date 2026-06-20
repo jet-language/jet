@@ -1,6 +1,6 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, ConstAttr, EnumDef,
+    AccessConvention, ConstAttr, DistinctDef, EnumDef,
     Expr, Func, Item, Program, RustConstKind, StructDef, Type,
 };
 use crate::Collections::is_reserved_type;
@@ -151,6 +151,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             }
                         }
                     }
+                    // D-NARG-D2 (E0126): check defaults don't ref later params.
+                    check_default_forward_refs(&f.params, &f.name, &mut diags);
                     funcs.insert(f.name.clone(), func_to_sig(f));
                 }
             }
@@ -177,6 +179,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ));
                 }
             }
+            Item::Distinct(d) => register_distinct(d, &mut registry, &mut diags, &funcs, &consts),
             Item::Const(c) => register_const(c, &mut consts, &mut diags, &funcs, &registry),
             Item::Test(t) => {
                 if name_defined(&t.name, &funcs, &registry, &consts) || tests.contains_key(&t.name)
@@ -480,7 +483,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::ExternRust(_)
             | Item::Trait(_)
             | Item::Module(_)
-            | Item::CModule(_) | Item::CodeModule(_) => {}
+            | Item::CModule(_)
+            | Item::CodeModule(_)
+            | Item::Distinct(_) => {}
         }
     }
 
@@ -494,6 +499,63 @@ pub(crate) fn name_defined(
     consts: &HashMap<String, Type>,
 ) -> bool {
     funcs.contains_key(name) || registry.contains(name) || consts.contains_key(name)
+}
+
+/// D-DIST1/D-DIST3: register a distinct type declaration.
+pub(crate) fn register_distinct(
+    d: &DistinctDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    funcs: &HashMap<String, FuncSig>,
+    consts: &HashMap<String, Type>,
+) {
+    if is_reserved_type(&d.name) {
+        diags.push(Diagnostic::error(
+            "E0106",
+            format!("the name `{}` is built in and can't be redefined", d.name),
+            format!("`{}` is provided by the language itself", d.name),
+            "choose a different name for this distinct type".to_string(),
+            Some(d.name_span),
+        ));
+        return;
+    }
+    if name_defined(&d.name, funcs, registry, consts) {
+        diags.push(defined_twice(
+            &d.name,
+            "every distinct type needs a unique name",
+            d.name_span,
+        ));
+        return;
+    }
+    // E0129: base must be a concrete value type, not itself a distinct type.
+    // We can only detect pre-registered distinct bases here; forward-declared
+    // bases are checked lazily in sema (resolve_type / type check).
+    if let Type::Named(base_name) = &d.base {
+        if registry.is_distinct(base_name) {
+            diags.push(Diagnostic::error(
+                "E0129",
+                format!(
+                    "`{}` can't be built on `{}` — `{}` is itself a distinct type",
+                    d.name, base_name, base_name
+                ),
+                format!(
+                    "`distinct`-over-`distinct` chaining is not allowed in v1; `{}` is already a distinct type",
+                    base_name
+                ),
+                format!("use `{}` directly, or build on the shared base type", base_name),
+                Some(d.base_span),
+            ));
+            return;
+        }
+    }
+    registry.types.insert(
+        d.name.clone(),
+        TypeDef::Distinct {
+            name_span: d.name_span,
+            base: d.base.clone(),
+            is_numeric: d.is_numeric,
+        },
+    );
 }
 
 /// S57 (M9.5): evaluate every `comptime NAME = expr;` in `items`. Purity and
@@ -607,7 +669,8 @@ pub(crate) fn comptime_context_from_items(
             | Item::Const(_)
             | Item::Trait(_)
             | Item::Module(_)
-            | Item::CModule(_) | Item::CodeModule(_) => {}
+            | Item::CModule(_) | Item::CodeModule(_)
+            | Item::Distinct(_) => {}
         }
     }
     (funcs, externs, globals)
@@ -799,6 +862,7 @@ pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry,
         };
         let methods_map = match type_def {
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+            TypeDef::Distinct { .. } => continue,
         };
         for m in methods {
             if field_names.iter().any(|f| f == &m.name) {
@@ -829,6 +893,9 @@ pub(crate) fn register_type_methods(items: &[Item], registry: &mut TypeRegistry,
                         }
                     }
                 }
+                // D-NARG-D2 (E0126): check defaults don't ref later params.
+                let non_self: Vec<_> = m.params.iter().filter(|p| p.name != "self").cloned().collect();
+                check_default_forward_refs(&non_self, &m.name, diags);
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
         }
@@ -847,6 +914,7 @@ pub(crate) fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry,
         };
         let methods_map = match type_def {
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+            TypeDef::Distinct { .. } => continue,
         };
         for m in &i.methods {
             if field_names.iter().any(|f| f == &m.name) {
@@ -877,6 +945,9 @@ pub(crate) fn register_impl_methods(items: &[Item], registry: &mut TypeRegistry,
                         }
                     }
                 }
+                // D-NARG-D2 (E0126): check defaults don't ref later params.
+                let non_self: Vec<_> = m.params.iter().filter(|p| p.name != "self").cloned().collect();
+                check_default_forward_refs(&non_self, &m.name, diags);
                 methods_map.insert(m.name.clone(), func_to_method_sig(m));
             }
         }
@@ -932,6 +1003,7 @@ pub(crate) fn check_func_body(
         expected_type: None,
         owner_type: owner_type.map(str::to_string),
         iter_borrowed: HashSet::new(),
+        freed_allocators: HashMap::new(),
         borrow_ctx: false,
         lambda_escapes: true,
         is_task_spawn: false,
@@ -945,6 +1017,9 @@ pub(crate) fn check_func_body(
         ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
         freestanding,
+        in_dropped_comptime_arm: false,
+        stmt_tail_ptr: std::ptr::null(),
+        stmt_tail_len: 0,
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
@@ -1242,6 +1317,39 @@ pub(crate) fn synthesize_default_method(
         is_unsafe: false,
         is_pure: false,
         body: body.to_vec(),
+    }
+}
+
+// ─── D-NARG-D2: default-expression forward-reference check (E0126) ───────────
+
+/// Check every default expression in a function/method for forward references —
+/// i.e. an Ident that names a parameter declared *after* the one being defaulted.
+/// Emits E0126 for each forward reference found.
+/// `params` excludes `self`; `fn_name` is for the error message.
+pub(crate) fn check_default_forward_refs(
+    params: &[crate::AST::Param],
+    fn_name: &str,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+    for (i, p) in params.iter().enumerate() {
+        let Some(default) = &p.default else { continue };
+        let forward_refs = super::find_forward_refs(default, &param_names, i);
+        for (fwd_name, fwd_span) in forward_refs {
+            diags.push(Diagnostic::error(
+                "E0126",
+                format!(
+                    "default for `{}` in `{}` references `{}`, which comes after it",
+                    p.name, fn_name, fwd_name
+                ),
+                "defaults fill left to right; a parameter isn't in scope until it appears in the list".to_string(),
+                format!(
+                    "reorder the parameters so `{}` comes before `{}`, or use a constant default",
+                    fwd_name, p.name
+                ),
+                Some(fwd_span),
+            ));
+        }
     }
 }
 

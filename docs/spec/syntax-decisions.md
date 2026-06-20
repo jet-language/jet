@@ -395,8 +395,8 @@ no default bodies, associated types, or trait inheritance.
 *Future relook (owner, 2026-06-15; updated 2026-06-18):* the owner may revisit
 trait-attach sugar post-v1 (e.g. a C++-ish `Type::Trait` feel). Constraint:
 `::` is **no longer available** — D-BIND1 (2026-06-18) made `name :: expr` the
-immutable-binding sigil, so any trait-attach (or S83 external-definition) sugar
-must pick a different separator. `::` inside `extern rust "rust::path"` strings
+immutable-binding sigil, so any trait-attach sugar must pick a different
+separator — S83 picked `~~` (`impl Point~~Trait`). `::` inside `extern rust "rust::path"` strings
 (S50) is unaffected — it lives inside a string literal, not a bare token.
 
 **S48 — Dynamic dispatch (M9)** *(ratified 2026-06-12)*: writing a trait
@@ -857,7 +857,10 @@ pending)*: `**pure fn name(…)**` — a checked modifier; purity is part of
 the signature; violations are compile errors naming the impure call path.
 Enables `jet eval --pure` (layer 3, post-v1) and makes comptime
 callability visible at API boundaries. Rejected: inference-only purity with
-no marking, full effects system.
+no marking, full effects system. **Naming note (D-CT-L2NAME):** "Layer 2"
+here is the S60 *capability tier* (compile-time pure evaluation + data
+embedding), **not** the S26 derive-ladder Layer 2 (built-in derives). The two
+share the name by accident; compile-time embedding work files under S60.
 
 **D-JPK1 — Jetpack invocation boundary** *(ratified 2026-06-15; amended
 2026-06-15)*: `jetpack` is the real package-manager binary/engine for binary
@@ -1604,7 +1607,8 @@ off the one-file "just run it" path.
 **S2** — full Odin sigils `name :: expr` (immutable) / `name := expr` (mutable);
 `val` / `var` retired to teaching errors. The owner accepted **spending `::`**:
 it now means "immutable binding" everywhere, so S83's external-definition form
-and any `Type::Trait` sugar (S28) must choose a different separator. `::` inside
+chose a different separator (`~~`, ratified 2026-06-19); any later `Type::Trait`
+sugar (S28) must likewise avoid `::`. `::` inside
 `extern rust "rust::path"` strings (S50) is unaffected. Rejected: `:=`-only with
 `val` kept (option B), status quo (option C).
 
@@ -1758,23 +1762,6 @@ implementation milestone is pending.
 | ID   | Question                                   | Needed by |
 | ---- | ------------------------------------------ | --------- |
 | S56  | typed reflection / user derives | **Epoch 3** — [`tools/Tower/docs/plans/epoch-3/user-derives-reflection.md`](../../tools/Tower/docs/plans/epoch-3/user-derives-reflection.md) |
-| S83  | external definitions for structs/modules — needs a **new separator** (`::` spent by D-BIND1); see note below | owner-paced |
-
-> **S83 — External definitions for structs and modules.** The philosophy
-> (one mechanical path, flexible structure) permits methods and module items
-> to be defined either inline in the type/module body block, or externally
-> with a `TypeName`-qualified definition — analogous to C++ out-of-class
-> definitions. Both forms would produce identical semantics; `jet fmt` may
-> enforce a project style.
->
-> **Blocked on a new separator (2026-06-18).** The original proposal used
-> `TypeName::item`, but D-BIND1 (ratified 2026-06-18) made `::` the
-> immutable-binding sigil — `::` is **spent**. D-MOD1 already took `.` for
-> module scoping. So S83 cannot reuse either; it must propose a fresh
-> separator (or be withdrawn). The owner has called out C++-style external
-> definitions as a desired structural option, so the feature stands —
-> only its spelling is reopened. **Decision gate:** owner picks a separator
-> and ratifies, or withdraws S83. No code until then.
 
 > Jetpack native-resolver decisions **D-JPK16** (tvix-shim posture) and
 > **D-JPK17** (named sources) were ratified 2026-06-15 — see the Ratified
@@ -2037,6 +2024,27 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-19 | D-NARG-D4 | **dedicated label-mismatch diagnostic** (A): transposed/unknown call-site labels get their own teaching code, not folded into E0104. **Ratified, not yet implemented** (D-NARG1 currently reuses E0104; carve out a dedicated code + snapshot) | owner |
 | 2026-06-19 | D-JSON3 | **surface JSON coercions via a log line** (B): lenient decode (D-JSON1) emits one log line per coercion; decoded value comes back plain. **Ratified, not yet implemented** | owner |
 | 2026-06-19 | S53 | **concurrency: tasks & channels — direction ratified** (A). Owner caveat: relook the surface syntax AND the memory-capability model first (major potential impact) before diving deep. **Not ready to implement** | owner |
-| 2026-06-19 | S56 | **user-defined derives + typed reflection — direction ratified** (A). Surface uses the external-definition connector (`derive Point<sep>Serialize`, mirroring `impl`); exact `<sep>` is the open S83 connector ballot. **Ratified (direction); syntax pending S83** | owner |
+| 2026-06-19 | S56 | **user-defined derives + typed reflection — direction ratified** (A). Surface uses the external-definition connector `~~` (S83): `derive Point~~Serialize`, mirroring `impl Point~~Drawable`. **Ratified (direction); connector resolved to `~~`** | owner |
 | 2026-06-19 | S60 | **compile-time pure evaluation + data embedding — ratified to pursue** (A); `comptime` Layer 2 promoted from post-1.0. **Ratified, not yet implemented** | owner |
 | 2026-06-19 | D-OS1 | **jetos config/platform — research-now, implement-post-E3** (C). Hold implementation until post-Epoch-3 (stable core); meanwhile research + document the end-state syntax, back-propagating from a magical end-user experience with core support (esp. pure eval). Documented as a research avenue to explore at the owner's discretion. **Held; research path documented** | owner |
+| 2026-06-19 | S83 | **external-definition connector = `~~`** (double tilde, D). Attaches an out-of-body definition to a type, Type-first: `fn Point~~dist(self)`, `impl Point~~Drawable`, `derive Point~~Serialize`. Free token (whole tilde family was unspent); never collides with `->` (return/arm) or `=>` (lambda). Resolves S56's derive spelling. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-TOOL-SPLIT | **one bundled `jet` binary** (A): fmt/lint/lsp are `jet` subcommands sharing the front end (I2/I3 — they need the real lexer/parser/sema). Reserve splitting only the LSP *artifact* (not codebase) if editor release cadence ever demands it. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-PATW | **`_` for ignored payload fields, `else` for catch-all** (D, split): `_` ignores one slot (`Active(_)`); `else ->` stays the only tail catch-all (no bare `_` arm). `_` special-cased in pattern position (still a legal ident char + S34 separator elsewhere). **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-PATR | **range patterns at all positions, reuse S22 `..`** (A): an arm head or a payload slot may hold `lo..hi`; the checker gap-checks coverage; open `Int`/`Char` always still requires `else`/`_`. c20/D-PATR owns range-pattern meaning + exhaustiveness at all positions. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-PATO | **`|` (single pipe) for structural or-patterns** (B): `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types (E0317). `||` stays value-distribution/boolean; new pattern-only meaning for `|`. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-RANGE1 | **range arms reuse inclusive `..`, desugar to `>= && <=`** (A): `90..100 -> "A"`; one range token across loops (S22), slices (S40), and arms. Exhaustiveness governed by D-PATR. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-RANGE2 | **arm-head range ownership** (A): S22 owns the `..` token; c20/D-PATR owns arm-head range *semantics* (checking + exhaustiveness); c25 owns only the terse `lo..hi ->` sugar + `..=`/`step`/inverted-band porting-error teaching, shippable first under D-PATR's rules. One spelling, one checker. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-ERR-CONV | **`impl Source -> Target { … }`** (A): reuses `->` + `impl`; conversion declared once, total, rejected unless declared (orphan rule S28 applies); `?` applies it; `Fallible` unifies as prelude `impl T -> Error`. Owner asked whether S83's `~~` belongs here — **no**: `~~` attaches a member to a type, an error conversion is a distinct construct (a `Source→Target` declaration), so `->` is correct (verified vs `tools/Tower/docs/sidequests/typed-error-families.md`). **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-DIST1 | **`UserId :: distinct Int`** (C, binding form): reuses the ratified `::` immutable sigil (D-BIND1) + the `distinct` keyword; no new separator token; `distinct`-over-`distinct` chaining rejected in v1. **Ratified, implemented 2026-06-20** | owner |
+| 2026-06-19 | D-DIST2 | **units of measure: in scope, delivered as a stdlib extension** (B + owner comment): units are NOT deferred, but ride on top of distinct types (D-DIST1) via a **stdlib extension layer, not core-language syntax**. Distinct types ship in core; dimensional algebra (derived units) lives in stdlib. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-WHEN1 | **`comptime if`** (A): reuses two ratified words; condition is a comptime expression; only the selected arm is checked + lowered. Extends S57's bindings-only comptime scope; the S26 dispatch law (no comptime type/trait/generic selection) is unchanged. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-WHEN2 | **unselected `comptime if` arm: name-resolution only** (A): the dropped arm is scanned for unknown names (typos still teach) but not type-checked against its surroundings (off-target intrinsics allowed). **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-NARG-DIAG | **E0125 (label mismatch) + E0126 (later-param ref in default)** (A): two purpose-built teaching codes (product copy for the ratified D-NARG-D4 / D-NARG-D2 follow-ups); E0125 covers transposed + unknown-label sub-cases, E0126 teaches "reorder so the param comes first." **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-CLI1 | **error & teach on an unknown `--`-flag before `--`** (A): extend the existing E2102 path's Fix line to point at `jet run app.jet -- --flag`; no silent forwarding of typo'd jet flags. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-L0201 | **liveness-gate the implicit-clone lint** (A): fire L0201 only when the cloned value is dead after the call (a wasteful clone); stay silent when it's reused. Needs a last-use analysis threaded through the four firing sites. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-DBG1 | **`jet debug <file>`** (A): a dedicated verb parallel to `jet run` / `jet test`, discoverable in `jet --help`; the editor launches the same command. **Ratified, not yet implemented** | owner |
+| 2026-06-19 | D-EVAL1 | **`jet eval --pure`: pretty by default, `--json` for machine output** (A): humans get indented, Jet-typed output; pipelines opt into the existing compact stable JSON via the global `--json` flag (no new `--pretty`). **Ratified, not yet implemented** | owner |
+| 2026-06-20 | D-DIST3 | **distinct types: explicit both directions, opt-in same-type arithmetic** (A): construct `UserId(expr)`, unwrap with `.raw()` (S42 named-cast family); **no** implicit base↔distinct coercion either way; arithmetic only via a `#Numeric` marker and only between two values of the *same* distinct type, else E0127. Completes c23 (with D-DIST1/D-DIST2). **Ratified, implemented 2026-06-20** | owner |
+| 2026-06-20 | D-PRELUDE1 | **`print` + `input` ambient** (B): the two primitives a first interactive program reaches for work with no `use`; `eprint`, `args`, `read_all_input` stay qualified behind `use core.io`. **Ratified, not yet implemented** | owner |
+| 2026-06-20 | D-CT-L2NAME | **disambiguate the two "Layer 2" names** (A): keep both numbers; add a cross-reference note on S60 marking it the capability tier, not the S26 derive layer. Docs-only; no code, no rename. **Ratified** | owner |
+| 2026-06-20 | D-DEFER1 | **user-writable scope-exit cleanup** (B): ship a stdlib `core.scope.guard(() => {…})` value whose Drop runs a stored lambda, firing LIFO on every exit path including `?`. No new syntax; `defer` (C) stays declined (D-SUGAR5); user-definable Drop remains the long-term roadmap item. **Ratified, not yet implemented** | owner |

@@ -33,6 +33,11 @@ impl<'a> Fmt<'a> {
                 let text = self.src[cm.span.start..cm.span.end].to_string();
                 self.write(&text);
             }
+            // D-DIST1: distinct type declarations are emitted verbatim.
+            Item::Distinct(d) => {
+                let text = self.src[d.span.start..d.span.end].to_string();
+                self.write(&text);
+            }
         }
     }
 
@@ -164,9 +169,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
-        // S58 (E2-M13): `@unsafe` whole-function contract sits on its own line.
+        // S58 (E2-M13): `#unsafe` whole-function contract sits on its own line.
         if f.is_unsafe {
-            self.write(&format!("@{}", Syntax::KW_UNSAFE));
+            self.write(&format!("#{}", Syntax::KW_UNSAFE));
             self.newline();
         }
         if top_level {
@@ -382,8 +387,8 @@ impl<'a> Fmt<'a> {
         }
         for attr in &c.attrs {
             match attr {
-                ConstAttr::ForceStatic => self.write("@static "),
-                ConstAttr::ForceInline => self.write("@inline "),
+                ConstAttr::ForceStatic => self.write("#static "),
+                ConstAttr::ForceInline => self.write("#inline "),
             }
         }
         self.write("const ");

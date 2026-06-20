@@ -152,7 +152,7 @@ fn cffi_end_to_end_links_and_runs() {
     // Hand-written bindgen cache fixture (simulates `jet bind` output).
     fs::write(
         cache.join("jetc.jet"),
-        r#"@bindgen module c.jetc.__bindgen__ {
+        r#"#bindgen module c.jetc.__bindgen__ {
     fn add_ints(a: Int, b: Int) -> Int = "jetc_add_ints";
     fn greeting() -> String = "jetc_greeting";
 }
@@ -225,14 +225,14 @@ fn cffi_empty_overlay_is_bindgen_only() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("jetc.jet"),
-        "@bindgen module c.jetc.__bindgen__ { fn ping() -> Int = \"jetc_ping\"; }\n",
+        "#bindgen module c.jetc.__bindgen__ { fn ping() -> Int = \"jetc_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-@extern module c.jetc { }
+#extern module c.jetc { }
 fn main() { print(jc.ping()); }
 "#,
     )
@@ -253,14 +253,14 @@ fn cffi_overlay_overrides_bindgen() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("jetc.jet"),
-        "@bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) -> Int = \"gen_add\"; }\n",
+        "#bindgen module c.jetc.__bindgen__ { fn add(a: Int, b: Int) -> Int = \"gen_add\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
     fs::write(
         &main,
         r#"use c.jetc as jc;
-@extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
+#extern module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add"; }
 fn main() { print(jc.add(1, 2)); }
 "#,
     )
@@ -283,7 +283,7 @@ fn cffi_header_use_form_lowers_to_lib() {
     fs::create_dir_all(&cache).unwrap();
     fs::write(
         cache.join("demo.jet"),
-        "@bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
+        "#bindgen module c.demo.__bindgen__ { fn ping() -> Int = \"demo_ping\"; }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -365,8 +365,8 @@ Error [E3202]: Type `Ptr<Int>` cannot cross the C boundary here.
     |
   1 | fn f(p: Ptr<Int>) = \"f\";
     |         ^^^^^^^^
- Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58).
- Fix: Move the call inside `@unsafe`, or change the type to a C-safe value type.
+ Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#unsafe { … }` region (S58).
+ Fix: Move the call inside `#unsafe`, or change the type to a C-safe value type.
 ";
     assert_eq!(rendered, expected);
 }

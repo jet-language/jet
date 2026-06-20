@@ -249,6 +249,9 @@ pub enum Item {
     Func(Func),
     Struct(StructDef),
     Enum(EnumDef),
+    /// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — a distinct type
+    /// declaration. `distinct`-over-`distinct` base is rejected in sema.
+    Distinct(DistinctDef),
     /// S28 (M9): `trait Name { fn sig(self) -> T; … }`.
     Trait(TraitDef),
     Impl(ImplDef),
@@ -604,6 +607,19 @@ pub struct StructDef {
     pub derives: Vec<(String, Span)>,
 }
 
+/// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name :: distinct Base`.
+#[derive(Debug)]
+pub struct DistinctDef {
+    pub is_pub: bool,
+    /// D-DIST3: whether `#Numeric` marker was present — enables same-type arithmetic.
+    pub is_numeric: bool,
+    pub name: String,
+    pub name_span: Span,
+    pub base: Type,
+    pub base_span: Span,
+    pub span: Span,
+}
+
 #[derive(Debug)]
 pub struct EnumDef {
     pub is_pub: bool,
@@ -868,6 +884,21 @@ pub enum Stmt {
         audit: Option<String>,
         body: Vec<Stmt>,
         span: Span,
+    },
+    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `comptime if <cond> { … } else { … }`.
+    /// The condition is evaluated at compile time; only the selected arm is
+    /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).
+    /// `else_body` is None when no `else` clause is written (statement position
+    /// only; in expression position both arms are required by the caller).
+    ComptimeIf {
+        cond: Expr,
+        cond_span: Span,
+        then_body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+        span: Span,
+        /// Filled by sema: true if the `then` arm is selected, false if `else`.
+        /// None before sema runs.
+        selected_then: Option<bool>,
     },
 }
 

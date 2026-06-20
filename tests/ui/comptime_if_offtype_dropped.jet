@@ -1,0 +1,15 @@
+// D-WHEN2: off-target intrinsics in the dropped arm are allowed —
+// the dropped arm is NOT type-checked against its surroundings.
+// Here `false` is the comptime condition, so the else arm is selected.
+// The then-arm has a type mismatch that would error if type-checked,
+// but since it is dropped it must be silently skipped.
+fn add(a: Int, b: Int) -> Int { return a + b }
+fn main() {
+    comptime if false {
+        // dropped: type mismatch — would fail full type-checking
+        result :: add("hello", 0)
+        print("{result}")
+    } else {
+        print("else arm selected")
+    }
+}

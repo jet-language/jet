@@ -81,6 +81,15 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
             Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
+            // D-WHEN1: rewrite calls in both arms so sibling resolution works
+            // regardless of which arm is selected at comptime.
+            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+                rewrite_inline_calls_expr(cond, siblings, modname);
+                rewrite_inline_calls_stmts(then_body, siblings, modname);
+                if let Some(eb) = else_body {
+                    rewrite_inline_calls_stmts(eb, siblings, modname);
+                }
+            }
         }
     }
 }
@@ -304,6 +313,10 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 }
                 Item::Const(c) => {
                     register_const(c, &mut st.consts, &mut diags, &st.funcs, &st.registry)
+                }
+                Item::Distinct(d) => {
+                    register_distinct(d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                    st.type_pub.insert(d.name.clone(), d.is_pub);
                 }
                 Item::Test(t) => {
                     if name_defined(&t.name, &st.funcs, &st.registry, &st.consts)
@@ -699,6 +712,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             | Item::ExternRust(_)
             | Item::Trait(_)
             | Item::Module(_)
+            | Item::Distinct(_)
             | Item::CModule(_) | Item::CodeModule(_) => {}
             }
         }
@@ -836,6 +850,8 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
             }
         }
     }
+    // D-NARG-D2 (E0126): check defaults don't ref later params.
+    check_default_forward_refs(&f.params, &f.name, diags);
     st.func_pub.insert(f.name.clone(), f.is_pub);
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
@@ -867,6 +883,7 @@ pub(crate) fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -
                 Item::Trait(_)
                 | Item::ExternRust(_)
                 | Item::Module(_)
+                | Item::Distinct(_)
                 | Item::CModule(_) | Item::CodeModule(_) => {}
             }
         }
@@ -924,6 +941,15 @@ pub(crate) fn collect_std_stmts(
             }
             Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => collect_std_stmts(body, imports, used),
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+            // D-WHEN1: collect std usage from both arms (we don't know which is
+            // selected until sema runs; over-collecting is harmless here).
+            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+                collect_std_expr(cond, imports, used);
+                collect_std_stmts(then_body, imports, used);
+                if let Some(eb) = else_body {
+                    collect_std_stmts(eb, imports, used);
+                }
+            }
         }
     }
 }
@@ -977,6 +1003,11 @@ pub(crate) fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, u
             }
         }
         Expr::Call(c) => {
+            // D-PRELUDE1 = B: bare `input(...)` is prelude-ambient; mark core.io so
+            // STD_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
+            if c.name == Syntax::BUILTIN_INPUT {
+                used.insert("core.io::input".to_string());
+            }
             for arg in &c.args {
                 collect_std_expr(&arg.expr, imports, used);
             }
@@ -1275,6 +1306,7 @@ pub(crate) fn check_func_body_bundle(
         expected_type: None,
         owner_type: owner_type.map(str::to_string),
         iter_borrowed: HashSet::new(),
+        freed_allocators: HashMap::new(),
         borrow_ctx: false,
         lambda_escapes: true,
         is_task_spawn: false,
@@ -1288,6 +1320,9 @@ pub(crate) fn check_func_body_bundle(
         ct_scopes: vec![HashMap::new()],
         type_param_scope: f.type_params.clone(),
         freestanding,
+        in_dropped_comptime_arm: false,
+        stmt_tail_ptr: std::ptr::null(),
+        stmt_tail_len: 0,
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.

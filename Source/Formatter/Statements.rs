@@ -138,13 +138,28 @@ impl<'a> Fmt<'a> {
             }
             Stmt::Unsafe { audit, body, .. } => {
                 if let Some(reason) = audit {
-                    self.write(&format!("@{}(\"{}\")", Syntax::ATTR_AUDIT, reason));
+                    self.write(&format!("#{}(\"{}\")", Syntax::ATTR_AUDIT, reason));
                     self.newline();
                 }
-                self.write(&format!("@{} {{", Syntax::KW_UNSAFE));
+                self.write(&format!("#{} {{", Syntax::KW_UNSAFE));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
+            }
+            // D-WHEN1 (ratified 2026-06-19): format like `if` with `comptime` lead.
+            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+                self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));
+                self.fmt_cond(cond);
+                self.write(" {");
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(then_body));
+                self.end_block();
+                if let Some(eb) = else_body {
+                    self.write(" else {");
+                    self.newline();
+                    self.with_indent(|f| f.fmt_block_stmts(eb));
+                    self.end_block();
+                }
             }
         }
     }

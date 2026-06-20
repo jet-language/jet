@@ -86,7 +86,7 @@
       "type": "task",
       "title": "Memory capability model",
       "body": "User-facing ownership via view/edit/take/share instead of borrow-checker vocabulary. Large design.",
-      "stage": "planned",
+      "stage": "decisions",
       "plan": "memory-capability-model",
       "notes": [
         {
@@ -102,7 +102,7 @@
       "type": "task",
       "title": "lib vs exe → targets model",
       "body": "Replace rigid lib/exe with fine-grained targets (library/binary/test/example/benchmark/plugin).",
-      "stage": "planned",
+      "stage": "decisions",
       "plan": "lib-exe-targets-model",
       "notes": [
         {
@@ -154,23 +154,27 @@
       "type": "task",
       "title": "CLI arg passthrough convention",
       "body": "How jet run passes --flags to the program; -- separator?",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "cli-arg-passthrough",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decision D-CLI1 in ballot (rec A).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-CLI1=A (error + teach on an unknown `--`-flag before `--`, via E2102). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c12",
       "type": "task",
       "title": "Reduce L0201 implicit-clone warning noise",
       "body": "Fires on every String passed to stdlib that stores it. Smarter ownership model or suppression.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "clone-warning-noise",
       "notes": [
         {
@@ -180,49 +184,61 @@
         {
           "t": "Plan drafted + vetted. Decision D-L0201 in ballot (rec C: defer).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-L0201=A (liveness-gate the implicit-clone lint — fire only on a dead/wasteful clone). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c13",
       "type": "task",
       "title": "REPL: make print 'just work'",
       "body": "Put print in core/prelude rather than auto-importing std.io magically.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "repl-print-prelude",
       "notes": [
         {
           "t": "Plan drafted + vetted (print already ambient; gap is asymmetry). Decision D-PRELUDE1 in ballot (rec B).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-PRELUDE1=B (`print` + `input` ambient; `eprint`/`args`/`read_all_input` stay behind `use core.io`). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c20",
       "type": "idea",
       "title": "Structural pattern matching",
       "body": "Nested enum/record destructuring, exhaustiveness, guards, wildcards, or-patterns, range patterns, unreachable-arm diagnostics.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "pattern-matching",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decisions D-PATW/D-PATR/D-PATO in ballot (all rec A).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-PATW=D (`_` ignores a payload field, `else` is the catch-all), D-PATR=A (range patterns at all positions, reuse S22 `..`, gap-checked), D-PATO=B (`|` for structural or-patterns). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c21",
       "type": "idea",
       "title": "defer for deterministic cleanup",
       "body": "Lexical scope-exit, LIFO, runs on all exit paths, infallible.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "defer-cleanup",
       "notes": [
         {
@@ -232,74 +248,95 @@
         {
           "t": "Plan drafted + vetted. Decision D-DEFER1 in ballot (rec B: ship stdlib Guard, keep keyword declined).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "D-DEFER1 ratified B: ship stdlib core.scope.guard(() => {…}) value; no new syntax, defer (C) stays declined. Logged in syntax-decisions.md. Ready to implement.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20T00:00:00Z"
     },
     {
       "id": "c22",
       "type": "idea",
       "title": "Typed error families + IntoError conversion",
       "body": "Convert error types across module boundaries (today ? needs same E).",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "typed-error-families",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decision D-ERR-CONV in ballot (rec A: impl Source -> Target).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-ERR-CONV=A (`impl Source -> Target { … }`; uses `->`, NOT S83`s `~~`). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c23",
       "type": "idea",
       "title": "Distinct types & units",
       "body": "newtype-style distinct types (Haskell newtype / F# units / Odin distinct).",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "distinct-types-units",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decisions D-DIST1/2/3 in ballot (rec C / defer / A).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-DIST1=C (`UserId :: distinct Int`), D-DIST2=B (units in scope but as a stdlib extension, not core syntax), D-DIST3=A (explicit both ways, `.raw()` unwrap, `#Numeric` opt-in same-type arithmetic, E0127). All three decided — ready, say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c24",
       "type": "idea",
       "title": "Odin-style when (compile-time if)",
       "body": "Compile-time conditional; relates to comptime.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "comptime-when",
       "notes": [
         {
           "t": "Plan drafted + vetted (when retired -> comptime if). Decisions D-WHEN1/D-WHEN2 in ballot (rec A).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-WHEN1=A (`comptime if`), D-WHEN2=A (dropped arm: name-resolution only). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c25",
       "type": "idea",
       "title": "Range-based switch arms",
       "body": "Odin-style range arms in if/match dispatch.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "range-switch-arms",
       "notes": [
         {
           "t": "Plan drafted + vetted (..= not in Jet -> ..). Decisions D-RANGE1/D-RANGE2 in ballot (rec A).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-RANGE1=A (`..` arm ranges desugar to `>= && <=`), D-RANGE2=A (c25 owns the terse sugar + porting-error teaching under D-PATR`s checker). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20",
+      "note": "[sweep] decisions resolved by ratified rules — ready to implement, say go."
     },
     {
       "id": "c26",
@@ -448,10 +485,14 @@
         {
           "t": "Plan drafted + vetted. Decision D-DBG1 in ballot (rec A: jet debug verb).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-DBG1=A (`jet debug <file>` verb). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c53",
@@ -478,7 +519,7 @@
       "type": "task",
       "title": "Pure-eval: transitive impurity traces + rich --pure rendering",
       "body": "E2 loose end → E3. E3401 shows one level (direct impure callee); transitive chains deferred. jet eval --pure rich struct/list rendering deferred.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "pure-eval-traces",
       "notes": [
         {
@@ -488,10 +529,14 @@
         {
           "t": "Plan drafted + vetted. Decision D-EVAL1 in ballot (rec A: pretty-by-default).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-EVAL1=A (`jet eval --pure`: pretty by default, `--json` for machine output). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c55",
@@ -511,7 +556,8 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-19T14:25:36.089Z",
+      "note": "[sweep] decisions resolved by ratified rules — ready to implement, say go."
     },
     {
       "id": "c56",
@@ -558,7 +604,7 @@
       "type": "task",
       "title": "Named-args follow-ups (D-NARG-D2, D-NARG-D4)",
       "body": "Ratified extensions to D-NARG1: (D-NARG-D2) defaults may reference earlier params — fn box(w: Int, h: Int = w); (D-NARG-D4) dedicated label-mismatch diagnostic carved out of E0104.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "named-args-followups",
       "notes": [
         {
@@ -568,17 +614,21 @@
         {
           "t": "D-NARG-D2/D4 ratified; plan vetted. Decision D-NARG-DIAG in ballot (rec A: mint E0125/E0126).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "Ratified: D-NARG-DIAG=A (mint E0125 label-mismatch + E0126 later-param-ref). Ready — say go.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20"
     },
     {
       "id": "c61",
       "type": "task",
       "title": "comptime Layer 2: compile-time pure eval + data embedding",
       "body": "S60 ratified-to-pursue (A): promote comptime Layer 2 from post-1.0 — pure compile-time evaluation + data embedding. Builds on existing comptime.rs / pure-eval work.",
-      "stage": "decisions",
+      "stage": "planned",
       "plan": "comptime-layer2",
       "notes": [
         {
@@ -588,10 +638,14 @@
         {
           "t": "S60 ratified; plan vetted (much already exists). Decision D-CT-L2NAME in ballot (rec A: label reconciliation).",
           "at": "2026-06-19"
+        },
+        {
+          "t": "D-CT-L2NAME ratified A: keep both numbers, added cross-reference note on S60 (capability tier, not S26 derive layer). Docs-only naming fix. Embedding work files under S60. Ready to implement.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z"
+      "updated": "2026-06-20T00:00:00Z"
     },
     {
       "id": "c62",
@@ -666,6 +720,22 @@
       "status": "answered",
       "answer": "Most modern toolchains use Option A — one binary, tool subcommands: Deno (deno fmt/lint/lsp), Gleam (gleam format/lsp), Ruff (ruff format/check/server), Bun. The recurring exception is the LSP, shipped as a separate artifact by Zig (ZLS), Go (gopls), and Rust (rust-analyzer) because editors spawn it long-lived on its own cadence. Rust's fmt/clippy are separate binaries (B) but hidden behind cargo subcommands and version-locked via rustup. Pure plugin (C) has no real precedent for compiled-language toolchains. Tradeoffs: A = one install, tooling can never disagree with the compiler, bigger binary, no independent patch cadence; B = independent releases + smaller core but version-skew risk and N artifacts; C = max flexibility, runtime ABI surface, no prior art, fights one-source-of-truth. Jet-specific: fmt/lint/lsp all need the real lexer/parser/sema (I2/I3), so under B/C they must link the same front end as a shared lib and stay version-locked anyway — getting separation's costs without its benefits. Prior art + that constraint both point at A, reserving the LSP as the one piece that could become a separate artifact later. Full table added to the D-TOOL-SPLIT card in tools/Tower/docs/ballots/decision-ballots.md.",
       "created": "2026-06-19T12:30:34.899Z"
+    },
+    {
+      "id": "cmqm7d1nj17e",
+      "decisionId": "D-CT-L2NAME",
+      "text": "I still have absolutely no clue what this means. Give me a user story with example code so I can learn what you mean",
+      "status": "answered",
+      "answer": "Ratified A (2026-06-20). Not a language feature — a naming clash inside our own spec docs. Two ratified decisions both coined \"Layer 2\": S26 (derive ladder: built-in derives) and S60 (capability tier: compile-time pure eval + data embedding). A keeps both numbers and adds one cross-reference sentence on S60 so the next reader can tell them apart. No code, no rename. Compile-time embedding work files under S60.",
+      "created": "2026-06-20T10:16:12.703Z"
+    },
+    {
+      "id": "cmqm7ilar46i",
+      "decisionId": "D-DEFER1",
+      "text": "I am leaning B but want to understand the practical tradeoofs of going with B & C respectively",
+      "status": "answered",
+      "answer": "Ratified B (2026-06-20). B (stdlib Guard value: scope.guard(() => {…})) delivers ~95% of C's value — cleanup on every exit path including the ? early return — for zero new syntax and zero ratification, running on existing Drop + lambda machinery, and keeps Jet's one-cleanup-story (RAII) intact. C (a defer keyword) adds a second cleanup mechanism plus the Go leak-by-omission bug class S63 was chosen to avoid; its only unique win is errdefer-style partial rollback, not yet proven. B doesn't foreclose C — add the keyword later on evidence. defer (C) stays declined (D-SUGAR5); user-definable Drop remains the long-term roadmap item.",
+      "created": "2026-06-20T10:20:31.443Z"
     }
   ]
 }

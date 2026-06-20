@@ -113,9 +113,16 @@ expr     = precedence climbing over:
 - `when subject { cond -> { ... }; else -> { ... }; }` (S24): arms are
   arbitrary `Bool` conditions tried top to bottom; `else` is mandatory.
   Lowered to an if/else chain; rustc optimizes it.
+- **Prelude (D-PRELUDE1 = B):** `print` and `input` are ambient — usable in
+  any Jet file with no `use` line. `eprint`, `args`, and `read_all_input`
+  stay qualified behind `use core.io`. A user-defined function named `print`
+  or `input` shadows the prelude one in that scope (prelude is lowest-priority).
 - `print(x)` is built in (S9); takes exactly one printable argument
   (E0103, E0112) and writes it with a trailing newline. `Float` always
   prints a decimal part (S21): `-5.0`, not `-5`.
+- `input()` / `input(prompt)` is prelude (D-PRELUDE1); reads a line from
+  stdin, strips the trailing newline, and returns `Result(String, IoError)`.
+  Use `??` to unwrap or handle the error.
 - Functions: multi-argument calls, checked arity (E0104) and argument
   types (E0112). A function with a return type must return on every path
   (E0114). Unknown names are E0102/E0107 with did-you-mean suggestions.
@@ -153,8 +160,8 @@ Borrow-checker mechanics live in the transpiler; tier-1 users never write
 | `ref field: T` (tier 2)| stored reference in a struct      | `field: &'a T`   |
 
 Call-site rules: `mut` and `take` must match the parameter; omitting `take`
-on a clonable type inserts `.clone()` with lint **L0201**; on a
-non-clonable type → **E0201**. Omitting `mut` on a mutable parameter →
+on a clonable type inserts `.clone()` with lint **L0201** (fired only when
+the cloned value is dead after the call — D-L0201); on a non-clonable type → **E0201**. Omitting `mut` on a mutable parameter →
 **E0202**. Using the same name twice in one call while `mut` is active →
 **E0204**. `*` outside `unsafe` → **E0208**.
 
@@ -378,11 +385,19 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 
 Codegen stays dumb (I3): an `@unsafe { … }` region lowers straight to a Rust
 `unsafe { … }`, an `@unsafe fn` to a Rust `unsafe fn`. All gating is decided in
-sema. Diagnostics **E3101–E3103 + L3101** in diagnostics.md with snapshots
-(`tests/ui/lowlevel_e310*`, `tests/ui_lint/unsafe_missing_audit`); the audited
-end-to-end example is `examples/features/48_lowlevel.jet`. Deferred (unratified):
-arena allocators (D-REF2 open) and the wider expert `std.mem` API (D-LL3, name
-TBD).
+sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
+(`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
+`tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
+`examples/features/48_lowlevel.jet`.
+
+### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19, implemented)
+
+Four allocators ship under `core.mem` — `Arena`, `Bump`, `Pool`, `Fixed` — all namespaced
+under `core.mem.alloc` (D-ALLOC-C). No `#unsafe` needed; `use core.mem` is the discovery
+gate (E3102). Constructors: `mem.Arena.new()` / `mem.Arena.new(capacity: N)` (D-ALLOC1);
+allocate with `arena.alloc(value)` which returns the value. Two lifecycle verbs (D-ALLOC-D):
+`reset()` keeps the backing buffer (cheap, arena is reusable), `free()` returns memory to
+the OS. Use-after-reset/free → **E3104** (names the site). Example: `70_arena.jet`.
 
 ## M6 phase 3 — multi-file imports (done)
 
@@ -546,9 +561,15 @@ deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
 Codegen invariant: importing std modules is free; sema records reachable std
 calls and codegen emits only those helpers (R10).
 
+Program arguments: `jet run file.jet -- arg1 arg2` forwards everything after `--`
+verbatim to the program; `io.args()` sees them as argv[1..]. An unknown `--`-flag
+before `--` is an error (E2102) that teaches the `--` form (D-CLI1=A). Plain
+positional words with no separator still work (`jet run greet.jet Ada`). `jet test`
+also accepts `--`; `jet build` does not (no running process).
+
 Examples: `examples/features/29_files.jet`, `examples/features/30_json.jet`,
-`examples/features/31_cli.jet`. UI: `tests/ui/std_*`, `tests/ui/u8_out_of_range.jet`,
-and M10 teaching errors **E0037**–**E0039**.
+`examples/features/31_cli.jet`, `examples/features/64_cli_args.jet`. UI: `tests/ui/std_*`,
+`tests/ui/u8_out_of_range.jet`, and M10 teaching errors **E0037**–**E0039**.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
 

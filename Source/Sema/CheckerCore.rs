@@ -382,12 +382,50 @@ impl<'a> Checker<'a> {
         if new_scope {
             self.push_scope();
         }
-        for stmt in stmts.iter_mut() {
-            self.check_stmt(stmt);
+        // D-L0201 liveness gate: before checking each statement, record the
+        // tail of the current block (statements that follow it).  The lint
+        // helper `is_name_live_after` reads this to decide whether the cloned
+        // value is dead at this point.  We save/restore so nested `check_block`
+        // calls don't clobber the outer frame.
+        let saved_ptr = self.stmt_tail_ptr;
+        let saved_len = self.stmt_tail_len;
+        for i in 0..stmts.len() {
+            // tail = stmts[i+1..], i.e. the statements after index i.
+            let tail = &stmts[i + 1..];
+            self.stmt_tail_ptr = tail.as_ptr();
+            self.stmt_tail_len = tail.len();
+            self.check_stmt(&mut stmts[i]);
         }
+        self.stmt_tail_ptr = saved_ptr;
+        self.stmt_tail_len = saved_len;
         if new_scope {
             self.pop_scope();
         }
+    }
+
+    /// D-L0201 liveness gate: returns `true` when `name` is referenced in any
+    /// statement that follows the current statement in the innermost block.
+    /// When true the implicit clone is *necessary* — suppressing L0201 is safe.
+    /// When false we can't prove liveness from this frame, so the clone may be
+    /// wasteful and L0201 fires.
+    ///
+    /// Conservative by design: it only inspects the current block's tail
+    /// (set by `check_block`).  Nested scopes (if/loop bodies) count as using
+    /// the name when they reference it, so the helper never claims "dead" while
+    /// the name might still be read.
+    pub(crate) fn is_name_live_after(&self, name: &str) -> bool {
+        if self.stmt_tail_ptr.is_null() || self.stmt_tail_len == 0 {
+            return false;
+        }
+        // SAFETY: stmt_tail_ptr + stmt_tail_len describe a valid slice that was
+        // set from `&stmts[i+1..]` just before the current check_stmt call.
+        // The slice's data lives in the Program AST, which is `&mut Program`
+        // at the call site and outlives the Checker.  We only read (no writes)
+        // and only during `check_stmt`, so no aliasing issues.
+        let tail = unsafe {
+            std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len)
+        };
+        tail.iter().any(|s| stmt_refs_name(s, name))
     }
 
     /// Check two alternative branches with independent move states, then
@@ -804,6 +842,8 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::If(ifs) => self.check_if(ifs),
+            // D-WHEN1/D-WHEN2 (ratified 2026-06-19): compile-time conditional.
+            Stmt::ComptimeIf { .. } => self.check_comptime_if(stmt),
             Stmt::While {
                 cond,
                 body,
@@ -1030,15 +1070,15 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Unsafe { audit, body, span } => {
-                // L3101 (D-LL2): every `@unsafe` block needs an `@audit("…")`
+                // L3101 (D-LL2): every `#unsafe` block needs a `#audit("…")`
                 // reason on the line above so the safety case is on record.
                 if audit.is_none() {
                     self.diags.push(Diagnostic::lint(
                         "L3101",
-                        "this `@unsafe` block has no `@audit` reason".to_string(),
+                        "this `#unsafe` block has no `#audit` reason".to_string(),
                         "every gated region records, in one line, why it can't break memory safety"
                             .to_string(),
-                        "add `@audit(\"why this is safe\")` on the line above".to_string(),
+                        "add `#audit(\"why this is safe\")` on the line above".to_string(),
                         Some(*span),
                     ));
                 }
@@ -1091,6 +1131,100 @@ impl<'a> Checker<'a> {
             }
         }
         self.moved = after;
+    }
+
+    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): check a `comptime if` statement.
+    ///
+    /// Steps:
+    /// 1. Evaluate the condition with the comptime interpreter. The condition
+    ///    must be Bool and comptime-evaluable (else E0989).
+    /// 2. Select the arm whose condition is true.
+    /// 3. Full type-check + lower the selected arm (`check_block`).
+    /// 4. D-WHEN2: run a name-resolution-only pass over the dropped arm —
+    ///    we enter `in_dropped_comptime_arm` mode, call `check_block`, but
+    ///    then keep only `E0107` (unknown name) diagnostics from that pass.
+    ///    This catches typos in dead code without requiring the arm to
+    ///    type-check against the current context.
+    pub(crate) fn check_comptime_if(&mut self, stmt: &mut Stmt) {
+        let Stmt::ComptimeIf {
+            cond,
+            cond_span,
+            then_body,
+            else_body,
+            selected_then,
+            ..
+        } = stmt
+        else {
+            return;
+        };
+        // Step 1: evaluate the condition at comptime.
+        let globals = self.current_ct_globals();
+        let selected = match crate::Comptime::evaluate_owned(
+            cond,
+            self.ct_funcs,
+            self.ct_externs,
+            self.ct_base_dir,
+            &globals,
+        ) {
+            Ok(crate::Comptime::CtValue::Bool(b)) => b,
+            Ok(_) => {
+                // The condition evaluated but isn't Bool — fall back to E0989
+                // (non-Bool condition is the same as non-comptime for users).
+                self.diags.push(Diagnostic::error(
+                    "E0989",
+                    format!(
+                        "a `comptime if` condition must be {}, not another type",
+                        Type::Bool.show()
+                    ),
+                    "the condition selects a branch at compile time — it must be true or false"
+                        .to_string(),
+                    "write a Bool comptime expression, like `comptime if FLAG { … }`".to_string(),
+                    Some(*cond_span),
+                ));
+                return;
+            }
+            Err(_d) => {
+                // Condition failed to evaluate — not comptime-evaluable (E0989).
+                self.diags.push(Diagnostic::error(
+                    "E0989",
+                    "this `comptime if` condition can't be known at compile time".to_string(),
+                    "a `comptime if` condition must be a comptime expression — a `comptime` binding, a literal, or a pure function call with comptime arguments (D-WHEN1)".to_string(),
+                    "use a `comptime` binding: `comptime FLAG = …; comptime if FLAG { … }`"
+                        .to_string(),
+                    Some(*cond_span),
+                ));
+                return;
+            }
+        };
+        *selected_then = Some(selected);
+
+        // Step 3: full type-check on the selected arm.
+        if selected {
+            self.check_block(then_body, true);
+        } else if let Some(eb) = else_body {
+            self.check_block(eb, true);
+        }
+
+        // Step 4: D-WHEN2 — name-resolution-only pass on the dropped arm.
+        let dropped_arm: Option<&mut Vec<Stmt>> = if selected {
+            else_body.as_mut()
+        } else {
+            Some(then_body)
+        };
+        if let Some(dropped) = dropped_arm {
+            let diag_before = self.diags.len();
+            let prev_flag = self.in_dropped_comptime_arm;
+            self.in_dropped_comptime_arm = true;
+            self.check_block(dropped, true);
+            self.in_dropped_comptime_arm = prev_flag;
+            // Keep only unknown-name diagnostics (E0107) from the dropped arm.
+            let dropped_diags: Vec<Diagnostic> = self.diags.drain(diag_before..).collect();
+            for d in dropped_diags {
+                if d.code == "E0107" {
+                    self.diags.push(d);
+                }
+            }
+        }
     }
 
     pub(crate) fn check_condition_with_bindings(&mut self, cond: &mut Expr) -> HashMap<String, Type> {
@@ -1476,6 +1610,19 @@ impl<'a> Checker<'a> {
                         }
                     }
                 } else if annot != actual {
+                    // D-DIST1/D-DIST3 (E0128): distinct-type coercion is never implicit.
+                    let distinct_name = if let Type::Named(n) = &annot {
+                        if self.registry.is_distinct(n) { Some(n.clone()) } else { None }
+                    } else { None };
+                    if let Some(dt) = distinct_name {
+                        self.diags.push(Diagnostic::error(
+                            "E0128",
+                            format!("a `{}` can't be used where a `{}` is expected", actual.name(), dt),
+                            format!("`{}` and `{}` are different types — even though `{}` is built on `{}`, one is never accepted in place of the other", dt, actual.name(), dt, self.registry.distinct_base(&dt).map(|t| t.name()).unwrap_or_default()),
+                            format!("construct a `{}`: `{}({})`", dt, dt, "expr"),
+                            Some(b.init.span()),
+                        ));
+                    } else {
                     self.diags.push(Diagnostic::error(
                         "E0108",
                         format!(
@@ -1488,6 +1635,7 @@ impl<'a> Checker<'a> {
                         type_fix_hint(&annot, &actual),
                         Some(b.init.span()),
                     ));
+                    }
                 }
                 annot
             }

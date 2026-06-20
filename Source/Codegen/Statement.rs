@@ -150,9 +150,13 @@ fn emit_stmt(
             // E2-M7: file handles need `let mut` even when bound with `val`,
             // because streaming reads and writes mutate the internal buffer state.
             // E2-M10: TcpStream also needs `let mut` for the same reason.
+            // D-ALLOC1/D-ALLOC-C: allocators need `let mut` because `alloc`/`reset`
+            // mutate the backing buffer, but Jet users bind them with `::`.
             let is_file_handle = matches!(
                 &b.ty,
-                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter" || n == "TcpStream"
+                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
+                    || n == "TcpStream"
+                    || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
             );
             let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
                 "let mut"
@@ -352,6 +356,30 @@ fn emit_stmt(
             out.push_str(&format!("{}unsafe {{\n", pad));
             emit_stmts(cx, body, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
+        }
+        // D-WHEN1 (ratified 2026-06-19): emit only the selected arm. The
+        // unselected arm never reaches here — it was name-resolved-only in sema
+        // (D-WHEN2) and is intentionally absent from codegen output (I3).
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            selected_then,
+            ..
+        } => {
+            match selected_then {
+                Some(true) => {
+                    emit_stmts(cx, then_body, env, out, indent, view_return);
+                }
+                Some(false) => {
+                    if let Some(eb) = else_body {
+                        emit_stmts(cx, eb, env, out, indent, view_return);
+                    }
+                }
+                None => {
+                    // Sema didn't run (e.g. skipped due to earlier errors) —
+                    // emit nothing rather than generating invalid Rust (I3).
+                }
+            }
         }
     }
 }

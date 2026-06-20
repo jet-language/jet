@@ -189,6 +189,8 @@ pub(crate) fn is_cloneable(
                             }
                         })
                     }
+                    // D-DIST1: distinct types wrap a scalar; they are always cloneable.
+                    Some(TypeDef::Distinct { .. }) => true,
                     None => false,
                 }
         }
@@ -415,6 +417,8 @@ pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<S
                     _ => None,
                 })
             }
+            // D-DIST1: distinct types wrap a comparable base; they are always comparable.
+            Some(TypeDef::Distinct { .. }) => None,
             None => Some("?".to_string()),
         },
         Type::Option(inner) => incomparable_field(inner, registry),

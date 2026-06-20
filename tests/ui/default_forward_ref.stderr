@@ -1,0 +1,15 @@
+Error [E0126]: default for `a` in `f` references `b`, which comes after it
+  --> tests/ui/default_forward_ref.jet:1:15
+    |
+  1 | fn f(a: Int = b, b: Int) -> Int {
+    |               ^
+ Why: defaults fill left to right; a parameter isn't in scope until it appears in the list
+ Fix: reorder the parameters so `b` comes before `a`, or use a constant default
+
+Error [E0104]: `f` expects 2 arguments, got 1
+  --> tests/ui/default_forward_ref.jet:6:10
+    |
+  6 |     _ :: f(1)
+    |          ^
+ Why: every argument must match a parameter
+ Fix: check the definition of `f`

@@ -106,6 +106,18 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types map to
+/// structs inside the `jet_mem` module emitted from Source/Prelude/Mem.rs.
+pub(crate) fn alloc_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "Arena" => Some("jet_mem::JetArena"),
+        "Bump" => Some("jet_mem::JetBump"),
+        "Pool" => Some("jet_mem::JetPool"),
+        "Fixed" => Some("jet_mem::JetFixed"),
+        _ => None,
+    }
+}
+
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
@@ -162,6 +174,9 @@ impl Cx {
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "U8" => "u8".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
+            // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
+            // so Rust infers the monomorphised type from the initialiser expression.
+            Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, file_handle_rust_type(name).unwrap())
@@ -169,6 +184,10 @@ impl Cx {
             // E2-M10: networking opaque types are top-level in the prelude.
             Type::Named(name) if net_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, net_handle_rust_type(name).unwrap())
+            }
+            // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
+            Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
+                format!("{}{}", self.root_prefix, alloc_handle_rust_type(name).unwrap())
             }
             Type::Named(name) if std_rust_type_name(name).is_some() => {
                 format!(
@@ -457,6 +476,9 @@ pub(crate) fn build_cx_items(
                 cx.trait_names.insert(t.name.clone());
             }
             Item::Impl(_) | Item::Test(_) | Item::Module(_) => {}
+            Item::Distinct(d) => {
+                cx.type_names.insert(d.name.clone());
+            }
             Item::CodeModule(cm) => {
                 // D-MOD2: register inline module alias and add mangled function sigs.
                 if let Some(body) = &cm.body {

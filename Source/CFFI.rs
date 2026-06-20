@@ -108,13 +108,13 @@ fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
         .all(|(x, y)| x.convention == y.convention && x.ty == y.ty)
 }
 
-/// E3207 — `@bindgen` used outside a generated cache file.
+/// E3207 — `#bindgen` used outside a generated cache file.
 fn e3207(lib: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3207",
-        format!("`@{}` is only allowed in generated cache files", Syntax::ATTR_BINDGEN),
+        format!("`#{}` is only allowed in generated cache files", Syntax::ATTR_BINDGEN),
         format!(
-            "`{}/{}/{}.{}` is written by `{} bind`; hand-written sources use `@{} module`",
+            "`{}/{}/{}.{}` is written by `{} bind`; hand-written sources use `#{} module`",
             Syntax::SOURCE_ROOT_DIR,
             Syntax::BINDINGS_C_SUBDIR,
             lib,
@@ -123,7 +123,7 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
             Syntax::ATTR_EXTERN_MODULE,
         ),
         format!(
-            "edit your overlay file with `@{} module`, or regenerate the cache with `{} bind`",
+            "edit your overlay file with `#{} module`, or regenerate the cache with `{} bind`",
             Syntax::ATTR_EXTERN_MODULE, Syntax::BINARY_NAME,
         ),
         Some(span),
@@ -136,7 +136,7 @@ fn e3205(lib: &str, name: &str, span: Span) -> Diagnostic {
         "E3205",
         format!("overlay `{}` disagrees with the generated binding", name),
         format!(
-            "user `@{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
+            "user `#{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
             Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib,
         ),
         "match the generated signature, or rename your overlay function".to_string(),

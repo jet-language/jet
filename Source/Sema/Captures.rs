@@ -53,6 +53,13 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
             Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
+            Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+                walk_expr_for_const_refs(cond, const_names, taken);
+                walk_stmts_for_const_refs(then_body, const_names, taken);
+                if let Some(eb) = else_body {
+                    walk_stmts_for_const_refs(eb, const_names, taken);
+                }
+            }
         }
     }
 }
@@ -328,6 +335,11 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         }
         Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => false,
+        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            expr_refs_name(cond, name)
+                || then_body.iter().any(|s| stmt_refs_name(s, name))
+                || else_body.as_ref().is_some_and(|eb| eb.iter().any(|s| stmt_refs_name(s, name)))
+        }
     }
 }
 
@@ -671,6 +683,14 @@ pub(crate) fn stmt_collect_captures(
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => {}
+        Stmt::ComptimeIf { then_body, else_body, .. } => {
+            let mut then_bound = bound.clone();
+            block_collect_captures(then_body, &mut then_bound, read, mut_cap);
+            if let Some(eb) = else_body {
+                let mut else_bound = bound.clone();
+                block_collect_captures(eb, &mut else_bound, read, mut_cap);
+            }
+        }
     }
 }
 

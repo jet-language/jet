@@ -1439,6 +1439,7 @@ impl<'a> Parser<'a> {
                         Stmt::Assign { value, .. } => value.span().end,
                         Stmt::Loop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
+                        Stmt::ComptimeIf { span, .. } => span.end,
                     }
                 } else {
                     close_paren.end

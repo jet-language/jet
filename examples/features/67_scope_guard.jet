@@ -1,0 +1,28 @@
+// 67 — scope-exit cleanup via core.scope.guard (D-DEFER1 option B).
+// Guard fires on every exit path — normal return, early return, and `?`
+// propagation. Multiple guards in the same scope drop LIFO.
+use core.scope as scope
+
+enum Fail { Bad }
+
+fn with_guards(succeed: Bool) -> Int ? Fail {
+    _g1 :: scope.guard(() => { print("guard 1 runs") })
+    _g2 :: scope.guard(() => { print("guard 2 runs") })
+    if succeed {
+        return ok(42)
+    }
+    return err(Fail.Bad)
+}
+
+fn question_path() -> Int ? Fail {
+    _cleanup :: scope.guard(() => { print("cleanup before ?") })
+    n :: with_guards(false)?
+    return ok(n)
+}
+
+fn main() {
+    r1 :: with_guards(true) ?? 0
+    print(r1)
+    r2 :: question_path() ?? -1
+    print(r2)
+}

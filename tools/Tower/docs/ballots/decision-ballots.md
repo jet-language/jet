@@ -5,834 +5,756 @@ leaves this file: it is recorded in the decision log in
 [`syntax-decisions.md`](syntax-decisions.md) and removed here. No "recently
 ratified" section, no decided history — decided decisions never reappear.
 
-**House rule for whoever edits this file:** a full decision card carries a worked,
-user-story example for each option (what a real person types, sees, and hits as an
-error) — not abstract option tables. Decisions not yet drafted to that bar are
-listed below as one-liners with a recommendation; expand one into a full card
-(with examples) when it's time to decide it.
+**House rule for whoever edits this file (enforced — a card missing any of these is
+not ballot-ready):** every full decision card carries, in this order, (1) a **user
+story** — a real person and what they're doing, so the owner sees why the decision
+exists; (2) a **short tradeoff comparison** — a compact table, one row per option,
+columns that actually differ (ceremony / failure mode / ratification cost /
+familiarity); and (3) a **worked example of every option** in a fenced ```jet (or
+```shell) block — what that person types, sees, and hits as an error. No abstract
+option tables standing in for examples. Close with `**Recommendation:**` + a one-line
+why. Decisions not yet drafted to that bar are listed below as one-liners with a
+recommendation; expand one into a full card when it's time to decide it.
 
 ---
 
 ## Open decisions
 
-Every open decision, listed and available now — nothing parked or hidden. Decide
-any directly when it has a full card; for the one-liners, ask the dashboard to
-**expand into a full card** (options + worked examples) when you want to decide it.
-Submitting a decision records it in `syntax-decisions.md` and removes it from here.
+> **13 open decisions across 3 cards.** Each card below is self-contained: a user
+> story (why it exists), a tradeoff table, and a worked example per option. Cards
+> **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
+> choice they raised is already covered by ratified decisions — so nothing is
+> queued for them here. Submitting a decision records it in `syntax-decisions.md`
+> and removes it from this file.
 
-### Language surface
+---
 
-### S83 — External-definition connector for `derive` / `impl` / `fn` (rec C)
+## Memory & capability model — board card c06
 
-You want ONE `Type<sep>name` connector, used consistently and Type-first, to attach things to a type from outside its body — `fn` keeps its keyword, the connector just injects the type before the name:
+
+# Ballot c06 — Memory capability model
+
+Source plan: `tools/Tower/docs/sidequests/memory-capability-model.md`. Replaces the
+internal three-mode `AccessConvention` (`Read`/`Mutate`/`Move`) with a user-visible
+four-capability vocabulary. `take` and `view` are already ratified ownership keywords
+(S10, M2); the open work is parameter-position annotations, the copy/share verbs, the
+manifest flag, and the inference defaults. Owner has final say on all syntax (I7, I8).
+
+Cross-references ballot c07 (`D-TGT1..D-TGT5`, `lib-exe-targets-model.md`): **D-CAP5**
+is blocked on **D-TGT1** (whether lib/exe survives), and the manifest spelling in
+**D-CAP4** should match whatever field style **D-TGT3** ratifies for `targets:`.
+
+---
+
+### D-CAP1 — Capability keyword spellings (rec A)
+
+**User story.** Mara is porting a Rust game loop to Jet. She never wants to write a
+borrow or a lifetime, but she does want to read a function signature and know at a
+glance whether `heal(player)` keeps the player, mutates it, or just looks at it. The
+words on the page have to mean what a beginner thinks they mean — and they have to be
+the *same* words the compiler uses in its error messages.
+
+| Option | Keywords | Reuses S10? | New tokens | Familiarity |
+|--------|----------|-------------|------------|-------------|
+| A | `view` / `edit` / `take` / `share` | `view`,`take` | `edit`,`share` | plain-English, no overlap with `mut` |
+| B | `view` / `mut` / `take` / `share` | `view`,`take`,`mut` | `share` | reuses ratified `mut`, but `mut` reads as Rust |
+| C | `read` / `write` / `own` / `share` | none | all 4 | S10 already **rejected** `read`/`write`/`owned` |
+| D | `look` / `change` / `keep` / `share` | none | all 4 | maximally beginner, but invents fresh jargon |
+
+- **Option A — view / edit / take / share.** Two keywords already exist; add `edit` and
+  `share`. The four words are distinct, plain, and map one-to-one onto the four
+  capabilities.
 
 ```jet
-fn Point<sep>dist(self) -> Int { … }   // external method
-impl Point<sep>Drawable { … }          // trait impl
-derive Point<sep>Serialize             // derive (S56)
+fn heal(player: edit Player) { player.hp += 10 }
+fn draw(scene: view Scene)   { render(scene) }
+fn add(player: take Player)  { party.members.push(player) }
+fn cache(tex: share Texture) { textures.insert(tex) }
 ```
 
-The constraint: the connector must be a token that isn't already spent. **Taken:** `=>` (lambda arrow, S46), `->` (return type / match arm), `::` (binding, D-BIND1), `.` (module + field, D-MOD1), `:` (type annotation), `@` (attribute/label), `#`. **Free (unused by the lexer today):** the whole tilde family, `:>`, `<-`, `<~`, and `$`/`\`. Each option below shows the `fn` form (same shape applies to `impl` and `derive`).
+- **Option B — reuse `mut` for the edit capability.** `mut` is already ratified (S10);
+  spend zero new tokens on the mutate slot.
+
+```jet
+fn heal(player: mut Player) { player.hp += 10 }
+// reads as Rust's `&mut`; the plan's diagnostics vocab explicitly bans
+// surfacing &mut-flavored wording to beginners.
+```
+
+- **Option C — read / write / own / share.** Verb-symmetric set.
+
+```jet
+fn heal(player: write Player) { player.hp += 10 }
+// S10 (ratified) already rejected `read`/`write`/`owned` as the canonical
+// ownership words. Re-proposing them would reverse a ratified decision.
+```
+
+- **Option D — look / change / keep / share.** Most beginner-legible verbs.
+
+```jet
+fn heal(player: change Player) { player.hp += 10 }
+fn draw(scene: look Scene)     { render(scene) }
+fn add(player: keep Player)    { party.members.push(player) }
+// but `take`/`view` are already ratified — this would orphan two live keywords.
+```
+
+**Recommendation:** A — keeps the two ratified keywords, adds the two genuinely-missing
+verbs, and avoids re-litigating S10's rejection of `read`/`write`.
+
+---
+
+### D-CAP2 — `copy` / `share` as keywords vs. method calls (rec A)
+
+**User story.** Theo calls `party.add(player)` and then prints `player.name`. The
+compiler tells him `player was taken`. He needs a one-word fix he can paste at the call
+site — and it has to be obvious in review that he chose to duplicate or to share, not
+that the compiler did it silently behind his back (the plan kills the implicit-clone
+path, L0201).
+
+| Option | Form | Visible at glance | Ceremony | Discoverable in diagnostic |
+|--------|------|-------------------|----------|----------------------------|
+| A | prefix keyword `copy x` / `share x` | yes — leads the line | low | trivial to quote in fix-it |
+| B | method `x.copy()` / `x.share()` | trailing, easy to miss | low | reads like any other method |
+| C | function `copy(x)` / `share(x)` | yes | low | but looks like stdlib, not a capability verb |
+| D | sigil `~x` (copy) / `^x` (share) | terse | lowest | opaque to a beginner |
+
+- **Option A — prefix keywords.** Matches the four-capability vocabulary; the verb leads
+  the expression so the intent is the first thing read.
+
+```jet
+party.add(copy player)   // duplicate, keep my own
+party.add(share player)  // both of us own it
+print(player.name)       // ok — I kept a copy / a share
+```
+
+- **Option B — method calls.** No new keywords; rides existing method syntax.
+
+```jet
+party.add(player.copy())
+party.add(player.share())
+// duplication hides at the tail of the expression; in `f(g(x).copy())`
+// it is easy to miss in review.
+```
+
+- **Option C — free functions.** `copy`/`share` as ordinary stdlib calls.
+
+```jet
+party.add(copy(player))
+// indistinguishable from a user-defined helper; the capability story is invisible.
+```
+
+- **Option D — sigils.** Single-character prefixes.
+
+```jet
+party.add(~player)   // copy
+party.add(^player)   // share
+// terse but unteachable; violates the plain-vocabulary goal.
+```
+
+**Recommendation:** A — the prefix verb is the only form that is both leading-visible and
+quotable verbatim in the post-take fix-it (`use copy player` / `use share player`).
+
+---
+
+### D-CAP3 — Annotation order: `player: edit Player` vs. `edit player: Player` (rec A)
+
+**User story.** Priya reads a signature `fn write(file: edit File, data: view Bytes)`.
+She parses it left-to-right as "the param `file`, which is an editable File." The
+capability is a property of *what the value is here*, not of its name — so it should sit
+where the rest of the type information already lives.
+
+| Option | Form | Groups with | Reads as |
+|--------|------|-------------|----------|
+| A | `player: edit Player` | the type | "player is an edit-Player" |
+| B | `edit player: Player` | the binding | "edit the player (a Player)" |
+| C | `edit Player player` | C-style | type-first, unlike all other Jet params |
+
+- **Option A — type-side.** Capability attaches to the type, mirroring every other type
+  annotation in Jet.
+
+```jet
+fn write(file: edit File, data: view Bytes) {
+    file.append(data)
+}
+```
+
+- **Option B — binding-side.** Capability prefixes the parameter name (Rust's `mut`
+  pattern position).
+
+```jet
+fn write(edit file: File, view data: Bytes) {
+    file.append(data)
+}
+// the keyword now sits where `pub`/`mut`-on-bindings live; a beginner
+// can misread `edit file` as an imperative "edit the file" statement.
+```
+
+- **Option C — C-style type-first.** Capability and type both precede the name.
+
+```jet
+fn write(edit File file, view Bytes data) {
+    file.append(data)
+}
+// inverts Jet's `name: Type` ordering everywhere; non-starter for consistency.
+```
+
+**Recommendation:** A — consistent with `name: Type` everywhere else and reads as a
+property of the value, not a command.
+
+---
+
+### D-CAP4 — `api` manifest spelling (rec A)
+
+**User story.** Devi publishes a library and wants its public capability signatures
+locked so a future refactor that flips `view` to `edit` is flagged as an API break, not
+shipped silently. She opens `pkg.jet` and needs one line that looks like every other
+field she already sets in the `payload:` identity block (`name:`, `version:`). `pkg.jet`
+is Jet syntax, not TOML (S52 amended; U1 → U10 → D-JPK-FILES).
+
+| Option | Spelling | Matches existing manifest style | Ratification cost |
+|--------|----------|---------------------------------|-------------------|
+| A | field `api: stable` / `api: explicit` | yes — colon fields like `name:`, `targets:` | low |
+| B | statement `package api = stable` | introduces `=` assignment into the manifest | new manifest grammar |
+| C | attribute `#[api(stable)] package` | attribute syntax on the package decl | new attribute surface |
+| D | per-target field inside `targets:` | granular, but couples to D-TGT shape | blocked on D-TGT3 |
+
+- **Option A — `api:` field.** A plain manifest field alongside the rest of `payload:`.
+
+```jet
+// pkg.jet
+payload: { name: "raylib-jet", version: "0.4.0", api: stable }
+//                                                ^^^^^^^^^^^ record public
+//                                          capability signatures; flag breaks
+packages: { raylib_jet: library }
+```
+
+- **Option B — `payload api = ...` statement.** The plan's literal first draft.
+
+```jet
+// pkg.jet
+payload api = stable
+// introduces `key = value` assignment; the rest of pkg.jet uses `key: value`.
+```
+
+- **Option C — attribute.** Attribute on the package declaration.
+
+```jet
+#[api(stable)]
+payload: { name: "raylib_jet", version: "0.4.0" }
+// adds an attribute grammar to the manifest that nothing else there uses.
+```
+
+- **Option D — per-target.** Capability mode declared inside each target.
+
+```jet
+// pkg.jet — speculative per-target shape proposed by c07 (D-TGT3)
+targets: [
+    library { api: stable },
+    executable,
+]
+// most precise once targets land, but its exact shape depends on D-TGT3
+// (bare keyword vs. block). Do not ratify ahead of c07.
+```
+
+**Recommendation:** A — `api: stable` / `api: explicit` matches the ratified colon-field
+manifest style and costs no new grammar. If c07 ratifies per-target blocks (D-TGT3),
+Option D can later layer on top without contradicting A.
+
+---
+
+### D-CAP5 — Which targets emit capability metadata (rec A, provisional — defer to D-TGT1)
+
+**User story.** Sol builds a project that produces both a runnable game and a reusable
+engine crate from one `pkg.jet`. The engine half must publish capability metadata so
+downstream consumers compile against a checked contract; the game half should just infer
+everything and stay ergonomic. Today that split rides one `pkg.jet`'s `packages:` block —
+`library` vs `executable` (U10/D-ILE1) — but c07's `lib-exe-targets-model.md` may dissolve that into
+fine-grained `targets:`. This card decides which *target* carries metadata emission once
+that happens.
+
+This decision is **blocked on D-TGT1** (ballot c07): if lib/exe is merely augmented
+(D-TGT1 Option A) the existing rule stands; if it is replaced (D-TGT1 Option B) the rule
+must move onto the new target vocabulary. The options below are the same rule expressed
+against each possible c07 outcome.
+
+| Option | Carrier of "emit metadata" | Depends on | Ergonomic default applies to |
+|--------|----------------------------|-----------|------------------------------|
+| A | any target that produces a consumable library artifact | D-TGT1=A or B | binary/app targets |
+| B | only an explicit `library` target; all else infer-only | D-TGT1=B | every non-library target |
+| C | metadata always emitted, gated purely by `api:` (D-CAP4) | independent of D-TGT | n/a — `api:` decides |
+
+- **Option A — library-producing targets emit; binaries infer.** Preserves today's
+  intent (`Library` emits, `Executable` does not) regardless of how D-TGT1 reshapes the
+  vocabulary.
+
+```jet
+// pkg.jet  — targets per D-TGT (c07, unratified)
+targets: [library, executable]
+// `library` artifact ships capability metadata; `executable` infers and emits nothing.
+pub fn step(world: World) { world.tick() }   // metadata: step(world: edit World)
+```
+
+- **Option B — only an explicit `library` target emits.** Tighter: anything not named
+  `library` is infer-only, even if it is consumable.
+
+```jet
+targets: [staticlib]   // not literally `library` → no metadata under Option B
+// risks a consumable artifact with no published contract.
+```
+
+- **Option C — decouple from targets; let `api:` decide.** Metadata emission is governed
+  only by D-CAP4's `api:` field, ignoring target kind.
+
+```jet
+targets: [executable]
+api: stable          // emits capability metadata even for an executable
+// simplest rule, but emits contracts for artifacts nobody consumes.
+```
+
+**Recommendation:** A, provisional — ratify D-TGT1 first (c07), then confirm "any
+library-producing target emits, binaries infer." A holds under either D-TGT1 outcome and
+keeps today's behavior intact.
+
+---
+
+### D-CAP6 — When does `api: explicit` become the library default (rec A)
+
+**User story.** Two years from now a beginner runs `jet new mylib` and writes one `pub`
+function with no annotations. The question the owner is deciding: does that just work
+(inference fills the contract), or does the toolchain refuse until she hand-writes
+`edit`/`view` on every public signature? This is the simplicity-ratchet call (I8): make
+the easy thing the default unless safety demands otherwise — and capability *safety* is
+already guaranteed by inference, so explicitness here buys documentation, not safety.
+
+| Option | Default for libraries | Beginner friction | When explicit is needed |
+|--------|-----------------------|-------------------|-------------------------|
+| A | inference; `api: explicit` opt-in forever | none | author opts in for visible contracts |
+| B | inference now, flip to explicit at v1.0 | none now, breaks later | forced on everyone at 1.0 |
+| C | explicit required for libraries from day one | high — every `pub` annotated | always |
+
+- **Option A — opt-in forever.** Inference is always the library default; `api: explicit`
+  is a tool authors reach for deliberately.
+
+```jet
+// pkg.jet has no `api:` line — inference fills the contract
+pub fn heal(player: Player) { player.hp += 10 }
+// published metadata: heal(player: edit Player)   — inferred, no error
+```
+
+- **Option B — flip to explicit at 1.0.** Ergonomic now, mandatory later.
+
+```jet
+// pre-1.0: compiles. post-1.0: same code errors —
+//   error: pub `heal` must declare capabilities under api = explicit
+//   fix:   pub fn heal(player: edit Player)
+// a silent future break to every library in the ecosystem.
+```
+
+- **Option C — explicit from day one.** Every public signature annotated, always.
+
+```jet
+pub fn heal(player: Player) { player.hp += 10 }
+// error: pub `heal` must declare capabilities
+//   fix: pub fn heal(player: edit Player) { … }
+// taxes the beginner for documentation inference already provides — fails I8.
+```
+
+**Recommendation:** A — inference already guarantees safety, so explicitness is a
+documentation preference, not a correctness gate. Keep it opt-in (I8); never auto-flip.
+
+---
+
+## Cross-references to ballot c07 (D-TGT)
+
+- **D-CAP5** is gated on **D-TGT1** (replace vs. augment lib/exe). Ratify D-TGT1 before
+  finalizing which target emits capability metadata.
+- **D-CAP4 Option A** (`api:` field) should match the colon-field manifest style; if
+  **D-TGT3** ratifies per-target blocks, **D-CAP4 Option D** (`library { api: stable }`)
+  becomes available as a follow-on without contradicting A.
+
+---
+
+## Library / executable targets — board card c07
+
+
+These five cards reshape the `packages:` block in `pkg.jet` (D-JPK-FILES, latest;
+renamed from `payload.jet`/`pack.jet` — see U1 → U10 → D-JPK-FILES) from a
+single `kind:` per package into fine-grained *targets*. They reuse the ratified
+manifest shape (U10: bare keyword `name: kind`, or block `name: { kind: …, … }`)
+and the `#test` prefix attribute (S82 marker, sigil `@`→`#` per D-ATTR1, latest).
+None of D-TGT1..D-TGT5 is ratified.
+
+D-TGT1 gates D-CAP5 in `memory-capability-model.md` (which target emits
+capability metadata). Resolve D-TGT1 first; the capability defaults follow.
+
+---
+
+### D-TGT1 — Replace `kind:` or augment it? (rec B)
+
+**User story.** Priya ships `httpx`: a request library other packages `use`, plus
+a `httpx` CLI that probes endpoints. Today U10 forces one `kind:` per package, so
+she has to split it into two packages or bolt the CLI on as a special case. She
+wants one package that openly declares it is both a library and an executable.
+
+| Option | Concepts the author learns | Migration cost | Failure mode |
+|---|---|---|---|
+| A — augment | two (`kind:` *and* `targets:`) | none (old form stays) | two ways to say the same thing diverge over time |
+| B — replace | one (`targets:`) | one-line lint per old entry | brief churn while `kind:` is deprecated |
+
+- **Option A — augment: keep `kind:`, add `targets:` alongside.** Both forms stay
+  first-class; `targets:` is merely preferred.
+
+```jet
+// pkg.jet — old kind: still canonical, targets: optional
+packages:
+  httpx: { kind: library }        // still valid, no warning
+  probe: { targets: [executable] }    // new form
+```
+
+- **Option B — replace: `targets:` is canonical, `kind:` is a deprecation lint.**
+  `kind:` is parsed and rewritten to a one-element `targets:` list with an
+  advisory.
+
+```jet
+// pkg.jet — kind: triggers a migration advisory
+packages:
+  httpx: { kind: library }
+//        ^^^^^^^^^^^^^^^ advisory: `kind: library` is deprecated; write
+//        `targets: [library]`. (run `jet fix` to migrate)
+  probe: { targets: [executable] }    // canonical
+```
+
+**Recommendation:** B — one concept (targets) is simpler than two; `kind:`
+collapses to a single-line migration the compiler can auto-fix.
+
+---
+
+### D-TGT2 — Which targets ship in the first increment? (rec A)
+
+**User story.** Marco is wiring up the first release of the targets model. He needs
+the targets that real packages reach for on day one — without blocking on tooling
+that does not exist yet (`benchmark` harness, `plugin` loader).
+
+| Option | Targets shipped | Tooling required now | Risk |
+|---|---|---|---|
+| A — core four | library, executable, test, example | none beyond build + `jet test` | none |
+| B — all six | + benchmark, plugin | benchmark harness, plugin loader | ships keywords with no working backend |
+
+- **Option A — core four: `library`, `executable`, `test`, `example`.** The four whose
+  build paths already exist. `benchmark`/`plugin` are rejected as unknown target
+  keywords until their tooling lands.
+
+```jet
+packages:
+  httpx: {
+    targets: [
+      library,
+      executable { name: "httpx", entry: "src/cli.jet" },
+      example { name: "probe", entry: "examples/probe.jet" },
+    ]
+  }
+// `jet test` runs the package's #test fns; no target needed (see D-TGT5)
+```
+
+- **Option B — all six now, including `benchmark` and `plugin`.** Keywords accepted
+  immediately, even though their backends are stubs.
+
+```jet
+packages:
+  httpx: {
+    targets: [library, benchmark { entry: "bench/throroughput.jet" }, plugin]
+  }
+// error: target `plugin` has no backend yet — its tooling design is unresolved.
+//        Declared targets must be buildable.
+```
+
+- **Option C — library + executable only this increment.** Defer `test`/`example` too,
+  matching today's two-kind surface exactly.
+
+```jet
+packages:
+  httpx: { targets: [library, executable { entry: "src/cli.jet" }] }
+// example { … } -> error: unknown target `example` (not in this increment)
+```
+
+**Recommendation:** A — `test` and `example` have working build paths and high
+demand; `benchmark`/`plugin` correctly wait on their own designs (I8).
+
+---
+
+### D-TGT3 — Manifest spelling: bare keyword vs. block (rec A)
+
+**User story.** Lena maintains a package whose `library` target needs no options at
+all, but whose `executable` target needs an explicit entry module. She wants the simple
+target to stay one word and only reach for a block where she actually sets a field —
+the same rule U10 already gives her for `kind:`.
+
+| Option | Zero-field target | Familiarity | Ceremony |
+|---|---|---|---|
+| A — bare allowed, block when fields | `library` | matches U10 `name: kind` | minimal |
+| B — block always | `library {}` | new rule to learn | empty braces everywhere |
+
+- **Option A — bare keyword allowed; block required only when fields are set.**
+  Mirrors U10's ratified `name: kind` vs `name: { kind: …, … }`.
+
+```jet
+packages:
+  app: {
+    targets: [
+      library,                                  // bare — no fields
+      executable { name: "app", entry: "src/main.jet" },  // block — has fields
+    ]
+  }
+```
+
+- **Option B — block-only: every target is a block, even with no fields.**
+
+```jet
+packages:
+  app: {
+    targets: [
+      library {},                               // mandatory empty block
+      executable { name: "app", entry: "src/main.jet" },
+    ]
+  }
+// library -> error: target entries must be blocks; write `library {}`
+```
+
+**Recommendation:** A — consistent with the already-ratified U10 shorthand; empty
+`{}` is pure noise.
+
+---
+
+### D-TGT4 — Convention for default executable entry point (no rec)
+
+**User story.** Sam writes `targets: [executable]` with no `entry:` and expects it to
+just build. The owner has ruled against designs that dictate file structure, so the
+real question is whether a bare `executable` is even allowed, and if so how its entry is
+found — without the manifest mandating where Sam's files live.
+
+| Option | File-structure mandate | Bare `executable` allowed | Failure mode |
+|---|---|---|---|
+| A — explicit `entry:` always | none | no | clear error: "specify `entry:`" |
+| B — convention search | yes (fixed search paths) | yes | ambiguous match across conventions |
+| C — single-root-file rule | soft (root layout) | yes, when one `.jet` at root | breaks the moment a second root file appears |
+
+- **Option A — require `entry:` on every `executable` (no convention).** No path is ever
+  assumed; a bare `executable` is rejected with a fix.
+
+```jet
+packages:
+  app: { targets: [executable] }
+// error: an `executable` target needs an entry module.
+//   fix: executable { entry: "src/main.jet" }
+```
+
+- **Option B — bare `executable` allowed; compiler searches fixed conventions.** Tries
+  e.g. `src/main.jet`, then `<package>.jet`; errors only if none or several match.
+
+```jet
+packages:
+  app: { targets: [executable] }
+// resolves: found src/main.jet -> entry for `executable`
+// (if both src/main.jet and app.jet exist:)
+// error: ambiguous entry for `executable` — src/main.jet and app.jet both match;
+//        add `entry:` to disambiguate.
+```
+
+- **Option C — bare `executable` valid only when exactly one `.jet` sits at package root.**
+
+```jet
+packages:
+  app: { targets: [executable] }   // valid: only app/main.jet at root
+// add a second root file and:
+// error: `executable` has no `entry:` and the package root has 2 `.jet` files;
+//        add `entry:`.
+```
+
+**Recommendation:** none — genuine owner call. Option A is the safest (no
+file-structure assumption, no ambiguity) but trades away the zero-config
+convenience that B/C buy with a layout convention the owner has resisted.
+
+---
+
+### D-TGT5 — `test` target vs. `#test fn` (S82) (rec C)
+
+**User story.** Dahlia has unit tests written as ratified S82 `#test` functions next
+to her code, and a separate end-to-end script under `tests/`. She wants `jet test` to
+just run her `#test` fns with no manifest entry, while still being able to point at
+the standalone integration file when she has one.
+
+| Option | Unit `#test` fns | Integration file | Manifest entry for units? |
+|---|---|---|---|
+| A — explicit test target | not auto-run | declared target | yes (required) |
+| B — implicit only | auto-collected | no path for it | no |
+| C — both (hybrid) | auto-collected | optional `test { entry: … }` | no |
+
+- **Option A — separate `test` target carries everything; `#test` fns aren't auto-run.**
+  Nothing runs unless a `test` target names a file.
+
+```jet
+packages:
+  app: { targets: [library, test { entry: "tests/all.jet" }] }
+// `jet test` runs only tests/all.jet; the #test fn below is ignored unless that
+// file imports and invokes it.
+#test
+fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }
+```
+
+- **Option B — implicit only: `jet test` collects `#test` fns; no `test` target exists.**
+  No way to point at an out-of-tree integration file as a target.
+
+```jet
+packages:
+  app: { targets: [library] }
+// `jet test` auto-collects every #test fn in the package — no target declared.
+#test
+fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }
+// tests/e2e.jet -> not built (no target slot for a standalone file)
+```
+
+- **Option C — hybrid: `#test` fns auto-collected; `test { entry: … }` optional for
+  out-of-tree files.** Both coexist.
+
+```jet
+packages:
+  app: { targets: [library, test { entry: "tests/e2e.jet" }] }
+// `jet test` runs BOTH: every #test fn in src/ (auto) AND tests/e2e.jet (declared)
+#test
+fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }
+```
+
+**Recommendation:** C — honors ratified S82 (unit `#test` fns always just work, no
+ceremony) while still giving integration files that live outside the source tree a
+declared home.
+
+---
+
+## Step-through debugger — board card c52
+
+
+# Draft ballot cards — c52 (DAP debugger) + c25 (range arms)
+
+> Status: draft — not yet queued in `decision-ballots.md`
+> Date: 2026-06-20
+> Prerequisite ratified decisions: D-DBG1 (`jet debug <file>` verb), D-OBS1 (source maps + Jet-line panics), D-RANGE1 (range arms reuse `..`), D-RANGE2 (ownership split), D-PATR (range patterns + exhaustiveness)
+
+---
+
+
+Two choices reach the owner. D-DBG1 (the `jet debug` command name) is already ratified. D-OBS1 scheduled the DAP debugger as a GA gate. The open decisions below cover the line-table artifact format and the policy for generated/library frames that have no Jet source line.
+
+---
+
+### D-OBS2 — Debug line-table format (rec A)
+
+**User story.** A Zed extension author wants to write a third-party DAP adapter that reads Jet's source map and translates VS Code breakpoints to Jet lines. They need to know where to find the line table and whether it is stable enough to rely on between compiler versions.
+
+| Option | Location | Parser complexity | Third-party stable? | Debug-build overhead |
+|--------|----------|-------------------|---------------------|----------------------|
+| A — inline `// jet:line` comments in generated `.rs` | Same file as codegen output | Scan lines for prefix; linear pass | Fragile: any Rust reformatter strips comments | Near-zero: comments don't affect compilation |
+| B — sidecar `.jetmap` JSON file | `<file>.jetmap` beside the temp Rust file | Parse one JSON object | Stable: a versioned schema; third parties read one file | Negligible: written once per compile; schema-versioned |
+| C — embed line table in the binary as a custom section | ELF/Mach-O `.jet_lines` section | Needs a binary reader (not std-only without careful scoping) | Stable at the binary level, invisible to source tools | Binary size: small table per translation unit |
+
+- **Option A — inline `// jet:line <rust>=<jet>` comments in the generated `.rs` file.**
+  The adapter scans the temp `.rs` for lines matching `// jet:line <rust>=<jet>` and builds the translation table in memory. No new file to manage.
+
+    ```
+    $ jet debug examples/features/05_loops.jet
+    # adapter reads build/tmp/05_loops.rs:
+    #   // jet:line 12=7
+    #   // jet:line 14=8
+    # translates editor breakpoint loops.jet:7 → rust line 12
+    breakpoint hit  loops.jet:7  in main()
+    ```
+
+    Third-party tools that want to read the line table must parse the generated Rust source (which may be reformatted or stripped of comments by `rustfmt`). I6: std-only, trivially.
+
+- **Option B — sidecar `.jetmap` JSON file beside the generated Rust.**
+  Codegen writes `build/tmp/05_loops.jetmap` alongside `build/tmp/05_loops.rs`. Schema: `{ "version": 1, "source": "examples/features/05_loops.jet", "lines": [[12, 7], [14, 8], …] }`. The adapter reads one file. Third-party tools have a stable, schema-versioned contract.
+
+    ```
+    $ ls build/tmp/
+    05_loops.rs   05_loops.jetmap
+
+    # .jetmap content:
+    { "version": 1, "source": "examples/features/05_loops.jet",
+      "lines": [[12, 7], [14, 8], [16, 9]] }
 
-- **Option A — `=>` (your first pick).** *Taken* — it's the lambda arrow. Parseable here (item position can't be a lambda), but it gives `=>` two meanings and sits oddly next to `->`: `fn Point=>dist(self) -> Int`.
-
-    ```jet
-    fn Point=>dist(self) -> Int { self.x + self.y }
-    ```
-
-- **Option B — `~` (single tilde).** *Free.* Minimal, quiet, Type-first. Reads "Point's dist."
-
-    ```jet
-    fn Point~dist(self) -> Int { … }   //  impl Point~Drawable   derive Point~Serialize
-    ```
-
-- **Option C — `~>` (tilde-arrow, recommended).** *Free.* Keeps the arrow feel you liked, but is unmistakably distinct from both `->` and `=>`. Reads "Point extends-to dist."
-
-    ```jet
-    fn Point~>dist(self) -> Int { … }   //  impl Point~>Drawable   derive Point~>Serialize
-    ```
-
-- **Option D — `~~` (double tilde).** *Free.* More visually weighted than `~`, clearly a "binder" not an operator.
-
-    ```jet
-    fn Point~~dist(self) -> Int { … }
-    ```
-
-- **Option E — `~~~` (triple tilde).** *Free.* Maximum visual distinctness; heavier to type, more "ceremony."
-
-    ```jet
-    fn Point~~~dist(self) -> Int { … }
-    ```
-
-- **Option F — `:>` (colon-arrow).** *Free.* Reads "Point provides dist." Risk: visually near `:` (type annotation) and `>`.
-
-    ```jet
-    fn Point:>dist(self) -> Int { … }
-    ```
-
-- **Option G — `<-` (left arrow).** *Free.* "Point receives dist." Direction reads backwards for `fn` (the member flows *into* the type).
-
-    ```jet
-    fn Point<-dist(self) -> Int { … }
-    ```
-
-- **Option H — `.` in definition position.** *Free in this position* (no expression here to confuse with field/module access). Familiar — looks like the call site `point.dist()`.
-
-    ```jet
-    fn Point.dist(self) -> Int { … }   //  impl Point.Drawable   derive Point.Serialize
-    ```
-
-- **Option I — `for` keyword (Rust-style).** Familiar, but **reverses order** (trait/name first, not Type-first) and reads awkwardly for free `fn`s.
-
-    ```jet
-    impl Drawable for Point { … }
-    fn dist for Point(self) -> Int { … }   // awkward
-    ```
-
-- **Option J — `extend Type { … }` block.** No per-item connector at all — a keyword block groups out-of-body members. Clean and Type-first, but it's a block, not the inline `Type<sep>name` shape.
-
-    ```jet
-    extend Point {
-        fn dist(self) -> Int { … }
-    }
-    ```
-
-**Recommendation:** **C (`~>`)** — free, keeps the arrow you wanted, and can never be confused with `->` (return) or `=>` (lambda); applies identically to `fn` / `impl` / `derive` and stays Type-first. If you want it quieter, **B (`~`)** is the minimal version of the same idea. Whatever you pick here also fixes S56's derive spelling.
-
-### D-TOOL-SPLIT — Split lsp/fmt/lint out of the `jet` binary (no rec)
-
-Editor tooling — format, lint, language server — can live inside the one `jet` binary or ship separately. This shapes install size, release cadence, and how an editor finds the LSP.
-
-- **Option A — One bundled binary.** Everything is a `jet` subcommand; one install, one version.
-
-    ```jet
-    // shell
-    jet fmt src/
-    jet lint src/
-    ```
-
-- **Option B — Separate binaries.** Ship `jet-fmt`, `jet-lint`, `jet-lsp` independently so each can release and update on its own.
-
-    ```jet
-    // shell
-    jet-fmt src/
-    jet-lsp --stdio
-    ```
-
-- **Option C — Plugin model.** `jet` loads tools as plugins discovered at runtime.
-
-    ```jet
-    // shell
-    jet fmt src/      // dispatched to the loaded fmt plugin
-    ```
-
-**Prior art — how other languages ship fmt / lint / lsp:**
-
-| Language | fmt | lint / vet | LSP | Shape |
-|----------|-----|------------|-----|-------|
-| **Deno** | `deno fmt` | `deno lint` | `deno lsp` | One binary, all subcommands (Option A, pure) |
-| **Gleam** | `gleam format` | (in compiler) | `gleam lsp` | One binary, all subcommands (Option A, pure) |
-| **Zig** | `zig fmt` | (in compiler) | ZLS — separate community project | Mostly A; LSP carved out |
-| **Go** | `go fmt` → bundled `gofmt` | `go vet` bundled | `gopls` — separate `go install` | A for fmt/vet; LSP separate |
-| **Rust** | `cargo fmt` → `rustfmt` | `cargo clippy` → `clippy` | `rust-analyzer` — separate project | Separate binaries (B) behind subcommand wrappers, version-locked via rustup |
-| **Python (Ruff)** | `ruff format` | `ruff check` | `ruff server` | One binary, all subcommands (Option A) |
-| **C/C++ (LLVM)** | `clang-format` | `clang-tidy` | `clangd` | Separate binaries (B), no unified driver |
-
-The dominant modern pattern is **A**: one binary, tool subcommands (Deno, Gleam, Ruff, Bun). The recurring exception is the **LSP**, which several toolchains ship separately (Zig/ZLS, Go/gopls, Rust/rust-analyzer) because an editor spawns it as a long-lived process on a different release cadence. **Pure Option C (runtime plugins)** has essentially no precedent among compiled-language toolchains — eslint/ruff plugins extend *rules*, not the binary.
-
-**Tradeoffs:**
-
-- **A — bundled.** One install, one version; fmt/lint/lsp can never disagree with the compiler about the language. Bigger binary; can't patch the formatter without a compiler release. Best beginner UX.
-- **B — separate binaries.** Independent release cadence; smaller core install. But each tool must still link the same front end (see below), so you pay version-skew risk and N release artifacts for little gain. Editors must discover the right `jet-lsp` on `PATH`.
-- **C — plugins.** Maximum flexibility, but a runtime discovery/ABI surface to maintain, no real prior art, and it fights "codegen is dumb / one source of truth." Highest complexity for the least demonstrated payoff.
-
-**Jet-specific consideration:** the front end owns *all* semantics and every error message (I2/I3). fmt, lint, and the LSP each need the real lexer/parser/sema — the same crates the compiler uses. Under B or C they'd all have to link that front end as a shared library and stay version-locked anyway, so separation buys the *costs* (multiple artifacts, skew risk) with little of the benefit. That argues for **A**, with the LSP as the one candidate for a separate *artifact* (not a separate codebase) if editor release cadence ever demands it.
-
-**Recommendation:** none on the owner's packaging-philosophy call, but prior art + the shared-front-end constraint both point at **A** (one `jet` binary, tool subcommands), reserving the option to split only the LSP artifact later.
-
-
-### Pattern matching & ranges (cards c20, c25)
-
-### D-PATW — Wildcard token in pattern position (rec A)
-
-When matching an enum, you often want to match a variant but ignore its payload, or write a structural catch-all. Today you can bind-then-ignore (`Active(u) ->` and never use `u`, which warns) or use `else ->`. There's no "match, bind nothing" token. `_` is **not free**: it is a legal identifier char (so a bare `_` lexes today as a throwaway *name*) and the S34 digit separator in numerics — so any `_`-as-wildcard option means special-casing `_` in pattern position (the Rust precedent), not adding a new token. Pick the spelling.
-
-- **Option A — `_` (underscore, recommended).** The universal "I don't care" token from Rust/Swift/Haskell/Go. Reads as a hole. Participates in the witness algorithm as "any value."
-
-    ```jet
-    if c {
-        Active(_)  -> "someone is connected"
-        Closing(_) -> "shutting down"
-        _          -> "idle or unknown"
-    }
-    ```
-
-    Forgot a variant and have no `_`:
-    ```
-    error[E0307]: this `if` doesn't cover every case — missing: Idle
-    help: add an arm `Idle -> …`, or a `_ -> …` catch-all
-    ```
-
-- **Option B — bare `else` only (no pattern wildcard).** Keep D-IF1's `else ->` as the only catch-all; for ignored payloads, require a bound name (which then warns if unused) or a future `_`-as-name. Smaller surface, but `Active(_)` (ignore one field) is then impossible without naming + suppressing.
-
-    ```jet
-    if c {
-        Active(name) -> "someone is connected"   // `name` unused → warning
-        else         -> "other"
-    }
-    ```
-
-- **Option C — `*` (star).** Free-ish token, "anything." But `*` is pointer deref in the expert tier (S58) and multiplication; overloading it in pattern position reads oddly next to those.
-
-    ```jet
-    if c {
-        Active(*) -> "connected"
-        *         -> "other"
-    }
-    ```
-
-- **Option D — `_` for fields, `else` for catch-all (split).** Use `_` only as an ignored *payload field* (`Active(_)`), but keep `else ->` as the only tail catch-all (no bare `_` arm). Cleanest separation of "ignore a slot" vs "match anything," at the cost of two concepts.
-
-    ```jet
-    if c {
-        Active(_) -> "connected"   // `_` = ignore this field
-        else      -> "other"       // `else` = catch-all (not `_`)
-    }
-    ```
-
-**Recommendation:** A. `_` is the single most recognized pattern token across languages; one spelling for both "ignore a field" and "match anything" is the mechanical-uniqueness answer (priority #4). It coexists with `else ->`, which stays for value/condition arms (D-IF1).
-
-### D-PATR — Range patterns: semantics & exhaustiveness (rec A)
-
-c20/D-PATR owns range-pattern **meaning + exhaustiveness at all positions** — both an arm head tested against the subject (`0..59 -> …`) and a range nested in a destructured payload slot (`Closing(500..599)`). One spelling, one exhaustiveness rule (open `Int`/`Char` always requires `else`/`_`). The range **token** is S22's single inclusive `..` (no `..=`) and is not re-decided here; **card c25** owns only the arm-head *sugar* (the terse `lo..hi ->` desugaring) plus its porting-hazard teaching errors, deferring to this card's checking. The one c20 question: are range patterns in scope, with the checker gap-checking their coverage?
-
-- **Option A — yes, range patterns at all positions, reuse S22 `..` (recommended).** An arm head or a payload position may hold `lo..hi`; the checker gap-checks it, and the open `Int`/`Char` domain still always requires a trailing `else`/`_`. Falls out of the `bindings: Vec<Pattern>` widening this card already needs.
-
-    ```jet
-    // Closing(code: Int)
-    if c {
-        Closing(500..599) -> "server crash"
-        Closing(_)        -> "clean close"
-        _                 -> "still up"
-    }
-    ```
-
-    Drop `Closing(_)` so the slot has a gap below 500:
-    ```
-    error[E0307]: this `if` leaves a gap — `Closing(_)` below 500 is not covered
-    help: add an arm `Closing(_) -> …`
-    ```
-
-- **Option B — no; write the `&&` guard.** Keep payload slots bind-only; to test the inner value, bind it and add a guard (D-PAT2). Smaller surface (I8), but the guard "covers nothing for exhaustiveness," so you always need a fallback arm even when the bands tile.
-
-    ```jet
-    if c {
-        Closing(code) && code >= 500 -> "server crash"
-        Closing(code)                -> "clean close"   // required: guard can fail
-        _                            -> "still up"
-    }
-    ```
-
-**Recommendation:** A. Reuse S22's `..` (one spelling across loops, slices, and patterns), gap-check both arm-head and payload positions, and own the exhaustiveness rule (open `Int`/`Char` always needs `else`/`_`). The token defers to S22; c25 owns only the arm-head sugar shape + porting errors and defers its checking here — exactly one range concept, one exhaustiveness story.
-
-### D-PATO — Structural or-patterns binding shared names (rec A)
-
-Jet already has two "or" mechanisms in arm heads: S25 value-distribution (`200 || 404 -> …`) and D-IF1 bare-value arms. Neither lets you OR two *enum patterns that bind a payload*. Should `Active(u) || Closing(u)` (alternatives binding the same name `u`) be allowed?
-
-- **Option A — reuse `||`, require identical bindings (recommended).** The alternatives must each bind the same set of names at the same types; the arm body sees those names. Same token as logical-or and S25 — no new sigil.
-
-    ```jet
-    // Status = enum { Active(id: Int); Reconnecting(id: Int); Closed }
-    if s {
-        Active(id) || Reconnecting(id) -> "live session {id}"
-        Closed                         -> "done"
-    }
-    ```
-
-    Mismatched bindings:
-    ```
-    error[E0317]: or-pattern alternatives must bind the same names
-      --> s.jet:3:9
-       |
-     3 |     Active(id) || Closing(code) -> …
-       |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ left binds `id`, right binds `code`
-    help: bind the same name in both, or split into two arms
-    ```
-
-- **Option B — `|` (single pipe) for structural or-patterns.** Match Rust exactly (`A(x) | B(x)`), reserving `||` for the value-distribution / boolean sense. Clear visual split between "pattern alternation" and "logical or," but introduces a new sigil (`|` is currently only bitwise-or, S17 `|=`), and two near-identical spellings risk confusion.
-
-    ```jet
-    if s {
-        Active(id) | Reconnecting(id) -> "live session {id}"
-        Closed                        -> "done"
-    }
-    ```
-
-- **Option C — reject; use separate arms.** Keep the surface minimal (I8). If two variants share handling, write two arms — or, when they share a *field*, bind it in each. Costs duplication for the genuinely-shared-body case.
-
-    ```jet
-    if s {
-        Active(id)       -> live(id)
-        Reconnecting(id) -> live(id)
-        Closed           -> "done"
-    }
-    ```
-
-**Recommendation:** A. Reuse `||` (already the or-spelling for S25/value arms), require identical bindings across alternatives (checked, E0317), and exclude this from the *minimum* c20 scope — land nested exhaustiveness first, add structural or-patterns as a clean follow-on once the matrix checker exists (it makes or-patterns nearly free).
-
-### D-RANGE1 — Range arms in multi-arm `if` (rec A)
-
-Multi-arm `if` (D-IF1) lets `200 ->` mean `subject == 200`. This card adds the range analog. Jet's range is inclusive `..` (S22); there is no `..=`.
-
-- **Option A — reuse inclusive `..`, desugar to `>= && <=` (recommended).** One range syntax across the whole language (loops S22, slices S40, now arms).
-
-    ```jet
-    if score {
-        90..100 -> "A";      // score >= 90 && score <= 100
-        80..89  -> "B";
-        else    -> "F";
-    }
-    ```
-
-- **Option B — introduce `..=` for arm ranges only.** Matches Rust/Odin muscle memory, but splits S22 (two range tokens, one inclusive-by-default and one explicit-inclusive) — an I8/S22 violation for cosmetic familiarity.
-
-    ```jet
-    if score {
-        90..=100 -> "A";     // a second range token Jet doesn't have
-        else     -> "F";
-    }
-    ```
-
-- **Option C — no sugar; keep the `&&` form (I8 default-no).** Smallest language. Cost: every band restates the subject twice; against the owner's standing anti-repetition direction.
-
-    ```jet
-    if score {
-        score >= 90 && score <= 100 -> "A";
-        else                        -> "F";
-    }
-    ```
-
-**Recommendation: A.** Reuses the one ratified range token, reads as English, desugars to existing machinery (codegen untouched), and cuts the repetition the owner consistently trims. Exhaustiveness behaviour is governed by c20/D-PATR (gap-checking; open `Int`/`Char` always requires `else`) — see D-RANGE2.
-
-### D-RANGE2 — Ownership of arm-head range semantics across c25 and c20 (rec A)
-
-c20's **D-PATR** governs ranges in `if` arm heads — the *same* construct this card proposes. They are not two positions (arm vs. destructuring); they are two depths of the *one* arm-head feature. Jet must end up with exactly one range spelling (S22/I8) **and** one exhaustiveness rule.
-
-- **Option A — S22 owns the `..` token; c20/D-PATR owns arm-head range *semantics* (checking + exhaustiveness); c25 owns only the desugaring shape + porting-hazard teaching errors; c25 may ship the sugar first, deferring to D-PATR's rules (recommended).** One spelling, one exhaustiveness story. c25 delivers the terse `lo..hi ->` arm and the `..=`/`step`/inverted-band errors now; when c20 lands its checker, the *same* arms gain gap-checking with no syntax change.
-
-    ```jet
-    // c25 ships this arm-head sugar (desugars to >= && <=, else mandatory):
-    if code { 400..499 -> "client error"; 500..599 -> "server error"; else -> "?"; }
-
-    // c20/D-PATR later deepens the SAME arm with gap-checking (no syntax change):
-    if code { 400..499 -> "client error"; else -> "?"; }
-    //         ^ checker can now report an uncovered band between arms
-    ```
-
-- **Option B — c20/D-PATR owns the whole arm-head range feature; c25 is folded into c20 and ships nothing on its own.** Single owner, zero divergence risk, but blocks the cheap, shippable-now sugar on the larger c20 sema effort.
-
-    ```jet
-    // c25 ships nothing until c20's range-pattern checker lands.
-    ```
-
-- **Option C — c25 and c20 each own arm-head ranges independently.** Rejected: two cards editing the same arm-head classifier and the same `..` spelling with possibly different exhaustiveness rules — a direct I8/S22 split. Listed only to close it.
-
-    ```jet
-    // two ratification paths converge on one grammar — the divergence hazard.
-    ```
-
-**Recommendation: A.** S22 owns the `..` token; c20/D-PATR owns arm-head range *meaning*; c25 ships the terse sugar + porting-error teaching now, under D-PATR's spelling and exhaustiveness rules. One spelling, one checker, no competing decisions.
-
-### Type system (cards c22, c23)
-
-### D-ERR-CONV — Typed error→error conversion across `?` (rec A)
-
-Today `?` crosses a typed-error boundary only when the target is the universal `Error` (via `Fallible`, D-ERR2). A library with its own typed error family (`enum ConfigError { … }`) can't fold a lower-level `IoError`/`ParseError` into it without per-call-site ceremony. This card picks the mechanism *and its spelling* for declaring "a `Source` error becomes a `Target` error", which `?` then applies automatically. In every option, the conversion is declared once, total, and rejected unless declared (no silent/blanket coercion); the orphan rule (S28) applies.
-
-- **Option A — `impl Source -> Target { … }` (recommended).** Reuses the existing `->` token and `impl` keyword; reads "Source becomes Target". `self` is the source error; the block returns the target. `Fallible` becomes the prelude's `impl T -> Error` instance, unifying the two mechanisms.
-
-    ```jet
-    enum ConfigError { Missing(String); BadInt(ParseError); Io(IoError); }
-
-    impl IoError    -> ConfigError { ConfigError.Io(self) }
-    impl ParseError -> ConfigError { ConfigError.BadInt(self) }
-
-    fn load(p: String) -> Config ? ConfigError {
-        val raw  = read_file(p)?;    // IoError    -> ConfigError.Io
-        val port = parse_int(raw)?;  // ParseError -> ConfigError.BadInt
-        Config { port }
-    }
-    ```
-
-    Seen on a missing conversion:
-
-    ```
-    Error [E2404]: `?` can't turn an `IoError` into a `ConfigError` here
-      --> config.jet:7:25
-        |
-      7 |     val raw = read_file(p)?;
-        |                         ^
-     Why: `?` only changes an error's type when you've declared how; there's no
-          declared way to turn `IoError` into `ConfigError`
-     Fix: add `impl IoError -> ConfigError { ConfigError.Io(self) }`
-    ```
-
-- **Option B — `convert Source -> Target { … }` keyword.** A dedicated word instead of `impl`, so error conversions read distinctly from trait impls. Costs a new keyword (`Syntax.rs` + I7 ID); `Fallible` stays separate rather than unifying.
-
-    ```jet
-    convert IoError    -> ConfigError { ConfigError.Io(self) }
-    convert ParseError -> ConfigError { ConfigError.BadInt(self) }
-
-    fn load(p: String) -> Config ? ConfigError {
-        val raw = read_file(p)?;
-        Config { port: parse_int(raw)? }
-    }
-    ```
-
-- **Option C — method on the target via a trait (`FromError`).** Mirror Rust's `From`: a trait whose method builds the target from the source. Familiar to Rustaceans, but `from`/`Into` directionality is a known beginner stumbling block, and it needs a generic trait (`trait FromError<E>`), heavier than v1's signature-only traits (S28).
-
-    ```jet
-    impl ConfigError: FromError<IoError> {
-        fn from_error(e: IoError) -> ConfigError { ConfigError.Io(e) }
-    }
-
-    fn load(p: String) -> Config ? ConfigError {
-        val raw = read_file(p)?;   // ? calls ConfigError.from_error(e)
-        Config { port: parse_int(raw)? }
-    }
-    ```
-
-- **Option D — call-site explicit map, no auto-conversion.** Reject silent crossing entirely; the author maps at each `?` with a fallback. Most explicit, zero new declaration form — but repeats the mapping per call site and clutters the happy path (the very thing the card exists to remove).
-
-    ```jet
-    fn load(p: String) -> Config ? ConfigError {
-        val raw  = read_file(p) ?? return err(ConfigError.Io(it));
-        val port = parse_int(raw) ?? return err(ConfigError.BadInt(it));
-        Config { port }
-    }
-    ```
-
-**Recommendation:** **A (`impl Source -> Target { … }`)** — no new sigil or keyword (I7-clean), reuses `impl`'s mental model and orphan rule, and unifies with the existing `Fallible`/`to_error` path (which becomes the prelude's `impl T -> Error`), so the language gains zero net concepts (I8). It keeps the happy path clean (Option D's flaw), avoids Rust's `from`/`Into` directionality confusion (Option C), and avoids spending a keyword (Option B).
-
-### D-DIST1 — Declaration spelling for distinct types (rec C)
-
-Two families. **Keyword-first** matches existing type declarations (`struct`, `enum` are keyword-led items). **Binding-form** matches Odin's exact `distinct` spelling and reuses Jet's ratified `::` immutable-binding sigil (D-BIND1). Both introduce a new word `distinct`; the question is where it sits and what separator joins the name to the base. `struct UserId(Int)` is **not** an option — positional tuple structs and `.0` access are rejected (S73, E0048/E0049). Reopens D-SUGAR4 (newtype keyword declined 2026-06-16) on the new evidence of zero-cost transparent lowering + opt-in arithmetic + primitive feel.
-
-- **Option A — `distinct UserId = Int` (keyword-first).** Reads like a type declaration; `distinct` is an item keyword beside `struct`/`enum`. `=` joins name to base (only ambiguous in expression position, not here).
-
-    ```jet
-    distinct UserId = Int
-    distinct Meters = Float
-    ```
-
-- **Option B — `distinct type UserId = Int` (keyword + `type`).** Closest to Go/Rust alias spelling, but adds a second word `type` that exists nowhere else in Jet today. Heavier.
-
-    ```jet
-    distinct type UserId = Int
-    ```
-
-- **Option C — `UserId :: distinct Int` (binding form, recommended).** Reuses the ratified `::` immutable binding (D-BIND1): a type-level constant whose value is "a distinct version of `Int`." Exactly Odin's word in Jet's sigil. No new separator token. The `distinct` keyword is load-bearing — `UserId :: Int` (no keyword) would be the transparent alias D-SUGAR3 declined; the keyword makes this a *separate* type, not the rejected alias.
-
-    ```jet
-    UserId    :: distinct Int
-    Meters    :: distinct Float
-    ProductId :: distinct Int
-    ```
-
-- **Option D — `UserId := distinct Int` (mutable-binding form).** Rejected on sight — `:=` is the *mutable* binding sigil; a type is never reassigned. Listed only to close it.
-
-    ```jet
-    UserId := distinct Int   // wrong sigil; types aren't mutable
-    ```
-
-**Recommendation:** **Option C** — `UserId :: distinct Int`. It is Odin's spelling, reuses the already-spent `::` immutable sigil with no new token, and reads as plain English. Option A is the runner-up if the owner prefers type declarations keyword-first beside `struct`/`enum`. (Whichever wins, distinct-over-distinct chaining is rejected in v1.)
-
-### D-DIST2 — Units of measure: in scope now, or deferred (rec A — defer)
-
-Nominal distinct types (a `Meters` that won't mix with `Seconds`) are the small, contained feature. *Units of measure* add **dimensional algebra**: multiplying and dividing distinct numeric types yields *derived* units, and the compiler tracks the dimension through expressions.
-
-- **Option A — distinct types only now; units deferred (recommended).** `Meters + Meters` works (opt-in same-type arithmetic via `#Numeric`, D-DIST3); `Meters * Seconds` is E0127 ("can't multiply two different distinct types"). No derived units. Small, shippable, doesn't foreclose units later.
-
-    ```jet
-    #Numeric
-    Meters  :: distinct Float
-    #Numeric
-    Seconds :: distinct Float
-
-    d :: Meters(100.0)
-    t :: Seconds(9.58)
-    speed :: d / t          // E0127: dividing two different distinct types isn't defined
-                            //  (units of measure are a future feature)
-    ```
-
-- **Option B — full units of measure now.** `Meters / Seconds` yields a derived `Float<m/s>`; the compiler does the dimensional bookkeeping. Powerful, but a whole type-algebra subsystem (derived-unit synthesis, normalization, display) — far larger than nominal wrappers.
-
-    ```jet
-    Meters  :: unit Float
-    Seconds :: unit Float
-
-    d :: Meters(100.0)
-    t :: Seconds(9.58)
-    speed :: d / t          // type: MetersPerSecond, derived automatically
-    print("{speed.raw()} m/s")
-    ```
-
-**Recommendation:** **Option A — defer units.** Ship nominal distinct types; leave a clean seam (`E0127` already says "units are a future feature"). Units are a strict superset and deserve their own card when the type system can carry dimensional algebra. Deferring is a widening, not a breaking change. Aligns with I8 and "measure twice, cut once."
-
-### D-DIST3 — Coercion, unwrap, and arithmetic rules (rec A)
-
-How a distinct type relates to its base. The safety of the whole feature lives here: any *implicit* base↔distinct coercion defeats the point.
-
-- **Option A — explicit both ways; opt-in same-type arithmetic (recommended).** Construct with `UserId(expr)`. Unwrap with one named method `.raw()` (matches S42's `.to_int()`/`.to_float()` casts). **No** implicit coercion either direction. Arithmetic is **opt-in** via a `#Numeric` marker: a `#Numeric` distinct type inherits base operators only when both operands are the *same* distinct type, yielding that type; an unmarked distinct type gets `==` but no arithmetic (E0127).
-
-    ```jet
-    UserId :: distinct Int   // no #Numeric -> id, no arithmetic
-
-    #Numeric
-    Meters :: distinct Float
-
-    u :: UserId(42)          // explicit construct
-    n :: u.raw()             // explicit unwrap -> Int
-    m :: Meters(3.0) + Meters(4.0)   // -> Meters(7.0)  (#Numeric)
-    bad :: u + UserId(1)     // E0127: a UserId is an id, not a number
-    ```
-
-- **Option B — implicit unwrap to base (one-way coercion).** A distinct value is accepted anywhere its base is expected; only base → distinct needs `UserId(...)`. More convenient, but a `UserId` silently becoming an `Int` argument re-opens the mixup the feature exists to prevent.
-
-    ```jet
-    fn log_id(n: Int) { print("{n}") }
-    u :: UserId(42)
-    log_id(u)                // compiles under B — UserId silently decays to Int
-    ```
-
-- **Option C — explicit, but unwrap via field-like accessor `.value`.** Same as A but the unwrap reads `u.value` instead of a method `u.raw()`. Risk: looks like struct-field access and invites treating the distinct type as a struct.
-
-    ```jet
-    u :: UserId(42)
-    n :: u.value             // unwrap via accessor
-    ```
-
-**Recommendation:** **Option A.** Explicit both directions keeps the safety guarantee whole; opt-in same-type-only arithmetic gives `#Numeric` distinct types primitive feel without leaking; `.raw()` reads as an intentional conversion in the S42 named-cast family.
-
-### Compile-time (cards c24, c61)
-
-### D-WHEN1 — Compile-time conditional spelling (rec A)
-
-Jet has no compile-time `if`. The card asks for Odin's `when`, but `when` is retired (D-IF1). Below: how the user spells "compile this branch only". Gated on the owner accepting an extension of S57's "bindings-only" comptime scope.
-
-- **Option A — `comptime if` (recommended).** Reuses two ratified words; reads as "the compile-time form of `if`." Condition is a comptime expression; only the selected arm is checked and lowered.
-
-    ```jet
-    comptime if target.pointer_bits == 64 {
-        fold_u64(buf)        // only this arm compiles on a 64-bit build
-    } else {
-        fold_u32(buf)
-    }
-    ```
-
-- **Option B — bare `comptime { }` block + ordinary `if` inside.** Smaller grammar delta, but it conflates "run at comptime" with "select at comptime" and reopens the general comptime-block can S57 closed.
-
-    ```jet
-    comptime {
-        if target.pointer_bits == 64 { fold_u64(buf) } else { fold_u32(buf) }
-    }
-    ```
-
-- **Option C — `static if` (D / C++ spelling).** Familiar to D users, but `static` is an unspent word that would mean *only* this; adds vocabulary for one feature against I8, and "static" is jargon (diagnostics voice bans it).
-
-    ```jet
-    static if target.pointer_bits == 64 { fold_u64(buf) } else { fold_u32(buf) }
-    ```
-
-- **Option D — reject; tell users to use runtime `if`.** Simplest (I8 default answer is no). Cost: no conditional compilation → off-target intrinsics can't be guarded → forecloses the freestanding/embedded story.
-
-    ```jet
-    if target.pointer_bits == 64 { fold_u64(buf) } else { fold_u32(buf) }
-    // both arms compiled; fold_u64 must link on every target — the blocker.
-    ```
-
-**Recommendation: A.** It reuses ratified words, reads plainly, and is the narrow Odin form. Gated on the owner accepting an extension of S57's "bindings-only" comptime scope. The S26 dispatch law (no comptime type/trait/generic selection) is enforced by sema, not relaxed.
-
-### D-WHEN2 — Checking of the unselected arm (rec A)
-
-- **Option A — name-resolution only (recommended).** The dropped arm is scanned for unknown names so typos still teach, but it is not type-checked against its surroundings (an off-target intrinsic is allowed).
-
-    ```jet
-    comptime if false {
-        wobble(x)        // E: nothing named `wobble` exists  (still caught)
-    } else {
-        ok(x)
-    }
-    ```
-
-- **Option B — zero checking (pure Odin).** The dead arm is parsed and ignored. A typo survives silently until that arm is selected on some other build.
-
-    ```jet
-    comptime if false {
-        wbidth_64()      // typo passes today, breaks the 64-bit build later
-    } else { ok(x) }
-    ```
-
-**Recommendation: A** — matches Jet's "diagnostics are the product" priority #2.
-
-### D-CT-L2NAME — Reconcile the two "Layer 2" labels (rec A)
-
-"Layer 2" is overloaded across ratified spec text and the implementer needs to know which doc the new comptime work attaches to:
-
-- **S26 layering**: Layer 1 = `comptime` bindings; **Layer 2 = built-in derives**; Layer 3 = reflection / user derives.
-- **S60 card / card c61**: "comptime **Layer 2** = compile-time pure evaluation + data embedding."
-
-Both are ratified phrasings on *different axes* (S26 = derive-machinery ladder; S60 = pure-eval capability tier). This card only decides how to label the work when it lands — no behaviour changes either way.
-
-- **Option A — log it as an S60 extension; cross-reference S26 (recommended).** The pure-eval + embedding work is filed under **S60**, and the spec entry adds a one-line note that "Layer 2" here is the S60 *capability tier*, distinct from the S26 *derive layer*. No renaming of existing ratified text.
-
-    ```jet
-    // Doc/changelog framing only — code is identical under any option:
-    comptime ROWS = parse_rows(embed_file("app.csv"))
-    ```
-
-- **Option B — rename one axis to drop the collision.** Re-label the S60 tier (e.g. "comptime *embedding tier*") so the word "Layer 2" is used by exactly one of them. Cleanest end state, but it edits ratified spec prose and breaks existing references.
-
-    ```jet
-    // Same code; the spec calls this the "comptime embedding tier".
-    comptime ROWS = parse_rows(embed_file("app.csv"))
-    ```
-
-**Recommendation:** **A** — attach to S60 with an explicit cross-reference to S26. It settles the ambiguity without re-opening or rewording any ratified decision, and keeps the derive-layer numbering (S26) intact.
-
-### Cleanup & error diagnostics (cards c21, c60)
-
-### D-DEFER1 — `defer` for deterministic cleanup (rec B)
-
-You declined `defer` once (D-SUGAR5) in favor of RAII (S63). RAII works well for std resource types, but a user **cannot write their own scope-exit cleanup today** — there's no user-implementable Drop. So when someone wants to restore a flag, log a span, or tear down a non-std handle on every exit path (including `?`), they hand-place the cleanup before each return and can miss one. This card asks how to close that gap.
-
-- **Option A — keep declined; RAII (S63) stays the only cleanup story.** No new surface. The gap closes later via *user-definable Drop* (a separate roadmap item), not a control-flow keyword. Today's workaround for a flag is explicit:
-
-    ```jet
-    fn parse(input: String) -> Tree ? ParseError {
-        depth := 0
-        depth = (depth + 1)
-        if input.is_empty() {
-            depth = (depth - 1)        // restore before THIS error return
-            return err(ParseError.Empty)
-        }
-        node :: parse_node(input)?     // `?` exits WITHOUT decrementing — the missed path
-        depth = (depth - 1)            // success path only
-        return ok(node)
-    }
-    ```
-
-- **Option B — add a stdlib `Guard` value (no new syntax, recommended).** Ship a `core` type whose Drop runs a stored lambda (closures S46/S47 exist; FileWriter's Drop already proves runs-code-on-scope-exit works). The user binds a guard; it fires on every exit path, LIFO with other Drops:
-
-    ```jet
-    use core.scope as scope
-    fn parse(input: String) -> Tree ? ParseError {
-        depth := 0
-        depth = (depth + 1)
-        _g :: scope.guard(() => { depth = (depth - 1) })  // fires on every exit
-        node :: parse_node(input)?                    // restore runs here too
-        return ok(node)
-    }
-    ```
-
-- **Option C — add an expert-tier `defer` keyword (block-scoped, Zig/Swift).** Real LIFO scope-exit on all paths; could later add `errdefer`.
-
-    ```jet
-    fn parse(input: String) -> Tree ? ParseError {
-        depth := 0
-        depth = (depth + 1)
-        defer depth = (depth - 1)      // LIFO, fires on every exit path
-        node :: parse_node(input)?
-        return ok(node)
-    }
-    ```
-
-**Recommendation: B — ship the stdlib `Guard` now; the `defer` keyword (C) stays declined; user-definable Drop is the real long-term roadmap item.** The gap behind c21 is *not* the absence of `defer` — it's the absence of user-writable cleanup. Option A alone leaves the gap open (its `?` line leaks). Option B closes it *today* with zero new syntax and zero ratification, on existing Drop + lambda machinery, staying inside S63 (a guard value *is* RAII). The keyword (C) reintroduces the Go leak-by-omission bug class S63 named; keep it declined unless **errdefer** (partial-build rollback) proves a recurring need user-Drop can't serve.
-
-### D-NARG-DIAG — diagnostic codes/text for the named-args follow-ups (rec A)
-
-D-NARG-D4 splits the call-site label-mismatch error out of the generic arity code (E0104). That needs a new sema code + its house-voice text. Separately, referencing a *later* parameter in a default needs a code. This card blesses both — implementation can't ship the snapshots (I4) until the text is settled. (D-NARG-D2 and D-NARG-D4 themselves are already ratified; this is product-copy only.)
-
-- **Option A — mint E0125 for label mismatch + E0126 for later-param ref (recommended).** Two purpose-built codes; each teaches its own rule. E0125 covers both the transposed and unknown-label sub-cases.
-
-    ```jet
-    // E0125 (transposed): label names a real param, wrong position
-    r :: Rect.square(height: 5, width: 3)
-    // Error [E0125]: label `height:` doesn't match the parameter `width` here
-    //  Why: labels are checked documentation — each names the parameter at its
-    //       own position, and arguments stay in the order they're declared
-    //  Fix: write `width:` here, or drop the label
-
-    // E0126 (later-param ref in a default)
-    fn f(a: Int = b, b: Int) -> Int { return a }
-    // Error [E0126]: a default can only use a parameter declared before it
-    //  Why: defaults fill left to right; `b` isn't bound yet when `a` defaults
-    //  Fix: reorder so `b` comes before `a`, or use a constant default
-    ```
-
-- **Option B — mint E0125 for label mismatch, reuse E0107 for later-param ref.** One new code; the forward-reference reuses the existing "unknown name" code.
-
-    ```jet
-    fn f(a: Int = b, b: Int) -> Int { return a }
-    // Error [E0107]: unknown name `b`
-    //  Why: that name isn't in scope here
-    //  Fix: define `b`, or check the spelling
-    ```
-
-**Recommendation: A.** E0125 is needed either way (D-NARG-D4 is ratified). For the forward-ref, E0126's reorder hint is the teaching win — E0107's generic "unknown name" sends the user looking for a missing definition when the real issue is parameter order. Both codes are free and sit naturally after E0124.
-
-### Tooling & CLI (cards c11, c12, c13, c52, c54)
-
-### D-CLI1 — Unknown `--`-flag before the `--` separator (rec A)
-
-`--` cleanly forwards everything after it. The remaining question is the *ambiguous* case: a `--`-flag that appears **before** any `--`, which jet doesn't recognise as one of its own. What should `jet run app.jet --port 8080` do?
-
-- **Option A — Error and teach (recommended).** Reject the unknown flag with a diagnostic that names the `--` form. Honest, no silent loss, teaches the convention once. The machinery already exists: `check_flags` already errors on unknown `--`-flags via E2102 — this just extends its Fix line to point at `--` for `jet run`.
-
-    ```shell
-    $ jet run app.jet --port 8080
-    Error [E2102]: `--port` isn't a flag jet understands
-     Why: flags before `--` belong to jet; everything after `--` is forwarded to your program
-     Fix: jet run app.jet -- --port 8080
-    ```
-
-- **Option B — Silently forward unknown flags.** Any `--`-flag jet doesn't know gets forwarded to the program. Convenient, no `--` needed — but a *typo'd* jet flag (`--smal`) is then silently handed to the program instead of being caught.
-
-    ```shell
-    $ jet run app.jet --port 8080      # program gets --port 8080; no error
-    $ jet run app.jet --smal           # typo silently forwarded, not caught
-    ```
-
-- **Option C — Forward with a one-time warning.** Forward the unknown flag but print a lint-style note suggesting `--`. Middle ground; adds noise to a common path and still forwards typos.
-
-    ```shell
-    $ jet run app.jet --port 8080
-    Warning: forwarding `--port` to your program; use `jet run app.jet -- --port 8080` to be explicit
-    ```
-
-**Recommendation: A.** Jet rejects-with-a-great-message over guessing (philosophy + I8), and the E2102 path that does it already exists. `--` is one keystroke; teaching it once at the first ambiguous flag is cheaper than the class of silent typo-forwarding bugs B admits.
-
-### D-PRELUDE1 — Which IO symbols are ambient (no `use`)? (rec B)
-
-`print` is already ambient. The question is its siblings. Each option shows the same first program; the difference is whether line 2 needs a `use`.
-
-- **Option A — Output only (Rust-style).** `print` ambient; *everything else*, including `input`, stays behind `use core.io`. Consistent with Rust; input is explicit.
-
-    ```jet
-    use core.io as io;          // ← required just to read a line
-    fn main() {
-        print("name?")
-        let name = io.input()
-    }
-    ```
-
-- **Option B — `print` + `input` (Python-leaning, recommended).** The two symbols a first interactive program needs are ambient; `eprint`, `args`, `read_all_input` stay qualified.
-
-    ```jet
-    fn main() {
-        print("name?")
-        let name = input()      // ← just works, like print
-    }
-    ```
-
-- **Option C — All of `core.io` ambient.** `print`, `input`, `eprint`, `args`, `read_all_input` all ambient, no `use core.io` ever.
-
-    ```jet
-    fn main() {
-        print("name?")
-        let name = input()
-        eprint("debug")         // stderr, also ambient
-        let argv = args()       // CLI args, also ambient
-    }
-    ```
-
-- **Option D — Status quo (`print` only, special-cased).** Leave it: `print` ambient, `input` requires `use`. (Listed for honesty; this is the inconsistency the card is trying to fix.)
-
-    ```jet
-    use core.io as io;
-    fn main() { print("name?"); let n = io.input() }
-    ```
-
-**Recommendation: B.** It makes the model *consistent for beginners* (the two primitives a first program reaches for are both magic) while keeping the prelude tiny and the expert/tooling IO (`eprint`, `args`) explicit behind `use`. Concrete answer to the crux: under B (and C), `input()` works with no `use core.io`; under A and D it does not.
-
-### D-L0201 — How to cut implicit-clone (L0201) noise (rec C — defer)
-
-L0201 warns on every implicit `.clone()` even when the user can't usefully avoid it. Three honest responses:
-
-- **Option A — Liveness gate (warn only on a wasteful clone).** Fire L0201 only when the value is dead after the call; stay silent when it's reused. Makes the lint *correct*, kills false positives by construction. Cost: a real last-use analysis threaded through four firing sites.
-
-    ```jet
-    let a = User(name)   // name reused below → silent (clone is necessary)
-    print(name)
-
-    let c = User(name)   // name never used again → L0201 (clone is wasteful, `move` helps)
-    ```
-
-- **Option B — Off-by-default + opt-in.** L0201 quiet by default; surfaced only on `jet run --lint=clones`. Cheap, no dataflow, clippy's resolution for true-but-noisy lints.
-
-    ```shell
-    $ jet run app.jet                 # quiet
-    $ jet run app.jet --lint=clones   # opt-in, for tuning hot paths
-    ```
-
-- **Option C — Defer to post-v1, gather evidence (recommended).** Leave L0201 as it is. Before spending on A or B, collect a real corpus and count the false-positive rate, so the fix is sized to measured noise, not guessed noise.
-
-    ```shell
-    # no change today; the lint stays. Decision deferred until a corpus of real
-    # Jet programs exists and the false-positive rate is measured.
-    ```
-
-**Recommendation: C (defer), with A as the eventual fix if evidence warrants.** The card already says "revisit post-v1 with evidence," and I8 backs it: A is a dataflow pass funded against a *hypothesized* noise level, before v1, with no baseline. Ship, measure the false-positive rate on real programs, then choose. Picking A or B *now*, pre-evidence, is the move I8 is meant to stop.
-
-### D-DBG1 — Debugger entry point (rec A)
-
-You can step through a Jet program in the editor or from the terminal. What does a person type to start a debug session, and where does the command live?
-
-- **Option A — `jet debug <file>` (recommended).** A dedicated verb, parallel to `jet run` / `jet test`. Discoverable in `jet --help`; the editor launches the same command under the hood.
-
-    ```shell
     $ jet debug examples/features/05_loops.jet
     breakpoint hit  loops.jet:7  in main()
     (jet-dbg) step
+       8 |     total += i
+    locals:  n = 5   total = 0   i = 1
     ```
 
-- **Option B — `jet run --debug <file>`.** No new verb; debugging is a mode of `run`. Fewer top-level commands, but couples a long-running interactive session to the "build and run to completion" verb, and the flag is easy to miss.
+    I6: hand-written JSON serialization in `Source/Debug/linemap.rs`, zero crates. Codegen stays dumb (I3): records `(jet_line, rust_line)` pairs it already has; the formatter writes a small JSON object.
+
+- **Option C — custom binary section in the compiled artifact.**
+  Codegen emits DWARF-adjacent line information in a custom ELF/Mach-O section (`__jet,__lines`). The adapter reads the binary. No extra file, fully self-contained artifact.
 
     ```shell
-    $ jet run --debug examples/features/05_loops.jet
+    $ jet debug examples/features/05_loops.jet
+    # adapter reads jet_lines section from the compiled binary
     breakpoint hit  loops.jet:7  in main()
     ```
 
-- **Option C — editor-only, no terminal verb.** The DAP adapter is an internal binary the editor spawns; there is no documented terminal command. Smallest CLI surface, but no terminal-first debugging and harder to script/test.
+    Requires a binary format writer and reader in `Source/Debug/` (std-only but non-trivial); platform binary format differences (ELF vs Mach-O vs PE) require per-platform branches. Viable for GA; heavyweight for a first iteration.
 
-    ```shell
-    # nothing to type — press the editor's "Debug" button
+**Recommendation:** B. A versioned sidecar JSON is the simplest stable contract for both the built-in adapter and any third-party tools, requires no binary format work, and is trivially std-only. The schema version field future-proofs format evolution without breaking existing adapters. If the intermediate Rust files are cleaned up after compilation, the adapter reads the map during the session and the file can be discarded; the binary retains full DWARF from `rustc` for lldb's use.
+
+---
+
+### D-DBG2 — Policy for frames with no Jet source line (rec A)
+
+**User story.** A developer is stepping through a Jet program that calls `core.fs.read_file(path)`. Execution steps into generated glue code or a Rust `std` function that has no Jet source line. What does the editor show?
+
+| Option | Editor display | Beginner experience | Expert escape hatch | I2 compliance |
+|--------|---------------|---------------------|---------------------|---------------|
+| A — step over silently; surface only frames with a Jet line | Next Jet frame shown | Clean; no Rust noise | None | Yes — no Rust paths/lines ever surface |
+| B — show a synthetic frame `[jet runtime]` with no file/line | Placeholder frame visible | Slightly noisy but honest | No detail | Yes — still no Rust identity |
+| C — show the raw Rust frame (file + line) | Rust file/line in editor | Confusing; breaks I2 | Yes | No — I2 violation |
+
+- **Option A — step over any frame that has no Jet source line; resume at the next Jet frame.**
+  The adapter walks the lldb frame list, skips every frame whose Rust line does not appear in the `.jetmap` table, and surfaces only the first (innermost) Jet frame.
+
+    ```
+    # user is in main(), steps into core.fs.read_file — no Jet line
+    # adapter silently steps over the generated glue
+    # next stop: back in main() after the call returns
+    breakpoint hit  loops.jet:7  in main()
+    (jet-dbg) step
+       9 |     total += i       ← next Jet line; glue was invisible
+    locals:  n = 5   total = 5   i = 2
     ```
 
-**Recommendation: A** — a dedicated `jet debug` verb mirrors `jet run`/`jet test`, shows up in `--help`, and is scriptable/testable; the editor drives the same path.
+    Fully I2-compliant. The cost: a user cannot inspect Jet stdlib internals at the source level (they see the call complete atomically). Acceptable for v1; expert source-level stdlib debug is a post-GA concern.
 
-### D-EVAL1 — Default output shape for `jet eval --pure` (rec A)
+- **Option B — surface a synthetic frame `[jet runtime]` at any depth with no Jet source.**
+  The adapter inserts a placeholder frame when a non-Jet frame is innermost, showing a label but no file or line.
 
-`jet eval --pure` produces a value. Is the default what a person reads, or what a machine parses?
-
-- **Option A — pretty by default, `--json` for stable machine output (recommended).** Humans get indented, Jet-typed output; pipelines opt into the existing compact stable JSON. Reuses the global `--json` flag — no new surface.
-
-    ```shell
-    $ jet eval --pure totals.jet
-    Report { total: 42, items: [Item { name: "a", qty: 3 }] }
-
-    $ jet eval --pure totals.jet --json
-    {"total":42,"items":[{"name":"a","qty":3}]}
+    ```
+    breakpoint hit  loops.jet:7  in main()
+    (jet-dbg) step
+    [jet runtime] — inside core.fs.read_file (no Jet source available)
+    (jet-dbg) step
+       9 |     total += i
     ```
 
-- **Option B — JSON by default, `--pretty` to opt in.** Preserves today's exact behavior; machine consumers need no flag, but the common interactive case is the less readable one, and it adds a new `--pretty` flag.
+    I2-compliant (no Rust paths). More visible about what is happening, but adds an extra step/frame the user must work through. Useful if users need to know "I am inside a runtime call."
 
-    ```shell
-    $ jet eval --pure totals.jet
-    {"total":42,"items":[{"name":"a","qty":3}]}
+- **Option C — show the raw Rust frame.**
+  The adapter passes the lldb frame through as-is when no Jet line is found. The editor shows `src/std/fs.rs:418`.
 
-    $ jet eval --pure totals.jet --pretty
-    Report { total: 42, items: [Item { name: "a", qty: 3 }] }
+    ```
+    breakpoint hit  loops.jet:7  in main()
+    (jet-dbg) step
+    /rustc/.../src/std/fs.rs:418   ← Rust path surfaced to user
     ```
 
-**Recommendation: A** — the interactive case is the common one, pretty is the friendlier default, and it reuses the existing global `--json` flag instead of adding `--pretty`.
+    Direct I2 violation. Listed to be explicitly closed.
+
+**Recommendation:** A. Silent step-over is the cleanest beginner experience and is the hardest I2 guarantee to weaken later. The adapter can log a debug-level trace (visible only in `jet debug --verbose`) so developers of the adapter itself can see skipped frames, while users never do. Option B is a reasonable upgrade once users report that the opaqueness is confusing.
+
+---
+

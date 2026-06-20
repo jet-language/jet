@@ -94,7 +94,9 @@ usage:
   {bin} build <file.{ext}>          compile to a native binary in ./build/
   {bin} run   <file.{ext}>          build, then run (or `jet run` inside a project)
   {bin} run   <file.{ext}> a b      extra words become program arguments
+  {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
   {bin} test  <file|dir>            compile and run top-level test blocks
+  {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} new   <name>                create a new project folder with pkg.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
@@ -197,7 +199,11 @@ fn unknown_subcommand(cmd: &str) -> ! {
 
 /// Validate every `--flag` in argv against the registry. The first unknown flag
 /// teaches E2102 (with a suggestion) and exits usage.
-fn check_flags(raw: &[String]) {
+///
+/// `subcmd` is the subcommand being run (e.g. `"run"`, `"test"`). When the
+/// subcommand can forward args to a program, the Fix line also teaches the `--`
+/// separator form (D-CLI1=A).
+fn check_flags(raw: &[String], subcmd: &str) {
     let bin = jet::Syntax::BINARY_NAME;
     for a in raw {
         if !a.starts_with("--") || a == "--" {
@@ -208,9 +214,17 @@ fn check_flags(raw: &[String]) {
         }
         let head = a.split('=').next().unwrap_or(a);
         eprintln!("Error [E2102]: `{}` isn't a flag {} understands", head, bin);
-        eprintln!(" Why: each command accepts a fixed set of flags; an unknown one is usually a typo");
+        eprintln!(" Why: flags before `--` belong to {}; everything after `--` is forwarded to your program", bin);
         match jet::CLI::closest_flag(head) {
+            Some(close) if matches!(subcmd, "run" | "test") => eprintln!(
+                " Fix: did you mean `{}`? Or use `{} {} <file> -- {}` to pass it to your program",
+                close, bin, subcmd, head
+            ),
             Some(close) => eprintln!(" Fix: did you mean `{}`? (run `{} help` for the flags)", close, bin),
+            None if matches!(subcmd, "run" | "test") => eprintln!(
+                " Fix: use `{} {} <file> -- {}` to pass this flag to your program",
+                bin, subcmd, head
+            ),
             None => eprintln!(" Fix: drop the flag, or run `{} help` to see the flags", bin),
         }
         exit(ExitCodes::USAGE);
@@ -257,25 +271,43 @@ fn main() {
         return;
     }
 
-    let emit_rust = raw.iter().any(|a| a == "--emit-rust");
-    let fmt_check = raw.iter().any(|a| a == "--check");
-    let json = raw.iter().any(|a| a == "--json");
-    let small = raw.iter().any(|a| a == "--small");
-    let freestanding = raw.iter().any(|a| a == "--freestanding");
-    let locked = raw.iter().any(|a| a == "--locked");
-    let annotated = raw.iter().any(|a| a == "--annotated");
-    let verbose = raw.iter().any(|a| a == "--verbose" || a == "-v");
+    // D-CLI1 (c11): split at the first standalone `--` separator.
+    // Everything before `--` belongs to jet; everything after is forwarded to
+    // the program verbatim (including tokens that look like jet flags).
+    // `passthrough_sep` is Some(index) when `--` was present.
+    let passthrough_sep = raw.iter().position(|a| a == "--");
+    // `jet_argv`: the slice jet parses for its own flags and subcommand.
+    let jet_argv: &[String] = match passthrough_sep {
+        Some(pos) => &raw[..pos],
+        None => &raw,
+    };
+    // `passthrough`: tokens after `--`, forwarded verbatim to the program.
+    // When no `--` was given this is empty; the caller site decides whether to
+    // fall back to the positional words instead.
+    let passthrough: Vec<&String> = match passthrough_sep {
+        Some(pos) => raw[pos + 1..].iter().collect(),
+        None => Vec::new(),
+    };
+
+    let emit_rust = jet_argv.iter().any(|a| a == "--emit-rust");
+    let fmt_check = jet_argv.iter().any(|a| a == "--check");
+    let json = jet_argv.iter().any(|a| a == "--json");
+    let small = jet_argv.iter().any(|a| a == "--small");
+    let freestanding = jet_argv.iter().any(|a| a == "--freestanding");
+    let locked = jet_argv.iter().any(|a| a == "--locked");
+    let annotated = jet_argv.iter().any(|a| a == "--annotated");
+    let verbose = jet_argv.iter().any(|a| a == "--verbose" || a == "-v");
     // D-TOOL5 (E2-M11): capability summary flags.
-    let capabilities_json = raw.iter().any(|a| a == "--capabilities-json");
+    let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
     // E2-M15: cross-compilation target triple (`--target=<triple>`).
-    let cross_target: Option<String> = raw
+    let cross_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
     let mode = OutputMode {
         json,
-        color: parse_color(&raw),
+        color: parse_color(jet_argv),
     };
-    let args: Vec<&String> = raw.iter().filter(|a| !a.starts_with("--")).collect();
+    let args: Vec<&String> = jet_argv.iter().filter(|a| !a.starts_with("--")).collect();
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
         let sub = args.get(1).map(|s| s.as_str());
@@ -348,7 +380,7 @@ fn main() {
             | "publish" | "vendor" | "audit" | "sbom" | "repl"
     );
     if !owns_flags {
-        check_flags(&raw);
+        check_flags(jet_argv, cmd);
     }
 
     // Commands with no required positional target.
@@ -522,8 +554,13 @@ fn main() {
                                 return;
                             }
                             _ => {
-                                let program_args: Vec<&String> =
-                                    args.iter().skip(1).copied().collect();
+                                // D-CLI1: use passthrough slice if `--` was present;
+                                // otherwise fall back to positional words after the subcommand.
+                                let program_args: Vec<&String> = if passthrough_sep.is_some() {
+                                    passthrough.clone()
+                                } else {
+                                    args.iter().skip(1).copied().collect()
+                                };
                                 run_compile_cmd(
                                     cmd,
                                     &entry_str,
@@ -560,17 +597,17 @@ fn main() {
 
     match cmd {
         "fmt" => run_fmt(target, fmt_check),
-        "fix" => run_fix(target, raw.iter().any(|a| a == "--dry-run")),
+        "fix" => run_fix(target, jet_argv.iter().any(|a| a == "--dry-run")),
         "new" => run_new(target, annotated),
         "test" => {
-            let update_snapshots = raw.iter().any(|a| a == "--update-snapshots" || a == "-u");
+            let update_snapshots = jet_argv.iter().any(|a| a == "--update-snapshots" || a == "-u");
             run_test(target, update_snapshots, mode);
         }
         "add" => run_add(&raw),
         "remove" => run_remove(target),
         // D-TOOL3 (E2-M11): `jet emit --rust` — print the generated Rust source.
         "emit" => {
-            let rust_flag = raw.iter().any(|a| a == "--rust");
+            let rust_flag = jet_argv.iter().any(|a| a == "--rust");
             if !rust_flag {
                 eprintln!("usage: {} emit --rust <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
                 eprintln!(" Why: `emit` needs a mode flag; today only `--rust` is supported");
@@ -591,7 +628,13 @@ fn main() {
             exit(ExitCodes::USER_ERROR);
         }
         _ => {
-            let program_args: Vec<&String> = args.iter().skip(2).copied().collect();
+            // D-CLI1: use passthrough slice if `--` was present; otherwise fall
+            // back to positional words after the file (args[0]=cmd, args[1]=file).
+            let program_args: Vec<&String> = if passthrough_sep.is_some() {
+                passthrough.clone()
+            } else {
+                args.iter().skip(2).copied().collect()
+            };
             // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
             // for the path-accepting compile commands.
             let resolved = if matches!(cmd, "run" | "build" | "check") {

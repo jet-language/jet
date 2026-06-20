@@ -850,6 +850,17 @@ fn emit_builtin_method(
         "lines" if matches!(&rty, Some(Type::Named(n)) if n == "FileReader") => {
             Some(format!("/* FileLines handled in loop */ &mut ({})", recv))
         }
+        // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): arena/bump/pool/fixed
+        // instance methods. recv is a `JetArena`/`JetBump`/`JetPool`/`JetFixed`.
+        "alloc" if matches!(&rty, Some(Type::Named(n)) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed")) => {
+            Some(format!("({}).alloc({})", recv, arg(0)))
+        }
+        "reset" if matches!(&rty, Some(Type::Named(n)) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed")) => {
+            Some(format!("({}).reset()", recv))
+        }
+        "free" if matches!(&rty, Some(Type::Named(n)) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed")) => {
+            Some(format!("drop({})", recv))
+        }
         // E2-M10: TcpListener methods.
         "accept" if matches!(&rty, Some(Type::Named(n)) if n == "TcpListener") => Some(format!(
             "{}jet_net_tcp_accept(&({}))", cx.root_prefix, recv
@@ -953,6 +964,12 @@ fn emit_std_field(module: &str, name: &str) -> String {
     match (module, name) {
         ("core.math", "pi") => "std::f64::consts::PI".to_string(),
         ("core.math", "e") => "std::f64::consts::E".to_string(),
+        // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator type sentinels.
+        // These only appear as the receiver of `.new()` — see emit_method_call.
+        ("core.mem", "Arena") => "jet_mem::JetArena".to_string(),
+        ("core.mem", "Bump") => "jet_mem::JetBump".to_string(),
+        ("core.mem", "Pool") => "jet_mem::JetPool".to_string(),
+        ("core.mem", "Fixed") => "jet_mem::JetFixed".to_string(),
         _ => "/* unknown std field */".to_string(),
     }
 }
@@ -1124,6 +1141,12 @@ fn emit_std_call(
             // serve(addr, handler): blocking; handler is a closure/fn.
             format!("{}(&({}), {})", helper("jet_http_serve"), arg(0), arg(1))
         }
+        // D-DEFER1 option B: scope.guard(() => { … }) → JetScopeGuard<F>
+        // The closure is emitted directly; Rust infers the generic F.
+        // Drop runs the closure on every exit path (LIFO by reverse-declaration order).
+        ("core.scope", "guard") => {
+            format!("{}jet_scope_guard({})", cx.root_prefix, arg(0))
+        }
         _ => "/* unknown std call */".to_string(),
     }
 }
@@ -1168,6 +1191,45 @@ fn emit_method_call(
 ) -> String {
     if method == "clone" {
         return format!("({}).clone()", emit_expr(cx, receiver, env));
+    }
+    // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena.new()` and friends.
+    // The receiver is `Field(Ident("mem"), "Arena")` — detect the constructor call.
+    if method == Syntax::MEM_ALLOC_NEW {
+        if let Expr::Field(inner, alloc_type, _) = receiver {
+            if let Expr::Ident(alias, _) = &**inner {
+                if cx.std_imports.get(alias).map(|m| m == Syntax::CORE_MEM_MODULE).unwrap_or(false) {
+                    let rust_type = match alloc_type.as_str() {
+                        "Arena" => "jet_mem::JetArena",
+                        "Bump" => "jet_mem::JetBump",
+                        "Pool" => "jet_mem::JetPool",
+                        "Fixed" => "jet_mem::JetFixed",
+                        _ => return format!("/* unknown allocator {} */", alloc_type),
+                    };
+                    // Capacity/slots/size optional arg.
+                    let arg = |i: usize| {
+                        args.get(i).map(|a| emit_expr(cx, &a.expr, env)).unwrap_or_default()
+                    };
+                    if args.is_empty() {
+                        return format!("{}::new()", rust_type);
+                    }
+                    // The optional arg label determines the constructor variant:
+                    // capacity: → with_capacity (Arena, Bump)
+                    // slots:    → with_slots (Pool)
+                    // size:     → with_size (Fixed)
+                    let ctor = match alloc_type.as_str() {
+                        "Pool" => "with_slots",
+                        "Fixed" => "with_size",
+                        _ => "with_capacity",
+                    };
+                    return format!("{}::{}({} as usize)", rust_type, ctor, arg(0));
+                }
+            }
+        }
+    }
+    // D-DIST3 (ratified 2026-06-20): `.raw()` on a distinct type — lowers to `.0`.
+    if method == crate::Syntax::METHOD_DISTINCT_RAW {
+        let recv = emit_expr(cx, receiver, env);
+        return format!("({}).0", recv);
     }
     // D-TOOL4 (E2-M11): `expect(x).snapshot()` — snapshot assertion.
     // The receiver is a `Call` to `expect`; emit the jet_expect(…).snapshot(…) form.
@@ -1368,6 +1430,21 @@ fn emit_call(cx: &Cx, call: &crate::AST::Call, env: &HashMap<String, Slot>) -> S
     if call.name == Syntax::BUILTIN_PRINT {
         let arg = emit_expr(cx, &call.args[0].expr, env);
         return format!("println!(\"{{}}\", ({}).jet_show())", arg);
+    }
+    // D-PRELUDE1 = B: bare `input(...)` is ambient — same lowering as `io.input(...)`.
+    // Only applies when the user has not defined their own `input` function
+    // (user-defined shadows the prelude, handled by sema; codegen follows suit).
+    if call.name == Syntax::BUILTIN_INPUT
+        && !cx.sigs.contains_key(Syntax::BUILTIN_INPUT)
+        && !env.contains_key(Syntax::BUILTIN_INPUT)
+    {
+        let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
+        return if call.args.is_empty() {
+            format!("{}(None)", helper("jet_std_io_input"))
+        } else {
+            let arg = emit_expr(cx, &call.args[0].expr, env);
+            format!("{}(Some(&({})))", helper("jet_std_io_input"), arg)
+        };
     }
     if call.name == Syntax::BUILTIN_PANIC {
         return emit_panic_stop(cx, call, env);

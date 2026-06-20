@@ -117,6 +117,8 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
             VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
             VariantPayload::Named(fs) => fs.iter().all(|f| is_c_abi_type(&f.ty, registry)),
         }),
+        // D-DIST1: distinct types are repr(transparent) over a scalar; treat as C-compatible.
+        Some(TypeDef::Distinct { base, .. }) => is_c_abi_type(base, registry),
         None => false,
     }
 }
@@ -127,7 +129,7 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
         "E3203",
         format!("`{}` is not a C-compatible type for a foreign function parameter or return.", ty.name()),
         format!(
-            "`@{}` / `@{}` functions must use types with a stable C ABI at the edge.",
+            "`#{}` / `#{}` functions must use types with a stable C ABI at the edge.",
             Syntax::ATTR_EXTERN_MODULE, Syntax::ATTR_BINDGEN,
         ),
         "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.".to_string(),
@@ -143,9 +145,9 @@ pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3202",
         format!("Type `{}` cannot cross the C boundary here.", ty),
-        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58)."
+        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#unsafe { … }` region (S58)."
             .to_string(),
-        "Move the call inside `@unsafe`, or change the type to a C-safe value type.".to_string(),
+        "Move the call inside `#unsafe`, or change the type to a C-safe value type.".to_string(),
         Some(span),
     )
 }
@@ -276,6 +278,8 @@ pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
                 VariantPayload::Named(fs) => fs.iter().all(|f| is_ffi_type(&f.ty, registry)),
             })
         }
+        // D-DIST1: distinct types are repr(transparent) over a scalar; treat as FFI-compatible.
+        Some(TypeDef::Distinct { base, .. }) => is_ffi_type(base, registry),
         None => false,
     }
 }

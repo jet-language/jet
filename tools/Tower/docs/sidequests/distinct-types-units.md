@@ -143,9 +143,11 @@ UserId :: distinct Int   // not #Numeric
 bad :: UserId(1) + UserId(2)   // E0127: a `UserId` is an id, not a number
 ```
 
-This is as far as v1 goes (nominal wrappers with opt-in same-type arithmetic).
-True
-units — `Meters / Seconds -> MetersPerSecond` — are deferred (D-DIST2).
+This is as far as the **core language** goes (nominal wrappers with opt-in
+same-type arithmetic). True units — `Meters / Seconds -> MetersPerSecond` — are
+**ratified in scope but delivered as a stdlib extension layer, not core syntax**
+(D-DIST2, 2026-06-19): dimensional algebra rides on top of these distinct types
+via stdlib, so core ships nominal wrappers and units never enter the grammar.
 
 ## Implementation sketch — pipeline touchpoints
 
@@ -239,15 +241,19 @@ the base) — the differential check that codegen stayed dumb and zero-cost.
   checking. rustc only verifies. Holds.
 - **I4:** every new code (E0125–E0127) gets a registry row + ui snapshot.
 - **I7:** `distinct` keyword/marker recorded in Syntax.rs with the D-DIST1 id.
-- **Scope creep into units:** keep units out (D-DIST2) or the card balloons into
-  dimensional algebra. "Measure twice, cut once" — ship nominal wrappers first.
+- **Scope creep into units:** keep units out of *core* (D-DIST2 — they ship as a
+  stdlib extension on top of these distinct types, never as grammar) or the core
+  card balloons into dimensional algebra. "Measure twice, cut once" — ship nominal
+  wrappers in core first; dimensional algebra is a separate stdlib effort.
 - **Interaction with `T ? E` / `Fallible`:** a distinct type as an error type is
   fine (it's a nominal type); no special handling.
 
 ## Open decisions
 
 1. Declaration spelling — keyword-first item vs. `::`-binding form (D-DIST1).
-2. Units of measure now or deferred (D-DIST2). Recommend defer.
+2. ~~Units of measure now or deferred (D-DIST2).~~ **Ratified 2026-06-19:** in
+   scope, but delivered as a **stdlib extension** on top of distinct types — not
+   core-language syntax.
 3. Coercion + unwrap + arithmetic rules, incl. the `#Numeric` arithmetic-opt-in
    marker and the unwrap spelling (D-DIST3).
 4. (Notes only, fold into D-DIST1) distinct-over-distinct chaining: rejected in

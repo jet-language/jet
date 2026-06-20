@@ -99,7 +99,7 @@ pub fn e1802(feature: &str) -> Diagnostic {
         "E1802",
         format!("the REPL interpreter can't run {}", feature),
         "the REPL is an interpreter for learning Jet; some features — \
-         FFI, tasks/channels, `@unsafe`, and OS-level APIs — require the real compiler"
+         FFI, tasks/channels, `#unsafe`, and OS-level APIs — require the real compiler"
             .to_string(),
         "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler"
             .to_string(),
@@ -285,14 +285,14 @@ fn looks_like_item(text: &str) -> bool {
 /// Detect hard-reject features (D-REPL6=A).
 fn reject_feature(text: &str) -> Option<&'static str> {
     let t = text.trim();
-    if t.contains("@unsafe") {
-        return Some("`@unsafe`");
+    if t.contains("#unsafe") {
+        return Some("`#unsafe`");
     }
     if t.contains("extern rust") {
         return Some("`extern rust`");
     }
-    if t.contains("@extern") || t.contains("@bindgen") {
-        return Some("C-FFI (`@extern`/`@bindgen`)");
+    if t.contains("#extern") || t.contains("#bindgen") {
+        return Some("C-FFI (`#extern`/`#bindgen`)");
     }
     if t.contains("core.tasks") || t.contains("core.channels") {
         return Some("tasks/channels (`core.tasks`)");

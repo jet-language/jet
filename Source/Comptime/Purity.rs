@@ -175,6 +175,14 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
             body.iter().for_each(|s| walk_stmt_exprs(s, f))
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+        // D-WHEN1: walk both arms for purity analysis (conservative).
+        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            f(cond);
+            then_body.iter().for_each(|s| walk_stmt_exprs(s, f));
+            if let Some(eb) = else_body {
+                eb.iter().for_each(|s| walk_stmt_exprs(s, f));
+            }
+        }
     }
 }
 

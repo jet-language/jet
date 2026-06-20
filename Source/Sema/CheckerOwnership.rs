@@ -364,7 +364,8 @@ impl<'a> Checker<'a> {
                 }
                 None
             }
-            None => None,
+            // D-DIST1: distinct types wrap a scalar; they are always Send.
+            Some(TypeDef::Distinct { .. }) | None => None,
         };
         seen.remove(name);
         found
@@ -511,23 +512,27 @@ impl<'a> Checker<'a> {
                 if let Expr::Ident(name, span) = &arg.expr {
                     if is_cloneable(param_ty, self.registry, self.structs) {
                         arg.flags.implicit_clone = true;
-                        self.diags.push(Diagnostic::lint(
-                            "L0201",
-                            format!(
-                                "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
-                                name,
-                                Syntax::KW_MOVE,
-                                name
-                            ),
-                            format!("`{}` expects to take ownership of this value", call_name),
-                            format!(
-                                "write `{} {}` to move, or `{} .clone()` to copy explicitly",
-                                Syntax::KW_MOVE,
-                                name,
-                                name
-                            ),
-                            Some(*span),
-                        ));
+                        // D-L0201: only warn when the value is dead after
+                        // this call (a wasteful clone).
+                        if !self.is_name_live_after(name) {
+                            self.diags.push(Diagnostic::lint(
+                                "L0201",
+                                format!(
+                                    "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                    name,
+                                    Syntax::KW_MOVE,
+                                    name
+                                ),
+                                format!("`{}` expects to take ownership of this value", call_name),
+                                format!(
+                                    "write `{} {}` to move, or `{} .clone()` to copy explicitly",
+                                    Syntax::KW_MOVE,
+                                    name,
+                                    name
+                                ),
+                                Some(*span),
+                            ));
+                        }
                     } else {
                         self.diags.push(Diagnostic::error(
                             "E0201",

@@ -1,52 +1,52 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    /// S58 (E2-M13, D-LL2): parse a `@unsafe { … }` audited region in
-    /// statement position, with an optional `@audit("…")` reason on the line
+    /// S58 (E2-M13, D-LL2): parse a `#unsafe { … }` audited region in
+    /// statement position, with an optional `#audit("…")` reason on the line
     /// above. The reason is required at runtime by lint L3101, not by the
-    /// grammar, so a missing `@audit` parses fine and is flagged in sema.
+    /// grammar, so a missing `#audit` parses fine and is flagged in sema.
     fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        // Optional `@audit("…")`.
+        // Optional `#audit("…")`.
         let mut audit = None;
-        if matches!(self.peek().kind, TokKind::At)
+        if matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_AUDIT)
         {
-            self.bump(); // `@`
+            self.bump(); // `#`
             self.bump(); // `audit`
-            self.expect(TokKind::LParen, "after `@audit`")?;
+            self.expect(TokKind::LParen, "after `#audit`")?;
             let (reason, _) = self.expect_plain_string(
                 "for the audit reason",
-                "`@audit` takes one piece of quoted text explaining why the block is safe",
-                "write: @audit(\"index checked against len\")",
+                "`#audit` takes one piece of quoted text explaining why the block is safe",
+                "write: #audit(\"index checked against len\")",
             )?;
             self.expect(TokKind::RParen, "after the audit reason")?;
             audit = Some(reason);
-            // S6-R: `@audit("…")` ends a line; the synthetic terminator before
-            // the `@unsafe` it annotates is trivia — skip it.
+            // S6-R: `#audit("…")` ends a line; the synthetic terminator before
+            // the `#unsafe` it annotates is trivia — skip it.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
         }
-        // Required `@unsafe { … }`.
-        if !(matches!(self.peek().kind, TokKind::At)
+        // Required `#unsafe { … }`.
+        if !(matches!(self.peek().kind, TokKind::Hash)
             && matches!(self.peek2().kind, TokKind::KwUnsafe))
         {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("`@{}` must be followed by an `@{}` block", Syntax::ATTR_AUDIT, Syntax::KW_UNSAFE),
+                format!("`#{}` must be followed by a `#{}` block", Syntax::ATTR_AUDIT, Syntax::KW_UNSAFE),
                 "an audit reason annotates the gated region it sits above".to_string(),
                 format!(
-                    "write `@{}(\"…\") @{} {{ … }}`",
+                    "write `#{}(\"…\") #{} {{ … }}`",
                     Syntax::ATTR_AUDIT,
                     Syntax::KW_UNSAFE
                 ),
                 Some(self.peek().span),
             ));
         }
-        self.bump(); // `@`
+        self.bump(); // `#`
         self.bump(); // `unsafe`
-        self.expect(TokKind::LBrace, "after `@unsafe`")?;
+        self.expect(TokKind::LBrace, "after `#unsafe`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Unsafe {
@@ -212,6 +212,13 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Val(binding))
             }
             TokKind::KwComptime => {
+                // D-WHEN1 (ratified 2026-06-19): `comptime if <cond> { … }` is
+                // a compile-time conditional — not a binding. Detect by peeking
+                // at the second token; `comptime NAME` is always a binding.
+                if matches!(self.peek2().kind, TokKind::KwIf) {
+                    let stmt = self.comptime_if_stmt()?;
+                    return Ok(stmt);
+                }
                 let binding = self.comptime_binding()?;
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
@@ -473,54 +480,60 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // S58 (E2-M13): the audit + unsafe gate is `@audit("…")` then
-            // `@unsafe { … }`. Bare `unsafe { … }` is the rejected former
-            // spelling — point users at the `@` form.
+            // S58 (E2-M13): the audit + unsafe gate is `#audit("…")` then
+            // `#unsafe { … }`. Bare `unsafe { … }` is the rejected former
+            // spelling — point users at the `#` form.
             TokKind::KwUnsafe => {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
                     "E0003",
-                    format!("`{}` blocks are written with `@`", Syntax::KW_UNSAFE),
+                    format!("`{}` blocks are written with `#`", Syntax::KW_UNSAFE),
                     "the expert low-level gate is an attribute marker, never a bare keyword"
                         .to_string(),
                     format!(
-                        "write `@{}(\"why this is safe\") @{} {{ … }}`",
+                        "write `#{}(\"why this is safe\") #{} {{ … }}`",
                         Syntax::ATTR_AUDIT,
                         Syntax::KW_UNSAFE
                     ),
                     Some(span),
                 ))
             }
-            TokKind::At => {
-                // D-LABEL1: `@name loop … { }` is a loop label. Disambiguate from
-                // the S58 `@audit(…)` / `@unsafe { … }` statement forms (handled by
-                // `at_unsafe_stmt`) by the token after the name: a `loop` keyword
-                // marks a label; `@unsafe` is `@` + the `unsafe` keyword (not an
-                // identifier); `@audit` is the identifier `audit`.
-                if let TokKind::Ident(name) = &self.peek2().kind {
-                    if name != Syntax::ATTR_AUDIT {
-                        if matches!(self.peek3().kind, TokKind::KwLoop) {
-                            self.bump(); // `@`
-                            let (label, lspan) =
-                                self.expect_ident("for the loop label after `@`")?;
-                            return self.loop_stmt(Some((label, lspan)));
-                        }
-                        // `@name` that is not followed by `loop` and is not an
-                        // `@audit`/`@unsafe` form: a mis-placed label (E0988).
-                        let at_span = self.peek().span;
-                        self.bump(); // `@`
-                        let (_, name_span) = self.expect_ident("for the loop label after `@`")?;
-                        return Err(Diagnostic::error(
-                            "E0988",
-                            "a `@name` loop label must be followed by `loop`".to_string(),
-                            "the `@name` label sigil attaches only to a `loop` (D-LABEL1)"
-                                .to_string(),
-                            "write `@name loop { … }`, or remove the label".to_string(),
-                            Some(Span::new(at_span.start, name_span.end)),
-                        ));
-                    }
-                }
+            TokKind::Hash => {
+                // S58 (E2-M13): `#audit("…")` / `#unsafe { … }` — the audited gate.
                 self.at_unsafe_stmt()
+            }
+            TokKind::At => {
+                // D-LABEL1: `@name loop … { }` is a loop label. `@` in stmt position
+                // is ONLY for labels now (D-ATTR3 = B); attributes use `#`.
+                if let TokKind::Ident(_) = &self.peek2().kind {
+                    if matches!(self.peek3().kind, TokKind::KwLoop) {
+                        self.bump(); // `@`
+                        let (label, lspan) =
+                            self.expect_ident("for the loop label after `@`")?;
+                        return self.loop_stmt(Some((label, lspan)));
+                    }
+                    // `@name` not followed by `loop` — mis-placed label (E0988).
+                    let at_span = self.peek().span;
+                    self.bump(); // `@`
+                    let (_, name_span) = self.expect_ident("for the loop label after `@`")?;
+                    return Err(Diagnostic::error(
+                        "E0988",
+                        "a `@name` loop label must be followed by `loop`".to_string(),
+                        "the `@name` label sigil attaches only to a `loop` (D-LABEL1)"
+                            .to_string(),
+                        "write `@name loop { … }`, or remove the label".to_string(),
+                        Some(Span::new(at_span.start, name_span.end)),
+                    ));
+                }
+                // `@` not followed by an ident — teaching error for old attribute spelling.
+                let t = self.bump();
+                Err(Diagnostic::error(
+                    "E0990",
+                    format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
+                    "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
+                    "write `#unsafe`, `#audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                    Some(t.span),
+                ))
             }
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).
@@ -1249,6 +1262,44 @@ impl<'a> Parser<'a> {
             }
             _ => Ok(None),
         }
+    }
+
+    /// D-WHEN1 (ratified 2026-06-19): parse `comptime if <cond> { … } else { … }`.
+    /// Both arms require `{ }` (braceless bodies are not allowed for `comptime if`).
+    /// `else` is optional in statement position. Sema selects the arm; codegen
+    /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
+    fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.bump().span; // `comptime`
+        self.bump(); // `if`
+        let cond_start = self.peek().span;
+        let cond = self.expr_no_struct_lit()?;
+        let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
+        self.expect(TokKind::LBrace, "to open the `comptime if` body")?;
+        let then_body = self.block_stmts();
+        let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
+            self.bump();
+            // Allow `else if` chained with another `comptime if`.
+            if matches!(self.peek().kind, TokKind::KwComptime)
+                && matches!(self.peek2().kind, TokKind::KwIf)
+            {
+                let chain = self.comptime_if_stmt()?;
+                Some(vec![chain])
+            } else {
+                self.expect(TokKind::LBrace, "to open the `comptime if` else body")?;
+                Some(self.block_stmts())
+            }
+        } else {
+            None
+        };
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ComptimeIf {
+            cond,
+            cond_span,
+            then_body,
+            else_body,
+            span: Span::new(start.start, end),
+            selected_then: None,
+        })
     }
 
     fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {

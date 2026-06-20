@@ -155,6 +155,8 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::CodeModule(cm) => src[..cm.name_span.start]
             .rfind(Syntax::KW_MODULE)
             .unwrap_or(cm.span.start),
+        // D-DIST1: distinct type declarations use their own span.
+        Item::Distinct(d) => d.span.start,
     }
 }
 
@@ -209,6 +211,7 @@ fn item_span_end(item: &Item) -> usize {
         Item::Module(m) => m.span.end,
         Item::CModule(cm) => cm.span.end,
         Item::CodeModule(cm) => cm.span.end,
+        Item::Distinct(d) => d.span.end,
     }
 }
 
@@ -235,6 +238,12 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.end,
         Stmt::Loop { body: inner, span: s, .. } => inner.last().map(stmt_end).unwrap_or(s.end),
         Stmt::Unsafe { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::ComptimeIf { else_body, then_body, span, .. } => else_body
+            .as_ref()
+            .and_then(|b| b.last())
+            .or_else(|| then_body.last())
+            .map(stmt_end)
+            .unwrap_or(span.end),
     }
 }
 
@@ -404,6 +413,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => s.start,
         Stmt::Loop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
+        Stmt::ComptimeIf { span, .. } => span.start,
     }
 }
 

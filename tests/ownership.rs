@@ -178,6 +178,51 @@ fn main() {
     assert!(diags.iter().any(|d| d.code == "E0204"));
 }
 
+/// D-L0201 liveness gate: when the value is still used after the call
+/// the clone is necessary and L0201 must be silent.
+#[test]
+fn implicit_clone_silent_when_value_live_after_call() {
+    let src = r#"
+fn consume(take s: String) {
+    print(s)
+}
+
+fn main() {
+    msg: String :: "hello"
+    consume(msg)
+    print(msg)
+}
+"#;
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.lints.iter().all(|d| d.code != "L0201"),
+        "L0201 must be silent when value is still used after the call"
+    );
+    // The clone is still generated (it's necessary), just no warning.
+    assert!(out.rust.contains(".clone()"), "clone must still be emitted");
+}
+
+/// D-L0201 liveness gate: when the value IS dead after the call,
+/// L0201 still fires (the clone is wasteful, `move` would be better).
+#[test]
+fn implicit_clone_fires_when_value_dead_after_call() {
+    let src = r#"
+fn consume(take s: String) {
+    print(s)
+}
+
+fn main() {
+    msg: String :: "hello"
+    consume(msg)
+}
+"#;
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.lints.iter().any(|d| d.code == "L0201"),
+        "L0201 must fire when value is dead after the call"
+    );
+}
+
 #[test]
 fn deref_outside_unsafe_is_error() {
     let src = r#"

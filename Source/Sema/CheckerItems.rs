@@ -55,44 +55,81 @@ impl<'a> Checker<'a> {
             sig.params.len()
         };
 
-        // D-NARG1 (S61): label validation — if a call arg has `name: val`,
-        // verify it matches the parameter name at that position. Labels never
-        // reorder. param_info is already self-excluded.
+        // D-NARG-D4 (S61, E0125): label validation — if a call arg has
+        // `name: val`, verify it matches the parameter name at that position.
+        // Labels never reorder. param_info is already self-excluded.
         if !sig.param_info.is_empty() {
+            let all_param_names: Vec<&str> =
+                sig.param_info.iter().map(|(n, _)| n.as_str()).collect();
             for (i, arg) in args.iter().enumerate() {
                 if let Some((label, label_span)) = &arg.label {
                     if let Some((param_name, _)) = sig.param_info.get(i) {
                         if label != param_name {
-                            self.diags.push(Diagnostic::error(
-                                "E0104",
-                                format!(
-                                    "label `{}:` doesn't match the parameter `{}` at position {}",
-                                    label,
-                                    param_name,
-                                    i + 1
-                                ),
-                                "labels are checked documentation — they must match the parameter name at that position; arguments stay in declaration order"
-                                    .to_string(),
-                                format!(
-                                    "write `{}:` instead, or remove the label",
-                                    param_name
-                                ),
-                                Some(*label_span),
-                            ));
+                            // Is the label a real param name at a different position?
+                            if all_param_names.contains(&label.as_str()) {
+                                // Transposed: label names a real param, but wrong position.
+                                self.diags.push(Diagnostic::error(
+                                    "E0125",
+                                    format!(
+                                        "label `{}:` doesn't match the parameter `{}` here",
+                                        label, param_name
+                                    ),
+                                    "labels are checked documentation — each names the parameter at its own position, and arguments stay in the order they're declared".to_string(),
+                                    format!(
+                                        "write `{}:` here, or drop the label",
+                                        param_name
+                                    ),
+                                    Some(*label_span),
+                                ));
+                            } else {
+                                // Unknown: label doesn't name any parameter.
+                                self.diags.push(Diagnostic::error(
+                                    "E0125",
+                                    format!(
+                                        "`{}` has no parameter named `{}`",
+                                        method, label
+                                    ),
+                                    format!(
+                                        "a label must name the parameter at its position; `{}` takes {}",
+                                        method,
+                                        all_param_names.join(", ")
+                                    ),
+                                    format!(
+                                        "use one of `{}`'s parameter names, or drop the label",
+                                        method
+                                    ),
+                                    Some(*label_span),
+                                ));
+                            }
                         }
                     }
                 }
             }
         }
 
-        // D-NARG1 (S61): default-value filling — append defaults for omitted
-        // trailing params.
+        // D-NARG-D2 (S61): default-value filling — append defaults for omitted
+        // trailing params. Earlier-param refs in defaults are substituted with
+        // the supplied argument expression so codegen never sees an unresolved
+        // identifier (invariant I2).
         if args.len() < expected_args && !sig.defaults.is_empty() {
             let provided = args.len();
             let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
             if provided >= required {
+                // Build earlier_names incrementally so a default like `d = h`
+                // can reference an already-filled synthetic arg `h`.
+                let all_param_names: Vec<String> =
+                    sig.param_info.iter().map(|(n, _)| n.clone()).collect();
                 for i in provided..expected_args {
                     if let Some(Some(default_expr)) = sig.defaults.get(i) {
+                        // earlier_names covers all params up to (not including) i.
+                        let earlier_names: Vec<String> =
+                            all_param_names.iter().take(i).cloned().collect();
+                        // Substitute any earlier-param idents with the supplied arg.
+                        let resolved = super::substitute_param_refs(
+                            default_expr.clone(),
+                            &earlier_names,
+                            args,
+                        );
                         // Use the first non-self param conv (offset by self).
                         let param_idx = if sig.self_conv.is_some() { i + 1 } else { i };
                         let conv = sig.params.get(param_idx)
@@ -100,7 +137,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or(crate::AST::AccessConvention::Read);
                         args.push(crate::AST::CallArg {
                             convention: conv,
-                            expr: default_expr.clone(),
+                            expr: resolved,
                             span,
                             flags: Default::default(),
                             label: None,
@@ -181,26 +218,31 @@ impl<'a> Checker<'a> {
                         if let Expr::Ident(name, span) = &arg.expr {
                             if is_cloneable(param_ty, self.registry, self.structs) {
                                 arg.flags.implicit_clone = true;
-                                self.diags.push(Diagnostic::lint(
-                                    "L0201",
-                                    format!(
-                                        "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
-                                        name,
-                                        Syntax::KW_MOVE,
-                                        name
-                                    ),
-                                    format!(
-                                        "`{}` expects to take ownership of this value",
-                                        method
-                                    ),
-                                    format!(
-                                        "write `{} {}` to move, or `{} .clone()` to copy explicitly",
-                                        Syntax::KW_MOVE,
-                                        name,
-                                        name
-                                    ),
-                                    Some(*span),
-                                ));
+                                // D-L0201: only warn when the value is dead after
+                                // this call (a wasteful clone). If it's still used
+                                // later the clone is necessary — stay silent.
+                                if !self.is_name_live_after(name) {
+                                    self.diags.push(Diagnostic::lint(
+                                        "L0201",
+                                        format!(
+                                            "implicit clone of `{}`; write `{} {}` to transfer ownership or `.clone()` to silence this warning",
+                                            name,
+                                            Syntax::KW_MOVE,
+                                            name
+                                        ),
+                                        format!(
+                                            "`{}` expects to take ownership of this value",
+                                            method
+                                        ),
+                                        format!(
+                                            "write `{} {}` to move, or `{} .clone()` to copy explicitly",
+                                            Syntax::KW_MOVE,
+                                            name,
+                                            name
+                                        ),
+                                        Some(*span),
+                                    ));
+                                }
                             } else {
                                 self.diags.push(Diagnostic::error(
                                     "E0201",

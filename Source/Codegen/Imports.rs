@@ -325,6 +325,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
             Item::CModule(cm) => emit_c_module(cm, out),
+            Item::Distinct(d) => emit_distinct(cx, d, out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
             | Item::Module(_) | Item::CodeModule(_) => {}
         }

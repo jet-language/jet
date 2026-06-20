@@ -56,7 +56,7 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
     }
 
     let source = format!(
-        "@bindgen module c.{}.__bindgen__ {{\n{}}}\n",
+        "#bindgen module c.{}.__bindgen__ {{\n{}}}\n",
         lib, lines
     );
     Ok(BindResult {
@@ -328,7 +328,7 @@ mod tests {
             bool is_ready();
         "#;
         let r = generate(h, "jetc").unwrap();
-        assert!(r.source.contains("@bindgen module c.jetc.__bindgen__ {"));
+        assert!(r.source.contains("#bindgen module c.jetc.__bindgen__ {"));
         assert!(r.source.contains("fn jetc_add(a: Int, b: Int) -> Int = \"jetc_add\";"));
         assert!(r.source.contains("fn scale(x: Float, k: Float) -> Float = \"scale\";"));
         assert!(r.source.contains("fn reset() = \"reset\";"));

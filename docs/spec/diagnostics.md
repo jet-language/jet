@@ -130,6 +130,8 @@ before continuing.
 | E0115 | sema  | `break`/`continue` outside a loop         |
 | E0987 | sema  | `break @name`/`continue @name` names a loop label not in scope (D-LABEL1) |
 | E0988 | parse | a `@name` loop label is not followed by `loop` (D-LABEL1) |
+| E0989 | sema  | `comptime if` condition is not a comptime expression (D-WHEN1) |
+| E0990 | parse | `@` used as attribute prefix; teaching error — use `#` (D-ATTR1) |
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
@@ -138,6 +140,11 @@ before continuing.
 | E0122 | sema  | `main` with parameters or a return type   |
 | E0123 | sema  | `for` range `step` must be a positive Int (S22, D-SG8) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
+| E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
+| E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
+| E0127 | sema  | arithmetic on a distinct type without `@Numeric` (D-DIST3) |
+| E0128 | sema  | implicit coercion between a distinct type and its base (D-DIST3) |
+| E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
 | E0201 | sema  | `take` required; value can't be copied    |
 | E0202 | sema  | `mut` required at call site               |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -145,7 +152,7 @@ before continuing.
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | multiple unlabeled `ref` fields           |
 | E0208 | sema  | `*` outside `unsafe`                      |
-| L0201 | sema  | implicit `.clone()` at call site (lint)   |
+| L0201 | sema  | implicit `.clone()` at call site — fired only when the value is dead after the call (D-L0201 liveness gate) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | E0301 | sema  | `impl` for unknown type                   |
 | E0302 | sema  | unknown field (with suggestion)           |
@@ -197,6 +204,7 @@ before continuing.
 | E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `@unsafe` block (S58) |
 | E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
 | E3103 | sema  | `@unsafe fn` called without an enclosing `@unsafe` block (S58) |
+| E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
 | L3101 | sema  | `@unsafe` block missing its `@audit("…")` reason (S58, D-LL2) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `@unsafe` / `core.mem` |
@@ -509,6 +517,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3101 | `{op}` can only run inside an `@unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `@audit("why this is safe") @unsafe { … }`. |
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
 | E3103 | `{fn}` is an `@unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `@audit("…") @unsafe { … }`. |
+| E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |
 | L3101 | This `@unsafe` block has no `@audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `@audit("why this is safe")` on the line above. |
 ## C FFI diagnostics (E2-M14, S59)
 

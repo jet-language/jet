@@ -199,16 +199,16 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 
 /// `jet bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
 ///
-/// Generates a `@bindgen module c.<lib>.__bindgen__` cache from a C header,
+/// Generates a `#bindgen module c.<lib>.__bindgen__` cache from a C header,
 /// the same backend the compiler invokes on a cache miss. The header→Jet
 /// translator (D-CBIND3 bindgen helper) is not built into this binary yet, so
-/// this surfaces **E3208** with the workaround (hand-write `@extern module`).
+/// this surfaces **E3208** with the workaround (hand-write `#extern module`).
 pub(crate) fn run_bind(args: &[&String]) {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);
         eprintln!();
         eprintln!("Generate a C binding cache from a header (S59). The output is");
-        eprintln!("an `@bindgen module c.<lib>.__bindgen__` file, by default written");
+        eprintln!("a `#bindgen module c.<lib>.__bindgen__` file, by default written");
         eprintln!("to .jet/bindings/c/<lib>.jet. The compiler also runs this");
         eprintln!("automatically on a cache miss; `bind` is the manual refresh.");
         exit(if args.is_empty() { 2 } else { 0 });
@@ -259,7 +259,7 @@ pub(crate) fn run_bind(args: &[&String]) {
             eprintln!("Error [E3208]: Could not generate bindings from `{}`.", header);
             eprintln!(" Why: {}.", why);
             eprintln!(
-                " Fix: hand-write `@extern module c.{} {{ … }}` for the symbols you need.",
+                " Fix: hand-write `#extern module c.{} {{ … }}` for the symbols you need.",
                 lib
             );
             exit(ExitCodes::USER_ERROR);
@@ -290,7 +290,7 @@ pub(crate) fn run_bind(args: &[&String]) {
     );
     if !result.skipped.is_empty() {
         println!(
-            "skipped {} declaration{} outside the bindable subset (hand-write `@extern` for these):",
+            "skipped {} declaration{} outside the bindable subset (hand-write `#extern` for these):",
             result.skipped.len(),
             if result.skipped.len() == 1 { "" } else { "s" }
         );

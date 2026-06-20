@@ -216,6 +216,13 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         match (module, name) {
             ("core.math", "pi" | "e") => Some(Type::Float),
+            // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,
+            // `mem.Pool`, `mem.Fixed` — accessed as a field on the `core.mem` alias,
+            // then `.new()` is called on the sentinel type to construct the allocator.
+            ("core.mem", "Arena") => Some(Type::Named(Syntax::MEM_ARENA.to_string())),
+            ("core.mem", "Bump") => Some(Type::Named(Syntax::MEM_BUMP.to_string())),
+            ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
+            ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
             _ => {
                 self.diags.push(unknown_std_item(module, name, span));
                 let _ = alias_span;
@@ -654,6 +661,47 @@ impl<'a> Checker<'a> {
                 }
                 return None; // serve runs forever; no meaningful return type
             }
+            // D-DEFER1 option B: scope.guard(() => { … }) → ScopeGuard
+            // The argument must be a zero-parameter lambda. LIFO drop order is
+            // guaranteed by Rust's reverse-declaration semantics.
+            ("core.scope", "guard") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_std_arity("guard", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                match &lam_ty {
+                    Some(Type::Fn { params, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "`scope.guard` needs a zero-parameter lambda, got {} parameter{}",
+                                    params.len(),
+                                    if params.len() == 1 { "" } else { "s" }
+                                ),
+                                "the guard body takes no arguments — it captures what it needs via closure".to_string(),
+                                "write `scope.guard(() => { cleanup_code })` with no parameters".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`scope.guard` needs a lambda, not {}", other.show()),
+                            "a scope guard runs a cleanup lambda when the binding goes out of scope".to_string(),
+                            "write `scope.guard(() => { cleanup_code })`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    None => {}
+                }
+                return Some(Type::Named("ScopeGuard".to_string()));
+            }
             _ => {}
         }
 
@@ -813,16 +861,20 @@ impl<'a> Checker<'a> {
                 let ispan = *ispan;
                 if self.is_borrowed_binding(&name) {
                     arg.flags.implicit_clone = true;
-                    self.diags.push(Diagnostic::lint(
-                        "L0201",
-                        format!(
-                            "implicit clone of `{}`; this value is borrowed, so it is copied into the JSON value",
-                            name
-                        ),
-                        format!("`{}.{}` stores its own copy of this value", Syntax::TYPE_JSON, call_name),
-                        format!("write `{} .clone()` to copy explicitly and silence this warning", name),
-                        Some(ispan),
-                    ));
+                    // D-L0201: only warn when the value is dead after
+                    // this call (a wasteful clone).
+                    if !self.is_name_live_after(&name) {
+                        self.diags.push(Diagnostic::lint(
+                            "L0201",
+                            format!(
+                                "implicit clone of `{}`; this value is borrowed, so it is copied into the JSON value",
+                                name
+                            ),
+                            format!("`{}.{}` stores its own copy of this value", Syntax::TYPE_JSON, call_name),
+                            format!("write `{} .clone()` to copy explicitly and silence this warning", name),
+                            Some(ispan),
+                        ));
+                    }
                 }
             }
         }
@@ -873,6 +925,8 @@ pub(crate) fn std_type_known(name: &str) -> bool {
         | "FileReader" | "FileWriter" | "FileLines"
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse"
+        // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
+        | "Arena" | "Bump" | "Pool" | "Fixed"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1048,6 +1102,121 @@ pub(crate) fn net_method_return(
     }
 }
 
+/// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): method calls on the four
+/// allocator opaque types (Arena, Bump, Pool, Fixed).
+/// Returns `Some(Some(T))` for a valid method with return type T, `Some(None)` for
+/// a void method, `None` if the type_name is not an allocator type.
+pub(crate) fn alloc_method_return(
+    type_name: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    use Syntax::{MEM_ARENA, MEM_BUMP, MEM_POOL, MEM_FIXED};
+    if !matches!(type_name, "Arena" | "Bump" | "Pool" | "Fixed") {
+        return None;
+    }
+    let unit = unit_ty();
+    match method {
+        // D-ALLOC1: `new()` is a static constructor — handled via `infer_std_field`
+        // returning a Named sentinel, then `.new()` dispatched here as an instance method
+        // on the sentinel. Return the same Named type (the allocator handle).
+        "new" => {
+            // Optional capacity/slots/size arg.
+            if args.len() > 1 {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`{}.new` takes at most one optional argument", type_name),
+                    "the only optional argument is `capacity:` / `slots:` / `size:`".to_string(),
+                    format!("write `mem.{}.new()` or `mem.{}.new(capacity: N)`", type_name, type_name),
+                    Some(span),
+                ));
+            }
+            Some(Some(Type::Named(type_name.to_string())))
+        }
+        // D-ALLOC1: `alloc(value)` — allocates a value into the arena.
+        // Returns the value's type; we infer it from the argument.
+        "alloc" => {
+            if args.len() != 1 {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`{}.alloc` takes exactly one argument", type_name),
+                    "pass the value you want to store in the allocator".to_string(),
+                    format!("write `arena.alloc(my_value)`"),
+                    Some(span),
+                ));
+                return Some(None);
+            }
+            // Return type is inferred from argument — caller handles inference.
+            // We return a sentinel; actual type inference is done in the caller.
+            Some(Some(Type::Named("__alloc_infer__".to_string())))
+        }
+        // D-ALLOC-D: `reset()` — keeps the backing buffer, marks all allocations invalid.
+        "reset" => {
+            if !args.is_empty() {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`{}.reset` takes no arguments", type_name),
+                    "reset clears all allocations, keeping the backing buffer".to_string(),
+                    "write `arena.reset()`".to_string(),
+                    Some(span),
+                ));
+            }
+            Some(Some(unit))
+        }
+        // D-ALLOC-D: `free()` — returns the backing memory to the OS.
+        "free" => {
+            if !args.is_empty() {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`{}.free` takes no arguments", type_name),
+                    "free releases the backing memory to the OS".to_string(),
+                    "write `arena.free()`".to_string(),
+                    Some(span),
+                ));
+            }
+            Some(Some(unit))
+        }
+        _ => {
+            diags.push(Diagnostic::error(
+                "E0102",
+                format!("`{}` has no method `{}`", type_name, method),
+                format!(
+                    "`{}` supports: `new`, `alloc`, `reset`, `free`",
+                    type_name
+                ),
+                format!("check the method name — valid methods are `alloc`, `reset`, `free`"),
+                Some(span),
+            ));
+            None
+        }
+    }
+}
+
+/// D-ALLOC-D (ratified 2026-06-19): E3104 — use of an allocator value after it was
+/// freed or reset.
+pub(crate) fn e3104(alloc_name: &str, method: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E3104",
+        format!(
+            "`{}` was already {}; this value lives in `{}` which is gone",
+            alloc_name,
+            method,
+            alloc_name
+        ),
+        format!(
+            "calling `{}.{}` invalidated all values allocated in `{}`",
+            alloc_name, method, alloc_name
+        ),
+        format!(
+            "move the `alloc` call before the `{}`, or create a new allocator",
+            method
+        ),
+        Some(span),
+    )
+}
+
 pub(crate) fn io_error_ty() -> Type {
     Type::Named(Syntax::TYPE_IO_ERROR.to_string())
 }
@@ -1077,15 +1246,15 @@ pub(crate) fn ptr_elem(t: &Type) -> Option<Type> {
     }
 }
 
-/// E3101: a low-level memory operation used outside an `@unsafe` block.
+/// E3101: a low-level memory operation used outside an `#unsafe` block.
 pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3101",
-        format!("`{}` can only run inside an `@unsafe` block", op),
+        format!("`{}` can only run inside an `#unsafe` block", op),
         "this operation can violate memory safety, so it must sit in an audited region"
             .to_string(),
         format!(
-            "wrap it: @{}(\"why this is safe\") @{} {{ … }}",
+            "wrap it: #{}(\"why this is safe\") #{} {{ … }}",
             Syntax::ATTR_AUDIT,
             Syntax::KW_UNSAFE
         ),
@@ -1339,10 +1508,15 @@ pub(crate) fn std_module_items(module: &str) -> Vec<String> {
         "core.random" => &["int", "float", "pick", "shuffle", "seed"],
         "core.time" => &["now", "sleep", "start"],
         "core.json" => &["parse", "render", "render_pretty"],
-        "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of"],
+        "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of",
+                        "Arena", "Bump", "Pool", "Fixed"],
+        // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
+        "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.tasks" => &["spawn", "channel"],
         "core.files" => &["open", "create", "append"],
         "core.path" => &["join", "parent", "extension", "normalize"],
+        // D-DEFER1 option B: scope-exit guard.
+        "core.scope" => &["guard"],
         "core" => &[],
         // E2-M9: ring packages.
         "jet.csv" => &["parse", "render"],

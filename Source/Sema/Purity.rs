@@ -194,6 +194,25 @@ pub(crate) fn check_pure_stmt(
             None
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
+        // D-WHEN1: check both arms of a comptime if for purity (conservative).
+        Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
+            if let Some(d) = check_pure_expr(cond, pure_fn, funcs) {
+                return Some(d);
+            }
+            for st in then_body {
+                if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
+                    return Some(d);
+                }
+            }
+            if let Some(eb) = else_body {
+                for st in eb {
+                    if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
+                        return Some(d);
+                    }
+                }
+            }
+            None
+        }
     }
 }
 
