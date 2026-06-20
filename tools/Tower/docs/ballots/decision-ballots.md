@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **13 open decisions across 3 cards.** Each card below is self-contained: a user
+> **14 open decisions across 4 cards.** Each card below is self-contained: a user
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -758,3 +758,169 @@ Two choices reach the owner. D-DBG1 (the `jet debug` command name) is already ra
 
 ---
 
+---
+
+## Allocators — board card c05
+
+### D-ALLOC2 — What `arena.alloc(value)` returns, and how `reset`/`free` relate to outstanding allocations (rec A)
+
+D-ALLOC1 ratified the *spelling* (`arena :: mem.Arena.new()`, `node :: arena.alloc(value)`)
+and D-ALLOC-D ratified *two verbs* (`reset` keeps the buffer, `free` returns it to the OS).
+Neither said what `alloc` **returns** or what the type system does when you touch an
+allocation after `reset`/`free`. The c05 runtime shipped a stub where `alloc(v)` just
+returns `v` — no real arena. This card picks the real return semantics. It is the load-bearing
+decision: it determines whether arenas in a safe-by-default language are *statically* safe
+(Rust's bar) or rely on a runtime trap, and whether Jet needs a region/lifetime story it
+does not yet have.
+
+**User story.** Priya is writing a game in Jet. Each frame she allocates thousands of
+short-lived scratch objects — collision pairs, particle nodes, path segments — into a
+per-frame arena, then wipes the whole thing at end-of-frame with one `reset` and reuses
+the buffer next frame. She wants the cheap bulk-free that makes arenas worth using, and she
+*never* wants a dangling read: if she stashes a frame-N node in a list that outlives the
+`reset`, the compiler must stop her — by name, at the use site — not hand her a corrupted
+read at runtime. She has never written a lifetime and does not want to start.
+
+**Prior art (confirmed current APIs).**
+
+- **Zig `std.heap.ArenaAllocator`** — `allocator.create(T)` returns `*T`, `alloc(T, n)` returns
+  `[]T` (a real pointer/slice). `deinit()` frees everything; `reset(.retain_capacity)` rewinds
+  the bump pointer but keeps the buffer. Outstanding pointers after a reset are silently
+  dangling — the language does nothing; correctness is on the programmer. Fast, **not statically safe.**
+- **Rust `bumpalo::Bump` / `typed-arena`** — `alloc(value)` returns `&'bump mut T`, a reference whose
+  lifetime is tied to the arena's borrow. `reset(&mut self)` takes `&mut self`, which the borrow
+  checker can only grant when **no** outstanding `&'bump T` references are live. Use-after-reset is
+  a *compile error*, not a trap. **Statically safe — this is the gold standard, and the cost is a
+  real lifetime/region in the type system.**
+- **Odin `mem.Arena`** — allocations come back as `rawptr` / typed pointers via `context.allocator`;
+  `free_all` / `arena_free_all` rewinds and keeps the first block. Outstanding pointers after
+  `free_all` dangle; safety is by convention. **Not statically safe.**
+- **C++ `std::pmr::monotonic_buffer_resource`** — `allocate()` returns `void*`; `deallocate()` is a
+  no-op; `release()` (or destruction) returns everything upstream at once. Pure pointer + bulk-free,
+  **no static guard at all.**
+- **Jai** — temporary-storage / pool allocators give the same per-frame bump-and-reset ergonomics
+  (`reset_temporary_storage`); pointer-based, manual lifetime discipline, no compiler enforcement.
+
+**The spectrum.** One axis: *pointer + bulk-free* (Zig, Odin, C++, Jai) is trivial to implement and
+maximally flexible, but the language cannot tell you when you've outlived your allocation — it's
+exactly the class of bug a memory-safe language exists to delete. *Lifetime-bound reference* (Rust)
+makes use-after-reset a compile error, but only because Rust pays for a borrow checker with regions.
+Jet sits in between: it has ownership (S10 `take`/`view`/`mut`/`ref`) and the c06 capability model,
+but **no user-facing region/lifetime mechanism today** and **no raw pointers exposed to users ever.**
+
+| Option | `alloc(value)` returns | Static safety (use-after-reset) | reset / free model | Fits S10 / c06 ownership | Prior art |
+|--------|------------------------|---------------------------------|--------------------|--------------------------|-----------|
+| A scope-bound view | a `view` into arena storage, valid only inside the arena's lexical scope | **Yes** — checker forbids escaping the scope and forbids any use after `reset`/`free` | `reset`/`free` take the arena by `mut`; legal only when no live view escapes the binding | extends `view` (S10) with a region tied to the `arena ::` binding scope | Rust bumpalo / typed-arena |
+| B opaque handle | an opaque `Handle<T>` (index into arena-owned storage), not a reference | **Yes** — `reset`/`free` bump a generation; sema marks every handle from the old generation dead, use names the site | `reset`/`free` invalidate all outstanding handles; arena *owns* the values | generational-index arenas (Rust `slotmap`/ECS); no new region machinery | 
+| C owned clone (stub) | an owned `T` (the value, cloned into arena-managed storage if it lived there at all) | N/A — nothing dangles because nothing is shared | `reset`/`free` drop arena-owned copies; callers hold independent owned values | trivially fits — it's just `take`/owned values | current c05 stub (barely an arena) |
+
+- **Option A — scope-bound view (à la Rust, the safe gold standard).** `alloc` returns a `view T`
+  bound to the *region* introduced by the `arena ::` binding. You may read/write the allocation
+  freely **inside** that scope; the checker forbids it from escaping (storing it somewhere that
+  outlives the arena) and forbids any use after `reset`/`free`, which require `mut arena` and are
+  only legal once no escaping view is live. This is bumpalo's `&'bump T` reworded in Jet's
+  capability vocabulary — no lifetimes typed by the user, but a real region behind the scenes.
+
+```jet
+use core.mem
+
+fn frame(world: view World) {
+    arena :: mem.Arena.new(capacity: 1 << 20)
+
+    node :: arena.alloc(CollisionPair{ a: 1, b: 2 })
+    node.a += world.gravity            // ok — used inside the arena's scope
+
+    arena.reset()                      // ok — `node` is not used after this point
+}
+```
+
+```jet
+fn frame(world: view World, out: mut [view CollisionPair]) {
+    arena :: mem.Arena.new(capacity: 1 << 20)
+    node :: arena.alloc(CollisionPair{ a: 1, b: 2 })
+
+    out.push(node)   // error[E0631]: arena allocation escapes the arena it was allocated in
+                     //  --> frame.jet:4:14
+                     //   |
+                     // 4 |     out.push(node)
+                     //   |              ^^^^ `node` is a view into `arena`, which is freed
+                     //   |                   when this function returns
+                     //   = note: an arena allocation may not outlive the `arena ::` that made it
+                     //   help: store an owned copy instead — `out.push(node.copy())`
+}
+```
+
+```jet
+fn frame() {
+    arena :: mem.Arena.new()
+    node :: arena.alloc(Node{ id: 7 })
+    arena.reset()           // wipes the buffer
+    print(node.id)          // error[E0632]: use of arena allocation after `reset`
+                            //  --> frame.jet:5:11
+                            //   |
+                            // 4 |     arena.reset()
+                            //   |     ----- `arena` reset here, invalidating `node`
+                            // 5 |     print(node.id)
+                            //   |           ^^^^ `node` was allocated before the reset
+                            //   help: move the `reset` after the last use of `node`
+}
+```
+
+- **Option B — opaque generational handle.** `alloc` returns an opaque `Handle<T>` — an
+  index plus a generation, never a reference. Reads go through `arena.get(handle) -> view T`.
+  `reset`/`free` bump the arena's generation; sema knows every handle minted before the bump is
+  dead and reports a use-after at the access site. Handles are plain values, so they *can* be
+  stored anywhere and outlive the arena — using a stale one is the error, caught statically when
+  the generation is statically known, and trapped at runtime otherwise (still memory-safe: a dead
+  handle never reads freed memory, it returns a checked failure). No region machinery needed.
+
+```jet
+fn frame() {
+    arena :: mem.Arena.new()
+    h :: arena.alloc(Node{ id: 7 })   // h : Handle<Node>
+    arena.reset()                     // generation bumps
+    n :: arena.get(h)                 // error[E0633]: handle invalidated by `reset`
+                                      //  --> frame.jet:5:21
+                                      //   |
+                                      // 4 |     arena.reset()
+                                      //   |     ----- generation bumped here; `h` is from the old generation
+                                      // 5 |     n :: arena.get(h)
+                                      //   |                    ^ `h` no longer names a live allocation
+                                      //   help: re-allocate after the reset, or move the reset later
+}
+```
+
+- **Option C — owned clone (the current c05 stub).** `alloc(value)` returns an owned `T`; the
+  arena owns at most a managed copy. `reset`/`free` drop the arena's copies, but callers already
+  hold independent owned values, so nothing can dangle — because nothing was ever shared. It is
+  trivially safe and trivially fits S10 (`take`/owned), but it is **barely an arena**: there is no
+  shared bump-allocated storage, every `alloc` is a clone, and `reset` frees nothing the caller
+  can see. It buys none of the per-frame win Priya came for. Listed for honesty and as the
+  fallback if a region story can't land this milestone.
+
+```jet
+fn frame() {
+    arena :: mem.Arena.new()
+    node :: arena.alloc(Node{ id: 7 })   // node : Node — an owned value, not shared
+    arena.reset()                        // drops the arena's copy; `node` is untouched
+    print(node.id)                       // prints 7 — no aliasing, so no use-after to catch.
+                                         // also: this allocated nothing into a shared buffer.
+}
+```
+
+**Recommendation:** A — scope-bound `view`. Safe-by-default (philosophy P1) means use-after-reset
+must be a *compile error*, not a runtime trap or undefined behavior; only A and B clear that bar,
+and only A gives the genuine shared-buffer bump allocation that makes arenas worth shipping
+(B's per-access indirection and runtime fallback are a weaker, slower compromise). A is also the
+design every language *lauded* for allocator safety converged on (Rust bumpalo / typed-arena).
+
+**Interaction with c06 / S10 — and the gap this exposes.** A extends `view` (S10) but needs
+something S10 does **not** have: a **region** — the lifetime of the `arena ::` binding scope — that
+the checker can attach to each allocation and use to forbid escape and use-after-`reset`. That is a
+new piece of the capability model. It should be specified as part of c06 (the `view` capability
+already there is the natural home) or as an explicit follow-on region card; **D-ALLOC2-A cannot be
+implemented until that region rule exists.** B is the escape hatch if the owner wants real arenas
+*this* milestone without taking on regions — it's safe and needs no new type-system machinery, at
+the cost of indirection and a runtime check on statically-unknown handles. C needs nothing new but
+isn't really an arena. Recommend ratifying A as the target and sequencing the region work into c06;
+fall back to B only if regions slip the milestone.
