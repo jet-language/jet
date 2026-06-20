@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **15 open decisions across 5 cards.** Each card below is self-contained: a user
+> **24 open decisions across 14 cards** (9 new EVALUATE-tier ballots added below the original five), plus a deferred-ballots list. Each card below is self-contained: a user
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -1052,3 +1052,1356 @@ pub fn checkout(req: Request) -> Response ! {net, db, log} ? {
 - **S60** deliberately rejected a full effects system (`pure fn` is the one ratified effect-tag). The `#(net, db, log)` effect surface **reopens S60**. D-QUAL1 is the place to decide that reopening explicitly.
 - **S56 / S83** ratified user-defined derives via the external connector `~~` (`derive Point~~Serialize`); `#[…]` is for built-in derive *markers*. Keep the two distinct: `#[…]` lists markers, `~~` attaches a derive impl.
 - **Manifest surface**: the `module shop.checkout { … }` block overlaps `pkg.jet` (`payload:`/`packages:`, D-JPK-FILES) and module paths (D-MOD1 uses `.`). Decide whether capability policy lives in `pkg.jet`, in an in-source `module { }` block, or both.
+
+---
+
+## Qualifier taxonomy (decide first) — board card c62
+
+### D-QUAL2 — How many kinds of qualifier? (rec B)
+
+> **Decide this before D-QUAL1.** D-QUAL2 is the taxonomy foundation; D-QUAL1
+> (c62) asks *where* qualifiers live across three surfaces (signature /
+> declaration / manifest), and that routing rule only makes sense once the
+> owner has decided *how many distinct kinds of qualifier exist*. Ratify
+> D-QUAL2 first to give D-QUAL1 a stable vocabulary to route. D-QUAL2 does not
+> duplicate D-QUAL1's surface decision — it feeds it.
+
+**User story.** Priya is a mid-level dev joining the Jet project. She reads
+the spec page on "qualifiers" and finds four overlapping terms: *trait*,
+*attribute*, *tag*, *effect*. She can't tell which apply to types, which to
+functions, which carry methods, which are just markers. She asks a colleague
+and gets a different answer. The taxonomy decision is the fix: one mental model
+that lets anyone answer her question from first principles.
+
+**How this relates to D-QUAL1.** D-QUAL1 decides the *surface* — `#(…)` for
+effects, `#[…]` for tags, manifest for policy. That surface routing is sound
+regardless of which taxonomy option wins here, but the *names* and *beginner
+explanation* change: under Option B the one-liner is "methods → trait, no
+methods → tag"; under Option A it requires four sentences; under Option C it
+requires a footnote about why traits are special labels. Ratify D-QUAL2, then
+confirm the D-QUAL1 vocabulary matches.
+
+| Option | Kinds | Beginner rule | Dispatch story | Re-teaching cost |
+|--------|-------|---------------|----------------|-----------------|
+| A — four kinds | trait / attribute / tag / effect | four sentences, four words | each kind dispatched differently | status quo; complexity already present |
+| B — two kinds | trait (has methods) / tag (no methods) | one sentence | `#Name` attaches either; traits dispatch via vtable, tags erase at runtime | one doc pass + small sema change to first-class `tag` |
+| C — one kind | "label" (labels with methods = traits) | one word, one footnote | hides vtable-vs-marker distinction | maximally small vocabulary; may confuse experts |
+
+#### How other languages do this
+
+- **Rust** — splits the space three ways: `trait` (has methods, dispatches),
+  `derive`/attribute macros (`#[derive(..)]`, compiler-driven codegen), and
+  marker traits (`Send`, `Copy` — empty bodies, no methods). Beginners conflate
+  all three. Takeaway: the marker-vs-method split is the real line; Jet draws it
+  once as tag-vs-trait instead of leaving three half-overlapping concepts.
+- **Swift** — `protocol` (methods, dispatch) vs. marker protocols
+  (`@_marker`, no requirements, erased) vs. property wrappers / attributes.
+  Takeaway: even Swift bolts on a separate "marker protocol" concept; Jet's tag
+  *is* that, first-class, no special case.
+- **Haskell** — type classes (methods) vs. empty/marker classes vs. `DataKinds`
+  promoted constructors used as phantom labels. Takeaway: the "class with no
+  methods" is already used as a pure label everywhere; Jet names that the tag.
+- **Go** — interfaces (methods, dispatch) and struct tags (string metadata, no
+  methods, read by reflection). Takeaway: Go already has exactly two kinds and a
+  beginner can say which is which — proof the two-kind split is teachable.
+- **Java** — interfaces (methods) vs. marker interfaces (`Serializable`, empty)
+  vs. annotations (`@Override`, metadata). Takeaway: three kinds where two would
+  do; the marker-interface idiom shows "no methods = pure label" is well-trodden.
+
+Across all five, the load-bearing distinction is *has methods (dispatches) vs.
+no methods (pure label, erases)*. Option B is the only one that makes that the
+whole vocabulary.
+
+- **Option A — Four kinds: trait, attribute, tag, effect.** Keep the four
+  existing concepts distinct and separately named. Traits have methods and
+  enable dispatch. Attributes are compiler-understood markers (`#Serialize`,
+  `#Comparable`). Tags are user-attached value-facts or typestate markers
+  (`#paid`, `#tainted`). Effects are runtime-reach annotations (`#(db, net)`).
+
+```jet
+// A trait: has methods, enables dispatch
+trait Drawable {
+    fn draw(self, canvas: mut Canvas)
+}
+
+// An attribute: compiler-understood marker on a declaration
+#Serialize
+struct Order { id: Int, total: Float }
+
+// A tag: user value-fact, no methods, attaches to a value
+fn charge(o: Order) -> Receipt #paid ? {
+    // ...
+}
+
+// An effect: runtime-reach annotation on a signature
+fn save(o: Order) #(db) -> Unit ? {
+    // error if you call this from a pure context:
+    // error[E0730]: `save` declares effect `#(db)`; caller must also
+    //               declare `#(db)` or wrap the call in an effect region.
+}
+```
+
+The problem: a beginner who asks "what's the difference between a tag and an
+attribute?" has no clear answer. Both are `#Name`-shaped, neither has methods.
+The distinction is implementation-level (compiler-known vs user-defined),
+which the beginner doesn't have context to reason about yet. Four overlapping
+concepts fight the simplicity ratchet (I8).
+
+- **Option B — Two kinds: trait (has methods) + tag (no methods).
+  (RECOMMENDED)** Collapse attributes, tags, effects, typestate markers,
+  units, taint, must-use, and tool-markers into one concept: **tag**. A tag is
+  any `#Name` that carries no method body. Traits are anything with at least
+  one method. The `#Name { … }` scoped-region form (S82, D-ATTR1) attaches
+  the same way; the region's *body* is the method-vs-no-method discriminator.
+  Derives are traits (they attach method impls). Effects like `#(db)` are tags
+  whose propagation rule is tracked by sema — they erase at runtime, no
+  dispatch needed.
+
+```jet
+// A trait — has methods; dispatch is real
+trait Drawable {
+    fn draw(self, canvas: mut Canvas)
+}
+
+// Tags — no methods; erase at codegen
+#[Serialize, Comparable]   // built-in tags that trigger compiler-generated impls
+struct Order { id: Int, total: Float }
+
+fn charge(o: Order #unpaid) -> Receipt #paid ? {
+    // #unpaid / #paid are user-defined tags; they are typestate
+    // sema checks them; codegen erases them.
+    // ...
+}
+
+fn save(o: Order) -> Unit ? {
+    // declared effect tag via D-QUAL1's #(…) surface:
+    // #(db) is a tag that propagates along call sites
+}
+
+// Error: tag used where a trait (dispatch) is expected
+fn render_all(items: [#Drawable]) {
+    //               ^^^^^^^^^^
+    // error[E0731]: `#Drawable` is a tag (no methods); to dispatch on it,
+    //               declare it as a trait: `trait Drawable { fn draw(…) }`
+    //               and use it as a type: `fn render_all(items: [Drawable])`
+}
+```
+
+```jet
+// Error: trying to write methods on a tag declaration
+tag Comparable {
+    fn compare(self, other: Self) -> Int  // error[E0732]: a `tag` may not
+                                          // declare methods; use `trait`
+}
+```
+
+Cost: sema gains a first-class `tag` keyword (or policy: a `#Name` with no
+method body is automatically a tag). One documentation pass renames "attribute"
+and "effect" to "tag" in teaching material. The codegen change is zero —
+tags already erase.
+
+- **Option C — One kind: "label" (traits are labels-with-methods).** Every
+  `#Name` is a label. Traits are the subset of labels that also carry a method
+  body. There is no user-facing distinction; the compiler figures it out from
+  context.
+
+```jet
+// C spells everything the same; the compiler infers kind from usage
+#Drawable           // label — has methods somewhere? trait. Else: tag.
+#Serialize          // label — compiler-known: generates impls
+#paid               // label — value-fact: typestate
+
+fn render(item: #Drawable) {
+    item.draw(canvas)  // ok if #Drawable turns out to have a `draw` method
+    // but: how does the beginner know whether #Drawable will dispatch
+    // or be erased? They have to look up whether #Drawable has methods.
+    // The "label" term hides the most load-bearing distinction in the type system.
+}
+```
+
+The failure mode: "label" is a smaller vocabulary but demands the learner
+understand the vtable-vs-erase distinction anyway, just with no word for it.
+The term "trait" is load-bearing in error messages, docs, and impl blocks; a
+rename to "label" would break all of them.
+
+**Recommendation:** B — "methods → trait, no methods → tag" is the shortest
+rule that correctly captures the dispatch-vs-marker split. Option A is the
+current reality and the source of beginner confusion. Option C erases the one
+distinction that actually matters for understanding dispatch.
+
+---
+
+---
+
+## Effect system — board card c66
+
+### D-EFF1 — An effect system, expressed as tags on functions (rec B)
+
+**User story.** Lena maintains a 200-file Jet service. A junior just landed a PR
+where a function deep inside the pricing logic — a function everyone assumed was a
+pure calculation — quietly grew a `core.net.fetch(...)` call to hit a currency API.
+Nothing flagged it. Now the pricing path makes a network round-trip per line item
+and nobody noticed until production latency spiked. Lena wants the compiler to know
+which functions touch the network, the disk, the clock, the RNG — and to *stop* a
+function she has declared pure from silently gaining a side effect. She does not
+want to hand-annotate 200 files to get it.
+
+| Option | Who writes effects | Failure mode it catches | Ceremony | Reopens S60? |
+|--------|--------------------|-------------------------|----------|--------------|
+| A — none (status quo) | nobody (`pure fn` only) | only "this `pure fn` isn't pure" | zero | no |
+| B — inferred, annotate at boundaries (rec) | compiler infers; you assert/restrict | hidden effect creep, capability leaks, taint sinks | low — boundaries only | **yes** |
+| C — explicit always | every function, every effect | same as B | high — the coloring tax | yes |
+
+#### How other languages do this
+
+- **Koka** — row-polymorphic effect *inference*: every function's type carries an
+  inferred effect row (`<console,exn>`); you rarely write them, the compiler
+  propagates. Takeaway: inference + propagation is the proven way to avoid the
+  coloring tax — this is the model B copies.
+- **Frank / Eff / Effekt** — algebraic effects with **runtime handlers**: an effect
+  is *performed* and a dynamically-installed handler resumes the computation.
+  Takeaway: powerful but a runtime mechanism; Jet wants none of the handler runtime
+  — effects are a static fact, then erased.
+- **OCaml 5** — effect handlers in the runtime (used for the scheduler/concurrency),
+  but effects are **not yet tracked in the type system**. Takeaway: even a flagship
+  ML shipped handlers before static checking; Jet inverts that — static checking,
+  no handlers.
+- **Unison** — "abilities" are typed effects (`{IO, Exception}`) checked at compile
+  time and discharged by handlers. Takeaway: closest to a clean typed-effect surface
+  on a function signature; Jet borrows the surface, drops the handler discharge.
+- **Haskell (mtl / monad transformers)** — effects encoded as type-class
+  constraints (`MonadReader`, `MonadIO`) stacked in a transformer tower. Takeaway:
+  expressive but the stack is the coloring tax made manifest; Jet refuses to make
+  beginners thread a monad stack.
+- **Rust** — *no* effect system: `unsafe` and the `Send`/`Sync` auto-traits are the
+  only coarse "capability" propagation, and async is famously a function color.
+  Takeaway: the gap D-EFF1 fills — Rust users feel the missing effect layer most.
+
+**Jet's is unlike all of these at runtime: STATIC + INFERRED + ERASED.** There is no
+handler, no monad, no runtime effect value. The effect set is computed in sema,
+checked against any assertion the user wrote, and then thrown away — codegen emits
+plain Rust with no trace of it (I3). An effect is just a compile-time tag on a
+function; `pure fn` (S60) is the empty set.
+
+- **Option A — no effect system; keep only `pure fn`.** S60 stands as-is. The only
+  thing the compiler knows is "this one function claimed purity." It cannot tell you
+  what an impure function touches, cannot wall the network out of a subtree, and
+  cannot back D-SCAP1 or D-TAINT1 (both need propagation).
+
+```jet
+pure fn price(items: [Item]) -> Usd {
+    items.sum(Item.price)          // ok — provably pure
+}
+
+fn quote(items: [Item]) -> Usd {   // just "not pure" — touches WHAT? unknowable
+    log(items.len())               // network? disk? clock? the type can't say
+    price(items)
+}
+// A junior adds core.net.fetch(...) inside quote(). No diagnostic. Nothing to
+// assert against, because there is no effect to name.
+```
+
+- **Option B — inferred effect tags; annotate at boundaries + cap regions (rec).**
+  The compiler infers each function's effect set from its body and propagates it
+  along calls (an effect of a callee is an effect of the caller, exactly like Koka's
+  rows). You only *write* an effect to **assert** ("this function touches at most
+  `#net`") or to **restrict** a region. A `pure fn` whose body gained an effect is a
+  compile error. A scoped cap region `#caps(net) { … }` (S82 + D-ATTR1 marker-region
+  form) bounds what the enclosed code may touch — anything outside the allowed set is
+  rejected at the call site. All compile-time; erased in codegen.
+
+```jet
+pure fn price(items: [Item]) -> Usd {
+    items.sum(Item.price)
+}
+
+fn quote(items: [Item]) -> Usd {   // inferred effect set: {#net} (from fetch_rate)
+    rate :: fetch_rate()?          // fetch_rate is inferred #net; quote inherits it
+    price(items) * rate
+}
+
+// Boundary assertion: the public entry point declares its contract on line 1.
+pub fn checkout(req: Request) #(net, db) -> Response ? {
+    rate :: fetch_rate()?          // #net — allowed
+    save(order)?                   // #db  — allowed
+    Response.ok()
+}
+
+// Restrict a region: inside here, only #net is permitted.
+fn render_card(c: view Card) {
+    #caps(net) {
+        thumb :: fetch_image(c.url)?    // ok — #net
+        write_temp(thumb)?              // error[E0701]: effect `#fs` not permitted
+                                        //   in this `#caps(net)` region
+                                        //  --> card.jet:4:9
+                                        //   |
+                                        // 4 |         write_temp(thumb)?
+                                        //   |         ^^^^^^^^^^ `write_temp` touches the
+                                        //   |                    disk (#fs); this region allows
+                                        //   |                    only #net
+                                        //   help: widen the region — `#caps(net, fs) { … }` —
+                                        //         or move the write outside it
+    }
+}
+
+// The bug Lena hit, now caught:
+pure fn price(items: [Item]) -> Usd {
+    rate :: fetch_rate()?          // error[E0702]: `pure fn price` performs effect `#net`
+                                   //  --> price.jet:2:13
+                                   //   |
+                                   // 2 |     rate :: fetch_rate()?
+                                   //   |             ^^^^^^^^^^^^ `fetch_rate` touches the
+                                   //   |                          network; `price` is declared pure
+                                   //   help: drop `pure`, or pass the rate in as a parameter
+    items.sum(Item.price) * rate
+}
+```
+
+  **Flag — this REOPENS S60.** S60 ratified `pure fn` as the *one* effect tag and
+  "deliberately rejected a full effects system." Option B is that full system. It does
+  not contradict `pure fn`'s spelling or meaning (purity becomes the empty effect set,
+  the natural bottom of the lattice) but it *does* reverse S60's "no further effects"
+  stance. The owner must reopen S60 to ratify B. **B is recommended but gated on
+  resolving five sub-questions** before implementation: (1) **effect polymorphism /
+  coloring** — does a higher-order fn like `map(f)` propagate `f`'s effects, and how is
+  that written (Koka does it with effect-row variables; Jet needs a beginner-legible
+  answer or an explicit "effects don't cross the `fn(...)` type boundary in v1"
+  limitation); (2) **trait-bound interaction** — can a trait method declare/forbid
+  effects, and does an `impl` have to honor it; (3) **diagnostic quality** — the
+  whole value is in errors like E0701/E0702 reading well at scale; (4) **surface
+  spelling** — `#net` inline tags vs. a `! {net, fs}` return-row slot (D-QUAL1's
+  Option E) — pick one and pin it; (5) **overlap with D-QUAL1's `#(…)`** — these are
+  the same surface and must not ship two spellings.
+
+- **Option C — explicit effects always.** Every function annotates every effect it
+  performs; no inference. This is the coloring tax in full: a one-line refactor that
+  adds a `log()` call forces an effect annotation onto that function *and every
+  transitive caller*, all the way up.
+
+```jet
+fn deep(x: Int) #log -> Int {      // add one log()...
+    log(x)
+    x + 1
+}
+fn mid(x: Int) #log -> Int { deep(x) }      // ...now mid must say #log...
+fn top(x: Int) #log -> Int { mid(x) }       // ...and top, and its callers, forever.
+// error[E0703]: `mid` calls `deep` (#log) but does not declare effect `#log`
+//   help: add `#log` to mid's signature  — repeated up the entire call chain
+```
+
+**Recommendation:** B — inference kills the coloring tax (the thing that makes C
+unlivable and A's `pure fn` an island), keeps `pure fn` meaningful as the empty set,
+and is the only option that can carry D-SCAP1 and D-TAINT1. Ratify only after pinning
+the surface spelling against D-QUAL1 and answering effect-polymorphism, and reopen
+S60 explicitly.
+
+---
+
+---
+
+## Scoped capabilities — board card c67
+
+### D-SCAP1 — Lend a power, get it back: scoped capabilities (rec A)
+
+**User story.** Devi runs a plugin host. A third-party coupon plugin needs to read
+*one* config file, once, during init — and nothing else, ever. She does not want the
+plugin holding a filesystem handle it can stash, pass around, or reuse after init.
+She wants to hand it the power to read that file, watch it use it inside a bounded
+scope, and have the power *evaporate* the instant the scope ends — the same shape as
+the `#audit`/`#unsafe` gate (S58) she already trusts, and the same RAII "cleanup at
+scope end" story Jet teaches for files (S63).
+
+This is **not** the c06 D-CAP capabilities (`take`/`view`/`edit`/`share`), which are
+about *value ownership* — who may read or mutate a value. D-SCAP1 is about handing
+out a revocable **power** — authority to perform an effect (filesystem access,
+network access) — into a scope, then taking it back. D-CAP answers "who owns this
+`Player`?"; D-SCAP1 answers "is this code *allowed* to touch the disk right now?"
+
+| Option | Capability is | Granted/revoked by | Can it be stashed & reused? | Built on |
+|--------|---------------|--------------------|-----------------------------|----------|
+| A — capability *value*, RAII-revoked (rec) | a first-class value you hold | granted into a scope; auto-revoked at scope end (S63) | no — escaping it is a compile error | D-EFF1 + S63 |
+| B — capability = effect tag only | a `#fs` tag on a function | the `#caps(fs){ }` region (D-EFF1) | no — there's no value at all | D-EFF1 only |
+
+#### How other languages do this
+
+- **Object-capability model (E, Caja; Pony reference capabilities)** — authority *is*
+  an unforgeable reference; you can only do what you hold a capability object for, and
+  you pass it explicitly. Takeaway: the canonical "no ambient authority" model — a
+  capability is a value, exactly Option A.
+- **Austral** — *linear* capability values: a capability is consumed/threaded
+  linearly so it can't be duplicated or leaked, and regions bound its scope.
+  Takeaway: linearity is how you make "get it back" enforceable at compile time; A
+  borrows the scope-bound version without requiring full linearity.
+- **Java SecurityManager** — *deprecated for removal* (JEP 411, deprecated in Java 17).
+  A runtime, stack-inspecting, global permission monitor that proved unmaintainable
+  and was a frequent CVE source. Takeaway: the cautionary tale — ambient,
+  runtime-checked, global permissions are exactly what *not* to build; D-SCAP1 is
+  static and erased.
+- **POSIX capabilities / Capsicum (FreeBSD)** — process-level rights: Capsicum drops a
+  process into "capability mode" where it can act only through pre-granted file
+  descriptors. Takeaway: OS-level proof that scoping authority to held handles works;
+  Jet does it at the language level, at compile time.
+- **Wasm / WASI preview 2** — a component starts with **no ambient authority** and can
+  only touch resources the host explicitly grants; not providing a resource implicitly
+  revokes the capability. Takeaway: the modern, mainstream endorsement of cap-based
+  security as the default — Jet's `#grant(fs) { … }` scope is the same idea, in-language.
+
+- **Option A — capability values, revoked by scope / RAII (rec).** A capability is a
+  first-class value granted into a lexical scope. Inside the scope you hold it and may
+  perform the effect it authorizes; at scope end it is revoked by the same RAII rule
+  S63 already teaches ("when a value goes out of scope, Jet cleans it up"). Letting the
+  capability *escape* — storing it somewhere that outlives the grant — is a compile
+  error, so it can't be stashed and reused. Layered on D-EFF1: the capability is what
+  authorizes a `#fs`/`#net` effect inside the region; without it the effect is rejected.
+
+```jet
+fn init_plugin(p: view Coupon) {
+    #grant(fs) { caps ->                 // grant fs authority into this scope
+        cfg :: caps.read("coupon.toml")? // ok — caps authorizes the #fs effect
+        p.configure(cfg)
+    }                                    // caps revoked here (RAII, S63)
+    // p can no longer touch the disk — it never held a capability value
+}
+
+// Escape is rejected — the power can't outlive the grant:
+fn leaky(store: mut [FsCap]) {
+    #grant(fs) { caps ->
+        store.push(caps)   // error[E0711]: capability `caps` escapes the `#grant` that lent it
+                           //  --> plugin.jet:3:20
+                           //   |
+                           // 3 |         store.push(caps)
+                           //   |                    ^^^^ `caps` is revoked when this `#grant`
+                           //   |                         scope ends; storing it would outlive
+                           //   |                         the authority
+                           //   = note: a lent capability may not be stored, returned, or shared
+                           //   help: do the filesystem work inside the `#grant` scope, or take a
+                           //         capability parameter on a function the caller grants per-call
+    }
+}
+
+// Using a #fs effect with no capability in scope is rejected at the call site:
+fn sneaky(p: view Coupon) {
+    cfg :: read("secret")?   // error[E0712]: `#fs` effect requires a filesystem capability
+                             //   help: wrap the access in `#grant(fs) { caps -> … }`,
+                             //         or take an `FsCap` parameter
+}
+```
+
+- **Option B — capabilities as effect tags only (no first-class value).** No
+  capability *value* exists. Authority is purely the D-EFF1 region: inside
+  `#caps(fs) { … }` the `#fs` effect is permitted, outside it isn't. Simpler — it's
+  just D-EFF1 — but you can't *hand* a capability to a callee as a value, can't model
+  "this plugin holds an fs cap and nothing else for the duration of a call it makes,"
+  and the grant/revoke is implicit in lexical nesting rather than an explicit lent
+  thing.
+
+```jet
+fn init_plugin(p: view Coupon) {
+    #caps(fs) {
+        cfg :: read("coupon.toml")?   // ok — region permits #fs
+        p.configure(cfg)
+        // but: nothing to pass to p so that p itself may read one file and no more.
+        // p.load() either is called inside this region (gets ALL of #fs) or outside
+        // it (gets none). No middle ground, no per-call lending.
+    }
+}
+```
+
+**Recommendation:** A — a capability *value* is the only form that can be lent to a
+callee, checked for escape, and revoked by the RAII rule users already know (S63);
+it's the natural generalization of the S58 `#audit`/`#unsafe` gate from "unsafe ops"
+to "any guarded power." B is strictly a subset (it's just D-EFF1's region) and can't
+express per-call lending. Gated on D-EFF1 landing first.
+
+---
+
+---
+
+## Units as a tag — board card c68
+
+### D-UNIT1 — Units of measure: library newtype vs. first-class tag (rec B)
+
+**User story.** Amara is writing a budget tracker. She has a `price: Float` and
+a `tax_rate: Float`. Last week she accidentally added them and got a nonsense
+total. She wants the compiler to reject `price + tax_rate` outright, and she
+wants to write `9.99.usd` in a literal, not `Usd(9.99)`. She is not a type
+theorist; she just wants the bug class to disappear.
+
+**Relationship to D-DIST2 (ratified).** D-DIST2 ratified units of measure as a
+*stdlib extension* riding on top of distinct types (D-DIST1: `UserId :: distinct
+Int`). Option A below is exactly what D-DIST2 shipped: a `struct Usd(Float)`
+distinct-type wrapper, hand-built in stdlib, with explicit constructor and
+`.raw()` unwrap (D-DIST3). Option B is the *upgrade* to that ratified baseline:
+instead of one hand-written distinct struct per unit, units become a
+**parameterised tag** `#unit(usd)` on a numeric type, letting the compiler
+generate the wrapper, enforce dimensional algebra, and make the literal syntax
+natural. Ratifying B does not undo D-DIST1/D-DIST3; it adds a higher-level
+surface that compiles down to the same erased newtype.
+
+| Option | Literal syntax | Arithmetic safety | New language surface | Erase at runtime | Dimensional algebra |
+|--------|---------------|-------------------|---------------------|-----------------|---------------------|
+| A — library newtype (D-DIST2 as-shipped) | `Usd(9.99)` | yes — distinct types block `Usd + Eur` | none (stdlib only) | yes | manual via impl |
+| B — `#unit(usd)` tag (RECOMMENDED) | `9.99.usd` | yes — tag mismatch is E0xxx | parameterised tag on numerics | yes — erases to `f64` | derived by compiler |
+
+**How other languages do this.**
+
+- **F# units of measure** — `[<Measure>] type usd` then `9.99<usd>`; `9.99<usd> + 8.00<eur>` is a type error; fully erased at runtime. The gold standard for compile-time, zero-cost units; Jet's erased-tag model mirrors this exactly.
+- **Frink** — a runtime units language where every number carries its dimension; handles unit conversion automatically (`3 feet + 1 meter`). Jet takeaway: conversion rules should be explicit; silent conversion is the bug class we're killing.
+- **Rust `uom` crate** — phantom-type dimensional system; `Length<meter, f64>`; safe but verbose; the type names leak into every signature. Jet takeaway: units should be invisible in erased code; user sees `Float`, not `Quantity<f64, UnitDef<…>>`.
+- **Haskell `dimensional`** — similar to `uom`; `Quantity d a` where `d` is a type-level dimension vector. Jet takeaway: the type-level machinery should be hidden behind the tag; users declare `#unit(kg)`, the compiler does the algebra.
+- **Ada dimensioned types** — `type Meters is new Float`; dimensional algebra via explicit subtype declarations; verbose but well-understood in safety-critical domains. Jet takeaway: safe-by-default is worth a little ceremony; the ceremony should be one `#unit` declaration, not a full newtype per unit.
+
+**Options.**
+
+- **Option A — library newtype (D-DIST2 as-shipped).** One distinct struct per unit, manually declared in stdlib or user code. Constructor is `Usd(expr)`, unwrap is `.raw()` (D-DIST3). Arithmetic only between two `Usd` values via the `#Numeric` marker (D-DIST3). No literal method. This is fully working today.
+
+```jet
+// stdlib or user declares:
+Usd :: distinct Float
+
+// user code
+price: Usd :: Usd(9.99)
+tax:   Float :: 0.08
+
+total :: price + Usd(tax * price.raw())   // ok: Usd + Usd
+
+// error case
+bad :: price + tax
+// error[E0127]: cannot add `Usd` and `Float`
+//  --> budget.jet:7:16
+//   |
+// 7 |     bad :: price + tax
+//   |                  ^ type mismatch: `Usd` vs `Float`
+//   = note: `Usd` is a distinct type; arithmetic requires both sides to be `Usd`
+//   help: wrap `tax` → `Usd(tax)`, or unwrap price → `price.raw()`
+
+// no natural literal — must write Usd(9.99) everywhere
+```
+
+- **Option B — `#unit(usd)` tag (RECOMMENDED).** A parameterised tag attaches a unit to any numeric binding or expression. The compiler derives a distinct wrapper internally (same erasure as A), enforces unit matching in arithmetic, and exposes a method-call literal syntax `9.99.usd`.
+
+```jet
+// stdlib declares a unit family (one line per physical dimension):
+#unit_family(currency) { usd, eur, gbp }
+
+// user code
+price: Float #unit(usd) :: 9.99.usd
+tax:   Float            :: 0.08
+
+tip:   Float #unit(usd) :: 1.50.usd
+
+// ok: same unit
+total :: price + tip    // Float #unit(usd)
+
+// error case — different units
+bad :: price + 8.00.eur
+// error[E0128]: unit mismatch: `usd` and `eur`
+//  --> budget.jet:10:18
+//   |
+// 10 |     bad :: price + 8.00.eur
+//    |                    ^^^^^^^^ unit `eur`; expected `usd`
+//    = note: `price` carries unit `usd`; you cannot add different currency units
+//    help: convert explicitly — `8.00.eur.to_usd(rate)` — or use `.raw()` to strip the unit
+
+// error case — unit + bare float
+bad2 :: price + tax
+// error[E0129]: cannot add `Float #unit(usd)` and bare `Float`
+//  --> budget.jet:13:18
+//   |
+// 13 |     bad2 :: price + tax
+//     |                    ^^^ bare `Float` (no unit); `price` has unit `usd`
+//     help: attach the unit → `tax.usd` — or strip price → `price.raw()`
+```
+
+**Recommendation:** B — the literal syntax (`9.99.usd`), compiler-derived algebra,
+and single-declaration units make this a genuine beginner-friendly safety layer
+rather than a boilerplate exercise. It is the natural upgrade to D-DIST2, not a
+replacement. Gated on D-QUAL2 (parameterised tags).
+
+---
+
+---
+
+## Linear / must-use values — board card c69
+
+### D-LIN1 — Money that can't leak: linear / must-use values (rec A)
+
+**User story.** Kenji writes a payment service. A `Receipt` is proof of payment;
+it must be saved to the database or returned to the caller — it must never be
+silently discarded. Today `fn charge(…) -> Receipt` compiles fine even if the
+caller writes `charge(order)` on a line by itself and throws the receipt away.
+Kenji wants the compiler to catch that, with a clear message naming the dropped
+value, every time, on every code path.
+
+Jet already has the substrate: `take` moves a value into the callee (S10), so
+values are already consumed at most once. Linear = consumed *exactly* once — the
+tag adds the "at least once" half.
+
+| Option | Prevents silent drop | Prevents copy | Cost to author | Failure mode |
+|--------|---------------------|---------------|---------------|--------------|
+| A — `#linear` tag (RECOMMENDED) | yes — every path must consume | yes — `#linear` implies `#no_copy` | one tag on the type; good errors | compiler error naming the unconsumed binding |
+| B — `#must_use` only | warn/err on ignored *call result* | no | zero — just a tag | only catches the ignored-return case; drop in a variable is silent |
+
+**How other languages do this.**
+
+- **Rust (affine types / move semantics)** — values are moved, not copied, unless they implement `Copy`; a moved value cannot be used again. Affine = used *at most* once. Jet already has this via `take`. Linear = at most once *and* at least once; Rust does not enforce the "at least once" half without the `#[must_use]` attribute.
+- **Austral** — true linear types: every linear value must be consumed on every code path; the compiler names the un-consumed binding at the branch where it escapes. The gold standard for "exactly-once" enforcement; Jet's `#linear` is this model.
+- **Linear Haskell (`%1` multiplicity)** — function arrows annotated with a multiplicity: `f :: a %1 -> b` means `f` consumes its argument exactly once. Jet takeaway: the constraint lives on the *type*, not the *function arrow* — a `Receipt` is always linear, not "linear only when passed to certain functions."
+- **Clean (uniqueness types)** — a `*a` is a *unique* value; only one reference may exist at a time; the compiler tracks aliasing. Jet takeaway: uniqueness and linearity overlap; Jet's tag is closer to linearity (must consume) than uniqueness (no aliasing), which is the weaker, more teachable property.
+- **Granule / quantitative type theory** — each variable has a *grade* (how many times it may be used); `0` = erased, `1` = linear, `ω` = unrestricted. Jet takeaway: we only need grade `1`; shipping the whole grade lattice would be I8-violating over-engineering.
+- **Rust `#[must_use]`** — an attribute on a type or function; the compiler *warns* (not errors) when a `must_use` value is ignored at a call site, but not when the value is bound to a variable and then the variable is dropped. Option B is exactly this; it catches 80% of the cases with zero new machinery.
+
+**Options.**
+
+- **Option A — `#linear` tag (RECOMMENDED).** The tag on a type means: every binding of that type must be consumed (passed to a `take` parameter, returned, or explicitly dropped via `drop(x)`) on every reachable code path. The compiler tracks consumption through branches; any path that lets a `#linear` value go out of scope silently is a compile error.
+
+```jet
+// type declaration
+#[linear]
+struct Receipt {
+    order_id: OrderId
+    amount:   Float #unit(usd)
+}
+
+// fn that produces one
+fn charge(take order: Order) -> Receipt ? {
+    // ... payment logic ...
+    ok(Receipt { order_id: order.id, amount: order.total })
+}
+
+// correct usage — consumed via return
+fn process(take order: Order) -> String ? {
+    receipt :: charge(order)?
+    save_to_db(take receipt)?    // take = consume
+    ok("saved")
+}
+
+// error — binding created but never consumed
+fn bad_process(take order: Order) -> String ? {
+    receipt :: charge(order)?
+    // ... forgot to save ...
+    ok("done")
+    // error[E0140]: linear value `receipt` is not consumed before it goes out of scope
+    //  --> payment.jet:18:5
+    //   |
+    // 14 |     receipt :: charge(order)?
+    //    |     ------- linear value bound here
+    // 18 |     ok("done")
+    //    |     ^^^^^^^^^^ `receipt` escapes scope unconsumed on this path
+    //    = note: `Receipt` is `#linear`; it must be consumed on every path
+    //    help: pass it somewhere → `save_to_db(take receipt)?`
+    //          or explicitly discard → `drop(receipt)` (requires an `#audit`)
+}
+
+// error — silent drop in a branch
+fn conditional(take order: Order, save: Bool) -> String ? {
+    receipt :: charge(order)?
+    if save {
+        save_to_db(take receipt)?
+    }
+    // error[E0141]: linear value `receipt` not consumed on the `else` branch
+    //  --> payment.jet:28:5
+    //   |
+    // 24 |     receipt :: charge(order)?
+    //    |     ------- linear value bound here
+    // 28 |     }   ← else branch here
+    //    |     ^ `receipt` is consumed in the `if` arm but not the `else` arm
+    //    help: add `drop(receipt)` in the else arm, or consume it unconditionally before the branch
+    ok("done")
+}
+```
+
+- **Option B — `#must_use` only (weaker stepping stone).** The tag causes the compiler to error when the return value of a call is immediately discarded (not bound). It does *not* enforce consumption of a bound variable.
+
+```jet
+#[must_use]
+struct Receipt {
+    order_id: OrderId
+    amount:   Float
+}
+
+// error — ignored call result
+fn bad1(take order: Order) -> String ? {
+    charge(order)?       // result not bound
+    // error[E0142]: value of type `Receipt` (marked `#must_use`) is ignored
+    //  --> payment.jet:6:5
+    //   |
+    // 6 |     charge(order)?
+    //   |     ^^^^^^^^^^^^^^ return value discarded
+    //   help: bind it → `receipt :: charge(order)?`
+    ok("done")
+}
+
+// NOT caught — variable bound then silently dropped
+fn bad2(take order: Order) -> String ? {
+    receipt :: charge(order)?
+    // receipt never used — but #must_use only checks the call site, not the binding
+    ok("done")   // compiles. bug ships.
+}
+```
+
+**Recommendation:** A — the "at least once" guarantee is the entire point; Option B
+only catches the most obvious case and lets the subtler one through. Implement B
+first as the simpler stepping stone (it is a strict subset of A), then lift to A.
+Both options are gated on D-QUAL2.
+
+---
+
+---
+
+## Taint tracking — board card c70
+
+### D-TAINT1 — Untrusted input can't reach the sink (rec A)
+
+**User story.** Sam owns security for a Jet web service. Last quarter an injection bug
+shipped because a request body flowed — through three helper functions and a struct
+field — straight into a SQL string with no escaping. Code review missed it; the
+dangerous path was four hops long. Sam wants the *compiler* to know that anything
+derived from `req.body()` is untrusted, to keep that mark riding along through every
+assignment and helper call, and to refuse to let it reach a query unless it has passed
+through a blessed sanitizer first. He wants the 80% "don't let user input hit the
+sink" win — not a PhD information-flow lattice.
+
+| Option | Tracks | User writes | Spread / strip | Defer to later? |
+|--------|--------|-------------|----------------|-----------------|
+| A — `#tainted` tag + sanitizers (rec) | one bit: tainted or not | a `#tainted` source + blessed sanitizer fns | derive-from-tainted ⇒ tainted; sanitizer strips it | no — ship it on D-EFF1 |
+| B — full information-flow control | a security lattice + declassification | levels, labels, declassify rules | lattice join on every flow | yes — IFC ballot (#30/#33) |
+
+#### How other languages do this
+
+- **Perl taint mode (`-T`)** — the original: data from outside the program is
+  *tainted*; tainted data can't be used in `system`, `exec`, SQL, etc.; a regex
+  capture is the blessed untaint. Runtime, one bit. Takeaway: the exact 80% model
+  Option A copies — but Jet does it *statically*, not at runtime.
+- **Ruby `$SAFE` / taint** — had a similar object-taint flag; **deprecated in 2.7 and
+  removed in 3.0 with no replacement** ([Feature #16131](https://bugs.ruby-lang.org/issues/16131)).
+  It was a global, runtime, mutable safe-level that proved too coarse and too easy to
+  bypass. Takeaway: a runtime, global taint flag is a known failure; Jet makes taint a
+  static, per-value, erased fact instead.
+- **Java Checker Framework** — `@Tainted` / `@Untainted` type qualifiers checked by a
+  pluggable type system at compile time; sanitizers return `@Untainted`. Takeaway: the
+  static, type-qualifier version of taint — the closest precedent for A, and proof it
+  works as a compile-time check.
+- **Meta Pysa (Python) / Hack** — taint as static *taint analysis*: sources, sinks,
+  and sanitizers declared in config; the analyzer reports any source→sink flow.
+  Takeaway: at scale, taint is run as source/sink/sanitizer triples — Jet bakes that
+  triple into the language (`#tainted` source, sink = effect, sanitizer fn).
+- **JIF / Jif & FlowCaml** — full **information-flow control**: a security-label
+  lattice, principals, and explicit *declassification* to lower a label. Takeaway:
+  the heavyweight end — expressive but research-grade ceremony; this is Option B, and
+  Jet defers it to a dedicated IFC ballot.
+
+Built on D-EFF1's propagation: a "sink" is just an effect (`#db`, `#exec`, `#net`), so
+"tainted value reaches a sink" is checked by the same engine that propagates effects.
+The taint is a static, per-value tag, erased in codegen (I3).
+
+- **Option A — `#tainted` tag + sanitizer functions (rec).** A value can carry a
+  `#tainted` tag (attached at an untrusted source, inline per S82/D-ATTR1). The tag
+  **spreads**: anything derived from a tainted value — assignment, interpolation,
+  field store, function return — is tainted. A function marked a **sanitizer** is the
+  one blessed way to strip it: its return is `#untainted` regardless of input. A
+  tainted value reaching a sink effect is a compile error naming the sink.
+
+```jet
+fn handle(req: Request) #(db) -> Response ? {
+    raw  :: req.body() #tainted         // source: untrusted, tagged inline
+    name :: "user_" + raw               // derived ⇒ still #tainted (spreads)
+
+    save(name)?                         // error[E0721]: tainted value reaches a `#db` sink
+                                        //  --> handler.jet:4:10
+                                        //   |
+                                        // 4 |     save(name)?
+                                        //   |          ^^^^ `name` is derived from `req.body()`
+                                        //   |               (untrusted) and has not been sanitized
+                                        //   = note: `save` performs `#db`, a taint sink
+                                        //   help: pass it through a sanitizer first —
+                                        //         `save(escape_sql(name))?`
+    Response.ok()
+}
+
+// A blessed sanitizer strips the tag:
+sanitizer fn escape_sql(s: String #tainted) -> String {   // takes tainted, returns clean
+    s.replace("'", "''")                                  // return is #untainted by contract
+}
+
+fn ok(req: Request) #(db) -> Response ? {
+    raw   :: req.body() #tainted
+    clean :: escape_sql(raw)            // #untainted — tag stripped
+    save(clean)?                        // ok — sink sees only sanitized data
+    Response.ok()
+}
+```
+
+- **Option B — full information-flow control.** A security-label lattice (levels,
+  principals), label-join on every flow, and explicit declassification to lower a
+  label — JIF/FlowCaml-grade. Strictly more powerful (handles confidentiality *and*
+  integrity, multiple trust levels, implicit-flow leaks through control flow) but
+  research-grade ceremony for the common case, and a large type-system commitment.
+
+```jet
+fn handle(req: Request #label(Untrusted)) -> Response ? {
+    raw :: req.body()                   // label: Untrusted
+    // every binding carries a lattice label; branching on a secret taints the
+    // branch (implicit flow); lowering requires an explicit, audited declassify:
+    clean :: declassify(escape_sql(raw), to: Trusted, because: "SQL-escaped")
+    save(clean)?
+    Response.ok()
+}
+// Powerful, but: lattices, principals, implicit-flow tracking, and declassify
+// ceremony on the 80% case that one #tainted bit already covers.
+```
+
+**Recommendation:** A — one bit (tainted / not) plus blessed sanitizers covers the
+injection-class bug Sam actually ships, rides D-EFF1's existing propagation for free,
+and stays beginner-legible. Full IFC (B) is real and worth its own future ballot
+(#30/#33), but it is the wrong altitude for v1 (I8 simplicity ratchet). Gated on
+D-EFF1 landing first.
+
+---
+
+**Sources** (prior-art confirmation):
+- Ruby $SAFE/taint removal — [Feature #16131: Remove $SAFE, taint and trust](https://bugs.ruby-lang.org/issues/16131), [Ruby 3.0 changes](https://rubyreferences.github.io/rubychanges/3.0.html)
+- WASI preview 2 capability model — [Capabilities-Based Security with WASI](https://marcokuoni.ch/blog/15_capabilities_based_security/), [Bytecode Alliance — WASI 0.2 Launched](https://bytecodealliance.org/articles/WASI-0.2)
+
+<!-- value-tags cluster: D-UNIT1, D-LIN1, D-STATE1 -->
+
+# Value-tag cluster — draft ballot cards
+
+Three cards. All assume tags are first-class (gated on D-QUAL2 from the c62
+qualifier-taxonomy work). UNIT1 and LIN1 are lower complexity; STATE1 is
+mid-pack. None of these cards should be ratified before D-QUAL2 settles the
+tag-vs-effect-vs-trait routing rule.
+
+**Dependency note (applies to all three cards):** D-QUAL1 (c62) proposed the
+taxonomy: a *tag* is a label without methods, written `#[Tag]` on a declaration
+or `#Tag` inline on a value. D-QUAL2 is the ballot that ratifies whether tags
+are first-class in the language at all and what surface they live on. D-UNIT1,
+D-LIN1, and D-STATE1 are built on top of that; treat them as "ratify D-QUAL2
+first, then decide these in any order."
+
+---
+
+---
+
+## Typestate — board card c71
+
+### D-STATE1 — Order-of-events types: typestate (rec A)
+
+**User story.** Fatima writes an e-commerce checkout. The invariant is: an `Order`
+must be *charged* before it can be *shipped*. Today she enforces this with a
+`require(order.is_charged)` at the top of `ship()` — a runtime check that fires in
+production, not at compile time. She wants `ship(order)` to be a compile error
+unless `order` has passed through `charge()`. She does not want to read a research
+paper to achieve this.
+
+Typestate = a tag that changes as a value moves through its lifecycle. A function
+consumes one tag-state and returns the next. The tag lives only in sema; it erases
+completely at runtime (no vtable, no enum discriminant, no overhead).
+
+| Option | Compile-time guarantee | Runtime cost | Author ceremony | Failure error |
+|--------|----------------------|-------------|-----------------|---------------|
+| A — transitioning tags (RECOMMENDED) | yes — wrong-state call is a compile error | zero — tags erase | declare states + transitions; write `#[State]` on return type | clear: "expected `#charged`, found `#pending`" |
+| B — runtime `require(…)` only | no — wrong-state call panics at runtime | `require` overhead | none | panic in production; message is a string |
+
+**How other languages do this.**
+
+- **Plaid** — the typestate research language; methods carry pre/post state annotations; the type checker verifies transitions; objects live in exactly one state at any time. The academic source for most of what Jet's D-STATE1 proposes; Jet simplifies by routing state through tags rather than separate type declarations.
+- **Rust typestate pattern (phantom types)** — a common Rust idiom: `struct Connection<S>(PhantomData<S>)`; `fn open(c: Connection<Closed>) -> Connection<Open>`; state changes force a new type. Correct, but phantom types are invisible boilerplate and the pattern requires careful hand-threading. Jet's tag approach achieves the same guarantee without any phantom-type machinery.
+- **Austral** — linear types enforce state protocols: a `Connection` value must be explicitly transitioned; the old state is consumed, the new one produced. Jet takeaway: consuming the old tag-state (`take`) and returning the new one is the right model; it maps directly onto Jet's `take` ownership keyword (S10).
+- **Session types (process calculi / Haskell `session-types`)** — encode communication protocols in the type system; a channel has a type that steps with each send/receive. Jet takeaway: the session-types insight is that protocols are sequences of typed operations — typestate is exactly that idea applied to values, not channels.
+- **TypeScript discriminated-union state machines** — `type Order = { status: "pending" } | { status: "charged" } | { status: "shipped" }`; a `ship` function takes only the `charged` variant. Works, but the state is a runtime enum discriminant (nonzero cost); the narrowing is done by the type checker reading the `status` field. Jet takeaway: the tag-based model achieves the same narrowing with zero runtime cost because the tag erases.
+- **Ada/SPARK (pre/post conditions)** — `Pre => Order.Status = Charged`; verified statically by SPARK's prover. Jet takeaway: SPARK proves preconditions but the precondition is still a runtime value (`Status`); Jet's tag is stronger because the state is the type itself — there is no runtime field to check.
+
+**Options.**
+
+- **Option A — typestate via transitioning tags (RECOMMENDED).** States are tags. A function that *transitions* a value from one state to another takes the old state (consuming the value via `take`) and returns the new state. The tag on a binding tracks which state it is currently in; a call that requires a different state is a compile error naming the mismatch.
+
+```jet
+// state tags — plain tags, no methods
+// (declared as tag constants; exact declaration syntax gated on D-QUAL2)
+#tag Pending
+#tag Charged
+#tag Shipped
+
+struct Order {
+    id:    OrderId
+    total: Float #unit(usd)
+}
+
+// transition: Pending → Charged
+fn charge(take order: Order #[Pending]) -> Order #[Charged] ? {
+    // ... call payment processor ...
+    ok(order)          // order is returned with the Charged tag
+}
+
+// transition: Charged → Shipped
+fn ship(take order: Order #[Charged]) -> Order #[Shipped] ? {
+    // ... dispatch courier ...
+    ok(order)
+}
+
+// correct lifecycle
+fn checkout(take order: Order #[Pending]) -> String ? {
+    charged  :: charge(order)?    // order: Order #[Charged]
+    shipped  :: ship(charged)?    // charged: Order #[Shipped]
+    ok("shipped: {shipped.id}")
+}
+
+// error — skipping charge
+fn bad_checkout(take order: Order #[Pending]) -> String ? {
+    ship(order)?
+    // error[E0150]: state mismatch
+    //  --> checkout.jet:23:5
+    //   |
+    // 23 |     ship(order)?
+    //    |          ^^^^^ expected `Order #[Charged]`, found `Order #[Pending]`
+    //    = note: `ship` requires the order to be in state `#[Charged]`
+    //    = note: `order` is currently in state `#[Pending]`
+    //    help: call `charge(order)` first to transition to `#[Charged]`
+    ok("done")
+}
+
+// error — using the old binding after transition
+fn stale(take order: Order #[Pending]) -> String ? {
+    charged :: charge(order)?
+    ship(order)?         // `order` was moved into `charge`; this is the old binding
+    // error[E0031]: use of moved value `order`
+    //  --> checkout.jet:35:10
+    //   |
+    // 33 |     charged :: charge(order)?
+    //    |                       ----- `order` moved here
+    // 35 |     ship(order)?
+    //    |          ^^^^^ value used after move
+    //    help: use `charged` (the transitioned value) instead
+    ok("done")
+}
+```
+
+- **Option B — runtime `require(…)` only.** No language change. The author adds a precondition check at the top of `ship`; the compiler does not enforce it.
+
+```jet
+struct Order {
+    id:      OrderId
+    total:   Float
+    charged: Bool     // runtime flag — the thing typestate replaces
+}
+
+fn ship(view order: Order) -> String ? {
+    require(order.charged, "order must be charged before shipping")
+    // ... dispatch courier ...
+    ok("shipped")
+}
+
+// compiles fine — crashes at runtime
+fn bad_checkout(take order: Order) -> String ? {
+    ship(view order)?    // order.charged is false — panic at runtime:
+    // thread 'main' panicked at checkout.jet:10:
+    // order must be charged before shipping
+    ok("done")
+}
+
+// the bug class is alive; the compiler never sees it
+```
+
+**Recommendation:** A — the whole value of typestate is moving the bug class from
+runtime to compile time; Option B is the status quo that typestate exists to
+replace. Option B is listed only to make explicit what "no decision" means in
+practice. Complexity sequencing: implement `#linear` (D-LIN1 Option A) first since
+it exercises the same "track a tag on a value across branches" machinery; typestate
+then adds the "tag changes on transition" layer on top. Both are gated on D-QUAL2.
+
+<!-- foundation+misc: D-QUAL2, D-TXN1, D-MIGRATE1 + deferred -->
+
+# Draft ballot cards — D-QUAL2, D-TXN1, D-MIGRATE1 + deferred stubs
+
+> Status: draft — not yet promoted to `decision-ballots.md`.
+> Date: 2026-06-20
+>
+> **Read order for owner:** D-QUAL2 first (foundational taxonomy); D-QUAL1
+> (already in the open queue, board card c62) builds on whatever D-QUAL2
+> ratifies and should be re-read in that light. D-TXN1 and D-MIGRATE1 are
+> independent.
+
+---
+
+---
+
+## Scoped transactions — board card c72
+
+### D-TXN1 — Rollback semantics for `#transact { }` (rec A)
+
+**User story.** Kai is writing a game action system. A single `use_ability`
+call must spend stamina, apply a cooldown, and damage the target — or do none
+of those things if any step fails. Today he writes a ladder of manual rollback
+calls after each `?`. He misses one. The bug ships. He wants the compiler to
+guarantee that a failed sequence is cleanly unwound without him hand-writing
+the ladder.
+
+> **Note on syntax.** The `#transact { }` scoped-region syntax is **already
+> ratified** (S82 / D-ATTR1: `#Marker { }` is the scoped-effect form). This
+> decision is about **rollback semantics** — what `#transact { }` actually
+> does when a `?` propagates — not syntax. Do not re-open the surface.
+
+| Option | What rolls back | Who writes rollback logic | Honest about limits? | After D-EFF1? |
+|--------|----------------|--------------------------|----------------------|---------------|
+| A — trait-declared rollback | types that impl `Rollback` | the type author, once | yes — only types that know how | natural sequencing (after D-EFF1) |
+| B — library-only compensation | nothing (caller hand-writes) | every caller | technically honest; no language help | independent; always available |
+
+- **Option A — `#transact { }` over types that declare `Rollback`. (RECOMMENDED)**
+  A type opts into the transaction protocol by implementing the `Rollback`
+  trait. Inside a `#transact { }` block, every `?`-failure triggers the
+  reverse sequence: each step's `rollback` method is called in reverse order
+  on the values that were mutated. On clean exit (no `?` propagation), the
+  transaction commits — no rollback needed. The compiler tracks which values
+  were mutated inside the block and synthesizes the reverse-call chain.
+
+  This is honest: only operations on types that declare a rollback are
+  covered. If you use a type that doesn't implement `Rollback` inside the
+  block, sema tells you.
+
+```jet
+trait Rollback {
+    fn rollback(mut self)
+}
+
+struct Stamina { current: Int, reserved: Int }
+
+impl Stamina: Rollback {
+    fn rollback(mut self) {
+        self.current += self.reserved
+        self.reserved = 0
+    }
+}
+
+struct Cooldown { active: Bool }
+
+impl Cooldown: Rollback {
+    fn rollback(mut self) {
+        self.active = false
+    }
+}
+
+fn use_ability(player: mut Player, target: mut Enemy) -> Unit ? {
+    #transact {
+        player.stamina.spend(10)?   // if this fails: nothing to roll back yet
+        player.cooldown.apply()?    // if this fails: rolls back stamina.spend
+        target.hp.damage(25)?       // if this fails: rolls back cooldown + stamina
+    }
+    // all three succeeded — committed, no rollback
+}
+```
+
+```jet
+// Error: using a non-Rollback type inside #transact
+struct Logger { entries: [String] }
+// Logger does not impl Rollback
+
+fn risky(logger: mut Logger) -> Unit ? {
+    #transact {
+        logger.entries.push("started")?
+        //             ^^^^
+        // error[E0801]: `Logger` does not implement `Rollback`; mutations
+        //               inside `#transact` must be reversible.
+        //   fix: impl Logger: Rollback { fn rollback(mut self) { … } }
+        //        or move `logger.entries.push` outside the `#transact` block.
+    }
+}
+```
+
+  Natural sequencing note: `#transact` is an effect region (S82). After
+  D-EFF1 ratifies the full effects model, rollback becomes a named effect
+  that propagates through call sites like any other. Ratify A now as the
+  semantic contract; the effect-system wiring follows D-EFF1.
+
+- **Option B — Library-only manual compensation.** No language change. Every
+  caller hand-writes the rollback ladder using `??` fallback arms. The `#transact`
+  syntax is not used for rollback; it could still be used for other region
+  semantics (locking, tracing), but rollback is purely caller responsibility.
+
+```jet
+fn use_ability(player: mut Player, target: mut Enemy) -> Unit ? {
+    // hand-written compensation ladder — no language help
+    player.stamina.spend(10) ?? {
+        return err(Error.message("stamina failed"))
+    }
+    player.cooldown.apply() ?? {
+        player.stamina.rollback()         // caller must remember this
+        return err(Error.message("cooldown failed"))
+    }
+    target.hp.damage(25) ?? {
+        player.cooldown.rollback()        // and this
+        player.stamina.rollback()         // and this
+        return err(Error.message("damage failed"))
+    }
+    return ok(())
+}
+
+// A new teammate adds a fourth step and forgets the rollback:
+fn use_ability_v2(player: mut Player, target: mut Enemy) -> Unit ? {
+    player.stamina.spend(10) ?? { return err(Error.message("stamina")) }
+    player.cooldown.apply()  ?? { player.stamina.rollback(); return err(…) }
+    target.hp.damage(25)     ?? { player.cooldown.rollback(); player.stamina.rollback(); return err(…) }
+    emit_sound(player.sfx)?
+    // no rollback for emit_sound — partial success shipped silently
+}
+```
+
+  Zero language change. Leak-by-omission is the exact failure mode Option B
+  accepts: every new step is a rollback the caller might forget.
+
+**How other languages do this.**
+
+| Language | Mechanism | Jet takeaway |
+|----------|-----------|-------------|
+| Haskell STM (`stm`) | `atomically` block over `TVar`s; the runtime retries on conflict; no partial state ever visible | Jet doesn't have shared mutable state across tasks (S53 deferred); STM's retry loop doesn't apply, but the "all-or-nothing block" idea does |
+| Clojure `dosync` / refs | Software transactional memory; `alter`/`ref-set` inside a `dosync` block; retries on conflict | Same as STM — the retry model is for concurrent shared state; Jet's `#transact` is single-threaded sequential undo |
+| Database ACID transactions | BEGIN / COMMIT / ROLLBACK; the DB engine tracks the undo log automatically | Jet's Option A is the same contract at the language level: each type declares its own undo; the block synthesizes the ROLLBACK call sequence |
+| Saga pattern (microservices) | Each step publishes a compensating action; a saga orchestrator calls compensations in reverse on failure | Option A is a local, synchronous Saga: the `Rollback` trait *is* the compensating action; `#transact` *is* the orchestrator |
+| Temporal Workflows | Compensations written as separate activities; the framework calls them on failure | More infrastructure, same idea; Jet's version is zero-framework, compiler-synthesized |
+
+Jet's Option A is unusually explicit: types opt in, the rollback logic is
+type-authored and auditable, and the compiler synthesizes the call sequence.
+There is no hidden retry, no global undo log, and no runtime overhead outside
+the `Rollback` calls themselves.
+
+**Recommendation:** A — `#transact { }` over `Rollback`-implementing types.
+The honesty is a feature: only operations whose authors have declared a
+rollback are covered; everything else is a compile error telling you what to
+fix. Option B is the status quo and the source of the bug Kai hit.
+
+---
+
+---
+
+## Safe schema changes — board card c73
+
+### D-MIGRATE1 — Compile-time enforcement of breaking data-shape changes (rec A)
+
+**User story.** Dev team at a Jet shop ships a library with a public `UserRecord`
+struct. Three months later, someone renames a field. Every consumer silently
+recompiles, gets default-zero for the missing field, and ships corrupted data to
+production before anyone notices. Sam, the library author, wants the compiler to
+refuse the rename until he writes an explicit migration — the same guarantee a
+database gives when you try to drop a column.
+
+| Option | When is the break caught? | Who writes conversion? | Ignorable? | Needs recorded shape? |
+|--------|--------------------------|----------------------|------------|----------------------|
+| A — compile-time enforcement + conversion library | at compile time of the library change | the library author | no — it's a compile error | yes — a published shape must be snapshotted |
+| B — lint/warn only | at compile time, advisory | nobody required to | yes — warnings are ignorable | no |
+
+- **Option A — Compile-time enforcement: the CHECK is core; conversion is the
+  Build-tier versioning library (#11). (RECOMMENDED)** When a type is marked
+  `#[PublishedSchema]` (or equivalent), the compiler snapshots its field layout
+  at release time and stores it alongside the package (in `.jet/cache/` or
+  embedded in the artifact). On the next build, if the shape has changed in a
+  breaking way (field removed, type changed, field renamed without migration),
+  sema emits **E0901** naming the field and the published version. The author
+  must either write a migration (using the Build-tier versioning library) or
+  explicitly bump the major version with a breaking-change marker.
+
+```jet
+// pkg.jet — published type, shape is snapshotted at release
+#PublishedSchema
+struct UserRecord {
+    id: Int,
+    email: String,
+    name: String,
+}
+
+// Later: rename `name` → `display_name` without a migration:
+#PublishedSchema
+struct UserRecord {
+    id: Int,
+    email: String,
+    display_name: String,   // renamed from `name`
+}
+// error[E0901]: breaking change to published schema `UserRecord` (v0.4.0)
+//   field `name: String` removed; `display_name: String` added
+//   Consumers reading v0.4.0 data will get a missing-field error at runtime.
+//   Options:
+//     1. Write a migration: `migration UserRecord { rename name -> display_name }`
+//     2. Bump the major version and mark this as a breaking release.
+//     3. Keep the old field and deprecate it.
+```
+
+```jet
+// With a migration — the compiler accepts the change:
+migration UserRecord {
+    rename name -> display_name
+}
+
+#PublishedSchema
+struct UserRecord {
+    id: Int,
+    email: String,
+    display_name: String,
+}
+// compiles: the migration tells consumers how to upgrade v0.4.0 → v0.5.0 data.
+```
+
+```jet
+// Consumer side — reading old data with the new shape:
+record :: UserRecord.from_v040(raw_bytes)?
+// the versioning library generates `from_v040` from the migration chain;
+// up/down conversion is the Build-tier library's job, not the compiler's.
+```
+
+  The compiler's job is the **check** — refuse a breaking shape change without
+  a declared migration. The conversion functions (`from_v040`, `to_v040`) are
+  generated by the Build-tier versioning library (#11), not by `sema` or
+  `codegen` directly. This keeps codegen dumb (I3) and gives the library room
+  to handle complex cases (field reorder, type coercion, default injection)
+  without adding new compiler machinery for each.
+
+- **Option B — Lint/warn only.** The compiler notices the structural change
+  and emits a warning, but the build does not fail. A `jet fix` or `--allow`
+  suppresses it.
+
+```jet
+// Same rename as above, no migration:
+#PublishedSchema
+struct UserRecord {
+    id: Int,
+    email: String,
+    display_name: String,
+}
+// warning[W0901]: breaking change to published schema `UserRecord` (v0.4.0)
+//   field `name: String` removed; `display_name: String` added
+//   (use --allow schema-break to suppress)
+```
+
+  Warnings are suppressible. The one time you most want an unbreakable
+  guarantee — public wire formats — is the one time a warning is ignored under
+  release deadline pressure. Option B is the database world's equivalent of a
+  migration framework you can opt out of: it exists, and the bugs still ship.
+
+**How other languages do this.**
+
+| Language | Mechanism | Jet takeaway |
+|----------|-----------|-------------|
+| Protocol Buffers | Field numbers + `reserved` keyword; removing a field number is a protocol error at decode time | Runtime check, not compile-time; Jet catches it earlier. The "number-is-identity, name-is-docs" rule is worth considering for the migration syntax |
+| Apache Avro | Reader/writer schema resolution at decode time; missing optional fields get defaults | Runtime resolution, not compile-time; Jet's check is stronger. Avro's reader/writer schema pair is the direct analog of Jet's published-vs-current shape diff |
+| Rust + serde | No built-in schema versioning; authors use `#[serde(rename = "…")]` and hope; `serde_versioning` crates exist but are optional | Jet enforces what Rust leaves as convention; the `migration` block is the `#[serde(rename)]` that the compiler requires |
+| Elm records | The compiler checks record type compatibility structurally; a renamed field is a type error at every call site, found immediately | Elm catches breaks locally (within a codebase); Jet's `#PublishedSchema` catches breaks at the library boundary, where Elm's type system stops |
+| Flyway / Alembic (database migration frameworks) | Migration scripts versioned and applied in order; the framework refuses to run if migrations are missing | The exact model Jet's option A adopts at the language level: migration = required, ordered, tracked. Jet makes it a compile error; Flyway makes it a deploy error |
+| Ecto migrations (Elixir) | Migrations are first-class modules; `mix ecto.migrate` fails if the schema is ahead of migrations | Same as Flyway; Jet's version is language-native, not a deploy-time CLI |
+
+Jet's Option A is the strongest guarantee in this table: it is a **compile
+error**, not a runtime decode error (Avro), a type error within a codebase
+(Elm), or a deploy-time failure (Flyway/Ecto). That strength comes at a cost:
+a published shape must be snapshotted and stored so the compiler can diff it.
+The `.jet/cache/` store is the natural home.
+
+**Recommendation:** A — compile-time enforcement is the only form of this
+guarantee that cannot be silenced by a deadline. The conversion library (#11)
+handles up/down migration logic without burdening the compiler; sema's job is
+exactly the check (I3). Option B is a lint, and lints get suppressed.
+
+---
+
+---
+
+## Deferred ballots — promote when reached
+
+The items below are not ready for owner decision. Each has a real user story
+and a clear reason to wait. Promote a stub to a full card when its
+prerequisite is ratified or its milestone is reached.
+
+---
+
+**D-PROP1 — Effect prohibitions: implicit propagation of `#(no_…)`.**
+*User story:* A security engineer wants to know, by reading the root call
+site, that a call graph never touches the network — without auditing every
+callee. He writes `#(no_net)` on a function and the compiler traces every
+reachable call for a net effect, naming the violating path.
+*Why deferred:* Rides **D-EFF1** (the effect-propagation engine itself) plus
+D-QUAL1's surface (`#(…)`); prohibition is the inverse-lattice follow-on once
+positive effects propagate. Sequencing: D-EFF1 → D-PROP1. Board items #24/#4.
+
+---
+
+**D-ROLE1 — Time-varying roles: typestate + time.**
+*User story:* A hotel booking system dev wants to express that a `Reservation`
+is `#pending` before payment and `#confirmed` after — and that calling
+`check_in` on a `#pending` reservation is a compile error.
+*Why deferred:* Requires the typestate machinery from **D-STATE1** (gated on
+D-QUAL2) to be ratified first; "time-varying" adds a temporal ordering
+constraint on top of static typestate, a separate design question. Board item #13.
+
+---
+
+**D-REFINE1 — Refinement types.**
+*User story:* A numeric processing library author wants `PositiveInt` to be a
+type the compiler can prove is always > 0, so she doesn't pepper every
+function with `require(n > 0)`.
+*Why deferred:* Refinement types require a proof/SMT layer that is not in the
+roadmap for v1; the simplicity ratchet (I8) requires a concrete milestone slot
+and owner sign-off before any work begins. Board item #19.
+
+---
+
+**D-BUDGET1 — Budgets as types.**
+*User story:* A systems developer writing a real-time renderer wants to express
+that `render_frame` has a 16ms CPU budget and have the compiler warn if a
+called function is known to exceed it.
+*Why deferred:* Requires comptime cost-bound inference, which is not in the
+v1 roadmap; no prior-art consensus on how to make it ergonomic without macros
+(I8 / no macros). Board item #22.
+
+---
+
+**D-IFC1 — Information-flow and compliance tracking.**
+*User story:* A fintech dev wants to annotate a value as `#pii` (personally
+identifiable information) and have the compiler refuse to let it flow into a
+logging call or a non-encrypted storage write without an explicit sanitize
+step — enforced at compile time, not by code review.
+*Why deferred:* Generalizes D-TAINT1 (taint tracking) and requires the full
+effect/tag propagation model from D-EFF1 and D-QUAL1 to be ratified first;
+the compliance dimension (what counts as a legal sink) is a policy question
+that also interacts with the manifest capability model (D-QUAL1 Option A,
+manifest surface). Board items #30/#33.
+
+---
+
+**D-REPLAY1 — Opt-in record and replay.**
+*User story:* A game developer wants to record a session's inputs, replay
+them deterministically to reproduce a bug, and have the compiler ensure no
+hidden state (system clock, random, I/O) is read during replay without being
+mocked.
+*Why deferred:* Requires the effect system (D-EFF1) to tag non-deterministic
+effects and a runtime record/replay harness; neither is in the v1 roadmap.
+Board item #7.
+
+---
+
+**D-REVERSE1 — Opt-in reversible computation and solver integration.**
+*User story:* A constraint-based UI layout author wants to write the forward
+constraint (`width = parent.width - padding * 2`) and have Jet automatically
+solve for `padding` given a target `width` — without writing the inverse by
+hand.
+*Why deferred:* Requires a reversibility annotation on functions and a
+solver/SMT backend; no prior-art consensus on making this ergonomic without
+macros or dependent types. Board item #36.
+
+---
+
+**D-PROTO1 — Protocol and session type generation.**
+*User story:* A network protocol implementer wants to declare a
+request/response handshake sequence as a type and have the compiler generate
+both the client and server stubs, rejecting code that sends messages out of
+order.
+*Why deferred:* Session types require linear types (used exactly once, in
+order) and typestate; **D-LIN1** (linear tag) and **D-STATE1** (typestate),
+both gated on D-QUAL2, are prerequisites, and the code-generation surface for
+protocol stubs is a separate design. Board item #9.
+
+---
+
+**D-VERIFY1 — Formal verification and proof integration.**
+*User story:* A cryptography library author wants to attach a machine-checked
+proof that her `constant_time_eq` function runs in time independent of its
+inputs, and have the Jet toolchain refuse to ship the library if the proof
+doesn't hold.
+*Why deferred:* Requires a proof-carrying-code or SMT integration layer that
+is explicitly post-v1; the simplicity ratchet (I8) bars this without a
+concrete roadmap slot and owner sign-off. Board items #15/#17.
