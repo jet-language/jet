@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **14 open decisions across 4 cards.** Each card below is self-contained: a user
+> **15 open decisions across 5 cards.** Each card below is self-contained: a user
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -924,3 +924,131 @@ implemented until that region rule exists.** B is the escape hatch if the owner 
 the cost of indirection and a runtime check on statically-unknown handles. C needs nothing new but
 isn't really an arena. Recommend ratifying A as the target and sequencing the region work into c06;
 fall back to B only if regions slip the milestone.
+
+---
+
+## Qualifier system: traits, effects & tags — board card c62
+
+### D-QUAL1 — Organizing traits, effects & tags across three reader-split surfaces (rec A — Core D, with Roles)
+
+This is the c62 linchpin: a single rule for where every "label" concept lives — traits, effects, value-facts, capabilities, markers, prohibitions — so each surface stays sparse and every declaration stays legible. The proposal (Variant D) routes by **who reads it**, and the hybrids are optional surfaces layered on top.
+
+**User story.** Two people read the same `checkout` service. Priya, a feature dev, opens a function and needs to know *at a glance* what it touches (does it hit the network? the DB?) and what its types *are* (is `Receipt` serializable? can it be silently dropped?). Sam, the security owner, never reads function bodies — he needs *one* auditable place that says what the coupon plugin is allowed to do. Today these concerns would pile onto the same declaration and drown each other. D-QUAL1 picks a routing rule so each reader sees only their surface.
+
+**The routing rule (the whole mnemonic — shape mirrors meaning).**
+
+- **`#(…)` round parens → what it *touches*** (effects). On the signature line — a per-caller contract everyone must see.
+- **`#[…]` square brackets → what it *is*** (a static *list* of tags: derives, traits, value-facts, markers). Above the declaration, for library users.
+- **`module { … }` manifest → what it's *allowed* to do** (capability policy). One auditable place, for security/ops.
+
+Round = runtime reach. Square = a static attribute list. Manifest = permissions. A beginner needs four facts: *types hold data, `#(…)` says what a function touches, `#[…]` is the tag list, the manifest walls things off.*
+
+| Option | Effect surface | Grouping power | Beginner read | Signature-glance contract | Best when |
+|---|---|---|---|---|---|
+| **A Core D** | inline `#(…)` | good | clear | **yes** | sensible default |
+| **B × Roles** | `#(Role)` | **highest (DRY)** | high at use-site | yes (via role) | large codebases, shared policy |
+| **C × Unified block** | `#[ effects: … ]` | **highest (visual)** | high | no (look above) | declaration-heavy review |
+| **D × Grammar** | `does (…)` | good | **highest** | yes | onboarding-first teams |
+| **E × Type-row** | `! {net, db, log}` | good | lower | yes | effects must flow through generics |
+
+These compose: A is the base; B/D are surface skins; C regroups everything into the bracket block. The strongest practical combo is **A + B**, with **D** as an optional grammar skin.
+
+- **Option A — Core D (recommended).** Three surfaces, sigil-spelled. Effects inline on the signature, tag lists in `#[…]` above the declaration, capability policy in the `module { }` manifest. Inline `#fact` attaches a value-fact locally to one value.
+
+```jet
+// ── manifest: the security owner reads only this ──
+module shop.checkout {
+    plugins.coupon: deny(fs, db)        // policy collected here, never inline
+}
+
+// ── data: a list of tags reads like a list ──
+#[
+    derive(Comparable, Serialize),
+]
+struct Order { id: OrderId, total: Usd }
+
+#[
+    derive(Serialize),
+    linear,                             // value-fact: can't be silently dropped
+]
+struct Receipt { order: OrderId, paid: Usd }
+
+// ── logic ──
+fn cart_total(items: [Item]) -> Usd {   // bare: pure, inferred
+    items.sum(Item.price)
+}
+
+fn charge(o: take Order #unpaid) #(db) -> Receipt #paid ?   // typestate + effect
+
+pub fn checkout(req: Request) #(net, db, log) -> Response ? {  // contract on line 1
+    raw  :: req.body() #tainted         // value-fact rides the value inline
+    rcpt :: charge(parse(sanitize(raw))?.order)?   // sanitize strips #tainted
+    record(rcpt)?                       // MUST consume the linear receipt
+    Response.ok()
+}
+```
+
+- **Option B — Core D × Roles (named bundles).** Define a contract once in the manifest; wear it by name. A *role* is a named effect-set or tag-set, referenced wherever its members would go. The DRY answer for a many-route service. Cost: indirection — you open `Handler` to see what it touches (mitigate with `jet explain #(Handler)`).
+
+```jet
+module shop.checkout {
+    role Handler = #(net, db, log)                            // an effect role
+    role Money   = #[derive(Comparable, Serialize), linear]   // a tag role
+    plugins.coupon: deny(fs, db)
+}
+
+#[ Money ]                              // expands to the tag list above
+struct Receipt { order: OrderId, paid: Usd }
+
+pub fn checkout(req: Request) #(Handler) -> Response ? { ... }   // one word = full contract
+pub fn refund(req: Request)   #(Handler) -> Response ? { ... }   // change Handler once, both update
+```
+
+- **Option C — Core D × Unified labeled block.** Group *everything* — effects included — in the bracket list using labeled sections that self-route. Cost: effects leave the signature line, so a caller glances *above* the function instead of *at* it.
+
+```jet
+#[
+    effects: net, db, log,
+    panics:  never,
+    marker:  route("/checkout"),
+]
+pub fn checkout(req: Request) -> Response ? { ... }
+
+#[
+    derive: Comparable, Serialize,
+    facts:  linear,
+]
+struct Receipt { order: OrderId, paid: Usd }
+```
+
+- **Option D — Core D × Grammar keywords.** Keep the three surfaces but spell the two inline ones in English. Most readable for newcomers; effects (`does`) vs traits (`is`) are visually unmistakable. Cost: `is / does / forbids / as` are four keywords doing what one sigil family did, and reads less "systematic" to experts.
+
+```jet
+module shop.checkout {
+    plugins.coupon forbids (fs, db)
+}
+
+struct Receipt is (Serialize), linear { order: OrderId, paid: Usd }
+
+pub fn checkout(req: Request) does (net, db, log) -> Response ? {
+    raw :: req.body() as tainted
+    ...
+}
+```
+
+- **Option E — Core D × Type-row effects.** Make the effect surface a type row on the return. Strictly more composable (effects flow through generics uniformly), but the heaviest-looking. Worth it only if effects must propagate through generic code.
+
+```jet
+pub fn checkout(req: Request) -> Response ! {net, db, log} ? {
+    raw :: req.body() #tainted
+    ...
+}
+```
+
+**Recommendation:** **A (Core D)** as the ratified base — it keeps each surface sparse, puts the effect contract on the signature line where every caller sees it, and needs only four facts to teach. Adopt **B (Roles)** alongside it for any codebase with shared policy across many routes (the strongest practical combo is A + B). **D (Grammar)** is an optional skin to ratify later if onboarding wins over expert density; **C** and **E** are situational and can stay declined unless a review style or generic-effect-propagation need forces them.
+
+**Interactions with ratified decisions (read before ratifying — A would amend these).**
+- **D-ATTR2** ratified the multi-marker list as **bare** `#[Serialize, Comparable]` and explicitly *rejected* the Rust-literal `#[derive(…)]` form. The examples above use `#[ derive(Comparable, Serialize) ]` — ratifying D-QUAL1 as written would **reverse D-ATTR2** on that point. Decide whether tag lists keep the bare form (`#[Comparable, Serialize, linear]`) or adopt the `derive(…)`-grouped form here.
+- **S60** deliberately rejected a full effects system (`pure fn` is the one ratified effect-tag). The `#(net, db, log)` effect surface **reopens S60**. D-QUAL1 is the place to decide that reopening explicitly.
+- **S56 / S83** ratified user-defined derives via the external connector `~~` (`derive Point~~Serialize`); `#[…]` is for built-in derive *markers*. Keep the two distinct: `#[…]` lists markers, `~~` attaches a derive impl.
+- **Manifest surface**: the `module shop.checkout { … }` block overlaps `pkg.jet` (`payload:`/`packages:`, D-JPK-FILES) and module paths (D-MOD1 uses `.`). Decide whether capability policy lives in `pkg.jet`, in an in-source `module { }` block, or both.
