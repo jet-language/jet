@@ -397,18 +397,29 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
 
 /// Discover and parse generated bindgen cache files for every C library this
 /// program brings in. Each cache lives at `<root>/.jet/bindings/c/<lib>.jet`
-/// (D-CBIND7). Parsed `@bindgen` modules are appended as ordinary loaded
-/// modules so the main drain/merge pass (step 1) folds them like any other.
+/// (D-CBIND7). When a cache is absent and the program uses the header-path form
+/// (`use "lib.h" as l`), the bind backend is invoked automatically (D-CBIND2
+/// auto half, E3 deferred piece). When the cache exists, its sidecar `.hash`
+/// file (Phase 3) is checked; a hash mismatch triggers re-bind before loading.
+/// Parsed `@bindgen` modules are appended as ordinary loaded modules so the
+/// main drain/merge pass (step 1) folds them like any other.
 fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
-    // Collect the set of C libs used anywhere in the program.
+    // Collect libs and, for the header-path `use "x.h"` form, the header path.
+    // A single lib can be brought in from multiple modules; first-seen header wins.
     let mut libs: Vec<String> = Vec::new();
+    let mut lib_header: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
     for module in &bundle.modules {
         for imp in &module.imports {
-            let lib = c_module_lib(imp).or_else(|| c_header_lib(imp).map(|(_, l)| l));
-            if let Some(lib) = lib {
+            if let Some(lib) = c_module_lib(imp) {
                 if !libs.contains(&lib) {
                     libs.push(lib);
                 }
+            } else if let Some((header_path, lib)) = c_header_lib(imp) {
+                if !libs.contains(&lib) {
+                    libs.push(lib.clone());
+                }
+                lib_header.entry(lib).or_insert(header_path);
             }
         }
     }
@@ -421,40 +432,149 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
         bundle.modules.iter().map(|m| m.path.clone()).collect();
 
     for lib in libs {
-        let path = bundle
+        let cache_path = bundle
             .project_root
             .join(Syntax::SOURCE_ROOT_DIR)
             .join(Syntax::BINDINGS_C_SUBDIR)
             .join(format!("{}.{}", lib, Syntax::FILE_EXT));
-        if !path.is_file() || already.contains(&path) {
+
+        if already.contains(&cache_path) {
             continue;
         }
-        let source = match std::fs::read_to_string(&path) {
+
+        // --- Phase 3: hash invalidation ---
+        // If the cache exists and we know the header path, check whether the
+        // header content has changed since the cache was generated. On a
+        // mismatch, re-run the bind backend before loading.
+        let need_rebind = if cache_path.is_file() {
+            if let Some(header_path) = lib_header.get(&lib) {
+                // Resolve header relative to project root (for `use "x.h"` forms
+                // where the path is relative to the importing file's directory;
+                // here we accept absolute or project-root-relative).
+                let header_abs = resolve_header_path(header_path, &bundle.project_root);
+                if let Ok(header_src) = std::fs::read_to_string(&header_abs) {
+                    let current_hash = crate::CBind::compute_bind_hash(&header_src, "");
+                    let stored = crate::CBind::read_stored_hash(&cache_path);
+                    stored.map(|s| s != current_hash).unwrap_or(false)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // --- D-CBIND2 auto-invoke on cache miss / hash mismatch ---
+        if !cache_path.is_file() || need_rebind {
+            let Some(header_path) = lib_header.get(&lib) else {
+                // No header path known (use c.<lib> form, no file to parse) —
+                // skip silently; an empty synthetic module is made in step 3.
+                if cache_path.is_file() && !need_rebind {
+                    // Present and fresh — handled below.
+                }
+                if !cache_path.is_file() {
+                    continue; // no cache, no header → nothing to auto-bind
+                }
+                // need_rebind but no header path: can't rebind, use stale cache.
+                // fall through to load existing cache
+                let source = match std::fs::read_to_string(&cache_path) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
+                continue;
+            };
+            let header_abs = resolve_header_path(header_path, &bundle.project_root);
+            let header_src = match std::fs::read_to_string(&header_abs) {
+                Ok(s) => s,
+                Err(_) => {
+                    // Header not readable — can't auto-bind; if cache exists load it.
+                    if cache_path.is_file() {
+                        let source = match std::fs::read_to_string(&cache_path) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
+                    }
+                    continue;
+                }
+            };
+            let result = match crate::CBind::generate(&header_src, &lib) {
+                Ok(r) => r,
+                Err(_) => {
+                    // Bind failed — if there's a stale cache, use it silently.
+                    if cache_path.is_file() {
+                        let source = match std::fs::read_to_string(&cache_path) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
+                    }
+                    continue;
+                }
+            };
+            // Write cache + hash sidecar.
+            if let Some(parent) = cache_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::write(&cache_path, &result.source).is_ok() {
+                let _ = crate::CBind::write_bind_hash(&cache_path, &header_src, "");
+            }
+            load_cache_source(&result.source, &cache_path, &lib, diags, &mut bundle.modules);
+            continue;
+        }
+
+        // Cache present and fresh — load it.
+        let source = match std::fs::read_to_string(&cache_path) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let (toks, lex_diags) = crate::Lexer::lex(&source);
-        if !lex_diags.is_empty() {
-            diags.extend(lex_diags);
-            continue;
-        }
-        let mut prog = match crate::Parser::parse(&toks) {
-            Ok(p) => p,
-            Err(ds) => {
-                diags.extend(ds);
-                continue;
-            }
-        };
-        let display = path.display().to_string();
-        bundle.modules.push(LoadedModule {
-            path: path.clone(),
-            display,
-            source,
-            alias: format!("__c_cache_{lib}"),
-            imports: std::mem::take(&mut prog.imports),
-            items: std::mem::take(&mut prog.items),
-        });
+        load_cache_source(&source, &cache_path, &lib, diags, &mut bundle.modules);
     }
+}
+
+/// Resolve a header path: if absolute use as-is, else try relative to
+/// the project root (common for `use "raylib.h"` in single-file mode).
+fn resolve_header_path(header_path: &str, project_root: &std::path::Path) -> std::path::PathBuf {
+    let p = std::path::Path::new(header_path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        project_root.join(header_path)
+    }
+}
+
+/// Parse a cache source string and push a `LoadedModule` into `modules`.
+fn load_cache_source(
+    source: &str,
+    path: &std::path::Path,
+    lib: &str,
+    diags: &mut Vec<Diagnostic>,
+    modules: &mut Vec<LoadedModule>,
+) {
+    let (toks, lex_diags) = crate::Lexer::lex(source);
+    if !lex_diags.is_empty() {
+        diags.extend(lex_diags);
+        return;
+    }
+    let mut prog = match crate::Parser::parse(&toks) {
+        Ok(p) => p,
+        Err(ds) => {
+            diags.extend(ds);
+            return;
+        }
+    };
+    let display = path.display().to_string();
+    modules.push(LoadedModule {
+        path: path.to_path_buf(),
+        display,
+        source: source.to_string(),
+        alias: format!("__c_cache_{lib}"),
+        imports: std::mem::take(&mut prog.imports),
+        items: std::mem::take(&mut prog.items),
+    });
 }
 
 /// Resolve link flags for one C library (D-CFFI2): hangar dep if the manifest

@@ -10,6 +10,39 @@
 //! Output is a `@bindgen module c.<lib>.__bindgen__ { … }` cache as parsed by
 //! `src/cffi.rs`; each binding is `fn name(p: T, …) [-> R] = "c_symbol";`.
 
+/// Compute the bind hash for a header + cflags pair (Phase 3 invalidation).
+/// The hash is SHA-256(header_src || "\0" || cflags_str) rendered as 64 hex digits.
+/// `cflags` is a space-joined list of flags; pass `""` when there are none.
+pub fn compute_bind_hash(header_src: &str, cflags: &str) -> String {
+    let mut input = Vec::with_capacity(header_src.len() + 1 + cflags.len());
+    input.extend_from_slice(header_src.as_bytes());
+    input.push(0u8); // null separator
+    input.extend_from_slice(cflags.as_bytes());
+    crate::SHA256::sha256_hex(&input)
+}
+
+/// Sidecar filename for the hash that accompanies `<lib>.jet` in the cache.
+pub fn hash_sidecar_path(cache_path: &std::path::Path) -> std::path::PathBuf {
+    cache_path.with_extension("hash")
+}
+
+/// Read the stored hash from the sidecar, or `None` if absent / unreadable.
+pub fn read_stored_hash(cache_path: &std::path::Path) -> Option<String> {
+    let sidecar = hash_sidecar_path(cache_path);
+    std::fs::read_to_string(sidecar).ok().map(|s| s.trim().to_string())
+}
+
+/// Write a hash sidecar next to `cache_path`. Returns `Ok(())` on success.
+pub fn write_bind_hash(
+    cache_path: &std::path::Path,
+    header_src: &str,
+    cflags: &str,
+) -> std::io::Result<()> {
+    let hash = compute_bind_hash(header_src, cflags);
+    let sidecar = hash_sidecar_path(cache_path);
+    std::fs::write(sidecar, hash)
+}
+
 /// Result of translating a header: the cache source plus what was/wasn't bound.
 pub struct BindResult {
     /// The `@bindgen module …` cache file text.

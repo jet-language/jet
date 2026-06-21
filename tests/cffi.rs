@@ -299,6 +299,200 @@ fn cffi_header_use_form_lowers_to_lib() {
     let _ = fs::remove_dir_all(&root);
 }
 
+// ---------------------------------------------------------------------------
+// D-CBIND2 + Phase 3 (E3 deferred pieces): auto-bind on cache miss, hash
+// invalidation, and cache-hit fast path.
+// ---------------------------------------------------------------------------
+
+/// Probe 1 — missing cache + header-path use form → compiler auto-runs bind,
+/// compilation succeeds (no E3208 / no error about missing cache).
+#[test]
+fn auto_bind_on_cache_miss() {
+    let root = std::env::temp_dir().join(format!("jet_autobind_miss_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    // Create the project layout but DO NOT pre-create the binding cache.
+    let cache_dir = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache_dir).unwrap();
+
+    // A simple C header with one bindable function.
+    let header_dir = root.join("include");
+    fs::create_dir_all(&header_dir).unwrap();
+    let header_path = header_dir.join("mylib.h");
+    fs::write(&header_path, "int mylib_ping(int x);\n").unwrap();
+
+    // A Jet source using the header-path form (`use "include/mylib.h" as m`).
+    // The compiler should auto-invoke the bind backend on the cache miss.
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use \"include/mylib.h\" as m;\nfn main() { print(m.mylib_ping(1)); }\n",
+    )
+    .unwrap();
+
+    let src = fs::read_to_string(&main).unwrap();
+    // compile_with_path loads the bundle from disk (including auto-bind).
+    let result = jet::compile_with_path(&src, main.to_str().unwrap());
+
+    // The cache should now exist (auto-created by the compiler).
+    let cache_file = cache_dir.join("mylib.jet");
+    assert!(
+        cache_file.is_file(),
+        "auto-bind: compiler should have created the binding cache at {:?}",
+        cache_file
+    );
+
+    // And compilation should succeed (the generated binding is loaded).
+    assert!(
+        result.is_ok(),
+        "auto-bind on cache miss must not produce a compile error; got: {:?}",
+        result.err()
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Probe 2 — header changes after a successful bind → hash mismatch detected,
+/// the compiler RE-BINDS (does not use the stale cache).
+#[test]
+fn hash_invalidation_on_header_change() {
+    let root = std::env::temp_dir().join(format!("jet_hash_inval_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache_dir = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache_dir).unwrap();
+
+    let header_dir = root.join("include");
+    fs::create_dir_all(&header_dir).unwrap();
+    let header_path = header_dir.join("mylib2.h");
+
+    // Step A: initial header with `mylib2_v1`.
+    let header_v1 = "int mylib2_v1(int x);\n";
+    fs::write(&header_path, header_v1).unwrap();
+
+    // Pre-populate the cache and hash sidecar (simulates a prior `jet bind`).
+    let cache_file = cache_dir.join("mylib2.jet");
+    let bind_v1 = jet::CBind::generate(header_v1, "mylib2").unwrap();
+    fs::write(&cache_file, &bind_v1.source).unwrap();
+    jet::CBind::write_bind_hash(&cache_file, header_v1, "").unwrap();
+
+    // Confirm v1 cache doesn't contain v2 symbol yet.
+    assert!(!bind_v1.source.contains("mylib2_v2"), "sanity: v2 not in v1 cache");
+
+    // Step B: change the header — add `mylib2_v2`, remove `mylib2_v1`.
+    let header_v2 = "int mylib2_v2(int y);\n";
+    fs::write(&header_path, header_v2).unwrap();
+
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use \"include/mylib2.h\" as m;\nfn main() { print(m.mylib2_v2(2)); }\n",
+    )
+    .unwrap();
+
+    let src = fs::read_to_string(&main).unwrap();
+    let result = jet::compile_with_path(&src, main.to_str().unwrap());
+
+    // The cache should have been regenerated with v2 content.
+    let new_cache = fs::read_to_string(&cache_file).unwrap_or_default();
+    assert!(
+        new_cache.contains("mylib2_v2"),
+        "hash invalidation: cache must be regenerated with updated symbol; got:\n{}",
+        new_cache
+    );
+    assert!(
+        !new_cache.contains("mylib2_v1"),
+        "hash invalidation: stale v1 symbol must not appear in regenerated cache; got:\n{}",
+        new_cache
+    );
+
+    // The hash sidecar must also be updated to reflect v2.
+    let new_hash = jet::CBind::read_stored_hash(&cache_file);
+    let expected_hash = jet::CBind::compute_bind_hash(header_v2, "");
+    assert_eq!(
+        new_hash.as_deref(),
+        Some(expected_hash.as_str()),
+        "hash sidecar must be updated after re-bind"
+    );
+
+    // The compile result may succeed or fail depending on whether the new
+    // symbol is in scope; what matters is that the CACHE was invalidated.
+    // (We don't assert compile success here since the test binary isn't linked.)
+    let _ = result;
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Probe 3 — unchanged header + present cache → NO re-bind (fast path: the
+/// cache is loaded as-is, hash stays the same).
+#[test]
+fn cache_hit_no_rebind() {
+    let root = std::env::temp_dir().join(format!("jet_cache_hit_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache_dir = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache_dir).unwrap();
+
+    let header_dir = root.join("include");
+    fs::create_dir_all(&header_dir).unwrap();
+    let header_path = header_dir.join("mylib3.h");
+    let header_src = "int mylib3_ping(int x);\n";
+    fs::write(&header_path, header_src).unwrap();
+
+    // Pre-populate cache + hash.
+    let cache_file = cache_dir.join("mylib3.jet");
+    let bind_result = jet::CBind::generate(header_src, "mylib3").unwrap();
+    fs::write(&cache_file, &bind_result.source).unwrap();
+    jet::CBind::write_bind_hash(&cache_file, header_src, "").unwrap();
+
+    // Record the cache content and mtime before compile.
+    let cache_before = fs::read_to_string(&cache_file).unwrap();
+    let mtime_before = fs::metadata(&cache_file)
+        .and_then(|m| m.modified())
+        .unwrap();
+
+    // Small sleep so any write would shift the mtime noticeably on most FS.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use \"include/mylib3.h\" as m;\nfn main() { print(m.mylib3_ping(0)); }\n",
+    )
+    .unwrap();
+    let src = fs::read_to_string(&main).unwrap();
+    let _ = jet::compile_with_path(&src, main.to_str().unwrap());
+
+    // Cache must not have been rewritten.
+    let cache_after = fs::read_to_string(&cache_file).unwrap();
+    let mtime_after = fs::metadata(&cache_file)
+        .and_then(|m| m.modified())
+        .unwrap();
+    assert_eq!(
+        cache_before, cache_after,
+        "cache-hit fast path: cache content must not change on identical header"
+    );
+    assert_eq!(
+        mtime_before, mtime_after,
+        "cache-hit fast path: cache file must not be rewritten on hash match"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Unit test: the hash function is deterministic and changes when input changes.
+#[test]
+fn bind_hash_is_real() {
+    let h1 = jet::CBind::compute_bind_hash("int foo(int x);", "");
+    let h2 = jet::CBind::compute_bind_hash("int foo(int x);", "");
+    let h3 = jet::CBind::compute_bind_hash("int bar(int x);", "");
+    let h4 = jet::CBind::compute_bind_hash("int foo(int x);", "-I/usr/include");
+
+    assert_eq!(h1, h2, "same inputs → same hash");
+    assert_ne!(h1, h3, "different header → different hash");
+    assert_ne!(h1, h4, "different cflags → different hash");
+    // Must be a 64-char hex string (SHA-256).
+    assert_eq!(h1.len(), 64);
+    assert!(h1.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
 #[test]
 fn parse_pkg_config_extracts_flags() {
     let flags = jet::CFFI::parse_pkg_config("-I/usr/include/foo -L/usr/lib -lfoo -lbar", "foo");

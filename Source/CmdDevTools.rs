@@ -281,6 +281,11 @@ pub(crate) fn run_bind(args: &[&String]) {
         exit(ExitCodes::USER_ERROR);
     }
 
+    // Phase 3 (D-CBIND2): write a hash sidecar alongside the cache so the
+    // compiler can detect stale caches on the next build (hash invalidation).
+    // cflags are not yet threaded through `jet bind`; pass "" for now.
+    let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
+
     println!(
         "bound {} function{} from `{}` → {}",
         result.bound.len(),
