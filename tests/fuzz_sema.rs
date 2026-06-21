@@ -123,12 +123,12 @@ fn fuzz_sema_rustc_agreement() {
         match jet::compile_with_path(&mutated, &file_str) {
             Ok(out) => {
                 // I1 (D-LL1 amendment): generated `unsafe` is only allowed when
-                // the source explicitly uses `#unsafe` (the expert gate, E2-M13).
-                // Sources without `#unsafe` must produce zero `unsafe` in output.
-                if !mutated.contains("#unsafe") {
+                // the source explicitly uses `#Unsafe` (the expert gate, E2-M13).
+                // Sources without `#Unsafe` must produce zero `unsafe` in output.
+                if !mutated.contains("#Unsafe") {
                     assert!(
                         !out.rust.contains("unsafe"),
-                        "I1 violated in fuzz variant {i} from {shown}: source has no #unsafe but generated code contains `unsafe`"
+                        "I1 violated in fuzz variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                     );
                 }
                 if let Err(rustc_err) = rustc_accepts(&format!("v{i}"), &out.rust) {

@@ -249,7 +249,7 @@ pub fn load_entry_with_overlay(
         project_root,
         modules,
         parse_teaching,
-        used_std: HashSet::new(),
+        used_core: HashSet::new(),
         cffi: crate::CFFI::CFfi::default(),
     };
     // S59 (E2-M14): fold every `@extern`/`@bindgen module c.<lib>` into merged
@@ -470,7 +470,7 @@ fn load_file(
             stack.pop();
             return Err(vec![d]);
         }
-        if std_module_path(imp).is_some() {
+        if core_module_path(imp).is_some() {
             continue;
         }
         // S59 (E2-M14): C `use` forms (`use c.<lib>` / `use "<header>.h"`) do
@@ -630,22 +630,22 @@ fn resolve_import(
     }
 }
 
-pub fn std_module_path(imp: &ImportDecl) -> Option<String> {
+pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
     let ImportKind::Module(name, _) = &imp.kind else {
         return None;
     };
-    normalize_std_module(name)
+    normalize_core_module(name)
 }
 
-pub fn normalize_std_module(name: &str) -> Option<String> {
-    if name == Syntax::STD_SHORT {
-        return Some(Syntax::STD_SHORT.to_string());
+pub fn normalize_core_module(name: &str) -> Option<String> {
+    if name == Syntax::CORE_SHORT {
+        return Some(Syntax::CORE_SHORT.to_string());
     }
     if let Some(rest) = name.strip_prefix("core.") {
         return Some(format!("core.{rest}"));
     }
-    if name == Syntax::STD_CANONICAL {
-        return Some(Syntax::STD_SHORT.to_string());
+    if name == Syntax::CORE_CANONICAL {
+        return Some(Syntax::CORE_SHORT.to_string());
     }
     if let Some(rest) = name.strip_prefix("jet.core.") {
         return Some(format!("core.{rest}"));
@@ -663,13 +663,14 @@ pub fn normalize_std_module(name: &str) -> Option<String> {
 pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
-        "csv" | "toml" | "yaml" | "log" | "json" | "time" | "crypto" | "http"
+        // D-REGEX1: `regex` is now shipped (was staged).
+        "csv" | "toml" | "yaml" | "log" | "json" | "time" | "crypto" | "http" | "regex"
     )
 }
 
 /// E2-M9: ring modules not yet available (blocked on external deps or future milestones).
 pub fn is_ring_module_staged(name: &str) -> bool {
-    matches!(name, "regex" | "archive" | "db")
+    matches!(name, "archive" | "db")
 }
 
 pub fn is_legacy_std_import(name: &str) -> bool {
@@ -679,13 +680,13 @@ pub fn is_legacy_std_import(name: &str) -> bool {
         || name.starts_with("jet.std.")
 }
 
-/// Single canonical source of truth for all known std modules (c45).
+/// Single canonical source of truth for all known Core modules (c45).
 ///
-/// `is_known_std_module` and `std_modules_list` both derive from this slice.
-/// `std_module_items` in Sema/CheckerStdlib.rs has per-module item data and
-/// cannot collapse here, but a drift-guard test (tests/stdlib.rs) asserts its
+/// `is_known_core_module` and `core_modules_list` both derive from this slice.
+/// `core_module_items` in Sema/CheckerCoreLib.rs has per-module item data and
+/// cannot collapse here, but a drift-guard test (tests/corelib.rs) asserts its
 /// key set equals this slice.
-pub const KNOWN_STD_MODULES: &[&str] = &[
+pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
     "core.fs",
     "core.io",
@@ -716,19 +717,21 @@ pub const KNOWN_STD_MODULES: &[&str] = &[
     "jet.crypto",
     // E2-M10: HTTP client/server ring package.
     "jet.http",
+    // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
+    "jet.regex",
 ];
 
-pub fn is_known_std_module(name: &str) -> bool {
-    KNOWN_STD_MODULES.contains(&name)
+pub fn is_known_core_module(name: &str) -> bool {
+    KNOWN_CORE_MODULES.contains(&name)
 }
 
-pub fn std_modules_list() -> String {
-    KNOWN_STD_MODULES.join(", ")
+pub fn core_modules_list() -> String {
+    KNOWN_CORE_MODULES.join(", ")
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
-    if let Some(module) = std_module_path(imp) {
-        if !is_known_std_module(&module) {
+    if let Some(module) = core_module_path(imp) {
+        if !is_known_core_module(&module) {
             let span = match &imp.kind {
                 ImportKind::Module(_, span) => *span,
                 ImportKind::File(_, _) | ImportKind::Unqualified { .. } => imp.span,
@@ -738,7 +741,7 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
                 format!("there is no core module `{}`", module),
                 "`core` is compiler-known in M10, and only the frozen core modules exist"
                     .to_string(),
-                format!("use one of: {}", std_modules_list()),
+                format!("use one of: {}", core_modules_list()),
                 Some(span),
             ));
         }
@@ -1007,7 +1010,7 @@ pub fn resolve_import_target(
     importing_idx: usize,
     imp: &ImportDecl,
 ) -> Result<usize, Diagnostic> {
-    if std_module_path(imp).is_some() {
+    if core_module_path(imp).is_some() {
         return Err(Diagnostic::error(
             "E1001",
             "core modules do not resolve to files".to_string(),

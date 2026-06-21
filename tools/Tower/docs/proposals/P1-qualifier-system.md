@@ -74,19 +74,19 @@ sigil.** Whether tags get their own sigil (and their *position* — prefix line
 vs. trailing in a signature) is an open decision (§7, Q1) — but the spelling
 must not blur the three roles in the diagnostics or the mental model.
 
-### The hardest case — `#unsafe` is dual-faced (and that's the point)
+### The hardest case — `#Unsafe` is dual-faced (and that's the point)
 
-`#unsafe` is the case a careful reader will test the boundary against, because
+`#Unsafe` is the case a careful reader will test the boundary against, because
 it wears both faces, and seeing why settles the rule rather than breaking it:
 
-- **`#unsafe { … }` region** — an **attribute**: a directive consumed where it
+- **`#Unsafe { … }` region** — an **attribute**: a directive consumed where it
   sits, marking a block whose body may use gated operations. One site, no
   propagation.
-- **`#unsafe fn` contract** — a **tag**: per S58/D-LL2, calling an `#unsafe fn`
-  *requires an enclosing `#unsafe` context*. That obligation propagates up the
+- **`#Unsafe fn` contract** — a **tag**: per S58/D-LL2, calling an `#Unsafe fn`
+  *requires an enclosing `#Unsafe` context*. That obligation propagates up the
   call graph and is checked relationally — the three tells.
 
-So `#unsafe` is not a counterexample to the rule; it is the sharpest proof of
+So `#Unsafe` is not a counterexample to the rule; it is the sharpest proof of
 "syntax ≠ semantic kind." One sigil, two roles, disambiguated exactly as §1
 disambiguates: by whether the thing propagates.
 
@@ -95,7 +95,7 @@ It also shows tags propagate in **both directions**, and the rule covers both:
 | Tag | Direction | Constraint |
 |---|---|---|
 | `pure fn` (S60) | downward (callees) | a pure fn **may not call** an impure one |
-| `#unsafe fn` (S58) | upward (callers) | an unsafe fn **may only be called from** an unsafe context |
+| `#Unsafe fn` (S58) | upward (callers) | an unsafe fn **may only be called from** an unsafe context |
 
 "Propagates along call edges and is checked relationally" holds for both; the
 *direction* is part of each policy, not of the taxonomy.

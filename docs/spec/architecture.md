@@ -43,14 +43,14 @@
   **I1 amendment (D-LL1, ratified 2026-06-16, E2-M13).** I1 originally read
   *"no `unsafe` in the language or generated code, ever (v1)."* The expert
   low-level tier (S58) amends it: generated `unsafe` appears **only** inside
-  user-written gated regions — an `@unsafe { … }` block (which requires an
-  `@audit("…")` reason, lint L3101) or an `@unsafe fn` contract, both
+  user-written gated regions — an `#Unsafe { … }` block (which requires an
+  `#Audit("…")` reason, lint L3101) or an `#Unsafe fn` contract, both
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
   sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
   the audited `48_lowlevel` must contain no `unsafe`, and even there every
   `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
-  it lowers an already-checked `@unsafe` region straight to a Rust `unsafe`
+  it lowers an already-checked `#Unsafe` region straight to a Rust `unsafe`
   region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must
   produce Rust that compiles. New language features land as: spec →
@@ -85,8 +85,8 @@
   future multi-file/package story is opt-in and post-v1 (see roadmap).
 - **R10 — Std is pay-for-what-you-call.** M10 standard-library modules are
   compiler-known namespaces, but importing them is free. Sema records the
-  std helpers that a checked program can call, and codegen emits only those
-  helper templates. A program that imports every std module but calls none
+  core helpers that a checked program can call, and codegen emits only those
+  helper templates. A program that imports every core module but calls none
   should stay in hello-world size territory.
 
 ## Exit codes (stable contract)

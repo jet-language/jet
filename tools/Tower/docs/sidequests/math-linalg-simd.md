@@ -12,7 +12,7 @@ vectorized kernels without dropping to Rust FFI).
 `core.math` covers basic `Float` ops only (verified persona note + no matrix/SIMD
 code in `Source/`). Marcus must implement linear algebra from scratch or via Rust
 FFI, and there are no SIMD intrinsics — the expert tier gives raw memory
-(`@audit`/`@unsafe`/`Ptr<T>`, verified `48_lowlevel.jet`) but no vectorized math.
+(`#Audit`/`#Unsafe`/`Ptr<T>`, verified `48_lowlevel.jet`) but no vectorized math.
 Two distinct gaps:
 
 - **A library**: vectors, matrices, decompositions, FFT — a numerics package.
@@ -28,14 +28,14 @@ Two distinct gaps:
 - **D-SIMD1 (the primitive)** — a SIMD vector type (`F32x4`, `F64x2`…) and
   intrinsics. Touches **sema** (new types), **codegen** (lower to Rust
   `std::simd`/`core::arch`), and the safety story: are SIMD ops safe-by-default or
-  expert-tier behind `@unsafe`? Interacts with D-SG9 sized floats (the lane type)
+  expert-tier behind `#Unsafe`? Interacts with D-SG9 sized floats (the lane type)
   and c82 fixed arrays `[T;N]` (SIMD-friendly layout).
 
 ## Invariants in play
 
 - **I6** any bootstrap numerics crate needs owner approval + a native plan.
 - **I1** SIMD must stay memory-safe by default; intrinsics that can violate
-  bounds/alignment belong behind `@unsafe`/`@audit`. Portable safe SIMD
+  bounds/alignment belong behind `#Unsafe`/`#Audit`. Portable safe SIMD
   (`std::simd`) is the safe-by-default path.
 - **I8** simplicity ratchet — these are large; each needs a roadmap slot / owner
   sign-off. Surfaced now so the next persona run isn't a surprise.
@@ -58,7 +58,7 @@ Two distinct gaps:
 1. **Surface** — explicit lane types (`F32x4`) with intrinsic methods, an
    auto-vectorization hint on a loop, or both? (D-SOA1 layout feeds this.)
 2. **Safety tier** — safe portable SIMD by default (`std::simd`) vs expert-only
-   behind `@unsafe`? Where's the line for target-specific intrinsics?
+   behind `#Unsafe`? Where's the line for target-specific intrinsics?
 3. **Lane/width portability** — fixed lane counts vs target-detected width;
    fallback when a target lacks the ISA.
 
@@ -68,4 +68,4 @@ Two distinct gaps:
    checksum; golden output (I5).
 2. `examples/features/simd_kernel.jet` — vectorized add over an `F32` array vs a
    scalar reference, assert equality.
-3. Safety: an out-of-lane/unsafe SIMD op requires `@unsafe` → diagnostic snapshot.
+3. Safety: an out-of-lane/unsafe SIMD op requires `#Unsafe` → diagnostic snapshot.

@@ -66,19 +66,43 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 }
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
-/// program has no `extern rust` declarations.
+/// program has no `extern rust` declarations and does not use `jet.regex`.
+///
+/// `jet.regex` (D-REGEX1) is delivered through this same hidden-cargo bridge:
+/// when the program imports it, the bridge crate gains the `regex` dependency
+/// and a hand-written regex runtime (`Source/Prelude/Regex.rs`). This keeps the
+/// `regex` crate strictly inside the FFI bridge — the compiler crate (`Source/`)
+/// stays zero-dependency (I6). It is the owner-approved I6 bootstrap exception,
+/// to be native-ized before the end of Epoch 3.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let entries = collect_externs(bundle);
-    if entries.is_empty() {
+    // `used_core` entries are `"{module}::{method}"` (e.g. `jet.regex::is_match`),
+    // so match on the module prefix, not a bare module name.
+    let needs_regex = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "jet.regex" || u.starts_with("jet.regex::"));
+    if entries.is_empty() && !needs_regex {
         return Ok(None);
     }
 
-    build_bridge(&entries).map(Some)
+    build_bridge(&entries, needs_regex).map(Some)
 }
 
-pub fn build_bridge(entries: &[ExternEntry]) -> Result<FfiLink, Vec<Diagnostic>> {
-    let deps = collect_crate_deps(entries);
-    let key = cache_key(entries, &deps);
+/// The `regex` crate version that backs `jet.regex` (D-REGEX1). Lives only here,
+/// never in the compiler's Cargo.toml (I6).
+pub const REGEX_CRATE_SPEC: (&str, &str) = ("regex", "1");
+
+/// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
+/// used. This is the only code that touches the `regex` crate.
+const REGEX_RUNTIME: &str = include_str!("Prelude/Regex.rs");
+
+pub fn build_bridge(entries: &[ExternEntry], needs_regex: bool) -> Result<FfiLink, Vec<Diagnostic>> {
+    let mut deps = collect_crate_deps(entries);
+    if needs_regex {
+        deps.insert(REGEX_CRATE_SPEC.0.to_string(), REGEX_CRATE_SPEC.1.to_string());
+    }
+    let key = cache_key_full(entries, &deps, needs_regex);
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
 
@@ -104,7 +128,7 @@ pub fn build_bridge(entries: &[ExternEntry]) -> Result<FfiLink, Vec<Diagnostic>>
     let lib_rs = src_dir.join("lib.rs");
     fs::write(&manifest, emit_cargo_toml(&crate_name, &deps))
         .map_err(|e| tool_error(&format!("couldn't write the FFI manifest: {}", e)))?;
-    fs::write(&lib_rs, emit_wrapper_lib(entries))
+    fs::write(&lib_rs, emit_wrapper_lib(entries, needs_regex))
         .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     let target_dir = cache_root.join("target");
@@ -209,8 +233,19 @@ pub fn crate_spec_needs_version(spec: &str) -> bool {
     spec != "std" && spec.split_once('@').is_none()
 }
 
-fn cache_key(entries: &[ExternEntry], deps: &BTreeMap<String, String>) -> u64 {
+fn cache_key_full(
+    entries: &[ExternEntry],
+    deps: &BTreeMap<String, String>,
+    needs_regex: bool,
+) -> u64 {
     let mut h = DefaultHasher::new();
+    // Only perturb the key when regex is actually needed, so non-regex programs
+    // keep their historical cache key (and pinned snapshots stay stable). The
+    // `regex` dep is already in `deps`, so regex programs hash distinctly anyway;
+    // this extra bit just guards the (currently impossible) empty-deps regex case.
+    if needs_regex {
+        needs_regex.hash(&mut h);
+    }
     for (k, v) in deps {
         k.hash(&mut h);
         v.hash(&mut h);
@@ -296,10 +331,15 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>) -> String 
     s
 }
 
-fn emit_wrapper_lib(entries: &[ExternEntry]) -> String {
+fn emit_wrapper_lib(entries: &[ExternEntry], needs_regex: bool) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
     );
+    if needs_regex {
+        // D-REGEX1: the regex runtime is the only place the `regex` crate is touched.
+        out.push_str(REGEX_RUNTIME);
+        out.push('\n');
+    }
     let mut names: HashSet<String> = HashSet::new();
     for e in entries {
         names.insert(e.jet_name.clone());

@@ -117,7 +117,7 @@ fn repl_function_declare_and_call() {
 
 #[test]
 fn repl_hard_reject_unsafe() {
-    let out = run_transcript(&["#unsafe { }"], None);
+    let out = run_transcript(&["#Unsafe { }"], None);
     assert!(out.contains("E1802"), "expected E1802 hard-reject, got: {:?}", out);
 }
 

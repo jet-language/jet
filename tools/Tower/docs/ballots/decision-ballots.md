@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **17 open decisions across 13 cards** (incl. testing ergonomics), plus a deferred-ballots list and informational notes.
+> **29 open decisions across 24 cards** (incl. testing ergonomics + the 13 persona-gap decisions from the 2026-06-20 run, board cards c83–c94), plus a deferred-ballots list and informational notes.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -140,6 +140,53 @@ reviewable choice). Full model: `tools/Tower/docs/sidequests/memory-capability-m
 
 ---
 
+**Owner Q (2026-06-21) — how does this interplay with experts who want low-level memory
+controls like references and pointers?**
+
+Cleanly, because they live on **different tiers** and compose. The capabilities are the
+*safe* surface; raw pointers are the *expert* tier underneath them (S58 `core.mem` +
+`#Unsafe`/`#Audit`):
+
+- **Capabilities ARE Jet's references — the safe ones.** `view T` lowers to `&T`, `edit T`
+  to `&mut T`. A beginner gets exactly the reference semantics an expert wants, without the
+  word "reference" or any `&`/`*` sigils. So "expert who wants references" is already served
+  by `view`/`edit` — they just get the borrow-checker guarantees for free.
+- **Raw pointers (`Ptr<T>`) are a deliberate drop below the capability layer**, reached only
+  through the expert gate: `use core.mem` (discovery) + an `#Unsafe`/`#Audit` region
+  (operation). Inside that audited region the capability/borrow guarantees are *suspended* —
+  that's the whole point of `#Unsafe`: the expert takes over the safety proof.
+- **They bridge at the function boundary.** The clean idiom: a function keeps **safe
+  capability params on its public signature** and drops to a raw `Ptr<T>` only *inside* a
+  localized `#Unsafe` block for a hot loop / MMIO / FFI, then hands back safe values. The
+  unsafe is contained and audited; callers never see a pointer.
+
+```jet
+use core.mem
+
+// public signature stays in the SAFE capability vocabulary:
+fn checksum(buf: view [U8]) -> U32 {     // `view` = &[u8], beginner-safe
+    sum: U32 := 0
+    #Audit("bounds proven by buf.len(); no aliasing — buf is view-only here")
+    #Unsafe {
+        p :: mem.address_of(buf)         // drop to a raw Ptr<U8> for the hot loop
+        for i in 0..buf.len() {
+            sum += mem.read(p, offset: i) // expert owns correctness in here
+        }
+    }
+    sum                                   // safe value back out; callers see no pointer
+}
+```
+
+- **`share` vs manual aliasing:** `share` (Rc/Arc) is the *safe* shared-ownership answer; an
+  expert who wants manual aliasing instead uses raw pointers under `#Unsafe` and accepts the
+  proof burden. Different tiers, no conflict.
+- **Nothing leaks downward:** `Ptr<T>`, `&`, `*` are never in the beginner surface;
+  capabilities are. This is the dual-facet exactly — `view`/`edit`/`take`/`share` is the safe
+  99% (inferred for beginners, explicit for experts), and `core.mem`'s `Ptr<T>` is the
+  audited 1% where an expert takes full manual control. (Ratified low-level tier: S58 / D-LL1.)
+
+---
+
 ### D-CAP3 — Annotation order: `player: edit Player` vs. `edit player: Player` (rec A)
 
 **User story.** Priya reads a signature `fn write(file: edit File, data: view Bytes)`.
@@ -184,6 +231,41 @@ fn write(edit File file, view Bytes data) {
 
 **Recommendation:** A — consistent with `name: Type` everywhere else and reads as a
 property of the value, not a command.
+
+---
+
+**Owner Q (2026-06-21) — how is this affected when no type is written (inferred type)?**
+
+It isn't, and that actually *reinforces* A. Two facts resolve it:
+
+1. **Capabilities are a *parameter/signature* concept, and parameters carry types.** A
+   capability says how a *passed* value may be used by a callee (`view`/`edit`/`take`/`share`);
+   it lives on `fn` parameters, which in Jet are written with types (`fn f(x: T)`). Local
+   bindings (`name :: expr`) just *own* their value — there's no capability to place there —
+   so "inferred-type local" never raises a capability-placement question at all.
+2. **When the capability is omitted, it's inferred (the beginner path) — there's no token to
+   place.** `fn heal(player: Player)` has no capability written; the compiler infers it
+   (D-CAP1/c06). So the *only* time placement matters is when an expert *writes* a capability
+   — and under A the capability rides the type, so writing one means writing the type too.
+   The rule is one line: **capability and type travel together on the type side; no type
+   written ⇒ capability inferred too.** You can never end up with a dangling capability and no
+   type.
+
+```jet
+fn draw(scene: Scene)            { … }   // no capability → inferred (here: view). beginner.
+fn draw(scene: view Scene)       { … }   // expert pins it — type is right there with it (A).
+
+// the only "inferred type" spot for a param is a lambda whose type comes from context:
+shapes.each((s) => render(s))            // `s`'s type inferred; capability also inferred (view)
+shapes.each((s: edit Shape) => bump(s))  // to PIN edit, you write the type too — A keeps them as one unit
+```
+
+This is a point *for* A over B: A keeps everything about "what this value is here" — its type
+*and* its capability — in **one place** (the type side). Under B (`edit scene: Scene`) the
+capability would sit on the binding while the type sits after the colon, splitting that
+information; the inferred-type case is the seam where that split would show. So: inferred type
+⇒ inferred capability (nothing to write); explicit capability ⇒ written alongside the type, A's
+single-location rule intact.
 
 ---
 
@@ -253,118 +335,6 @@ One choice remains for the owner. D-DBG1 (the `jet debug` command name) and D-OB
     Direct I2 violation. Listed to be explicitly closed.
 
 **Recommendation:** A. Silent step-over is the cleanest beginner experience and is the hardest I2 guarantee to weaken later. The adapter can log a debug-level trace (visible only in `jet debug --verbose`) so developers of the adapter itself can see skipped frames, while users never do. Option B is a reasonable upgrade once users report that the opaqueness is confusing.
-
----
-
----
-
-## Allocators — board card c05
-
-> D-ALLOC2 ratified **2026-06-21 (option A — scope-bound `view`)**. A needs a **region**
-> (the lifetime of the `arena ::` scope) that `view` (S10/c06) does not yet have, so it
-> cannot be built until the region rule below is decided. D-REGION1 is the follow-on.
-
-### D-REGION1 — How is an allocation region denoted? (rec A)
-
-**User story.** Priya allocates per-frame scratch into an arena and wipes it with one
-`reset`. She has never written a lifetime and does not want to. The compiler still has to
-stop her from stashing a frame-N node where it outlives the arena. The question: does she
-write *anything* to mark the region, or does the compiler infer it from the `arena ::`
-binding scope she already wrote?
-
-| Option | Region is | User writes | Escape check | Familiarity |
-|--------|-----------|-------------|--------------|-------------|
-| A — implicit, scope-inferred (rec) | the lexical scope of the `arena ::` binding | nothing | view tied to that scope; escaping it is E0631 | no lifetimes — matches Jet's "never write a borrow" promise |
-| B — explicit `region r { … }` block | a named region introduced by a block | `region r { … }` wrapper | views carry `r`; leaving the block ends `r` | one new block keyword; visible but more ceremony |
-| C — named lifetime on the binding | a user-named region label | `arena ::'a mem.Arena.new()` | views carry `'a` | Rust's `'a` — the exact thing Jet promised never to surface |
-
-- **Option A — implicit, scope-inferred (rec).** The region *is* the scope of the
-  `arena ::` binding; no syntax. The checker attaches that scope to each `alloc` view and
-  rejects escape/use-after-reset by name.
-
-```jet
-fn frame(world: view World, out: mut [view CollisionPair]) {
-    arena :: mem.Arena.new(capacity: 1 << 20)
-    node  :: arena.alloc(CollisionPair{ a: 1, b: 2 })
-    node.a += world.gravity        // ok — inside the arena's scope
-    out.push(node)                 // error[E0631]: `node` escapes the arena that made it
-}
-```
-
-- **Option B — explicit `region r { … }` block.** A region is a named block; views inside
-  it carry `r` and may not leave it.
-
-```jet
-fn frame(out: mut [view CollisionPair]) {
-    region r {
-        arena :: mem.Arena.new()
-        node  :: arena.alloc(CollisionPair{ a: 1, b: 2 })
-        out.push(node)             // error[E0631]: `node` may not leave region `r`
-    }
-}
-```
-
-- **Option C — named lifetime on the binding.** A Rust-style label names the region.
-
-```jet
-fn frame() {
-    arena ::'a mem.Arena.new()     // surfaces a lifetime name — the thing Jet promised to hide
-    node  :: arena.alloc(Node{ id: 7 })
-}
-```
-
-**Recommendation:** A as the inferred **beginner** default, **plus B as the explicit expert
-tier** (see the owner Q below) — not A *xor* B. C reintroduces exactly the borrow-lifetime
-surface Jet exists to avoid. Unblocks D-ALLOC2-A on ratification.
-
----
-
-**Owner Q (2026-06-21) — how is this supportive of experts? Jet is beginner-automagic AND
-expert-full-control.**
-
-You're right to push on this — A alone is only the beginner half. The dual-facet answer is
-**A is the inferred default; B (`region r { … }`) is the expert opt-in**, and both ship.
-That's the same shape as the rest of Jet (capabilities are inferred but can be written;
-`@unsafe`/`core.mem` is the expert gate over safe defaults):
-
-- **Beginner / automagic (A, inferred):** write `arena :: mem.Arena.new()`, allocate, and
-  the region *is* that binding's scope. No lifetime, no `region` block, no annotation. The
-  checker silently proves no allocation escapes. 99% of code never names a region.
-
-```jet
-fn frame() {
-    arena :: mem.Arena.new()
-    node  :: arena.alloc(Node{ id: 7 })   // region inferred from `arena ::`
-    use(node)                              // freed at scope end, automatically
-}
-```
-
-- **Expert / full control (B, explicit `region`):** the moment an expert needs a region the
-  inference *can't* give them — one spanning **two** allocators, or **narrower** than the
-  enclosing function, or one they pass to a helper so allocations can flow back out under a
-  named bound — they write it explicitly. The named region is the expert's lever; the
-  checker enforces the same escape rule against `r` instead of an inferred scope.
-
-```jet
-fn build(out: edit Scene) {
-    region r {                              // expert names the region explicitly
-        scratch :: mem.Arena.new()
-        staging :: mem.Arena.new()          // two arenas, ONE region `r`
-        for part in source {
-            node :: scratch.alloc(part.mesh)
-            out.commit(node, in: r)         // legal: `node` lives as long as `r`
-        }
-    }                                       // both arenas freed here, together
-    // a beginner never writes `region`; an expert reaches for it when scope-inference
-    // is too coarse or too fine for what they're building.
-}
-```
-
-So experts are not boxed in by the automagic: A removes lifetimes from the 99% path, and B
-hands the expert an explicit, named region with full control over the 1% — exactly the
-beginner-magic / expert-control split. (C is still rejected: a Rust-style `'a` *forces* the
-lifetime surface on everyone, which is neither the beginner default nor a clean expert tier.)
-**Revised recommendation: ratify A + B together.**
 
 ---
 
@@ -1096,6 +1066,883 @@ exactly the check (I3). Option B is a lint, and lints get suppressed.
 
 ---
 
+**Owner Q (2026-06-21) — leaning A, but how is bloat addressed? How do large codebases
+avoid 3k lines of nothing-but-migrations?**
+
+Four bounds keep the migration set small — it's bounded by *published API surface and
+your data-support window*, never by codebase size:
+
+1. **Only `#PublishedSchema` types accrue migrations.** Internal/private structs — the
+   vast majority of a large codebase — never participate. The count scales with the
+   handful of types you actually serialize and publish, not your line count.
+2. **Migrations live in a dedicated `migrations/` tree, never inline with logic.** They're
+   build-tier declarations (they generate `from_vXXX` converters at build time), so they
+   add **zero runtime/binary cost** and don't clutter the code that does work. Your
+   business logic file is never longer because of them.
+3. **You only keep migrations back to your oldest *still-supported* data version.** A
+   migration exists to read old serialized data; once you no longer promise to read
+   v0.x data (past your support floor), its migrations are dead.
+4. **Squash to a baseline (the database "schema squash" idea).** `jet schema squash`
+   collapses every migration older than the support floor into a single fresh **baseline
+   snapshot** of the current shape, and deletes the collapsed chain. So the chain length
+   is bounded by *(breaking changes within the support window)*, not all-time history —
+   the same way Rails/Django/Prisma keep migrations from growing unbounded.
+
+```shell
+$ jet schema status
+UserRecord: baseline v3.0.0 → 2 migrations → current (v3.4.0)   # only 2 live
+Order:      baseline v3.0.0 → 0 migrations                       # never broke
+
+$ jet schema squash --before 3.0.0     # support floor moved to 3.0
+collapsed 11 migrations (v0.4.0..v2.9.0) into baseline @ v3.0.0; removed 340 lines
+```
+
+So a 500k-line codebase with 12 published types and a 2-major-version support window
+carries maybe a few dozen live migration lines, not thousands. The "3k lines of
+migrations" failure mode is specifically what the squash-to-baseline + support-floor model
+prevents; without it (append-only forever) you'd be right to worry. **Recommend ratifying
+A with the squash/baseline tooling named as part of the Build-tier versioning library
+(#11)** so the bloat answer ships with the feature, not after.
+
+---
+
+---
+
+---
+
+## Persona-gap decisions — board cards c83–c96 (2026-06-20 persona run)
+
+13 owner decisions shaken out of the 2026-06-20 persona run, one per gap that needs a
+user-facing call. Each board card (c83–c96) links its plan in `sidequests/`. House format,
+no effort column. `c95` is implement-only (no decision); `D-PUBLISH1` is a stub in the
+deferred list until M12.2 infra is verified.
+
+### D-ROUTE1 — HTTP route registration & dispatch surface (rec A)
+
+**User story.** Tariq is porting a Go `net/http` service to Jet. He has ten
+endpoints — `GET /users/:id`, `POST /orders`, a health check. Today `jet.http`
+gives him one handler closure and he branches on `request.path` with a growing
+`if/match` ladder; `:id` extraction is manual string-splitting. He wants to
+register routes and have the right handler called with `:id` already parsed.
+
+| Option | Registration | Param access | Glance-readable route map | Beginner read |
+|---|---|---|---|---|
+| A — builder chain | `router.get(path, h)` | `req.param("id")` | yes — one place | clear |
+| B — route table value | a `[Route]` literal | `req.param("id")` | yes — declarative | clear |
+| C — handler attribute | `#route("GET","/u/:id")` on fn | typed handler args | scattered across fns | medium |
+| D — match block | `route req { GET "/u/:id" -> … }` | bound in pattern | yes — but new syntax | high (familiar `match`) |
+
+- **Option A — builder method chain.** A `Router` value collects routes; handlers
+  read params from the request.
+
+```jet
+fn main() {
+    router :: http.Router.new()
+    router.get("/users/:id", get_user)
+    router.post("/orders", create_order)
+    router.get("/health", |req| http.ok("ok"))
+    http.serve(":8080", router)
+}
+
+fn get_user(req: http.Request) -> http.Response {
+    id :: req.param("id")              // "42" — extracted from /users/:id
+    http.json(lookup(id))
+}
+```
+
+- **Option B — declarative route table.** Routes are a value, handlers referenced
+  by name.
+
+```jet
+routes :: [
+    http.route(GET,  "/users/:id", get_user),
+    http.route(POST, "/orders",    create_order),
+    http.route(GET,  "/health",    health),
+]
+http.serve(":8080", routes)
+```
+
+- **Option C — handler attribute.** Each handler declares its own route; the
+  framework collects them.
+
+```jet
+#route(GET, "/users/:id")
+fn get_user(req: http.Request, id: String) -> http.Response {
+    http.json(lookup(id))              // :id arrives as a typed arg
+}
+// routes live next to their handlers, but there is no one place
+// to read the whole route map.
+```
+
+- **Option D — match-style routing block.** A dedicated routing construct.
+
+```jet
+http.serve(":8080", |req| route req {
+    GET  "/users/:id" (id) -> http.json(lookup(id)),
+    POST "/orders"          -> create_order(req),
+    GET  "/health"          -> http.ok("ok"),
+    _                       -> http.not_found(),
+})
+// new grammar; reads like `match`, but adds routing syntax to the language (I8).
+```
+
+**Recommendation:** A — a `Router` builder keeps routing a *library* (no grammar
+change, honoring I8), gives one readable place for the route map, and the
+`req.param` access generalizes to query/header params. B is a fine declarative
+peer; D buys familiarity at the cost of new syntax the simplicity ratchet resists.
+
+---
+
+### D-DETACH1 — Marking a task as intentionally detached (silence L1101) (rec A)
+
+**User story.** Tariq spawns his HTTP server on a task so `main` can keep doing
+setup. Every server program he writes lights up **L1101** ("Task value dropped
+without `.join()`") — including the shipped `57_http_server.jet`. The warning is
+right for an accidental drop but wrong here: he *wants* the server task to outlive
+the spawn scope. He needs a one-word "I meant this."
+
+| Option | Surface | Capture safety enforced | Reads as intent | One verb |
+|---|---|---|---|---|
+| A — `task.detach()` | method on handle | yes (owned/`share` only) | yes — explicit verb | yes |
+| B — `#detach` marker on spawn | attribute (D-ATTR1) | yes | yes — leads the spawn | yes |
+| C — `detach { … }` block | parallel to `spawn { … }` | yes | yes — but two spawn forms | no (two verbs) |
+| D — `spawn(detached: true)` | named arg | yes | trailing flag, easy to miss | yes |
+
+- **Option A — `.detach()` on the task handle.** Spawn returns a handle; calling
+  `.detach()` consumes it and exempts it from L1101.
+
+```jet
+fn main() {
+    server :: spawn { http.serve(":8080", router) }
+    server.detach()        // "runs on its own; don't warn me"
+    log.info("server up")
+    // no L1101 — the drop was declared intentional
+}
+```
+
+- **Option B — `#detach` marker on the spawn.** The intent leads the statement.
+
+```jet
+fn main() {
+    #detach spawn { http.serve(":8080", router) }
+    log.info("server up")
+}
+```
+
+- **Option C — a dedicated `detach { … }` block.** A second spawn verb whose
+  result is never joinable.
+
+```jet
+fn main() {
+    detach { http.serve(":8080", router) }   // distinct from `spawn { … }`
+    log.info("server up")
+    // two spawn constructs to teach; which one do I reach for?
+}
+```
+
+- **Option D — a named arg on spawn.** A flag selects detached mode.
+
+```jet
+fn main() {
+    spawn(detached: true) { http.serve(":8080", router) }
+    // the intent is a trailing boolean; in review it's easy to miss.
+}
+```
+
+In every option, a detached task that captures a borrowed `view` of the caller's
+scope is a compile error (it would outlive the borrow):
+
+```jet
+fn run(cfg: view Config) {
+    spawn { serve(cfg) }.detach()
+    // error[Lxxxx]: a detached task may not capture the borrow `cfg` (view)
+    //   it can outlive the scope `cfg` is borrowed from
+    //   help: pass an owned copy — `spawn { serve(copy cfg) }` — or `share cfg`
+}
+```
+
+**Recommendation:** A — `.detach()` is a single explicit verb on the value, reads
+as a deliberate choice in review, and is the natural place to quote in the L1101
+fix-it ("if intentional, call `.detach()`"). It keeps one spawn verb (unlike C)
+and is leading-visible (unlike D).
+
+---
+
+### D-REPRC1 — C-compatible struct layout annotation (rec A)
+
+**User story.** Yuki is writing ARM firmware. She needs a Jet struct that overlays
+a memory-mapped peripheral register block — exact field order, C padding, no
+reordering — so an `#Unsafe` volatile cast onto the MMIO address is sound. Today
+struct layout is opaque, so she can't reliably interop with C structs or hardware.
+
+| Option | Spelling | Family it joins | Modes | Beginner sees it's expert |
+|---|---|---|---|---|
+| A — `#repr(c)` | attribute (D-ATTR1) | markers; near `#Unsafe` | `c`, `packed`, `align(N)`, `transparent` | yes — clearly an annotation |
+| B — `#layout(c)` | attribute | same family as D-SOA1 `#layout(soa)` | layout kinds | yes |
+| C — `c struct Foo` | type modifier keyword | none | only `c` | medium |
+| D — `extern(c) struct` | extern modifier | FFI `extern` family | only `c` | yes — ties to FFI |
+
+- **Option A — `#repr(c)` attribute (+ `packed` / `align(N)`).** Pins layout;
+  codegen stamps `#[repr(C)]` on the generated Rust struct.
+
+```jet
+#repr(c)
+struct GpioRegs {
+    mode:   U32,
+    output: U32,
+    input:  U32,
+}
+
+fn read_input(base: U64) -> U32 {
+    #Audit("MMIO read of GPIO input register at a fixed peripheral address")
+    #Unsafe {
+        regs :: mem.cast<GpioRegs>(base)   // sound: layout is pinned
+        mem.volatile_read(regs.input)
+    }
+}
+
+// a growable field breaks the guarantee:
+#repr(c)
+struct Bad { tag: U32, items: [U32] }
+// error[E04xx]: field `items: [U32]` has no stable C layout
+//   help: use a fixed-size array `[U32#N]`, or remove `#repr(c)`
+```
+
+- **Option B — `#layout(c)`, unifying with SOA.** C-repr and SOA become one
+  `#layout(…)` family.
+
+```jet
+#layout(c)
+struct GpioRegs { mode: U32, output: U32, input: U32 }
+// one annotation family also spells #layout(soa) (D-SOA1) and #layout(packed).
+```
+
+- **Option C — `c struct` modifier keyword.** Layout is a struct-declaration
+  modifier.
+
+```jet
+c struct GpioRegs { mode: U32, output: U32, input: U32 }
+// terse, but adds a bare keyword in type position and has no room for
+// packed/align variants without more keywords.
+```
+
+- **Option D — `extern(c) struct`.** Ties layout to the FFI surface.
+
+```jet
+extern(c) struct GpioRegs { mode: U32, output: U32, input: U32 }
+// reads as "this struct crosses the C boundary"; conflates layout with FFI,
+// so a pure-Jet struct that just wants packed layout has nowhere to go.
+```
+
+**Recommendation:** A — `#repr(c)` matches the ratified attribute/marker family
+(D-ATTR1), sits visually next to the other expert markers (`#Unsafe`/`#Audit`),
+and has obvious room for `packed`/`align(N)` that firmware needs. B is a strong
+alternative *if* the owner wants one `#layout(…)` family shared with D-SOA1 —
+that cross-cutting choice (repr and SOA together vs separate) is the real fork
+and worth deciding alongside D-SOA1.
+
+---
+
+### D-STDIN1 — Streaming line-by-line stdin (rec A)
+
+**User story.** Priya writes a grep-like filter: `cat huge.log | jet run filter.jet`.
+Today `io.read_all_input()` reads *all* of stdin into memory, then she splits it
+by hand. Files already stream (`reader.lines()` works), but stdin has no such
+path. She wants stdin to stream lines the same way files do, constant-memory.
+
+| Option | Spelling | Same type as files? | Convenience | One idiom |
+|---|---|---|---|---|
+| A — `io.stdin().lines()` | stdin handle mirrors `files.open` | yes — reuses `FileLines` | medium | yes (files+stdin interchangeable) |
+| B — bare `io.lines()` | top-level convenience | yes under the hood | high | a second spelling beside files |
+| C — `io.read_lines()` | returns an iterator value | maybe | high | a third verb |
+
+- **Option A — `io.stdin()` handle with `.lines()` / `.read_line()`.** Mirrors the
+  file reader exactly, so a function can take either source.
+
+```jet
+fn main() {
+    loop line in io.stdin().lines() {
+        if line.contains("ERROR") { print(line) }
+    }
+}
+// same .lines() the file reader uses (CheckerStdlib FileLines); a function
+// written against a file reader also accepts stdin.
+```
+
+- **Option B — bare `io.lines()`.** A direct convenience for the common case.
+
+```jet
+fn main() {
+    loop line in io.lines() {           // implicitly stdin
+        if line.contains("ERROR") { print(line) }
+    }
+}
+// terse, but "lines of what?" is implicit, and it's a separate spelling
+// from the file `reader.lines()` users already learned.
+```
+
+- **Option C — `io.read_lines()` returning an iterator.** A new verb alongside
+  `read_all_input`.
+
+```jet
+fn main() {
+    loop line in io.read_lines() {
+        print(line)
+    }
+}
+// pairs by name with read_all_input, but adds a third reading verb and
+// doesn't reuse the file streaming type.
+```
+
+A `pure fn` reading stdin stays rejected (stdin is impure, like `input`):
+
+```jet
+pure fn count() -> Int {
+    n :: 0
+    loop _ in io.stdin().lines() { n += 1 }   // error: pure fn reads stdin (impure)
+    n
+}
+```
+
+**Recommendation:** A — reusing the file reader's `.lines()`/`FileLines` gives
+*one* streaming idiom across files and stdin (a function written for one accepts
+the other), which is the strongest one-path outcome. `read_all_input` stays as a
+small-input convenience.
+
+---
+
+### D-TERM1 — Terminal raw-mode + key input surface (rec A)
+
+**User story.** Kofi is building a terminal puzzle game — the one persona whose
+verdict is *blocked*, not just friction. He needs to read an arrow key without
+Enter, move the cursor, and print color, all from one file. `core.io` is
+line-based, so today he cannot write a game loop at all. He wants a small
+terminal API that puts the terminal in raw mode and restores it automatically.
+
+| Option | Surface | Auto-restore | Key model | Scope |
+|---|---|---|---|---|
+| A — `raw_mode { … }` scoped block | block guarantees restore | yes — on scope exit (incl. panic) | `Key` enum | minimal: raw + key + cursor + color |
+| B — `Terminal` handle value | methods on a handle | via scope-guard the user holds | `Key` enum | configurable |
+| C — `core.term` free functions | enter/exit + read funcs | manual `term.restore()` | `Key` enum or bytes | minimal |
+| D — full TUI module | screen/widget abstraction | yes | rich events | large (alt-screen, mouse, resize) |
+
+- **Option A — `raw_mode { … }` scoped block (rec).** Raw mode is entered for the
+  block and *guaranteed* restored on exit (built on the ratified scope-guard,
+  D-DEFER1).
+
+```jet
+fn main() {
+    raw_mode {
+        term.clear()
+        loop {
+            term.move_to(0, 0)
+            term.write("press a key (q to quit): ".green())
+            match term.read_key() {
+                Key.Char('q') -> break,
+                Key.Arrow(dir) -> term.write("arrow: {dir}"),
+                Key.Char(c)    -> term.write("you pressed {c}"),
+                else           -> {},
+            }
+        }
+    }
+    // terminal is back in cooked mode here, even if the loop panicked
+}
+```
+
+- **Option B — a `Terminal` handle with methods.** The user holds the handle and a
+  guard.
+
+```jet
+fn main() {
+    t :: term.enter_raw()           // returns a handle + restores via its guard
+    loop {
+        match t.read_key() { Key.Char('q') -> break, else -> {} }
+    }
+}
+// flexible, but the restore depends on the handle's guard surviving every path;
+// a beginner can drop it on an early return and wedge their terminal.
+```
+
+- **Option C — `core.term` free functions.** Explicit enter/exit.
+
+```jet
+fn main() {
+    term.enter_raw()
+    loop { match term.read_key() { Key.Char('q') -> break, else -> {} } }
+    term.restore()        // MUST be called on every exit path, by hand
+}
+// forgetting restore() (or a panic before it) leaves the terminal broken —
+// the exact footgun a beginner game author will hit.
+```
+
+- **Option D — a full TUI module.** Alt-screen, widgets, mouse, resize events.
+
+```jet
+fn main() {
+    app :: tui.App.new()
+    app.on_key(|k| if k == Key.Char('q') { app.quit() })
+    app.run()
+}
+// powerful, but far past what "a small terminal game" needs; large surface,
+// many decisions, slower to give Kofi anything playable.
+```
+
+**Recommendation:** A — the scoped `raw_mode { }` block makes auto-restore a
+*language guarantee*, not a discipline, which is exactly right for a beginner
+games persona who must not be able to wedge their terminal. `Key` as an enum makes
+input teachable. (The I6 question — native termios vs a bootstrap crate — is an
+implementation choice on top, flagged in the plan, not a user-facing fork.)
+
+---
+
+### D-LSDIR1 — Directory listing: paths, not just names (rec A)
+
+**User story.** Priya writes her first Jet tool: scan a directory and rename
+files. `fs.list_dir(dir)` hands her bare names, so she rebuilds each full path
+with `"{dir}/{name}"` — fragile, and on the wrong OS the separator is wrong. She
+wants the scan to give her something she can act on directly.
+
+| Option | What `list_dir` gives | Path-join help | `is_dir` without re-stat | Behavior change |
+|---|---|---|---|---|
+| A — `DirEntry` values | `{name, path, is_dir}` | path built for you | yes | yes (return type changes) |
+| B — full-path strings | `[String]` full paths | implicit | no | yes (values change) |
+| C — names + `path.join` | `[String]` names + helper | explicit `path.join` | no | none (additive) |
+
+- **Option A — `list_dir` returns `[DirEntry]`.** Each entry carries name, full
+  path, and type.
+
+```jet
+fn main() ? {
+    loop entry in fs.list_dir("./logs")? {
+        if entry.is_dir { continue }
+        fs.rename(entry.path, "{entry.path}.bak")?   // full path, ready to use
+    }
+}
+```
+
+- **Option B — `list_dir` returns full-path strings.**
+
+```jet
+fn main() ? {
+    loop path in fs.list_dir("./logs")? {            // each is "./logs/app.log"
+        fs.rename(path, "{path}.bak")?
+    }
+}
+// no is_dir without a separate fs.is_dir(path) call.
+```
+
+- **Option C — keep names, add `path.join`.**
+
+```jet
+fn main() ? {
+    dir :: "./logs"
+    loop name in fs.list_dir(dir)? {                 // bare names, as today
+        path :: path.join(dir, name)                 // portable join
+        fs.rename(path, "{path}.bak")?
+    }
+}
+// additive (nothing existing changes), but the user still threads dir+name
+// by hand on every scan.
+```
+
+**Recommendation:** A — `DirEntry` gives a beginner the path *and* `is_dir` in one
+step, which is what nearly every scan actually needs (filter dirs, act on files),
+and removes a whole class of separator bugs. It is a return-type change to a
+shipped function — call that out — but the persona task (scan + act) is the
+canonical first tool, so getting it right beats source-compat. A `path.join`
+helper (C) is still worth shipping *alongside* for the cases A doesn't cover.
+
+---
+
+### D-CSVROW1 — Typed CSV row decoding (rec A)
+
+**User story.** Elena runs a CSV→JSON ETL. `jet.csv` hands her each row as
+`[String]`, so she pulls fields by index (`row[2].to_int()`), guessing at columns
+and re-counting when the file changes. She wants to declare a row as a struct and
+decode records into it by header name, with a clean per-row error she can skip
+with `??`.
+
+| Option | How fields map | Needs S56 derives? | Robust to column reorder | Failure shape |
+|---|---|---|---|---|
+| A — comptime `decode<Row>` | by field name via comptime reflection | no (uses S57/S60 comptime) | yes (header mapping) | typed row error |
+| B — explicit mapping closure | user writes `Row{ id: r[0]… }` | no | no (positional) | user-chosen |
+| C — `#[CsvRow]` derive | derive generates decoder | **yes (blocked on S56)** | yes | typed |
+
+- **Option A — `csv.decode<Order>(record)` via comptime field reflection.** The
+  compiler walks `Order`'s fields (comptime is shipped, S57/S60) and maps columns
+  by header name, coercing types.
+
+```jet
+struct Order { id: Int, customer: String, total: Float }
+
+fn main() ? {
+    loop record in csv.rows("orders.csv")? {
+        order :: csv.decode<Order>(record) ?? continue   // skip malformed rows
+        emit(order)
+    }
+}
+// a bad cell:
+// row 14, column `total`: cannot read "N/A" as Float  → ?? skips this row
+```
+
+- **Option B — explicit mapping closure.** The user writes the field map; no
+  reflection.
+
+```jet
+fn main() ? {
+    loop r in csv.rows("orders.csv")? {
+        order :: Order{ id: r[0].to_int()?, customer: r[1], total: r[2].to_float()? } ?? continue
+        emit(order)
+    }
+}
+// total control, but indices are back and a column reorder silently corrupts.
+```
+
+- **Option C — `#[CsvRow]` derive.** A derive generates the decoder.
+
+```jet
+#[CsvRow]
+struct Order { id: Int, customer: String, total: Float }
+// order :: csv.decode<Order>(record)?
+// error: user-defined derives (S56) are not available until Epoch 3
+```
+
+**Recommendation:** A — comptime `decode<Row>` gives Elena typed, header-mapped
+rows *today* (comptime field walk is already shipped) without waiting on the S56
+derive system, and the typed per-row error composes with the ratified `??` skip
+idiom. C is the eventual ergonomic spelling once S56 lands; ship A now, and if A's
+comptime decode and a future `#[CsvRow]` derive both exist they should produce the
+*same* decoder (one path).
+
+---
+
+### D-JSONOUT1 — Serialize a typed struct to JSON (rec A)
+
+**User story.** Elena's ETL ends by emitting JSON. `json.render` takes the dynamic
+`JSON` enum, so she hand-builds `Object([("id", Number(o.id)), …])` for every
+struct — verbose and drift-prone. She wants `json.render(order)` to just work when
+`order: Order`.
+
+| Option | Mechanism | Needs S56? | One annotation for in+out | Field rename |
+|---|---|---|---|---|
+| A — built-in `#[Serialize]` marker | compiler honors via comptime field walk | no | yes (drives decode too) | via `#json("name")` |
+| B — explicit `to_json(self)` method | user writes per type | no | no | manual |
+| C — S56 user-derive | user-written derive | **yes (blocked)** | yes | yes |
+
+- **Option A — built-in `#[Serialize]` marker.** A *built-in* marker (distinct from
+  S56 user-derives; D-ATTR2 ratified the bare-marker form) tells the compiler to
+  generate render (and decode) by walking fields.
+
+```jet
+#[Serialize]
+struct Order { id: Int, customer: String, total: Float }
+
+fn main() {
+    order :: Order{ id: 7, customer: "Mara", total: 19.5 }
+    print(json.render(order))      // {"id":7,"customer":"Mara","total":19.5}
+}
+
+#[Serialize]
+struct Bad { cb: fn(Int) -> Int }
+// error: `Bad` is not serializable — field `cb` is a function
+```
+
+- **Option B — explicit `to_json` method.**
+
+```jet
+impl Order {
+    fn to_json(view self) -> JSON {
+        JSON.object([("id", JSON.num(self.id)), ("customer", JSON.str(self.customer)),
+                     ("total", JSON.num(self.total))])
+    }
+}
+// works with no compiler help, but every struct re-writes the obvious thing
+// and it drifts when a field is added.
+```
+
+- **Option C — S56 user-derive.**
+
+```jet
+derive Order ~~ Serialize     // S83 connector
+// error: user-defined derives (S56) are deferred to Epoch 3
+```
+
+**Recommendation:** A — a built-in `#[Serialize]` marker (riding the already-shipped
+comptime field walk and the ratified bare-marker form) closes the gap now without
+S56, and the *same* marker should drive both `json.render` and typed decode so one
+annotation covers in and out. **Owner must confirm** whether a built-in Serialize
+marker is intended distinct from S56 user-derives before this ratifies — that
+boundary is the real question.
+
+---
+
+### D-ARGS1 — Structured command-line argument parsing (rec A)
+
+**User story.** Amara replaces a bash script with Jet. Her tool takes
+`--input file`, `--verbose`, and a positional command. `io.args()` gives her a raw
+`[String]`; she writes the flag loop by hand and her `--help` is a `print`. She
+wants to declare the flags her tool accepts and get typed values plus a generated
+`--help` and good errors for free.
+
+| Option | Spec form | Needs S56/comptime? | Auto `--help` | Typed values |
+|---|---|---|---|---|
+| A — builder spec | `args.flag(...).option(...)` | no | yes | yes |
+| B — `#[Args]` struct | fields are flags | yes (comptime/S56) | yes | yes |
+| C — declarative table | a `[ArgSpec]` value | no | yes | yes |
+
+- **Option A — builder spec value.** Build a spec, parse `io.args()` against it.
+
+```jet
+fn main() ? {
+    spec :: args.spec()
+        .flag("verbose", short: 'v', help: "noisy output")
+        .option("input", String, required: true, help: "input file")
+        .positional("command", String)
+    cli :: spec.parse(io.args())?       // prints generated --help on `--help`
+    if cli.flag("verbose") { log.verbose() }
+    run(cli.option("input"), cli.positional("command"))
+}
+// unknown flag:
+//   error: unknown flag `--inpt` (did you mean `--input`?)
+//   usage: tool [--verbose] --input <file> <command>
+```
+
+- **Option B — `#[Args]` struct.** Declare a struct; fields become flags.
+
+```jet
+#[Args]
+struct Cli {
+    #flag(short: 'v')  verbose: Bool,
+    #option(required)  input:   String,
+    #positional        command: String,
+}
+// cli :: args.parse<Cli>(io.args())?
+// error: deriving the parser needs user-derives (S56), deferred to Epoch 3
+```
+
+- **Option C — declarative table.** A value listing the args.
+
+```jet
+cli :: args.parse(io.args(), [
+    args.flag("verbose", short: 'v'),
+    args.option("input", String, required: true),
+    args.positional("command", String),
+])?
+// equivalent to A's data without the builder chain.
+```
+
+**Recommendation:** A — a builder spec gives typed values, auto-generated `--help`,
+and teaching errors *today* with no dependency on S56, and the spec value can later
+back a `#[Args]` struct form (B) once derives land — same parser underneath. The
+generated `--help` and error text are product copy and must be snapshot-tested.
+
+---
+
+### D-LOGFMT1 — Human-readable log output for `jet.log` (rec A)
+
+**User story.** Amara runs her automation script in a terminal and reads the log
+live. `jet.log` emits JSON lines, so her console is a wall of `{"level":"info",…}`.
+She falls back to building strings by hand. She wants the same `log.info(…)` calls
+to print a readable line locally, while still emitting JSON when piped to a log
+aggregator.
+
+| Option | Default | Selection | Magic level | Risk |
+|---|---|---|---|---|
+| A — auto by TTY | text on a TTY, JSON when piped | auto + override | highest | surprise if expectation differs |
+| B — text default, JSON opt-in | text | `log.setup(format: json)` | medium | prod forgets to switch to JSON |
+| C — JSON default (today), text opt-in | JSON | `log.setup(format: text)` | low | beginner sees JSON first |
+
+- **Option A — auto-detect (text on a TTY, JSON when piped).** The logger picks
+  format by whether stderr is a terminal; an explicit setting overrides.
+
+```jet
+fn main() {
+    log.info("starting", port: 8080)
+    // interactive terminal:
+    //   12:01:03 INFO  starting  port=8080
+    // piped (`tool | jq`):
+    //   {"ts":"...","level":"info","msg":"starting","port":8080}
+}
+```
+
+- **Option B — text by default, JSON opt-in.**
+
+```jet
+fn main() {
+    log.info("starting", port: 8080)              // 12:01:03 INFO starting port=8080
+}
+// production:
+log.setup(format: json)                            // opt in to JSON lines
+```
+
+- **Option C — JSON by default (status quo), text opt-in.**
+
+```jet
+fn main() {
+    log.setup(format: text)                        // must opt in to readable output
+    log.info("starting", port: 8080)
+}
+// without setup, a beginner running locally sees raw JSON — today's friction.
+```
+
+**Recommendation:** A — auto-by-TTY is the modern logger behavior (Rust `tracing`,
+Go `slog` setups, Python `rich`) and gives a beginner a readable console *and* a
+production pipeline JSON *with no configuration*, which is the strongest
+beginner-experience + correctness combination. The explicit override stays for
+when detection guesses wrong. The text line layout is product copy — snapshot it.
+
+---
+
+### D-FLOATW1 — Precision-correct math on sized floats (rec A)
+
+> Note: the `F32`/`F64` *type spellings* are already ratified (**D-SG9**); they are
+> merely unimplemented. This decision is only the **math/precision policy** on top.
+
+**User story.** Marcus runs a numerical simulation where memory and precision
+matter. He wants `F32` arrays for half the memory and wants `core.math.sqrt`,
+`sin`, etc. to work on them at `F32` precision — and he wants the compiler to stop
+him from silently dropping `F64` precision into an `F32` binding.
+
+| Option | Math over widths | Literal into `F32` | Mixed `f32`+`f64` |
+|---|---|---|---|
+| A — width-generic math, explicit conversion | `sqrt` works per-width, returns same width | explicit `.to_f32()` or exact-rep literal ok | error: convert explicitly (D-SG9) |
+| B — f64-only math, convert at call | `sqrt` always f64; convert in/out | implicit narrowing allowed | implicit widen to f64 |
+
+- **Option A — width-generic math + explicit conversions (rec).** `core.math`
+  functions accept and return the float width they're given; precision-losing
+  moves are explicit, consistent with D-SG9's "no implicit widening, named-method
+  conversions."
+
+```jet
+xs :: [F32]{ 1.0, 2.0, 3.0 }
+ys :: xs.map(|x| math.sqrt(x))     // sqrt(F32) -> F32, full F32 path
+
+a :: 1.0e40                        // a: Float (f64)
+b :: F32 = a                       // error: assigning f64 to F32 may lose precision
+                                   //   help: write `a.to_f32()` to convert explicitly
+c :: 2.0f32 + 3.0                  // error: cannot mix F32 and Float(f64)
+                                   //   help: `2.0f32 + (3.0).to_f32()`
+```
+
+- **Option B — f64-only math, convert at the boundary.** Math stays f64; sized
+  floats are storage only.
+
+```jet
+xs :: [F32]{ 1.0, 2.0, 3.0 }
+ys :: xs.map(|x| math.sqrt(x.to_f64()).to_f32())   // round-trip through f64
+b :: F32 = 1.0e40                                   // silently narrows
+// less ceremony, but the f64 round-trip defeats the F32 precision/perf intent
+// and silent narrowing is the footgun numerical code most fears.
+```
+
+**Recommendation:** A — width-generic math keeps `F32` a real first-class precision
+choice (not just storage), and explicit precision-losing conversions match the
+already-ratified D-SG9 stance (no implicit widening, named conversions). B
+reintroduces exactly the silent-narrowing footgun D-SG9 rejected for casts.
+
+---
+
+### D-MATHLIB1 — Linear-algebra library home & scope (rec A)
+
+**User story.** Marcus needs vectors and matrices — dot, cross, matmul, and ideally
+decompositions/FFT — for a physics simulation. Today `core.math` is scalar `Float`
+ops only, so he writes matrices from scratch or drops to Rust FFI. He wants a
+numerics library that ships with the language.
+
+| Option | Home | Dimensions | v1 scope |
+|---|---|---|---|
+| A — `jet.linalg` ring package | a ring package (like csv/toml/regex) | comptime-sized + runtime | small vectors + matrices core, FFT later |
+| B — `core.math` extension | built into core | runtime-sized | grows core surface |
+| C — expert-only `#Unsafe` BLAS binding | FFI overlay | runtime | thin wrapper, expert-tier |
+
+- **Option A — `jet.linalg` ring package (rec).** Numerics ships as a first-party
+  ring package, consistent with regex/csv/toml.
+
+```jet
+use jet.linalg
+
+fn main() {
+    a :: Matrix<2,2>{ {1.0, 2.0}, {3.0, 4.0} }     // comptime-sized (rides S76/c82)
+    b :: Matrix<2,2>{ {5.0, 6.0}, {7.0, 8.0} }
+    print((a * b).trace())                          // 67.0
+    v :: Vec3{ 1.0, 0.0, 0.0 }
+    print(v.cross(Vec3{ 0.0, 1.0, 0.0 }))           // Vec3{0,0,1}
+}
+```
+
+- **Option B — extend `core.math`.** Matrices live in core.
+
+```jet
+use core.math
+m :: math.Matrix.new(2, 2)        // runtime-sized only
+// pulls a large numerics surface into core, which every program carries.
+```
+
+- **Option C — expert `#Unsafe` BLAS binding.** A thin FFI wrapper, expert-tier.
+
+```jet
+use jet.blas
+#Unsafe { jet.blas.dgemm(a, b, out) }   // raw, fast, expert-only — no beginner path
+```
+
+**Recommendation:** A — a `jet.linalg` ring package keeps core small (I8), matches
+how regex/csv/toml already ship, and can offer comptime-sized matrices (riding the
+fixed-array work, c82/S76) for the cache-friendly, bounds-checked layout numerical
+code wants. The I6 question (native vs bootstrap a numerics crate) is an
+implementation gate flagged in the plan, decided like regex (c79).
+
+---
+
+### D-SIMD1 — SIMD primitive surface & safety tier (rec A)
+
+**User story.** Marcus has a hot kernel adding two large `F32` arrays. He wants it
+vectorized. Today there are no SIMD types — the expert tier gives him raw pointers
+(`#Unsafe`/`Ptr<T>`) but no lanes, so he can't write portable vector math.
+
+| Option | Surface | Safety | Portability |
+|---|---|---|---|
+| A — safe portable lane types `F32x4` | explicit lane values + ops | safe by default (`std::simd`) | portable; falls back when ISA absent |
+| B — auto-vectorize hint on a loop | `#vectorize loop …` | safe | compiler-best-effort |
+| C — target intrinsics behind `#Unsafe` | raw arch intrinsics | expert-only `#Unsafe` | per-target |
+
+- **Option A — portable lane types (rec).** First-class `F32x4`/`F64x2` with safe
+  ops that lower to portable SIMD.
+
+```jet
+fn add(xs: [F32], ys: [F32], out: mut [F32]) {
+    loop i in (0..xs.len()).step(4) {
+        a :: F32x4.load(xs, i)
+        b :: F32x4.load(ys, i)
+        (a + b).store(out, i)         // safe; lowers to std::simd, scalar fallback
+    }
+}
+```
+
+- **Option B — a vectorize hint.** Annotate a scalar loop; the compiler tries to
+  vectorize.
+
+```jet
+#vectorize
+loop i in 0..xs.len() { out[i] = xs[i] + ys[i] }
+// no new types, but "best-effort" — Marcus can't tell if it actually vectorized.
+```
+
+- **Option C — target intrinsics behind `#Unsafe`.** Raw architecture intrinsics.
+
+```jet
+#Audit("AVX2 packed add; falls back required on non-AVX targets")
+#Unsafe { simd.x86.mm256_add_ps(a, b) }
+// maximum control, expert-only, non-portable, and unsafe — no beginner/portable path.
+```
+
+**Recommendation:** A — portable safe lane types (`std::simd` model) keep SIMD
+*memory-safe by default* (I1) and portable across targets, which fits Jet's
+safe-by-default-with-expert-opt-in spine; raw target intrinsics (C) remain
+available behind `#Unsafe`/`#Audit` for the last-mile expert case. B is a nice
+additive sugar but can't be the primitive (it's unpredictable).
+
+---
+
 ---
 
 ## Deferred ballots — promote when reached
@@ -1103,6 +1950,19 @@ exactly the check (I3). Option B is a lint, and lints get suppressed.
 The items below are not ready for owner decision. Each has a real user story
 and a clear reason to wait. Promote a stub to a full card when its
 prerequisite is ratified or its milestone is reached.
+
+---
+
+**D-PUBLISH1 — `jet publish` command shape + semver/resolver policy (board card c96).**
+*User story:* Saoirse cuts a release of her Jet library and Amara pins a semver range to it.
+*Decision (when promoted):* the `jet publish` command surface, version-immutability /
+re-publish-refusal policy, and the resolver default (highest-compatible vs exact pins +
+explicit update; lockfile default). *Why deferred:* rides **c50** (build-from-source) and
+**c56** (registry upload) infra, both unverified/soft-blocked on dep approvals. Promote to a
+full card with worked `jet publish` shell examples once M12.2 infra is verified.
+Rec direction: `jet publish` infers version from `pkg.jet`, refuses re-publish + a dirty
+tree, resolver defaults to highest-compatible with a committed lockfile. From the 2026-06-20
+persona run (Saoirse, Amara).
 
 ---
 
@@ -1210,7 +2070,82 @@ concrete roadmap slot and owner sign-off. Board items #15/#17.
 
 ## Smart Context — board card c74
 
-### D-CTX1 — Smart Context: an implicit allocator+logger bundle threaded through every call (rec A2 + Cβ)
+### D-CTX1 — Smart Context: pick the `#context` grammar (baseline A2 + Cβ, owner-set 2026-06-21)
+
+> **REFORMED 2026-06-21 per owner.** The two semantic questions below are **decided**:
+> **Q1 = A2 (Complement)** — explicit S58/D-ALLOC1 allocator-passing stays and *wins when
+> present*; the implicit context is only the swappable default. **Q2 = Cβ** — the per-block
+> swap is a `#context(…) { … }` marker block (rides the ratified `#` grammar). v1 bundle =
+> **allocator + logger only**. The original Q1/Q2 analysis is kept below for reference.
+>
+> **The only open choice now is the grammar of the field list inside `#context(…)`** — the
+> owner wants to pick the exact spelling. Pick one of G1–G3 (and the two sub-points).
+
+#### Grammar options for `#context(<fields>) { … }` — pick one
+
+| Option | Field spelling | Consistent with | Risk |
+|---|---|---|---|
+| G1 — `=` assignment | `#context(allocator = arena, logger = silent)` | Jai's `context.x = v` | `=` is *reassignment* (S17) everywhere else in Jet — overloads it |
+| G2 — `:` colon (rec) | `#context(allocator: arena, logger: silent)` | named args S61, struct fields S29, manifest fields | none — `name: value` is Jet's one spelling |
+| G3 — type-inferred slots | `#context(arena, silent)` | inferred constructors U18 | ambiguous if two values share a slot type; adding a slot silently re-routes |
+
+- **Option G1 — `field = value`.** The literal Cβ draft; reads like Jai's `context.allocator = …`.
+
+```jet
+silent :: log.Silent.new()
+#context(allocator = arena, logger = silent) {
+    report :: build_report(rows)
+}                                              // both restored on exit
+```
+But every other `name value` pairing in Jet uses `:` (`f(timeout: 30)`, `Point{ x: 1 }`,
+`name: "x"` in `pkg.jet`); `=` already means "reassign an existing `:=` binding" (S17).
+G1 spends `=` on a second meaning.
+
+- **Option G2 — `field: value` (recommended).** The same colon Jet uses for named args,
+  struct literals, and manifest fields — one spelling, nothing new to learn.
+
+```jet
+silent :: log.Silent.new()
+#context(allocator: arena, logger: silent) {
+    report :: build_report(rows)               // arena + silent flow downstream
+}                                              // both restored here
+
+#context(allocator: arena) {                   // single field — no ceremony
+    big :: build_report(rows)
+}
+```
+
+- **Option G3 — bare values, slot inferred from type.** Terse; the compiler routes each
+  value to its slot by type (an `Arena` → `allocator`, a `Logger` → `logger`), U18-style.
+
+```jet
+#context(arena, silent) {                      // which is which? inferred from type
+    report :: build_report(rows)
+}
+// error[E08xx]: two values target the context slot `allocator`
+#context(arena, scratch) { … }                 // both are arenas — ambiguous
+```
+Con: ambiguous when two values map to one slot, and once the bundle grows (capabilities,
+effects later) a bare value can silently land in a new slot — it doesn't scale past 2 fields.
+
+#### Sub-point 1 — single-field shorthand
+With G2, a one-field swap is already clean (`#context(allocator: arena) { … }`). No special
+shorthand needed. (Recommend: **no shorthand** — one form.)
+
+#### Sub-point 2 — prebuilt bundle (optional, additive)
+Allow a named bundle to be swapped in whole, for the rare expert reusing one context across
+many blocks: `ctx :: context.with(allocator: arena, logger: silent)` then
+`#context(..ctx) { … }` (spread). **Recommend: defer** — not needed for v1; revisit if a real
+multi-block reuse case appears. v1 = inline fields only.
+
+**Recommendation: G2** (`#context(allocator: arena, logger: silent) { … }`) — it reuses
+Jet's single `name: value` spelling (S61/S29), keeps `=` meaning only "reassign" (S17),
+scales to more fields and to the future capability/effect carrier, and stays unambiguous.
+G1 overloads `=`; G3 is terse but breaks down past two fields.
+
+---
+
+#### Original Q1/Q2 analysis (kept for reference — both now decided above)
 
 There are **two coupled questions** here. The owner must answer both:
 
@@ -1355,7 +2290,7 @@ default. So Q1 is not a nicety; it is the gate.
   injection" — reusing the word the owner already declined elsewhere is a trap.
 
 - **Option Cβ — `#context(allocator = arena) { … }` (recommended).** A `#` marker block
-  (consistent with D-ATTR1's `#unsafe`/`#audit`), naming swapped fields as `field = value`;
+  (consistent with D-ATTR1's `#Unsafe`/`#Audit`), naming swapped fields as `field = value`;
   multiple fields comma-separated (D-ATTR2 list feel). Auto-restores on block exit.
 
   ```jet
@@ -1367,7 +2302,7 @@ default. So Q1 is not a nicety; it is the gate.
 
   Pro: rides the **already-ratified `#` marker grammar** — no new top-level keyword, no
   collision with `using` (S62) or `use` (S16); the marker form signals "compiler-managed,
-  scoped" exactly like `#unsafe`. Con: a `#(…)` block is a slightly heavier read than bare
+  scoped" exactly like `#Unsafe`. Con: a `#(…)` block is a slightly heavier read than bare
   `using`.
 
 - **Option Cγ — `push_context my_ctx { … }`.** Jai-literal: build a whole context value,
@@ -1451,10 +2386,10 @@ Jet's comptime engine is already ratified and partly shipped: S26 (the comptime 
   comptime esc :: embed_file("../../etc/passwd")    // error: path escapes the project root
   ```
 
-- **Option C — broad gated build-time I/O.** Allow arbitrary comptime functions to do I/O when explicitly gated with a visible audit marker (mirroring the S58 `#audit`/`#unsafe` model).
+- **Option C — broad gated build-time I/O.** Allow arbitrary comptime functions to do I/O when explicitly gated with a visible audit marker (mirroring the S58 `#Audit`/`#Unsafe` model).
 
   ```jet
-  #audit("reads the local package list at build time — no network, no secrets")
+  #Audit("reads the local package list at build time — no network, no secrets")
   comptime pkgs :: #run(io) {
       core.fs.read("local-packages.txt").lines().filter((l) => l.len() > 0)
   }
@@ -1565,6 +2500,52 @@ interpreter first — it's the part users feel — and keep the JIT behind a sea
 backend choice (A vs C) can be made on real workloads without blocking the pillar.
 Cranelift (A) is the likely successor; rustc-in-the-loop (B) is rejected outright as an
 I2 hazard.
+
+---
+
+**Owner directive (2026-06-21): "Option D, but don't defer the full implementation if
+avoidable — we're close to Epoch 3. Propose a new approach to get it working."**
+
+Here it is — **Option D+ : seam now, Cranelift JIT *this* Epoch-3, tiered (not deferred).**
+D and A were framed as "ship the experience now / pick the backend later." D+ collapses
+that into one Epoch-3 deliverable so the speed lands with the experience:
+
+- **Phase 1 (now, days):** `jet serve` ships on the interpreter with hot-swap — behind a
+  stable `JitBackend` trait seam (one Rust trait: `compile_unit(checked_ir) -> CodePtr`).
+  The interpreter is the first impl. Users get live reload immediately (D's win).
+- **Phase 2 (same Epoch-3 milestone — named, not "a later milestone"):** implement a
+  **Cranelift** `JitBackend` behind that seam and flip `jet serve` to it. The interpreter
+  stays as **tier-0** (cold / not-yet-JITed / unsupported-op fallback); Cranelift is
+  **tier-1** for hot code — the JVM-style tiering the plan already wanted (4b). So nothing
+  built in Phase 1 is thrown away; the interpreter is permanent tier-0, not scaffolding.
+
+```shell
+$ jet serve api.jet
+serving on :8080 (tier-0 interpreter; tier-1 cranelift: warming)
+# edit handlers/checkout.jet, save
+[checkout.jet] checked ok → interpreted live in 8ms        # instant (tier-0)
+[checkout.jet] hot path → cranelift-compiled in 31ms        # upgraded to native (tier-1)
+```
+
+**Why this is safe and I-compliant (the whole reason D was cautious):**
+- **I6 holds.** Cranelift is a **runtime-side** crate in the `jet serve` runtime, **not in
+  `Source/`** (the compiler). I6 forbids crates in the *compiler*; the runtime already
+  links rustc for `jet build`. This needs your **dep approval** — the same kind you gave the
+  `regex` crate (D-REGEX1) — for a runtime-only Cranelift dependency. That approval is the
+  one decision that unblocks Phase 2; everything else is engineering.
+- **I2/I3 hold.** sema fully checks every unit *before* any emit; the JIT only ever lowers
+  already-valid IR (codegen stays dumb, I3). If Cranelift ever rejects valid IR that's an
+  internal ICE, never Sam's error (I2) — identical to the rustc contract.
+- **B stays rejected** (rustc in the interactive loop = seconds + I2 hazard). C (two
+  release backends kept output-identical) is **not** needed: release stays rustc/LLVM via
+  `jet build`; `jet serve` is dev-only, so dev-vs-release output-identity is a test concern,
+  not a correctness gate — Cranelift dev + rustc release is fine because the release artifact
+  is always the rustc one.
+
+**What I need from you:** approve the **runtime-side Cranelift dependency** (I6 runtime
+exception, like regex/rustc). With that yes, D+ ships the hot-reload experience now AND the
+real JIT inside Epoch 3 — no open-ended defer. If you'd rather not take the dep at all,
+fall back to plain D (interpreter-only, JIT genuinely later). **Recommend D+.**
 
 ---
 

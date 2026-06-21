@@ -71,7 +71,7 @@ impl JetExpect {
     }
 }
 "#;
-const STD_PRELUDE: &str = include_str!("../Prelude/Std.rs");
+const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 
@@ -288,8 +288,8 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     }
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
-    if !bundle.used_std.is_empty() {
-        out.push_str(STD_PRELUDE);
+    if !bundle.used_core.is_empty() {
+        out.push_str(CORELIB_PRELUDE);
     }
     out.push('\n');
 
@@ -316,8 +316,8 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
-        cx.std_imports = std_import_map(bundle, i);
-        cx.used_std = bundle.used_std.clone();
+        cx.core_imports = core_import_map(bundle, i);
+        cx.used_core = bundle.used_core.clone();
         cx.root_prefix = "super::".to_string();
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
@@ -339,8 +339,8 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
-    cx.std_imports = std_import_map(bundle, bundle.entry);
-    cx.used_std = bundle.used_std.clone();
+    cx.core_imports = core_import_map(bundle, bundle.entry);
+    cx.used_core = bundle.used_core.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -375,8 +375,8 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     out.push_str(PRELUDE);
     out.push_str(MEM_PRELUDE);
     out.push_str(TEST_PRELUDE);
-    if !bundle.used_std.is_empty() {
-        out.push_str(STD_PRELUDE);
+    if !bundle.used_core.is_empty() {
+        out.push_str(CORELIB_PRELUDE);
     }
     out.push('\n');
 
@@ -404,8 +404,8 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
-        cx.std_imports = std_import_map(bundle, i);
-        cx.used_std = bundle.used_std.clone();
+        cx.core_imports = core_import_map(bundle, i);
+        cx.used_core = bundle.used_core.clone();
         cx.root_prefix = "super::".to_string();
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
         cx.unqualified_inline = uinline;
@@ -428,8 +428,8 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
-    cx.std_imports = std_import_map(bundle, bundle.entry);
-    cx.used_std = bundle.used_std.clone();
+    cx.core_imports = core_import_map(bundle, bundle.entry);
+    cx.used_core = bundle.used_core.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;

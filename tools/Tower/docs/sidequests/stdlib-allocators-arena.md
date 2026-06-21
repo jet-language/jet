@@ -82,7 +82,7 @@ blocking one), then `Fixed`, `Bump`, `Pool` behind the same gate.
    constructors return the handle (`take` ownership), `alloc(value)` returns the
    stored value at the inferred type, `reset()` takes `edit self`. (c) Decide
    the gate level: constructing/using an allocator is **memory-safe** (the whole
-   point of safe arenas) → it should *not* require `@unsafe`, only `use
+   point of safe arenas) → it should *not* require `#Unsafe`, only `use
    core.mem` (E3102). Only raw `Ptr` ops keep E3101. (d) Wire E3303's promised
    `set_allocator` for freestanding.
 6. **Codegen (dumb, I3).** Map each handle to a vetted Rust impl in a new
@@ -117,7 +117,7 @@ Summary of what needs a ruling:
 - **D-ALLOC-A — constructor + allocate spelling.** `mem.Arena.new()` +
   `arena.alloc(value)` (method) vs. an allocator-parameter style
   (`make(Node, in: arena)`) vs. capacity-typed constructor.
-- **D-ALLOC-B — does an arena-allocated value need `@unsafe`?** Recommend **no**
+- **D-ALLOC-B — does an arena-allocated value need `#Unsafe`?** Recommend **no**
   (safe by default; arenas are the *safe* expert primitive) — gate only with
   `use core.mem` (E3102). Confirm.
 - **D-ALLOC-C — which allocators ship, and the wider-API name (D-LL3 leftover).**
@@ -132,8 +132,8 @@ Summary of what needs a ruling:
 - [ ] `49_arena.jet` runs, golden output matches (I5).
 - [ ] Naming `Arena` without `use core.mem` → E3102, snapshot pinned
       (`tests/ui/mem_arena_gate/`).
-- [ ] Arena allocation needs **no** `@unsafe` (if D-ALLOC-B = no): a gated-but-
-      safe example compiles clean; a raw-`Ptr` op still demands `@unsafe`
+- [ ] Arena allocation needs **no** `#Unsafe` (if D-ALLOC-B = no): a gated-but-
+      safe example compiles clean; a raw-`Ptr` op still demands `#Unsafe`
       (E3101) — both pinned.
 - [ ] Use-after-reset/free → the new E33xx diagnostic, capability-worded,
       snapshot pinned (I4).

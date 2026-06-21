@@ -91,7 +91,7 @@ impl<'a> Checker<'a> {
         }
         match ty {
             Type::Named(n) => {
-                if std_type_known(n) {
+                if core_type_known(n) {
                     return;
                 }
                 if self.type_param_scope.iter().any(|p| p.name == *n) {
@@ -128,9 +128,9 @@ impl<'a> Checker<'a> {
                 ));
             }
             Type::Apply { name, args } => {
-                let is_std_generic =
+                let is_core_generic =
                     matches!(name.as_str(), "Task" | "Channel" | "Sender" | "Ptr");
-                if !is_std_generic && !self.registry.contains(name) {
+                if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0119",
                         format!("there's no type called `{}`", name),
@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                if !is_std_generic {
+                if !is_core_generic {
                     let expected = self
                         .m9
                         .struct_params
@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn type_known(&self, ty: &Type) -> bool {
         match ty {
-            Type::Named(n) => self.registry.contains(n) || std_type_known(n),
+            Type::Named(n) => self.registry.contains(n) || core_type_known(n),
             Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => self.type_known(inner),
             Type::Map { key, value } => self.type_known(key) && self.type_known(value),
             Type::Char => true,
@@ -497,7 +497,7 @@ impl<'a> Checker<'a> {
                 }
                 let vt = self.infer(value);
                 self.note_move_if_direct_ident(value);
-                // D-UNINIT1: a plain `name = …` initializes a `#uninit` binding; a
+                // D-UNINIT1: a plain `name = …` initializes a `#Uninit` binding; a
                 // compound `name += …` reads it first, so it's a read-before-write.
                 if let LValue::Local { name, name_span } = &*target {
                     if self.uninit.contains_key(name) {
@@ -506,7 +506,7 @@ impl<'a> Checker<'a> {
                                 "E0420",
                                 format!("`{}` may be read before it is given a value", name),
                                 format!(
-                                    "`{}+=` reads `{}` first, but it was declared `#uninit` and has no value yet",
+                                    "`{}+=` reads `{}` first, but it was declared `#Uninit` and has no value yet",
                                     name, name
                                 ),
                                 format!("give `{}` a value with `{} = …` before updating it", name, name),
@@ -1130,15 +1130,15 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Unsafe { audit, body, span } => {
-                // L3101 (D-LL2): every `#unsafe` block needs a `#audit("…")`
+                // L3101 (D-LL2): every `#Unsafe` block needs a `#Audit("…")`
                 // reason on the line above so the safety case is on record.
                 if audit.is_none() {
                     self.diags.push(Diagnostic::lint(
                         "L3101",
-                        "this `#unsafe` block has no `#audit` reason".to_string(),
+                        "this `#Unsafe` block has no `#Audit` reason".to_string(),
                         "every gated region records, in one line, why it can't break memory safety"
                             .to_string(),
-                        "add `#audit(\"why this is safe\")` on the line above".to_string(),
+                        "add `#Audit(\"why this is safe\")` on the line above".to_string(),
                         Some(*span),
                     ));
                 }
@@ -1153,7 +1153,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
         let before = self.moved.clone();
         let mut after = before.clone();
-        // D-UNINIT1: definite-assignment merge. A `#uninit` name is initialized
+        // D-UNINIT1: definite-assignment merge. A `#Uninit` name is initialized
         // after the `if` only if it is written on *every* path; it stays uninit if
         // still-uninit in any branch (or, with no `else`, on the fall-through).
         let before_u = self.uninit.clone();
@@ -1619,12 +1619,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// D-UNINIT1 (opt C): `#uninit name: Type` — gate on `use core.mem`, restrict
+    /// D-UNINIT1 (opt C): `#Uninit name: Type` — gate on `use core.mem`, restrict
     /// to plain-data types (E0423), declare the binding, and record it as
     /// not-yet-written so the dataflow can prove write-before-read (E0420).
     pub(crate) fn check_uninit_binding(&mut self, b: &mut Binding) {
         let has_mem = self
-            .std_imports
+            .core_imports
             .values()
             .any(|m| m == Syntax::CORE_MEM_MODULE);
         if !has_mem {
@@ -1677,7 +1677,7 @@ impl<'a> Checker<'a> {
         self.uninit.insert(b.name.clone(), b.name_span);
     }
 
-    /// D-UNINIT1: clear an `#uninit` binding's not-yet-written flag when it is
+    /// D-UNINIT1: clear an `#Uninit` binding's not-yet-written flag when it is
     /// passed as a `mut` argument (the fill case) — the callee writes it. Call
     /// before inferring the args so the read-hook doesn't flag the fill site.
     pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
@@ -2173,7 +2173,7 @@ impl<'a> Checker<'a> {
 
 }
 
-/// D-UNINIT1: a `#uninit` binding is restricted to plain-data ("POD") types —
+/// D-UNINIT1: a `#Uninit` binding is restricted to plain-data ("POD") types —
 /// no heap ownership, no Drop glue — so an uninitialized value can never expose
 /// freed/owned state. v1 allows scalars, `Char`, `U8`, and fixed arrays of those.
 pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {

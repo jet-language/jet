@@ -207,7 +207,7 @@ impl<'a> Checker<'a> {
         None
     }
 
-    pub(crate) fn infer_std_field(
+    pub(crate) fn infer_core_field(
         &mut self,
         module: &str,
         name: &str,
@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
             ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
             _ => {
-                self.diags.push(unknown_std_item(module, name, span));
+                self.diags.push(unknown_core_item(module, name, span));
                 let _ = alias_span;
                 None
             }
@@ -243,7 +243,7 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         // E3102: the discovery gate — the alias must be a `core.mem` import.
         let is_mem = self
-            .std_imports
+            .core_imports
             .get(alias)
             .map(|m| m == Syntax::CORE_MEM_MODULE)
             .unwrap_or(false);
@@ -286,7 +286,7 @@ impl<'a> Checker<'a> {
         )
     }
 
-    pub(crate) fn infer_std_call(
+    pub(crate) fn infer_core_call(
         &mut self,
         module: &str,
         name: &str,
@@ -308,23 +308,23 @@ impl<'a> Checker<'a> {
         // E2-M16 / E3403: a `pure fn` cannot reach a non-deterministic std call
         // (time/random). `jet eval --pure` requires every fn to be `pure`, so
         // this covers the --pure path too.
-        if self.in_pure && is_nondeterministic_std(module, name) {
+        if self.in_pure && is_nondeterministic_core(module, name) {
             let api = format!("{}.{}", module_short_name(module), name);
             self.diags.push(e3403(&api, Some(span)));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
             // Return the declared type so the call site doesn't cascade.
-            return std_fixed_sig(module, name).and_then(|(_, ret)| ret);
+            return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
-        let sig = std_fixed_sig(module, name);
+        let sig = core_fixed_sig(module, name);
         match (module, name) {
             ("core.mem", "volatile_read") => {
                 if !self.in_unsafe {
                     self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
                 }
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     return None;
                 }
                 let arg = args.get_mut(0)?;
@@ -345,7 +345,7 @@ impl<'a> Checker<'a> {
             }
             ("core.mem", "address_of") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     return None;
                 }
                 // Taking an address is inert (S58): legal outside `@unsafe`.
@@ -356,7 +356,7 @@ impl<'a> Checker<'a> {
             }
             ("core.io", "eprint") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
                     self.borrow_ctx = true;
@@ -377,16 +377,16 @@ impl<'a> Checker<'a> {
             }
             ("core.io", "input") => {
                 if args.len() > 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    self.expect_std_arg(name, 0, &Type::String, arg);
+                    self.expect_core_arg(name, 0, &Type::String, arg);
                 }
                 return Some(result_ty(Type::String, io_error_ty()));
             }
             ("core.math", "abs") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let Some(arg) = args.get_mut(0) else {
                     return Some(Type::Int);
@@ -406,7 +406,7 @@ impl<'a> Checker<'a> {
             }
             ("core.math", "min" | "max") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_std_arity(name, 2, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                 }
                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
                     for a in args.iter_mut().skip(1) {
@@ -438,7 +438,7 @@ impl<'a> Checker<'a> {
             }
             ("core.math", "clamp") => {
                 if args.len() != 3 {
-                    self.diags.push(wrong_std_arity(name, 3, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 3, args.len(), span));
                 }
                 let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
                     for a in args.iter_mut().skip(1) {
@@ -472,7 +472,7 @@ impl<'a> Checker<'a> {
             }
             ("core.random", "pick") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let Some(arg) = args.get_mut(0) else {
                     return Some(Type::Option(Box::new(Type::Int)));
@@ -492,7 +492,7 @@ impl<'a> Checker<'a> {
             }
             ("core.random", "shuffle") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity(name, 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 let Some(arg) = args.get_mut(0) else {
                     return None;
@@ -521,7 +521,7 @@ impl<'a> Checker<'a> {
             ("core.tasks", "spawn") => {
                 if args.len() != 1 {
                     self.diags
-                        .push(wrong_std_arity("spawn", 1, args.len(), span));
+                        .push(wrong_core_arity("spawn", 1, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -606,7 +606,7 @@ impl<'a> Checker<'a> {
             ("core.tasks", "channel") => {
                 if !args.is_empty() {
                     self.diags
-                        .push(wrong_std_arity("channel", 0, args.len(), span));
+                        .push(wrong_core_arity("channel", 0, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -639,11 +639,11 @@ impl<'a> Checker<'a> {
             // handler: fn(HttpRequest) -> HttpResponse (lambda or fn reference).
             ("jet.http", "serve") => {
                 if args.len() != 2 {
-                    self.diags.push(wrong_std_arity("serve", 2, args.len(), span));
+                    self.diags.push(wrong_core_arity("serve", 2, args.len(), span));
                     for a in args.iter_mut() { self.infer(&mut a.expr); }
                     return None;
                 }
-                self.expect_std_arg("serve", 0, &Type::String, &mut args[0]);
+                self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
                 // Check the handler arg — accept any callable (lambda or fn pointer).
                 let handler_ty = self.infer(&mut args[1].expr);
                 match &handler_ty {
@@ -666,7 +666,7 @@ impl<'a> Checker<'a> {
             // guaranteed by Rust's reverse-declaration semantics.
             ("core.scope", "guard") => {
                 if args.len() != 1 {
-                    self.diags.push(wrong_std_arity("guard", 1, args.len(), span));
+                    self.diags.push(wrong_core_arity("guard", 1, args.len(), span));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -706,7 +706,7 @@ impl<'a> Checker<'a> {
         }
 
         let Some((params, ret)) = sig else {
-            self.diags.push(unknown_std_item(module, name, span));
+            self.diags.push(unknown_core_item(module, name, span));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
@@ -715,7 +715,7 @@ impl<'a> Checker<'a> {
         };
         if args.len() != params.len() {
             self.diags
-                .push(wrong_std_arity(name, params.len(), args.len(), span));
+                .push(wrong_core_arity(name, params.len(), args.len(), span));
         }
         for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
             if *conv == AccessConvention::Mutate && arg.convention != AccessConvention::Mutate {
@@ -727,7 +727,7 @@ impl<'a> Checker<'a> {
                     Some(arg.span),
                 ));
             }
-            self.expect_std_arg(name, i, param_ty, arg);
+            self.expect_core_arg(name, i, param_ty, arg);
         }
         for arg in args.iter_mut().skip(params.len()) {
             self.infer(&mut arg.expr);
@@ -735,7 +735,7 @@ impl<'a> Checker<'a> {
         ret
     }
 
-    pub(crate) fn check_std_json_lit(
+    pub(crate) fn check_core_json_lit(
         &mut self,
         variant: &str,
         args: &mut [crate::AST::CallArg],
@@ -792,7 +792,7 @@ impl<'a> Checker<'a> {
         }
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(want) = expected.get(i) {
-                self.expect_std_arg(variant, i, want, arg);
+                self.expect_core_arg(variant, i, want, arg);
             } else {
                 self.infer(&mut arg.expr);
             }
@@ -800,7 +800,7 @@ impl<'a> Checker<'a> {
         Some(json)
     }
 
-    pub(crate) fn expect_std_arg(
+    pub(crate) fn expect_core_arg(
         &mut self,
         call_name: &str,
         idx: usize,
@@ -918,7 +918,7 @@ pub(crate) fn is_utf8_error_type_name(name: &str) -> bool {
     name == Syntax::TYPE_UTF8_ERROR || name == "Utf8Error"
 }
 
-pub(crate) fn std_type_known(name: &str) -> bool {
+pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
@@ -933,7 +933,7 @@ pub(crate) fn std_type_known(name: &str) -> bool {
         || is_utf8_error_type_name(name)
 }
 
-pub(crate) fn std_struct_field(type_name: &str, field: &str) -> Option<Type> {
+pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if is_json_error_type_name(type_name) {
         return match field {
             "line" => Some(Type::Int),
@@ -966,7 +966,7 @@ pub(crate) fn std_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
 }
 
-pub(crate) fn std_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
+pub(crate) fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
     let json = json_ty();
     match variant {
         "Null" => Some(Vec::new()),
@@ -1045,7 +1045,7 @@ pub(crate) fn file_handle_method_return(
 
 /// E2-M10: field definitions for compiler-known constructable struct types.
 /// Returns `Some(fields)` when the named type is a prelude struct users can construct.
-pub(crate) fn std_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
+pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
     let map_ty = Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
     match type_name {
@@ -1098,6 +1098,9 @@ pub(crate) fn net_method_return(
         ("TcpStream", "peer_addr") => Some(Some(str_ty.clone())),
         ("TcpStream", "local_addr") => Some(Some(str_ty.clone())),
         ("TcpStream", "close") => Some(Some(unit)),
+        // D-REGEX1: a regex `Match`. `group(0)` is the whole match; `group(n)` is
+        // capture group n, `none` if the group did not participate.
+        ("Match", "group") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
         _ => None,
     }
 }
@@ -1119,7 +1122,7 @@ pub(crate) fn alloc_method_return(
     }
     let unit = unit_ty();
     match method {
-        // D-ALLOC1: `new()` is a static constructor — handled via `infer_std_field`
+        // D-ALLOC1: `new()` is a static constructor — handled via `infer_core_field`
         // returning a Named sentinel, then `.new()` dispatched here as an instance method
         // on the sentinel. Return the same Named type (the allocator handle).
         "new" => {
@@ -1246,11 +1249,11 @@ pub(crate) fn ptr_elem(t: &Type) -> Option<Type> {
     }
 }
 
-/// E3101: a low-level memory operation used outside an `#unsafe` block.
+/// E3101: a low-level memory operation used outside an `#Unsafe` block.
 pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3101",
-        format!("`{}` can only run inside an `#unsafe` block", op),
+        format!("`{}` can only run inside an `#Unsafe` block", op),
         "this operation can violate memory safety, so it must sit in an audited region"
             .to_string(),
         format!(
@@ -1262,7 +1265,7 @@ pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     )
 }
 
-pub(crate) fn std_fixed_sig(
+pub(crate) fn core_fixed_sig(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
@@ -1484,12 +1487,45 @@ pub(crate) fn std_fixed_sig(
         )),
         // serve blocks until the listener is closed; handler is called per request.
         // The handler type is resolved at the call site (lambda / fn pointer).
-        ("jet.http", "serve") => None, // special-cased in check_std_call
+        ("jet.http", "serve") => None, // special-cased in check_core_call
+        // D-REGEX1: jet.regex — linear-time regex on the `regex` crate. Every call
+        // returns a Result; the `Err` is a bad-pattern message at the boundary.
+        ("jet.regex", "is_match") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::Bool, Type::String)),
+        )),
+        // First match anywhere: `Match?` (none when nothing matches).
+        ("jet.regex", "match") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::Named("Match".to_string()))),
+                Type::String,
+            )),
+        )),
+        // First matched substring, or none.
+        ("jet.regex", "find") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::String)),
+                Type::String,
+            )),
+        )),
+        ("jet.regex", "find_all" | "split") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::List(Box::new(Type::String)),
+                Type::String,
+            )),
+        )),
+        ("jet.regex", "replace" | "replace_all") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
         _ => None,
     }
 }
 
-pub(crate) fn std_module_items(module: &str) -> Vec<String> {
+pub(crate) fn core_module_items(module: &str) -> Vec<String> {
     let items: &[&str] = match module {
         "core.fs" => &[
             "read",
@@ -1538,6 +1574,10 @@ pub(crate) fn std_module_items(module: &str) -> Vec<String> {
             "tcp_reply",
         ],
         "jet.http" => &["get", "post", "serve"],
+        // D-REGEX1: linear-time regex ring package.
+        "jet.regex" => &[
+            "is_match", "match", "find", "find_all", "replace", "replace_all", "split",
+        ],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -1582,8 +1622,8 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
     }
 }
 
-pub(crate) fn unknown_std_item(module: &str, name: &str, span: Span) -> Diagnostic {
-    let items = std_module_items(module);
+pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnostic {
+    let items = core_module_items(module);
     let mut fix = if items.is_empty() {
         "import a specific core module, like `import core.fs as fs;`".to_string()
     } else {
@@ -1601,7 +1641,7 @@ pub(crate) fn unknown_std_item(module: &str, name: &str, span: Span) -> Diagnost
     )
 }
 
-pub(crate) fn wrong_std_arity(name: &str, want: usize, got: usize, span: Span) -> Diagnostic {
+pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0104",
         format!(

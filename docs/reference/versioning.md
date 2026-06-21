@@ -12,7 +12,7 @@ changes are called out in release notes and require a version bump per:
 | Change kind | Version bump | Migration |
 |-------------|--------------|-----------|
 | Bug fix (no syntax change) | PATCH | None |
-| New feature (additive syntax/stdlib) | MINOR | Optional — old programs keep compiling |
+| New feature (additive syntax/Core) | MINOR | Optional — old programs keep compiling |
 | Breaking syntax or type rule | MAJOR | Required `jet fmt` migration |
 
 ### Syntax changes require `jet fmt`

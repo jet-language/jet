@@ -1,34 +1,34 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    /// S58 (E2-M13, D-LL2): parse a `#unsafe { … }` audited region in
-    /// statement position, with an optional `#audit("…")` reason on the line
+    /// S58 (E2-M13, D-LL2): parse a `#Unsafe { … }` audited region in
+    /// statement position, with an optional `#Audit("…")` reason on the line
     /// above. The reason is required at runtime by lint L3101, not by the
-    /// grammar, so a missing `#audit` parses fine and is flagged in sema.
+    /// grammar, so a missing `#Audit` parses fine and is flagged in sema.
     fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        // Optional `#audit("…")`.
+        // Optional `#Audit("…")`.
         let mut audit = None;
         if matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_AUDIT)
         {
             self.bump(); // `#`
             self.bump(); // `audit`
-            self.expect(TokKind::LParen, "after `#audit`")?;
+            self.expect(TokKind::LParen, "after `#Audit`")?;
             let (reason, _) = self.expect_plain_string(
                 "for the audit reason",
-                "`#audit` takes one piece of quoted text explaining why the block is safe",
-                "write: #audit(\"index checked against len\")",
+                "`#Audit` takes one piece of quoted text explaining why the block is safe",
+                "write: #Audit(\"index checked against len\")",
             )?;
             self.expect(TokKind::RParen, "after the audit reason")?;
             audit = Some(reason);
-            // S6-R: `#audit("…")` ends a line; the synthetic terminator before
-            // the `#unsafe` it annotates is trivia — skip it.
+            // S6-R: `#Audit("…")` ends a line; the synthetic terminator before
+            // the `#Unsafe` it annotates is trivia — skip it.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
         }
-        // Required `#unsafe { … }`.
+        // Required `#Unsafe { … }`.
         if !(matches!(self.peek().kind, TokKind::Hash)
             && matches!(self.peek2().kind, TokKind::KwUnsafe))
         {
@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // `#`
         self.bump(); // `unsafe`
-        self.expect(TokKind::LBrace, "after `#unsafe`")?;
+        self.expect(TokKind::LBrace, "after `#Unsafe`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Unsafe {
@@ -149,7 +149,7 @@ impl<'a> Parser<'a> {
         body
     }
 
-    /// D-UNINIT1 (opt C): parse `#uninit name: Type` — a binding with no
+    /// D-UNINIT1 (opt C): parse `#Uninit name: Type` — a binding with no
     /// initializer, gated by `use core.mem` (the gate is checked in sema).
     /// The type annotation is required; an initializer is rejected here.
     /// Not yet wired into `stmt` — see the note in the `TokKind::Hash` arm.
@@ -160,7 +160,7 @@ impl<'a> Parser<'a> {
         let marker = self.bump(); // `uninit`
         let marker_span = Span::new(hash_span.start, marker.span.end);
         // S6-R: the marker may end its line; skip the synthetic terminator before
-        // the binding it annotates (same as `#audit` before `#unsafe`).
+        // the binding it annotates (same as `#Audit` before `#Unsafe`).
         if matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
@@ -534,14 +534,14 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // S58 (E2-M13): the audit + unsafe gate is `#audit("…")` then
-            // `#unsafe { … }`. Bare `unsafe { … }` is the rejected former
+            // S58 (E2-M13): the audit + unsafe gate is `#Audit("…")` then
+            // `#Unsafe { … }`. Bare `unsafe { … }` is the rejected former
             // spelling — point users at the `#` form.
-            TokKind::KwUnsafe => {
+            TokKind::Ident(n) if n == Syntax::FOREIGN_UNSAFE => {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
                     "E0003",
-                    format!("`{}` blocks are written with `#`", Syntax::KW_UNSAFE),
+                    format!("`{}` blocks are written with `#{}`", Syntax::FOREIGN_UNSAFE, Syntax::KW_UNSAFE),
                     "the expert low-level gate is an attribute marker, never a bare keyword"
                         .to_string(),
                     format!(
@@ -553,11 +553,11 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::Hash => {
-                // D-UNINIT1 (opt C): `#uninit name: Type` parsing is implemented in
+                // D-UNINIT1 (opt C): `#Uninit name: Type` parsing is implemented in
                 // `uninit_binding` but NOT yet wired here — it stays unexposed until
                 // the sema write-before-read proof (E0420) and MaybeUninit codegen land,
                 // so no mis-compiling/unsafe path exists. See sidequests/visible-uninit.md.
-                // S58 (E2-M13): `#audit("…")` / `#unsafe { … }` — the audited gate.
+                // S58 (E2-M13): `#Audit("…")` / `#Unsafe { … }` — the audited gate.
                 self.at_unsafe_stmt()
             }
             TokKind::At => {
@@ -589,7 +589,7 @@ impl<'a> Parser<'a> {
                     "E0990",
                     format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
                     "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
-                    "write `#unsafe`, `#audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                    "write `#Unsafe`, `#Audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
                     Some(t.span),
                 ))
             }

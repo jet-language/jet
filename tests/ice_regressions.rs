@@ -6,8 +6,8 @@
 //!
 //! B1 — `JSON.Text(x)` on a borrowed (`view`) parameter moved out of the
 //!      borrow; sema must insert a clone.
-//! B2 — field access on a std struct (`ProcessResult.code`) mangled the field
-//!      name to `user_code`; the std struct has unprefixed fields.
+//! B2 — field access on a core struct (`ProcessResult.code`) mangled the field
+//!      name to `user_code`; the core struct has unprefixed fields.
 //! B3 — `.get(k)` on a `Map` bound from an `Object(root)` pattern lowered to
 //!      list indexing; the binding must keep its `Map` type.
 //! B4 — `for k, v in recv.field { … }` parsed `recv.field { … }` as a struct
@@ -19,7 +19,7 @@ use std::process::Command;
 /// Front-end-compile `src`, then (when rustc is present) build the generated
 /// Rust, asserting it is accepted. `name` only labels temp files / failures.
 /// Goes through `compile_with_path` (from a real temp file) so `use core.*`
-/// std imports resolve, exactly like `jet run`.
+/// core imports resolve, exactly like `jet run`.
 fn assert_compiles(name: &str, src: &str) {
     let dir = std::env::temp_dir().join(format!("jet_ice_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

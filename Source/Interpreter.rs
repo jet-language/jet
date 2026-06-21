@@ -9,7 +9,7 @@
 //!
 //! Hard line (I2/I3): nothing here ever produces a release artifact. `jet
 //! build`/`jet run` never touch this path. When the interpreter can't run a
-//! program (FFI, tasks/channels, `@unsafe`/`core.mem`, native-only std), it
+//! program (FFI, tasks/channels, `@unsafe`/`core.mem`, native-only Core), it
 //! stops with **E2201** naming the feature and `jet build`/`jet run` — unless
 //! the user opted in with "try anyway" (D-DEV1), which runs past the boundary
 //! with no guarantees.
@@ -62,7 +62,7 @@ fn boundary_diag(b: &Boundary) -> Diagnostic {
 /// (D-DEV1). Pure walk over the typed AST — no execution.
 fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
     for module in &bundle.modules {
-        // Native std modules whose results aren't pure/deterministic enough to
+        // Native Core modules whose results aren't pure/deterministic enough to
         // interpret. The interpreter supports `print`/`eprint` only; anything
         // that reaches the filesystem, network, clock, RNG, environment, or
         // process table needs the real build.
@@ -93,7 +93,7 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                 Item::Func(f) => {
                     if f.is_unsafe {
                         return Some(Boundary {
-                            feature: "uses an `#unsafe` function".to_string(),
+                            feature: "uses an `#Unsafe` function".to_string(),
                             span: Some(f.name_span),
                         });
                     }
@@ -138,7 +138,7 @@ fn scan_stmts_for_unsafe(stmts: &[Stmt]) -> Option<Boundary> {
 fn scan_stmt_for_unsafe(s: &Stmt) -> Option<Boundary> {
     match s {
         Stmt::Unsafe { span, .. } => Some(Boundary {
-            feature: "uses an `#unsafe` block".to_string(),
+            feature: "uses an `#Unsafe` block".to_string(),
             span: Some(*span),
         }),
         Stmt::If(ifs) => scan_if_for_unsafe(ifs),

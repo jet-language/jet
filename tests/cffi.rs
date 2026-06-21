@@ -559,8 +559,8 @@ Error [E3202]: Type `Ptr<Int>` cannot cross the C boundary here.
     |
   1 | fn f(p: Ptr<Int>) = \"f\";
     |         ^^^^^^^^
- Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#unsafe { … }` region (S58).
- Fix: Move the call inside `#unsafe`, or change the type to a C-safe value type.
+ Why: C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58).
+ Fix: Move the call inside `#Unsafe`, or change the type to a C-safe value type.
 ";
     assert_eq!(rendered, expected);
 }

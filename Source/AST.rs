@@ -224,9 +224,9 @@ pub struct ProgramBundle {
     pub modules: Vec<LoadedModule>,
     /// S14 teaching diagnostics collected during a lenient parse (LSP check).
     pub parse_teaching: Vec<crate::Diagnostics::Diagnostic>,
-    /// M10: std helper names proven reachable by sema. Codegen emits only
+    /// M10: Core helper names proven reachable by sema. Codegen emits only
     /// these helpers (SL9).
-    pub used_std: std::collections::HashSet<String>,
+    pub used_core: std::collections::HashSet<String>,
     /// S59 (E2-M14): C-FFI artifacts produced by `CFFI::assemble` after loading
     /// — per-file `use c.<lib>` bindings and the libraries to link against.
     pub cffi: crate::CFFI::CFfi,
@@ -1011,7 +1011,7 @@ pub struct Binding {
     /// after ordinary type checking and emitted as literal data.
     pub is_comptime: bool,
     pub ct: Option<crate::Comptime::CtValue>,
-    /// D-UNINIT1 (ratified 2026-06-21, opt C): `#uninit name: Type` — an
+    /// D-UNINIT1 (ratified 2026-06-21, opt C): `#Uninit name: Type` — an
     /// uninitialized binding (no `:=`/`::` initializer), gated by `use core.mem`.
     /// `init` is a harmless placeholder (never evaluated); sema proves write-before-read (E0420)
     /// and codegen lowers to `MaybeUninit`. `false` for every ordinary binding.

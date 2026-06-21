@@ -171,7 +171,7 @@ pub(crate) fn is_cloneable(
             is_cloneable(ok, registry, structs) && is_cloneable(err, registry, structs)
         }
         Type::Fn { .. } => false,
-        Type::Named(name) if is_type_var_name(name) || std_type_known(name) => true,
+        Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
         Type::Named(name) => {
             registry.contains(name)
                 && match registry.types.get(name) {
@@ -372,7 +372,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
-        Type::Named(n) => registry.contains(n) || std_type_known(n),
+        Type::Named(n) => registry.contains(n) || core_type_known(n),
         Type::Apply { args, .. } => args.iter().all(|a| is_printable(a, registry)),
         Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,

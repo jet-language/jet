@@ -163,7 +163,7 @@ pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
             source: src.to_string(),
         }],
         parse_teaching: Vec::new(),
-        used_std: std::collections::HashSet::new(),
+        used_core: std::collections::HashSet::new(),
         cffi: CFFI::CFfi::default(),
     };
     bundle.cffi = match CFFI::assemble(&mut bundle) {
@@ -288,7 +288,7 @@ fn compile_with_mode(
             source: src.to_string(),
         }],
         parse_teaching: Vec::new(),
-        used_std: std::collections::HashSet::new(),
+        used_core: std::collections::HashSet::new(),
         cffi: CFFI::CFfi::default(),
     };
     // S59: fold any in-file C FFI modules + resolve `use c.<lib>` forms.

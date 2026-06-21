@@ -122,21 +122,26 @@ pub const KW_RETURN: &str = "return";
 /// M2: loop statement (for SharedHandle lint checks).
 pub const KW_LOOP: &str = "loop";
 
-/// S58 (ratified 2026-06-12; amended 2026-06-16): the audited expert gate,
-/// written as the marker `@unsafe { … }` (statement) or `@unsafe fn` (whole-
-/// function contract). The bare `unsafe` keyword is the rejected former
-/// spelling, recognized only to emit a teaching error.
-pub const KW_UNSAFE: &str = "unsafe";
+/// S58 (ratified 2026-06-12; amended 2026-06-16; PascalCase D-CASING1
+/// 2026-06-21): the audited expert gate, written as the marker `#Unsafe { … }`
+/// (statement) or `#Unsafe fn` (whole-function contract). The bare lowercase
+/// `unsafe` keyword (FOREIGN_UNSAFE) is the rejected foreign spelling,
+/// recognized only to emit a teaching error.
+pub const KW_UNSAFE: &str = "Unsafe";
+
+/// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
+/// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
+pub const FOREIGN_UNSAFE: &str = "unsafe";
 
 /// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
 /// requires `use core.mem`.
 pub const CORE_MEM_MODULE: &str = "core.mem";
 
-/// D-UNINIT1 (ratified 2026-06-21, opt C): the `#uninit` binding marker —
-/// `#uninit name: Type` declares a binding with no initializer, opting out of
+/// D-UNINIT1 (ratified 2026-06-21, opt C): the `#Uninit` binding marker —
+/// `#Uninit name: Type` declares a binding with no initializer, opting out of
 /// the default zero-fill. Gated by `use core.mem` (S58); sema proves
 /// write-before-read (E0420) and codegen lowers to `MaybeUninit`.
-pub const ATTR_UNINIT: &str = "uninit";
+pub const ATTR_UNINIT: &str = "Uninit";
 
 /// S58 (ratified 2026-06-12): the pointer type — `Ptr<T>`.
 pub const TYPE_PTR: &str = "Ptr";
@@ -154,7 +159,7 @@ pub const MEM_ADDRESS_OF: &str = "address_of";
 
 /// D-ALLOC1 (ratified 2026-06-19): arena allocator type name.
 /// Construct with `mem.Arena.new()`, allocate with `arena.alloc(value)`.
-/// Gated by `use core.mem` (E3102); no `#unsafe` needed.
+/// Gated by `use core.mem` (E3102); no `#Unsafe` needed.
 pub const MEM_ARENA: &str = "Arena";
 
 /// D-ALLOC-C (ratified 2026-06-19): bump allocator (append-only, O(1)).
@@ -312,9 +317,9 @@ pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
 /// S51 (ratified M10; amended 2026-06-16): compiler-known **core** library roots.
-pub const STD_SHORT: &str = "core";
-pub const STD_CANONICAL_ROOT: &str = "jet";
-pub const STD_CANONICAL: &str = "jet.core";
+pub const CORE_SHORT: &str = "core";
+pub const CORE_CANONICAL_ROOT: &str = "jet";
+pub const CORE_CANONICAL: &str = "jet.core";
 
 /// S51 (amended 2026-06-16): former `std` spellings — teaching errors only (S14).
 pub const LEGACY_STD_SHORT: &str = "std";
@@ -337,8 +342,9 @@ pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
 pub const ATTR_BINDGEN: &str = "bindgen"; // S59
 /// S59 (S82): attribute on user C overlay modules — `#extern module c.…`.
 pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `#extern module`, not `extern rust`
-/// S58 / D-LL2: required reason on `#unsafe { … }` — `#audit("…")`.
-pub const ATTR_AUDIT: &str = "audit"; // S58
+/// S58 / D-LL2: required reason on `#Unsafe { … }` — `#Audit("…")` (PascalCase
+/// D-CASING1 2026-06-21).
+pub const ATTR_AUDIT: &str = "Audit"; // S58
 // D-LABEL1: a loop label is `@name` immediately before `loop`
 // (`@outer loop { … }`); `break @name` / `continue @name` target it.
 // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
@@ -476,7 +482,7 @@ pub const FOREIGN_EXCEPT: &str = "except";
 pub const FOREIGN_UNWRAP: &str = "unwrap";
 pub const FOREIGN_EXPECT: &str = "expect";
 
-/// M10 teaching spellings for common std/library habits.
+/// M10 teaching spellings for common Core/library habits.
 pub const FOREIGN_EPRINTLN: &str = "eprintln";
 pub const FOREIGN_OPEN: &str = "open";
 pub const FOREIGN_GETENV: &str = "getenv";

@@ -250,7 +250,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             structs: HashMap::new(),
             consts: HashMap::new(),
             imports: HashMap::new(),
-            std_imports: HashMap::new(),
+            core_imports: HashMap::new(),
             tests: HashMap::new(),
             m9: M9Registry::default(),
             code_modules: HashMap::new(),
@@ -479,7 +479,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 ));
                 continue;
             }
-            if st.std_imports.contains_key(&alias) {
+            if st.core_imports.contains_key(&alias) {
                 diags.push(Diagnostic::error(
                     "E0105",
                     format!("the import name `{}` is used twice", alias),
@@ -497,27 +497,27 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                         "the standard library module was renamed to `core`".to_string(),
                         format!(
                             "use `import {}` or `import {}.fs as fs`",
-                            Syntax::STD_SHORT,
-                            Syntax::STD_SHORT
+                            Syntax::CORE_SHORT,
+                            Syntax::CORE_SHORT
                         ),
                         Some(imp.span),
                     ));
                     continue;
                 }
             }
-            if let Some(module) = Loader::std_module_path(imp) {
-                if !Loader::is_known_std_module(&module) {
+            if let Some(module) = Loader::core_module_path(imp) {
+                if !Loader::is_known_core_module(&module) {
                     diags.push(Diagnostic::error(
                         "E1001",
                         format!("there is no core module `{}`", module),
                         "`core` is compiler-known in M10, and only the frozen core modules exist"
                             .to_string(),
-                        format!("import one of: {}", Loader::std_modules_list()),
+                        format!("import one of: {}", Loader::core_modules_list()),
                         Some(imp.span),
                     ));
                     continue;
                 }
-                st.std_imports.insert(alias, module);
+                st.core_imports.insert(alias, module);
                 continue;
             }
             // S59 (E2-M14): C `use` forms bind to a synthetic merged module
@@ -574,20 +574,20 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     }
                 }
             } else if module_alias == "core" || module_alias == "jet" {
-                // Std namespace prefix: `use core.mem` → bind each item as a std import.
+                // Std namespace prefix: `use core.mem` → bind each item as a Core import.
                 // Each item `x` becomes `core.x` in the known-modules table.
                 let st = &mut states[idx];
                 for item in items {
                     let full = format!("core.{}", item);
-                    if !Loader::is_known_std_module(&full) {
+                    if !Loader::is_known_core_module(&full) {
                         diags.push(Diagnostic::error(
                             "E1001",
                             format!("there is no core module `{}`", full),
                             "`core` is compiler-known in M10, and only the frozen core modules exist".to_string(),
-                            format!("import one of: {}", Loader::std_modules_list()),
+                            format!("import one of: {}", Loader::core_modules_list()),
                             Some(*module_alias_span),
                         ));
-                    } else if st.std_imports.contains_key(item) {
+                    } else if st.core_imports.contains_key(item) {
                         diags.push(Diagnostic::error(
                             "E0105",
                             format!("the import name `{}` is used twice", item),
@@ -596,7 +596,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                             Some(imp.alias_span),
                         ));
                     } else {
-                        st.std_imports.insert(item.clone(), full);
+                        st.core_imports.insert(item.clone(), full);
                     }
                 }
             } else if st.imports.contains_key(module_alias.as_str()) {
@@ -801,7 +801,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         diags.extend(check_module_bodies(module, idx, &states, mode, freestanding));
     }
-    bundle.used_std = collect_used_std(bundle, &states);
+    bundle.used_core = collect_used_core(bundle, &states);
     diags
 }
 
@@ -860,30 +860,30 @@ pub(crate) fn register_func_item(f: &Func, st: &mut ModuleState, diags: &mut Vec
     st.funcs.insert(f.name.clone(), func_to_sig(f));
 }
 
-pub(crate) fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -> HashSet<String> {
+pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) -> HashSet<String> {
     let mut used = HashSet::new();
     for (idx, module) in bundle.modules.iter().enumerate() {
-        let imports = &states[idx].std_imports;
+        let imports = &states[idx].core_imports;
         for item in &module.items {
             match item {
-                Item::Func(f) => collect_std_stmts(&f.body, imports, &mut used),
+                Item::Func(f) => collect_core_stmts(&f.body, imports, &mut used),
                 Item::Struct(s) => {
                     for m in &s.methods {
-                        collect_std_stmts(&m.body, imports, &mut used);
+                        collect_core_stmts(&m.body, imports, &mut used);
                     }
                 }
                 Item::Enum(e) => {
                     for m in &e.methods {
-                        collect_std_stmts(&m.body, imports, &mut used);
+                        collect_core_stmts(&m.body, imports, &mut used);
                     }
                 }
                 Item::Impl(i) => {
                     for m in &i.methods {
-                        collect_std_stmts(&m.body, imports, &mut used);
+                        collect_core_stmts(&m.body, imports, &mut used);
                     }
                 }
-                Item::Test(t) => collect_std_stmts(&t.body, imports, &mut used),
-                Item::Const(c) => collect_std_expr(&c.value, imports, &mut used),
+                Item::Test(t) => collect_core_stmts(&t.body, imports, &mut used),
+                Item::Const(c) => collect_core_expr(&c.value, imports, &mut used),
                 Item::Trait(_)
                 | Item::ExternRust(_)
                 | Item::Module(_)
@@ -896,38 +896,38 @@ pub(crate) fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -
     used
 }
 
-pub(crate) fn collect_std_stmts(
+pub(crate) fn collect_core_stmts(
     stmts: &[Stmt],
     imports: &HashMap<String, String>,
     used: &mut HashSet<String>,
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e) => collect_std_expr(e, imports, used),
-            Stmt::Val(b) => collect_std_expr(&b.init, imports, used),
+            Stmt::Expr(e) => collect_core_expr(e, imports, used),
+            Stmt::Val(b) => collect_core_expr(&b.init, imports, used),
             Stmt::Assign { target, value, .. } => {
-                collect_std_lvalue(target, imports, used);
-                collect_std_expr(value, imports, used);
+                collect_core_lvalue(target, imports, used);
+                collect_core_expr(value, imports, used);
             }
-            Stmt::Return(Some(e), _) => collect_std_expr(e, imports, used),
+            Stmt::Return(Some(e), _) => collect_core_expr(e, imports, used),
             Stmt::Return(None, _) => {}
-            Stmt::If(ifs) => collect_std_if(ifs, imports, used),
+            Stmt::If(ifs) => collect_core_if(ifs, imports, used),
             Stmt::While { cond, body, .. } => {
-                collect_std_expr(cond, imports, used);
-                collect_std_stmts(body, imports, used);
+                collect_core_expr(cond, imports, used);
+                collect_core_stmts(body, imports, used);
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
                     ForKind::Range { start, end, step } => {
-                        collect_std_expr(start, imports, used);
-                        collect_std_expr(end, imports, used);
+                        collect_core_expr(start, imports, used);
+                        collect_core_expr(end, imports, used);
                         if let Some(step) = step {
-                            collect_std_expr(step, imports, used);
+                            collect_core_expr(step, imports, used);
                         }
                     }
-                    ForKind::In { collection } => collect_std_expr(collection, imports, used),
+                    ForKind::In { collection } => collect_core_expr(collection, imports, used),
                 }
-                collect_std_stmts(body, imports, used);
+                collect_core_stmts(body, imports, used);
             }
             Stmt::Switch {
                 subject,
@@ -935,53 +935,53 @@ pub(crate) fn collect_std_stmts(
                 else_body,
                 ..
             } => {
-                collect_std_expr(subject, imports, used);
+                collect_core_expr(subject, imports, used);
                 for arm in arms {
-                    collect_std_expr(&arm.cond, imports, used);
-                    collect_std_stmts(&arm.body, imports, used);
+                    collect_core_expr(&arm.cond, imports, used);
+                    collect_core_stmts(&arm.body, imports, used);
                 }
                 if let Some(body) = else_body {
-                    collect_std_stmts(body, imports, used);
+                    collect_core_stmts(body, imports, used);
                 }
             }
-            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => collect_std_stmts(body, imports, used),
+            Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => collect_core_stmts(body, imports, used),
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
-            // D-WHEN1: collect std usage from both arms (we don't know which is
+            // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
-                collect_std_expr(cond, imports, used);
-                collect_std_stmts(then_body, imports, used);
+                collect_core_expr(cond, imports, used);
+                collect_core_stmts(then_body, imports, used);
                 if let Some(eb) = else_body {
-                    collect_std_stmts(eb, imports, used);
+                    collect_core_stmts(eb, imports, used);
                 }
             }
         }
     }
 }
 
-pub(crate) fn collect_std_if(ifs: &IfStmt, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
-    collect_std_expr(&ifs.cond, imports, used);
-    collect_std_stmts(&ifs.then_body, imports, used);
+pub(crate) fn collect_core_if(ifs: &IfStmt, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+    collect_core_expr(&ifs.cond, imports, used);
+    collect_core_stmts(&ifs.then_body, imports, used);
     match &ifs.else_branch {
-        Some(ElseBranch::Else(body)) => collect_std_stmts(body, imports, used),
-        Some(ElseBranch::ElseIf(next)) => collect_std_if(next, imports, used),
+        Some(ElseBranch::Else(body)) => collect_core_stmts(body, imports, used),
+        Some(ElseBranch::ElseIf(next)) => collect_core_if(next, imports, used),
         None => {}
     }
 }
 
-pub(crate) fn collect_std_lvalue(lv: &LValue, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+pub(crate) fn collect_core_lvalue(lv: &LValue, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
     match lv {
         LValue::Local { .. } => {}
         LValue::Index { base, index, .. } => {
-            collect_std_expr(base, imports, used);
-            collect_std_expr(index, imports, used);
+            collect_core_expr(base, imports, used);
+            collect_core_expr(index, imports, used);
         }
     }
 }
 
-pub(crate) fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
+pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, used: &mut HashSet<String>) {
     match expr {
-        Expr::PtrFromAddr { addr, .. } => collect_std_expr(addr, imports, used),
+        Expr::PtrFromAddr { addr, .. } => collect_core_expr(addr, imports, used),
         Expr::MethodCall {
             receiver,
             method,
@@ -1002,25 +1002,25 @@ pub(crate) fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, u
                     used.insert(format!("{module}::{method}"));
                 }
             }
-            collect_std_expr(receiver, imports, used);
+            collect_core_expr(receiver, imports, used);
             for arg in args {
-                collect_std_expr(&arg.expr, imports, used);
+                collect_core_expr(&arg.expr, imports, used);
             }
         }
         Expr::Call(c) => {
             // D-PRELUDE1 = B: bare `input(...)` is prelude-ambient; mark core.io so
-            // STD_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
+            // CORELIB_PRELUDE is emitted and jet_std_io_input is in scope for codegen.
             if c.name == Syntax::BUILTIN_INPUT {
                 used.insert("core.io::input".to_string());
             }
             for arg in &c.args {
-                collect_std_expr(&arg.expr, imports, used);
+                collect_core_expr(&arg.expr, imports, used);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            collect_std_expr(callee, imports, used);
+            collect_core_expr(callee, imports, used);
             for arg in args {
-                collect_std_expr(&arg.expr, imports, used);
+                collect_core_expr(&arg.expr, imports, used);
             }
         }
         Expr::Field(inner, member, _) => {
@@ -1029,86 +1029,86 @@ pub(crate) fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, u
             {
                 used.insert("core::json".to_string());
             }
-            collect_std_expr(inner, imports, used);
+            collect_core_expr(inner, imports, used);
         }
-        Expr::OptField { base, .. } => collect_std_expr(base, imports, used),
+        Expr::OptField { base, .. } => collect_core_expr(base, imports, used),
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
-        | Expr::Try(inner, _, _) => collect_std_expr(inner, imports, used),
+        | Expr::Try(inner, _, _) => collect_core_expr(inner, imports, used),
         Expr::Binary(_, lhs, rhs, _)
         | Expr::Index {
             base: lhs,
             index: rhs,
             ..
         } => {
-            collect_std_expr(lhs, imports, used);
-            collect_std_expr(rhs, imports, used);
+            collect_core_expr(lhs, imports, used);
+            collect_core_expr(rhs, imports, used);
         }
         Expr::Slice {
             base, start, end, ..
         } => {
-            collect_std_expr(base, imports, used);
-            collect_std_expr(start, imports, used);
-            collect_std_expr(end, imports, used);
+            collect_core_expr(base, imports, used);
+            collect_core_expr(start, imports, used);
+            collect_core_expr(end, imports, used);
         }
         Expr::Str(parts, _) => {
             for part in parts {
                 if let StrPart::Interp(e) = part {
-                    collect_std_expr(e, imports, used);
+                    collect_core_expr(e, imports, used);
                 }
             }
         }
         Expr::ListLit(items, _) => {
             for e in items {
-                collect_std_expr(e, imports, used);
+                collect_core_expr(e, imports, used);
             }
         }
         Expr::TupleLit(fields, _, _) => {
             for (_, e) in fields {
-                collect_std_expr(e, imports, used);
+                collect_core_expr(e, imports, used);
             }
         }
         Expr::MapLit(items, _) => {
             for (k, v) in items {
-                collect_std_expr(k, imports, used);
-                collect_std_expr(v, imports, used);
+                collect_core_expr(k, imports, used);
+                collect_core_expr(v, imports, used);
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, e) in fields {
-                collect_std_expr(e, imports, used);
+                collect_core_expr(e, imports, used);
             }
         }
         Expr::EnumLit { args, .. } => {
             for arg in args {
                 match arg {
-                    EnumLitArg::Positional(e) => collect_std_expr(e, imports, used),
-                    EnumLitArg::Named { expr, .. } => collect_std_expr(expr, imports, used),
+                    EnumLitArg::Positional(e) => collect_core_expr(e, imports, used),
+                    EnumLitArg::Named { expr, .. } => collect_core_expr(expr, imports, used),
                 }
             }
         }
-        Expr::PatternTest { subject, .. } => collect_std_expr(subject, imports, used),
+        Expr::PatternTest { subject, .. } => collect_core_expr(subject, imports, used),
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            collect_std_expr(value, imports, used);
+            collect_core_expr(value, imports, used);
             match fallback {
-                OrFallback::Value(e) => collect_std_expr(e, imports, used),
-                OrFallback::Return(Some(e), _) => collect_std_expr(e, imports, used),
+                OrFallback::Value(e) => collect_core_expr(e, imports, used),
+                OrFallback::Return(Some(e), _) => collect_core_expr(e, imports, used),
                 OrFallback::Return(None, _) => {}
                 OrFallback::Panic { args, .. } => {
                     for arg in args {
-                        collect_std_expr(&arg.expr, imports, used);
+                        collect_core_expr(&arg.expr, imports, used);
                     }
                 }
             }
         }
         Expr::Lambda(lam) => match &lam.body {
-            LambdaBody::Expr(e) => collect_std_expr(e, imports, used),
-            LambdaBody::Block(stmts) => collect_std_stmts(stmts, imports, used),
+            LambdaBody::Expr(e) => collect_core_expr(e, imports, used),
+            LambdaBody::Block(stmts) => collect_core_stmts(stmts, imports, used),
         },
         Expr::If {
             cond,
@@ -1118,16 +1118,16 @@ pub(crate) fn collect_std_expr(expr: &Expr, imports: &HashMap<String, String>, u
             else_value,
             ..
         } => {
-            collect_std_expr(cond, imports, used);
-            collect_std_stmts(then_body, imports, used);
-            collect_std_expr(then_value, imports, used);
-            collect_std_stmts(else_body, imports, used);
-            collect_std_expr(else_value, imports, used);
+            collect_core_expr(cond, imports, used);
+            collect_core_stmts(then_body, imports, used);
+            collect_core_expr(then_value, imports, used);
+            collect_core_stmts(else_body, imports, used);
+            collect_core_expr(else_value, imports, used);
         }
         Expr::FanOut { callee, items, .. } => {
-            collect_std_expr(callee, imports, used);
+            collect_core_expr(callee, imports, used);
             for item in items {
-                collect_std_expr(item, imports, used);
+                collect_core_expr(item, imports, used);
             }
         }
         Expr::Int(_, _)
@@ -1306,7 +1306,7 @@ pub(crate) fn check_func_body_bundle(
         modules: Some(states),
         module_idx,
         imports: &st.imports,
-        std_imports: &st.std_imports,
+        core_imports: &st.core_imports,
         code_modules: &st.code_modules,
         unqualified: &st.unqualified,
         unqualified_file: &st.unqualified_file,

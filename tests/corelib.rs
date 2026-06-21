@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
-    let dir = std::env::temp_dir().join(format!("jet_stdlib_test_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     fs::write(&path, src).unwrap();
@@ -84,9 +84,9 @@ fn build_and_run(
 }
 
 #[test]
-fn canonical_and_short_std_imports_resolve() {
+fn canonical_and_short_core_imports_resolve() {
     let out = compile_temp(
-        "std_imports.jet",
+        "core_imports.jet",
         r#"
 use core.fs as fs
 use jet.core.fs as files
@@ -101,9 +101,9 @@ fn main() {
 }
 
 #[test]
-fn importing_std_without_calls_is_free_in_codegen() {
+fn importing_core_without_calls_is_free_in_codegen() {
     let out = compile_temp(
-        "std_import_only.jet",
+        "core_import_only.jet",
         r#"
 use core.fs as fs
 use core.io as io
@@ -131,7 +131,7 @@ fn io_input_reads_a_line_from_stdin() {
         eprintln!("note: skipping io.input test (need rustc)");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("jet_stdlib_input_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_corelib_input_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let (code, stdout, stderr) = build_and_run(
@@ -163,7 +163,7 @@ fn random_and_time_output_pins_with_seed_and_epoch() {
         eprintln!("note: skipping random/time pin test (need rustc)");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("jet_stdlib_time_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_corelib_time_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let (code, stdout, _stderr) = build_and_run(
@@ -188,17 +188,17 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// SL9 / R10: importing every std module without calling it must not bloat the binary.
+/// SL9 / R10: importing every core module without calling it must not bloat the binary.
 #[test]
-fn importing_all_std_modules_without_calls_stays_hello_world_sized() {
+fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
     let jet = jet_bin();
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc || !jet.exists() {
-        eprintln!("note: skipping std use size test (need jet + rustc)");
+        eprintln!("note: skipping core use size test (need jet + rustc)");
         return;
     }
 
-    let dir = std::env::temp_dir().join(format!("jet_stdlib_size_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_corelib_size_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::create_dir_all(dir.join("build")).unwrap();
@@ -209,7 +209,7 @@ fn importing_all_std_modules_without_calls_stays_hello_world_sized() {
     )
     .unwrap();
     fs::write(
-        dir.join("std_import_only.jet"),
+        dir.join("core_import_only.jet"),
         r#"
 use core.fs as fs
 use core.io as io
@@ -234,14 +234,14 @@ fn main() {
         .unwrap();
     assert!(hello.status.success(), "hello build failed");
     let imports = Command::new(&jet)
-        .args(["build", "--small", "std_import_only.jet"])
+        .args(["build", "--small", "core_import_only.jet"])
         .current_dir(&dir)
         .output()
         .unwrap();
     assert!(imports.status.success(), "import-only build failed");
 
     let hello_size = fs::metadata(dir.join("build/hello")).unwrap().len();
-    let import_size = fs::metadata(dir.join("build/std_import_only"))
+    let import_size = fs::metadata(dir.join("build/core_import_only"))
         .unwrap()
         .len();
     assert!(
@@ -399,23 +399,23 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// c45 drift-guard: `std_module_items` in Sema/CheckerStdlib.rs must cover
-/// every module in `Loader::KNOWN_STD_MODULES` (and no extras).
+/// c45 drift-guard: `core_module_items` in Sema/CheckerCoreLib.rs must cover
+/// every module in `Loader::KNOWN_CORE_MODULES` (and no extras).
 ///
-/// `std_module_items` is `pub(crate)` so we can't call it directly from here.
+/// `core_module_items` is `pub(crate)` so we can't call it directly from here.
 /// Instead we parse the source file and extract the string literals used as
 /// match arm heads — the same technique used in tests/decisions.rs for
 /// Source/Syntax.rs. This breaks if the match arm format changes, which is
 /// exactly the right tripwire: a format change must be mirrored here.
 #[test]
-fn std_module_items_covers_known_std_modules() {
-    let src = fs::read_to_string("Source/Sema/CheckerStdlib.rs")
-        .expect("Source/Sema/CheckerStdlib.rs must exist");
+fn core_module_items_covers_known_core_modules() {
+    let src = fs::read_to_string("Source/Sema/CheckerCoreLib.rs")
+        .expect("Source/Sema/CheckerCoreLib.rs must exist");
 
-    // Extract the `std_module_items` function body.
+    // Extract the `core_module_items` function body.
     let fn_start = src
-        .find("pub(crate) fn std_module_items(")
-        .expect("std_module_items function not found in CheckerStdlib.rs");
+        .find("pub(crate) fn core_module_items(")
+        .expect("core_module_items function not found in CheckerCoreLib.rs");
     // Find the closing `}` at top-level indent (just after the last arm).
     let fn_body = &src[fn_start..];
     // Collect all string literal match arm heads: lines matching `"<module>" =>`
@@ -440,21 +440,21 @@ fn std_module_items_covers_known_std_modules() {
     }
 
     let known: std::collections::BTreeSet<&str> =
-        jet::Loader::KNOWN_STD_MODULES.iter().copied().collect();
+        jet::Loader::KNOWN_CORE_MODULES.iter().copied().collect();
 
     let missing_from_items: Vec<&&str> = known.iter().filter(|m| !items_keys.contains(*m)).collect();
     let extra_in_items: Vec<&&str> = items_keys.iter().filter(|m| !known.contains(*m)).collect();
 
     assert!(
         missing_from_items.is_empty(),
-        "std_module_items is missing arms for modules in KNOWN_STD_MODULES: {:?}\n\
-         Add a match arm in Source/Sema/CheckerStdlib.rs for each.",
+        "core_module_items is missing arms for modules in KNOWN_CORE_MODULES: {:?}\n\
+         Add a match arm in Source/Sema/CheckerCoreLib.rs for each.",
         missing_from_items
     );
     assert!(
         extra_in_items.is_empty(),
-        "std_module_items has arms for modules NOT in KNOWN_STD_MODULES: {:?}\n\
-         Either add to KNOWN_STD_MODULES in Source/Loader.rs or remove the arm.",
+        "core_module_items has arms for modules NOT in KNOWN_CORE_MODULES: {:?}\n\
+         Either add to KNOWN_CORE_MODULES in Source/Loader.rs or remove the arm.",
         extra_in_items
     );
 }

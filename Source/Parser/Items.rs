@@ -272,7 +272,7 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 },
-                TokKind::KwUnsafe => {
+                TokKind::Ident(n) if n == Syntax::FOREIGN_UNSAFE => {
                     let t = self.bump();
                     let ffi_attempt = matches!(&self.peek().kind, TokKind::KwExtern);
                     self.diags.push(Diagnostic::error(
@@ -280,7 +280,7 @@ impl<'a> Parser<'a> {
                         format!(
                             "{} doesn't use `{}` to call Rust crates",
                             Syntax::LANG_NAME,
-                            Syntax::KW_UNSAFE
+                            Syntax::FOREIGN_UNSAFE
                         ),
                         "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
                             .to_string(),
@@ -347,7 +347,7 @@ impl<'a> Parser<'a> {
                         "E0990",
                         format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
                         "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
-                        "write `#unsafe`, `#audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                        "write `#Unsafe`, `#Audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
                         Some(t.span),
                     ));
                     self.sync_top();
@@ -642,7 +642,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S58 (E2-M13): is the cursor at `#unsafe fn …`? The whole-function
+    /// S58 (E2-M13): is the cursor at `#Unsafe fn …`? The whole-function
     /// unsafe contract — `#` then the `unsafe` keyword then `fn`/`pub fn`.
     fn at_unsafe_fn(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
@@ -650,7 +650,7 @@ impl<'a> Parser<'a> {
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
 
-    /// S58 (E2-M13): parse `#unsafe fn name(...) { ... }`. The body is checked
+    /// S58 (E2-M13): parse `#Unsafe fn name(...) { ... }`. The body is checked
     /// like any other; the contract is enforced at call sites (E3103).
     fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
         self.expect(TokKind::Hash, "before `unsafe`")?;
@@ -659,7 +659,7 @@ impl<'a> Parser<'a> {
         if is_pub {
             self.bump();
         }
-        self.expect_kw(TokKind::KwFn, "after `#unsafe`")?;
+        self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
         self.func_after_fn(is_pub, true, false)
     }
 

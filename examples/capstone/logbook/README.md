@@ -27,12 +27,12 @@ jet run logbook.jet new     fixtures/notes my-note
 | render.jet   | Note and listing to HTML                                    |
 | server.jet   | HTTP routing: list, note, graph JSON, search, health        |
 | config.jet   | Load `config.toml` with env-var overrides                   |
-| hashid.jet   | FNV-1a content hash — `@unsafe` expert-tier demo            |
-| ffi.jet      | Minimal FFI demo (stub PID via `@unsafe`)                   |
+| hashid.jet   | FNV-1a content hash — `#Unsafe` expert-tier demo            |
+| ffi.jet      | Minimal FFI demo (stub PID via `#Unsafe`)                   |
 
 ## Features
 
-Exercises structs, enums, `when`-matching, optionals (`?`), maps, loops, `comptime`, `@unsafe`/`@audit`, FFI, TOML config, parallel index build, and HTTP serving — all in a single real-world CLI + server program.
+Exercises structs, enums, `when`-matching, optionals (`?`), maps, loops, `comptime`, `#Unsafe`/`#Audit`, FFI, TOML config, parallel index build, and HTTP serving — all in a single real-world CLI + server program.
 
 ## Boundaries
 

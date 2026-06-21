@@ -1,11 +1,11 @@
-# Standard library (`jet.core`)
+# Core library (`jet.core`)
 
-The Jet standard library gives you files, terminal I/O, environment variables,
+The Jet Core library gives you files, terminal I/O, environment variables,
 process control, math, time, random numbers, JSON, tasks, and channels —
 enough to write real command-line tools. Every fallible call returns a
-`T ? E` value; nothing in core std panics on its own.
+`T ? E` value; nothing in Core panics on its own.
 
-**How it works today:** std modules are built into the compiler. Use them by
+**How it works today:** Core modules are built into the compiler. Use them by
 name; the compiler type-checks your calls and generates only the helpers you
 actually use (see [Using modules](#using-modules) and [Pay for what you call](#pay-for-what-you-call)).
 
@@ -49,7 +49,7 @@ nix develop -c jet run tool.jet World
 
 ## Using modules
 
-Std modules use `use` — no quotes, unlike file imports.
+Core modules use `use` — no quotes, unlike file imports.
 
 ```jet
 use core.fs as fs           // one submodule
@@ -74,7 +74,7 @@ first-party packages.
 
 ## Errors and results
 
-Fallible std functions return `T ? E`. Handle them like any other Jet
+Fallible Core functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet
@@ -95,7 +95,7 @@ automatic conversion between error types in v1.
 ## Pay for what you call
 
 Using `core.fs` costs nothing in the generated binary until you **call**
-something from it. A program that uses every std module but only calls
+something from it. A program that uses every Core module but only calls
 `print` stays hello-world sized. Only the helpers your program can reach are
 compiled in.
 
@@ -281,7 +281,7 @@ not for tests.
 
 ### `core.time` — clock and delays
 
-Time in core std is **Unix milliseconds** only — no dates, time zones, or
+Time in Core is **Unix milliseconds** only — no dates, time zones, or
 formatting (use `jet.time` for calendars).
 
 ```jet
@@ -399,6 +399,54 @@ structs containing `ref` fields, no trait values, and no closure values unless
 they are handed over with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 
+### `jet.regex` — linear-time regular expressions
+
+`use jet.regex as re`. Matching is **linear-time** — the engine is a DFA/NFA
+hybrid with no catastrophic backtracking, so patterns are ReDoS-safe by
+construction. Backreferences and lookaround do not exist (the safety property
+would be lost), and that is deliberate.
+
+Every call returns a `Result`; the `Err` carries a one-line message when the
+pattern itself is malformed (the only failure at the boundary). A `Match` is a
+list of capture groups: `group(0)` is the whole match, `group(n)` is the n-th
+group as `String?` (`null` if the group did not participate or `n` is out of
+range).
+
+```jet
+use jet.regex as re
+
+fn main() {
+    text :: "order 42 shipped"
+    print(re.is_match("\\d+", text) ?? panic("bad pattern"))   // true
+
+    m :: re.match("(\\d+) shipped", text) ?? panic("bad pattern")
+    if m == value(mat) {
+        print(mat.group(0) ?? "")   // 42 shipped
+        print(mat.group(1) ?? "")   // 42
+    }
+
+    print(re.replace_all("\\d+", text, "#") ?? panic("bad pattern"))
+}
+```
+
+| Call | Returns | Does |
+|------|---------|------|
+| `re.is_match(pat, text)` | `Bool ? String` | whether `pat` occurs anywhere |
+| `re.match(pat, text)` | `Match? ? String` | first match with capture groups, `null` if none |
+| `re.find(pat, text)` | `String? ? String` | first matched substring, `null` if none |
+| `re.find_all(pat, text)` | `[String] ? String` | every non-overlapping match, left to right |
+| `re.replace(pat, text, repl)` | `String ? String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
+| `re.replace_all(pat, text, repl)` | `String ? String` | replace every match |
+| `re.split(pat, text)` | `[String] ? String` | split `text` on every match |
+| `mat.group(n)` | `String?` | capture group `n` of a `Match` |
+
+Note: `{N}` quantifiers must be written `{{N}}` in Jet source — single braces
+are string interpolation (S8). Write `\\d{{4}}` for "four digits".
+
+`regex` is the one owner-approved I6 bootstrap dependency (D-REGEX1): it lives
+only inside the hidden FFI bridge crate, never in the compiler, and is slated to
+be replaced by an in-house RE2-style engine before the end of Epoch 3.
+
 ---
 
 ## Binary data (`U8`)
@@ -443,7 +491,7 @@ Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
 
 ## First-party ring (`jet.*` packages)
 
-Core std (`jet.core`) stays at the eight modules above. The first-party ring
+Core (`jet.core`) stays at the eight modules above. The first-party ring
 ships as versioned `jet.*` packages. These shipped in Epoch 2:
 
 | Package | What it unlocks |
@@ -460,9 +508,9 @@ ships as versioned `jet.*` packages. These shipped in Epoch 2:
 
 ---
 
-## Writing std in Jet (future)
+## Writing Core in Jet (future)
 
-Today, std lives in the compiler as typed signatures plus Rust prelude templates
+Today, Core lives in the compiler as typed signatures plus Rust prelude templates
 (`Source/Prelude/Std.rs`). The **API** is Jet; the **implementation** is Rust until
 the package system fully stabilizes.
 
@@ -476,4 +524,4 @@ the package system fully stabilizes.
 | `examples/features/30_json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/31_cli.jet` | Args, environment, exit codes |
 
-Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test stdlib`.
+Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.

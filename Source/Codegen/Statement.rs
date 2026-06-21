@@ -1008,7 +1008,7 @@ fn if_pattern_test(cond: &Expr) -> Option<(&Pattern, &Expr)> {
 /// The payload types a variant binds, so destructured names carry their type
 /// into the body (needed so e.g. `.get` on a `Map` bound from `Object(root)`
 /// lowers to a map lookup, not list indexing — B3). Mirrors sema's
-/// `std_json_pattern_types` for the std `JSON` enum and reads `cx` for user
+/// `core_json_pattern_types` for the core `JSON` enum and reads `cx` for user
 /// enums. Returns `None` when the types aren't known (binding stays untyped).
 fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     if is_json_variant(variant) {

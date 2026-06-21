@@ -73,7 +73,7 @@
       "type": "task",
       "title": "Arena allocators in stdlib",
       "body": "core.mem arena (+ pool/bump/fixed staged).",
-      "stage": "decisions",
+      "stage": "implementation",
       "plan": "stdlib-allocators-arena",
       "notes": [
         {
@@ -82,6 +82,10 @@
         },
         {
           "t": "D-ALLOC2 ratified 2026-06-21 (opt A, scope-bound view); needs a region rule → follow-on D-REGION1 queued → stays in decisions",
+          "at": "2026-06-21"
+        },
+        {
+          "t": "D-REGION1 ratified 2026-06-21 (A+B: implicit scope-inferred default + explicit `region r {}` expert tier) → unblocks D-ALLOC2. Both c05 decisions ratified → implementation. Arena scope-bound view + regions now buildable.",
           "at": "2026-06-21"
         }
       ],
@@ -125,8 +129,8 @@
       "type": "task",
       "title": "lib vs exe → targets model",
       "body": "Replace rigid lib/exe with fine-grained targets (library/binary/test/example/benchmark/plugin).",
-      "stage": "implementation",
-      "plan": "lib-exe-targets-model",
+      "stage": "done",
+      "plan": null,
       "notes": [
         {
           "t": "promoted from owner-todo; plan drafted, needs your review",
@@ -134,6 +138,10 @@
         },
         {
           "t": "D-TGT1-5 + D-CAP4/5/6 ratified 2026-06-21; manifest layer building → implementation",
+          "at": "2026-06-21"
+        },
+        {
+          "t": "DONE 2026-06-21: targets manifest layer fully implemented + green (kind removed; targets: parse incl per-target blocks; entry/name/api validation E1216; package_kind derive; E1210/E1211 reworded; 3 ui snapshots; unit tests). Downstream binary-build consumption of targets is c50 scope. Rationale in syntax-decisions.md (D-TGT1-5/D-CAP4-6).",
           "at": "2026-06-21"
         }
       ],
@@ -1141,7 +1149,7 @@
       "type": "idea",
       "title": "jet.regex — how it ships (native vs bootstrap crate)",
       "body": "Persona brief #1 gap: missing jet.regex blocks CLI/ETL/HTTP/lib text work. Needs an owner call per I6 (stdlib external dep approval): native RE2-style engine now (slow, dep-free) vs bootstrap the regex crate then native-ize before Epoch 3 ends (fast, needs dep approval). Rec B.",
-      "stage": "implementation",
+      "stage": "done",
       "decisions": [
         "D-REGEX1"
       ],
@@ -1152,6 +1160,10 @@
         },
         {
           "t": "D-REGEX1 ratified 2026-06-21 (opt B, bootstrap regex crate; owner-approved I6 exception); unblocked → implementation",
+          "at": "2026-06-21"
+        },
+        {
+          "t": "DONE 2026-06-21: jet.regex shipped end-to-end + green (43 ok / 0 fail). regex crate confined to the FFI bridge (S50/D-DEP1) — compiler Cargo.toml stays zero-dep (I6). API: re.is_match/match/find/find_all/split/replace/replace_all + Match.group. Example 74_regex.jet golden-tested. Native-ize-before-Epoch-3 obligation recorded. NOTE: its std-naming will be swept by the Core-rename directive.",
           "at": "2026-06-21"
         }
       ],
@@ -1248,6 +1260,271 @@
       "decisions": [
         "D-FIXARR1"
       ]
+    },
+    {
+      "id": "c83",
+      "type": "task",
+      "title": "HTTP routing layer / middleware (jet.http)",
+      "body": "Route registration + dispatch + :param extraction for jet.http; today only a single handler. Persona rec #2 (Tariq, Amara).",
+      "stage": "pre-plan",
+      "plan": "http-routing",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/http-routing",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-ROUTE1"
+      ]
+    },
+    {
+      "id": "c84",
+      "type": "task",
+      "title": "Detached-task idiom — fix L1101 on servers",
+      "body": "A one-word way to mark a spawned task intentionally detached so server patterns dont trip L1101. Persona rec #3.",
+      "stage": "pre-plan",
+      "plan": "task-detach",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/task-detach",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-DETACH1"
+      ]
+    },
+    {
+      "id": "c85",
+      "type": "task",
+      "title": "repr(C) struct layout control",
+      "body": "Pin struct field order/padding for C/MMIO interop. Persona rec #4 (Yuki, Marcus). Interacts with D-SOA1/c82.",
+      "stage": "pre-plan",
+      "plan": "repr-c-layout",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/repr-c-layout",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-REPRC1"
+      ]
+    },
+    {
+      "id": "c86",
+      "type": "task",
+      "title": "Streaming / line-by-line stdin",
+      "body": "Stream stdin lines constant-memory like files already do. Persona rec #7 (Priya, Elena).",
+      "stage": "pre-plan",
+      "plan": "streaming-stdin",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/streaming-stdin",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-STDIN1"
+      ]
+    },
+    {
+      "id": "c87",
+      "type": "task",
+      "title": "Terminal raw-mode + single-key input",
+      "body": "Raw mode, key polling, cursor/color for terminal games. Persona rec #8 (Kofi — only blocked persona). I6 dep gate.",
+      "stage": "pre-plan",
+      "plan": "terminal-raw-mode",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/terminal-raw-mode",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-TERM1"
+      ]
+    },
+    {
+      "id": "c88",
+      "type": "task",
+      "title": "fs.list_dir full paths + path join",
+      "body": "Directory listing returns paths/DirEntry not bare names + a portable path.join. Priya.",
+      "stage": "pre-plan",
+      "plan": "fs-listdir-paths",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/fs-listdir-paths",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-LSDIR1"
+      ]
+    },
+    {
+      "id": "c89",
+      "type": "task",
+      "title": "Typed CSV row structs",
+      "body": "Decode CSV rows into typed structs by header name via comptime; no S56 dependency. Elena.",
+      "stage": "pre-plan",
+      "plan": "typed-csv-rows",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/typed-csv-rows",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-CSVROW1"
+      ]
+    },
+    {
+      "id": "c90",
+      "type": "task",
+      "title": "Typed JSON output / struct serialization",
+      "body": "json.render(struct) via a built-in #[Serialize] marker (distinct from S56 user-derives). Elena.",
+      "stage": "pre-plan",
+      "plan": "typed-json-output",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/typed-json-output",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-JSONOUT1"
+      ]
+    },
+    {
+      "id": "c91",
+      "type": "task",
+      "title": "Structured flag/argument parsing",
+      "body": "Declarative CLI flags/options/positionals with typed values + generated --help. Amara, Priya. Distinct from c11 passthrough.",
+      "stage": "pre-plan",
+      "plan": "structured-arg-parsing",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/structured-arg-parsing",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-ARGS1"
+      ]
+    },
+    {
+      "id": "c92",
+      "type": "task",
+      "title": "Human-readable log format for jet.log",
+      "body": "Readable console log output (auto by TTY) alongside JSON lines. Amara.",
+      "stage": "pre-plan",
+      "plan": "human-log-format",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/human-log-format",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-LOGFMT1"
+      ]
+    },
+    {
+      "id": "c93",
+      "type": "task",
+      "title": "Sized floats F32/F64 impl + precision math",
+      "body": "Implement the ratified D-SG9 sized floats + decide width-generic math/precision policy. Marcus.",
+      "stage": "pre-plan",
+      "plan": "sized-floats",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/sized-floats",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-FLOATW1"
+      ]
+    },
+    {
+      "id": "c94",
+      "type": "task",
+      "title": "Linear algebra + SIMD math story",
+      "body": "jet.linalg numerics ring package + portable SIMD lane types. Marcus. Large; I6 + roadmap-slot gates.",
+      "stage": "far-horizon",
+      "plan": "math-linalg-simd",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/math-linalg-simd",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-MATHLIB1",
+        "D-SIMD1"
+      ]
+    },
+    {
+      "id": "c95",
+      "type": "task",
+      "title": "C-header binding example (use c.<lib>)",
+      "body": "Pure I5 gap: add an examples/features entry binding a C header (engine D-CBIND3/c53 shipped). Implement-only, no decision. Yuki.",
+      "stage": "pre-plan",
+      "plan": "cbind-example",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/cbind-example",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": []
+    },
+    {
+      "id": "c96",
+      "type": "task",
+      "title": "M12.2 registry + jet publish UX",
+      "body": "jet publish command shape + semver/version-immutability + resolver default. Rides c50/c56 infra. Saoirse, Amara.",
+      "stage": "pre-plan",
+      "plan": "publish-registry-ux",
+      "notes": [
+        {
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/publish-registry-ux",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-PUBLISH1"
+      ]
     }
   ],
   "questions": [
@@ -1314,6 +1591,22 @@
       "status": "open",
       "answer": "",
       "created": "2026-06-21T12:03:40.695Z"
+    },
+    {
+      "id": "cmqnqxvijn6",
+      "decisionId": "D-CAP2",
+      "text": "How does this interplay with experts that will want to use low level memory controls like references and pointers?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-21T12:12:03.403Z"
+    },
+    {
+      "id": "cmqnqyta74mv",
+      "decisionId": "D-CAP3",
+      "text": "How is this affected when no type is written (inferred type)?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-21T12:12:47.167Z"
     }
   ]
 }

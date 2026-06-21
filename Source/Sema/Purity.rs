@@ -72,7 +72,7 @@ pub(crate) fn is_impure_builtin(name: &str) -> bool {
 /// resolved `(module, method)` pair (std calls are method calls on a module
 /// alias, not bare names). `jet.time.format` is pure (Int + pattern → String)
 /// and intentionally excluded.
-pub(crate) fn is_nondeterministic_std(module: &str, method: &str) -> bool {
+pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
     matches!(
         (module, method),
         ("core.time", "now" | "sleep" | "start")

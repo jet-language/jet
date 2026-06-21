@@ -457,11 +457,11 @@ impl<'a> Checker<'a> {
     ) -> Type {
         // E2-M10: compiler-known constructable struct types (HttpRequest, HttpResponse).
         // These have no user-module owner but are valid in struct literals.
-        if let Some(std_fields) = std_constructable_fields(type_name) {
+        if let Some(core_fields) = core_constructable_fields(type_name) {
             let str_map_ty = Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
             let provided_names: std::collections::HashSet<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
             for (fname, _, fexpr) in fields.iter_mut() {
-                let expected_ty: Option<Type> = std_fields.iter()
+                let expected_ty: Option<Type> = core_fields.iter()
                     .find(|(n, _)| n == fname)
                     .map(|(_, t)| t.clone());
                 let saved = self.expected_type.clone();
@@ -471,7 +471,7 @@ impl<'a> Checker<'a> {
                 let _ = (&str_map_ty, &expected_ty);
             }
             // Report missing fields.
-            let missing: Vec<_> = std_fields.iter()
+            let missing: Vec<_> = core_fields.iter()
                 .filter(|(n, _)| !provided_names.contains(n))
                 .map(|(n, _)| n.clone())
                 .collect();
@@ -897,7 +897,7 @@ impl<'a> Checker<'a> {
                 },
             ) => {
                 if is_json_type_name(enum_name) {
-                    let Some(expected) = std_json_pattern_types(variant) else {
+                    let Some(expected) = core_json_pattern_types(variant) else {
                         self.diags.push(Diagnostic::error(
                             "E0305",
                             format!(

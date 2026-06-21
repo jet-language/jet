@@ -370,7 +370,7 @@ pub(crate) struct ModuleState {
     structs: HashMap<String, Vec<(Option<String>, Type)>>,
     consts: HashMap<String, Type>,
     imports: HashMap<String, usize>,
-    std_imports: HashMap<String, String>,
+    core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     m9: M9Registry,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
@@ -397,7 +397,7 @@ pub(crate) struct Checker<'a> {
     modules: Option<&'a [ModuleState]>,
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
-    std_imports: &'a HashMap<String, String>,
+    core_imports: &'a HashMap<String, String>,
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     code_modules: &'a HashMap<String, String>,
     /// D-MOD3: unqualified inline-module items in scope (name → mangled name).
@@ -432,8 +432,8 @@ pub(crate) struct Checker<'a> {
     /// or reset in this scope — maps name → verb ("free"/"reset").
     /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
     freed_allocators: HashMap<String, String>,
-    /// D-UNINIT1 (ratified 2026-06-21): `#uninit` bindings not yet definitely
-    /// written — maps name → the `#uninit` decl span. A read while still in this
+    /// D-UNINIT1 (ratified 2026-06-21): `#Uninit` bindings not yet definitely
+    /// written — maps name → the `#Uninit` decl span. A read while still in this
     /// map is E0420 (write-before-read proof); a write clears it. Branch-merged
     /// in `check_if` (intersection of "initialized").
     uninit: HashMap<String, Span>,
@@ -485,7 +485,7 @@ mod Registration;
 mod Bundle;
 mod CheckerCore;
 mod CheckerInfer;
-mod CheckerStdlib;
+mod CheckerCoreLib;
 mod CheckerOwnership;
 mod CheckerItems;
 mod Diagnostics;
@@ -495,7 +495,7 @@ mod Purity;
 pub(crate) use FFI::*;
 pub(crate) use Registration::*;
 pub(crate) use Bundle::*;
-pub(crate) use CheckerStdlib::*;
+pub(crate) use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Captures::*;
 pub(crate) use Purity::*;

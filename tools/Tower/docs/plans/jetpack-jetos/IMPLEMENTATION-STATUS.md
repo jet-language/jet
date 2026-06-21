@@ -52,7 +52,7 @@ Branch `jetos-ratified-arc` off `master` @ `3e6be24`. Not yet merged to `master`
 |---|---|---|
 | **C FFI real bind backend** — `jet bind` translates a C header into a `@bindgen` cache | ✅ done 2026-06-18 | owner superseded D-CBIND3=B (bindgen) with a **native std-only parser** (`Source/CBind.rs`); no external crate, no libclang. `jet bind <hdr.h>` works; E3208 is now the honest parse-failure path. Compile-time auto-invoke on cache miss → E3. |
 | **C FFI Phase-3 cache hash-regen** — caches are read as-is; no header/cflags-hash invalidation | deferred | follows the real bind backend |
-| **E3202** (pointer crosses C boundary outside `@unsafe`/`core.mem`) — registered + snapshotted but unreachable from real source | unreachable | **E2-M13** (pointer / `@unsafe` / `core.mem` tier, S58) not yet built |
+| **E3202** (pointer crosses C boundary outside `#Unsafe`/`core.mem`) — registered + snapshotted but unreachable from real source | unreachable | **E2-M13** (pointer / `#Unsafe` / `core.mem` tier, S58) not yet built |
 | **Raylib pong showcase** (`examples/features/49_cffi.jet`, D-CFFI3) — replaced by a deterministic small-C-lib e2e in `tests/cffi.rs` (graphical app has no golden stdout / no headless run) | substituted | a non-graphical golden, or a CI display harness |
 | **gap #6 remainder** — richer interactive dev-shell beyond `jet dev`/`jetpack enter` | low priority | rides existing `shell::enter`; no new syntax |
 | **The real Jet→binary compiler** — both package kinds stage source/prebuilt bytes; no compile step | not started | its own architecture design pass |

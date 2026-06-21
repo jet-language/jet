@@ -279,7 +279,7 @@ impl<'a> Interp<'a> {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Unsafe { span, .. } => Err(unsupported("an `#unsafe` block", *span)),
+            Stmt::Unsafe { span, .. } => Err(unsupported("an `#Unsafe` block", *span)),
             // D-LABEL1: labeled `break @name`/`continue @name` need the compiled
             // backend's multi-level loop control; the interpreter declines them
             // honestly (like `@unsafe`) rather than approximate them.

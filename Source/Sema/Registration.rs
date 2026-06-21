@@ -989,7 +989,7 @@ pub(crate) fn check_func_body(
     freestanding: bool,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
-    let empty_std_imports = HashMap::new();
+    let empty_core_imports = HashMap::new();
     let empty_code_modules = HashMap::new();
     let empty_unqualified: HashMap<String, String> = HashMap::new();
     let empty_unqualified_file: HashMap<String, (String, usize)> = HashMap::new();
@@ -1002,7 +1002,7 @@ pub(crate) fn check_func_body(
         modules: None,
         module_idx: 0,
         imports: &empty_imports,
-        std_imports: &empty_std_imports,
+        core_imports: &empty_core_imports,
         code_modules: &empty_code_modules,
         unqualified: &empty_unqualified,
         unqualified_file: &empty_unqualified_file,

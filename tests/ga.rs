@@ -112,7 +112,7 @@ fn ga_all_showcases_front_end_clean() {
 /// D-GA2=B: hard CI perf/size gates. Each showcase binary built with
 /// `--small` must stay under its pinned ceiling.
 ///
-/// Ceilings are generous — they catch accidental bloat (stdlib pulled in
+/// Ceilings are generous — they catch accidental bloat (core library pulled in
 /// unexpectedly) rather than micro-optimisation regressions.
 #[test]
 fn ga_showcase_size_budgets() {
@@ -124,7 +124,7 @@ fn ga_showcase_size_budgets() {
     }
 
     // (showcase file, max bytes with --small)
-    // Budgets are 4 MiB per tool; adjust if stdlib grows intentionally.
+    // Budgets are 4 MiB per tool; adjust if the core library grows intentionally.
     let budgets: &[(&str, u64)] = &[
         ("jetgrep.jet", 4_194_304),
         ("jsonfmt.jet", 4_194_304),

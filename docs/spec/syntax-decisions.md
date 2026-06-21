@@ -660,9 +660,9 @@ vocabulary: explicit **Zig-style allocators** (allocating APIs take an
 allocator parameter; a fixed arena works on embedded), `**Ptr<T>**`,
 layout/repr control, volatile wrappers. The audit gate for operations that can
 violate memory safety — pointer **deref**, pointer math, transmute-class casts,
-FFI pointer crossings — uses **`@audit("…")`** then **`@unsafe { … }`** (D-LL2:
-audit required; lint **L3101** if missing). **`@unsafe`** on the line before `fn`
-marks a whole-function contract; calling one requires an enclosing `@unsafe`
+FFI pointer crossings — uses **`#Audit("…")`** then **`#Unsafe { … }`** (D-LL2:
+audit required; lint **L3101** if missing). **`#Unsafe`** on the line before `fn`
+marks a whole-function contract; calling one requires an enclosing `#Unsafe`
 block. Taking a pointer (`&x`) is legal outside a block (a pointer is inert
 data); *using* one (`*p`, `.offset`) requires the block. `&`/`*` are **core
 grammar, sema-gated**: outside the gates they keep producing E0208-family
@@ -854,7 +854,7 @@ lifetime-heavy cases → overlay or gated pointers.
 **C macros (D-CBIND6):** bind emits **`#define` constants only**; skip function-like macros;
 overlay for macro-wrapped symbols.
 
-**Unsafe audit (D-LL2):** `@audit("reason")` required on `@unsafe { … }` blocks.
+**Unsafe audit (D-LL2):** `#Audit("reason")` required on `#Unsafe { … }` blocks.
 
 Rejected: bare `extern c raylib { }` globals (S59 provisional A); shadow-only
 override (overlay must merge with bindgen); two `use` forms for the same C lib
@@ -1301,11 +1301,11 @@ share one sigil; **position disambiguates**.
 **Declaration markers** — `@Marker` or `@[…]` on the line before `struct`,
 `enum`, or `fn`. Covers derive-like markers (`@Serialize`, `@Comparable`),
 harness markers (`@test`, `@todo`), and whole-item effects (`@transact`,
-`@unsafe` on a function). **`pure fn`** and **`comptime`** bindings stay prefix
+`#Unsafe` on a function). **`pure fn`** and **`comptime`** bindings stay prefix
 keywords (not migrated to `@`).
 
 **Scoped effects** — `@Marker { … }` as a statement inside a function (`@transact
-{ … }`, `@unsafe { … }`, `@async { … }` reserved for Epoch 3). Same spelling as
+{ … }`, `#Unsafe { … }`, `@async { … }` reserved for Epoch 3). Same spelling as
 in-body config; parser distinguishes by context.
 
 **Configurable markers (D-JSON1):** prefix `@Serialize` (etc.) = automatic
@@ -1342,8 +1342,8 @@ fn try_move(player: mut Player, target: Point) -> Bool ? {
     return ok(true);
 }
 
-@audit("bounds checked against len")
-@unsafe { slice.get_unchecked(i); }
+#Audit("bounds checked against len")
+#Unsafe { slice.get_unchecked(i); }
 ```
 
 **S83 — Multi-head functions (D-PAT5)** *(ratified 2026-06-16)*: a function may
@@ -1664,11 +1664,11 @@ allocator-spelling (D-ALLOC1) cards stay open pending owner explanations.
 land on the owner's word; `src/` is untouched until then.
 
 **D-ATTR1 — Attribute sigil `@` → `#`** *(ratified 2026-06-19, option B; reverses
-the S55 / S82 marker spelling)*: attributes and markers are written `#unsafe`,
-`#Serialize`, `#audit("…")`. Positional disambiguation keeps the existing `#`
+the S55 / S82 marker spelling)*: attributes and markers are written `#Unsafe`,
+`#Serialize`, `#Audit("…")`. Positional disambiguation keeps the existing `#`
 uses — fixed-size `[T#N]` and version-pin `name#ver` — working, since those never
 sit in the marker (item/statement-prefix) position. The teaching error flips to
-reject `@unsafe` and point at `#unsafe`. Reverses the *spelling* the owner picked
+reject `#Unsafe` and point at `#Unsafe`. Reverses the *spelling* the owner picked
 in S55 (derive policy) and S82 (marker sigil), not their semantics.
 
 **D-ATTR2 — Multi-marker list form** *(ratified 2026-06-19, option A; live with
@@ -1721,7 +1721,7 @@ an allocator with a named constructor and allocate with a method —
 `arena :: mem.Arena.new()` then `node :: arena.alloc(value)` (freed at scope end).
 Capacity rides as an optional S61 default (`mem.Arena.new(capacity: 4096)`), so
 A subsumes option C; the free-builtin `make(Node, in: arena)` form (B) is rejected.
-An arena value is **not** `@unsafe` — `use core.mem` is the opt-in gate (D-ALLOC-B).
+An arena value is **not** `#Unsafe` — `use core.mem` is the opt-in gate (D-ALLOC-B).
 Ships with the `core.mem` arena work (D-REF2).
 
 ### Targets model & capability vocabulary (ratified 2026-06-21)
@@ -1806,7 +1806,7 @@ capability authorizes its effect (`#fs`/`#net`) inside the scope; letting it esc
 (stored, returned, shared) is a compile error (**E0711**), and using an effect with no
 capability in scope is **E0712**. This is **authority to perform an effect**, distinct
 from the c06 value-ownership capabilities (`view`/`edit`/`take`/`share`); it generalizes
-the S58 `#audit`/`#unsafe` gate from "unsafe ops" to "any guarded power." **Gated on
+the S58 `#Audit`/`#Unsafe` gate from "unsafe ops" to "any guarded power." **Gated on
 D-EFF1** (the effect system, c66) — the capability is what authorizes an effect region,
 so D-EFF1 must land first. Rejected: effect-tag-only capabilities with no value (option
 B — can't lend a power per-call).
@@ -1824,7 +1824,7 @@ only (option A — boilerplate per unit, no natural literal).
 **D-LIN1 — Single-use (must-consume) values** *(ratified 2026-06-21, option A; gated on
 D-QUAL2; owner renamed `linear` → `SingleUse`)*: a type marked **`#SingleUse`** must be
 consumed **exactly once on every reachable path** — passed to a `take` parameter,
-returned, or explicitly `drop(x)`'d (drop requires an `#audit`). `#SingleUse` implies
+returned, or explicitly `drop(x)`'d (drop requires an `#Audit`). `#SingleUse` implies
 `#no_copy`. The checker tracks consumption through branches and names the unconsumed
 binding — **E0140** (unconsumed at scope end), **E0141** (unconsumed on one branch). This
 adds the "at least once" half to `take`'s "at most once" (S10). **Naming (owner call):**
@@ -1837,11 +1837,11 @@ Rejected: `#must_use`-only (option B — misses the bound-then-silently-dropped 
 
 **D-UNINIT1 — Visible uninitialization** *(ratified 2026-06-21, option C; owner chose
 the attribute form over the rec)*: skipping the default zero-fill of a binding is opted
-into with the **`#uninit` attribute** on the binding — `#uninit buffer: [4096]U8` —
-reusing the `#` marker sigil (D-ATTR1) like `#unsafe`/`#audit`. Gated behind
+into with the **`#Uninit` attribute** on the binding — `#Uninit buffer: [4096]U8` —
+reusing the `#` marker sigil (D-ATTR1) like `#Unsafe`/`#Audit`. Gated behind
 **`use core.mem`** (S58 low-level tier); outside that gate it is a teaching error
 pointing at the gate. Safety is a **compile-time** write-before-read proof: sema tracks
-each `#uninit` binding's initialized state by dataflow across all paths, and a read on
+each `#Uninit` binding's initialized state by dataflow across all paths, and a read on
 any path that may precede a full write is **E0420** (snapshot required when implemented,
 I4). Codegen lowers to `MaybeUninit::<T>::uninit()` after the proof passes — never a
 runtime trap (the rail Zig's `= undefined` and C's silence lack). **Status:** the sema
@@ -1858,10 +1858,10 @@ badly); `:= uninit` value-keyword
 owner-approved I6 bootstrap dep)*: `jet.regex` ships now backed by Rust's **`regex`**
 crate (DFA/NFA hybrid, **linear-time, no ReDoS**), surface `use jet.regex as re` /
 `re.match(pattern, text)?`. This is an explicit, **owner-approved I6 exception** — the
-one external stdlib dep sanctioned for the regex bootstrap — carrying a standing
+one external Core-library dep sanctioned for the regex bootstrap — carrying a standing
 obligation to **native-ize (replace with an in-house RE2-style engine) before the end of
 Epoch 3**, so the end state stays dependency-free (I6). The compiler (`Source/`) takes no
-crate; the dep lives only in the `jet.regex` stdlib sub-library. Rejected: native engine
+crate; the dep lives only in the `jet.regex` Core sub-library. Rejected: native engine
 first (option A — weeks of work, blocks the #1 persona gap meanwhile); defer (option C —
 leaves the largest adoption gap open).
 
@@ -1917,6 +1917,20 @@ denoted/inferred, part of c06) is queued in the ballot; option B (opaque generat
 indirection + a runtime check on statically-unknown handles); owned-clone stub (option C —
 "barely an arena", no shared buffer).
 
+**D-REGION1 — Allocation regions** *(ratified 2026-06-21, options A **and** B together;
+owner: "A & B together — ratify it"; unblocks D-ALLOC2)*: regions are **implicit and
+scope-inferred by default (A — the beginner/automagic tier)**: the region *is* the lexical
+scope of the `arena ::` binding, no lifetime is ever typed, and the checker proves no
+allocation escapes it (E0631) or outlives a `reset`/`free` (E0632, per D-ALLOC2). **Plus an
+explicit `region r { … }` block (B — the expert tier)** for the cases inference cannot give:
+a region spanning **two** allocators, **narrower** than the enclosing function, or **named**
+so allocations flow back out under a stated bound. Both ship — the beginner never writes
+`region`; the expert reaches for it when scope-inference is too coarse/fine. The escape rule
+is enforced against the inferred scope or the named region identically. This is the **region
+mechanism D-ALLOC2-A required**, so the scope-bound arena `view` is now buildable. Rejected:
+Rust-style named lifetime `'a` (option C — forces the lifetime surface on everyone, neither
+the beginner default nor a clean expert tier).
+
 **D-OBS2 — Debug line-table format** *(ratified 2026-06-21, option B)*: the Jet→Rust line
 table is a **sidecar `<file>.jetmap` JSON file** written beside the generated Rust, schema
 `{ "version": 1, "source": "<path>", "lines": [[rust_line, jet_line], …] }`. A versioned,
@@ -1928,6 +1942,30 @@ debugger (rides D-OBS1's source-map foundation → GA). Rejected: inline `// jet
 comments (option A — a reformatter or `rustfmt` strips comments, so it is not a stable
 contract for third-party tools); custom binary section (option C — invisible to source
 tools and platform-coupled per ELF/Mach-O/PE, the wrong fit for an editor-facing map).
+
+**D-CASING1 — Tag & trait casing; "Core" not "std"** *(ratified 2026-06-21, owner-directed)*:
+two naming conventions, applied everywhere (code, examples, snapshots, docs, ballot cards):
+1. **All tags are PascalCase.** A *tag* is the D-QUAL2 marker category — any `#`-marker with
+   no methods. So every `#`-marker is PascalCase: value-facts (`#Tainted`, `#Paid`,
+   `#Unpaid`), gates (`#Unsafe`, `#Audit`), harness (`#Test`, `#Todo`), feature markers
+   (`#Uninit`, `#Unit`, `#SingleUse`, `#NoCopy`, `#MustUse`, `#Repr`, `#Transact`, `#Grant`,
+   `#Detach`, `#Route`, …), and effect-tag members (`#(Net, Db, Log)`, `#(NoNet)`). The tag
+   *name* is PascalCase; value-style arguments keep their own case (a user unit `#Unit(usd)`),
+   type/ABI-style arguments are PascalCase (`#Repr(C)`). Built-in derive markers
+   (`#[Serialize, Comparable]`) were already PascalCase (D-ATTR2) — unchanged.
+2. **Traits are PascalCase** (they are types; enforce it).
+3. **The standard library is "Core", never "std".** The user-facing namespace is already
+   `core.*` (`core.fs`/`core.mem`/…) — kept. The *terminology* and *identifiers* "std"/"stdlib"
+   are renamed to "Core" everywhere: docs ("the Core library"), filenames (`Std.rs` →
+   `Core.rs`), consts (`KNOWN_STD_MODULES` → `KNOWN_CORE_MODULES`, `std_imports` →
+   `core_imports`, …), error copy, and ui-snapshot names. The `jet.*` ring packages keep
+   their namespace but are collectively part of **Core**, not "std".
+
+This amends the marker casing in S82/D-ATTR1 (markers were mixed-case) and the value-fact/
+effect spellings throughout c62/c66–c73. Note: the high-impact gate renames (`#unsafe` →
+`#Unsafe`, `#audit` → `#Audit`, `#test` → `#Test`) touch deeply-ratified syntax (S58/S82/S43)
+— applied per "all tags PascalCase"; flagged for owner reversal if a lowercase gate is
+preferred. Rejected: keeping lowercase tags / the name "std".
 
 ## Enforcement
 
@@ -2030,8 +2068,10 @@ upgrade that must re-earn an owner crate sign-off.
 
 | Date       | ID  | Decision                                    | By    |
 | ---------- | --- | ------------------------------------------- | ----- |
+| 2026-06-21 | D-CASING1 | tags PascalCase; traits PascalCase; "Core" not "std" (owner-directed casing/naming) | owner |
 | 2026-06-21 | D-OBS2 | debug line-table is a sidecar `<file>.jetmap` JSON (versioned, std-only); part of the DAP debugger | owner |
-| 2026-06-21 | D-ALLOC2 | arena `alloc` returns scope-bound `view`; use-after-reset/escape = compile error (E0631/E0632); gated on new region rule (D-REGION1) | owner |
+| 2026-06-21 | D-ALLOC2 | arena `alloc` returns scope-bound `view`; use-after-reset/escape = compile error (E0631/E0632); region rule ratified (D-REGION1) → unblocked | owner |
+| 2026-06-21 | D-REGION1 | allocation regions: implicit scope-inferred (A, beginner) + explicit `region r { … }` (B, expert) — both; unblocks D-ALLOC2 | owner |
 | 2026-06-21 | D-TAINT1 | `#tainted` tag + `sanitizer fn`; tainted→sink is E0721 (gated on D-EFF1); full IFC (opt B) deferred post-Epoch-3 → D-IFC1 | owner |
 | 2026-06-21 | D-QUAL2 | two qualifier kinds — `trait` (methods, dispatches) vs `tag` (no methods, erases); unblocks value-tags cluster | owner |
 | 2026-06-21 | D-UNINIT1 | `#uninit` binding marker, gated by `use core.mem`; write-before-read proof (E0420) | owner |

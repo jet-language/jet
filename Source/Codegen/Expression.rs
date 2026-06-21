@@ -174,16 +174,16 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
         Expr::Call(call) => emit_call(cx, call, env),
         Expr::Deref(inner, _) => format!("*{}", emit_expr(cx, inner, env)),
         Expr::Field(inner, member, _) => {
-            // Fields of a std struct (e.g. `ProcessResult.code`) are emitted by
-            // their plain Rust name, never `user_<name>` — the std structs in
-            // src/prelude/std.rs declare unprefixed fields (B2).
-            let field = std_struct_field_rust_name(cx, inner, member, env)
+            // Fields of a core struct (e.g. `ProcessResult.code`) are emitted by
+            // their plain Rust name, never `user_<name>` — the core structs in
+            // Source/Prelude/Core.rs declare unprefixed fields (B2).
+            let field = core_struct_field_rust_name(cx, inner, member, env)
                 .unwrap_or_else(|| mangle(member));
             if member == "clone" {
                 format!("({}).clone()", emit_expr(cx, inner, env))
             } else if let Expr::Ident(alias, _) = &**inner {
-                if let Some(module) = cx.std_imports.get(alias) {
-                    emit_std_field(module, member)
+                if let Some(module) = cx.core_imports.get(alias) {
+                    emit_core_field(module, member)
                 } else if is_json_type_name(alias) && member == "Null" {
                     format!("{}jet_std::Json::Null", cx.root_prefix)
                 } else if cx.enum_variants.contains_key(alias) {
@@ -627,7 +627,7 @@ fn emit_enum_lit(
 /// returns the field's plain Rust name (std structs use unprefixed fields, so
 /// emitting `user_<member>` would not compile — B2). Returns `None` otherwise,
 /// so user structs keep their mangled field names.
-fn std_struct_field_rust_name(
+fn core_struct_field_rust_name(
     cx: &Cx,
     inner: &Expr,
     member: &str,
@@ -681,7 +681,7 @@ pub(crate) fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Ty
     }
 }
 
-/// Like `expr_jet_ty` but also resolves std module call return types.
+/// Like `expr_jet_ty` but also resolves core module call return types.
 /// Used to determine the subject type for pattern match switches so that
 /// `Ok(binding)` / `Err(binding)` patterns carry the correct inner type.
 pub(crate) fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {
@@ -689,11 +689,11 @@ pub(crate) fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Sl
     if let Some(ty) = expr_jet_ty(expr, env) {
         return Some(ty);
     }
-    // Handle std module method calls: `alias.method(...)` where `alias` is a
-    // std import.  Only the ones that return a `Result` matter here.
+    // Handle core module method calls: `alias.method(...)` where `alias` is a
+    // core import.  Only the ones that return a `Result` matter here.
     if let Expr::MethodCall { receiver, method, .. } = expr {
         if let Expr::Ident(alias, _) = receiver.as_ref() {
-            if let Some(module) = cx.std_imports.get(alias) {
+            if let Some(module) = cx.core_imports.get(alias) {
                 let json_ty = || Type::Named(Syntax::TYPE_JSON.to_string());
                 let json_err_ty = || Type::Named(Syntax::TYPE_JSON_ERROR.to_string());
                 let io_err_ty = || Type::Named(Syntax::TYPE_IO_ERROR.to_string());
@@ -717,6 +717,19 @@ pub(crate) fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Sl
                     // E2-M9: ring module result types.
                     ("jet.csv", "parse") => Some(result(list_list_str(), str_ty())),
                     ("jet.toml", "parse") | ("jet.yaml", "parse") => Some(result(map_str_str(), str_ty())),
+                    // D-REGEX1: regex result types (for `?` propagation + chaining).
+                    ("jet.regex", "is_match") => Some(result(Type::Bool, str_ty())),
+                    ("jet.regex", "match") => Some(result(
+                        Type::Option(Box::new(Type::Named("Match".to_string()))),
+                        str_ty(),
+                    )),
+                    ("jet.regex", "find") => Some(result(Type::Option(Box::new(str_ty())), str_ty())),
+                    ("jet.regex", "find_all") | ("jet.regex", "split") => {
+                        Some(result(list_str(), str_ty()))
+                    }
+                    ("jet.regex", "replace") | ("jet.regex", "replace_all") => {
+                        Some(result(str_ty(), str_ty()))
+                    }
                     _ => None,
                 };
                 if ty.is_some() {
@@ -921,6 +934,11 @@ fn emit_builtin_method(
         "header" if matches!(&rty, Some(Type::Named(n)) if n == "HttpResponse") => Some(format!(
             "({}).headers.get(&{}).cloned()", recv, arg(0)
         )),
+        // D-REGEX1: `Match.group(n)` — capture group n as `String?`. The match is a
+        // `Vec<Option<String>>`; indexing past the end (or an absent group) is `none`.
+        "group" if matches!(&rty, Some(Type::Named(n)) if n == "Match") => Some(format!(
+            "({}).get(({}) as usize).cloned().flatten()", recv, arg(0)
+        )),
         "map" => {
             if let Expr::Lambda(l) = &args[0].expr {
                 if l.meta.needs_fn_mut {
@@ -974,7 +992,16 @@ fn emit_builtin_method(
     }
 }
 
-fn emit_std_field(module: &str, name: &str) -> String {
+/// D-REGEX1: qualify a regex runtime function with the FFI bridge crate name.
+/// The runtime lives only in that crate (the sole `regex`-crate dependant), so
+/// `cx.ffi_crate` is always `Some` here — `FFI::prepare` builds the bridge
+/// whenever `jet.regex` is imported.
+fn regex_fn(cx: &Cx, name: &str) -> String {
+    let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+    format!("{}::{}", crate_name, name)
+}
+
+fn emit_core_field(module: &str, name: &str) -> String {
     match (module, name) {
         ("core.math", "pi") => "std::f64::consts::PI".to_string(),
         ("core.math", "e") => "std::f64::consts::E".to_string(),
@@ -988,7 +1015,7 @@ fn emit_std_field(module: &str, name: &str) -> String {
     }
 }
 
-fn emit_std_call(
+fn emit_core_call(
     cx: &Cx,
     module: &str,
     method: &str,
@@ -1157,6 +1184,32 @@ fn emit_std_call(
             // serve(addr, handler): blocking; handler is a closure/fn.
             format!("{}(&({}), {})", helper("jet_http_serve"), arg(0), arg(1))
         }
+        // D-REGEX1: jet.regex — calls land in the FFI bridge crate (the only place
+        // the `regex` crate lives). `regex_fn` qualifies them with the bridge crate
+        // name carried in `cx.ffi_crate`.
+        ("jet.regex", "is_match") => {
+            format!("{}(&({}), &({}))", regex_fn(cx, "jet_regex_is_match"), arg(0), arg(1))
+        }
+        ("jet.regex", "match") => {
+            format!("{}(&({}), &({}))", regex_fn(cx, "jet_regex_match"), arg(0), arg(1))
+        }
+        ("jet.regex", "find") => {
+            format!("{}(&({}), &({}))", regex_fn(cx, "jet_regex_find"), arg(0), arg(1))
+        }
+        ("jet.regex", "find_all") => {
+            format!("{}(&({}), &({}))", regex_fn(cx, "jet_regex_find_all"), arg(0), arg(1))
+        }
+        ("jet.regex", "split") => {
+            format!("{}(&({}), &({}))", regex_fn(cx, "jet_regex_split"), arg(0), arg(1))
+        }
+        ("jet.regex", "replace") => format!(
+            "{}(&({}), &({}), &({}))",
+            regex_fn(cx, "jet_regex_replace"), arg(0), arg(1), arg(2)
+        ),
+        ("jet.regex", "replace_all") => format!(
+            "{}(&({}), &({}), &({}))",
+            regex_fn(cx, "jet_regex_replace_all"), arg(0), arg(1), arg(2)
+        ),
         // D-DEFER1 option B: scope.guard(() => { … }) → JetScopeGuard<F>
         // The closure is emitted directly; Rust infers the generic F.
         // Drop runs the closure on every exit path (LIFO by reverse-declaration order).
@@ -1167,7 +1220,7 @@ fn emit_std_call(
     }
 }
 
-fn emit_std_json_lit(
+fn emit_core_json_lit(
     cx: &Cx,
     variant: &str,
     args: &[crate::AST::CallArg],
@@ -1213,7 +1266,7 @@ fn emit_method_call(
     if method == Syntax::MEM_ALLOC_NEW {
         if let Expr::Field(inner, alloc_type, _) = receiver {
             if let Expr::Ident(alias, _) = &**inner {
-                if cx.std_imports.get(alias).map(|m| m == Syntax::CORE_MEM_MODULE).unwrap_or(false) {
+                if cx.core_imports.get(alias).map(|m| m == Syntax::CORE_MEM_MODULE).unwrap_or(false) {
                     let rust_type = match alloc_type.as_str() {
                         "Arena" => "jet_mem::JetArena",
                         "Bump" => "jet_mem::JetBump",
@@ -1279,8 +1332,8 @@ fn emit_method_call(
         }
     }
     if let Expr::Ident(alias, _) = receiver {
-        if let Some(module) = cx.std_imports.get(alias) {
-            return emit_std_call(cx, module, method, args, env);
+        if let Some(module) = cx.core_imports.get(alias) {
+            return emit_core_call(cx, module, method, args, env);
         }
         // D-MOD4: `pub use` re-export — emit the module that really defines the item.
         if let Some((real_mod, real_fn)) =
@@ -1328,7 +1381,7 @@ fn emit_method_call(
     }
     if let Expr::Ident(type_name, _) = receiver {
         if is_json_type_name(type_name) {
-            return emit_std_json_lit(cx, method, args, env);
+            return emit_core_json_lit(cx, method, args, env);
         }
         if let Some(variants) = cx.enum_variants.get(type_name) {
             if variants.iter().any(|(v, _)| v == method) {

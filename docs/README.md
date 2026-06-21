@@ -4,7 +4,7 @@ One home per kind of document. Start here.
 
 | If you want to… | Go to |
 |---|---|
-| Look up the standard library | [reference/stdlib.md](reference/stdlib.md) |
+| Look up the standard library | [reference/core-library.md](reference/core-library.md) |
 | Understand an error code | [reference/errors/](reference/errors/) (generated from snapshots) |
 | Read embedded / freestanding builds | [reference/embedded.md](reference/embedded.md) |
 | Read the versioning / release policy | [reference/versioning.md](reference/versioning.md) |

@@ -145,9 +145,9 @@ pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3202",
         format!("Type `{}` cannot cross the C boundary here.", ty),
-        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#unsafe { … }` region (S58)."
+        "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58)."
             .to_string(),
-        "Move the call inside `#unsafe`, or change the type to a C-safe value type.".to_string(),
+        "Move the call inside `#Unsafe`, or change the type to a C-safe value type.".to_string(),
         Some(span),
     )
 }

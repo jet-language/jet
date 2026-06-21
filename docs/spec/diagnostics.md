@@ -205,13 +205,13 @@ before continuing.
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
-| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `@unsafe` block (S58) |
+| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `#Unsafe` block (S58) |
 | E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
-| E3103 | sema  | `@unsafe fn` called without an enclosing `@unsafe` block (S58) |
+| E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe` block (S58) |
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
-| L3101 | sema  | `@unsafe` block missing its `@audit("…")` reason (S58, D-LL2) |
+| L3101 | sema  | `#Unsafe` block missing its `#Audit("…")` reason (S58, D-LL2) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
-| E3202 | sema  | pointer/gated type crosses C boundary outside `@unsafe` / `core.mem` |
+| E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
 | E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
 | E3204 | sema  | two C `use` forms for the same lib in one file |
 | E3205 | sema  | overlay symbol clashes with bindgen (incompatible signature) |
@@ -225,7 +225,7 @@ before continuing.
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
-| E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `@unsafe`, OS-level APIs) |
+| E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs) |
 | E0801 | sema  | lambda parameter type unknown |
 | E0802 | sema  | escaping lambda captures non-clonable value without `take` |
 | E0803 | sema  | calling a value that isn't a function |
@@ -270,10 +270,10 @@ before continuing.
 | E0981 | jetpack | a `jetpack os` config file doesn't exist (U16) |
 | E0982 | jetpack | `use <pkg>` names an `executable` package — executables go on PATH, not `use` (U17) |
 | E0983 | jetpack | `use <pkg>` names a declared `library` dependency that hasn't been realized yet (U17) |
-| E1001 | jet   | unknown std module |
+| E1001 | jet   | unknown core module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
 | E1003 | sema  | U8 literal out of range |
-| E1004 | sema  | unknown item in std module |
+| E1004 | sema  | unknown item in core module |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | L1101 | sema  | Task value dropped without `.join()`       |
@@ -301,7 +301,7 @@ before continuing.
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
 | E2102 | jet   | unknown or ambiguous flag on the command line, with a suggestion (E2-M3, D-DX) |
-| E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`@unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
+| E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
 | E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
 | L2101 | jet   | `jet doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
@@ -354,7 +354,7 @@ build path; it never silently falls back to a different answer.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2201 | `jet dev` can't interpret this program yet — it uses a feature the dev interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `@unsafe`/`core.mem` region, or a native-only std module like files/clock/random/environment/process). | The dev interpreter runs a deterministic, pure-enough subset for instant feedback; features that touch threads, foreign code, raw memory, or the outside world need the real native build. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` keeps showing checks live. Opt in with `jet dev <file> --try-anyway` to attempt execution past the boundary, with no guarantees (D-DEV1). |
+| E2201 | `jet dev` can't interpret this program yet — it uses a feature the dev interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `#Unsafe`/`core.mem` region, or a native-only core module like files/clock/random/environment/process). | The dev interpreter runs a deterministic, pure-enough subset for instant feedback; features that touch threads, foreign code, raw memory, or the outside world need the real native build. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` keeps showing checks live. Opt in with `jet dev <file> --try-anyway` to attempt execution past the boundary, with no guarantees (D-DEV1). |
 | E2202 | A program ran too long for `jet dev` to keep interpreting (the step budget was exhausted). | `jet dev` interprets your program; a run that never finishes is almost always a loop whose condition never becomes false. | Check the loop near the pointed-at line for a condition that never ends; `jet run` executes the real build with no step limit. |
 
 ## Range arm porting diagnostics (C25/D-RANGE2)
@@ -529,22 +529,22 @@ span is embedded in the message (Jet file + line + function name).
 ## Low-level tier diagnostics (E2-M13, S58)
 
 The expert tier is gated twice: `use core.mem` unlocks the vocabulary, and an
-`@audit("…")` + `@unsafe { … }` region (or an `@unsafe fn` contract) opens the
+`#Audit("…")` + `#Unsafe { … }` region (or an `#Unsafe fn` contract) opens the
 operations that can violate memory safety. Ordinary Jet never reaches these.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3101 | `{op}` can only run inside an `@unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `@audit("why this is safe") @unsafe { … }`. |
+| E3101 | `{op}` can only run inside an `#Unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `#Audit("why this is safe") #Unsafe { … }`. |
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
-| E3103 | `{fn}` is an `@unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `@audit("…") @unsafe { … }`. |
+| E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Audit("…") #Unsafe { … }`. |
 | E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |
-| L3101 | This `@unsafe` block has no `@audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `@audit("why this is safe")` on the line above. |
+| L3101 | This `#Unsafe` block has no `#Audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `#Audit("why this is safe")` on the line above. |
 ## C FFI diagnostics (E2-M14, S59)
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E3201 | C library `{lib}` was not found. | Jet tried the hangar dep keyed `{lib}` in `pkg.jet`, then `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or add `{lib}` under `[dependencies:c]` with a pinned hangar ref. |
-| E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `@unsafe { … }` region (S58). | Move the call inside `@unsafe`, or change the type to a C-safe value type. |
+| E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58). | Move the call inside `#Unsafe`, or change the type to a C-safe value type. |
 | E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `@extern` / `@bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |
 | E3205 | Overlay `{name}` disagrees with the generated binding. | User `@extern module c.{lib}` may override bindgen symbols, but the Jet signature must stay compatible when replacing. | Match the generated signature, or rename your overlay function. |
@@ -577,7 +577,7 @@ REPL step number in place of a file span (`<repl:N>`).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
-| E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `@unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
+| E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
 
 ## CLI diagnostics (E2-M3 developer command UX)
 

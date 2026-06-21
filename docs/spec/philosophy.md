@@ -57,7 +57,7 @@ and `jet fmt` can enforce a project preference; the language never forces one.
    Structural flexibility (where code lives, how it is nested or
    externalized) is not constrained by this priority.
 5. **Implementation simplicity & compile speed.** Matters, loses to 1–4.
-6. **Ecosystem breadth.** The stdlib grows to cover all target domains
+6. **Ecosystem breadth.** The Core library grows to cover all target domains
    post-v1: networking, web, embedded, systems. Each addition is
    first-party and curated, not a fragmented afterthought.
 

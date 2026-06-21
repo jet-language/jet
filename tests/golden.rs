@@ -73,7 +73,7 @@ fn examples_compile_and_run() {
 
         // I1 (amended by D-LL1, E2-M13): memory safety is never traded away in
         // ordinary Jet. Generated `unsafe` appears ONLY inside the gated
-        // low-level tier (`use core.mem` + `@unsafe`). The audited
+        // low-level tier (`use core.mem` + `#Unsafe`). The audited
         // `48_lowlevel` example is the sole exception, and even there every
         // `unsafe` must be a *gated* form (`unsafe {` or `unsafe fn`) — never a
         // bare `unsafe` leaking memory safety. Every other example emits zero

@@ -164,12 +164,12 @@ pub(crate) fn reexport_call_map(
     map
 }
 
-pub(crate) fn std_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
+pub(crate) fn core_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
-        if let Some(std_module) = Loader::std_module_path(imp) {
-            map.insert(Loader::import_alias(imp), std_module);
+        if let Some(core_module) = Loader::core_module_path(imp) {
+            map.insert(Loader::import_alias(imp), core_module);
             continue;
         }
         // D-MOD3: `use core.item` / `use core.{a,b}` — bind each item name to its
@@ -179,7 +179,7 @@ pub(crate) fn std_import_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
             if module_alias == "core" || module_alias == "jet" {
                 for item in items {
                     let full = format!("core.{}", item);
-                    if Loader::is_known_std_module(&full) {
+                    if Loader::is_known_core_module(&full) {
                         map.insert(item.clone(), full);
                     }
                 }
@@ -218,7 +218,7 @@ pub(crate) fn unqualified_import_maps(
             continue;
         };
         if module_alias == "core" || module_alias == "jet" {
-            // Std namespace — handled separately by std_import_map.
+            // Std namespace — handled separately by core_import_map.
             continue;
         }
         if code_mod_aliases.contains(module_alias.as_str()) {

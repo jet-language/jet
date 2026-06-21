@@ -292,7 +292,7 @@ impl<'a> Checker<'a> {
                     })
                 }
             }
-            Type::Named(name) if is_type_var_name(name) || std_type_known(name) => None,
+            Type::Named(name) if is_type_var_name(name) || core_type_known(name) => None,
             Type::Named(name) => self.named_sendability_problem(name, &[], seen),
             Type::Apply { name, args }
                 if matches!(name.as_str(), "Task" | "Channel" | "Sender") =>

@@ -214,7 +214,7 @@ impl Circle {
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
   `Printable`/`Equatable`; explicit `@Comparable` / `@Serialize` (S82).
 - **Attributes (S82):** `@Marker` or `@[a, b]` on the line before a
-  declaration; `@Marker { … }` for scoped effects (`@transact`, `@unsafe`) or
+  declaration; `@Marker { … }` for scoped effects (`@transact`, `#Unsafe`) or
   in-body config (`@Serialize { rename …; }`). **`pure fn`** and **`comptime`**
   stay prefix keywords.
 
@@ -350,7 +350,7 @@ if declared → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=�
 `-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
 structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**;
-pointers require `use core.mem` + `@unsafe` (E2-M13) → **E3202** (registered;
+pointers require `use core.mem` + `#Unsafe` (E2-M13) → **E3202** (registered;
 unreachable until the pointer tier lands). `@bindgen` is legal only inside a
 generated cache file (**E3207**); users may not name the reserved `__bindgen__`
 segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
@@ -372,19 +372,19 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 - **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`Ptr<T>`,
   `mem.volatile_read`, `mem.address_of`, allocators). Naming one of these without
   the import → **E3102**.
-- **Audit gate** — `@audit("reason")` on the line above an `@unsafe { … }` block
+- **Audit gate** — `#Audit("reason")` on the line above an `#Unsafe { … }` block
   opens the operations that can violate memory safety (pointer build/deref,
-  volatile access). A missing audit is lint **L3101**. `@unsafe` on the line
+  volatile access). A missing audit is lint **L3101**. `#Unsafe` on the line
   before `fn` marks a whole-function contract; its body is itself an audited
-  region, and calling it requires an enclosing `@unsafe` block → **E3103**.
+  region, and calling it requires an enclosing `#Unsafe` block → **E3103**.
 - **Operations** — `mem.Ptr<T>.from_addr(addr)` builds a typed pointer from an
   `Int` address (`Ptr<T>` lowers to a Rust `*mut T`); `mem.volatile_read(p)`
   reads through it (lowers to `std::ptr::read_volatile`); `mem.address_of(x)` is
   inert (a plain address as `Int`) and legal outside a gate. Using a low-level op
-  outside `@unsafe` → **E3101**.
+  outside `#Unsafe` → **E3101**.
 
-Codegen stays dumb (I3): an `@unsafe { … }` region lowers straight to a Rust
-`unsafe { … }`, an `@unsafe fn` to a Rust `unsafe fn`. All gating is decided in
+Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
+`unsafe { … }`, an `#Unsafe fn` to a Rust `unsafe fn`. All gating is decided in
 sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 (`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
 `tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
@@ -393,7 +393,7 @@ sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 ### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19, implemented)
 
 Four allocators ship under `core.mem` — `Arena`, `Bump`, `Pool`, `Fixed` — all namespaced
-under `core.mem.alloc` (D-ALLOC-C). No `#unsafe` needed; `use core.mem` is the discovery
+under `core.mem.alloc` (D-ALLOC-C). No `#Unsafe` needed; `use core.mem` is the discovery
 gate (E3102). Constructors: `mem.Arena.new()` / `mem.Arena.new(capacity: N)` (D-ALLOC1);
 allocate with `arena.alloc(value)` which returns the value. Two lifecycle verbs (D-ALLOC-D):
 `reset()` keeps the backing buffer (cheap, arena is reusable), `free()` returns memory to
@@ -527,7 +527,7 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 
 ## M10 — Standard library (done)
 
-Full user-facing reference: **docs/reference/stdlib.md**.
+Full user-facing reference: **docs/reference/core-library.md**.
 
 M10 standard library modules are compiler-known namespaces backed by Rust std
 helpers in the generated prelude. Import the short `core` spelling or the
@@ -538,18 +538,18 @@ use core.fs as fs;
 use jet.core.json as json;
 ```
 
-Implemented modules: `std.fs`, `std.io`, `std.env`, `std.process`,
-`std.math`, `std.random`, `std.time`, and `std.json`. Unknown std modules are
+Implemented modules: `core.fs`, `core.io`, `core.env`, `core.process`,
+`core.math`, `core.random`, `core.time`, and `core.json`. Unknown core modules are
 **E1001**; local modules/import aliases may not shadow reserved first-party
 roots (`core`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
 **E1002**. Selective imports are rejected; keep qualified access through an
 alias.
 
-Fallible std functions return `T ? E` and must be handled with `?`,
+Fallible core functions return `T ? E` and must be handled with `?`,
 `??`, or pattern tests like any M4 result. File APIs use whole-file helpers
 only; file handles and streaming are out of scope. Paths are `String` in M10.
 Binary APIs use `U8` and `[U8]`; integer literals for `U8` must be in
-0..255 (**E1003**). Unknown items in a std module are **E1004** with a
+0..255 (**E1003**). Unknown items in a core module are **E1004** with a
 did-you-mean suggestion when possible.
 
 Receiver additions: `String.bytes() -> [U8]`,
@@ -564,7 +564,7 @@ naming the field and the from→to types. The decoded value comes back plain —
 no wrapper type. Use `jet.json.decode` when consuming externally-produced JSON
 that may encode numbers or booleans as strings.
 
-Codegen invariant: importing std modules is free; sema records reachable std
+Codegen invariant: importing core modules is free; sema records reachable core
 calls and codegen emits only those helpers (R10).
 
 Program arguments: `jet run file.jet -- arg1 arg2` forwards everything after `--`
@@ -574,13 +574,13 @@ positional words with no separator still work (`jet run greet.jet Ada`). `jet te
 also accepts `--`; `jet build` does not (no running process).
 
 Examples: `examples/features/29_files.jet`, `examples/features/30_json.jet`,
-`examples/features/31_cli.jet`, `examples/features/64_cli_args.jet`. UI: `tests/ui/std_*`,
+`examples/features/31_cli.jet`, `examples/features/64_cli_args.jet`. UI: `tests/ui/core_*`,
 `tests/ui/u8_out_of_range.jet`, and M10 teaching errors **E0037**–**E0039**.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-06-14)
 
-`std.tasks` provides blocking tasks and typed channels. Import it as a normal
-std module:
+`core.tasks` provides blocking tasks and typed channels. Import it as a normal
+core module:
 
 ```jet
 use core.tasks as tasks;

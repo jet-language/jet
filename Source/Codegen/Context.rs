@@ -41,10 +41,10 @@ pub(crate) struct Cx {
     pub(crate) reexport_calls: HashMap<(String, String), (String, String)>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     pub(crate) import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
-    /// Import alias -> compiler-known std module (`std.fs`, `std.json`, ...).
-    pub(crate) std_imports: HashMap<String, String>,
+    /// Import alias -> compiler-known core module (`core.fs`, `core.json`, ...).
+    pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
-    pub(crate) used_std: HashSet<String>,
+    pub(crate) used_core: HashSet<String>,
     /// Empty at the entry module, `super::` inside generated import modules.
     pub(crate) root_prefix: String,
     /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
@@ -71,7 +71,7 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
     name == Syntax::TYPE_JSON || name == "Json"
 }
 
-fn std_rust_type_name(name: &str) -> Option<&'static str> {
+fn core_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
         n if is_json_type_name(n) => Some("Json"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
@@ -174,6 +174,9 @@ impl Cx {
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "U8" => "u8".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
+            // D-REGEX1: a regex `Match` is a list of capture groups (index 0 = whole
+            // match), each `Some` if it participated. `.group(n)` is plain indexing.
+            Type::Named(name) if name == "Match" => "Vec<Option<String>>".to_string(),
             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
             // so Rust infers the monomorphised type from the initialiser expression.
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
@@ -189,11 +192,11 @@ impl Cx {
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, alloc_handle_rust_type(name).unwrap())
             }
-            Type::Named(name) if std_rust_type_name(name).is_some() => {
+            Type::Named(name) if core_rust_type_name(name).is_some() => {
                 format!(
                     "{}jet_std::{}",
                     self.root_prefix,
-                    std_rust_type_name(name).unwrap()
+                    core_rust_type_name(name).unwrap()
                 )
             }
             Type::Named(name) if self.trait_names.contains(name) => {
@@ -371,8 +374,8 @@ pub(crate) fn build_cx_items(
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
-        std_imports: HashMap::new(),
-        used_std: HashSet::new(),
+        core_imports: HashMap::new(),
+        used_core: HashSet::new(),
         root_prefix: String::new(),
         ffi_crate: link.map(|l| l.crate_name.clone()),
         extern_funcs: extern_funcs.clone(),

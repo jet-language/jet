@@ -13,7 +13,7 @@ Struct field layout is opaque today — the compiler picks order/padding, so a J
 struct cannot reliably overlay a C struct or a memory-mapped register block.
 Yuki needs a struct whose layout matches C's: declared field order, C padding
 rules, no reordering. The user-facing goal: one annotation that pins layout so
-`use c.<lib>` structs and `@unsafe` MMIO casts are sound.
+`use c.<lib>` structs and `#Unsafe` MMIO casts are sound.
 
 Verified: `syntax-decisions.md:661` mentions "layout/repr control" only as a
 future audit-gate concern; no `repr` annotation exists (`grep repr Source/` →
@@ -35,7 +35,7 @@ binder D-CBIND3 — neither pins Jet-side struct layout.
 
 - **I1** layout control is an expert-tier opt-in; default structs stay opaque/safe.
   `repr(C)` itself is safe (it only pins layout); the *unsafe cast* that uses it
-  stays behind `@unsafe`/`@audit` (I1). repr does not weaken safety on its own.
+  stays behind `#Unsafe`/`#Audit` (I1). repr does not weaken safety on its own.
 - **I3** codegen stays dumb — it just stamps the attribute sema already validated.
 - **I7** the annotation keyword lives in `Syntax.rs` with a decision id.
 

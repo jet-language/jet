@@ -211,13 +211,13 @@ impl<'a> Checker<'a> {
                     self.moved.remove(name); // report once
                     return None;
                 }
-                // D-UNINIT1: reading a `#uninit` binding before it is written.
+                // D-UNINIT1: reading a `#Uninit` binding before it is written.
                 if self.uninit.contains_key(name) {
                     self.diags.push(Diagnostic::error(
                         "E0420",
                         format!("`{}` may be read before it is given a value", name),
                         format!(
-                            "`{}` was declared `#uninit`, so it holds no value until you write to it — this read could see garbage",
+                            "`{}` was declared `#Uninit`, so it holds no value until you write to it — this read could see garbage",
                             name
                         ),
                         format!(
@@ -328,9 +328,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0208",
                         "`*` isn't allowed here".to_string(),
-                        "dereferencing with `*` is only for expert code inside an `#unsafe` block"
+                        "dereferencing with `*` is only for expert code inside an `#Unsafe` block"
                             .to_string(),
-                        "remove `*`, or wrap this code in `#unsafe { ... }`".to_string(),
+                        "remove `*`, or wrap this code in `#Unsafe { ... }`".to_string(),
                         Some(*span),
                     ));
                 }
@@ -956,10 +956,10 @@ impl<'a> Checker<'a> {
             if take_set.contains(name) || param_names.contains(name) {
                 continue;
             }
-            // Module aliases (imports and std_imports) are always in scope in
+            // Module aliases (imports and core_imports) are always in scope in
             // lambdas — they're not local variables but they're valid references.
             // Don't report them as unknown names; the body check validates calls.
-            if self.imports.contains_key(name) || self.std_imports.contains_key(name) {
+            if self.imports.contains_key(name) || self.core_imports.contains_key(name) {
                 continue;
             }
             if self.lookup(name).is_none() && !self.consts.contains_key(name) {
@@ -1789,13 +1789,13 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(alias, alias_span) = &**inner {
-            if let Some(module) = self.std_imports.get(alias).cloned() {
-                return self.infer_std_field(&module, member, *alias_span, span);
+            if let Some(module) = self.core_imports.get(alias).cloned() {
+                return self.infer_core_field(&module, member, *alias_span, span);
             }
         }
         if let Expr::Ident(type_name, _) = &**inner {
             if is_json_type_name(type_name) {
-                if let Some(ret) = self.check_std_json_lit(member, &mut [], span) {
+                if let Some(ret) = self.check_core_json_lit(member, &mut [], span) {
                     return Some(ret);
                 }
             }
@@ -1813,7 +1813,7 @@ impl<'a> Checker<'a> {
     /// `?.` chaining). Emits E0302 and returns `None` when there's no such field.
     pub(crate) fn field_type(&mut self, t: &Type, member: &str, span: Span) -> Option<Type> {
         if let Type::Named(type_name) = t {
-            if let Some(fty) = std_struct_field(type_name, member) {
+            if let Some(fty) = core_struct_field(type_name, member) {
                 return Some(fty);
             }
             if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
@@ -1987,8 +1987,8 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
-            if let Some(module) = self.std_imports.get(alias).cloned() {
-                return self.infer_std_call(&module, method, *alias_span, span, args);
+            if let Some(module) = self.core_imports.get(alias).cloned() {
+                return self.infer_core_call(&module, method, *alias_span, span, args);
             }
             if let Some(&mod_idx) = self.imports.get(alias) {
                 return self.infer_import_call(mod_idx, method, *alias_span, span, args);
@@ -2002,7 +2002,7 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(type_name, _) = &**receiver {
             if is_json_type_name(type_name) {
-                if let Some(ret) = self.check_std_json_lit(method, args, span) {
+                if let Some(ret) = self.check_core_json_lit(method, args, span) {
                     return Some(ret);
                 }
             }
@@ -2750,10 +2750,10 @@ impl<'a> Checker<'a> {
         {
             if call.args.len() > 1 {
                 self.diags
-                    .push(wrong_std_arity(Syntax::BUILTIN_INPUT, 1, call.args.len(), call.name_span));
+                    .push(wrong_core_arity(Syntax::BUILTIN_INPUT, 1, call.args.len(), call.name_span));
             }
             if let Some(arg) = call.args.get_mut(0) {
-                self.expect_std_arg(Syntax::BUILTIN_INPUT, 0, &Type::String, arg);
+                self.expect_core_arg(Syntax::BUILTIN_INPUT, 0, &Type::String, arg);
             }
             return Some(Some(result_ty(Type::String, io_error_ty())));
         }
@@ -2901,12 +2901,12 @@ impl<'a> Checker<'a> {
             return None;
         };
 
-        // E3103 (S58): an `#unsafe fn` is a whole-function contract; callers
-        // must take responsibility inside their own `#unsafe` block.
+        // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
+        // must take responsibility inside their own `#Unsafe` block.
         if sig.is_unsafe && !self.in_unsafe {
             self.diags.push(Diagnostic::error(
                 "E3103",
-                format!("`{}` is an `#unsafe` function", call.name),
+                format!("`{}` is an `#Unsafe` function", call.name),
                 "its contract can't be checked by the compiler, so the caller must vouch for it"
                     .to_string(),
                 format!(

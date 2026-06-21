@@ -13,7 +13,7 @@
 //!   D-REPL-FUEL=A   ~10M steps/input; E1801 on overshoot
 //!   D-REPL-BANNER=A banner + `:help` hint on startup
 //!   D-REPL-COLOR=A  respect `NO_COLOR`/`CLICOLOR`
-//!   D-REPL-PRELOAD=A auto-import `std.io`; teaching note on first use
+//!   D-REPL-PRELOAD=A auto-import `core.io`; teaching note on first use
 //!
 //! Error codes (E18xx):
 //!   E1801  fuel cap hit — snippet ran too long
@@ -99,7 +99,7 @@ pub fn e1802(feature: &str) -> Diagnostic {
         "E1802",
         format!("the REPL interpreter can't run {}", feature),
         "the REPL is an interpreter for learning Jet; some features — \
-         FFI, tasks/channels, `#unsafe`, and OS-level APIs — require the real compiler"
+         FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler"
             .to_string(),
         "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler"
             .to_string(),
@@ -583,8 +583,8 @@ fn looks_like_item(text: &str) -> bool {
 /// Detect hard-reject features (D-REPL6=A).
 fn reject_feature(text: &str) -> Option<&'static str> {
     let t = text.trim();
-    if t.contains("#unsafe") {
-        return Some("`#unsafe`");
+    if t.contains("#Unsafe") {
+        return Some("`#Unsafe`");
     }
     if t.contains("extern rust") {
         return Some("`extern rust`");
@@ -755,7 +755,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
 
 /// Standard prelude import injected into every REPL program (D-REPL-PRELOAD=A).
 /// Note: `print`/`eprint` are builtins that don't require an import in Jet v1;
-/// the `use std.io` line is included for teaching purposes (the REPL shows a
+/// the `use core.io` line is included for teaching purposes (the REPL shows a
 /// note about it on first use) but the import itself is a no-op for the checker.
 const PRELOAD_SRC: &str = "";
 
@@ -1001,7 +1001,7 @@ pub fn run(project_dir: Option<&str>) -> i32 {
             println!(
                 "{}",
                 dim(
-                    "note: `print` is from `use std.io` — imported automatically in the REPL",
+                    "note: `print` is from `use core.io` — imported automatically in the REPL",
                     color
                 )
             );
@@ -1194,7 +1194,7 @@ fn print_help(color: bool) {
     );
     println!(
         "  Tip: {} is auto-imported — type `print(\"hello\")` to try it.",
-        bold("std.io", color)
+        bold("core.io", color)
     );
 }
 
