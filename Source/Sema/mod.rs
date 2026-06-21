@@ -355,6 +355,9 @@ pub enum CompileMode {
     /// `jet check` / LSP — type-check only; imported modules and library files
     /// need not define `main`.
     Check,
+    /// `jet eval` — full sema type-checking, but `main` may return a non-`()`
+    /// type (E0122 is relaxed). The entry still requires a `main` function.
+    Eval,
 }
 
 pub(crate) struct ModuleState {
@@ -496,4 +499,4 @@ pub(crate) use Purity::*;
 pub use Registration::{check, check_with_mode};
 pub use Bundle::{check_bundle, check_bundle_freestanding};
 pub use FFI::{e3202, e3301, e3302, e3303};
-pub use Purity::{check_pure_fn, e3401, e3402, e3403};
+pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};

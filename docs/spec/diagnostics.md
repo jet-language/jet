@@ -563,7 +563,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `pure fn` may only call other `pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). | Mark `{call}` as `pure fn`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `pure fn` may only call other `pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `main` is checked transitively; the why-line shows the full chain (`main → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `pure fn`, or remove the call from `{pure_fn}`. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
 | E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `pure`. |
 

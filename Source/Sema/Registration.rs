@@ -265,7 +265,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         }
     }
 
-    if mode == CompileMode::Run {
+    if mode == CompileMode::Run || mode == CompileMode::Eval {
         match funcs.get("main") {
             None => {
                 diags.push(Diagnostic::error(
@@ -278,7 +278,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 ));
             }
             Some(sig) => {
-                if !sig.params.is_empty() || sig.return_type.is_some() {
+                // E0122: in Run mode main must be `fn main()` with no params and no return.
+                // In Eval mode we allow a return type (e.g. `pure fn main() -> Int`).
+                if mode == CompileMode::Run && (!sig.params.is_empty() || sig.return_type.is_some()) {
                     let span = prog.items.iter().find_map(|i| match i {
                         Item::Func(f) if f.name == "main" => Some(f.name_span),
                         _ => None,
@@ -311,7 +313,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 None,
             ));
         }
-        CompileMode::Test | CompileMode::Run | CompileMode::Check => {}
+        CompileMode::Test | CompileMode::Run | CompileMode::Check | CompileMode::Eval => {}
     }
 
     // S57 (M9.5): evaluate comptime bindings before bodies are checked, so

@@ -138,6 +138,189 @@ impl CtValue {
         }
     }
 
+    /// Human-readable, Jet-typed pretty output (D-EVAL1=A).
+    ///
+    /// Structs render as `Name { field: value, … }`, lists as `[…]`, maps as
+    /// `{key: value, …}`. Scalars render with their Jet literal syntax.
+    /// Nested values indent by 2 spaces per level. `--json` callers use
+    /// `serialize()` (byte-stable) instead.
+    pub fn render_pretty(&self) -> String {
+        let mut out = String::new();
+        self.render_pretty_inner(&mut out, 0);
+        out
+    }
+
+    fn render_pretty_inner(&self, out: &mut String, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let inner_indent = "  ".repeat(depth + 1);
+        match self {
+            CtValue::Int(n) => out.push_str(&n.to_string()),
+            CtValue::Float(f) => out.push_str(&format!("{:?}", f)),
+            CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            CtValue::Char(c) => {
+                out.push('\'');
+                out.push(*c);
+                out.push('\'');
+            }
+            CtValue::Str(s) => {
+                out.push('"');
+                out.push_str(s);
+                out.push('"');
+            }
+            CtValue::List(xs) => {
+                if xs.is_empty() {
+                    out.push_str("[]");
+                } else {
+                    out.push_str("[\n");
+                    for item in xs {
+                        out.push_str(&inner_indent);
+                        item.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push(']');
+                }
+            }
+            CtValue::Map(m) => {
+                if m.is_empty() {
+                    out.push_str("{}");
+                } else {
+                    out.push_str("{\n");
+                    for (k, v) in m {
+                        out.push_str(&inner_indent);
+                        out.push_str(&k.jet_show());
+                        out.push_str(": ");
+                        v.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push('}');
+                }
+            }
+            CtValue::Struct { type_name, fields } => {
+                if fields.is_empty() {
+                    out.push_str(type_name);
+                    out.push_str(" {}");
+                } else {
+                    out.push_str(type_name);
+                    out.push_str(" {\n");
+                    for (name, value) in fields {
+                        out.push_str(&inner_indent);
+                        out.push_str(name);
+                        out.push_str(": ");
+                        value.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push('}');
+                }
+            }
+            CtValue::Enum { type_name, variant, args } => {
+                out.push_str(type_name);
+                out.push_str("::");
+                out.push_str(variant);
+                if !args.is_empty() {
+                    out.push('(');
+                    let mut first = true;
+                    for (label, v) in args {
+                        if !first { out.push_str(", "); }
+                        first = false;
+                        if let Some(lbl) = label {
+                            out.push_str(lbl);
+                            out.push_str(": ");
+                        }
+                        v.render_pretty_inner(out, depth);
+                    }
+                    out.push(')');
+                }
+            }
+            CtValue::Some(v) => {
+                out.push_str("Some(");
+                v.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::None(_) => out.push_str("None"),
+            CtValue::Unit => out.push_str("()"),
+        }
+    }
+
+    /// Stable JSON output for `jet eval --pure --json` (machine consumers).
+    /// Byte-stable: same program always produces the same bytes.
+    pub fn to_json(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(f) => {
+                let s = format!("{:?}", f);
+                // Ensure it contains a decimal point so JSON consumers treat it as float.
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
+            }
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("\"{}\"", c),
+            CtValue::Str(s) => {
+                // JSON-escape the string.
+                let mut out = String::from('"');
+                for ch in s.chars() {
+                    match ch {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        c => out.push(c),
+                    }
+                }
+                out.push('"');
+                out
+            }
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();
+                format!("[{}]", parts.join(","))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}:{}", k.to_value().to_json(), v.to_json()))
+                    .collect();
+                format!("{{{}}}", parts.join(","))
+            }
+            CtValue::Struct { fields, .. } => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("\"{}\":{}", n, v.to_json()))
+                    .collect();
+                format!("{{{}}}", parts.join(","))
+            }
+            CtValue::Enum { variant, args, .. } => {
+                if args.is_empty() {
+                    format!("\"{}\"", variant)
+                } else {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            if let Some(lbl) = label {
+                                format!("\"{}\":{}", lbl, v.to_json())
+                            } else {
+                                v.to_json()
+                            }
+                        })
+                        .collect();
+                    if args.iter().all(|(label, _)| label.is_some()) {
+                        format!("{{\"{}\":{{{}}}}}", variant, parts.join(","))
+                    } else {
+                        format!("{{\"{}\":[{}]}}", variant, parts.join(","))
+                    }
+                }
+            }
+            CtValue::Some(v) => v.to_json(),
+            CtValue::None(_) => "null".to_string(),
+            CtValue::Unit => "null".to_string(),
+        }
+    }
+
     /// A Rust expression that reconstructs this value, matching codegen's
     /// `emit_expr` representations exactly (Vec, BTreeMap, Option, owned
     /// String). Inlined at each use site (codegen stays dumb, I3).

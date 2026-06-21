@@ -83,6 +83,29 @@ pub fn run_main(
     Ok(())
 }
 
+/// `jet eval --pure` variant: runs `main()` and returns its return value as a
+/// `CtValue` instead of buffering stdout. Used when the caller wants to render
+/// the value (pretty or JSON) rather than capture print output. Any print
+/// calls are still captured but discarded; the return value is authoritative.
+pub fn run_main_value(
+    main: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+) -> Result<CtValue, Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: DEV_FUEL_BUDGET,
+        sink: Some(sink),
+    };
+    let mut scope = HashMap::new();
+    match interp.exec_block(&main.body, &mut scope)? {
+        Interpreter::Flow::Return(v) => Ok(v),
+        _ => Ok(CtValue::Unit),
+    }
+}
+
 /// REPL variant of `run_main`: uses a caller-supplied fuel cap so the REPL
 /// can enforce D-REPL-FUEL without patching DEV_FUEL_BUDGET. Returns the
 /// same E2202 (dev fuel stop) or E0956 (unsupported) errors; the REPL

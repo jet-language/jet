@@ -136,6 +136,47 @@ pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
     }
 }
 
+/// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
+/// but with `CompileMode::Eval` so E0122 (main must return `()`) is relaxed
+/// while all other diagnostics (type errors, unknown identifiers, etc.) still
+/// fire. Returns the error diagnostics, or an empty vec on success.
+pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
+    let (toks, lex_diags) = Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return lex_diags;
+    }
+    let mut prog = match Parser::parse(&toks) {
+        Ok(p) => p,
+        Err(ds) => return ds,
+    };
+    let mut bundle = AST::ProgramBundle {
+        entry: 0,
+        project_root: std::path::PathBuf::from(
+            std::path::Path::new(file).parent().unwrap_or(std::path::Path::new(".")),
+        ),
+        modules: vec![AST::LoadedModule {
+            path: std::path::PathBuf::from(file),
+            display: file.to_string(),
+            alias: "main".to_string(),
+            imports: std::mem::take(&mut prog.imports),
+            items: std::mem::take(&mut prog.items),
+            source: src.to_string(),
+        }],
+        parse_teaching: Vec::new(),
+        used_std: std::collections::HashSet::new(),
+        cffi: CFFI::CFfi::default(),
+    };
+    bundle.cffi = match CFFI::assemble(&mut bundle) {
+        Ok(c) => c,
+        Err(diags) => return diags,
+    };
+    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Eval);
+    diags
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect()
+}
+
 fn compile_bundle_path(
     file: &str,
     mode: Sema::CompileMode,
@@ -289,6 +330,8 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
 
 pub use Diagnostics::render_all as render_diagnostics;
 pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
+pub use Sema::check_pure_program_root;
+pub use Comptime::CtValue;
 
 /// Pretty-print source to canonical Jet style (M6/S44).
 pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
@@ -298,6 +341,50 @@ pub fn format_source(src: &str) -> Result<String, Vec<Diagnostic>> {
 /// Front-end check for one document (LSP / editor integration).
 pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
     LSP::check_document(path, text)
+}
+
+/// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
+/// interpreter and return the value `main()` returns as a `CtValue`.
+/// Stdout is captured but not returned; callers render with `render_pretty()`
+/// (human) or `to_json()` (machine/`--json`).
+///
+/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
+    use std::collections::HashMap;
+
+    let (toks, lex_diags) = Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Err(lex_diags);
+    }
+    let prog = Parser::parse(&toks)?;
+
+    let func_map: HashMap<String, &AST::Func> = prog
+        .items
+        .iter()
+        .filter_map(|item| {
+            if let AST::Item::Func(f) = item {
+                Some((f.name.clone(), f))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let main_fn = func_map.get("main").ok_or_else(|| {
+        vec![Diagnostics::Diagnostic::error(
+            "E3401",
+            "no `main` function found for `jet eval`".to_string(),
+            "pure evaluation needs a `pure fn main()` entry point".to_string(),
+            "add `pure fn main() { … }` to the program".to_string(),
+            None,
+        )]
+    })?;
+
+    let base_dir = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
+    let mut sink = Comptime::DevSink::new();
+    let value = Comptime::run_main_value(main_fn, &func_map, base_dir, &mut sink)
+        .map_err(|d| vec![d])?;
+    Ok(value)
 }
 
 /// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime

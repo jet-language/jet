@@ -754,7 +754,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
     }
 
     let entry = &states[bundle.entry];
-    if mode == CompileMode::Run {
+    if mode == CompileMode::Run || mode == CompileMode::Eval {
         if !entry.funcs.contains_key("main") {
             diags.push(Diagnostic::error(
                 "E0101",
@@ -765,7 +765,9 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 None,
             ));
         } else if let Some(sig) = entry.funcs.get("main") {
-            if !sig.params.is_empty() || sig.return_type.is_some() {
+            // E0122: in Run mode main must have no params and no return type.
+            // In Eval mode a return type is allowed (e.g. `pure fn main() -> Int`).
+            if mode == CompileMode::Run && (!sig.params.is_empty() || sig.return_type.is_some()) {
                 diags.push(Diagnostic::error(
                     "E0122",
                     "`main` takes no parameters and returns nothing".to_string(),
@@ -793,7 +795,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 None,
             ));
         }
-        CompileMode::Test | CompileMode::Run | CompileMode::Check => {}
+        CompileMode::Test | CompileMode::Run | CompileMode::Check | CompileMode::Eval => {}
     }
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {

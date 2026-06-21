@@ -300,10 +300,13 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
 }
 
-/// S60 / D-PURE1 (E2-M16): evaluate a `pure fn main()` program to stable JSON.
-/// All top-level functions must be `pure`; any impure call is E3401.
+/// S60 / D-PURE1 (E2-M16): evaluate a `pure fn main()` program.
+/// D-EVAL1=A: pretty output by default; `--json` for stable machine JSON.
+///
+/// When `--pure` is given, the entire call graph from `main` is checked for
+/// purity violations (E3401 with the full transitive chain, not just the
+/// direct callee). This replaces the old hand-rolled `impure_fns` check.
 pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
-    // Use check_with_path to validate, then run through comptime interpreter.
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -311,7 +314,8 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    // Lex + parse to get the AST for purity inspection.
+
+    // Lex + parse (needed for purity walk and for eval).
     let (toks, lex_diags) = jet::Lexer::lex(&src);
     if !lex_diags.is_empty() {
         eprint!(
@@ -331,44 +335,60 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
         }
     };
 
-    // Verify purity if --pure: every top-level fn must be `pure fn`.
+    // Transitive purity check via the real sema root-walker (E3401 with full
+    // call chain). Replaces the old hand-rolled top-level `is_pure` scan.
     if pure_required {
-        let mut impure_fns: Vec<String> = Vec::new();
+        // Build a FuncSig map from the parsed program for purity flags.
+        use std::collections::HashMap;
+        let mut funcs_sig: HashMap<String, jet::Sema::FuncSig> = HashMap::new();
+        let mut ast_funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
         for item in &prog.items {
             if let jet::AST::Item::Func(f) = item {
-                if !f.is_pure {
-                    impure_fns.push(f.name.clone());
-                }
+                funcs_sig.insert(f.name.clone(), jet::Sema::FuncSig {
+                    params: f.params.iter().map(|p| (p.convention.clone(), p.ty.clone())).collect(),
+                    return_type: f.return_type.clone(),
+                    is_view_return: f.is_view_return,
+                    is_extern: false,
+                    is_unsafe: f.is_unsafe,
+                    is_pure: f.is_pure,
+                    param_info: f.params.iter().map(|p| (p.name.clone(), p.default.is_some())).collect(),
+                    defaults: f.params.iter().map(|p| p.default.as_ref().map(|d| *d.clone())).collect(),
+                });
+                ast_funcs.insert(f.name.clone(), f);
             }
         }
-        if !impure_fns.is_empty() {
-            eprintln!(
-                "error [E3401]: `jet eval --pure` requires all functions to be `pure fn`"
+        let diags = jet::check_pure_program_root("main", &funcs_sig, &ast_funcs);
+        if !diags.is_empty() {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, &src, &diags, mode.color_stderr())
             );
-            for name in &impure_fns {
-                eprintln!("  impure: `{}`", name);
-            }
-            eprintln!(" fix: add `pure` before `fn` on each function, or remove the call");
             exit(ExitCodes::USER_ERROR);
         }
     }
 
-    // Use the comptime evaluator to interpret main() and render as JSON.
-    // The comptime module evaluates a pure subset — E3401/E3402/E3403 fire on impure calls.
-    match jet::compile(&src) {
-        Ok(_) => {
-            // Program is valid. Run via comptime.
-            match jet::eval_pure_program(&src, file) {
-                Ok(json) => {
-                    println!("{}", json);
-                }
-                Err(diags) => {
-                    eprint!(
-                        "{}",
-                        jet::render_all_colored(file, &src, &diags, mode.color_stderr())
-                    );
-                    exit(ExitCodes::USER_ERROR);
-                }
+    // Full sema type-check with CompileMode::Eval — runs all type/ownership
+    // checks but relaxes E0122 (main return type) so `pure fn main() -> T`
+    // is accepted. This ensures type errors (e.g. `"string" + 5`) surface with
+    // their precise diagnostics rather than falling through to E0956.
+    {
+        let type_diags = jet::check_for_eval(&src, file);
+        if !type_diags.is_empty() {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, &src, &type_diags, mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+
+    // Evaluate via comptime and render. D-EVAL1=A: pretty by default, JSON with --json.
+    match jet::eval_pure_program_value(&src, file) {
+        Ok(value) => {
+            if mode.json {
+                println!("{}", value.to_json());
+            } else {
+                println!("{}", value.render_pretty());
             }
         }
         Err(diags) => {
