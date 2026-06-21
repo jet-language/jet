@@ -60,11 +60,11 @@ pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
 }
 
 /// The builtins that are always impure (write to stdout/stderr or read input).
+///
+/// Derives from `Syntax::IMPURE_BUILTINS` (c44 consolidation). Add new impure
+/// builtins to Syntax.rs; the comptime purity checker uses the same list.
 pub(crate) fn is_impure_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "print" | "eprint" | "input" | "read_all_input"
-    )
+    crate::Syntax::IMPURE_BUILTINS.contains(&name)
 }
 
 /// E3403: std calls that are non-deterministic — their result depends on wall

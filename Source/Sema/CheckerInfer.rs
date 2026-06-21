@@ -2852,7 +2852,7 @@ impl<'a> Checker<'a> {
                 .funcs
                 .keys()
                 .map(|s| s.as_str())
-                .chain([Syntax::BUILTIN_PRINT, Syntax::BUILTIN_INPUT])
+                .chain(Syntax::PRELUDE_IDENTS.iter().copied())
             {
                 let d = edit_distance(&call.name, cand);
                 if d <= 2 && best.map_or(true, |(_, bd)| d < bd) {

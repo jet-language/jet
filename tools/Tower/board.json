@@ -483,12 +483,16 @@
       "type": "bug",
       "title": "Eliminate remaining multiple-sources-of-truth",
       "body": "Docs cleanup: one home per fact. Being addressed by the 2026-06-19 doc cleanup.",
-      "stage": "implementation",
+      "stage": "done",
       "plan": null,
       "notes": [
         {
           "t": "in progress this session",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Done + audited 2026-06-20: consolidated 4 drift-prone lists (LSP keywords/types, impure-builtins, prelude-idents) to derive from Syntax.rs single source + 4 drift-guard tests. 2 invasive offenders carded as c45/c46.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -1076,6 +1080,36 @@
       "notes": [
         {
           "t": "[sweep] Surfaced by 2026-06-20 persona brief as the #1 gap; balloted because adding a regex crate needs owner approval (I6).",
+          "at": "2026-06-20"
+        }
+      ],
+      "created": "2026-06-20T00:00:00Z",
+      "updated": "2026-06-20"
+    },
+    {
+      "id": "c45",
+      "type": "task",
+      "title": "Single-source std-module list (Loader triple)",
+      "body": "Loader.rs has is_known_std_module / std_modules_list / std_module_items as 3 parallel lists; adding a module (e.g. core.scope) requires editing all 3. Generate from one canonical KNOWN_STD_MODULES slice. From c44 audit.",
+      "stage": "implementation",
+      "notes": [
+        {
+          "t": "[c44] deferred — invasive (3 lists, different shapes/callers). Tracked for safe consolidation.",
+          "at": "2026-06-20"
+        }
+      ],
+      "created": "2026-06-20T00:00:00Z",
+      "updated": "2026-06-20"
+    },
+    {
+      "id": "c46",
+      "type": "task",
+      "title": "Drift-guard test for TextMate grammar keywords",
+      "body": "editors/*/jet.tmLanguage grammar has inline keyword regexes that must track Syntax.rs but cannot import Rust constants. Add a test that generates expected grammar keyword patterns from Syntax::JET_KEYWORD_LIST and diffs the grammar file. From c44 audit.",
+      "stage": "implementation",
+      "notes": [
+        {
+          "t": "[c44] deferred — JSON grammar cannot import constants; needs a codegen/diff guard.",
           "at": "2026-06-20"
         }
       ],

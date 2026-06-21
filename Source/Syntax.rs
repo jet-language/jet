@@ -777,3 +777,60 @@ pub const METHOD_DISTINCT_RAW: &str = "raw";
 /// arithmetic on a distinct type. Written `#Numeric` on the same line
 /// before the distinct-type name (uses the `#` attribute prefix D-ATTR1).
 pub const ATTR_NUMERIC: &str = "Numeric";
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Canonical keyword/type/builtin tables (c44: single source of truth).
+//
+// These slices are the authoritative lists for the LSP, formatter, TextMate
+// grammar, and any other consumer that needs to enumerate Jet's keyword surface.
+// Add a word here (with its decision ID) rather than in each consumer.
+//
+// Rules for each list:
+//   JET_KEYWORD_LIST  — real Jet keywords a user can type; FOREIGN_* teaching
+//                       words must NOT appear here.
+//   JET_TYPE_LIST     — built-in primitive / collection type names for completion
+//                       and rename-guard. Only types a user writes in source.
+//   IMPURE_BUILTINS   — bare-name builtins that write to I/O or read from stdin;
+//                       used by both Sema/Purity and Comptime/Purity.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Canonical list of real Jet keywords for LSP completion and rename validation.
+///
+/// Every entry corresponds to a `KW_*`, `LIT_*`, or `BUILTIN_*` constant above.
+/// FOREIGN_* teaching-error words must NOT appear here — they are recognized only
+/// to emit a diagnostic, not valid syntax.
+pub const JET_KEYWORD_LIST: &[&str] = &[
+    // Core structure (S1, S18, S16, S50, U3)
+    KW_FN, KW_PUB, KW_USE, KW_EXTERN, KW_MODULE,
+    // Control flow (M1, S19, S23, M1/M2)
+    KW_IF, KW_ELSE, KW_SWITCH, KW_LOOP, KW_IN, KW_BREAK, KW_CONTINUE, KW_RETURN,
+    // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
+    KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
+    // Ownership / borrow keywords (S10, M2)
+    KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
+    // Memory / expert tier (S58)
+    KW_UNSAFE,
+    // Test / tooling (S43, S60, D-TOOL2)
+    KW_TEST, KW_PURE, KW_TODO,
+    // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
+    LIT_TRUE, LIT_FALSE, LIT_NULL, LIT_OK, LIT_ERR, KW_IT,
+    // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.
+];
+
+/// Canonical list of built-in type names for LSP completion and rename guard.
+///
+/// Only types a user writes in source. `Result` is the legacy fallible type
+/// (S34) kept for teaching errors; it is intentionally excluded here since
+/// `T ? E` is the current spelling.
+pub const JET_TYPE_LIST: &[&str] = &[
+    TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_STRING, TYPE_CHAR, TYPE_LIST, TYPE_MAP, TYPE_SHARED,
+];
+
+/// Canonical list of impure builtins (write stdout/stderr or read stdin).
+///
+/// Used by Sema/Purity and Comptime/Purity to detect I/O calls inside
+/// `pure fn` or comptime contexts. Both consumers must agree on this set;
+/// having it here prevents silent divergence.
+pub const IMPURE_BUILTINS: &[&str] = &[
+    BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input",
+];

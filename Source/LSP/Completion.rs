@@ -1,6 +1,7 @@
 //! Completion: keyword/type tables + completion assembly.
 
 use crate::AST;
+use crate::Syntax;
 
 use super::JSON::json_escape;
 use super::SymbolDB::{SymKind, SymbolDB};
@@ -77,43 +78,20 @@ impl CompletionItem {
     }
 }
 
-/// Jet keywords for completion.
+/// Jet keywords for completion and rename validation.
 ///
-/// Every entry here must correspond to a real keyword or literal from
-/// Source/Syntax.rs (invariant I7). FOREIGN_* teaching-error words must NOT
-/// appear here — they are not valid Jet syntax, only recognized to emit a
-/// teaching diagnostic. Drift from Syntax.rs is caught by tests/lsp.rs c40_*.
+/// Derives directly from `Syntax::JET_KEYWORD_LIST` (c44 consolidation).
+/// Do NOT duplicate this list here — add keywords to Syntax.rs instead.
 ///
-/// Removed (formerly wrong):
-///   - `val`, `var`   → FOREIGN_VAL / FOREIGN_VAR (retired; D-BIND1)
-///   - `switch`       → FOREIGN_SWITCH (renamed to `when`; KW_SWITCH = "when")
-///   - `import`       → FOREIGN_IMPORT (renamed to `use`; D-S16-USE)
-///   - `or`           → FOREIGN_OR_FALLBACK (replaced by `??`; D-SG6)
-///   - `value`        → LIT_VALUE (a literal like true/false/null, not a keyword)
-pub(crate) const JET_KEYWORDS: &[&str] = &[
-    // Core structure
-    "fn", "pub", "use", "extern", "module",
-    // Control flow
-    "if", "else", "when", "loop", "in", "break", "continue", "return",
-    // Types and declarations
-    "struct", "enum", "impl", "trait", "derive", "const", "comptime",
-    // Ownership / borrow keywords
-    "mut", "take", "view", "ref", "self",
-    // Memory / expert tier
-    "unsafe",
-    // Test / tooling
-    "test", "pure", "todo",
-    // Literals (boolean, option, result, synthetic)
-    "true", "false", "null", "ok", "err", "it",
-    // Binding sigils are not words, so not listed here
-    // `distinct` (D-DIST1)
-    "distinct",
-];
+/// FOREIGN_* teaching-error words must NOT appear here. Drift from Syntax.rs
+/// is impossible: this is just an alias. Guarded by tests::c44_keyword_drift.
+pub(crate) const JET_KEYWORDS: &[&str] = Syntax::JET_KEYWORD_LIST;
 
-/// Built-in type names for completion.
-pub(crate) const JET_TYPES: &[&str] = &[
-    "Int", "Float", "Bool", "String", "Char", "List", "Map", "Shared", "Result",
-];
+/// Built-in type names for completion and rename guard.
+///
+/// Derives directly from `Syntax::JET_TYPE_LIST` (c44 consolidation).
+/// Do NOT duplicate this list here — add types to Syntax.rs instead.
+pub(crate) const JET_TYPES: &[&str] = Syntax::JET_TYPE_LIST;
 
 /// Is the character sequence before `offset` indicative of member access (`.`)?
 fn context_is_member_access(src: &str, offset: usize) -> Option<String> {

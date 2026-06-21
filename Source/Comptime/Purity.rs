@@ -23,7 +23,7 @@ pub(super) fn check_purity(
 }
 
 fn impure_builtin(name: &str) -> bool {
-    matches!(name, "print" | "eprint" | "input" | "read_all_input")
+    crate::Syntax::IMPURE_BUILTINS.contains(&name)
 }
 
 fn check_purity_expr(
