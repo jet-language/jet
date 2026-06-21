@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **24 open decisions across 14 cards** (9 new EVALUATE-tier ballots added below the original five), plus a deferred-ballots list. Each card below is self-contained: a user
+> **31 open decisions across 18 cards** (the original 5 areas, the 9 EVALUATE-tier ballots, and 7 new Jai-borrowed ballots below), plus a deferred-ballots list and informational notes. `defer` (Jai Ballot 6) is already shipped — see the note, not a ballot.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -2405,3 +2405,750 @@ doesn't hold.
 *Why deferred:* Requires a proof-carrying-code or SMT integration layer that
 is explicitly post-v1; the simplicity ratchet (I8) bars this without a
 concrete roadmap slot and owner sign-off. Board items #15/#17.
+
+---
+
+## Smart Context — board card c74
+
+### D-CTX1 — Smart Context: an implicit allocator+logger bundle threaded through every call (rec A2 + Cβ)
+
+There are **two coupled questions** here. The owner must answer both:
+
+- **Q1 (the S58 question, dominant):** does an implicit context *replace*, *complement*,
+  or get *rejected* against the ratified explicit-allocator stance?
+- **Q2 (syntax):** if it ships, how is a per-block swap spelled?
+
+**User story.** Mia, four weeks into programming, writes a program that builds a big list
+of records and prints a report. She never types the word "allocator" — she has never
+heard it. Her code runs, is memory-safe, and frees everything at scope end. Later, Dev, an
+embedded engineer on the same team, needs that exact report-building function to run
+against a fixed 64 KB arena with no heap and a silent logger — *without editing the
+function*. He wraps the call in one block that swaps the context, and every allocation and
+log inside (including in library code he didn't write) reroutes. Mia's source is
+untouched and still reads like nothing happened. That "swap once at the top, everything
+downstream follows, restores on exit" is the whole feature — and it is exactly the power
+S58 deliberately made *explicit and visible* instead.
+
+#### The S58 tension (read this first)
+
+S58 ratified, verbatim: *"explicit Zig-style allocators — allocating APIs take an
+allocator parameter; a fixed arena works on embedded."* D-ALLOC1 then ratified the
+spelling `arena :: mem.Arena.new()` / `node :: arena.alloc(value)`. The whole point of
+that line was **the allocator is a visible parameter you pass**.
+
+Smart Context is the opposite move: the allocator becomes an **implicit, invisible**
+value threaded through the call graph, so `alloc` finds it without anyone passing it. That
+is genuinely useful (it is *why* beginners never see memory), but it **partly reverses
+S58's explicit stance**. The two designs answer the same question — "where does an
+allocating function get its allocator?" — with opposite answers. They cannot both be the
+default. So Q1 is not a nicety; it is the gate.
+
+| | Where `alloc` gets its allocator | Beginner sees | Expert control | S58 status |
+|---|---|---|---|---|
+| **S58 today (explicit)** | a parameter the caller passes | passes/sees the allocator (or a defaulted one) | total, local, visible | as ratified |
+| **Context replace** | the implicit context, always | nothing | swap a block | **reverses S58** |
+| **Context complement** | context **unless** an explicit allocator is passed | nothing | pass param *or* swap block | **extends S58, keeps it valid** |
+| **Reject** | a parameter the caller passes | the allocator | total, local, visible | unchanged |
+
+#### How other languages do this
+
+- **Jai — `context` + `push_context`.** A hidden `context` (allocator, logger, …) is
+  passed into every call; `push_context new_ctx { … }` swaps it for a block and restores
+  on exit; library code transparently picks up the new allocator. This is the direct
+  ancestor of the proposal. *Jet takeaway:* this is exactly the ergonomic we want — adopt
+  the block-scoped swap-and-restore shape.
+- **Odin — implicit `context`.** Every scope has an implicit `context` passed by pointer
+  on each Odin-convention call; `new(T)` uses `context.allocator` unless overridden;
+  **copy-on-write** so a callee can't back-propagate a bad context to the caller. Built for
+  *intercepting third-party code's* allocation/logging. *Jet takeaway:* steal the
+  copy-on-write / per-scope-local guarantee — a swap inside a block must never leak
+  outward, which also gives us the auto-restore for free.
+- **Go — `context.Context` (explicit, the contrast case).** Go threads context as an
+  *explicit first parameter* (`func F(ctx context.Context, …)`) and the community treats
+  invisible/implicit context as an anti-pattern. *Jet takeaway:* this is the cautionary
+  twin — Go chose visibility and ceremony on purpose; it shows the cost of *not* hiding it
+  (every signature grows a param) and the benefit (no magic). It is essentially "the
+  Reject option, productized."
+- **Scheme / Racket — `parameterize`.** Dynamic parameters (`make-parameter`) hold values
+  looked up dynamically; `(parameterize ([p v]) body)` rebinds for the dynamic extent of
+  `body` and restores after. *Jet takeaway:* the precise semantics we want are
+  *dynamic-extent* rebinding, not lexical — proves the swap-restore model is a 40-year-old,
+  well-understood construct, not a novelty.
+- **Thread-locals (C/C++/Rust `thread_local!`).** A per-thread global the callee reads
+  without a parameter. *Jet takeaway:* the likely **codegen** substrate for the implicit
+  value — but a leaky mental model for users, so it stays a backend detail and is *never*
+  surfaced (mirrors S58's "onboarding never mentions any of it").
+
+#### Q1 options — REPLACE vs COMPLEMENT vs REJECT (the S58 interaction)
+
+- **Option A1 — Replace.** Context becomes *the* way allocators are found; S58's
+  explicit-parameter line is superseded. Allocating APIs no longer take an allocator
+  parameter — they read the context.
+
+  ```jet
+  // Library function — note: NO allocator parameter anymore.
+  fn build_report(rows: [Row]) -> [Line] {
+      out :: []                 // allocates from the implicit context
+      loop r in rows { out.push(format(r)) }
+      out
+  }
+  ```
+
+  Pro: maximally beginner-clean, one mechanism. Con: **directly reverses S58 and
+  D-ALLOC1's "alloc is a visible method on a named arena"** — the embedded story
+  "a fixed arena works because you pass it" evaporates into invisible threading; experts
+  lose the local, visible control S58 promised. Violates the simplicity ratchet by
+  *removing* an already-shipped explicit path.
+
+- **Option A2 — Complement (recommended).** Explicit S58/D-ALLOC1 allocator-passing stays
+  exactly as ratified and **wins when present**; the implicit context is only the
+  **default used when no allocator is passed explicitly**. Nothing about S58 is reversed —
+  context fills the hole S58 already had (beginners weren't passing allocators anyway; the
+  default heap allocator simply *becomes nameable and swappable*).
+
+  ```jet
+  arena :: mem.Arena.new(capacity: 65536)   // S58 / D-ALLOC1, unchanged
+
+  // Explicit wins — exactly S58 today:
+  node :: arena.alloc(value)
+
+  // Implicit default — beginner path, fed by the context:
+  list :: []                                // uses context.allocator
+
+  // Expert swaps the *default* for a block; explicit calls still override locally:
+  using context.allocator = arena {
+      report :: build_report(rows)          // build_report's internal allocs -> arena
+  }                                         // context restored here
+  ```
+
+  Pro: **add-only** — S58 and D-ALLOC1 keep their exact meaning; the explicit parameter is
+  still the override and still the embedded story. Beginners get the magic; experts get
+  *both* knobs (pass a param for one call, swap the block for a subtree). Con: two ways to
+  pick an allocator coexist (mitigated: explicit always wins, one precedence rule, easy to
+  teach — "passed beats ambient").
+
+- **Option A3 — Reject.** No implicit context. Allocators stay strictly explicit (S58 as
+  is). Loggers, if wanted, are an ordinary passed value or a plain module-level function.
+
+  ```jet
+  fn build_report(rows: [Row], in: mem.Allocator) -> [Line] { … }   // S58 forever
+  ```
+
+  Pro: zero new magic, S58 fully intact, simplicity ratchet satisfied by *not* adding a
+  feature. Con: the beginner "never see an allocator" story still leans on a single hidden
+  default that nobody can swap; no clean seam to later carry capabilities/effects (c06 /
+  D-EFF1) — we'd reinvent this carrier when effects land.
+
+#### Q2 options — per-block swap syntax (only if A1 or A2 wins)
+
+- **Option Cα — `using context.allocator = arena { … }`.** Jai/`using`-flavored; reads as
+  prose, names the exact field being swapped.
+
+  ```jet
+  using context.allocator = arena {
+      report :: build_report(rows)          // arena is the ambient allocator in here
+      log.info("built {report.len()} lines") // still the outer logger
+  }                                          // allocator auto-restored on exit
+  ```
+
+  Con: `using` collides conceptually with S62's rejected "Jai-style `using` member
+  injection" — reusing the word the owner already declined elsewhere is a trap.
+
+- **Option Cβ — `#context(allocator = arena) { … }` (recommended).** A `#` marker block
+  (consistent with D-ATTR1's `#unsafe`/`#audit`), naming swapped fields as `field = value`;
+  multiple fields comma-separated (D-ATTR2 list feel). Auto-restores on block exit.
+
+  ```jet
+  silent :: log.Silent.new()
+  #context(allocator = arena, logger = silent) {
+      report :: build_report(rows)          // arena + silent logger flow downstream
+  }                                          // BOTH fields restored here
+  ```
+
+  Pro: rides the **already-ratified `#` marker grammar** — no new top-level keyword, no
+  collision with `using` (S62) or `use` (S16); the marker form signals "compiler-managed,
+  scoped" exactly like `#unsafe`. Con: a `#(…)` block is a slightly heavier read than bare
+  `using`.
+
+- **Option Cγ — `push_context my_ctx { … }`.** Jai-literal: build a whole context value,
+  push it.
+
+  ```jet
+  my_ctx :: context.with(allocator = arena, logger = silent)
+  push_context my_ctx { report :: build_report(rows) }
+  ```
+
+  Pro: closest to the prior art, swaps the whole bundle at once. Con: a new top-level
+  keyword (`push_context`) for a niche expert op — fails the keyword-budget bar; forces
+  users to name a context value even for a one-field swap.
+
+#### Recommendation
+
+**A2 (Complement) + Cβ (`#context(…) { … }`).** A2 is the only option that **does not
+reverse a ratified call**: S58 and D-ALLOC1 keep their exact meaning, the explicit
+allocator parameter stays the override and the embedded story, and the implicit context
+merely makes the *already-hidden default* nameable and swappable — pure add. Precedence is
+one sentence: **a passed allocator always beats the ambient one.** Cβ reuses the ratified
+`#` marker grammar, dodges the `using` (S62) and `push_context` (keyword-budget) traps, and
+the scoped marker form reads as "compiler-managed, restores on exit." v1 holds the bundle
+to **allocator + logger only**; the context is the natural future carrier for c06
+capabilities and D-EFF1 effects, but that expansion is explicitly out of scope here and
+must come back as its own card. **Reject A1** — replacing S58 trades a shipped, visible,
+teachable expert path for invisible threading. If the owner wants zero new magic, **A3** is
+the clean no; everything beginner-facing still works, we just never get the swap seam.
+
+**Stop-work:** Smart Context implementation is blocked until D-CTX1 (Q1 at minimum) is
+decided.
+
+---
+
+Sources (prior-art verification):
+- Jai context / `push_context`: [The Way to Jai — Context](https://github.com/Ivo-Balbaert/The_Way_to_Jai/blob/main/book/25A_Context.md), [Jai Community wiki — Context](https://jai.community/t/context/163)
+- Odin implicit `context`: [gingerBill — Odin's Most Misunderstood Feature: context](https://www.gingerbill.org/article/2025/12/15/odins-most-misunderstood-feature-context/), [Odin overview](https://odin-lang.org/docs/overview/)
+- Go `context.Context`, Racket `parameterize`, thread-locals: standard language docs.
+
+---
+
+## Build-time I/O at comptime — board card c75
+
+### D-CTIO1 — Gated build-time I/O at comptime (rec B)
+
+Jet's comptime engine is already ratified and partly shipped: S26 (the comptime law — value-only, no macros, no comptime types), S57 (`comptime x = …` bindings), S60 (Layer 2 — compile-time pure evaluation + data embedding), D-PURE2 (no ambient I/O; `embed_file` the one named exception), D-WHEN1/2 (`comptime if`, shipped). So this ballot does **not** re-decide comptime. The one unresolved question: **should Jet permit build-time I/O beyond `embed_file`?** Jai's `#run` allows full filesystem access at compile time — a supply-chain risk Jet's S26 law was written to refuse. This card settles the policy boundary.
+
+**User story.** Dana is shipping a graphics tool. She wants a WGSL shader (and a root cert, a JSON schema) baked into the binary as a constant at compile time — without a separate build script, and without opening `jet build` to arbitrary code execution from a dependency.
+
+| | A — pure-only forever | B — ratify `embed_file`/`embed_bytes` | C — broad gated build I/O |
+|---|---|---|---|
+| Supply-chain risk | none | minimal (read-only, path-checked) | high un-audited; moderate gated |
+| Power | lowest | covers ~90% of embed needs | full (env, network, codegen) |
+| Consistency w/ S26 law | perfect | good (S26 already names `embed_file`) | strained |
+| Ratchet (I8) cost | none | small (two builtins) | high (new gate, lockfile, sandbox) |
+| Prior-art twin | — | Zig `@embedFile`, Rust `include_str!` | Jai `#run`, Nim `staticExec` |
+
+**How other languages do this.**
+- **Zig** — `@embedFile("path")` bakes a file's bytes in; no general comptime I/O (a compile error). The cleanest precedent for B — takeaway: a dedicated embed builtin, not an I/O grant.
+- **Jai** — `#run fn()` runs *anything* at compile time, including filesystem/network/process spawn. A buggy dep can read `~/.ssh` during `jai build`. Takeaway: this is exactly the model S26 refuses.
+- **Rust** — `include_str!`/`include_bytes!` are embed-only; arbitrary build execution is isolated to a separate `build.rs`. Takeaway: safe embed built-in, dangerous execution quarantined to a distinct, visible mechanism.
+- **D** — CTFE over a pure subset; `import("file")` is the sole file-read intrinsic. Takeaway: even a powerful comptime keeps I/O to one named read.
+- **Nim** — `staticRead` (safe embed) *and* `staticExec` (shell at compile time). Takeaway: `staticExec` is the footgun that spreads through packages once it exists — the cautionary tale against C.
+
+- **Option A — keep pure-only forever.** No build-time I/O at all; `embed_file` stays unimplemented. Assets embed via a separate codegen step or are read at runtime.
+
+  ```jet
+  comptime shader :: read_file("shaders/main.wgsl")  // error: I/O not allowed in comptime; use a build step or core.fs at runtime
+  ```
+  Safest and simplest (I8 favors it), but forfeits an ergonomic win the spec already blessed and forces a separate build step for every embedded asset.
+
+- **Option B — ratify `embed_file` / `embed_bytes` (recommended).** Ship the read-only builtins S26/D-PURE2 already name: `embed_file(path) -> String`, `embed_bytes(path) -> [U8]`. Path must be a string literal, resolved relative to the source file, no `..`-escape past the project root. Not new I/O capability — it implements the blessed exception.
+
+  ```jet
+  comptime shader_src :: embed_file("shaders/main.wgsl")   // String, baked into the binary
+  comptime cert_der   :: embed_bytes("certs/root.der")     // [U8]
+
+  comptime bad :: embed_file(build_path())          // error: path must be a string literal
+  comptime esc :: embed_file("../../etc/passwd")    // error: path escapes the project root
+  ```
+
+- **Option C — broad gated build-time I/O.** Allow arbitrary comptime functions to do I/O when explicitly gated with a visible audit marker (mirroring the S58 `#audit`/`#unsafe` model).
+
+  ```jet
+  #audit("reads the local package list at build time — no network, no secrets")
+  comptime pkgs :: #run(io) {
+      core.fs.read("local-packages.txt").lines().filter((l) => l.len() > 0)
+  }
+  ```
+  Sandboxed subprocess, an auditable `.jet/build-io.lock` of accessed paths, cache-invalidation on change. Powerful, but a new marker + lockfile + sandbox — heavy against the ratchet, and the Nim/Jai evidence shows un-auditable spread once shipped.
+
+**Recommendation:** **B** — it's the answer Zig and Rust already prove safe at scale, it's what S26/D-PURE2/S60 already committed to (so this is an implementation/surface ratification, not a policy change), and it closes the door on C's supply-chain class. Owner sign-off questions: (1) `embed_bytes` in scope or embed-as-`String` only? (2) does the path restriction get its own diagnostic code? (3) does `embed_file` ride S60 Layer 2's milestone or get its own slot?
+
+---
+
+## B6 `defer` — already decided, no ballot
+
+`defer` is solved; nothing to vote on. **D-DEFER1 (ratified + implemented 2026-06-20)** shipped `core.scope.guard(() => {…})` — a stdlib value whose `Drop` runs the stored lambda LIFO on every exit path including `?`. `defer`-as-primary stays rejected (S63); the `defer` keyword stays declined (D-SUGAR5).
+
+```jet
+use core.scope
+
+fn copy_file(src: String, dst: String) -> () ? Error {
+    f :: core.fs.open(src)?
+    g1 :: scope.guard(() => { core.fs.close(f) })   // replaces `defer close(f)`
+    g :: core.fs.create(dst)?
+    g2 :: scope.guard(() => { core.fs.close(g) })   // fires before g1, even on early return
+    core.fs.copy(f, g)?
+}
+```
+
+**Reopen (owner-only):** you could later add `defer expr` as sugar over `scope.guard` (same Drop-backed lowering, zero runtime cost). For: it's the spelling Jai/Go/Swift/Odin/Zig converge on. Against: D-SUGAR5 declined it; it adds a second cleanup spelling and reintroduces Go's leak-by-omission class. No agent reopens this without your instruction.
+
+---
+
+## Visible uninitialization — board card c76
+
+### D-UNINIT1 — Visible uninitialization (rec B)
+
+**User story.** Priya is writing a hot networking path that fills a 4 KB stack
+buffer from a socket read. Auto-zeroing the buffer every call is measurably
+wasteful — she's profiled it. She adds `use core.mem` to opt in to the
+low-level tier (S58) and wants to tell the compiler "I'll fill every byte
+before I read it; skip the zero-fill." She expects a compile error, not
+undefined behavior, if she ever forgets.
+
+| Option | Spelling | Beginner legibility | Tokens introduced | Gate required | Failure mode |
+|--------|----------|--------------------|--------------------|---------------|--------------|
+| A | `buffer: [4096]U8 := ---` | poor — `---` reads as punctuation noise | none (sigil) | `use core.mem` | opaque; cryptic to grep for |
+| B | `buffer: [4096]U8 := uninit` | high — reads as English | `uninit` keyword | `use core.mem` | clearest in diagnostics, quotable in fix-it |
+| C | `#uninit buffer: [4096]U8` | medium — attribute-style matches `#unsafe` idiom | none (reuses `#`) | `use core.mem` | separates the "no init" signal from the binding site |
+
+**How other languages do this**
+
+- **Jai (`---`):** `buf: [4096] u8 = ---;` — the three-dash sigil is Jai-specific  
+  vocabulary with no prior-art meaning. Terse but opaque. Jet takeaway: don't borrow
+  the sigil; borrow the idea that the programmer makes an explicit, visible choice.
+- **Zig (`= undefined`):** `var buf: [4096]u8 = undefined;` — a keyword that looks
+  like a value. Zig's safety mode traps reads in debug builds; release mode is silent
+  UB. Jet takeaway: a keyword is the right shape; the compile-time proof (not a
+  runtime trap) is the right safety rail.
+- **C (implicit):** `char buf[4096];` — no annotation needed; the buffer is uninit
+  by default. The footgun Jet explicitly avoids: silence where UB lurks. Jet
+  takeaway: the absence of syntax is the wrong default; opt-in, not opt-out.
+- **Rust (`MaybeUninit`):** `let mut buf = MaybeUninit::<[u8; 4096]>::uninit();` —
+  correct and safe, but the user must manually call `.assume_init()` after writing,
+  with no compiler enforcement that writes actually occurred. Jet wraps this and adds
+  the write-before-read proof in sema. Jet takeaway: `MaybeUninit` is the right
+  lowering target; the ergonomic surface above it should be a keyword, not a type.
+- **C# (`stackalloc` / `SkipLocalsInit`):** `Span<byte> buf = stackalloc byte[4096];`
+  zeroes by default; `[SkipLocalsInit]` on the method skips zeroing for the whole
+  frame — coarse-grained and invisible at the variable. Jet takeaway: per-binding
+  opt-out is finer-grained and safer than per-function attributes.
+
+- **Option A — `= ---` (Jai marker).**
+
+```jet
+use core.mem
+
+fn fill(sock: Socket) {
+    buffer: [4096]U8 := ---   // skip zero-fill; Jai-style
+
+    sock.read(mut buffer)?
+
+    // Compile error if buffer is read before a full write:
+    // E0420  read of possibly-uninitialized value `buffer`
+    //        hint: every path through this function must write
+    //              `buffer` before reading it
+    //        note: declared `:= ---` at line 4
+    process(buffer)
+}
+```
+
+Grep for `:= ---` in a 50-file codebase: noisy, ambiguous with subtraction chains.
+
+- **Option B — `:= uninit` (keyword).**
+
+```jet
+use core.mem
+
+fn fill(sock: Socket) {
+    buffer: [4096]U8 := uninit   // skip zero-fill; explicit opt-out
+
+    sock.read(mut buffer)?
+
+    // If the read is removed and buffer is used before write:
+    // E0420  read of possibly-uninitialized value `buffer`
+    //        declared `:= uninit` at line 4; a write to every
+    //        element must precede this read on all paths
+    //        fix: write to `buffer` first, or remove `:= uninit`
+    process(buffer)
+}
+```
+
+`uninit` is a reserved word gated behind `use core.mem`; outside that gate the compiler
+teaches: `:= uninit` is an expert-tier construct — add `use core.mem` at the top of this file.
+
+- **Option C — `#uninit` attribute.**
+
+```jet
+use core.mem
+
+fn fill(sock: Socket) {
+    #uninit
+    buffer: [4096]U8
+
+    sock.read(mut buffer)?
+
+    // E0420  read of possibly-uninitialized value `buffer`
+    //        declared with `#uninit` at line 4
+    process(buffer)
+}
+```
+
+The `#` sigil is consistent with `#unsafe` / `#audit` (D-ATTR1, ratified). However,
+placing the annotation on a *separate line* splits the meaning from the binding; it is
+easy to insert a blank line between them and forget the relationship.
+
+**Recommendation:** B — `:= uninit` is a value-position keyword that sits exactly where
+the initial value would be, making the opt-out structurally visible at the binding site.
+It is quotable verbatim in diagnostics ("declared `:= uninit`"), greppable, and reads as
+plain English. The compile-time write-before-read proof (not a runtime trap) is the
+non-negotiable safety rail that separates this from Zig's `= undefined` and C's silence.
+
+**Implementation notes (for agent after ratification):**
+- Gated by `use core.mem` (S58); outside that gate emit a teaching error pointing at
+  the gate requirement.
+- Sema tracks `MaybeUninit` state per binding; performs a dataflow analysis on all paths
+  to ensure the binding is written before any read. Read-before-write on any path is
+  E0420 (snapshot required, I4).
+- Codegen lowers to `MaybeUninit::<T>::uninit()` in generated Rust; after the sema proof
+  passes, uses `.assume_init()` — no generated `unsafe` leaks outside the `#unsafe` gate
+  (I1).
+- `uninit` is not a valid default parameter value, struct field default, or const context;
+  sema rejects each with a specific sub-code of E0420.
+
+---
+
+---
+
+## Three-mode execution & JIT dev runtime — board card c77
+
+### D-JIT1 — JIT backend (rec D)
+
+**User story.** Sam runs `jet serve api.jet` for a 40-endpoint service and edits a
+handler. He wants the change live in well under a second, with the new code running at
+something close to native speed — and he never wants to see a Rust or LLVM error,
+because Jet promised him the front end owns every message. The question is what
+machine actually turns his saved handler into running code inside the live process.
+
+| Option | Latency to live | Peak throughput | New compiler dep (I6) | I2/I3 risk | Ratification cost |
+|--------|-----------------|-----------------|------------------------|-----------|-------------------|
+| A Cranelift JIT | very low (ms) | good, below LLVM | yes — Cranelift in the runtime crate | low (sema gates before emit) | high (new backend) |
+| B incremental rustc | high (rustc per swap) | best (LLVM) | no new dep, but rustc in the hot loop | **high** — rustc errors in the live path | medium |
+| C hybrid (Cranelift dev, rustc release) | very low dev / best release | best release | yes — both | medium — two backends to keep consistent | highest |
+| D stay-interpreter-for-v1 | low (no compile) | interpreter-speed | **none** | lowest | lowest |
+
+**How other languages do this.**
+- **Cranelift JIT** (wasmtime, rustc's `-Zcodegen-backend=cranelift`): fast machine-code
+  emit, designed for low-latency compile, weaker optimizer than LLVM. *Jet takeaway:*
+  the natural "fast swap, decent speed" backend, but it's an external crate in the
+  runtime — needs an I6 stance even though it's runtime-side, not in the `Source/`
+  compiler.
+- **JVM HotSpot / tiered JIT**: interpret first, JIT the hot methods on a background
+  thread. *Jet takeaway:* tiering (interpret cold, JIT hot — plan item 4b) is the right
+  shape regardless of which backend wins; v1 can be tier-0 only.
+- **incremental rustc**: real LLVM codegen but seconds-scale per change, and the tool
+  doing the compile is the one Jet has sworn never lets speak to users (I2). *Jet
+  takeaway:* fine as the *release* backend (already shipped as `jet build`), wrong as
+  the *interactive* backend.
+- **Cranelift-as-rustc-backend**: rustc itself can emit via Cranelift for faster debug
+  builds. *Jet takeaway:* shows the hybrid is real prior art, not a fantasy — but it's
+  two backends to keep output-identical (see D-DEVMODE1 / 4e).
+
+- **Option A — Cranelift JIT in the live process.** sema fully checks the unit, then a
+  Cranelift backend emits native code in-process. rustc stays the release backend only.
+
+```shell
+$ jet serve api.jet
+serving on :8080 (JIT: cranelift, tier-0)
+# edit handlers/checkout.jet, save
+[checkout.jet] checked ok → JIT-compiled in 31ms → swapped live
+```
+
+- **Option B — incremental rustc per swap.** Reuse the shipped rustc path for every
+  reload. One backend, but rustc runs in the interactive loop.
+
+```shell
+$ jet serve api.jet
+# edit + save
+[checkout.jet] checked ok → rustc rebuild… 4.2s → swapped live
+# and if rustc ever rejected the generated crate, that is an I2 ICE, never Sam's error
+```
+
+- **Option C — hybrid: Cranelift for dev/serve, rustc for release.** Fast swap in the
+  live process, LLVM-grade binary on `jet build`. Pays for two backends and must prove
+  they agree (4e).
+
+```shell
+$ jet serve api.jet      # cranelift, ms-scale swaps
+$ jet build api.jet      # rustc/LLVM, optimized binary
+# CI runs every example through both and diffs (D-DEVMODE1 / 4e)
+```
+
+- **Option D — stay interpreter for v1, design the JIT seam now.** `jet serve` ships
+  on the comptime interpreter (D-DEV3) with hot-swap; the JIT backend lands behind a
+  stable seam in a later Epoch-3 milestone. Zero new deps, lowest risk, ships the
+  *experience* (live hot-reload server) before the *speed*.
+
+```shell
+$ jet serve api.jet
+serving on :8080 (interpreter; JIT backend: planned)
+# edit + save → re-checked + hot-swapped at interpreter speed, sub-200ms
+```
+
+**Recommendation: D.** Ship the hot-reload *experience* on the already-proven
+interpreter first — it's the part users feel — and keep the JIT behind a seam so the
+backend choice (A vs C) can be made on real workloads without blocking the pillar.
+Cranelift (A) is the likely successor; rustc-in-the-loop (B) is rejected outright as an
+I2 hazard.
+
+---
+
+### D-HOTSWAP1 — hot-reload semantics (rec: module boundary + type-stable state preservation)
+
+**User story.** Priya's `jet serve` process holds an in-memory session cache and 200
+open websocket connections. She fixes a typo in one handler and saves. She expects the
+fix live with the cache and the sockets intact. Next she changes the *shape* of the
+session record. She does **not** expect the server to keep reinterpreting old bytes as
+the new type — that's exactly the memory-unsafety Jet exists to prevent. She'd rather
+be told "this change needs a restart" and have it happen cleanly.
+
+Two coupled questions: **(Q1) swap boundary** — what unit gets replaced; **(Q2) state
+policy** — what happens to live state across the swap.
+
+| Option | Swap unit | State on type-compatible edit | State on type-changing edit | Safety story |
+|--------|-----------|-------------------------------|------------------------------|--------------|
+| A function | single fn | preserved | n/a (fn body only) | tight blast radius; can't swap a type at all |
+| B module | module | **preserved** (code swapped, data kept) | **announced clean restart** | matches Erlang; clear safety line |
+| C whole-program | process | always restart | always restart | trivially safe, loses the live-state win |
+
+- **Option A — function-granularity swap, state untouched.** Only function bodies hot-
+  swap; any signature/type/struct change forces a restart. Smallest blast radius,
+  simplest invalidation — but most real edits touch more than one body.
+
+```jet
+# edit the body only → swapped in place, all state preserved
+fn price(c: Cart) -> Money {
+    c.lines.sum((l) => l.qty * l.unit) - c.discount?   # was: ... (no discount)
+}
+```
+
+- **Option B — module-granularity swap with type-stable state preservation.** The
+  reload unit is a module. If the module's **public type surface is unchanged**, swap
+  the code and **keep the module's live state** (the session cache, the sockets). If a
+  reload **changes a type/layout** that live state depends on, Jet does **not**
+  reinterpret old data — it performs a **clean, announced restart** of that module (or
+  the process, if the change crosses module walls), draining connections first.
+
+```jet
+module sessions {
+    cache :: SessionCache.new()   # live state
+
+    fn touch(id: SessionId) { cache.bump(id) }   # type-stable edit → hot-swap, cache kept
+}
+```
+
+```shell
+# type-stable edit:
+[sessions] checked ok → hot-swapped; module state preserved
+# type-changing edit (Session gains a field):
+[sessions] type surface changed (Session: +field `region`)
+  → live state of `sessions` is no longer well-typed; announced restart in 2s
+  → draining 200 connections… restarted clean
+```
+
+- **Option C — whole-program swap, always restart.** Every save restarts the process.
+  Trivially safe, zero stale-state risk — but throws away the live-cache/live-socket
+  benefit that justifies a long-lived JIT process at all.
+
+```shell
+[any change] → full restart (state not preserved)
+```
+
+**Recommendation: B (module boundary + type-stable preservation).** This is the
+Erlang/Elixir gold-standard model adapted to a no-GC, statically-typed setting: keep
+state across code-only swaps, refuse to reinterpret state across type changes, and make
+the restart *announced and clean* rather than silent. The type-surface check is a sema
+job (I3) — the runtime never guesses. Function-only (A) is too coarse a win for too
+many restarts; whole-program (C) defeats the pillar's purpose.
+
+---
+
+### D-DEVMODE1 — hot-reload home + dev↔release consistency guarantee (rec: B for home, ratify the guarantee)
+
+**User story.** Theo just wants "edit, see it instantly." He already knows `jet dev`
+(the shipped watch-and-rerun loop) and `jet run`/`jet build`. The open question isn't
+the verbs — D-DEV4 settled those — it's whether *instant hot-reload* is `jet dev`
+growing a hot-swap upgrade, or a separate `jet serve` for long-lived processes. And
+separately: Theo must be able to trust that what he sees in dev is exactly what ships.
+
+**Q1 — where does hot-reload live?** **Q2 — ratify the consistency guarantee (4e) as a
+hard rule?** (Verb naming is NOT on this ballot.)
+
+| Option (Q1) | Home of hot-swap | Mental model | Cost |
+|-------------|------------------|--------------|------|
+| A | extend `jet dev` | "dev got faster — same verb, now swaps instead of reruns" | one verb does both short scripts and long servers |
+| B | new `jet serve` (D-DEV2) | "`dev` = rerun my script; `serve` = long-lived process I hot-swap into" | two verbs, but each matches its prior art |
+
+- **Option A — hot-reload is an upgrade to the shipped `jet dev` loop.** The watch loop
+  (4a, already shipped) keeps its verb; in Epoch 3 it gains hot-swap instead of full
+  re-run. One verb for all reload.
+
+```shell
+$ jet dev script.jet     # short script: watch + rerun (today) → watch + hot-swap (E3)
+$ jet dev api.jet        # also the long-lived server? one verb, two lifetimes
+```
+
+- **Option B — `jet dev` stays the rerun loop; `jet serve` is the long-lived hot-swap
+  process.** `jet dev` keeps the shipped semantics (re-run my entry on save). The
+  long-lived JIT/hot-swap process is `jet serve` (the D-DEV2 surface). The watcher and
+  debounce (4a) are shared machinery; the difference is rerun-vs-swap-into-a-living-
+  process.
+
+```shell
+$ jet dev script.jet     # unchanged shipped behavior: re-run entry on save
+$ jet serve api.jet      # long-lived; modules hot-swapped in place (D-HOTSWAP1)
+```
+
+**How other languages do this.**
+- **Bun `--watch` / Vite dev (HMR)**: `--watch` restarts the process; Vite HMR swaps
+  modules into a *running* app — and they are deliberately *different* tools/flags.
+  *Jet takeaway:* the ecosystem itself separates "rerun" from "swap into a live app" —
+  supports B's two-verb split.
+- **nodemon**: pure restart-on-change, no state preservation. *Jet takeaway:* that's
+  today's `jet dev` exactly; the hot-swap upgrade is a genuinely different capability,
+  worth its own home.
+- **Erlang/Elixir hot code swapping**: the gold standard — versioned modules swapped
+  into a running node with state carried via `code_change`. *Jet takeaway:* this is a
+  `serve`-shaped, long-lived-process feature, not a "re-run my script" feature.
+- **JVM HotSwap / JRebel**: HotSwap allows method-body changes only; JRebel extends to
+  structural changes. *Jet takeaway:* mirrors D-HOTSWAP1's "type-stable swap vs
+  restart" line; reinforces that hot-swap belongs to a persistent process.
+- **Wasm component reload**: swap a component instance, explicitly hand off state across
+  the boundary. *Jet takeaway:* state hand-off is an explicit, typed operation, never
+  an implicit byte-reinterpret — exactly the I1 line D-HOTSWAP1 draws.
+
+**Q2 — the consistency guarantee (4e).** Regardless of Q1: a program must behave
+**identically** under the dev runtime (interpreter / JIT) and the release build (rustc
+binary). Ratify as a **hard rule**: a `tests/` mode runs every golden example through
+**both** paths and **diffs output**; any mismatch is a **release blocker**. This is the
+I5 guard across two backends and the standard JIT/AOT-divergence defense.
+
+```shell
+$ jet test --consistency
+running 142 examples through {interpreter, rustc-release}…
+  141 identical
+  ✗ 03_floats.jet: dev=0.30000000000000004  release=0.3
+  → RELEASE BLOCKED: dev/release output diverged (4e)
+```
+
+**Recommendation: B for Q1, and ratify Q2 as a hard rule.** Keep the shipped `jet dev`
+rerun loop exactly as users learned it; give long-lived hot-swap its own `jet serve`
+verb (already the D-DEV2 surface) — matching how Bun/Vite/Erlang separate the two
+lifetimes. And make the dev↔release diff a release blocker, not a warning, so Jet never
+ships the "works in dev, breaks in prod" bug class.
+
+---
+
+## Cache-friendly layout (SOA, deferred) — board card c78
+
+### D-SOA1 — Cache-friendly data layout (SOA) (rec A, deferred to Later)
+
+**Tier: Later / deferred.** This decision is ballot-ready but implementation is
+deferred until after v1. The owner's vote locks in the syntax now so the feature can
+be planned against a fixed spelling.
+
+**User story.** Dev is writing a particle system that updates 100 000 `Particle`
+records per frame. Profiling shows cache misses dominate: the default array-of-structs
+(AOS) layout loads the `x`, `y`, `z`, and `color` fields of one particle into a cache
+line even when the update loop only touches `x`, `y`, `z`. He wants
+structure-of-arrays (SOA) layout — one contiguous array per field — without rewriting
+every access as `particles_x[i]`, `particles_y[i]`, `particles_z[i]`.
+
+| Option | Spelling | Annotation site | Field-access change? | Ceremony | Composability |
+|--------|----------|-----------------|----------------------|----------|----------------|
+| A | `#layout(soa) struct Particle { … }` | type definition | none — `p.x` still works | low | layout is part of the type; composable with `#Serialize` etc. |
+| B | `particles: soa [Particle]` | variable declaration | none — `p.x` still works | low | layout is per-container; same type can be AOS in one place, SOA in another |
+
+**How other languages do this**
+
+- **Jai (`#place` / `using`):** Jai lets you embed one struct inside another with
+  `#place` to force field co-location; SOA is built into the language's array
+  primitives. No single annotation; requires structural knowledge of the layout
+  system. Jet takeaway: a single annotation is the right UX; the compiler does the
+  structural transformation, not the user.
+- **Zig (`MultiArrayList`):** `std.MultiArrayList(T)` is a stdlib type that stores
+  fields in separate arrays; access is via `.items(.field_name)`, breaking normal
+  field syntax. Jet takeaway: field syntax must stay identical; a compile-time
+  transform that preserves `p.x` is the goal.
+- **Rust (`soa-derive` / `slotmap`):** The `soa-derive` crate generates a parallel
+  struct via a procedural macro; `slotmap` provides SOA slots. Both require
+  importing a crate and annotating the struct. Jet takeaway: the annotation-on-type
+  shape is familiar from Rust macros; a built-in transform avoids external crate
+  dependency (I6).
+- **ISPC / data-oriented design (manual):** ISPC's `soa<N> T` type declaration
+  generates SOA layout for SIMD; elsewhere, data-oriented design achieves SOA by
+  hand — splitting one `struct Particle` into multiple parallel arrays. Jet
+  takeaway: a compiler-managed transform is superior to manual splitting; the ISPC
+  `soa<N>` shape (annotation on the type) confirms the Option A position.
+- **Unity DOTS (`[StructLayout]` / `IComponentData`):** Unity's ECS requires
+  implementing `IComponentData` and relies on the runtime's archetype system;
+  the developer does not choose AOS vs SOA directly. Jet takeaway: the decision
+  should be explicit and developer-controlled, not hidden in a runtime framework.
+
+- **Option A — `#layout(soa)` on the struct.**
+
+```jet
+#layout(soa)
+struct Particle {
+    x: Float
+    y: Float
+    z: Float
+    color: U32
+}
+
+fn update(particles: mut [Particle]) {
+    loop p in particles {
+        p.x += p.velocity_x   // field access unchanged
+        p.y += p.velocity_y
+    }
+}
+```
+
+The type carries its layout. Any `[Particle]` collection is automatically SOA; the
+caller does not need to know. Mixing AOS and SOA `Particle` values in the same
+collection is a type error (they are the same nominal type, so sema must track the
+layout tag).
+
+*Partial-SOA variant (open question — recommend deferring):*
+
+```jet
+#layout(soa: x, y, z)   // only hot fields go SOA; color stays interleaved
+struct Particle { … }
+// Complexity: the field-access lowering for the cold fields differs.
+// Recommend: whole-struct only for v1.
+```
+
+- **Option B — `soa` keyword on the container.**
+
+```jet
+struct Particle {
+    x: Float
+    y: Float
+    z: Float
+    color: U32
+}
+
+fn update(particles: mut soa [Particle]) {
+    loop p in particles {
+        p.x += p.velocity_x   // field access unchanged
+        p.y += p.velocity_y
+    }
+}
+```
+
+The layout is per-collection. A `[Particle]` passed to a non-`soa` function is a
+type mismatch; the caller must decide the layout. This is more flexible (same type,
+two layouts) but surfaces the layout decision to every call site.
+
+**Recommendation:** A — `#layout(soa)` on the type is consistent with the `#`
+attribute system (D-ATTR1, ratified) and keeps the layout decision at the definition,
+not scattered across every call site. The tradeoff (one layout per type in v1) is
+acceptable for the common case; partial SOA and per-container layout are open
+questions for a later revision. Defer implementation until after v1; ratify the
+syntax now so plans can be written against a fixed spelling.
+
+**Open questions for the owner:**
+1. Whole-struct SOA only in v1 (recommended), or support `#layout(soa: field, …)`
+   partial annotation?
+2. Should `soa` [Particle] (Option B) be a future-reserved spelling even if A is
+   chosen, to enable per-container overrides later?
+3. Interaction with `#Serialize` and reflection: does SOA layout affect the
+   serialized representation?
