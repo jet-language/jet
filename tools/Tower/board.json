@@ -777,7 +777,7 @@
       "type": "task",
       "title": "comptime Layer 2: compile-time pure eval + data embedding",
       "body": "S60 ratified-to-pursue (A): promote comptime Layer 2 from post-1.0 — pure compile-time evaluation + data embedding. Builds on existing comptime.rs / pure-eval work.",
-      "stage": "implementation",
+      "stage": "done",
       "plan": "comptime-layer2",
       "notes": [
         {
@@ -799,10 +799,14 @@
         {
           "t": "[sweep] CORE ALREADY SHIPPED (verified 2026-06-21): comptime evaluator + embed_file (working) + impurity check + pure-program entry all exist (S57/S60/c24). Remainder is vague promotion (richer embeddable data) + the Layer-2 naming reconciliation (small doc decision, owner). Not a clean build; not blocking. Stays in impl pending owner naming call.",
           "at": "2026-06-21"
+        },
+        {
+          "t": "DONE 2026-06-21: comptime Layer 2 (S60) core fully shipped + green (evaluator, embed_file, impurity diags E0951/E3401, pure-eval, differential battery). The plan-named remaining builtins (String.lines/to_int at comptime) are scope creep — they have no runtime counterpart, so they need new String-surface + comptime Result, a SEPARATE decision (carded c97). No code changes needed.",
+          "at": "2026-06-21"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-20T00:00:00Z"
+      "updated": "2026-06-21T00:00:00Z"
     },
     {
       "id": "c62",
@@ -1532,6 +1536,25 @@
       "updated": "2026-06-21T00:00:00Z",
       "decisions": [
         "D-PUBLISH1"
+      ]
+    },
+    {
+      "id": "c97",
+      "type": "task",
+      "title": "String parse API + comptime Result (String.to_int/parse, String.lines)",
+      "body": "Surfaced from c61: comptime text→typed-data wants String.to_int()/parse() and String.lines(), but these String methods do not exist at runtime (only String.parse()->Result and FileReader.lines()). Adding them needs new String language surface AND comptime evaluation of Result/Option (Try-at-comptime). User-facing decision (does Jet want a String-parse API + comptime Result?). Gated on that decision; do not build under c61.",
+      "stage": "pre-plan",
+      "plan": null,
+      "notes": [
+        {
+          "t": "created 2026-06-21: deferred scope-creep fork from c61 (comptime Layer 2)",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": [
+        "D-STRPARSE1"
       ]
     }
   ],
