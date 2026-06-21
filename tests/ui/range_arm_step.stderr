@@ -1,0 +1,7 @@
+Error [E0319]: `step` is not allowed in a range arm — range arms test a band, not a sequence
+  --> tests/ui/range_arm_step.jet:4:9
+    |
+  4 |         0..10 step 2 -> { return "even-ish" }
+    |         ^^^^^
+ Why: `step` belongs in a loop (`loop i in lo..hi step n`); a range arm just checks if the subject falls between the two ends
+ Fix: remove `step …`, or use a full condition: `subject >= 0 && subject <= 10 && subject % n == 0 ->`

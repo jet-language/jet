@@ -170,6 +170,8 @@ before continuing.
 | E0315 | sema  | list-pattern arity ≠ a known-length list literal (S74) |
 | E0316 | sema  | D-PATR: range pattern on non-integer field, or `lo > hi` (empty range) |
 | E0317 | sema  | D-PATO: or-pattern alternatives bind different names or types |
+| E0318 | parse | C25/D-RANGE2: `..=` in an arm head — Jet's `..` is already inclusive; write `lo..hi` |
+| E0319 | parse | C25/D-RANGE2: `step` in an arm head — `step` is a loop modifier, not an arm construct |
 | L0301 | sema  | unreachable `switch` pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
@@ -353,6 +355,18 @@ build path; it never silently falls back to a different answer.
 |------|------|-----|-----|
 | E2201 | `jet dev` can't interpret this program yet — it uses a feature the dev interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `@unsafe`/`core.mem` region, or a native-only std module like files/clock/random/environment/process). | The dev interpreter runs a deterministic, pure-enough subset for instant feedback; features that touch threads, foreign code, raw memory, or the outside world need the real native build. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` keeps showing checks live. Opt in with `jet dev <file> --try-anyway` to attempt execution past the boundary, with no guarantees (D-DEV1). |
 | E2202 | A program ran too long for `jet dev` to keep interpreting (the step budget was exhausted). | `jet dev` interprets your program; a run that never finishes is almost always a loop whose condition never becomes false. | Check the loop near the pointed-at line for a condition that never ends; `jet run` executes the real build with no step limit. |
+
+## Range arm porting diagnostics (C25/D-RANGE2)
+
+Jet's `..` is inclusive (S22). Users porting from Rust or Odin may write `..=`
+(Rust's explicit inclusive range) or `step` (a loop modifier). These two
+codes teach the Jet spelling and stop before misleading the user with a generic
+parse error.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0318 | `` `..=` `` is not a Jet operator — Jet's `..` is already inclusive. | In Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` always includes both ends, so there is no `..=`. | Write `lo..hi` — it already means "lo through hi inclusive." |
+| E0319 | `` `step` `` is not allowed in a range arm — range arms test a band, not a sequence. | `step` modifies a loop range to skip values (`loop i in 0..10 step 2`); an arm head like `1..10` just checks whether the subject is between 1 and 10. A stepped range is not a contiguous band and can't be used for membership testing. | Remove `step …`; to match only multiples of N, use a full condition: `subject >= lo && subject <= hi && subject % n == 0 ->`. |
 
 ## Fan-out and fixed-size list diagnostics
 

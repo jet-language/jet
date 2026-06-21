@@ -291,6 +291,11 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
 // `||` remains value-or / boolean-or; `|=` is bitwise-or-assign.
 
+// D-RANGE2 (c25, ratified): porting-hazard teaching errors for constructs Jet does NOT use.
+// E0318: `..=` (Rust inclusive range) — Jet's `..` is already inclusive; `0..=9` → teach `0..9`.
+// E0319: `step` in an arm head — `step` is a loop modifier (S22/S72), not an arm construct.
+// These use `..` (OP_RANGE) and `step` (KW_RANGE_STEP) which are already registered above.
+
 /// S13 (ratified): word forms recognized only for S14 teaching errors.
 pub const FOREIGN_AND: &str = "and";
 pub const FOREIGN_OR: &str = "or";

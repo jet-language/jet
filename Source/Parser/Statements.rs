@@ -646,14 +646,34 @@ impl<'a> Parser<'a> {
             return false;
         }
         // D-PATR: `Int .. Int ->` is a range arm — detect without full expr parse.
+        // Also detect `Int ..= Int ->` (E0318) and `Int .. Int step Int ->` (E0319)
+        // porting hazards so we can emit teaching errors rather than confusing parse failures.
         if let TokKind::Int(_) = &self.peek().kind {
             if matches!(
                 self.toks.get(self.pos + 1).map(|t| &t.kind),
                 Some(TokKind::DotDot)
             ) {
-                // Look ahead past lo, .., hi to see if Arrow follows.
+                // `lo .. hi ->` (4 tokens: lo, .., hi, ->)
                 if let Some(tok_after_hi) = self.toks.get(self.pos + 3) {
-                    return matches!(tok_after_hi.kind, TokKind::Arrow);
+                    if matches!(tok_after_hi.kind, TokKind::Arrow) {
+                        return true;
+                    }
+                }
+                // `lo .. hi step n ->` (6 tokens: lo, .., hi, step, n, ->)  — E0319 porting hazard
+                if matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(s)) if s == Syntax::KW_RANGE_STEP) {
+                    if let Some(tok_after_step_n) = self.toks.get(self.pos + 5) {
+                        if matches!(tok_after_step_n.kind, TokKind::Arrow) {
+                            return true;
+                        }
+                    }
+                }
+                // `lo ..= hi ->` (5 tokens: lo, .., =, hi, ->)  — E0318 porting hazard
+                if matches!(self.toks.get(self.pos + 2).map(|t| &t.kind), Some(TokKind::Eq)) {
+                    if let Some(tok_after_eq_hi) = self.toks.get(self.pos + 4) {
+                        if matches!(tok_after_eq_hi.kind, TokKind::Arrow) {
+                            return true;
+                        }
+                    }
                 }
                 return false;
             }
@@ -706,6 +726,7 @@ impl<'a> Parser<'a> {
                 _ => {
                     let arm_start = self.peek().span;
                     // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
+                    // C25: also detect `Int ..= Int ->` (E0318) and `Int .. Int step N ->` (E0319).
                     let raw_head = if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
                         if matches!(
                             self.toks.get(self.pos + 1).map(|t| &t.kind),
@@ -714,10 +735,54 @@ impl<'a> Parser<'a> {
                             let lo = *lo_val;
                             let range_start = self.bump().span; // consume lo
                             self.bump(); // consume `..`
-                            if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                            // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
+                            // Push the error, then recover by consuming hi and building a valid range arm.
+                            if matches!(self.peek().kind, TokKind::Eq) {
+                                self.bump(); // consume `=`
+                                if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                    let hi = *hi_val;
+                                    let range_end = self.bump().span; // consume hi
+                                    let pat_span = Span::new(range_start.start, range_end.end);
+                                    self.diags.push(Diagnostic::error(
+                                        "E0318",
+                                        "`..=` is not a Jet operator — Jet's `..` is already inclusive".to_string(),
+                                        "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends".to_string(),
+                                        format!("write `{}..{}` — that already includes `{}`", lo, hi, hi),
+                                        Some(pat_span),
+                                    ));
+                                    Expr::PatternTest {
+                                        subject: Box::new(subject.clone()),
+                                        pattern: Pattern::Range { lo, hi, span: pat_span },
+                                        span: pat_span,
+                                    }
+                                } else {
+                                    return Err(Diagnostic::error(
+                                        "E0318",
+                                        "`..=` is not a Jet operator — Jet's `..` is already inclusive".to_string(),
+                                        "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends".to_string(),
+                                        "write `lo..hi` — that already includes `hi`".to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                }
+                            } else if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
                                 let hi = *hi_val;
                                 let range_end = self.bump().span; // consume hi
                                 let pat_span = Span::new(range_start.start, range_end.end);
+                                // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
+                                // Push the error and skip `step N` so the arm can still be parsed.
+                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0319",
+                                        "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
+                                        "`step` belongs in a loop (`loop i in lo..hi step n`); a range arm just checks if the subject falls between the two ends".to_string(),
+                                        format!("remove `step …`, or use a full condition: `subject >= {} && subject <= {} && subject % n == 0 ->`", lo, hi),
+                                        Some(pat_span),
+                                    ));
+                                    self.bump(); // consume `step`
+                                    if matches!(self.peek().kind, TokKind::Int(_)) {
+                                        self.bump(); // consume step value
+                                    }
+                                }
                                 Expr::PatternTest {
                                     subject: Box::new(subject.clone()),
                                     pattern: Pattern::Range { lo, hi, span: pat_span },
@@ -989,6 +1054,7 @@ impl<'a> Parser<'a> {
                 _ => {
                     let arm_start = self.peek().span;
                     // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
+                    // C25: also detect `Int ..= Int ->` (E0318) and `Int .. Int step N ->` (E0319).
                     let cond = if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
                         if matches!(
                             self.toks.get(self.pos + 1).map(|t| &t.kind),
@@ -997,10 +1063,54 @@ impl<'a> Parser<'a> {
                             let lo = *lo_val;
                             let range_start = self.bump().span; // consume lo
                             self.bump(); // consume `..`
-                            if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                            // C25/E0318: `..=` is Rust's inclusive range — Jet's `..` is already inclusive.
+                            // Push the error, then recover by consuming hi and building a valid range arm.
+                            if matches!(self.peek().kind, TokKind::Eq) {
+                                self.bump(); // consume `=`
+                                if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                    let hi = *hi_val;
+                                    let range_end = self.bump().span; // consume hi
+                                    let pat_span = Span::new(range_start.start, range_end.end);
+                                    self.diags.push(Diagnostic::error(
+                                        "E0318",
+                                        "`..=` is not a Jet operator — Jet's `..` is already inclusive".to_string(),
+                                        "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends".to_string(),
+                                        format!("write `{}..{}` — that already includes `{}`", lo, hi, hi),
+                                        Some(pat_span),
+                                    ));
+                                    Expr::PatternTest {
+                                        subject: Box::new(subject.clone()),
+                                        pattern: Pattern::Range { lo, hi, span: pat_span },
+                                        span: pat_span,
+                                    }
+                                } else {
+                                    return Err(Diagnostic::error(
+                                        "E0318",
+                                        "`..=` is not a Jet operator — Jet's `..` is already inclusive".to_string(),
+                                        "in Rust, `..` is exclusive and `..=` is inclusive; in Jet, `..` includes both ends".to_string(),
+                                        "write `lo..hi` — that already includes `hi`".to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                }
+                            } else if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
                                 let hi = *hi_val;
                                 let range_end = self.bump().span; // consume hi
                                 let pat_span = Span::new(range_start.start, range_end.end);
+                                // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
+                                // Push the error and skip `step N` so the arm can still be parsed.
+                                if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_RANGE_STEP) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0319",
+                                        "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
+                                        "`step` belongs in a loop (`loop i in lo..hi step n`); a range arm just checks if the subject falls between the two ends".to_string(),
+                                        format!("remove `step …`, or use a full condition: `subject >= {} && subject <= {} && subject % n == 0 ->`", lo, hi),
+                                        Some(pat_span),
+                                    ));
+                                    self.bump(); // consume `step`
+                                    if matches!(self.peek().kind, TokKind::Int(_)) {
+                                        self.bump(); // consume step value
+                                    }
+                                }
                                 // Wrap as PatternTest so sema/codegen treat it uniformly.
                                 Expr::PatternTest {
                                     subject: Box::new(subject.clone()),
