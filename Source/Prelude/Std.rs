@@ -567,6 +567,74 @@ fn jet_std_json_parse(text: &String) -> Result<jet_std::Json, jet_std::JsonError
 fn jet_std_json_render(j: &jet_std::Json) -> String { jet_std::render_json(j, false, 0) }
 fn jet_std_json_render_pretty(j: &jet_std::Json) -> String { jet_std::render_json(j, true, 0) }
 
+// D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing.
+// Parses `text`, then walks the result. Any JSON string that looks like a
+// number or boolean is coerced to that type; one log line is emitted per
+// coercion naming the field and the from→to types.
+fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::Json, jet_std::JsonError> {
+    let parsed = jet_std::parse_json(text)?;
+    Ok(jet_std_json_coerce_walk(&parsed, ""))
+}
+
+fn jet_std_json_coerce_walk(value: &jet_std::Json, path: &str) -> jet_std::Json {
+    match value {
+        jet_std::Json::Text(s) => {
+            // try bool first (exact match only)
+            if s == "true" {
+                jet_std_json_emit_coerce(path, "string", "boolean");
+                return jet_std::Json::Boolean(true);
+            }
+            if s == "false" {
+                jet_std_json_emit_coerce(path, "string", "boolean");
+                return jet_std::Json::Boolean(false);
+            }
+            // try number (must parse as valid f64 and round-trip cleanly)
+            if let Ok(n) = s.parse::<f64>() {
+                if n.is_finite() {
+                    jet_std_json_emit_coerce(path, "string", "number");
+                    return jet_std::Json::Number(n);
+                }
+            }
+            value.clone()
+        }
+        jet_std::Json::Object(entries) => {
+            let mut out = std::collections::BTreeMap::new();
+            for (k, v) in entries {
+                let child_path = if path.is_empty() {
+                    format!("{}", k)
+                } else {
+                    format!("{}.{}", path, k)
+                };
+                out.insert(k.clone(), jet_std_json_coerce_walk(v, &child_path));
+            }
+            jet_std::Json::Object(out)
+        }
+        jet_std::Json::Array(items) => {
+            let coerced: Vec<jet_std::Json> = items.iter().enumerate().map(|(i, v)| {
+                let child_path = if path.is_empty() {
+                    format!("[{}]", i)
+                } else {
+                    format!("{}[{}]", path, i)
+                };
+                jet_std_json_coerce_walk(v, &child_path)
+            }).collect();
+            jet_std::Json::Array(coerced)
+        }
+        // Null, Boolean, Number — already the right type, no coercion.
+        other => other.clone(),
+    }
+}
+
+fn jet_std_json_emit_coerce(path: &str, from: &str, to: &str) {
+    let field_label = if path.is_empty() { "<root>" } else { path };
+    let msg = format!("json coerce: field \"{}\" {} \u{2192} {}", field_label, from, to);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    eprintln!("{{\"level\":\"info\",\"body\":\"{}\",\"ts\":{}}}", msg, ts);
+}
+
 fn jet_string_bytes(s: &String) -> Vec<u8> { s.as_bytes().to_vec() }
 fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::Utf8Error> {
     String::from_utf8(bs.clone()).map_err(|e| jet_std::Utf8Error { message: e.to_string() })

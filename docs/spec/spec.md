@@ -556,7 +556,13 @@ Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and
 `b.to_int()`. Time stays unix milliseconds (`time.now()`); random is
 deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
-`json.parse`, `json.render`, and `json.render_pretty`.
+`json.parse`, `json.render`, and `json.render_pretty`. `jet.json` also exposes
+`json.decode` (D-JSON1-decode + D-JSON3=B): a lenient variant that coerces
+string values that look like numbers or booleans (`"8080"` → `8080`,
+`"true"` → `true`) and emits one structured log line per coercion to stderr
+naming the field and the from→to types. The decoded value comes back plain —
+no wrapper type. Use `jet.json.decode` when consuming externally-produced JSON
+that may encode numbers or booleans as strings.
 
 Codegen invariant: importing std modules is free; sema records reachable std
 calls and codegen emits only those helpers (R10).

@@ -1398,9 +1398,14 @@ pub(crate) fn std_fixed_sig(
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
         ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
-        // jet.json: first-party JSON with coercion surfacing (D-JSON1).
-        // Reuses core.json types; decode_verbose returns a plain map with coercions field.
+        // jet.json: first-party JSON with coercion surfacing (D-JSON1, D-JSON3).
+        // `decode` is the lenient variant: coerces string→number/bool, emits one log
+        // line per coercion (D-JSON3=B), and returns the value plain.
         ("jet.json", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(json.clone(), json_error_ty())),
+        )),
+        ("jet.json", "decode") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), json_error_ty())),
         )),
@@ -1523,7 +1528,7 @@ pub(crate) fn std_module_items(module: &str) -> Vec<String> {
         "jet.toml" => &["parse", "render"],
         "jet.yaml" => &["parse", "render"],
         "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id"],
-        "jet.json" => &["parse", "render", "render_pretty"],
+        "jet.json" => &["parse", "decode", "render", "render_pretty"],
         "jet.time" => &["now", "format"],
         "jet.crypto" => &["sha256", "sha256_bytes"],
         // E2-M10: networking modules.

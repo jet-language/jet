@@ -705,7 +705,7 @@ pub(crate) fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Sl
                 let list_list_str = || Type::List(Box::new(Type::List(Box::new(Type::String))));
                 let map_str_str = || Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
                 let ty: Option<Type> = match (module.as_str(), method.as_str()) {
-                    ("core.json", "parse") | ("jet.json", "parse") => Some(result(json_ty(), json_err_ty())),
+                    ("core.json", "parse") | ("jet.json", "parse") | ("jet.json", "decode") => Some(result(json_ty(), json_err_ty())),
                     ("core.fs", "read") => Some(result(str_ty(), io_err_ty())),
                     ("core.fs", "read_bytes") => Some(result(list_u8(), io_err_ty())),
                     ("core.fs", "write" | "append" | "remove" | "create_dir" | "copy" | "rename") => {
@@ -1124,6 +1124,8 @@ fn emit_std_call(
         // E2-M12 D-OBS3: trace context for structured log records.
         ("jet.log", "set_trace_id") => format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0)),
         ("jet.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        // D-JSON3=B: lenient decode emits one log line per coercion; decoded value is plain.
+        ("jet.json", "decode") => format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0)),
         ("jet.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
         ("jet.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
         ("jet.time", "now") => format!("{}()", helper("jet_std_time_now")),
