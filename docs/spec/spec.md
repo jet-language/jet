@@ -62,7 +62,8 @@ assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
 if       = "if" cond block { "else" "if" cond block } [ "else" block ]   // two-arm
          | "if" subject "{" { arm } [ "else" "->" arm-body ] "}" ;       // multi-arm dispatch
 arm      = arm-head "->" arm-body NL ;
-arm-head = value | condition ;   // bare value ⇒ `subject == value`; else a Bool condition (D-IF2 Q3)
+arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
+range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
 loop     = [ "@" ident ] loop-body ;            // D-LABEL1: optional `@name` label
 loop-body= "loop" block                                                  // infinite
@@ -110,9 +111,19 @@ expr     = precedence climbing over:
   carry an `@name` label (D-LABEL1) — `@outer loop … { }` — and `break @outer` /
   `continue @outer` target it from a nested loop (E0987 names an out-of-scope
   label; E0988 flags a `@name` not followed by `loop`).
-- `when subject { cond -> { ... }; else -> { ... }; }` (S24): arms are
-  arbitrary `Bool` conditions tried top to bottom; `else` is mandatory.
-  Lowered to an if/else chain; rustc optimizes it.
+- `if subject { cond -> { ... }; else -> { ... }; }` (S24, folded into `if` by
+  D-IF1; `when` is retired to a teaching error): arms are arbitrary `Bool`
+  conditions tried top to bottom; `else` is mandatory. Lowered to an if/else
+  chain; rustc optimizes it.
+- **Range arms (D-RANGE1/D-PATR, c25):** in multi-arm `if`, an arm head that is
+  a range `lo..hi` fires when the subject is in that inclusive band (S22) —
+  `90..100 -> "A"` desugars to `subject >= 90 && subject <= 100`. The subject
+  and bounds must share an ordered scalar type (`Int`/`Char`); the open
+  `Int`/`Char` domain always still needs a trailing `else` (D-PATR). c25 adds
+  the porting-hazard teaching errors: `..=` in an arm head is **E0318** (Jet's
+  `..` is already inclusive — write `lo..hi`), `step` in an arm head is
+  **E0319** (`step` is a loop modifier, not a band), and an inverted/empty band
+  `hi..lo` is **E0316**.
 - **Prelude (D-PRELUDE1 = B):** `print` and `input` are ambient — usable in
   any Jet file with no `use` line. `eprint`, `args`, and `read_all_input`
   stay qualified behind `use core.io`. A user-defined function named `print`
