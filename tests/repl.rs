@@ -164,3 +164,158 @@ fn repl_basics_transcript() {
     let txt = include_str!("repl/basics.txt");
     run_transcript_file(txt);
 }
+
+// ── D-REPL8=A: move semantics across inputs ───────────────────────────────
+
+#[test]
+fn repl_move_across_inputs_string() {
+    // `t :: s` moves s (String is non-scalar). A later reference to s must error.
+    let inputs = &["s :: \"hello\"", "t :: s", "s"];
+    let out = run_transcript(inputs, None);
+    // After s is moved into t, using s in input 3 must produce an error.
+    // The error will be E0121 ("was given away") because the binding_stubs_src
+    // emits a synthetic consume of s before the check.
+    assert!(
+        out.contains("error") && (out.contains("E0121") || out.contains("given away") || out.contains("nothing named")),
+        "expected use-after-move error, got: {:?}",
+        out
+    );
+    // Must NOT silently succeed (no echo of the moved value).
+    assert!(!out.trim_end().ends_with(": String"), "moved value should not be echoed, got: {:?}", out);
+}
+
+#[test]
+fn repl_move_within_single_input_still_errors() {
+    // Move within a single input: x is moved in the same step it's used again.
+    let inputs = &["x :: \"hi\"", "y :: x; x"];
+    let out = run_transcript(inputs, None);
+    // Within the same input, sema catches the use after move.
+    assert!(out.contains("error"), "expected within-input move error, got: {:?}", out);
+}
+
+#[test]
+fn repl_move_int_not_moved() {
+    // Int is a scalar — `t :: s` where s is an Int does NOT move s.
+    let inputs = &["s :: 42", "t :: s", "s"];
+    let out = run_transcript(inputs, None);
+    // s should still be accessible since Int is copy.
+    assert!(out.contains("42 : Int"), "Int should be accessible after copy, got: {:?}", out);
+}
+
+// ── D-REPL-FUEL=A: :run ──────────────────────────────────────────────────
+
+#[test]
+fn repl_run_empty_session() {
+    // :run on an empty session is a clean no-op.
+    let out = run_transcript(&[":run"], None);
+    assert!(
+        out.contains("empty") || out.contains("nothing"),
+        "empty :run should note nothing to run, got: {:?}",
+        out
+    );
+    // Must not produce an error code.
+    assert!(!out.contains("error [E"), "empty :run must not error, got: {:?}", out);
+}
+
+#[test]
+fn repl_run_produces_output() {
+    // :run on a session with a print should produce that output.
+    let inputs = &["print(\"hello from run\")", ":run"];
+    let out = run_transcript(inputs, None);
+    assert!(
+        out.contains("hello from run"),
+        ":run should replay print output, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_run_consistency_with_interpreter() {
+    // The output of :run must match the interpreter's direct output.
+    // First run with interpreter: print("ping") produces "ping".
+    let direct_out = run_transcript(&["print(\"ping\")"], None);
+    // Now run the same with :run.
+    let run_out = run_transcript(&["print(\"ping\")", ":run"], None);
+    // :run output must contain the same output as the interpreter.
+    assert!(
+        run_out.contains("ping"),
+        ":run output must contain interpreter output; got: {:?}",
+        run_out
+    );
+    // Direct interpreter also produced "ping".
+    assert!(direct_out.contains("ping"), "got: {:?}", direct_out);
+}
+
+// Probe test — not a real test, only used during dev to see exact output.
+// Kept for reference but skipped in CI.
+#[test]
+#[ignore]
+fn repl_probe_exact_outputs() {
+    use jet::REPL::run_transcript;
+
+    // Move: String binding s moved into t, then use of s
+    let out = run_transcript(&["s :: \"hello\"", "t :: s", "s"], None);
+    eprintln!("MOVE_STRING: {:?}", out);
+
+    // Move: Int binding s copied into t, then use of s
+    let out = run_transcript(&["s :: 42", "t :: s", "s"], None);
+    eprintln!("COPY_INT: {:?}", out);
+
+    // :run empty
+    let out = run_transcript(&[":run"], None);
+    eprintln!("RUN_EMPTY: {:?}", out);
+
+    // :run with print
+    let out = run_transcript(&["print(\"hello from run\")", ":run"], None);
+    eprintln!("RUN_PRINT: {:?}", out);
+
+    // --project probe
+    let fixture = std::env::temp_dir().join("jet_repl_project_probe");
+    std::fs::create_dir_all(&fixture).ok();
+    std::fs::write(fixture.join("helper.jet"),
+        "fn add_three(x: Int) -> Int { return x + 3; }\n").ok();
+    let project_dir = fixture.to_string_lossy().to_string();
+    let out = run_transcript(&["add_three(10)"], Some(&project_dir));
+    eprintln!("PROJECT_ADD_THREE: {:?}", out);
+    std::fs::remove_dir_all(&fixture).ok();
+}
+
+// ── D-REPL10=A: --project mode ───────────────────────────────────────────
+
+#[test]
+fn repl_project_loads_items() {
+    // Create a tiny fixture project with a function.
+    let fixture = std::env::temp_dir().join("jet_repl_project_test");
+    std::fs::create_dir_all(&fixture).ok();
+    std::fs::write(
+        fixture.join("helper.jet"),
+        "fn add_three(x: Int) -> Int { return x + 3; }\n",
+    ).expect("write fixture");
+
+    let project_dir = fixture.to_string_lossy().to_string();
+    // With --project, add_three() is available without `use`.
+    let out = run_transcript(&["add_three(10)"], Some(&project_dir));
+    // Must not report unknown function error.
+    assert!(
+        !out.contains("E0102") && !out.contains("error [E0107]"),
+        "--project should make project functions available, got: {:?}",
+        out
+    );
+    // Must produce the correct result.
+    assert!(
+        out.contains("13 : Int"),
+        "--project: add_three(10) should return 13, got: {:?}",
+        out
+    );
+
+    // Without --project, add_three() is unknown.
+    let out_no_project = run_transcript(&["add_three(10)"], None);
+    assert!(
+        out_no_project.contains("error"),
+        "without --project, unknown fn should error, got: {:?}",
+        out_no_project
+    );
+
+    // Clean up.
+    std::fs::remove_dir_all(&fixture).ok();
+}

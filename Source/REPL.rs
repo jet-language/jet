@@ -19,11 +19,11 @@
 //!   E1801  fuel cap hit — snippet ran too long
 //!   E1802  hard-reject: feature not available in the REPL interpreter
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use crate::AST::{Func, Item, Stmt};
+use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
 use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::Diagnostics::Diagnostic;
 
@@ -131,6 +131,12 @@ pub struct Session {
     pub shown_preload_note: bool,
     /// Input counter — used in synthetic spans (diagnostics say `<repl:N>`).
     pub step: usize,
+    /// D-REPL8=A: bindings moved/consumed in a prior input. Excluded from
+    /// binding stubs so sema sees them as undefined in later inputs.
+    pub moved_names: HashSet<String>,
+    /// Accumulated raw statement source text for each successfully executed
+    /// statement input. Used by `:run` to materialize a `main()` body.
+    pub stmt_srcs: Vec<String>,
 }
 
 impl Default for Session {
@@ -148,6 +154,8 @@ impl Session {
             scope: HashMap::new(),
             shown_preload_note: false,
             step: 0,
+            moved_names: HashSet::new(),
+            stmt_srcs: Vec::new(),
         }
     }
 
@@ -157,6 +165,8 @@ impl Session {
         self.func_defs.clear();
         self.scope.clear();
         self.step = 0;
+        self.moved_names.clear();
+        self.stmt_srcs.clear();
         // Keep shown_preload_note — no need to repeat the teaching note.
     }
 
@@ -167,8 +177,25 @@ impl Session {
     }
 
     /// Build the accumulated val-binding stubs for insertion INSIDE a function body.
+    /// Bindings moved in prior inputs are re-declared then immediately consumed
+    /// by a synthetic assignment, so sema reports E0121 ("was given away") if the
+    /// current input tries to use them (D-REPL8=A).
     fn binding_stubs_src(&self) -> String {
-        self.binding_srcs.join("\n")
+        let mut lines: Vec<String> = Vec::new();
+        for stub in &self.binding_srcs {
+            let name = stub.split(':').next().unwrap_or("").trim();
+            if self.moved_names.contains(name) {
+                // Re-declare, then synthetically consume so sema sees it moved.
+                lines.push(stub.clone());
+                // `__moved_<name>__ :: name` — a binding whose init is `name`
+                // (a non-scalar Ident). Sema's `note_move_if_direct_ident` marks
+                // `name` as moved immediately after this declaration.
+                lines.push(format!("__moved_{}__ :: {};", name, name));
+            } else {
+                lines.push(stub.clone());
+            }
+        }
+        lines.join("\n")
     }
 
     /// Register a val binding for sema visibility after it was evaluated.
@@ -194,6 +221,277 @@ impl Session {
             CtValue::Unit => return,
         };
         self.binding_srcs.push(format!("{}: {}", name, type_and_val));
+    }
+}
+
+// ── move detection (D-REPL8=A) ─────────────────────────────────────────────
+
+/// Scan the successfully-parsed stmts for names that were moved from the
+/// session's current bindings. A move occurs when:
+///
+/// 1. `val t = s` (or `t :: s`) — the init is a bare identifier that names a
+///    session binding of non-scalar type. Sema's `note_move_if_direct_ident`
+///    marks non-scalar bindings moved at this point.
+/// 2. A call argument uses `take name` convention — `CallArg::convention == Move`
+///    with an `Ident` expr naming a session binding.
+///
+/// `scope` is consulted to determine if a binding is scalar (Int/Float/Bool/Char)
+/// — scalars are copy, not moved.
+///
+/// We only scan depth-1 (the stmt list passed to the REPL step). Nested moves
+/// inside `fn` bodies are not relevant — they stay within the item's own scope.
+fn collect_moved_names(
+    stmts: &[Stmt],
+    session_bindings: &HashSet<String>,
+    scope: &HashMap<String, CtValue>,
+) -> HashSet<String> {
+    let mut moved = HashSet::new();
+    for stmt in stmts {
+        collect_moved_in_stmt(stmt, session_bindings, scope, &mut moved);
+    }
+    moved
+}
+
+/// Return true if a CtValue is scalar (copy semantics, not moved).
+fn ct_value_is_scalar(v: &CtValue) -> bool {
+    matches!(v, CtValue::Int(_) | CtValue::Float(_) | CtValue::Bool(_) | CtValue::Char(_))
+}
+
+fn collect_moved_in_stmt(
+    stmt: &Stmt,
+    session_bindings: &HashSet<String>,
+    scope: &HashMap<String, CtValue>,
+    moved: &mut HashSet<String>,
+) {
+    match stmt {
+        Stmt::Val(b) => {
+            // `val t = s` — if init is a bare Ident naming a non-scalar session
+            // binding, that's a move (sema marks it via note_move_if_direct_ident).
+            if let Expr::Ident(name, _) = &b.init {
+                if session_bindings.contains(name.as_str()) {
+                    // Only non-scalars are moved.
+                    let is_scalar = scope.get(name.as_str())
+                        .map(ct_value_is_scalar)
+                        .unwrap_or(false);
+                    if !is_scalar {
+                        moved.insert(name.clone());
+                    }
+                }
+            } else {
+                collect_moved_in_expr(&b.init, session_bindings, scope, moved);
+            }
+        }
+        Stmt::Assign { value, .. } => {
+            collect_moved_in_expr(value, session_bindings, scope, moved);
+        }
+        Stmt::Expr(e) => {
+            collect_moved_in_expr(e, session_bindings, scope, moved);
+        }
+        Stmt::Return(Some(e), _) => {
+            collect_moved_in_expr(e, session_bindings, scope, moved);
+        }
+        _ => {}
+    }
+}
+
+fn collect_moved_in_expr(
+    expr: &Expr,
+    session_bindings: &HashSet<String>,
+    scope: &HashMap<String, CtValue>,
+    moved: &mut HashSet<String>,
+) {
+    match expr {
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_moved_in_callarg(arg, session_bindings, scope, moved);
+            }
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            collect_moved_in_expr(receiver, session_bindings, scope, moved);
+            for arg in args {
+                collect_moved_in_callarg(arg, session_bindings, scope, moved);
+            }
+        }
+        // Don't recurse into nested lambdas/closures — they capture, not move
+        // session bindings (those would be in their own `take_names`).
+        _ => {}
+    }
+}
+
+fn collect_moved_in_callarg(
+    arg: &CallArg,
+    session_bindings: &HashSet<String>,
+    scope: &HashMap<String, CtValue>,
+    moved: &mut HashSet<String>,
+) {
+    if arg.convention == AccessConvention::Move {
+        if let Expr::Ident(name, _) = &arg.expr {
+            if session_bindings.contains(name.as_str()) {
+                let is_scalar = scope.get(name.as_str())
+                    .map(ct_value_is_scalar)
+                    .unwrap_or(false);
+                if !is_scalar {
+                    moved.insert(name.clone());
+                }
+            }
+        }
+    }
+}
+
+// ── :run ───────────────────────────────────────────────────────────────────
+
+/// Materialize the session + stmt_srcs to a temp `.jet` file and run it
+/// natively via `jet run` (D-REPL-FUEL=A). Bypasses the interpreter fuel cap.
+/// When the session is empty, reports a no-op note.
+fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
+    if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
+        let _ = writeln!(out_sink, "note: session is empty — nothing to run");
+        return;
+    }
+
+    // Materialize: items + a main() that replays statement inputs.
+    let item_src = session.item_srcs.join("\n");
+    let stmt_body = session.stmt_srcs.join("\n");
+    let jet_src = if stmt_body.trim().is_empty() {
+        format!("{}\nfn main() {{}}\n", item_src)
+    } else {
+        format!("{}\nfn main() {{\n{}\n}}\n", item_src, stmt_body)
+    };
+
+    // Write to a temp file.
+    let tmp_path = std::env::temp_dir().join("__jet_repl_run__.jet");
+    if let Err(e) = std::fs::write(&tmp_path, &jet_src) {
+        let _ = writeln!(out_sink, "error: couldn't write temp file: {}", e);
+        return;
+    }
+
+    let _ = write!(out_sink, "{}", dim("compiling session…", color));
+    let _ = writeln!(out_sink, " {}", dim("running…", color));
+
+    // Spawn `jet run <temp>` using the current executable. This reuses the
+    // full compile+rustc pipeline without duplicating it in the library crate.
+    let jet_bin = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("jet"));
+
+    let result = std::process::Command::new(&jet_bin)
+        .arg("run")
+        .arg(&tmp_path)
+        .output();
+
+    let _ = std::fs::remove_file(&tmp_path);
+
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let _ = write!(out_sink, "{}", stdout);
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.is_empty() {
+                    let _ = write!(out_sink, "{}", stderr);
+                }
+            }
+        }
+        Err(e) => {
+            let _ = writeln!(out_sink, "error: couldn't invoke jet run: {}", e);
+        }
+    }
+}
+
+/// Transcript-test variant of `:run`: materializes the session and interprets
+/// the materialized `main()` with unlimited fuel (no cap). Used in tests so
+/// we can verify `:run` semantics without invoking rustc.
+fn cmd_run_transcript(session: &Session) -> String {
+    if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
+        return "note: session is empty — nothing to run\n".to_string();
+    }
+
+    let item_src = session.item_srcs.join("\n");
+    let stmt_body = session.stmt_srcs.join("\n");
+    let jet_src = if stmt_body.trim().is_empty() {
+        format!("{}\nfn main() {{}}\n", item_src)
+    } else {
+        format!("{}\nfn main() {{\n{}\n}}\n", item_src, stmt_body)
+    };
+
+    // Parse and interpret the materialized source.
+    let (toks, lex_diags) = crate::Lexer::lex(&jet_src);
+    if !lex_diags.is_empty() {
+        return format!("error: materialization parse failed: {:?}\n", lex_diags.first().map(|d| &d.what));
+    }
+    let prog = match crate::Parser::parse(&toks) {
+        Ok(p) => p,
+        Err(ds) => return format!("error: materialization parse error: {}\n", ds.first().map(|d| d.what.as_str()).unwrap_or("?")),
+    };
+    // Find main() and run it through the interpreter with DEV_FUEL_BUDGET.
+    let mut func_defs: HashMap<String, Func> = HashMap::new();
+    for item in &prog.items {
+        if let Item::Func(f) = item {
+            func_defs.insert(f.name.clone(), f.clone());
+        }
+    }
+    let funcs: HashMap<String, &Func> = func_defs.iter().map(|(k, v)| (k.clone(), v)).collect();
+    let Some(main) = func_defs.get("main") else {
+        return "note: no main in materialized session\n".to_string();
+    };
+    let main_clone = main.clone();
+    let base_dir = std::path::PathBuf::from(".");
+    let mut sink = DevSink::new();
+    // Use a very large fuel budget (but still finite) for :run.
+    const RUN_FUEL: u64 = 1_000_000_000;
+    match crate::Comptime::run_main_with_fuel(&main_clone, &funcs, &base_dir, &mut sink, RUN_FUEL) {
+        Ok(()) => sink.stdout,
+        Err(d) => format!("error [{}]: {}\n", d.code, d.what),
+    }
+}
+
+// ── --project manifest loading (D-REPL10) ──────────────────────────────────
+
+/// Load a project's source files into the session as accumulated items.
+/// Scans `project_dir/src/*.jet` and `project_dir/*.jet` (excluding `pkg.jet`)
+/// and loads each as an item source so functions and types are available
+/// without `use` in REPL inputs.
+fn load_project_items(project_dir: &Path, session: &mut Session, out_sink: &mut impl Write) {
+    // Try src/ subdirectory first (standard project layout), then project root.
+    let src_dirs = [project_dir.join("src"), project_dir.to_path_buf()];
+    let mut loaded = 0usize;
+    for dir in &src_dirs {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jet") {
+                continue;
+            }
+            // Skip pkg.jet — that's the manifest, not source.
+            if path.file_name().and_then(|n| n.to_str()) == Some("pkg.jet") {
+                continue;
+            }
+            let src = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            // Parse to check it has items.
+            let (toks, lex_diags) = crate::Lexer::lex(&src);
+            if !lex_diags.is_empty() {
+                continue;
+            }
+            match crate::Parser::parse(&toks) {
+                Ok(prog) if !prog.items.is_empty() => {
+                    session.item_srcs.push(src);
+                    loaded += 1;
+                }
+                _ => {}
+            }
+        }
+        if loaded > 0 {
+            break; // src/ had files — don't double-load from root
+        }
+    }
+    rebuild_funcs(session);
+    if loaded > 0 {
+        let _ = writeln!(out_sink, "project: loaded {} source file(s)", loaded);
     }
 }
 
@@ -666,6 +964,14 @@ pub fn run(project_dir: Option<&str>) -> i32 {
     println!();
 
     let mut session = Session::new();
+
+    // D-REPL10=A: --project loads the project's source items into the session
+    // so functions/types are available without `use`.
+    if let Some(dir) = project_dir {
+        let mut stdout = io::stdout();
+        load_project_items(Path::new(dir), &mut session, &mut stdout);
+    }
+
     let stdin = io::stdin();
     let mut stdin_lock = stdin.lock();
 
@@ -740,8 +1046,13 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                     continue;
                 }
 
+                // D-REPL8=A: detect which session bindings are moved by this input.
+                let session_binding_names: HashSet<String> =
+                    session.scope.keys().cloned().collect();
+                let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+
                 // Snapshot keys before execution to detect new bindings.
-                let before_keys: std::collections::HashSet<String> =
+                let before_keys: HashSet<String> =
                     session.scope.keys().cloned().collect();
 
                 let funcs: HashMap<String, &Func> = session.func_defs
@@ -759,6 +1070,13 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                     suppress,
                 ) {
                     Ok(echo_val) => {
+                        // Track moves: bindings consumed in this input are gone.
+                        session.moved_names.extend(newly_moved);
+                        // Record stmt source for :run materialization.
+                        let raw = trimmed.trim_end_matches(';').trim().to_string();
+                        if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
+                            session.stmt_srcs.push(format!("{};", raw));
+                        }
                         // Register any new bindings for sema visibility.
                         let new_names: Vec<String> = session.scope.keys()
                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
@@ -837,15 +1155,9 @@ fn handle_meta(
             cmd_type(name, session, color);
         }
         "run" => {
-            // D-REPL-FUEL=A: `:run` would compile and run the session.
-            println!(
-                "{}",
-                dim(
-                    "note: `:run` compiles the session to a temp file and runs it natively.\n\
-                     This path isn't wired in this build — use `jet run <file.jet>` instead.",
-                    color
-                )
-            );
+            // D-REPL-FUEL=A: compile the session to a temp file and run it natively.
+            let mut stdout = io::stdout();
+            cmd_run_native(session, color, &mut stdout);
         }
         "help" => print_help(color),
         _ => {
@@ -900,6 +1212,13 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
 
     let mut session = Session::new();
     let mut out = String::new();
+
+    // D-REPL10=A: load project items when --project is set.
+    if let Some(dir) = project_dir {
+        let mut buf = Vec::new();
+        load_project_items(Path::new(dir), &mut session, &mut buf);
+        out.push_str(&String::from_utf8_lossy(&buf));
+    }
 
     for &input in inputs {
         let trimmed = input.trim();
@@ -960,6 +1279,12 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                             out.push_str(&format!("note: `{}` isn't defined in this session\n", name));
                         }
                     }
+                    "run" => {
+                        // D-REPL-FUEL=A: transcript path uses interpreter-based
+                        // materialization (same semantics, no rustc dependency).
+                        let run_out = cmd_run_transcript(&session);
+                        out.push_str(&run_out);
+                    }
                     "help" => out.push_str("REPL meta-commands\n"),
                     _ => out.push_str(&format!("unknown meta-command `:{}`\n", cmd)),
                 }
@@ -992,7 +1317,12 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     continue;
                 }
 
-                let before_keys: std::collections::HashSet<String> =
+                // D-REPL8=A: detect which session bindings are moved by this input.
+                let session_binding_names: HashSet<String> =
+                    session.scope.keys().cloned().collect();
+                let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+
+                let before_keys: HashSet<String> =
                     session.scope.keys().cloned().collect();
 
                 let funcs: HashMap<String, &Func> = session.func_defs
@@ -1010,6 +1340,13 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     suppress,
                 ) {
                     Ok(echo_val) => {
+                        // Track moves for cross-input detection (D-REPL8=A).
+                        session.moved_names.extend(newly_moved);
+                        // Record stmt source for :run materialization.
+                        let raw = trimmed.trim_end_matches(';').trim().to_string();
+                        if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
+                            session.stmt_srcs.push(format!("{};", raw));
+                        }
                         // Register new bindings for sema visibility.
                         let new_names: Vec<String> = session.scope.keys()
                             .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
