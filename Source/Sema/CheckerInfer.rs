@@ -228,6 +228,11 @@ impl<'a> Checker<'a> {
                     ));
                     self.uninit.remove(name); // report once, then resolve its type below
                 }
+                // D-ALLOC2: E0632 — reading an arena `view` whose backing arena
+                // was already `reset`/`free`d. (`alloc` and `reset`/`free` go
+                // through the method-call path below, so reaching here means a
+                // plain read of the view's value.)
+                self.check_view_use(name, *span);
                 if let Some(info) = self.lookup(name) {
                     return Some(info.ty.clone());
                 }
@@ -2094,6 +2099,15 @@ impl<'a> Checker<'a> {
                 if method == "free" {
                     if let Some(ref name) = recv_name {
                         self.freed_allocators.insert(name.clone(), "free".to_string());
+                    }
+                }
+                // D-ALLOC2: `reset`/`free` invalidate every value previously
+                // allocated in this arena. Any view of it used afterward is
+                // E0632 (use-after-reset/free) — the runtime `&mut self`/`self`
+                // signatures would also reject, so Jet rejects first (I2).
+                if method == "reset" || method == "free" {
+                    if let Some(ref name) = recv_name {
+                        self.kill_views_of_arena(name, method, span);
                     }
                 }
                 *recv_type_out = Some(handle_ty_s.clone());

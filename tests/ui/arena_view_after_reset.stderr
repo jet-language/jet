@@ -1,0 +1,7 @@
+Error [E0632]: `arena` was reset here, so the value `x` points into is gone
+  --> tests/ui/arena_view_after_reset.jet:9:11
+    |
+  9 |     print(x)
+    |           ^
+ Why: `x` is a view into `arena`; `arena.reset()` invalidated everything stored in `arena`, so reading `x` now would read freed memory
+ Fix: use `x` before `arena.reset()`, or re-`alloc` after the reset to get a fresh value

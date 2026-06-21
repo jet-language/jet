@@ -75,6 +75,44 @@ const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 
+/// D-ALLOC2: the `jet_mem` arena helper carries the one vetted lifetime-extension
+/// `unsafe` (D-LL1). It is part of the always-emitted prelude, but a program that
+/// never touches `core.mem` allocators must not carry any `unsafe` at all (I1 —
+/// golden/closures/regex/… tests assert zero `unsafe` in such output). So strip
+/// the `mod jet_mem { … }` block whenever nothing references `jet_mem::`.
+fn strip_unused_mem_prelude(out: String) -> String {
+    let Some(start) = out.find("mod jet_mem") else {
+        return out;
+    };
+    // Brace-match the module body to find its end.
+    let bytes = out.as_bytes();
+    let mut depth = 0usize;
+    let mut seen = false;
+    let mut end = out.len();
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => { depth += 1; seen = true; }
+            b'}' => {
+                depth -= 1;
+                if seen && depth == 0 { end = i + 1; break; }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    // Referenced anywhere outside its own definition? Keep it.
+    let used = out[..start].contains("jet_mem::") || out[end..].contains("jet_mem::");
+    if used {
+        return out;
+    }
+    let mut s = out[..start].to_string();
+    // Drop a trailing blank line left by the removed block.
+    let rest = out[end..].trim_start_matches('\n');
+    s.push_str(rest);
+    s
+}
+
 pub(crate) fn mangle(name: &str) -> String {
     if name == "main" {
         "main".to_string()
@@ -154,7 +192,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
-    out
+    strip_unused_mem_prelude(out)
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
@@ -269,7 +307,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
-    out
+    strip_unused_mem_prelude(out)
 }
 
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
@@ -345,7 +383,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
-    out
+    strip_unused_mem_prelude(out)
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -469,5 +507,5 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
-    out
+    strip_unused_mem_prelude(out)
 }

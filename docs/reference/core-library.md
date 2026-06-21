@@ -449,6 +449,67 @@ be replaced by an in-house RE2-style engine before the end of Epoch 3.
 
 ---
 
+### `core.mem` — arenas and regions
+
+Expert-tier explicit allocators, unlocked by `use core.mem` (no `#Unsafe`
+needed — arenas are the *safe* fast-allocation primitive). An arena bump-allocates
+many values into one buffer and frees them all at once.
+
+```jet
+use core.mem
+
+fn main() {
+    arena :: mem.Arena.new()             // or .new(capacity: 4096)
+    x :: arena.alloc(42)                 // x is a *view* into the arena
+    y :: arena.alloc("hi")
+    print(x)
+    print(y)
+    arena.reset()                        // frees everything; buffer reused
+    z :: arena.alloc(7)
+    print(z)
+}
+```
+
+`arena.alloc(value)` hands back a **view** into the arena's storage, not an owned
+copy. A view is fast and zero-copy, but it lives only inside its **region** — the
+scope of the `arena` binding — and only until the arena is `reset`/`free`d. The
+checker enforces both:
+
+- returning, storing, or giving away a view → **E0631** (it would outlive the arena);
+- using a view after `reset()`/`free()` → **E0632**.
+
+Both are compile errors, so a dangling arena pointer can never run. Copy what you
+need out (`x.clone()`) before it leaves the region.
+
+For the cases scope-inference is too coarse — a region spanning two allocators, or
+narrower than the function — write an explicit **`region r { … }`** block:
+
+```jet
+use core.mem
+
+fn main() {
+    region scratch {
+        a :: mem.Arena.new()
+        b :: mem.Bump.new()
+        first :: a.alloc(1)
+        second :: b.alloc(2)
+        print(first)
+        print(second)
+    }                                    // both arenas freed here
+}
+```
+
+| Type / verb | What it does |
+|-------------|--------------|
+| `mem.Arena.new()` / `.new(capacity: N)` | A general grow-only arena |
+| `mem.Bump` / `mem.Pool` / `mem.Fixed` | Bump / fixed-slot / static-backed variants |
+| `arena.alloc(value)` | Store `value`, return a scope-bound view |
+| `arena.reset()` | Free everything, keep the buffer (reusable) |
+| `arena.free()` | Return the buffer to the OS |
+| `region r { … }` | An explicit region — views inside may not escape it |
+
+---
+
 ## Binary data (`U8`)
 
 The `U8` type holds one byte (0–255). Literals outside that range are a compile

@@ -1,0 +1,7 @@
+Error [E0631]: `x` can't be returned — it's a view into `arena`
+  --> tests/ui/arena_view_escape.jet:8:12
+    |
+  8 |     return x
+    |            ^
+ Why: `x` borrows storage owned by `arena`; if it left this scope it would outlive `arena` and point into freed memory
+ Fix: keep `x` inside the `arena` region, or copy what you need out with `.clone()` before it leaves

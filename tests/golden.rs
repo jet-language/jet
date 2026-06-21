@@ -73,17 +73,46 @@ fn examples_compile_and_run() {
 
         // I1 (amended by D-LL1, E2-M13): memory safety is never traded away in
         // ordinary Jet. Generated `unsafe` appears ONLY inside the gated
-        // low-level tier (`use core.mem` + `#Unsafe`). The audited
-        // `48_lowlevel` example is the sole exception, and even there every
+        // low-level tier (`use core.mem` + `#Unsafe`) and the vetted Core `mem`
+        // arena helper (`mod jet_mem`, D-ALLOC2 — the one lifetime-extension
+        // `unsafe`, always emitted as part of the prelude). Either way every
         // `unsafe` must be a *gated* form (`unsafe {` or `unsafe fn`) — never a
-        // bare `unsafe` leaking memory safety. Every other example emits zero
-        // `unsafe`.
+        // bare `unsafe` leaking memory safety. We check the gated-form rule on
+        // the user code; the fixed `jet_mem` prelude block is excluded since it
+        // is the audited helper, not example output.
+        let user_code: String = {
+            // Drop the `mod jet_mem { … }` block (brace-matched) before scanning.
+            if let Some(start) = rust_code.find("mod jet_mem") {
+                let bytes = rust_code.as_bytes();
+                let mut depth = 0usize;
+                let mut i = start;
+                let mut end = rust_code.len();
+                let mut seen_brace = false;
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'{' => { depth += 1; seen_brace = true; }
+                        b'}' => {
+                            depth -= 1;
+                            if seen_brace && depth == 0 { end = i + 1; break; }
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                let mut s = rust_code[..start].to_string();
+                s.push_str(&rust_code[end..]);
+                s
+            } else {
+                rust_code.clone()
+            }
+        };
         if stem == "48_lowlevel" {
             assert!(
-                rust_code.contains("unsafe"),
+                user_code.contains("unsafe"),
                 "the low-level example should exercise the gated `unsafe` tier"
             );
-            for (i, line) in rust_code.lines().enumerate() {
+            // Even in the audited example, every `unsafe` is a gated form.
+            for (i, line) in user_code.lines().enumerate() {
                 if let Some(col) = line.find("unsafe") {
                     let after = line[col..].trim_start_matches("unsafe");
                     let after = after.trim_start();
@@ -96,9 +125,11 @@ fn examples_compile_and_run() {
                 }
             }
         } else {
+            // Every other example's user code is fully safe — the only `unsafe`
+            // in the file is the vetted `jet_mem` arena helper, already excluded.
             assert!(
-                !rust_code.contains("unsafe"),
-                "generated Rust for {} contains `unsafe`",
+                !user_code.contains("unsafe"),
+                "generated Rust for {} contains `unsafe` outside the vetted `jet_mem` helper",
                 stem
             );
         }

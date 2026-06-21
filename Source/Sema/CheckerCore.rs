@@ -20,6 +20,12 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn pop_scope(&mut self) {
         self.lint_unjoined_tasks_in_current_scope();
+        // D-ALLOC2: arena `view`s declared in the scope being popped leave their
+        // region here — drop their bookkeeping so a same-named binding in an
+        // outer scope isn't mistaken for the view. The arena binding itself
+        // lives in `self.scopes`, so it pops alongside.
+        let depth = self.scopes.len();
+        self.arena_views.retain(|_, v| v.scope_len < depth);
         self.scopes.pop();
         self.lambda_mut_borrow_stack.pop();
         self.ct_scopes.pop();
@@ -762,6 +768,13 @@ impl<'a> Checker<'a> {
                         // `val` binding so a dangling stored ref never reaches
                         // codegen (which has no lifetime to lower it with).
                         self.check_stored_ref_fields(e);
+                        // D-ALLOC2: E0631 — returning an arena `view` would let
+                        // it outlive the arena (the arena drops at scope end).
+                        if let Expr::Ident(n, nspan) = &*e {
+                            if self.is_arena_view(n) {
+                                self.report_view_escape(n, "be returned", *nspan);
+                            }
+                        }
                         // Returning a borrowed parameter would move out of a
                         // borrow in the generated Rust (I2) — require a copy.
                         if let Expr::Ident(n, nspan) = &*e {
@@ -1146,6 +1159,15 @@ impl<'a> Checker<'a> {
                 self.in_unsafe = true;
                 self.check_block(body, true);
                 self.in_unsafe = prev;
+            }
+            // D-REGION1 (opt B): an explicit `region r { … }`. A fresh lexical
+            // scope: arena `view`s allocated inside cannot escape it (the
+            // E0631 escape rule is enforced against the scope floor, identical
+            // to the implicit scope-inferred region of opt A). The region name
+            // is documentary in v1 — it labels the scope for the reader; the
+            // bound is the scope itself.
+            Stmt::Region { body, .. } => {
+                self.check_block(body, true);
             }
         }
     }
@@ -1867,6 +1889,21 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
+        // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
+        // `arena`. Record it so E0631 (escape) / E0632 (use-after-reset) can
+        // fire, and flag the binding for codegen (it lowers to a `&mut T`, read
+        // through a deref). E0631: a binding whose *initializer is itself a view
+        // name* (`y :: x`) would move the view to a new — possibly
+        // longer-lived — binding; reject it (views are non-reassignable
+        // non-escaping locals, I8).
+        if let Some(arena) = self.arena_alloc_source(&b.init) {
+            b.arena_view = true;
+            self.record_arena_view(&b.name, arena);
+        } else if let Expr::Ident(src, src_span) = &b.init {
+            if self.is_arena_view(src) {
+                self.report_view_escape(src, "be stored in another binding", *src_span);
+            }
+        }
         self.declare(
             &b.name,
             b.name_span,

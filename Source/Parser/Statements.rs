@@ -200,6 +200,7 @@ impl<'a> Parser<'a> {
             is_comptime: false,
             ct: None,
             uninit: true,
+            arena_view: false,
         }))
     }
 
@@ -595,6 +596,27 @@ impl<'a> Parser<'a> {
                     "write `#Unsafe`, `#Audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
                     Some(t.span),
                 ))
+            }
+            // D-REGION1 (opt B): `region r { … }` — an explicit allocation
+            // region. `region` is a lowercase contextual keyword (D-CASING1):
+            // recognized only when followed by `name {`, so a variable named
+            // `region` still works everywhere else.
+            TokKind::Ident(n)
+                if n == Syntax::KW_REGION
+                    && matches!(&self.peek2().kind, TokKind::Ident(_))
+                    && matches!(self.peek3().kind, TokKind::LBrace) =>
+            {
+                let start = self.bump().span; // `region`
+                let (name, name_span) = self.expect_ident("for the region name")?;
+                self.expect(TokKind::LBrace, "after the region name")?;
+                let body = self.block_stmts();
+                let end = self.toks[self.pos - 1].span.end;
+                return Ok(Stmt::Region {
+                    name,
+                    name_span,
+                    body,
+                    span: Span::new(start.start, end),
+                });
             }
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).
@@ -1260,6 +1282,7 @@ impl<'a> Parser<'a> {
                 is_comptime: false,
                 ct: None,
                 uninit: false,
+                arena_view: false,
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
@@ -1283,6 +1306,7 @@ impl<'a> Parser<'a> {
             is_comptime: false,
             ct: None,
             uninit: false,
+            arena_view: false,
         })
     }
 
@@ -1416,6 +1440,7 @@ impl<'a> Parser<'a> {
                 is_comptime: false,
                 ct: None,
                 uninit: false,
+                arena_view: false,
             });
         }
         let (name, name_span) = self.expect_ident("after a binding keyword")?;
@@ -1439,6 +1464,7 @@ impl<'a> Parser<'a> {
             is_comptime: false,
             ct: None,
             uninit: false,
+            arena_view: false,
         })
     }
 
@@ -1596,6 +1622,7 @@ impl<'a> Parser<'a> {
             is_comptime: true,
             ct: None,
             uninit: false,
+            arena_view: false,
         })
     }
 

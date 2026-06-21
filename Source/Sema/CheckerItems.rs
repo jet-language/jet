@@ -548,6 +548,14 @@ impl<'a> Checker<'a> {
             let et = self.infer(expr);
             self.expected_type = saved_expected;
             self.lambda_escapes = saved_esc;
+            // D-ALLOC2: E0631 — storing an arena `view` in a struct field would
+            // let the struct (which can outlive the region) keep a dangling
+            // borrow into the arena.
+            if let Expr::Ident(vname, vspan) = expr {
+                if self.is_arena_view(vname) {
+                    self.report_view_escape(vname, "be stored in a struct field", *vspan);
+                }
+            }
             if let Some((_, _, fty, _, _)) = field_def {
                 let inst = self.m9.instantiate_type(fty, &subst);
                 if let Some(et) = et {

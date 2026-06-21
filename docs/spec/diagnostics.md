@@ -201,6 +201,8 @@ before continuing.
 | E0610 | sema  | `use alias.item` but alias is not a module (D-MOD3) |
 | E0611 | sema  | `use alias.item` but item is not defined (D-MOD3) |
 | E0612 | jet   | wildcard imports (`use math.*`) are not supported |
+| E0631 | sema  | an arena `view` escapes its region — returned, stored, given away, or captured (D-ALLOC2/D-REGION1) |
+| E0632 | sema  | an arena `view` is read after its arena was `reset`/`free`d (D-ALLOC2) |
 | E0701 | sema  | non-`std` `extern rust` crate missing `@version` pin |
 | E0702 | sema  | type or access mode can't cross the FFI boundary |
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
@@ -542,6 +544,22 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Audit("…") #Unsafe { … }`. |
 | E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |
 | L3101 | This `#Unsafe` block has no `#Audit` reason. | Every gated region records, in one line, why it can't break memory safety. | Add `#Audit("why this is safe")` on the line above. |
+
+## Arena region diagnostics (D-ALLOC2 / D-REGION1)
+
+`arena.alloc(value)` hands back a *view* into the arena's storage, not an owned
+copy — real shared bump-allocation. A view is sound only inside its **region**
+(the lexical scope of the `arena` binding, or an explicit `region r { … }`) and
+only until the arena is `reset`/`free`d. Two compile-time checks keep it that way,
+both at least as strict as Rust's borrow checker, so a use-after-free is a
+*compile error*, never a runtime trap. Unlike E3104 (which catches `alloc` on an
+already-freed arena), these track the views themselves.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0631 | `{view}` can't {escape} — it's a view into `{arena}`. | A view borrows storage owned by the arena; if it left the region it would outlive the arena and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `.clone()` before it leaves. |
+| E0632 | `{arena}` was {reset/freed} here, so the value `{view}` points into is gone. | `reset`/`free` invalidate every value allocated in the arena; reading the view afterward would read freed memory. | Use the view before `reset`/`free`, or re-`alloc` after to get a fresh value. |
+
 ## C FFI diagnostics (E2-M14, S59)
 
 | Code | What | Why | Fix |

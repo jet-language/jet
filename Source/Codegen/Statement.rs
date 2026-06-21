@@ -163,6 +163,22 @@ fn emit_stmt(
             } else {
                 "let"
             };
+            // D-ALLOC2: an arena `view` binding (`x :: arena.alloc(v)`) holds a
+            // Rust `&mut T`, not an owned `T`. Bind it without a type annotation
+            // (the inferred `&mut T` is correct) and never as `let mut` (it is a
+            // non-reassignable view, I8); reads dereference via the `deref` slot.
+            if b.arena_view {
+                out.push_str(&format!("{}let {} = {};\n", pad, mangle(&b.name), init));
+                env.insert(
+                    b.name.clone(),
+                    Slot {
+                        rust_name: mangle(&b.name),
+                        deref: true,
+                        jet_ty: b.ty.clone(),
+                    },
+                );
+                return;
+            }
             let ty =
                 b.ty.as_ref()
                     .map(|t| {
@@ -354,6 +370,15 @@ fn emit_stmt(
             // region lowers straight to a Rust `unsafe { … }`. All safety
             // checking already happened in sema.
             out.push_str(&format!("{}unsafe {{\n", pad));
+            emit_stmts(cx, body, env, out, indent + 1, view_return);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        // D-REGION1 (opt B): an explicit `region r { … }` lowers to a plain Rust
+        // block — a lexical scope. The region's escape bound (E0631) and
+        // arena-drop ordering (S63 RAII) are enforced entirely in sema; codegen
+        // is dumb (I3).
+        Stmt::Region { body, .. } => {
+            out.push_str(&format!("{}{{\n", pad));
             emit_stmts(cx, body, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }

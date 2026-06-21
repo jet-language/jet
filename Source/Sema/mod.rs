@@ -322,6 +322,23 @@ pub(crate) struct LocalInfo {
     task_lint_span: Option<Span>,
 }
 
+/// D-ALLOC2 (ratified 2026-06-21): bookkeeping for an arena-`view` binding —
+/// what `x :: arena.alloc(v)` produced. The view points into `arena`'s storage
+/// and is valid only inside the region (the lexical scope of the `arena`
+/// binding, or an explicit `region`); the checker forbids it escaping (E0631)
+/// or being used after `arena` is `reset`/`free`d (E0632).
+#[derive(Debug, Clone)]
+pub(crate) struct ArenaViewInfo {
+    /// The arena this view points into.
+    arena: String,
+    /// `scopes.len()` at the view's declaration — the region floor a use must
+    /// stay within. Cleared when that scope is popped.
+    scope_len: usize,
+    /// Set when the backing arena was `reset`/`free`d after this view was made:
+    /// `(verb, span_of_reset_or_free)`. Any later *read* of the view is E0632.
+    dead: Option<(String, Span)>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum SendProblemKind {
     RefField,
@@ -432,6 +449,10 @@ pub(crate) struct Checker<'a> {
     /// or reset in this scope — maps name → verb ("free"/"reset").
     /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
     freed_allocators: HashMap<String, String>,
+    /// D-ALLOC2 (ratified 2026-06-21): arena-`view` bindings in scope — a binding
+    /// `x :: arena.alloc(v)` holds a scope-bound view into `arena`. Maps the view
+    /// name → which arena it points into (for E0631 escape / E0632 use-after-reset).
+    arena_views: HashMap<String, ArenaViewInfo>,
     /// D-UNINIT1 (ratified 2026-06-21): `#Uninit` bindings not yet definitely
     /// written — maps name → the `#Uninit` decl span. A read while still in this
     /// map is E0420 (write-before-read proof); a write clears it. Branch-merged

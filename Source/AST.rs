@@ -942,6 +942,17 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation region
+    /// `region r { … }`. `name` names the region; arena `view`s allocated
+    /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
+    /// emitted as a plain Rust block — the region bound is enforced entirely in
+    /// sema (I3: codegen stays dumb).
+    Region {
+        name: String,
+        name_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `comptime if <cond> { … } else { … }`.
     /// The condition is evaluated at compile time; only the selected arm is
     /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).
@@ -1016,6 +1027,12 @@ pub struct Binding {
     /// `init` is a harmless placeholder (never evaluated); sema proves write-before-read (E0420)
     /// and codegen lowers to `MaybeUninit`. `false` for every ordinary binding.
     pub uninit: bool,
+    /// D-ALLOC2 (ratified 2026-06-21): set by sema when `init` is an
+    /// `arena.alloc(value)` call, so this binding holds a scope-bound *view*
+    /// into the arena's storage (Rust `&mut T`), not an owned `T`. Codegen
+    /// binds it as a reference and dereferences reads; sema (E0631/E0632)
+    /// forbids it escaping its arena's scope or outliving a `reset`/`free`.
+    pub arena_view: bool,
 }
 
 #[derive(Debug, Clone)]

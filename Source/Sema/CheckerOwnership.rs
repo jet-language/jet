@@ -173,6 +173,109 @@ impl<'a> Checker<'a> {
         }
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): scope-bound arena `view`s.
+    //
+    // `x :: arena.alloc(v)` makes `x` a *view* into `arena`'s storage — Rust
+    // `&'arena mut T`. The view is sound only while it stays inside its region
+    // (the lexical scope of the `arena` binding / an explicit `region`) and only
+    // until `arena` is `reset`/`free`d. Two diagnostics enforce that, both
+    // *strictly* at least as strict as Rust's borrow checker, so every
+    // Jet-accepted program is rustc-accepted (I2: Jet rejects first):
+    //   * E0631 — the view escapes its region (returned, stored in a binding /
+    //     ref / struct field, passed where ownership/`mut` is taken, captured by
+    //     an escaping closure).
+    //   * E0632 — the view is used after the backing arena was `reset`/`free`d.
+    //
+    // v1 restriction (I8): views are non-reassignable, non-escaping locals; we
+    // reject anything the analysis can't prove with a teaching error rather than
+    // attempt a clever lowering.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// If `init` is `arena.alloc(value)` on a name, return the arena's name.
+    pub(crate) fn arena_alloc_source(&self, init: &Expr) -> Option<String> {
+        if let Expr::MethodCall { receiver, method, .. } = init {
+            if method == Syntax::MEM_ALLOC_ALLOC {
+                if let Expr::Ident(arena, _) = &**receiver {
+                    if self.lookup(arena).is_some_and(|i| is_allocator_type(&i.ty)) {
+                        return Some(arena.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Record `name` as a view into `arena`, declared at the current scope depth.
+    pub(crate) fn record_arena_view(&mut self, name: &str, arena: String) {
+        let scope_len = self.scopes.len();
+        self.arena_views.insert(
+            name.to_string(),
+            ArenaViewInfo { arena, scope_len, dead: None },
+        );
+    }
+
+    /// E0632: when `arena` is `reset`/`free`d, every live view into it dies.
+    pub(crate) fn kill_views_of_arena(&mut self, arena: &str, verb: &str, span: Span) {
+        for v in self.arena_views.values_mut() {
+            if v.arena == arena && v.dead.is_none() {
+                v.dead = Some((verb.to_string(), span));
+            }
+        }
+    }
+
+    /// E0632: reading a view whose arena was already `reset`/`free`d.
+    pub(crate) fn check_view_use(&mut self, name: &str, span: Span) {
+        if let Some(info) = self.arena_views.get(name) {
+            if let Some((verb, _kill_span)) = &info.dead {
+                let arena = info.arena.clone();
+                let verb = verb.clone();
+                self.diags.push(Diagnostic::error(
+                    "E0632",
+                    format!("`{}` was {} here, so the value `{}` points into is gone", arena, verb, name),
+                    format!(
+                        "`{}` is a view into `{}`; `{}.{}()` invalidated everything stored in `{}`, so reading `{}` now would read freed memory",
+                        name, arena, arena, verb, arena, name
+                    ),
+                    format!(
+                        "use `{}` before `{}.{}()`, or re-`alloc` after the {} to get a fresh value",
+                        name, arena, verb, verb
+                    ),
+                    Some(span),
+                ));
+            }
+        }
+    }
+
+    /// E0631: a view named `name` is escaping its region (used where it would
+    /// outlive `arena`). `what` describes the escape site for the message.
+    pub(crate) fn report_view_escape(&mut self, name: &str, what: &str, span: Span) {
+        let arena = self
+            .arena_views
+            .get(name)
+            .map(|v| v.arena.clone())
+            .unwrap_or_else(|| "its arena".to_string());
+        self.diags.push(Diagnostic::error(
+            "E0631",
+            format!("`{}` can't {} — it's a view into `{}`", name, what, arena),
+            format!(
+                "`{}` borrows storage owned by `{}`; if it left this scope it would outlive `{}` and point into freed memory",
+                name, arena, arena
+            ),
+            format!(
+                "keep `{}` inside the `{}` region, or copy what you need out with `.clone()` before it leaves",
+                name, arena
+            ),
+            Some(span),
+        ));
+    }
+
+    /// True if `name` is currently a live arena view. Used to gate escape checks
+    /// at the use sites (return / bind / move-arg / struct field).
+    pub(crate) fn is_arena_view(&self, name: &str) -> bool {
+        self.arena_views.contains_key(name)
+    }
+
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
         if let Some(info) = self.lookup(&name) {
             if info.decl_loop_depth < self.loop_depth {
@@ -507,6 +610,24 @@ impl<'a> Checker<'a> {
         param_ty: &Type,
         arg: &mut crate::AST::CallArg,
     ) {
+        // D-ALLOC2: E0631 — a view passed to a `take`/`mut` (out) parameter
+        // would let the callee keep a borrow past the arena's region. Reading
+        // it (Read convention) is fine; only ownership/`mut` transfer escapes.
+        if matches!(
+            arg.convention,
+            AccessConvention::Move | AccessConvention::Mutate
+        ) {
+            if let Expr::Ident(name, span) = &arg.expr {
+                if self.is_arena_view(name) {
+                    let verb = if matches!(arg.convention, AccessConvention::Move) {
+                        "be given away"
+                    } else {
+                        "be lent out for mutation"
+                    };
+                    self.report_view_escape(name, verb, *span);
+                }
+            }
+        }
         match arg.convention {
             AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {

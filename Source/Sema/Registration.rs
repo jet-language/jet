@@ -1024,6 +1024,7 @@ pub(crate) fn check_func_body(
         owner_type: owner_type.map(str::to_string),
         iter_borrowed: HashSet::new(),
         freed_allocators: HashMap::new(),
+        arena_views: HashMap::new(),
         uninit: HashMap::new(),
         borrow_ctx: false,
         lambda_escapes: true,

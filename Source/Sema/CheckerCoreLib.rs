@@ -1109,6 +1109,11 @@ pub(crate) fn net_method_return(
 /// allocator opaque types (Arena, Bump, Pool, Fixed).
 /// Returns `Some(Some(T))` for a valid method with return type T, `Some(None)` for
 /// a void method, `None` if the type_name is not an allocator type.
+/// D-ALLOC1/D-ALLOC2: is `ty` one of the four allocator handle types?
+pub(crate) fn is_allocator_type(ty: &Type) -> bool {
+    matches!(ty, Type::Named(n) if matches!(n.as_str(), "Arena" | "Bump" | "Pool" | "Fixed"))
+}
+
 pub(crate) fn alloc_method_return(
     type_name: &str,
     method: &str,

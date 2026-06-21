@@ -396,9 +396,37 @@ sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 Four allocators ship under `core.mem` — `Arena`, `Bump`, `Pool`, `Fixed` — all namespaced
 under `core.mem.alloc` (D-ALLOC-C). No `#Unsafe` needed; `use core.mem` is the discovery
 gate (E3102). Constructors: `mem.Arena.new()` / `mem.Arena.new(capacity: N)` (D-ALLOC1);
-allocate with `arena.alloc(value)` which returns the value. Two lifecycle verbs (D-ALLOC-D):
-`reset()` keeps the backing buffer (cheap, arena is reusable), `free()` returns memory to
-the OS. Use-after-reset/free → **E3104** (names the site). Example: `70_arena.jet`.
+allocate with `arena.alloc(value)`. Two lifecycle verbs (D-ALLOC-D): `reset()` keeps the
+backing buffer (cheap, arena is reusable), `free()` returns memory to the OS. **E3104**
+catches `alloc` on an already-`free`d arena. Example: `70_arena.jet`.
+
+### Arena regions and scope-bound views (D-ALLOC2, D-REGION1; ratified 2026-06-21, implemented)
+
+The c05 upgrade makes the arena *real*: `arena.alloc(value)` bump-allocates into a shared
+buffer (the typed-arena pattern) and returns a **scope-bound `view`** — Rust `&'arena mut T`
+— not an owned copy. The runtime (`Source/Prelude/Mem.rs`, `mod jet_mem`) carries the one
+vetted lifetime-extension internal (D-LL1, inside the helper only; never leaks to user code,
+golden-test enforced); `reset(&mut self)`/`free(self)` take the arena by `&mut`/value, so
+rustc itself forbids reset/free while a view is live — the I2 backstop.
+
+A view is sound only inside its **region** and only until the arena is `reset`/`free`d. Two
+sema checks (`Source/Sema/CheckerOwnership.rs`), both at least as strict as rustc's borrow
+checker so Jet always rejects first (I2):
+
+- **E0631** — the view escapes its region: returned, stored in another binding / `ref` /
+  struct field, given away or lent `mut` to a `take`/out parameter, or captured by an
+  escaping closure.
+- **E0632** — the view is read after its arena was `reset`/`free`d.
+
+Regions (D-REGION1): **implicit and scope-inferred by default** — the region is the lexical
+scope of the `arena` binding; the beginner never types a lifetime. **Plus an explicit
+`region r { … }` block** (lowercase contextual keyword, `KW_REGION`) for the expert cases
+inference can't give: a region spanning two allocators, narrower than the enclosing function,
+or named. The escape rule is enforced against the inferred scope or the named region
+identically. v1 restriction (I8): views are non-reassignable, non-escaping locals; anything
+the analysis can't prove is rejected with a teaching error. Example: `75_arena_regions.jet`;
+UI snapshots `tests/ui/arena_view_escape` (E0631), `tests/ui/arena_view_after_reset` (E0632);
+unit tests `tests/arena.rs`.
 
 ## M6 phase 3 — multi-file imports (done)
 

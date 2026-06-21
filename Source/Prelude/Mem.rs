@@ -1,38 +1,81 @@
-// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): explicit allocator runtime.
-// Four allocators: Arena, Bump, Pool, Fixed — all under `core.mem` / `core.mem.alloc`.
-// Generated code is memory-safe; no gated operations in the allocator handles themselves.
-// I6: zero external crates — plain std Rust only.
-
 mod jet_mem {
-    /// Arena allocator: grow-only, reset (keep buffer) or free (return to OS).
-    /// All allocations live until the arena is reset or freed.
+    // D-ALLOC2 / D-REGION1 (ratified 2026-06-21): real bump-allocated arena +
+    // scope-bound regions. The c05 upgrade — replaces the owned-clone stub where
+    // `alloc(v)` just returned `v` with a real shared bump buffer.
+    //
+    // Soundness contract (the runtime half; the sema half lives in
+    // Source/Sema/CheckerOwnership.rs as E0631/E0632):
+    //   * `alloc(&self, v) -> &'arena mut T` hands out a reference *into* the
+    //     arena's storage, tied to the arena's borrow — the typed-arena pattern.
+    //     Chunks live in a `RefCell` (interior mutability) so `alloc` takes
+    //     `&self` and many live views may coexist.
+    //   * `reset(&mut self)` / `free(self)` take `&mut self` / `self` by value,
+    //     so rustc itself forbids reset/free while any view is live: a borrow
+    //     held by an outstanding `&'arena mut T` view conflicts with the
+    //     `&mut`/`move`. Jet's sema rejects first (E0632) so I2 holds — rustc
+    //     never speaks — but the signatures are the backstop.
+    //
+    // I6: zero external crates — plain std Rust only.
+    // D-LL1: the one vetted lifetime-extension lives here, inside the std/mem
+    // helper module; it never leaks into user-visible generated code.
+    use std::cell::RefCell;
+
+    /// Arena allocator: grow-only bump buffer. Every value handed to `alloc`
+    /// is boxed and kept alive in `chunks` until the arena is reset or freed;
+    /// the returned reference borrows *into* that storage.
     pub struct JetArena {
-        buf: Vec<u8>,
+        // Each allocation is a separately-boxed value, type-erased so one arena
+        // can store heterogeneous types. The box owns the value; the pointer we
+        // hand out aliases its interior for `'arena`. We never move or drop a
+        // box while the arena is borrowed, so the alias stays valid.
+        chunks: RefCell<Vec<Box<dyn std::any::Any>>>,
     }
 
     impl JetArena {
         pub fn new() -> Self {
-            JetArena { buf: Vec::new() }
+            JetArena { chunks: RefCell::new(Vec::new()) }
         }
         pub fn with_capacity(cap: usize) -> Self {
-            JetArena { buf: Vec::with_capacity(cap) }
+            JetArena { chunks: RefCell::new(Vec::with_capacity(cap)) }
         }
-        /// Store a value in the arena and return it cloned.
-        /// (Jet arenas hand out clones; lifetime management is via reset/free.)
-        pub fn alloc<T: Clone>(&mut self, val: T) -> T {
-            val
+
+        /// Store `val` in the arena and return a mutable view into its storage,
+        /// valid for as long as the arena is borrowed (`&self`). The reference
+        /// is tied to `&self`, so the borrow checker keeps the arena alive and
+        /// un-reset/un-freed for the whole life of the view.
+        pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+            let mut boxed: Box<T> = Box::new(val);
+            // Pointer into the box's heap allocation. The box itself is parked
+            // in `chunks` (below) and never moved/dropped while borrowed, so
+            // this pointer stays valid for the arena's borrow.
+            let ptr: *mut T = boxed.as_mut();
+            self.chunks.borrow_mut().push(boxed as Box<dyn std::any::Any>);
+            // SAFETY (D-LL1, vetted): `ptr` points at the interior of a box now
+            // owned by `self.chunks`. `alloc` takes `&self`; the returned
+            // `&mut T` borrows `self` for `'arena`. `reset`/`free` take
+            // `&mut self`/`self`, so they cannot run while this borrow is live —
+            // the box is therefore neither moved out, dropped, nor reallocated
+            // for the lifetime of the reference. The box owns the only `T`; no
+            // other view aliases this same allocation. So the `&mut T` is unique
+            // and valid for `'arena`.
+            unsafe { &mut *ptr }
         }
-        /// Reset: clear all allocations, keep the backing buffer.
+
+        /// Reset: drop all allocations, keep the backing buffer's capacity.
+        /// `&mut self` — the borrow checker forbids calling this while any view
+        /// handed out by `alloc` is still live (Jet rejects first: E0632).
         pub fn reset(&mut self) {
-            self.buf.clear();
+            self.chunks.borrow_mut().clear();
         }
-        /// Free: return the backing memory to the allocator.
+
+        /// Free: consume the arena, returning all memory. By-value `self` — no
+        /// view can outlive it (Jet rejects first: E0632/E0631).
         pub fn free(self) {
             drop(self);
         }
     }
 
-    /// Bump allocator: alias for Arena; append-only, O(1) alloc.
+    /// Bump allocator: append-only, O(1) alloc — same engine as Arena.
     pub struct JetBump {
         inner: JetArena,
     }
@@ -44,7 +87,7 @@ mod jet_mem {
         pub fn with_capacity(cap: usize) -> Self {
             JetBump { inner: JetArena::with_capacity(cap) }
         }
-        pub fn alloc<T: Clone>(&mut self, val: T) -> T {
+        pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
             self.inner.alloc(val)
         }
         pub fn reset(&mut self) {
@@ -55,43 +98,47 @@ mod jet_mem {
         }
     }
 
-    /// Pool allocator: fixed-slot slab allocator.
+    /// Pool allocator: fixed-slot slab — same bump engine, sized by slot count.
     pub struct JetPool {
-        slots: usize,
+        inner: JetArena,
     }
 
     impl JetPool {
         pub fn new() -> Self {
-            JetPool { slots: 0 }
+            JetPool { inner: JetArena::new() }
         }
         pub fn with_slots(slots: usize) -> Self {
-            JetPool { slots }
+            JetPool { inner: JetArena::with_capacity(slots) }
         }
-        pub fn alloc<T: Clone>(&mut self, val: T) -> T {
-            val
+        pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+            self.inner.alloc(val)
         }
-        pub fn reset(&mut self) {}
+        pub fn reset(&mut self) {
+            self.inner.reset();
+        }
         pub fn free(self) {
             drop(self);
         }
     }
 
-    /// Fixed allocator: static backing buffer (stack-oriented).
+    /// Fixed allocator: static-backed (capacity pre-sized) bump buffer.
     pub struct JetFixed {
-        _size: usize,
+        inner: JetArena,
     }
 
     impl JetFixed {
         pub fn new() -> Self {
-            JetFixed { _size: 0 }
+            JetFixed { inner: JetArena::new() }
         }
         pub fn with_size(size: usize) -> Self {
-            JetFixed { _size: size }
+            JetFixed { inner: JetArena::with_capacity(size) }
         }
-        pub fn alloc<T: Clone>(&mut self, val: T) -> T {
-            val
+        pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
+            self.inner.alloc(val)
         }
-        pub fn reset(&mut self) {}
+        pub fn reset(&mut self) {
+            self.inner.reset();
+        }
         pub fn free(self) {
             drop(self);
         }

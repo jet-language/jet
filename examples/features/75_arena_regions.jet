@@ -1,0 +1,44 @@
+// D-ALLOC2 / D-REGION1 (ratified 2026-06-21): real bump-allocated arenas with
+// scope-bound regions. `arena.alloc(value)` hands back a *view* into the
+// arena's storage — readable and writable, but it may not escape the arena's
+// region (the lexical scope of the `arena` binding, or an explicit `region`),
+// and it may not be used after the arena is `reset`/`free`d. Both rules are
+// compile-time: a use-after-free is an error, never a runtime trap.
+use core.mem
+
+fn main() {
+    // Implicit region: the region is the scope of the `arena` binding.
+    arena :: mem.Arena.new()
+    first :: arena.alloc(10)
+    second :: arena.alloc(20)
+    print(first)
+    print(second)
+
+    // reset keeps the backing buffer; everything allocated so far is gone, so
+    // `first`/`second` may not be touched after this point (that would be
+    // E0632). A fresh alloc after the reset is fine.
+    arena.reset()
+    reused :: arena.alloc(30)
+    print(reused)
+
+    // Explicit `region r { … }` (D-REGION1 opt B): a narrower, named region
+    // spanning two allocators. Views made inside live only until the block ends.
+    region scratch {
+        a :: mem.Arena.new()
+        b :: mem.Bump.new()
+        x :: a.alloc(1)
+        y :: b.alloc(2)
+        print(x)
+        print(y)
+    }
+
+    print(99)
+
+    // Memory safety, enforced at compile time — none of these would compile:
+    //   return first            // E0631: a view can't be returned (it would
+    //                           //        outlive `arena`)
+    //   stash :: first          // E0631: a view can't be stored in another
+    //                           //        binding that may outlive the region
+    //   arena.reset(); print(reused)  // (after reset) E0632: reading a view
+    //                           //        whose arena was reset reads freed memory
+}

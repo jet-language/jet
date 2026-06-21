@@ -171,7 +171,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
                 b.iter().for_each(|s| walk_stmt_exprs(s, f));
             }
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => {
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f))
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}

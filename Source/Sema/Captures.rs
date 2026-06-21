@@ -50,7 +50,7 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
                 walk_stmts_for_const_refs(else_body.as_deref().unwrap_or(&[]), const_names, taken);
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
-            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } => {
+            Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Region { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
@@ -333,7 +333,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                     .as_ref()
                     .is_some_and(|b| b.iter().any(|s| stmt_refs_name(s, name)))
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => false,
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             expr_refs_name(cond, name)
@@ -410,7 +410,7 @@ pub(crate) fn stmt_view_return_span(checker: &Checker<'_>, stmt: &Stmt) -> Optio
                 .as_ref()
                 .and_then(|branch| else_view_return_span(checker, branch))
         }
-        Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => body
+        Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } => body
             .iter()
             .find_map(|stmt| stmt_view_return_span(checker, stmt)),
         Stmt::For { body, .. } => body
@@ -692,7 +692,7 @@ pub(crate) fn stmt_collect_captures(
                 block_collect_captures(b, &mut else_bound, read, mut_cap);
             }
         }
-        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } => {
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }

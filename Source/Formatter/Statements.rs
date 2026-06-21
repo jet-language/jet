@@ -146,6 +146,13 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-REGION1 (opt B): `region r { … }`.
+            Stmt::Region { name, body, .. } => {
+                self.write(&format!("{} {} {{", Syntax::KW_REGION, name));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-WHEN1 (ratified 2026-06-19): format like `if` with `comptime` lead.
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
                 self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));

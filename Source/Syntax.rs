@@ -187,6 +187,14 @@ pub const MEM_ALLOC_FREE: &str = "free";
 /// D-ALLOC-C (ratified 2026-06-19): wider allocator API namespace.
 pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 
+/// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation-region block
+/// `region r { … }`. A lowercase contextual block keyword (D-CASING1) that
+/// names a region spanning multiple arenas or narrower than the enclosing
+/// function; arena `view`s allocated inside may not escape the region (E0631).
+/// The beginner default is an implicit scope-inferred region (opt A) and never
+/// writes `region`.
+pub const KW_REGION: &str = "region";
+
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
 pub const TYPE_LIST: &str = "List";
@@ -870,8 +878,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
     // Ownership / borrow keywords (S10, M2)
     KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
-    // Memory / expert tier (S58)
-    KW_UNSAFE,
+    // Memory / expert tier (S58, D-REGION1)
+    KW_UNSAFE, KW_REGION,
     // Test / tooling (S43, S60, D-TOOL2)
     KW_TEST, KW_PURE, KW_TODO,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
