@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **32 open decisions across 19 cards** (incl. the persona-surfaced jet.regex question), plus a deferred-ballots list and informational notes.
+> **34 open decisions across 20 cards** (incl. testing ergonomics + jet.regex), plus a deferred-ballots list and informational notes.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -3202,3 +3202,362 @@ The 2026-06-20 persona brief found a missing `jet.regex` is the **#1 gap** — i
   Zero work and zero dep, but leaves the single biggest adoption gap open.
 
 **Recommendation:** **B** — I6 explicitly sanctions bootstrap crates through Epoch 3, the `regex` crate is the memory-safe linear-time gold standard, and it unblocks the most personas fastest; schedule the native-ization (Option A's engine) as the pre-Epoch-3-close replacement so the end state is still dependency-free. Pick A only if you want native-first now and accept the slower timeline. This card exists because B needs your dep approval (I6).
+
+---
+
+## Testing ergonomics — board card c51
+
+Source plan: `tools/Tower/docs/plans/epoch-3/testing-docs-ergonomics.md`.
+
+The Epoch 2 test core shipped: `#test fn name { … }` blocks (S43/S82), `require`
+/ `require_eq` assertions (S36), snapshot `expect(…).snapshot()` with
+`--update-snapshots`, `todo` typed holes, and `jet bench`. These three items are
+**ergonomics layer**, not core language, and each is gated on a syntax decision Jet
+has not yet made.
+
+**What is add-only (not re-deciding):**
+- `#test fn name { … }` — the unit-test surface (S43, S82). Ratified. Untouched.
+- `require` / `require_eq` — assertion builtins (S36). Ratified. Untouched.
+- `///` doc-comment marker — the *existence* of `///` is ratified (S49): "summary
+  lines immediately above items; plain text in v1; shown by hover/docs tooling."
+  D-TEST4 decides only how code examples *inside* those comments are delimited and
+  executed as tests. S49's `///` marker stays.
+
+D-TEST1 gates property testing + shrinking. D-TEST4 gates doc-example execution.
+Coverage (D-COV1 below) needs no syntax decision; it is noted as deferred.
+
+---
+
+### D-TEST1 — property-test surface + shrinking (rec B)
+
+**User story.**
+
+Mia writes a `reverse` function for lists. She wants to say "for any list of
+integers, reversing twice returns the original" — and when her implementation is
+wrong she wants the test runner to hand her the *smallest* list that breaks it, not
+just the first random one it found. She has never heard of QuickCheck. She types
+something that looks like a normal test and discovers property testing by accident.
+
+**How other languages do this.**
+
+| Language | Spelling | Shrinking |
+|----------|----------|-----------|
+| **Haskell QuickCheck** | `prop_reverse xs = reverse (reverse xs) == xs`; `quickCheck prop_reverse` — an ordinary function whose args are `Arbitrary` | Automatic (typeclass-driven); built into the library |
+| **Python Hypothesis** | `@given(st.lists(st.integers())) def test_rev(xs): assert rev(rev(xs)) == xs` — decorator + strategy objects | Automatic shrinking; strategies carry shrinkers |
+| **Rust proptest** | `proptest!(|(xs: Vec<i32>)| { assert_eq!(rev(rev(&xs)), xs); });` macro; strategy is the type | Automatic; macro-driven |
+| **JavaScript fast-check** | `fc.assert(fc.property(fc.array(fc.integer()), xs => reverseReverse(xs)))` — imperative | Automatic; arbitraries carry shrinkers |
+
+Jet takeaway from all four: the surface that feels lowest-ceremony is one where the
+test annotation and a parameter list together communicate "generate inputs for me."
+The shrinking behavior is automatic and invisible in every respected property-test
+library; the user never writes a shrinker.
+
+**Current state (add-only).**
+
+S82 shows `#test fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }` as a worked example in the attribute-syntax ratification. This is the *aspirational* property-test surface hinted there; it is **not yet executable** — the plan explicitly states property testing is blocked on D-TEST1. That example establishes the Jet aesthetic the owner already prefers (looks like a normal test, parameter list carries the generated type), so options below are ordered by how closely they follow it.
+
+**Tradeoff comparison.**
+
+| Option | Surface | New keyword/sigil? | Shrinking surface | Ceremony |
+|--------|---------|-------------------|-------------------|----------|
+| A — `#property fn` attribute | `#property fn name(x: T) { … }` | new attribute `#property` | implicit, always on | low — one new marker |
+| B — `#test fn` with parameters | `#test fn name(x: T) { … }` | none (extends existing `#test`) | implicit | zero — same marker, params signal property |
+| C — `forall` expression inside test | `#test fn name { forall n: Int { … } }` | new keyword `forall` | implicit | medium — nested blocks |
+| D — generator call as a parameter default | `#test fn name(x: Int = Gen.int()) { … }` | none | explicit shrinker optional | medium — call-site annotation noise |
+
+
+- **Option A — `#property fn` attribute.** A distinct attribute signals "this is a
+  property test, not a unit test." The runner generates inputs from the parameter
+  types.
+
+```jet
+#property
+fn reversing_twice(xs: [Int]) {
+    require_eq(reverse(reverse(xs)), xs)
+}
+
+#property
+fn addition_commutes(a: Int, b: Int) {
+    require_eq(a + b, b + a)
+}
+```
+
+Shrinking failure output (automatic — user never writes a shrinker):
+
+```
+FAIL property reversing_twice
+  failed after 47 examples
+  counterexample: xs = [3, 1]
+  shrunk to:      xs = [1, 0]
+  error: require_eq failed
+    left:  [0, 1]
+    right: [1, 0]
+```
+
+**Tradeoff:** two test markers (`#test` and `#property`) is two concepts to teach
+and two words to remember. The distinction is real but adds cognitive overhead on
+first contact.
+
+- **Option B — `#test fn` with parameters (recommended).** An `#test fn` with
+  parameters is a property test; one with no parameters is a unit test. The runner
+  generates inputs from the parameter types. Zero new syntax; the parameter list
+  already tells the reader something interesting is happening.
+
+```jet
+// unit test — no params, exactly as before
+#test
+fn empty_list_reverses_to_empty() {
+    require_eq(reverse([]: [Int]), []: [Int])
+}
+
+// property test — params present → generate and shrink
+#test
+fn reversing_twice(xs: [Int]) {
+    require_eq(reverse(reverse(xs)), xs)
+}
+
+#test
+fn addition_commutes(a: Int, b: Int) {
+    require_eq(a + b, b + a)
+}
+```
+
+Same failure output as Option A (automatic shrinking; zero user effort). The rule
+is a single sentence: "a test function with parameters is a property test."
+
+**Tradeoff:** slightly less obvious from the marker alone that a function is a
+property test. The parameter list is the signal, not the attribute. For experts
+wanting to pin generated ranges or enumerate cases, a future `#[test, cases(…)]`
+multi-marker form (S82) is compatible without breaking this surface.
+
+- **Option C — `forall` expression inside test.** A `forall` keyword inside a test
+  block introduces generated variables. Closer to mathematical notation.
+
+```jet
+#test
+fn prop_reverse_is_involution() {
+    forall xs: [Int] {
+        require_eq(reverse(reverse(xs)), xs)
+    }
+}
+
+#test
+fn prop_commutes() {
+    forall a: Int, b: Int {
+        require_eq(a + b, b + a)
+    }
+}
+```
+
+**Tradeoff:** `forall` is a new keyword (I7 demands a slot in `Source/Syntax.rs`
+and a decision ID). The nested block adds indentation. The mathematical flavour
+may feel out-of-place next to Jet's plain-English style. Benefit: visually
+unambiguous — property tests look different from unit tests inside the body.
+
+- **Option D — generator call as parameter default.** Users annotate parameters
+  with explicit generator calls; the runner recognizes parameters with generator
+  defaults.
+
+```jet
+#test
+fn prop_reverse(xs: [Int] = Gen.list(Gen.int())) {
+    require_eq(reverse(reverse(xs)), xs)
+}
+
+// with range constraint:
+#test
+fn prop_bounded(n: Int = Gen.int(0..100)) {
+    require(n >= 0 && n <= 100)
+}
+```
+
+**Tradeoff:** explicit generators are more powerful (users can constrain ranges
+day one) but more verbose. `Gen.int()` is a stdlib API call, not syntax — the
+line between library and language blurs. Property tests look like ordinary tests
+with defaults, which may cause confusion about which functions actually run
+generators.
+
+**Recommendation:** B. It adds zero syntax: an `#test fn` with parameters is a
+property test; without parameters it is a unit test. This matches the S82 worked
+example the owner already ratified, removes a cognitive split between two
+attributes, and follows the simplicity ratchet (I8). Shrinking is always automatic
+and invisible. The rule teaches in one sentence. If the owner wants an explicit
+generator-constraint story, that is a follow-on decision layered on top of B
+without breaking it (e.g. `#test fn prop(n: Int) where n in 0..100 { … }` or a
+future `#[test, config(runs: 500)]` multi-marker).
+
+---
+
+### D-TEST4 — doctest convention (rec A)
+
+**User story.**
+
+Lena writes a `parse_int` function and adds a `///` doc comment explaining what it
+does (S49). She wants the code example in that comment to run as part of `jet test`
+so it never goes stale. She does not know the word "doctest" — she just wants her
+example to be checked.
+
+**How other languages do this.**
+
+| Language | Doc marker | Example delimiter | Expected-output convention | Jet takeaway |
+|----------|-----------|-------------------|---------------------------|--------------|
+| **Rust** | `///` or `//!` | fenced ` ```rust ``` ` or bare ` ``` ` inside doc comment | `// ` comment after expression is *not* checked; `assert_eq!` used instead | Jet can't require `assert_eq!` calls (that's two concepts); expected output must be a simpler convention |
+| **Python doctest** | triple-quoted docstring | `>>>` prompt prefix; expected output on the next line(s) | Visually distinct from prose; REPL-style | The `>>>` prompt is universally understood but adds a new sigil |
+| **Elixir ExUnit** | `#doc """…"""` | fenced ` ```elixir ``` ` block; `iex>` prompt | `iex>` lines run as doctests; return value on next line is checked | Prompt-style is readable inline; `iex>` is language-specific branding |
+| **Julia** | `"""…"""` docstring | ` ```jldoctest ``` ` block with `julia>` prompt | Checked against output | Language-specific fenced language tag works but requires tooling recognition |
+
+Jet takeaway: fenced code blocks inside `///` comments are the cross-language
+convention; the question is whether the expected output is a trailing comment, a
+following plain line, or embedded via a prompt style. Jet has no REPL yet (c55
+deferred), so a prompt style implies a surface that doesn't exist. A trailing
+comment convention (`// => value`) is lightweight and already reads naturally in
+Jet comments.
+
+**Current state (add-only).**
+
+S49 ratifies `///` as the doc-comment marker and defers example running to M13. E2901
+("doctest output mismatch") is reserved in `diagnostics.md`. This decision picks the
+delimiter and expected-output convention so D-TEST4 can be implemented.
+
+**Tradeoff comparison.**
+
+| Option | Example delimiter | Expected output | New syntax? | Reads naturally? |
+|--------|------------------|-----------------|-------------|-----------------|
+| A — fenced ` ```jet ``` ` + `// =>` trailing comment | ` ```jet…``` ` block inside `///` | `// => value` comment on the last expression line | none — reuses `//` comment (S5) and fenced block convention | yes — comment is Jet syntax |
+| B — fenced ` ```jet ``` ` + plain following line | ` ```jet…``` ` block; output as a bare second block or following plain text | prose line after the code block | none | ambiguous — prose vs expected output |
+| C — `>>>` prompt prefix | `/// >>> parse_int("42")` with `/// 42` on the next line | plain line after `>>>` line | new inline prompt convention | familiar to Python users; unfamiliar to others |
+| D — `#doctest` attribute on function | separate attribute triggers example extraction | no in-comment convention | new `#doctest` attribute | separates docs and tests; poor discoverability |
+
+
+- **Option A — fenced ` ```jet ``` ` block + `// =>` trailing comment (recommended).**
+  Examples are delimited by a standard fenced code block inside `///` lines. The
+  expected output is a `// =>` comment on the line where a value is produced. The
+  runner extracts the block, compiles it, and checks the printed/returned value
+  against the `// =>` annotation.
+
+```jet
+/// Parse a decimal integer from a string.
+///
+/// Returns an error if the string contains non-digit characters.
+///
+/// ```jet
+/// parse_int("42")  // => 42
+/// parse_int("-7")  // => -7
+/// parse_int("hi")  // => err(ParseError { … })
+/// ```
+pub fn parse_int(s: String) -> Int ? ParseError {
+    …
+}
+```
+
+A mismatch fires E2901:
+
+```
+error[E2901]: doctest output mismatch
+  --> src/math.jet:6
+   |
+ 6 |   parse_int("42")  // => 99
+   |                         ^^
+   |   expected: 99
+   |   actual:   42
+   |   note: update the `// =>` comment to match, or fix the implementation
+```
+
+Multiple statements, no expected output for intermediate lines:
+
+```jet
+/// ```jet
+/// x :: parse_int("10")?
+/// y :: parse_int("20")?
+/// x + y  // => 30
+/// ```
+```
+
+**Tradeoff:** the `// =>` convention adds no new tokens (S5 ratified `//` as the
+line-comment marker); the runner just looks for that specific comment prefix on the
+last expression of a block. The fenced block is the universal doc-example
+convention. Downside: the `// =>` idiom is not self-describing on first encounter
+(though it reads naturally: "this produces 42").
+
+- **Option B — fenced ` ```jet ``` ` + separate plain-text output block.** A second
+  fenced block (or a plain indented block) after the code block holds expected
+  output. Rust's standard approach for prose output (not for expression values).
+
+```jet
+/// ```jet
+/// print(parse_int("42"))
+/// ```
+///
+/// Output:
+///
+/// ```
+/// 42
+/// ```
+```
+
+**Tradeoff:** two blocks per example doubles the visual weight. The separator label
+("Output:") is prose that the runner must parse. Works well when expected output is
+multi-line `print` output; awkward for simple expression values.
+
+- **Option C — `>>>` prompt prefix.** REPL-style inline convention, each line
+  prefixed by `>>>` inside `///` comments.
+
+```jet
+/// >>> parse_int("42")
+/// 42
+/// >>> parse_int("hi")
+/// err(ParseError { … })
+pub fn parse_int(s: String) -> Int ? ParseError { … }
+```
+
+**Tradeoff:** `>>>` is a new inline convention inside `///` comments — not a token
+the lexer sees (it lives in comment text), but a convention the doctest runner must
+parse. Familiar to Python users. Jet has no interactive REPL today (c55 deferred),
+so `>>>` implies a mode that doesn't exist. The prompt may confuse beginners who
+try to type `>>>` at a terminal.
+
+- **Option D — `#doctest` attribute on the function, examples in a separate file.**
+  A marker attribute on the function points the runner at examples stored elsewhere.
+
+```jet
+#doctest("examples/parse_int.jet")
+pub fn parse_int(s: String) -> Int ? ParseError { … }
+```
+
+**Tradeoff:** discoverability is poor — the example lives in a different file from
+the doc comment. Breaks the "docs and examples colocate" ergonomic goal. Not
+recommended.
+
+**Recommendation:** A. The `// =>` trailing-comment convention reuses existing
+comment syntax (S5), requires zero new tokens, and reads naturally in Jet — the
+`// =>` prefix is already idiomatically used in prose code snippets to show "this
+evaluates to." The fenced ` ```jet ``` ` delimiter matches how examples already
+appear in this codebase's docs. The diagnostic E2901 slots into the reserved
+position cleanly.
+
+---
+
+## Coverage — D-COV1 (deferred, no ballot needed)
+
+The epoch-3 plan scopes coverage as "tooling only — no new syntax; couples to the
+test runner in `Source/main.rs` (`run_test`)." There is no user-facing surface
+decision: `jet test --coverage` is the spelled-out verb and the output format (LCOV
+/ HTML / stdout summary) is an implementation choice, not a syntax choice.
+
+**Prior art:**
+- **Rust tarpaulin** — `cargo tarpaulin --out Html`; produces HTML + lcov. No new
+  Rust syntax. Jet takeaway: a `--coverage` flag on `jet test` is the right shape.
+- **llvm-cov / cargo llvm-cov** — output: `--json`, `--lcov`, `--html`, `--text`.
+  Jet takeaway: multiple formats are useful but can be deferred to a `--format`
+  flag.
+- **Python coverage.py** — `coverage run`; then `coverage report` / `coverage html`.
+  Two-step. Jet takeaway: a single `jet test --coverage` that prints a summary to
+  stdout (and optionally writes a report) is simpler than a two-step model.
+
+**Deferred note:** if coverage ever needs a source annotation (e.g. `// @no_cover`
+to exclude a line from the report), that is a syntax decision requiring a ballot.
+Until then, coverage is tooling-only and can land without owner ratification. The
+implementation milestone (exit criterion: `jet test --coverage` reports per-line /
+per-function coverage) can proceed independently of D-TEST1 and D-TEST4.
+
+---
