@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **31 open decisions across 18 cards** (the original 5 areas, the 9 EVALUATE-tier ballots, and 7 new Jai-borrowed ballots below), plus a deferred-ballots list and informational notes. `defer` (Jai Ballot 6) is already shipped — see the note, not a ballot.
+> **32 open decisions across 19 cards** (incl. the persona-surfaced jet.regex question), plus a deferred-ballots list and informational notes.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -3152,3 +3152,53 @@ syntax now so plans can be written against a fixed spelling.
    chosen, to enable per-container overrides later?
 3. Interaction with `#Serialize` and reflection: does SOA layout affect the
    serialized representation?
+
+---
+
+## jet.regex (persona #1 gap) — board card c79
+
+### D-REGEX1 — How does `jet.regex` ship? (rec B)
+
+The 2026-06-20 persona brief found a missing `jet.regex` is the **#1 gap** — it blocks 4 of 9 personas (CLI text-processing, ETL filtering, HTTP route matching, library validation). But regex can't just be built: **I6** says the compiler carries zero external crates, stdlib sub-libraries may bootstrap with crates only **until the end of Epoch 3**, and **any new stdlib external dep requires owner approval**. So this is your call, not a silent build.
+
+**User story.** Mara writes a CLI that greps logs; Elena filters an ETL feed; Tariq matches HTTP routes. All three reach for `regex.match(pattern, text)` on day one and find nothing. Whatever ships must be memory-safe and must not ReDoS (catastrophic backtracking) on hostile input — Jet's whole promise.
+
+| Option | Time to unblock personas | I6 posture | ReDoS-safe | Maintenance |
+|---|---|---|---|---|
+| A — native engine now | slow (weeks) | clean (no dep ever) | yes (build it linear-time) | ours forever |
+| B — bootstrap `regex` crate, native-ize before Epoch 3 ends | fast (days) | I6-sanctioned bootstrap; needs your dep approval | yes (Rust `regex` is linear-time) | temporary dep, then ours |
+| C — defer regex | none (gap persists) | n/a | n/a | none |
+
+**How other languages do this.**
+- **Rust `regex`** — DFA/NFA hybrid, **guaranteed linear time, no backtracking** (no ReDoS). The crate B would bootstrap on. Takeaway: the safe, fast reference implementation.
+- **Google RE2** — the linear-time automaton engine Rust's `regex` descends from; built precisely to kill ReDoS on untrusted input. Takeaway: the design target for a native Jet engine (Option A).
+- **PCRE / Perl / Python `re`** — backtracking; powerful (backreferences) but **ReDoS-prone** on adversarial patterns. Takeaway: the model Jet must NOT copy by default.
+- **Go `regexp`** — RE2-based, linear-time, deliberately omits backreferences for safety. Takeaway: precedent that dropping backtracking-only features is an acceptable, safety-positive trade.
+
+- **Option A — native engine now.** Hand-write an RE2-style linear-time matcher in Jet/Rust under `jet.regex`, no external crate.
+
+  ```jet
+  use jet.regex as re
+  m :: re.match("(\\d+)-(\\d+)", "8080-9090")?   // native engine, no dependency
+  print(m.group(1))   // 8080
+  ```
+  Cleanest I6 story (never a dep), full control, but weeks of work and a real risk of subtle bugs in a from-scratch engine.
+
+- **Option B — bootstrap the `regex` crate now, native-ize before Epoch 3 ends (recommended).** Ship `jet.regex` backed by Rust's `regex` crate immediately to unblock the 4 personas; replace it with a native engine before the I6 Epoch-3 deadline. Requires your approval of the dep.
+
+  ```jet
+  use jet.regex as re
+  m :: re.match("(\\d+)-(\\d+)", "8080-9090")?   // same surface; backed by `regex` crate for now
+  print(m.group(1))   // 8080
+  ```
+  Unblocks users in days and is ReDoS-safe (the crate is linear-time); the cost is a temporary sanctioned dependency and a scheduled native-ization before Epoch 3 ends.
+
+- **Option C — defer regex.** Ship nothing; the 4 personas keep hand-rolling string scans.
+
+  ```jet
+  // no jet.regex — users write manual scanners
+  fn has_port(s: String) -> Bool { s.contains("-") && s.split("-").all((p) => p.is_digits()) }
+  ```
+  Zero work and zero dep, but leaves the single biggest adoption gap open.
+
+**Recommendation:** **B** — I6 explicitly sanctions bootstrap crates through Epoch 3, the `regex` crate is the memory-safe linear-time gold standard, and it unblocks the most personas fastest; schedule the native-ization (Option A's engine) as the pre-Epoch-3-close replacement so the end state is still dependency-free. Pick A only if you want native-first now and accept the slower timeline. This card exists because B needs your dep approval (I6).
