@@ -1,7 +1,7 @@
 use super::*;
 use crate::AST::{
     AccessConvention, ConstAttr, DistinctDef, EnumDef,
-    Expr, Func, Item, Program, RustConstKind, StructDef, Type,
+    Expr, Func, Item, Param, Program, RustConstKind, StructDef, Type,
 };
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
@@ -206,6 +206,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             // S59: C FFI modules are folded by CFFI::assemble before the
             // bundle path runs; this legacy single-Program path ignores them.
             Item::CModule(_) => {}
+            // D-ERR-CONV: registration happens in m9.register_items below.
+            Item::ErrorConv(_) => {}
         }
     }
 
@@ -479,6 +481,21 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 ));
                 t.body = synthetic.body;
             }
+            // D-ERR-CONV: type-check the conversion body with `self: from_ty`, return `to_ty`.
+            Item::ErrorConv(ec) => {
+                diags.extend(check_error_conv_body(
+                    ec,
+                    &funcs,
+                    &registry,
+                    &struct_fields_legacy,
+                    &consts,
+                    &m9,
+                    &ct_funcs,
+                    &ct_externs,
+                    ct_base_dir,
+                    &ct_globals,
+                ));
+            }
             Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)
@@ -670,7 +687,8 @@ pub(crate) fn comptime_context_from_items(
             | Item::Trait(_)
             | Item::Module(_)
             | Item::CModule(_) | Item::CodeModule(_)
-            | Item::Distinct(_) => {}
+            | Item::Distinct(_)
+            | Item::ErrorConv(_) => {}
         }
     }
     (funcs, externs, globals)
@@ -1020,6 +1038,7 @@ pub(crate) fn check_func_body(
         in_dropped_comptime_arm: false,
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,
+        liveness_frames: Vec::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
@@ -1027,6 +1046,67 @@ pub(crate) fn check_func_body(
         ck.diags.extend(check_pure_fn(f, funcs));
     }
     ck.diags
+}
+
+/// D-ERR-CONV: type-check an `impl Source -> Target { body }` conversion body.
+/// `self` is bound to the source error type; the block must return the target type.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn check_error_conv_body(
+    ec: &mut crate::AST::ErrorConvDef,
+    funcs: &HashMap<String, FuncSig>,
+    registry: &TypeRegistry,
+    structs: &HashMap<String, Vec<(Option<String>, Type)>>,
+    consts: &HashMap<String, Type>,
+    m9: &M9Registry,
+    ct_funcs: &HashMap<String, Func>,
+    ct_externs: &HashSet<String>,
+    ct_base_dir: &std::path::Path,
+    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
+) -> Vec<Diagnostic> {
+    // Synthesise a pseudo-function to reuse check_func_body.
+    let mut synthetic = Func {
+        is_pub: false,
+        name: format!("__errconv_{}_to_{}", ec.from_ty.replace('.', "_"), ec.to_ty.replace('.', "_")),
+        name_span: ec.from_span,
+        type_params: Vec::new(),
+        params: vec![Param {
+            name: crate::Syntax::KW_SELF.to_string(),
+            name_span: ec.from_span,
+            ty: Type::Named(String::new()), // sema fills self type from owner_type
+            ty_span: ec.from_span,
+            convention: AccessConvention::Move,
+            default: None,
+        }],
+        return_type: Some(Type::Named(ec.to_ty.clone())),
+        is_view_return: false,
+        is_unsafe: false,
+        is_pure: false,
+        body: std::mem::take(&mut ec.body),
+    };
+    let d = check_func_body(
+        &mut synthetic,
+        funcs,
+        registry,
+        structs,
+        consts,
+        m9,
+        Some(&ec.from_ty),
+        ct_funcs,
+        ct_externs,
+        ct_base_dir,
+        ct_globals,
+        false,
+    );
+    ec.body = synthetic.body;
+    d
+}
+
+/// D-ERR-CONV: canonical Rust function name for the `impl From -> To` conversion.
+/// Used by sema (to stamp into `TryConvert::Typed`) and codegen (to define + call it).
+pub(crate) fn error_conv_fn_name(from: &str, to: &str) -> String {
+    let f = from.replace('.', "_");
+    let t = to.replace('.', "_");
+    format!("__jet_errconv_{}_to_{}", f, t)
 }
 
 pub(crate) fn already_defined(name: &str, span: Span) -> Diagnostic {

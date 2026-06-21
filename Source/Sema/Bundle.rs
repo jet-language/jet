@@ -376,6 +376,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                         }
                     }
                 }
+                Item::ErrorConv(_) => {}
             }
         }
         // S62 + D-LIB2: synthesis must happen before register_impl_methods
@@ -713,7 +714,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             | Item::Trait(_)
             | Item::Module(_)
             | Item::Distinct(_)
-            | Item::CModule(_) | Item::CodeModule(_) => {}
+            | Item::CModule(_) | Item::CodeModule(_)
+            | Item::ErrorConv(_) => {}
             }
         }
         for item in &mut module.items {
@@ -884,7 +886,8 @@ pub(crate) fn collect_used_std(bundle: &ProgramBundle, states: &[ModuleState]) -
                 | Item::ExternRust(_)
                 | Item::Module(_)
                 | Item::Distinct(_)
-                | Item::CModule(_) | Item::CodeModule(_) => {}
+                | Item::CModule(_) | Item::CodeModule(_)
+                | Item::ErrorConv(_) => {}
             }
         }
     }
@@ -1258,6 +1261,22 @@ pub(crate) fn check_module_bodies(
                     }
                 }
             }
+            Item::ErrorConv(ec) => {
+                // D-ERR-CONV: type-check the conversion body in the bundle path.
+                let st = &states[module_idx];
+                diags.extend(crate::Sema::Registration::check_error_conv_body(
+                    ec,
+                    &st.funcs,
+                    &st.registry,
+                    &st.structs,
+                    &st.consts,
+                    &st.m9,
+                    &ct_funcs,
+                    &ct_externs,
+                    &ct_base_dir,
+                    &ct_globals,
+                ));
+            }
             _ => {}
         }
     }
@@ -1323,6 +1342,7 @@ pub(crate) fn check_func_body_bundle(
         in_dropped_comptime_arm: false,
         stmt_tail_ptr: std::ptr::null(),
         stmt_tail_len: 0,
+        liveness_frames: Vec::new(),
     };
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.

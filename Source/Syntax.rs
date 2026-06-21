@@ -279,6 +279,18 @@ pub const OP_CARET_EQ: &str = "^=";
 pub const OP_SHL_EQ: &str = "<<=";
 pub const OP_SHR_EQ: &str = ">>=";
 
+/// D-PATW (ratified 2026-06-19): `_` in a variant payload slot ignores that field and binds nothing.
+/// `_` remains a legal identifier character (digit-separator, S34) in all other positions.
+/// No bare `_` arm in a switch — only `else ->` acts as a catch-all.
+pub const PAT_WILDCARD_SLOT: &str = "_";
+
+// D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
+// level and inside variant payload slots. Open Int/Char subjects always still require `else`.
+
+// D-PATO (ratified 2026-06-19): structural or-patterns use OP_PIPE (single `|`).
+// `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
+// `||` remains value-or / boolean-or; `|=` is bitwise-or-assign.
+
 /// S13 (ratified): word forms recognized only for S14 teaching errors.
 pub const FOREIGN_AND: &str = "and";
 pub const FOREIGN_OR: &str = "or";

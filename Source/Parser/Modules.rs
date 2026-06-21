@@ -193,7 +193,7 @@ impl<'a> Parser<'a> {
             TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
             TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-            TokKind::KwImpl => self.impl_def().map(Item::Impl),
+            TokKind::KwImpl => self.impl_or_error_conv(),
             TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
             TokKind::KwTest => self.test_def().map(Item::Test),

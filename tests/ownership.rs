@@ -234,3 +234,58 @@ fn main() {
     let diags = jet::compile(src).expect_err("should error");
     assert!(diags.iter().any(|d| d.code == "E0208"));
 }
+
+/// D-L0201 liveness gate: clone inside a nested `if` block must NOT fire L0201
+/// when the value is used in the enclosing block after the `if`.
+/// Previously `is_name_live_after` only checked the current block's tail and
+/// missed uses in enclosing scopes — a false-fire that would advise `move msg`
+/// but the move would cause use-after-move on the `print(msg)` below.
+#[test]
+fn implicit_clone_silent_when_live_in_enclosing_block() {
+    let src = r#"
+fn consume(take s: String) {
+    print(s)
+}
+
+fn maybe(b: Bool) -> Bool { return b }
+
+fn main() {
+    msg: String :: "hello"
+    if maybe(true) {
+        consume(msg)
+    }
+    print(msg)
+}
+"#;
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.lints.iter().all(|d| d.code != "L0201"),
+        "L0201 must be silent when value is used in the enclosing block after the if"
+    );
+    assert!(out.rust.contains(".clone()"), "clone must still be emitted");
+}
+
+/// D-L0201 liveness gate: clone inside a nested block where the value is
+/// genuinely dead everywhere after (enclosing block included) still fires.
+#[test]
+fn implicit_clone_fires_when_dead_in_all_enclosing_blocks() {
+    let src = r#"
+fn consume(take s: String) {
+    print(s)
+}
+
+fn maybe(b: Bool) -> Bool { return b }
+
+fn main() {
+    msg: String :: "hello"
+    if maybe(true) {
+        consume(msg)
+    }
+}
+"#;
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.lints.iter().any(|d| d.code == "L0201"),
+        "L0201 must fire when value is dead on all paths after the nested block"
+    );
+}

@@ -1,6 +1,6 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, StrPart, Type,
+    AccessConvention, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, StrPart, TryConvert, Type,
     UnOp, VariantPayload,
 };
 use crate::Diagnostics::span_line_col;
@@ -322,30 +322,44 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
         }
         Expr::Ok(inner, _) => format!("Ok({})", emit_expr(cx, inner, env)),
         Expr::Err(inner, _) => format!("Err({})", emit_expr(cx, inner, env)),
-        Expr::Try(inner, span, via_fallible) => {
+        Expr::Try(inner, span, convert) => {
             // E3002 (E2-M12): wrap each `?` so a propagating Err prints one trace
             // frame in debug builds. jet_trace_err returns the Result unchanged.
             let (line, _col) = span_line_col(&cx.src, span.start);
             let file = escape_rust_str(&cx.file);
             let fn_name = cx.current_fn.borrow().clone();
             let fn_name = escape_rust_str(&fn_name);
-            if *via_fallible {
-                // S80/D-LIB3: error type implements Fallible; convert via .to_error()
-                format!(
-                    "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
-                    emit_expr(cx, inner, env),
-                    file,
-                    line,
-                    fn_name
-                )
-            } else {
-                format!(
-                    "jet_trace_err({}, {}, {}, {})?",
-                    emit_expr(cx, inner, env),
-                    file,
-                    line,
-                    fn_name
-                )
+            match convert {
+                TryConvert::Fallible => {
+                    // S80/D-LIB3: error type implements Fallible; convert via .to_error()
+                    format!(
+                        "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
+                        emit_expr(cx, inner, env),
+                        file,
+                        line,
+                        fn_name
+                    )
+                }
+                TryConvert::Typed(conv_fn) => {
+                    // D-ERR-CONV: apply the declared `impl Source -> Target` conversion.
+                    format!(
+                        "jet_trace_err({}.map_err({}), {}, {}, {})?",
+                        emit_expr(cx, inner, env),
+                        conv_fn,
+                        file,
+                        line,
+                        fn_name
+                    )
+                }
+                TryConvert::None => {
+                    format!(
+                        "jet_trace_err({}, {}, {}, {})?",
+                        emit_expr(cx, inner, env),
+                        file,
+                        line,
+                        fn_name
+                    )
+                }
             }
         }
         Expr::OrFallback {

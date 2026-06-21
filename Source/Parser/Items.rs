@@ -334,7 +334,7 @@ impl<'a> Parser<'a> {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-                TokKind::KwImpl => self.impl_def().map(Item::Impl),
+                TokKind::KwImpl => self.impl_or_error_conv(),
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::Hash if self.at_numeric_distinct_def() => {
@@ -1173,6 +1173,96 @@ impl<'a> Parser<'a> {
             delegation_field: None,
             assoc_type_impls,
         })
+    }
+
+    /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
+    /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
+    pub(super) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
+        self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
+        let (type_name, type_span) = self.parse_type_path("after `impl`")?;
+        // Detect `impl Source -> Target { body }` — D-ERR-CONV.
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            let _arrow = self.bump(); // consume `->`
+            let (to_ty, to_span) = self.parse_type_path("after `->` in error conversion")?;
+            // Peek the `{` span before consuming.
+            if !matches!(self.peek().kind, TokKind::LBrace) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "expected `{` to open the error-conversion body".to_string(),
+                    "an error conversion body is a block: `impl Source -> Target { … }`".to_string(),
+                    "add `{` after the target type".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+            let brace_start = self.bump().span.start; // consume `{`
+            // block_stmts consumes statements AND the closing `}`.
+            // We need to track where the `}` ended — peek first to record pos.
+            let body = self.block_stmts();
+            // After block_stmts, the `}` is consumed; the last consumed token is at pos-1.
+            let rbrace_end = self.toks[self.pos.saturating_sub(1)].span.end;
+            let body_span = Span::new(brace_start, rbrace_end);
+            return Ok(Item::ErrorConv(crate::AST::ErrorConvDef {
+                from_ty: type_name,
+                from_span: type_span,
+                to_ty,
+                to_span,
+                body,
+                body_span,
+            }));
+        }
+        // Normal `impl` path — re-enter parsing without re-consuming `impl` or type name.
+        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Colon) {
+            self.bump();
+            let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
+            (Some(t), Some(ts))
+        } else {
+            (None, None)
+        };
+        // S62: `impl Type: Trait using field_name;` — delegation form.
+        if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+            if kw == "using" && trait_name.is_some() {
+                self.bump(); // consume `using`
+                let (field, _) = self.expect_ident("after `using` for the delegation field")?;
+                self.finish_stmt()?;
+                return Ok(Item::Impl(ImplDef {
+                    type_name,
+                    type_span,
+                    trait_name,
+                    trait_span,
+                    methods: Vec::new(),
+                    delegation_field: Some(field),
+                    assoc_type_impls: Vec::new(),
+                }));
+            }
+        }
+        self.expect(TokKind::LBrace, "to open the `impl` body")?;
+        let mut methods = Vec::new();
+        let mut assoc_type_impls = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+                if kw == "type" {
+                    let kw_span = self.bump().span;
+                    let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
+                    self.expect(TokKind::Eq, "after associated type name")?;
+                    let (assoc_ty, _) = self.type_()?;
+                    self.finish_stmt()?;
+                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
+                    continue;
+                }
+            }
+            methods.push(self.method_in_type()?);
+        }
+        self.bump();
+        Ok(Item::Impl(ImplDef {
+            type_name,
+            type_span,
+            trait_name,
+            trait_span,
+            methods,
+            delegation_field: None,
+            assoc_type_impls,
+        }))
     }
 
     /// S28: `impl Trait { … }` inside a struct/enum body.

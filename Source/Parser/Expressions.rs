@@ -566,7 +566,7 @@ impl<'a> Parser<'a> {
                 TokKind::Question => {
                     let qspan = self.bump().span;
                     let full = Span::new(expr.span().start, qspan.end);
-                    expr = Expr::Try(Box::new(expr), full, false);
+                    expr = Expr::Try(Box::new(expr), full, TryConvert::None);
                 }
                 // S71 (D-SG6): `base?.field` optional chaining.
                 TokKind::QuestionDot => {
@@ -1323,11 +1323,46 @@ impl<'a> Parser<'a> {
                 let span = self.peek().span;
                 self.bump();
                 self.bump();
-                let mut bindings = Vec::new();
+                let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
-                        let (b, _) = self.expect_ident("for a pattern binding")?;
-                        bindings.push(b);
+                        // D-PATW: `_` in payload slot = wildcard (ignore field, bind nothing).
+                        let slot = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT) {
+                            self.bump();
+                            crate::AST::PatSlot::Wildcard
+                        } else if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                            // D-PATR: `lo..hi` range in payload slot.
+                            let lo = *lo_val;
+                            self.bump();
+                            if matches!(self.peek().kind, TokKind::DotDot) {
+                                self.bump(); // consume `..`
+                                if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                    let hi = *hi_val;
+                                    self.bump();
+                                    crate::AST::PatSlot::Range { lo, hi }
+                                } else {
+                                    return Err(Diagnostic::error(
+                                        "E0003",
+                                        "expected an integer after `..` in a range pattern".to_string(),
+                                        "range patterns need both ends: `lo..hi`".to_string(),
+                                        "write `0..100` for an inclusive range".to_string(),
+                                        Some(self.peek().span),
+                                    ));
+                                }
+                            } else {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    "expected `..` after the lower bound of a range pattern".to_string(),
+                                    "range patterns need `lo..hi` syntax".to_string(),
+                                    "write `0..100` for an inclusive range".to_string(),
+                                    Some(self.peek().span),
+                                ));
+                            }
+                        } else {
+                            let (b, _) = self.expect_ident("for a pattern binding")?;
+                            crate::AST::PatSlot::Bind(b)
+                        };
+                        bindings.push(slot);
                         if matches!(self.peek().kind, TokKind::RParen) {
                             break;
                         }
@@ -1336,11 +1371,35 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokKind::RParen, "after pattern bindings")?;
                 let end = self.toks[self.pos.saturating_sub(1)].span.end;
-                return Ok(Some(Pattern::Variant {
+                // D-PATO: check for `| AltVariant(bindings)` after this pattern.
+                let base = Pattern::Variant {
                     variant,
                     bindings,
                     span: Span::new(span.start, end),
-                }));
+                };
+                if matches!(self.peek().kind, TokKind::Pipe) {
+                    // Collect or-pattern alternatives.
+                    let or_start = span;
+                    let mut alts = vec![base];
+                    while matches!(self.peek().kind, TokKind::Pipe) {
+                        self.bump(); // consume `|`
+                        // Parse the next alternative (must be a Variant pattern).
+                        if let Some(alt) = self.try_pattern_rhs()? {
+                            alts.push(alt);
+                        } else {
+                            return Err(Diagnostic::error(
+                                "E0003",
+                                "expected a variant pattern after `|` in an or-pattern".to_string(),
+                                "or-patterns join two variant patterns: `A(x) | B(x)`".to_string(),
+                                "write a variant name with bindings after `|`".to_string(),
+                                Some(self.peek().span),
+                            ));
+                        }
+                    }
+                    let or_end = self.toks[self.pos.saturating_sub(1)].span.end;
+                    return Ok(Some(Pattern::Or(alts, Span::new(or_start.start, or_end))));
+                }
+                return Ok(Some(base));
             }
             _ => Ok(None),
         }

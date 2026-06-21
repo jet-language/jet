@@ -209,11 +209,21 @@ pub(crate) fn expr_is_same_ident(a: &Expr, name: &str) -> bool {
 
 pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
     match pattern {
-        Pattern::Variant { variant, .. } => Some(variant.clone()),
+        Pattern::Variant { variant, bindings, .. } => {
+            // D-PATR: a Variant with Range slots only partially covers the variant
+            // (it matches a subset of payloads), so we don't mark it as fully covered.
+            let has_range = bindings.iter().any(|s| matches!(s, crate::AST::PatSlot::Range { .. }));
+            if has_range { None } else { Some(variant.clone()) }
+        }
         Pattern::Present { .. } => Some(Syntax::LIT_VALUE.to_string()),
         Pattern::Absent(_) => Some(Syntax::LIT_NULL.to_string()),
         Pattern::Ok { .. } => Some(Syntax::LIT_OK.to_string()),
         Pattern::Err { .. } => Some(Syntax::LIT_ERR.to_string()),
+        // D-PATO: use the first alternative's name as the canonical coverage key.
+        // The check_switch loop also inserts the remaining alt names separately.
+        Pattern::Or(alts, _) => alts.first().and_then(pattern_variant_name),
+        // D-PATR: range patterns at arm-head level don't cover a single variant name.
+        Pattern::Range { .. } => None,
     }
 }
 

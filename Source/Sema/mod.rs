@@ -460,14 +460,15 @@ pub(crate) struct Checker<'a> {
     in_dropped_comptime_arm: bool,
     /// D-L0201: liveness gate — pointer to the statements that follow the
     /// currently-executing statement in the innermost block, plus the count.
-    /// Set by `check_block` before each call to `check_stmt`; reset to empty
-    /// when entering a nested block (so the lint can only see the current
-    /// frame's tail, which is conservative: if the name is *not* in the tail
-    /// we fire; if uncertain we stay silent).
+    /// Set by `check_block` before each call to `check_stmt`.
     /// Safety: valid for the duration of `check_stmt` — the slice lives in
     /// the `Program` AST which outlives the checker.
     stmt_tail_ptr: *const crate::AST::Stmt,
     stmt_tail_len: usize,
+    /// D-L0201: stack of enclosing block tails, from outermost to innermost.
+    /// Each entry is the (ptr, len) of the tail saved before entering a nested
+    /// block, so `is_name_live_after` can walk up through all enclosing scopes.
+    liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
 }
 
 

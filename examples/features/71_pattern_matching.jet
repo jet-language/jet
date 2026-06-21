@@ -1,0 +1,72 @@
+// D-PATW (ratified 2026-06-19): `_` in payload slot = wildcard (ignore, bind nothing).
+// D-PATR (ratified 2026-06-19): range patterns `lo..hi` in arm-head and payload slots.
+// D-PATO (ratified 2026-06-19): `|` structural or-patterns `A(x) | B(x)`.
+
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Idle(Int)
+    Closed
+}
+
+fn describe_conn(c: Conn) -> String {
+    if c {
+        // D-PATO: or-pattern — Active and Reconnecting share the same body.
+        c == Active(id) | Reconnecting(id) -> {
+            return "live:{id}"
+        }
+        // D-PATW: wildcard slot — Idle's payload doesn't matter here.
+        c == Idle(_) -> {
+            return "idle"
+        }
+        c == Closed -> {
+            return "closed"
+        }
+    }
+    return "unknown"
+}
+
+enum Http {
+    Good(Int)
+    Fail(Int)
+}
+
+fn classify(r: Http) -> String {
+    if r {
+        // D-PATR: range pattern in payload slot.
+        r == Good(200..299) -> { return "success" }
+        r == Good(300..399) -> { return "redirect" }
+        r == Good(400..499) -> { return "client error" }
+        r == Good(500..599) -> { return "server error" }
+        r == Good(_) -> { return "other" }
+        r == Fail(_) -> { return "network error" }
+    }
+    return "unknown"
+}
+
+fn score_grade(score: Int) -> String {
+    // D-PATR: range pattern at arm-head level.
+    if score {
+        0..59 -> { return "F" }
+        60..69 -> { return "D" }
+        70..79 -> { return "C" }
+        80..89 -> { return "B" }
+        90..100 -> { return "A" }
+        else -> { return "?" }
+    }
+}
+
+fn main() {
+    print(describe_conn(Conn.Active(42)))
+    print(describe_conn(Conn.Reconnecting(7)))
+    print(describe_conn(Conn.Idle(99)))
+    print(describe_conn(Conn.Closed))
+    print(classify(Http.Good(201)))
+    print(classify(Http.Good(301)))
+    print(classify(Http.Good(404)))
+    print(classify(Http.Good(503)))
+    print(classify(Http.Fail(0)))
+    print(score_grade(95))
+    print(score_grade(72))
+    print(score_grade(45))
+}

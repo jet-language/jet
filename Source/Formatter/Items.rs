@@ -38,6 +38,18 @@ impl<'a> Fmt<'a> {
                 let text = self.src[d.span.start..d.span.end].to_string();
                 self.write(&text);
             }
+            // D-ERR-CONV: error conversion declarations are emitted verbatim.
+            Item::ErrorConv(ec) => {
+                let text = self.src[ec.body_span.start..ec.body_span.end].to_string();
+                // Re-emit as `impl From -> To { body }` verbatim for now.
+                self.write("impl ");
+                self.write(&ec.from_ty);
+                self.write(" -> ");
+                self.write(&ec.to_ty);
+                self.write(" ");
+                self.write(&text);
+                self.newline();
+            }
         }
     }
 

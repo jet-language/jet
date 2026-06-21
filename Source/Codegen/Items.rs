@@ -592,3 +592,31 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     emit_stmts(cx, &f.body, &mut env, out, 1, f.is_view_return);
     out.push_str("}\n\n");
 }
+
+/// D-ERR-CONV: emit a standalone Rust function for `impl Source -> Target { body }`.
+/// The function is called by the `map_err` closure emitted in `Expression.rs`
+/// when a `TryConvert::Typed` node is encountered.
+pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut String) {
+    let fn_name = crate::Sema::error_conv_fn_name(&ec.from_ty, &ec.to_ty);
+    let from_rust = cx.rust_type(&crate::AST::Type::Named(ec.from_ty.clone()));
+    let to_rust = cx.rust_type(&crate::AST::Type::Named(ec.to_ty.clone()));
+    *cx.current_fn.borrow_mut() = fn_name.clone();
+    out.push_str(&format!(
+        "pub fn {fn_name}(user_self: {from}) -> {to} {{\n",
+        fn_name = fn_name,
+        from = from_rust,
+        to = to_rust,
+    ));
+    let mut env: HashMap<String, Slot> = HashMap::new();
+    // `self` maps to `user_self` (Move convention, named type).
+    env.insert(
+        crate::Syntax::KW_SELF.to_string(),
+        Slot {
+            rust_name: "user_self".to_string(),
+            deref: false,
+            jet_ty: Some(crate::AST::Type::Named(ec.from_ty.clone())),
+        },
+    );
+    emit_stmts(cx, &ec.body, &mut env, out, 1, false);
+    out.push_str("}\n\n");
+}

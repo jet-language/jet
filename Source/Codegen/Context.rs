@@ -475,7 +475,7 @@ pub(crate) fn build_cx_items(
             Item::Trait(t) => {
                 cx.trait_names.insert(t.name.clone());
             }
-            Item::Impl(_) | Item::Test(_) | Item::Module(_) => {}
+            Item::Impl(_) | Item::Test(_) | Item::Module(_) | Item::ErrorConv(_) => {}
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
             }

@@ -225,9 +225,9 @@ Fallible functions return **`T ? E`** (S34): `T` is the success payload,
 the error side in a function return — **`T ?`** — means **`T ? Error`**.
 Build outcomes with **`ok(v)`** and **`err(e)`**; test them with
 **`== ok(n)`** / **`== err(e)`** (same pattern machinery as M3 optionals).
-Cross-type **`?`** conversion is opt-in via the **`Fallible`** trait
-(D-ERR2): `impl MyFail: Fallible { fn to_error(self) -> Error { … } }`.
-Prelude types implement **`Fallible`** by default.
+Cross-type **`?`** conversion supports two forms:
+- **`Fallible`** trait (D-ERR2): `impl MyFail: Fallible { fn to_error(self) -> Error { … } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
+- **Declared typed conversion** (D-ERR-CONV): `impl Source -> Target { return Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,

@@ -645,6 +645,19 @@ impl<'a> Parser<'a> {
         if matches!(self.peek().kind, TokKind::RBrace) {
             return false;
         }
+        // D-PATR: `Int .. Int ->` is a range arm — detect without full expr parse.
+        if let TokKind::Int(_) = &self.peek().kind {
+            if matches!(
+                self.toks.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokKind::DotDot)
+            ) {
+                // Look ahead past lo, .., hi to see if Arrow follows.
+                if let Some(tok_after_hi) = self.toks.get(self.pos + 3) {
+                    return matches!(tok_after_hi.kind, TokKind::Arrow);
+                }
+                return false;
+            }
+        }
         let save = self.pos;
         let saved_diags = self.diags.len();
         let is_arm = matches!(self.expr_no_struct_lit(), Ok(_))
@@ -692,8 +705,41 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let arm_start = self.peek().span;
-                    let raw_head = self.expr_no_struct_lit()?;
-                    let cond = Self::switch_pipe_cond(subject.clone(), raw_head);
+                    // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
+                    let raw_head = if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                        if matches!(
+                            self.toks.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokKind::DotDot)
+                        ) {
+                            let lo = *lo_val;
+                            let range_start = self.bump().span; // consume lo
+                            self.bump(); // consume `..`
+                            if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                let hi = *hi_val;
+                                let range_end = self.bump().span; // consume hi
+                                let pat_span = Span::new(range_start.start, range_end.end);
+                                Expr::PatternTest {
+                                    subject: Box::new(subject.clone()),
+                                    pattern: Pattern::Range { lo, hi, span: pat_span },
+                                    span: pat_span,
+                                }
+                            } else {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    "expected an integer after `..` in a range arm".to_string(),
+                                    "range arms need both ends: `lo..hi -> body`".to_string(),
+                                    "write `0..59 -> { body }` for an inclusive range arm".to_string(),
+                                    Some(self.peek().span),
+                                ));
+                            }
+                        } else {
+                            let raw = self.expr_no_struct_lit()?;
+                            Self::switch_pipe_cond(subject.clone(), raw)
+                        }
+                    } else {
+                        let raw = self.expr_no_struct_lit()?;
+                        Self::switch_pipe_cond(subject.clone(), raw)
+                    };
                     self.expect(TokKind::Arrow, "after an `if` arm value or condition")?;
                     let body = self.arm_body()?;
                     let end = self
@@ -702,7 +748,7 @@ impl<'a> Parser<'a> {
                         .map(|t| t.span.end)
                         .unwrap_or(arm_start.end);
                     arms.push(SwitchArm {
-                        cond,
+                        cond: raw_head,
                         body,
                         span: Span::new(arm_start.start, end),
                     });
@@ -942,7 +988,40 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let arm_start = self.peek().span;
-                    let cond = self.expr_no_struct_lit()?;
+                    // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
+                    let cond = if let TokKind::Int(lo_val) = &self.peek().kind.clone() {
+                        if matches!(
+                            self.toks.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokKind::DotDot)
+                        ) {
+                            let lo = *lo_val;
+                            let range_start = self.bump().span; // consume lo
+                            self.bump(); // consume `..`
+                            if let TokKind::Int(hi_val) = &self.peek().kind.clone() {
+                                let hi = *hi_val;
+                                let range_end = self.bump().span; // consume hi
+                                let pat_span = Span::new(range_start.start, range_end.end);
+                                // Wrap as PatternTest so sema/codegen treat it uniformly.
+                                Expr::PatternTest {
+                                    subject: Box::new(subject.clone()),
+                                    pattern: Pattern::Range { lo, hi, span: pat_span },
+                                    span: pat_span,
+                                }
+                            } else {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    "expected an integer after `..` in a range arm".to_string(),
+                                    "range arms need both ends: `lo..hi -> body`".to_string(),
+                                    "write `0..59 -> { body }` for an inclusive range arm".to_string(),
+                                    Some(self.peek().span),
+                                ));
+                            }
+                        } else {
+                            self.expr_no_struct_lit()?
+                        }
+                    } else {
+                        self.expr_no_struct_lit()?
+                    };
                     self.expect(TokKind::Arrow, "after a `switch` arm's condition")?;
                     self.expect(TokKind::LBrace, "to open the arm's body")?;
                     let body = self.block_stmts();

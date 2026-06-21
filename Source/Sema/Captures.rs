@@ -664,11 +664,25 @@ pub(crate) fn stmt_collect_captures(
                             arm_bound.insert(binding.clone());
                         }
                         Pattern::Variant { bindings, .. } => {
-                            for b in bindings {
-                                arm_bound.insert(b.clone());
+                            for slot in bindings {
+                                if let crate::AST::PatSlot::Bind(b) = slot {
+                                    arm_bound.insert(b.clone());
+                                }
                             }
                         }
-                        Pattern::Absent(_) => {}
+                        Pattern::Absent(_) | Pattern::Range { .. } => {}
+                        Pattern::Or(alts, _) => {
+                            // Insert bindings from first alt (all alts bind same names).
+                            if let Some(first) = alts.first() {
+                                if let Pattern::Variant { bindings, .. } = first {
+                                    for slot in bindings {
+                                        if let crate::AST::PatSlot::Bind(b) = slot {
+                                            arm_bound.insert(b.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 block_collect_captures(&a.body, &mut arm_bound, read, mut_cap);

@@ -244,6 +244,32 @@ pub struct LoadedModule {
     pub items: Vec<Item>,
 }
 
+/// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TryConvert {
+    /// Error types match exactly — no conversion needed.
+    None,
+    /// The source error implements `Fallible`; call `.to_error()` (D-ERR2).
+    Fallible,
+    /// Declared `impl Source -> Target { … }` conversion (D-ERR-CONV).
+    /// Holds the mangled Rust function name emitted by codegen.
+    Typed(String),
+}
+
+/// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { body }` — declares
+/// how a `Source` error becomes a `Target` error; `?` applies it automatically.
+#[derive(Debug)]
+pub struct ErrorConvDef {
+    pub from_ty: String,
+    pub from_span: Span,
+    pub to_ty: String,
+    pub to_span: Span,
+    /// The single expression that is the conversion body.
+    /// `self` in the body refers to the source error value.
+    pub body: Vec<Stmt>,
+    pub body_span: Span,
+}
+
 #[derive(Debug)]
 pub enum Item {
     Func(Func),
@@ -270,6 +296,9 @@ pub enum Item {
     /// `module name { … }` (inline body). `body = None` means the items live in
     /// a separate file found by the loader. NOT a JetOS module (see `ModuleDecl`).
     CodeModule(CodeModule),
+    /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { … }` — typed
+    /// error conversion; `?` applies it when propagating Source into a Target context.
+    ErrorConv(ErrorConvDef),
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
@@ -684,11 +713,31 @@ pub struct Field {
     pub ty_span: Span,
 }
 
+/// D-PATW / D-PATR (ratified 2026-06-19): a single payload slot inside a variant pattern.
+/// `Active(_)` — wildcard (D-PATW); `Closing(500..599)` — range (D-PATR).
+#[derive(Debug, Clone)]
+pub enum PatSlot {
+    /// D-PATW: `_` in payload position — ignore this field, bind nothing.
+    Wildcard,
+    /// Regular name binding: `Active(id)`.
+    Bind(String),
+    /// D-PATR: `lo..hi` range in payload slot (inclusive). Field type must be Int or Char.
+    Range { lo: i64, hi: i64 },
+}
+
+impl PatSlot {
+    /// Returns the binding name if this is a `Bind` slot, else `None`.
+    pub fn as_bind(&self) -> Option<&str> {
+        if let PatSlot::Bind(s) = self { Some(s) } else { None }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Variant {
         variant: String,
-        bindings: Vec<String>,
+        /// D-PATW/D-PATR: slots can be wildcards or ranges, not just names.
+        bindings: Vec<PatSlot>,
         span: Span,
     },
     Present {
@@ -706,6 +755,12 @@ pub enum Pattern {
         binding: String,
         span: Span,
     },
+    /// D-PATR (ratified 2026-06-19): range pattern at arm-head level (`0..59 -> "F"`).
+    /// Subject must be Int or Char. Open types always still require `else`.
+    Range { lo: i64, hi: i64, span: Span },
+    /// D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
+    /// All alternatives must bind the same names at the same types (E0317).
+    Or(Vec<Pattern>, Span),
 }
 
 /// S74: a single name bound by a destructuring target.
@@ -766,8 +821,10 @@ impl Pattern {
             Pattern::Variant { span, .. }
             | Pattern::Present { span, .. }
             | Pattern::Ok { span, .. }
-            | Pattern::Err { span, .. } => *span,
+            | Pattern::Err { span, .. }
+            | Pattern::Range { span, .. } => *span,
             Pattern::Absent(span) => *span,
+            Pattern::Or(_, span) => *span,
         }
     }
 }
@@ -1181,9 +1238,9 @@ pub enum Expr {
     /// S34: `err(expr)` — failure value for `T ? E`.
     Err(Box<Expr>, Span),
     /// S7: postfix `?` — propagate a fallible value.
-    /// S7/S80: `expr?` — propagates failure. When `via_fallible` is true, the
-    /// error type implements `Fallible` and codegen must call `.to_error()`.
-    Try(Box<Expr>, Span, bool /* via_fallible */),
+    /// S7/S80/D-ERR-CONV: `expr?` — propagates failure.
+    /// `TryConvert` records how (if at all) the error type is converted.
+    Try(Box<Expr>, Span, TryConvert),
     /// S35: `value or fallback`.
     OrFallback {
         value: Box<Expr>,

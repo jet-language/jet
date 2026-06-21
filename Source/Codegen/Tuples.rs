@@ -345,7 +345,7 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
                 }
             }
             Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
-            | Item::CodeModule(_) | Item::Distinct(_) => {}
+            | Item::CodeModule(_) | Item::Distinct(_) | Item::ErrorConv(_) => {}
         }
     }
     out

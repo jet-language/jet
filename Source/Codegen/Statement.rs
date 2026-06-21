@@ -390,8 +390,15 @@ fn switch_arm_pattern_owned(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Patt
             subject: s,
             pattern,
             ..
-        } if pattern_subjects_match(s, subject) => Some(pattern.clone()),
-        Expr::Binary(crate::AST::BinOp::Eq, lhs, rhs, span)
+        } if pattern_subjects_match(s, subject) => {
+            // D-PATR: range patterns at arm-head go through mixed-switch (if/else chains),
+            // not the exhaustive Rust match path. Exclude them from "pattern arm" detection.
+            if matches!(pattern, Pattern::Range { .. }) {
+                return None;
+            }
+            Some(pattern.clone())
+        }
+        Expr::Binary(crate::AST::BinOp::Eq, lhs, rhs, _span)
             if pattern_subjects_match(lhs, subject) =>
         {
             if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
@@ -454,12 +461,19 @@ fn emit_pattern_match_switch(
             }
         })
     });
+    use crate::AST::PatSlot;
     let subject_ty = expr_jet_ty_with_cx(cx, subject, env);
     out.push_str(&format!("{}match {} {{\n", pad, subj));
     for arm in arms {
         if let Some(pattern) = switch_arm_pattern_owned(cx, &arm.cond, subject) {
             let pat = emit_match_pattern(cx, &pattern, enum_type.as_deref());
-            out.push_str(&format!("{}    {} => {{\n", pad, pat));
+            // D-PATR: check if any slot in the (possibly Or'd) variants has a Range → emit guard.
+            let range_guard = emit_range_guard(&pattern);
+            if let Some(guard) = range_guard {
+                out.push_str(&format!("{}    {} if {} => {{\n", pad, pat, guard));
+            } else {
+                out.push_str(&format!("{}    {} => {{\n", pad, pat));
+            }
             let mut body_env = env.clone();
             add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
             emit_stmts(cx, &arm.body, &mut body_env, out, indent + 2, false);
@@ -470,8 +484,38 @@ fn emit_pattern_match_switch(
         out.push_str(&format!("{}    _ => {{\n", pad));
         emit_stmts(cx, body, env, out, indent + 2, false);
         out.push_str(&format!("{}    }}\n", pad));
+    } else {
+        // I2 / I3: always emit a fallthrough so rustc never sees an incomplete match.
+        // Sema already verified exhaustiveness; this arm is dead but keeps rustc happy.
+        out.push_str(&format!(
+            "{}    _ => unreachable!(\"jet: exhaustiveness bug\"),\n",
+            pad
+        ));
     }
     out.push_str(&format!("{}}}\n", pad));
+}
+
+/// Build an `if guard` string for Range slots in a Variant (or Or) pattern.
+/// Returns `None` when no slot is a Range.
+fn emit_range_guard(pattern: &Pattern) -> Option<String> {
+    use crate::AST::PatSlot;
+    match pattern {
+        Pattern::Variant { bindings, .. } => {
+            let guards: Vec<String> = bindings.iter().enumerate().filter_map(|(i, s)| {
+                if let PatSlot::Range { lo, hi } = s {
+                    Some(format!("__jet_range_{} >= {} && __jet_range_{} <= {}", i, lo, i, hi))
+                } else {
+                    None
+                }
+            }).collect();
+            if guards.is_empty() { None } else { Some(guards.join(" && ")) }
+        }
+        Pattern::Or(alts, _) => {
+            // All alts bind same slots (validated by sema); use first alt's ranges.
+            alts.first().and_then(emit_range_guard)
+        }
+        _ => None,
+    }
 }
 
 fn emit_mixed_switch(
@@ -533,38 +577,33 @@ fn emit_switch_arm_cond(cx: &Cx, cond: &Expr, env: &HashMap<String, Slot>) -> St
 }
 
 pub(crate) fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) -> String {
+    use crate::AST::PatSlot;
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
         } => {
             let prefix = enum_type_prefix(cx, variant);
+            let rust_variant = variant_rust_name(variant);
             if bindings.is_empty() {
-                format!(
-                    "matches!({}, {}::{})",
-                    subject,
-                    prefix,
-                    variant_rust_name(variant)
-                )
-            } else if bindings.len() == 1 {
-                format!(
-                    "matches!({}, {}::{}({}))",
-                    subject,
-                    prefix,
-                    variant_rust_name(variant),
-                    mangle(&bindings[0])
-                )
+                format!("matches!({}, {}::{})", subject, prefix, rust_variant)
             } else {
-                format!(
-                    "matches!({}, {}::{} {{ {} }})",
-                    subject,
-                    prefix,
-                    variant_rust_name(variant),
-                    bindings
-                        .iter()
-                        .map(|n| format!("{}: {}", mangle(n), mangle(n)))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                // D-PATW: Wildcard → `_`; D-PATR: Range → named temp + guard (not in matches!).
+                // For matches! we use `_` for both wildcard and range slots.
+                let slot_pats: Vec<String> = bindings.iter().map(|s| match s {
+                    PatSlot::Bind(n) => mangle(n),
+                    PatSlot::Wildcard | PatSlot::Range { .. } => "_".to_string(),
+                }).collect();
+                if slot_pats.len() == 1 {
+                    format!("matches!({}, {}::{}({}))", subject, prefix, rust_variant, slot_pats[0])
+                } else {
+                    format!(
+                        "matches!({}, {}::{} {{ {} }})",
+                        subject, prefix, rust_variant,
+                        slot_pats.iter().enumerate()
+                            .map(|(i, p)| format!("f{}: {}", i, p))
+                            .collect::<Vec<_>>().join(", ")
+                    )
+                }
             }
         }
         Pattern::Present { binding, .. } => {
@@ -577,12 +616,45 @@ pub(crate) fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) ->
         Pattern::Err { binding, .. } => {
             format!("matches!({}, Err({}))", subject, mangle(binding))
         }
+        // D-PATR: range pattern at arm-head level → integer comparison.
+        // `subject` may be a plain ident (from emit_expr) — no dereference needed.
+        Pattern::Range { lo, hi, .. } => {
+            format!("({} >= {} && {} <= {})", subject, lo, subject, hi)
+        }
+        // D-PATO: or-pattern → matches!(s, A | B).
+        Pattern::Or(alts, _) => {
+            let enum_type = alts.iter().find_map(|a| {
+                if let Pattern::Variant { variant, .. } = a {
+                    cx.variant_owner.get(variant).cloned()
+                } else {
+                    None
+                }
+            });
+            let inner: Vec<String> = alts.iter()
+                .map(|a| emit_match_pattern(cx, a, enum_type.as_deref()))
+                .collect();
+            format!("matches!({}, {})", subject, inner.join(" | "))
+        }
     }
 }
 
 fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
-    let is_json = enum_type.map(is_json_type_name).unwrap_or(false);
-    let prefix = enum_type
+    use crate::AST::PatSlot;
+    // Resolve the enum type prefix from the pattern if not provided.
+    let resolved_type = enum_type.map(|t| t.to_string()).or_else(|| {
+        if let Pattern::Variant { variant, .. } = pattern {
+            cx.variant_owner.get(variant).cloned()
+        } else if let Pattern::Or(alts, _) = pattern {
+            alts.iter().find_map(|a| {
+                if let Pattern::Variant { variant, .. } = a { cx.variant_owner.get(variant).cloned() } else { None }
+            })
+        } else {
+            None
+        }
+    });
+    let etype = resolved_type.as_deref().or(enum_type);
+    let is_json = etype.map(is_json_type_name).unwrap_or(false);
+    let prefix = etype
         .map(|t| {
             if is_json_type_name(t) {
                 format!("{}jet_std::Json", cx.root_prefix)
@@ -602,33 +674,40 @@ fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> St
         Pattern::Variant {
             variant, bindings, ..
         } => {
+            // Check if any slot is a Range (needs a guard — handled in emit_pattern_match_switch).
             if bindings.is_empty() {
                 format!("{}::{}", prefix, vname(variant))
-            } else if bindings.len() == 1 {
-                format!(
-                    "{}::{}({})",
-                    prefix,
-                    vname(variant),
-                    mangle(&bindings[0])
-                )
             } else {
-                let fields = bindings
-                    .iter()
-                    .map(|b| format!("{}: {}", mangle(b), mangle(b)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "{}::{} {{ {} }}",
-                    prefix,
-                    vname(variant),
-                    fields
-                )
+                // Build per-slot Rust binding: Bind(n) → mangle(n), Wildcard → `_`, Range → temp name.
+                let slot_pats: Vec<String> = bindings.iter().enumerate().map(|(i, s)| match s {
+                    PatSlot::Bind(n) => mangle(n),
+                    PatSlot::Wildcard => "_".to_string(),
+                    PatSlot::Range { .. } => format!("__jet_range_{}", i),
+                }).collect();
+                if slot_pats.len() == 1 {
+                    format!("{}::{}({})", prefix, vname(variant), slot_pats[0])
+                } else {
+                    // Named-field struct variant: use positional f0, f1 ... names.
+                    let fields: Vec<String> = slot_pats.iter().enumerate()
+                        .map(|(i, p)| format!("f{i}: {p}"))
+                        .collect();
+                    format!("{}::{} {{ {} }}", prefix, vname(variant), fields.join(", "))
+                }
             }
         }
         Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
         Pattern::Absent(_) => "None".to_string(),
         Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
         Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
+        // D-PATR arm-head: range patterns go through mixed-switch; shouldn't appear here.
+        Pattern::Range { lo, hi, .. } => format!("_ if __jet_subject >= {} && __jet_subject <= {}", lo, hi),
+        // D-PATO: or-pattern in exhaustive match → `A(x) | B(x)`.
+        Pattern::Or(alts, _) => {
+            let pats: Vec<String> = alts.iter()
+                .map(|a| emit_match_pattern(cx, a, etype))
+                .collect();
+            pats.join(" | ")
+        }
     }
 }
 
@@ -983,19 +1062,31 @@ fn add_pattern_bindings(
         Pattern::Variant {
             variant, bindings, ..
         } => {
+            use crate::AST::PatSlot;
             let tys = variant_binding_types(cx, variant);
-            for (i, b) in bindings.iter().enumerate() {
-                let jet_ty = tys.as_ref().and_then(|ts| ts.get(i).cloned());
-                env.insert(
-                    b.clone(),
-                    Slot {
-                        rust_name: mangle(b),
-                        deref: false,
-                        jet_ty,
-                    },
-                );
+            for (i, slot) in bindings.iter().enumerate() {
+                if let PatSlot::Bind(b) = slot {
+                    let jet_ty = tys.as_ref().and_then(|ts| ts.get(i).cloned());
+                    env.insert(
+                        b.clone(),
+                        Slot {
+                            rust_name: mangle(b),
+                            deref: false,
+                            jet_ty,
+                        },
+                    );
+                }
+                // Wildcard and Range slots bind nothing.
             }
         }
+        // D-PATO: use first alt's bindings (all alts bind same names — validated by sema).
+        Pattern::Or(alts, _) => {
+            if let Some(first) = alts.first() {
+                add_pattern_bindings(cx, first, env, subject_ty);
+            }
+        }
+        // D-PATR arm-head: range patterns bind nothing.
+        Pattern::Range { .. } => {}
         Pattern::Absent(_) => {}
         Pattern::Ok { binding, .. } => {
             let ok_ty = match subject_ty {
@@ -1134,38 +1225,38 @@ pub(crate) fn emit_for_in(
 }
 
 fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
+    use crate::AST::PatSlot;
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
         } => {
             let prefix = enum_type_prefix(cx, variant);
+            let rv = variant_rust_name(variant);
             if bindings.is_empty() {
-                format!("{}::{}", prefix, variant_rust_name(variant))
-            } else if bindings.len() == 1 {
-                format!(
-                    "{}::{}({})",
-                    prefix,
-                    variant_rust_name(variant),
-                    mangle(&bindings[0])
-                )
+                format!("{}::{}", prefix, rv)
             } else {
-                let fields = bindings
-                    .iter()
-                    .map(|b| format!("{}: {}", mangle(b), mangle(b)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!(
-                    "{}::{} {{ {} }}",
-                    prefix,
-                    variant_rust_name(variant),
-                    fields
-                )
+                let slot_pats: Vec<String> = bindings.iter().enumerate().map(|(i, s)| match s {
+                    PatSlot::Bind(n) => mangle(n),
+                    PatSlot::Wildcard => "_".to_string(),
+                    PatSlot::Range { .. } => format!("__jet_range_{}", i),
+                }).collect();
+                if slot_pats.len() == 1 {
+                    format!("{}::{}({})", prefix, rv, slot_pats[0])
+                } else {
+                    let fields: Vec<String> = slot_pats.iter().enumerate()
+                        .map(|(i, p)| format!("f{i}: {p}"))
+                        .collect();
+                    format!("{}::{} {{ {} }}", prefix, rv, fields.join(", "))
+                }
             }
         }
         Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
         Pattern::Absent(_) => "None".to_string(),
         Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
         Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
+        // Or/Range in if-let position: fall back to a safe default.
+        Pattern::Or(alts, _) => alts.first().map(|a| emit_if_let_pattern(cx, a)).unwrap_or_default(),
+        Pattern::Range { .. } => "_".to_string(),
     }
 }
 

@@ -1,7 +1,7 @@
 use super::*;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, Binding, ElseBranch,
-    Expr, ForKind, IfStmt, IndexKind, LValue, Stmt, Type,
+    Expr, ForKind, IfStmt, IndexKind, LValue, Pattern, Stmt, Type,
 };
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
@@ -385,16 +385,25 @@ impl<'a> Checker<'a> {
         // D-L0201 liveness gate: before checking each statement, record the
         // tail of the current block (statements that follow it).  The lint
         // helper `is_name_live_after` reads this to decide whether the cloned
-        // value is dead at this point.  We save/restore so nested `check_block`
-        // calls don't clobber the outer frame.
+        // value is dead at this point.  We push the previous frame onto the
+        // liveness_frames stack so `is_name_live_after` can walk enclosing
+        // scopes; on exit we pop and restore.
         let saved_ptr = self.stmt_tail_ptr;
         let saved_len = self.stmt_tail_len;
+        // Push the caller's frame as an enclosing scope (non-null only).
+        let pushed_frame = !saved_ptr.is_null();
+        if pushed_frame {
+            self.liveness_frames.push((saved_ptr, saved_len));
+        }
         for i in 0..stmts.len() {
             // tail = stmts[i+1..], i.e. the statements after index i.
             let tail = &stmts[i + 1..];
             self.stmt_tail_ptr = tail.as_ptr();
             self.stmt_tail_len = tail.len();
             self.check_stmt(&mut stmts[i]);
+        }
+        if pushed_frame {
+            self.liveness_frames.pop();
         }
         self.stmt_tail_ptr = saved_ptr;
         self.stmt_tail_len = saved_len;
@@ -409,23 +418,38 @@ impl<'a> Checker<'a> {
     /// When false we can't prove liveness from this frame, so the clone may be
     /// wasteful and L0201 fires.
     ///
-    /// Conservative by design: it only inspects the current block's tail
-    /// (set by `check_block`).  Nested scopes (if/loop bodies) count as using
-    /// the name when they reference it, so the helper never claims "dead" while
-    /// the name might still be read.
+    /// Checks the current block's tail AND all enclosing block tails pushed
+    /// by `check_block`, so a clone inside a nested `if` body is not flagged
+    /// when the value is used again in the enclosing block after the `if`.
     pub(crate) fn is_name_live_after(&self, name: &str) -> bool {
-        if self.stmt_tail_ptr.is_null() || self.stmt_tail_len == 0 {
-            return false;
+        // Check the innermost block's tail first.
+        if !self.stmt_tail_ptr.is_null() && self.stmt_tail_len > 0 {
+            // SAFETY: stmt_tail_ptr + stmt_tail_len describe a valid slice that was
+            // set from `&stmts[i+1..]` just before the current check_stmt call.
+            // The slice's data lives in the Program AST, which is `&mut Program`
+            // at the call site and outlives the Checker.  We only read (no writes)
+            // and only during `check_stmt`, so no aliasing issues.
+            let tail = unsafe {
+                std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len)
+            };
+            if tail.iter().any(|s| stmt_refs_name(s, name)) {
+                return true;
+            }
         }
-        // SAFETY: stmt_tail_ptr + stmt_tail_len describe a valid slice that was
-        // set from `&stmts[i+1..]` just before the current check_stmt call.
-        // The slice's data lives in the Program AST, which is `&mut Program`
-        // at the call site and outlives the Checker.  We only read (no writes)
-        // and only during `check_stmt`, so no aliasing issues.
-        let tail = unsafe {
-            std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len)
-        };
-        tail.iter().any(|s| stmt_refs_name(s, name))
+        // Walk enclosing frames (innermost pushed last) — if the name appears
+        // in any enclosing block after the point this nested block was entered,
+        // the clone is necessary.
+        for &(ptr, len) in self.liveness_frames.iter().rev() {
+            if !ptr.is_null() && len > 0 {
+                // SAFETY: same as above — each frame was set from a block slice
+                // in the Program AST that outlives the Checker.
+                let frame = unsafe { std::slice::from_raw_parts(ptr, len) };
+                if frame.iter().any(|s| stmt_refs_name(s, name)) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Check two alternative branches with independent move states, then
@@ -1217,10 +1241,12 @@ impl<'a> Checker<'a> {
             self.in_dropped_comptime_arm = true;
             self.check_block(dropped, true);
             self.in_dropped_comptime_arm = prev_flag;
-            // Keep only unknown-name diagnostics (E0107) from the dropped arm.
+            // D-WHEN2: keep name-resolution diagnostics from the dropped arm
+            // (unknown variable E0107, unknown function E0102) so typos still
+            // teach, but drop all type-checking diagnostics.
             let dropped_diags: Vec<Diagnostic> = self.diags.drain(diag_before..).collect();
             for d in dropped_diags {
-                if d.code == "E0107" {
+                if d.code == "E0107" || d.code == "E0102" {
                     self.diags.push(d);
                 }
             }
@@ -1316,7 +1342,15 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let pspan = pattern.span();
-                    if let Some(variant) = pattern_variant_name(&pattern) {
+                    // D-PATO: or-patterns cover multiple variants; insert all of them.
+                    let covered_names: Vec<String> = if let Pattern::Or(alts, _) = &pattern {
+                        alts.iter().filter_map(pattern_variant_name).collect()
+                    } else if let Some(v) = pattern_variant_name(&pattern) {
+                        vec![v]
+                    } else {
+                        Vec::new()
+                    };
+                    for variant in covered_names {
                         if covered.contains(&variant) {
                             self.diags.push(Diagnostic::lint(
                                 "L0301",
@@ -1392,7 +1426,33 @@ impl<'a> Checker<'a> {
         }
         if all_pattern {
             if let Some(st) = subj_ty {
-                if let Some(missing) = missing_pattern_coverage(&st, &covered, self.registry) {
+                // D-PATR: Int/Char are open scalar types — range arms can never
+                // prove totality, so an `else` (or wildcard) is always required.
+                // `missing_pattern_coverage` returns None for Int/Char (infinite
+                // domain), so we detect this case separately.
+                let open_scalar_no_else = matches!(st, Type::Int | Type::Char)
+                    && else_body.is_none();
+                if open_scalar_no_else {
+                    self.diags.push(Diagnostic::error(
+                        "E0307",
+                        format!(
+                            "this `{}` over `{}` has no `{}` arm — range arms can't cover every value",
+                            Syntax::KW_IF,
+                            st.show(),
+                            Syntax::KW_ELSE,
+                        ),
+                        format!(
+                            "`{}` has infinitely many values; range arms only cover a subset (D-PATR)",
+                            st.show()
+                        ),
+                        format!(
+                            "add `{} {} {{ … }}` to handle values not matched by any range",
+                            Syntax::KW_ELSE,
+                            Syntax::OP_ARM_ARROW
+                        ),
+                        Some(span),
+                    ));
+                } else if let Some(missing) = missing_pattern_coverage(&st, &covered, self.registry) {
                     if else_body.is_none() {
                         let mut diag = Diagnostic::error(
                             "E0307",

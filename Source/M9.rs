@@ -25,6 +25,10 @@ pub struct M9Registry {
     pub local_traits: HashSet<String>,
     pub auto_printable: HashSet<String>,
     pub auto_equatable: HashSet<String>,
+    /// D-ERR-CONV: registered `(from_ty, to_ty)` error conversions.
+    /// Maps (source_type_name, target_type_name) → the span where it was declared.
+    /// Used for duplicate detection and orphan-rule checking.
+    pub error_conversions: HashMap<(String, String), Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +60,9 @@ impl M9Registry {
                     }
                 }
                 Item::Impl(i) => self.register_impl(i, diags),
+                Item::ErrorConv(ec) => {
+                    self.register_error_conv(&ec.from_ty, &ec.to_ty, ec.from_span, diags);
+                }
                 _ => {}
             }
         }
@@ -326,6 +333,63 @@ impl M9Registry {
 
     pub fn instantiate_type(&self, ty: &Type, subst: &HashMap<String, Type>) -> Type {
         substitute_type(ty, subst)
+    }
+
+    /// D-ERR-CONV: register a typed error conversion (Source → Target).
+    /// Returns `Err(prev_span)` if a conversion for this pair already exists (E2405).
+    /// Checks the orphan rule: at least one of `from_ty`/`to_ty` must be local.
+    pub fn register_error_conv(
+        &mut self,
+        from_ty: &str,
+        to_ty: &str,
+        span: Span,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        // Orphan rule (S28 analogue): at least one side must be defined in this program.
+        let from_local = self.local_types.contains(from_ty);
+        let to_local = self.local_types.contains(to_ty);
+        if !from_local && !to_local {
+            diags.push(Diagnostic::error(
+                "E2406",
+                format!(
+                    "can't declare `impl {} -> {}` — neither type is defined in this program",
+                    from_ty, to_ty
+                ),
+                "error conversions obey the same orphan rule as trait impls (S28): \
+                 at least one of `Source` or `Target` must be a type you defined"
+                    .to_string(),
+                format!(
+                    "define one of these types locally, or use `{}` (D-ERR2) if you don't own either type",
+                    crate::Syntax::TRAIT_FALLIBLE
+                ),
+                Some(span),
+            ));
+            return;
+        }
+        let key = (from_ty.to_string(), to_ty.to_string());
+        if let Some(prev) = self.error_conversions.get(&key) {
+            let prev = *prev;
+            diags.push(Diagnostic::error(
+                "E2405",
+                format!(
+                    "duplicate error conversion: `impl {} -> {}` is already declared",
+                    from_ty, to_ty
+                ),
+                "there can be at most one declared way to convert a `Source` error into a `Target`"
+                    .to_string(),
+                "remove one of the two `impl … -> …` blocks".to_string(),
+                Some(span),
+            ));
+            let _ = prev; // the previous span could be added to the note in a future diagnostic upgrade
+            return;
+        }
+        self.error_conversions.insert(key, span);
+    }
+
+    /// D-ERR-CONV: returns true if a declared `impl from_ty -> to_ty` exists.
+    pub fn has_error_conv(&self, from_ty: &str, to_ty: &str) -> bool {
+        self.error_conversions
+            .contains_key(&(from_ty.to_string(), to_ty.to_string()))
     }
 }
 

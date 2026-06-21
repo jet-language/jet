@@ -469,6 +469,7 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_pattern(&mut self, pat: &Pattern) {
+        use crate::AST::PatSlot;
         match pat {
             Pattern::Variant {
                 variant, bindings, ..
@@ -476,11 +477,19 @@ impl<'a> Fmt<'a> {
                 self.write(variant);
                 if !bindings.is_empty() {
                     self.write("(");
-                    for (i, b) in bindings.iter().enumerate() {
+                    for (i, slot) in bindings.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
                         }
-                        self.write(b);
+                        match slot {
+                            PatSlot::Bind(name) => self.write(name),
+                            PatSlot::Wildcard => self.write("_"),
+                            PatSlot::Range { lo, hi } => {
+                                self.write(&lo.to_string());
+                                self.write("..");
+                                self.write(&hi.to_string());
+                            }
+                        }
                     }
                     self.write(")");
                 }
@@ -500,6 +509,21 @@ impl<'a> Fmt<'a> {
                 self.write("err(");
                 self.write(binding);
                 self.write(")");
+            }
+            // D-PATR: range pattern at arm-head level.
+            Pattern::Range { lo, hi, .. } => {
+                self.write(&lo.to_string());
+                self.write("..");
+                self.write(&hi.to_string());
+            }
+            // D-PATO: or-pattern `A(x) | B(x)`.
+            Pattern::Or(alts, _) => {
+                for (i, alt) in alts.iter().enumerate() {
+                    if i > 0 {
+                        self.write(" | ");
+                    }
+                    self.fmt_pattern(alt);
+                }
             }
         }
     }

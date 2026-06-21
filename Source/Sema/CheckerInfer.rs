@@ -2,7 +2,7 @@ use super::*;
 use crate::AST::{
     AccessConvention, BinOp, Call, EnumLitArg,
     Expr, IndexKind, Lambda, LambdaBody,
-    OrFallback, Pattern, Stmt, StrPart, Type,
+    OrFallback, Pattern, Stmt, StrPart, TryConvert, Type,
     UnOp,
 };
 use crate::Collections::{self, is_map_key_type};
@@ -448,7 +448,7 @@ impl<'a> Checker<'a> {
             }
             Expr::Ok(inner, span) => self.infer_ok(inner, *span),
             Expr::Err(inner, span) => self.infer_err(inner, *span),
-            Expr::Try(inner, span, via_fallible) => self.infer_try(inner, *span, via_fallible),
+            Expr::Try(inner, span, convert) => self.infer_try(inner, *span, convert),
             Expr::OrFallback {
                 value,
                 fallback,
@@ -542,7 +542,7 @@ impl<'a> Checker<'a> {
         None
     }
 
-    pub(crate) fn infer_try(&mut self, inner: &mut Box<Expr>, span: Span, via_fallible: &mut bool) -> Option<Type> {
+    pub(crate) fn infer_try(&mut self, inner: &mut Box<Expr>, span: Span, convert: &mut TryConvert) -> Option<Type> {
         let inner_ty = self.infer(inner)?;
         match inner_ty {
             Type::Result { ok, err } => {
@@ -562,13 +562,22 @@ impl<'a> Checker<'a> {
                         Some((*ok).clone())
                     }
                     Type::Result { err: ret_err, .. } => {
+                        let err_type_name = err.name();
+                        let ret_err_name = ret_err.name();
+
+                        // D-ERR-CONV: check if a declared `impl Source -> Target` conversion exists.
+                        if self.m9.has_error_conv(&err_type_name, &ret_err_name) {
+                            let fn_name = error_conv_fn_name(&err_type_name, &ret_err_name);
+                            *convert = TryConvert::Typed(fn_name);
+                            return Some((*ok).clone());
+                        }
+
                         // S80/D-LIB3: check if the error type implements `Fallible`
                         // and the return error is the default `Error`.
-                        let err_type_name = err.name();
                         if is_default_error(ret_err) {
                             if self.m9.implements_trait(&err_type_name, Syntax::TRAIT_FALLIBLE) {
                                 // Mark the Try node for Fallible conversion in codegen.
-                                *via_fallible = true;
+                                *convert = TryConvert::Fallible;
                                 return Some((*ok).clone());
                             }
                             // E2402: return is `Error` but the error type has no Fallible impl.
@@ -597,19 +606,21 @@ impl<'a> Checker<'a> {
                             ));
                             return None;
                         }
+                        // E2404: no declared conversion between these two typed error types.
                         self.diags.push(Diagnostic::error(
-                            "E0403",
+                            "E2404",
                             format!(
-                                "`{}` can't pass a {} error into a function that returns {}",
-                                Syntax::OP_TRY_SUFFIX,
-                                err.show(),
-                                ret_err.show()
+                                "`?` can't turn a `{}` into a `{}` here",
+                                err_type_name, ret_err_name
                             ),
-                            "the error type must match exactly — there's no conversion in v1"
-                                .to_string(),
                             format!(
-                                "handle the failure here with `== {}`, or change the return type to match",
-                                Syntax::LIT_ERR
+                                "`?` only changes an error's type when you've declared how; \
+                                 there's no declared way to turn `{}` into `{}`",
+                                err_type_name, ret_err_name
+                            ),
+                            format!(
+                                "add `impl {} -> {} {{ … }}` before this function",
+                                err_type_name, ret_err_name
                             ),
                             Some(span),
                         ));
@@ -3287,3 +3298,4 @@ impl<'a> Checker<'a> {
         }))
     }
 }
+

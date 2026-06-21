@@ -327,7 +327,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             Item::CModule(cm) => emit_c_module(cm, out),
             Item::Distinct(d) => emit_distinct(cx, d, out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_) => {}
         }
     }
     for item in items {
@@ -350,6 +350,10 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
                 } else {
                     emit_type_impl(cx, &i.type_name, &[], &i.methods, out);
                 }
+            }
+            // D-ERR-CONV: emit the conversion function.
+            Item::ErrorConv(ec) => {
+                emit_error_conv(cx, ec, out);
             }
             _ => {}
         }

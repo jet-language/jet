@@ -934,11 +934,24 @@ impl<'a> Checker<'a> {
                             Some(span),
                         ));
                     }
-                    return bindings
-                        .iter()
-                        .zip(expected.iter())
-                        .map(|(b, t)| (b.clone(), t.clone()))
-                        .collect();
+                    // JSON pattern: only Bind slots generate bindings; wildcard/range are invalid here.
+                    let mut result = HashMap::new();
+                    for (slot, ty) in bindings.iter().zip(expected.iter()) {
+                        match slot {
+                            crate::AST::PatSlot::Bind(name) => { result.insert(name.clone(), ty.clone()); }
+                            crate::AST::PatSlot::Wildcard => {}
+                            crate::AST::PatSlot::Range { .. } => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0316",
+                                    "range patterns are not supported in JSON variant payloads".to_string(),
+                                    "JSON variants have flexible payload types; use a binding and check at runtime".to_string(),
+                                    "write a name like `n` instead of a range".to_string(),
+                                    Some(span),
+                                ));
+                            }
+                        }
+                    }
+                    return result;
                 }
                 let Some(variants) = self.resolve_enum_variants_cloned(enum_name) else {
                     self.diags.push(Diagnostic::error(
@@ -983,11 +996,38 @@ impl<'a> Checker<'a> {
                         Some(span),
                     ));
                 }
-                bindings
-                    .iter()
-                    .zip(expected.iter())
-                    .map(|(b, t)| (b.clone(), t.clone()))
-                    .collect()
+                // Build bindings: Bind(name) → insert; Wildcard → skip; Range → validate type + skip.
+                let mut result = HashMap::new();
+                for (slot, ty) in bindings.iter().zip(expected.iter()) {
+                    match slot {
+                        crate::AST::PatSlot::Bind(name) => { result.insert(name.clone(), ty.clone()); }
+                        crate::AST::PatSlot::Wildcard => {}
+                        crate::AST::PatSlot::Range { lo, hi } => {
+                            // D-PATR: field must be Int or Char; lo must be <= hi.
+                            if !matches!(ty, Type::Int | Type::Char) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0316",
+                                    format!(
+                                        "range pattern `{}..{}` used on a non-integer field (type `{}`)",
+                                        lo, hi, ty.show()
+                                    ),
+                                    "range patterns only work on `Int` or `Char` payload fields".to_string(),
+                                    "use a binding name and add a condition in the arm body instead".to_string(),
+                                    Some(span),
+                                ));
+                            } else if lo > hi {
+                                self.diags.push(Diagnostic::error(
+                                    "E0316",
+                                    format!("range pattern `{}..{}` is empty — lower bound exceeds upper bound", lo, hi),
+                                    "the lower end of a range must be ≤ the upper end".to_string(),
+                                    format!("swap to `{}..{}`", hi, lo),
+                                    Some(span),
+                                ));
+                            }
+                        }
+                    }
+                }
+                result
             }
             (_, Pattern::Variant { variant, .. }) => {
                 self.diags.push(Diagnostic::error(
@@ -1033,6 +1073,54 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
                 HashMap::new()
+            }
+            // D-PATR (ratified 2026-06-19): arm-head range pattern.
+            (_, Pattern::Range { lo, hi, .. }) => {
+                if !matches!(subject_ty, Type::Int | Type::Char) {
+                    self.diags.push(Diagnostic::error(
+                        "E0316",
+                        format!(
+                            "range pattern `{}..{}` used on `{}` — only `Int` or `Char` values support range patterns",
+                            lo, hi, subject_ty.show()
+                        ),
+                        "range arms match a subject that is an integer or character".to_string(),
+                        "use a regular condition (`subject >= lo && subject <= hi`) for other types".to_string(),
+                        Some(span),
+                    ));
+                } else if lo > hi {
+                    self.diags.push(Diagnostic::error(
+                        "E0316",
+                        format!("range pattern `{}..{}` is empty — lower bound exceeds upper bound", lo, hi),
+                        "the lower end of a range must be ≤ the upper end".to_string(),
+                        format!("swap to `{}..{}`", hi, lo),
+                        Some(span),
+                    ));
+                }
+                HashMap::new() // range patterns bind nothing at arm-head level
+            }
+            // D-PATO (ratified 2026-06-19): structural or-pattern `A(x) | B(x)`.
+            (_, Pattern::Or(alts, _)) => {
+                if alts.is_empty() {
+                    return HashMap::new();
+                }
+                // Check each alternative and collect its bindings.
+                let first_bindings = self.validate_pattern(subject_ty, &alts[0], span);
+                for alt in &alts[1..] {
+                    let alt_bindings = self.validate_pattern(subject_ty, alt, span);
+                    // E0317: alternatives must bind the same names at the same types.
+                    let names_match = first_bindings.len() == alt_bindings.len()
+                        && first_bindings.iter().all(|(k, v)| alt_bindings.get(k) == Some(v));
+                    if !names_match {
+                        self.diags.push(Diagnostic::error(
+                            "E0317",
+                            "or-pattern alternatives bind different names or types".to_string(),
+                            "every arm of `A(x) | B(y)` must bind the same names at the same types".to_string(),
+                            "rename bindings so both alternatives bind identical names".to_string(),
+                            Some(span),
+                        ));
+                    }
+                }
+                first_bindings
             }
             _ => HashMap::new(),
         }
