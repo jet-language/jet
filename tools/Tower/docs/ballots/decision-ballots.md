@@ -2613,6 +2613,8 @@ Sources (prior-art verification):
 
 ### D-CTIO1 — Gated build-time I/O at comptime (rec B)
 
+> **Update (verified 2026-06-21): `embed_file` is already implemented and working** — `comptime x = embed_file("path")` reads the file at compile time and bakes it in (eval_embed_file, E0955, purity-allowed). So this decision is NARROWER than framed below: Option A’s “embed_file unimplemented” is moot. Live questions: (1) add `embed_bytes` for binary alongside the working `embed_file`? (2) harden path-escape rules (literal-path, no `..`)? (3) allow broader build-time I/O beyond embed_file (rec: **no**). Option B is largely shipped for text — ratify `embed_bytes` + the path rules.
+
 Jet's comptime engine is already ratified and partly shipped: S26 (the comptime law — value-only, no macros, no comptime types), S57 (`comptime x = …` bindings), S60 (Layer 2 — compile-time pure evaluation + data embedding), D-PURE2 (no ambient I/O; `embed_file` the one named exception), D-WHEN1/2 (`comptime if`, shipped). So this ballot does **not** re-decide comptime. The one unresolved question: **should Jet permit build-time I/O beyond `embed_file`?** Jai's `#run` allows full filesystem access at compile time — a supply-chain risk Jet's S26 law was written to refuse. This card settles the policy boundary.
 
 **User story.** Dana is shipping a graphics tool. She wants a WGSL shader (and a root cert, a JSON schema) baked into the binary as a constant at compile time — without a separate build script, and without opening `jet build` to arbitrary code execution from a dependency.
