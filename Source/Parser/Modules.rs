@@ -90,7 +90,9 @@ impl<'a> Parser<'a> {
                     | TokKind::KwModule
                     | TokKind::KwTrait
                     | TokKind::KwComptime
-                    | TokKind::KwTest
+                    // D-CASING1 follow-on: `#Test`/`#Pure`/`#Unsafe` markers start
+                    // with `#` inside a code-module body.
+                    | TokKind::Hash
                     | TokKind::RBrace => true,
                     // JetOS body starters: `sources:`, `imports:`, or `ident .`
                     TokKind::Ident(n)
@@ -173,6 +175,8 @@ impl<'a> Parser<'a> {
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwFn => self.func().map(Item::Func),
+            // S60 (D-CASING1 follow-on): `#Pure fn` inside a module body.
+            TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
             TokKind::KwPub => match self.peek2().kind {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -196,7 +200,7 @@ impl<'a> Parser<'a> {
             TokKind::KwImpl => self.impl_or_error_conv(),
             TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
-            TokKind::KwTest => self.test_def().map(Item::Test),
+            TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
             TokKind::KwUse => {
                 let span = self.peek().span;
                 self.sync_stmt();

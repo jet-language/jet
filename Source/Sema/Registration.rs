@@ -300,9 +300,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         CompileMode::Test if tests.is_empty() => {
             diags.push(Diagnostic::error(
                 "E0601",
-                format!("no `{}` blocks found to run", Syntax::KW_TEST),
+                format!("no `#{}` blocks found to run", Syntax::KW_TEST),
                 format!(
-                    "add at least one top-level block: {} \"describes what this checks\" {{ ... }}",
+                    "add at least one top-level block: #{} \"describes what this checks\" {{ ... }}",
                     Syntax::KW_TEST
                 ),
                 format!(

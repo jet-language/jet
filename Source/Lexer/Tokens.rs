@@ -49,11 +49,8 @@ pub enum TokKind {
     KwUse,
     KwExtern,
     KwModule,
-    KwTest,
-    /// D-TOOL2 (E2-M11): typed hole `todo`.
-    KwTodo,
-    /// S60 (E2-M16): `pure fn` checked modifier.
-    KwPure,
+    // D-CASING1 follow-on: `Test`/`Todo`/`Pure` are no longer keyword tokens —
+    // they are `#`-markers recognized as `#` + ident in the parser.
     Ident(String),
     Str(Vec<StrTokPart>),
     Int(i64),
@@ -190,9 +187,6 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwUse => format!("the keyword `{}`", Syntax::KW_USE),
         TokKind::KwExtern => format!("the keyword `{}`", Syntax::KW_EXTERN),
         TokKind::KwModule => format!("the keyword `{}`", Syntax::KW_MODULE),
-        TokKind::KwTest => format!("the keyword `{}`", Syntax::KW_TEST),
-        TokKind::KwTodo => format!("the keyword `{}`", Syntax::KW_TODO),
-        TokKind::KwPure => format!("the keyword `{}`", Syntax::KW_PURE),
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
         TokKind::Int(_) => "a number".to_string(),

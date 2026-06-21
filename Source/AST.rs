@@ -282,7 +282,7 @@ pub enum Item {
     Trait(TraitDef),
     Impl(ImplDef),
     Const(ConstDef),
-    /// S43 (M6): `test "name" { … }` — only at file top level.
+    /// S43 (M6): `#Test "name" { … }` — only at file top level.
     Test(TestDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
     ExternRust(ExternRustBlock),
@@ -1225,7 +1225,7 @@ pub enum Expr {
     Present(Box<Expr>, Span),
     /// S32: bare `null` — absent optional.
     Absent(Span),
-    /// D-TOOL2 (E2-M11): `todo` typed hole. Compiles anywhere; panics at
+    /// D-TOOL2 (E2-M11; D-CASING1): `#Todo` typed hole. Compiles anywhere; panics at
     /// runtime with file, line, and the expected type (filled in by sema).
     Todo {
         span: Span,

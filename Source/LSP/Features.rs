@@ -282,7 +282,6 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwComptime
         | TokKind::KwUse
         | TokKind::KwExtern
-        | TokKind::KwTest
         | TokKind::KwLoop
         | TokKind::KwUnsafe
         | TokKind::KwMutate
@@ -294,8 +293,6 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwOk
         | TokKind::KwErr
         | TokKind::KwIt
-        | TokKind::KwPure
-        | TokKind::KwTodo
         | TokKind::KwModule => Some((st::KEYWORD, 0)),
 
         TokKind::KwTrue | TokKind::KwFalse => Some((st::KEYWORD, sm::READONLY)),

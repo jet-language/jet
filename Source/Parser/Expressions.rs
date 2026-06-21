@@ -760,11 +760,37 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 return Ok(Expr::Absent(span));
             }
-            TokKind::KwTodo => {
-                // D-TOOL2 (E2-M11): `todo` typed hole — valid in any expression
-                // position; sema fills `expected_type`; codegen emits a panic.
-                let span = self.bump().span;
+            TokKind::Hash
+                if matches!(
+                    self.toks.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokKind::Ident(n)) if n == Syntax::KW_TODO
+                ) =>
+            {
+                // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed hole — valid in any
+                // expression position; sema fills `expected_type`; codegen emits a
+                // panic.
+                let start = self.bump().span.start; // `#`
+                let span = Span::new(start, self.bump().span.end); // `Todo`
                 return Ok(Expr::Todo { span, expected_type: None });
+            }
+            TokKind::Ident(name) if name == Syntax::FOREIGN_TODO => {
+                // S14: bare lowercase `todo` is the retired spelling (E0054).
+                let t = self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0054",
+                    format!(
+                        "the typed hole is written `#{}`, not bare `{}`",
+                        Syntax::KW_TODO,
+                        Syntax::FOREIGN_TODO
+                    ),
+                    format!(
+                        "`#{}` is a marker, like every other `#`-tag, so an unfinished spot draws the eye",
+                        Syntax::KW_TODO
+                    ),
+                    format!("write: #{}", Syntax::KW_TODO),
+                    Some(t.span),
+                ));
+                return Ok(Expr::Todo { span: t.span, expected_type: None });
             }
             TokKind::Ident(name)
                 if matches!(name.as_str(), Syntax::FOREIGN_THROW | Syntax::FOREIGN_RAISE) =>

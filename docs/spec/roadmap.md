@@ -128,7 +128,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M13** — expert low-level tier: `use core.mem`, `#Audit`/`#Unsafe` gates, `Ptr<T>`, volatile; I1 amendment (D-LL1).
 - **E2-M14** — C FFI: `@bindgen`/`@extern module`, `use c.<lib>`, link discovery.
 - **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
-- **E2-M16** — pure evaluation + layer 3: `pure fn`, `jet eval --pure`, package recipes, sandboxed builds.
+- **E2-M16** — pure evaluation + layer 3: `#Pure fn`, `jet eval --pure`, package recipes, sandboxed builds.
 - **E2-M17** — Epoch 2 GA: six showcase programs, diagnostics audit, size/perf budgets.
 - **E2-M18** — REPL: `jet repl`, interpreter-backed, 16 transcript tests.
 

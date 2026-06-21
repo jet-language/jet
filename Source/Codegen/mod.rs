@@ -158,7 +158,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
-/// every `test "…" { }` block (M6 phase 2).
+/// every `#Test "…" { }` block (M6 phase 2).
 pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     let tests: Vec<&TestDef> = prog
         .items

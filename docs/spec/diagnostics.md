@@ -110,6 +110,9 @@ before continuing.
 | E0049 | parse | teaching: `.0` field access → named members (S73, D-SG7) |
 | E0050 | parse | teaching: `while` → `loop cond { }` (S19-amend) |
 | E0051 | parse | teaching: `for x in` → `loop x in` (S19-amend) |
+| E0052 | parse | teaching: bare `test "name" { }` → `#Test "name" { }` (D-CASING1 follow-on) |
+| E0053 | parse | teaching: bare `pure fn` → `#Pure fn` (D-CASING1 follow-on) |
+| E0054 | parse | teaching: bare `todo` → `#Todo` (D-CASING1 follow-on) |
 | E0984 | parse | teaching: `when` → `if subject { arm -> body }` (D-IF1) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name ::`/`name :=` sigil (D-BIND1) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -186,7 +189,7 @@ before continuing.
 | E0505 | sema  | wrong index/key type or bad slice target  |
 | E0507 | sema  | collection changed while `for` reads it   |
 | L0501 | sema  | slice copy inside a loop (lint)           |
-| E0601 | sema  | `test` block in wrong position / none found |
+| E0601 | sema  | `#Test` block in wrong position / none found |
 | E0602 | jet   | `use` path escapes the project (`..` or outside entry tree) |
 | E0603 | jet   | `use` target file / module not found |
 | E0604 | jet   | `use` cycle (lists the loop) |
@@ -221,7 +224,7 @@ before continuing.
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
-| E3401 | sema  | impure call inside a `pure fn` / pure-eval context (call-trace path) |
+| E3401 | sema  | impure call inside a `#Pure fn` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
@@ -511,8 +514,8 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2901 | Doctest output mismatch. Expected: `{expected}` Got: `{actual}` | The example in the doc comment claims a different result from what the code produces. Docs cannot lie (D-TEST4/I5 generalized to user code). | Run `jet test --update-snapshots` to update the golden output, or fix the code to match the claimed output. |
-| E2902 | `todo` at `{file}:{line}` — expected `{type}` | A `todo` typed hole was reached at runtime. The hole compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `todo` with a real implementation. |
-| L2901 | This `test` block has no assertions. | A test with no `require`, `require_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
+| E2902 | `#Todo` at `{file}:{line}` — expected `{type}` | A `#Todo` typed hole was reached at runtime. The hole compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `#Todo` with a real implementation. |
+| L2901 | This `#Test` block has no assertions. | A test with no `require`, `require_eq`, or `expect(…).snapshot()` call cannot find bugs — it always passes. | Add at least one assertion, or remove the test if it only exercises compilation. |
 
 ## Debugging and observability diagnostics (E2-M12, D-OBS1–3)
 
@@ -564,9 +567,9 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `pure fn` may only call other `pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `main` is checked transitively; the why-line shows the full chain (`main → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `pure fn`, or remove the call from `{pure_fn}`. |
+| E3401 | `{pure_fn}` calls the impure function `{call}`. | A `#Pure fn` may only call other `#Pure fn`s and pure builtins. Impure calls make the result non-deterministic (D-PURE2). In `jet eval --pure` the whole call graph from `main` is checked transitively; the why-line shows the full chain (`main → a → b calls \`print\``) so the user can find the leak. | Mark `{call}` as `#Pure fn`, or remove the call from `{pure_fn}`. |
 | E3402 | `{call}` is not allowed during a sandboxed package build. | Package builds run with ambient I/O and network access disabled (D-PURE2). | Compute this value at compile time or pass it in as a parameter. |
-| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `pure`. |
+| E3403 | `{what}` is non-deterministic and cannot appear in a pure evaluation. | Pure evaluation must produce the same result on every machine (D-PURE2). | Remove this call, or do not mark the enclosing function `#Pure`. |
 
 ## REPL diagnostics (E2-M18 `jet repl`)
 

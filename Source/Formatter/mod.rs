@@ -141,7 +141,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                 .unwrap_or(c.name_span.start)
         }
         Item::Test(t) => src[..t.name_span.start]
-            .rfind(Syntax::KW_TEST)
+            .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_TEST))
             .unwrap_or(t.name_span.start),
         Item::ExternRust(b) => src[..b.crate_span.start]
             .rfind(Syntax::KW_EXTERN)
@@ -167,10 +167,18 @@ fn item_span_start(item: &Item, src: &str) -> usize {
 fn func_decl_start(f: &Func, src: &str) -> usize {
     let before = &src[..f.name_span.start];
     let fn_pos = before.rfind("fn").unwrap_or(f.name_span.start);
-    if f.is_pub {
+    let pos = if f.is_pub {
         before[..fn_pos].rfind("pub").unwrap_or(fn_pos)
     } else {
         fn_pos
+    };
+    // S60 (D-CASING1 follow-on): the `#Pure` marker precedes `pub`/`fn`.
+    if f.is_pure {
+        before[..pos]
+            .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_PURE))
+            .unwrap_or(pos)
+    } else {
+        pos
     }
 }
 

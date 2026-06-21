@@ -14,8 +14,8 @@ pub fn e3401(
 ) -> Diagnostic {
     let why = if path.is_empty() {
         format!(
-            "`{}` is impure, but `{}` is declared `pure fn`",
-            call_name, pure_fn_name
+            "`{}` is impure, but `{}` is declared `#{} fn`",
+            call_name, pure_fn_name, crate::Syntax::KW_PURE
         )
     } else {
         format!(
@@ -30,8 +30,8 @@ pub fn e3401(
         format!("`{}` calls the impure function `{}`", pure_fn_name, call_name),
         why,
         format!(
-            "mark `{}` as `pure fn`, or remove the call from `{}`",
-            call_name, pure_fn_name
+            "mark `{}` as `#{} fn`, or remove the call from `{}`",
+            call_name, crate::Syntax::KW_PURE, pure_fn_name
         ),
         Some(span),
     )
@@ -54,7 +54,7 @@ pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
         "E3403",
         format!("`{}` is non-deterministic and cannot appear in a pure evaluation", what),
         "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
-        "remove this call, or do not mark the enclosing function `pure`".to_string(),
+        format!("remove this call, or do not mark the enclosing function `#{}`", crate::Syntax::KW_PURE),
         span,
     )
 }

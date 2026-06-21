@@ -439,17 +439,32 @@ pub const BUILTIN_REQUIRE: &str = "require";
 /// S43 (ratified M6): equality assertion in test blocks.
 pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
 
-/// S43 (ratified M6): top-level test block keyword.
-pub const KW_TEST: &str = "test";
+/// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
+/// top-level test-declaration block, written as the marker `#Test "name" { … }`.
+/// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
+/// recognized only to emit the E0052 teaching error pointing at `#Test`.
+pub const KW_TEST: &str = "Test";
 
-/// D-TOOL2 (ratified 2026-06-17, E2-M11): typed hole — compiles everywhere,
-/// panics at runtime with file, line, and expected type.
-pub const KW_TODO: &str = "todo";
+/// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
+/// 2026-06-21): typed hole `#Todo` — compiles everywhere, panics at runtime with
+/// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the
+/// retired spelling → E0054 teaching error pointing at `#Todo`.
+pub const KW_TODO: &str = "Todo";
 
-/// S60 (ratified 2026-06-12; implemented E2-M16): `pure fn` checked modifier.
-/// A `pure fn` may only call other `pure fn`s and pure builtins; impure calls
-/// are a compile error (E3401) with the call-trace path.
-pub const KW_PURE: &str = "pure";
+/// S60 (ratified 2026-06-12; implemented E2-M16; PascalCase marker D-CASING1
+/// follow-on 2026-06-21): the purity modifier, written as the marker `#Pure fn
+/// name() { … }`. A `#Pure fn` may only call other `#Pure fn`s and pure
+/// builtins; impure calls are a compile error (E3401) with the call-trace path.
+/// Bare lowercase `pure` (FOREIGN_PURE) is the retired spelling → E0053 teaching
+/// error pointing at `#Pure`.
+pub const KW_PURE: &str = "Pure";
+
+/// S14 / D-CASING1 follow-on (2026-06-21): the retired lowercase spellings of
+/// the three marker keywords, recognized only for teaching errors that point at
+/// the `#Test` / `#Pure` / `#Todo` marker forms.
+pub const FOREIGN_TEST: &str = "test";
+pub const FOREIGN_PURE: &str = "pure";
+pub const FOREIGN_TODO: &str = "todo";
 
 /// D-TOOL4 (ratified 2026-06-16, E2-M11): snapshot testing builtin.
 /// `expect(value).snapshot()` records or compares a golden snapshot.

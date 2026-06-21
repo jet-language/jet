@@ -308,13 +308,14 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
         Expr::Present(inner, _) => format!("Some({})", emit_expr(cx, inner, env)),
         Expr::Absent(_) => "None".to_string(),
         Expr::Todo { span, expected_type } => {
-            // D-TOOL2 (E2-M11): emit a runtime panic with file, line, and
-            // expected type. `todo!()` is diverging in Rust so it type-checks
-            // anywhere (I1: no unsafe generated).
+            // D-TOOL2 (E2-M11; D-CASING1 follow-on spelling): emit a runtime panic
+            // with file, line, and expected type. `todo!()` is diverging in Rust so
+            // it type-checks anywhere (I1: no unsafe generated).
             let ty = expected_type.as_deref().unwrap_or("(unknown)");
             let (line, _) = span_line_col(&cx.src, span.start);
             format!(
-                "todo!(\"todo at {}:{} — expected {}\")",
+                "todo!(\"#{} at {}:{} — expected {}\")",
+                crate::Syntax::KW_TODO,
                 cx.file,
                 line,
                 ty

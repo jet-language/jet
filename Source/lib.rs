@@ -374,8 +374,8 @@ pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Dia
         vec![Diagnostics::Diagnostic::error(
             "E3401",
             "no `main` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `pure fn main()` entry point".to_string(),
-            "add `pure fn main() { … }` to the program".to_string(),
+            "pure evaluation needs a `#Pure fn main()` entry point".to_string(),
+            "add `#Pure fn main() { … }` to the program".to_string(),
             None,
         )]
     })?;
@@ -419,8 +419,8 @@ pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic
         vec![Diagnostics::Diagnostic::error(
             "E3401",
             "no `main` function found for `jet eval`".to_string(),
-            "pure evaluation needs a `pure fn main()` entry point".to_string(),
-            "add `pure fn main() { … }` to the program".to_string(),
+            "pure evaluation needs a `#Pure fn main()` entry point".to_string(),
+            "add `#Pure fn main() { … }` to the program".to_string(),
             None,
         )]
     })?;

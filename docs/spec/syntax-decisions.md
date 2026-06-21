@@ -1962,10 +1962,20 @@ two naming conventions, applied everywhere (code, examples, snapshots, docs, bal
    their namespace but are collectively part of **Core**, not "std".
 
 This amends the marker casing in S82/D-ATTR1 (markers were mixed-case) and the value-fact/
-effect spellings throughout c62/c66–c73. Note: the high-impact gate renames (`#unsafe` →
-`#Unsafe`, `#audit` → `#Audit`, `#test` → `#Test`) touch deeply-ratified syntax (S58/S82/S43)
-— applied per "all tags PascalCase"; flagged for owner reversal if a lowercase gate is
-preferred. Rejected: keeping lowercase tags / the name "std".
+effect spellings throughout c62/c66–c73. The high-impact gate renames (`#unsafe` →
+`#Unsafe`, `#audit` → `#Audit`) are **confirmed** (owner, 2026-06-21: PascalCase reinforces
+that these are weighty, unique declarations). Rejected: keeping lowercase tags / the name "std".
+
+**D-CASING1 follow-on (owner-directed 2026-06-21): `test` / `todo` / `pure` become PascalCase
+`#`-markers.** These three "unique declarations" join the tag family rather than staying bare
+keywords, so they draw the same attention as every other tag:
+- **`#Test`** replaces the `test "name" { … }` block keyword (S43/S82): `#Test "name" { … }`.
+  The `jet test` harness recognizes `#Test`.
+- **`#Todo`** replaces the bare `todo` typed-hole expression (D-TOOL2).
+- **`#Pure`** replaces the `pure fn` modifier (S60): `#Pure fn name() { … }`.
+The lowercase spellings (`test`/`todo`/`pure`) are retired to teaching errors pointing at the
+`#`-marker forms (S14 pattern). Amends S43, S60, D-TOOL2, S82 on spelling only — semantics
+unchanged.
 
 ## Enforcement
 

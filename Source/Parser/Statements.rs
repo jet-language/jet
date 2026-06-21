@@ -205,9 +205,12 @@ impl<'a> Parser<'a> {
 
     fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
-            TokKind::KwTest => {
+            // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
+            // position is misplaced — E0601 points at the top level.
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) => {
                 let span = self.peek().span;
-                self.bump();
+                self.bump(); // `#`
+                self.bump(); // `Test`
                 if matches!(self.peek().kind, TokKind::Str(_)) {
                     self.bump();
                 }
@@ -219,11 +222,11 @@ impl<'a> Parser<'a> {
                 }
                 Err(Diagnostic::error(
                     "E0601",
-                    format!("`{}` blocks only belong at the top of a file", Syntax::KW_TEST),
+                    format!("`#{}` blocks only belong at the top of a file", Syntax::KW_TEST),
                     "test blocks group checks that `jet test` runs separately from `main`"
                         .to_string(),
                     format!(
-                        "move this block to the top level, after your functions: {} \"name\" {{ ... }}",
+                        "move this block to the top level, after your functions: #{} \"name\" {{ ... }}",
                         Syntax::KW_TEST
                     ),
                     Some(span),

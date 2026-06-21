@@ -136,7 +136,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_test(&mut self, t: &crate::AST::TestDef) {
-        self.write(Syntax::KW_TEST);
+        self.write(&format!("#{}", Syntax::KW_TEST));
         self.write(" ");
         self.write("\"");
         self.write(&t.name.replace('\\', "\\\\").replace('"', "\\\""));
@@ -186,14 +186,14 @@ impl<'a> Fmt<'a> {
             self.write(&format!("#{}", Syntax::KW_UNSAFE));
             self.newline();
         }
+        // S60 (D-CASING1 follow-on): `#Pure` marker precedes `pub`/`fn`.
+        if f.is_pure {
+            self.write(&format!("#{} ", Syntax::KW_PURE));
+        }
         if top_level {
             self.fmt_pub(f.is_pub);
         } else if f.is_pub {
             self.write("pub ");
-        }
-        // S60 (E2-M16): `pure fn` modifier.
-        if f.is_pure {
-            self.write("pure ");
         }
         self.write("fn ");
         self.write(&f.name);

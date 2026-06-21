@@ -1,4 +1,31 @@
-# Sidequest: stdlib memory allocators (arena, pool, bump, fixed)
+# Sidequest: Core memory allocators (arena, pool, bump, fixed)
+
+## Verified soundness design for D-ALLOC2-A + D-REGION1 (2026-06-21)
+
+A design pass confirmed this is **sound and buildable with NO representation gap** (unlike
+`#Uninit`, which is blocked on Vec-vs-stack-array). Use this when implementing c05:
+
+- **Runtime (Core `Mem`):** a real shared bump buffer, `typed-arena` pattern — arena holds
+  chunks in a `RefCell` (interior mutability so `alloc` takes `&self`). `alloc(&self, v) ->
+  &'arena mut T` bump-allocates and returns a reference tied to the arena borrow (one vetted
+  internal `unsafe` lifetime-extension, allowed by D-LL1). `reset(&mut self)` / `free(self)`
+  take `&mut self` / by-value, so **rustc itself** forbids reset/free while any view is live.
+- **E0631 (escape) soundness:** a view is `&'arena mut T`. Jet sema forbids a view binding
+  from being returned, stored into a `ref`/struct field, passed to a `take`/out-param, or
+  captured by an escaping closure — **strictly ≥ as strict as Rust's borrow checker**, so
+  every Jet-accepted program is rustc-accepted (I2 holds; Jet rejects first).
+- **E0632 (use-after-reset) soundness:** Jet tracks per-arena live views and rejects
+  `reset`/`free` while a view is reachable, and any use of a view after reset. Mirrors the
+  `&mut self`/`self` runtime signatures, so rustc would also reject — Jet rejects first.
+- **Region = the `arena ::` binding's lexical scope = exactly `'arena`.** v1 restriction:
+  views are **non-reassignable, non-escaping locals**; reject anything the analysis can't
+  prove with a teaching error (I8). Explicit `region r { }` (D-REGION1 B) names a region
+  spanning multiple arenas / narrower scope.
+- **Conclusion:** no representation gap; build it. Extend the existing view-escape machinery
+  in `Source/Sema/CheckerOwnership.rs` (E2302 ref-field-dangles, view_return) rather than
+  reinvent.
+
+---
 
 ## Goal
 

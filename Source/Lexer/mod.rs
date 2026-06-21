@@ -65,9 +65,11 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == Syntax::KW_USE => Some(TokKind::KwUse),
         s if s == Syntax::KW_EXTERN => Some(TokKind::KwExtern),
         s if s == Syntax::KW_MODULE => Some(TokKind::KwModule),
-        s if s == Syntax::KW_TEST => Some(TokKind::KwTest),
-        s if s == Syntax::KW_TODO => Some(TokKind::KwTodo),
-        s if s == Syntax::KW_PURE => Some(TokKind::KwPure),
+        // D-CASING1 follow-on: `Test`/`Todo`/`Pure` are NOT lexer keywords —
+        // they are PascalCase `#`-markers recognized as `#` + ident in the
+        // parser, so the bare words stay usable as ordinary identifiers (e.g. a
+        // struct named `Test`). The lowercase foreign spellings are likewise
+        // plain idents, matched in the parser for teaching errors.
         _ => None,
     }
 }

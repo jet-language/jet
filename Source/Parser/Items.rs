@@ -300,8 +300,14 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                 TokKind::KwFn => self.func().map(Item::Func),
-                // S60 (E2-M16): `pure fn name(…)` or at file level.
-                TokKind::KwPure => self.func().map(Item::Func),
+                // S60 (D-CASING1 follow-on): `#Pure fn name(…)` purity modifier.
+                TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+                // S14: bare lowercase `pure` is the retired spelling (E0053).
+                TokKind::Ident(n) if n == Syntax::FOREIGN_PURE && self.foreign_pure_follows() => {
+                    let t = self.bump();
+                    self.diags.push(self.foreign_pure_diag(t.span));
+                    self.func_with_purity(true).map(Item::Func)
+                }
                 TokKind::KwPub => match self.peek2().kind {
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -326,7 +332,14 @@ impl<'a> Parser<'a> {
                     }
                     _ => self.func().map(Item::Func),
                 },
-                TokKind::KwTest => self.test_def().map(Item::Test),
+                // S43 (D-CASING1 follow-on): `#Test "name" { … }`.
+                TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
+                // S14: bare lowercase `test "name" { … }` is the retired spelling (E0052).
+                TokKind::Ident(n) if n == Syntax::FOREIGN_TEST && self.foreign_test_follows() => {
+                    let t = self.bump();
+                    self.diags.push(self.foreign_test_diag(t.span));
+                    self.test_def_after_kw().map(Item::Test)
+                }
                 TokKind::KwModule if self.is_code_module_at(1) => {
                     self.code_module(false).map(Item::CodeModule)
                 }
@@ -458,7 +471,7 @@ impl<'a> Parser<'a> {
                     let d = Diagnostic::error(
                         "E0003",
                         format!(
-                            "expected `{}`, `{}`, `{}`, or `{}` here, found {}",
+                            "expected `{}`, `#{}`, `{}`, or `{}` here, found {}",
                             Syntax::KW_FN,
                             Syntax::KW_TEST,
                             Syntax::KW_STRUCT,
@@ -467,7 +480,7 @@ impl<'a> Parser<'a> {
                         ),
                         "at the top level of a file, only definitions can appear".to_string(),
                         format!(
-                            "define a function ({} main() {{ ... }}), {} block, struct, or const",
+                            "define a function ({} main() {{ ... }}), #{} block, struct, or const",
                             Syntax::KW_FN,
                             Syntax::KW_TEST
                         ),
@@ -490,8 +503,21 @@ impl<'a> Parser<'a> {
         Program { imports, items }
     }
 
+    /// S43 (D-CASING1 follow-on): true when the cursor is at the `#Test` marker.
+    pub(super) fn at_test_def(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST)
+    }
+
+    /// Parse `#Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
+    /// `test` path enters via `test_def_after_kw` after emitting E0052.
     pub(super) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
-        self.expect_kw(TokKind::KwTest, "to start a test block")?;
+        self.expect(TokKind::Hash, "before `Test`")?;
+        self.bump(); // the `Test` marker ident (guaranteed by at_test_def)
+        self.test_def_after_kw()
+    }
+
+    fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
         let (name, name_span) = self.expect_test_name()?;
         self.expect(TokKind::LBrace, "to open the test body")?;
         let body = self.block_stmts();
@@ -502,6 +528,59 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// S14: a bare lowercase `test` introduces a test block only when followed by
+    /// a quoted name (so an ordinary identifier named `test` is unaffected).
+    fn foreign_test_follows(&self) -> bool {
+        matches!(self.peek2().kind, TokKind::Str(_))
+    }
+
+    fn foreign_test_diag(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0052",
+            format!(
+                "test blocks are written with `#{}`, not bare `{}`",
+                Syntax::KW_TEST,
+                Syntax::FOREIGN_TEST
+            ),
+            format!(
+                "`#{}` is a marker, like every other `#`-tag, so a test declaration draws the eye",
+                Syntax::KW_TEST
+            ),
+            format!("write: #{} \"name\" {{ ... }}", Syntax::KW_TEST),
+            Some(span),
+        )
+    }
+
+    /// S60 (D-CASING1 follow-on): true when the cursor is at `#Pure fn`/`#Pure pub`.
+    pub(super) fn at_pure_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
+            && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// S14: bare lowercase `pure` introduces a function only when `fn`/`pub`
+    /// follows (so an ordinary identifier named `pure` is unaffected).
+    fn foreign_pure_follows(&self) -> bool {
+        matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    fn foreign_pure_diag(&self, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0053",
+            format!(
+                "the purity modifier is written `#{}`, not bare `{}`",
+                Syntax::KW_PURE,
+                Syntax::FOREIGN_PURE
+            ),
+            format!(
+                "`#{}` is a marker, like every other `#`-tag, so the purity contract draws the eye",
+                Syntax::KW_PURE
+            ),
+            format!("write: #{} fn name() {{ ... }}", Syntax::KW_PURE),
+            Some(span),
+        )
+    }
+
     /// Test names are plain string literals — no interpolation (S43).
     fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
         let parts = match &self.peek().kind {
@@ -510,13 +589,13 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "expected a test name in quotes after `{}`, found {}",
+                        "expected a test name in quotes after `#{}`, found {}",
                         Syntax::KW_TEST,
                         describe(other)
                     ),
                     "each test block needs a name so failures are easy to find".to_string(),
                     format!(
-                        "write: {} \"describes what this checks\" {{ ... }}",
+                        "write: #{} \"describes what this checks\" {{ ... }}",
                         Syntax::KW_TEST
                     ),
                     Some(self.peek().span),
@@ -529,7 +608,7 @@ impl<'a> Parser<'a> {
                 "E0003",
                 "a test name must be one piece of quoted text".to_string(),
                 "test names are labels, not interpolated messages".to_string(),
-                format!("write: {} \"my test name\" {{ ... }}", Syntax::KW_TEST),
+                format!("write: #{} \"my test name\" {{ ... }}", Syntax::KW_TEST),
                 Some(span),
             ));
         }
@@ -539,7 +618,7 @@ impl<'a> Parser<'a> {
                 "E0003",
                 "a test name can't contain `{ }` interpolation".to_string(),
                 "test names are fixed labels".to_string(),
-                format!("write: {} \"my test name\" {{ ... }}", Syntax::KW_TEST),
+                format!("write: #{} \"my test name\" {{ ... }}", Syntax::KW_TEST),
                 Some(span),
             )),
         }
@@ -854,13 +933,23 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn func(&mut self) -> Result<Func, Diagnostic> {
+        // S60 (D-CASING1 follow-on): `#Pure fn` / `#Pure pub fn` — consume the
+        // `#Pure` marker (guaranteed by `at_pure_fn` when present).
+        let is_pure = if self.at_pure_fn() {
+            self.bump(); // `#`
+            self.bump(); // `Pure`
+            true
+        } else {
+            false
+        };
+        self.func_with_purity(is_pure)
+    }
+
+    /// Parse a function whose purity is already known (the bare-`pure` teaching
+    /// path enters here after emitting E0053 and consuming the `pure` word).
+    pub(super) fn func_with_purity(&mut self, is_pure: bool) -> Result<Func, Diagnostic> {
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
-            self.bump();
-        }
-        // S60 (E2-M16): `pure fn` or `pub pure fn`.
-        let is_pure = matches!(self.peek().kind, TokKind::KwPure);
-        if is_pure {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
@@ -1397,13 +1486,23 @@ impl<'a> Parser<'a> {
 
     /// S27: method inside a type body or `impl` block.
     fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
+        // S60 (D-CASING1 follow-on): allow `#Pure fn` on methods too; the marker
+        // precedes `pub`.
+        let is_pure = if self.at_pure_fn() {
+            self.bump(); // `#`
+            self.bump(); // `Pure`
+            true
+        } else if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
+            && self.foreign_pure_follows()
+        {
+            let t = self.bump();
+            self.diags.push(self.foreign_pure_diag(t.span));
+            true
+        } else {
+            false
+        };
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
-            self.bump();
-        }
-        // S60: allow `pure fn` on methods too.
-        let is_pure = matches!(self.peek().kind, TokKind::KwPure);
-        if is_pure {
             self.bump();
         }
         self.expect_kw(TokKind::KwFn, "to start a method")?;

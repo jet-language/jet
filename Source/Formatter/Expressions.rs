@@ -343,7 +343,7 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write("null"),
-            Expr::Todo { .. } => self.write("todo"),
+            Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
             Expr::PatternTest {
                 subject, pattern, ..
             } => {

@@ -215,8 +215,8 @@ impl Circle {
   `Printable`/`Equatable`; explicit `@Comparable` / `@Serialize` (S82).
 - **Attributes (S82):** `@Marker` or `@[a, b]` on the line before a
   declaration; `@Marker { … }` for scoped effects (`@transact`, `#Unsafe`) or
-  in-body config (`@Serialize { rename …; }`). **`pure fn`** and **`comptime`**
-  stay prefix keywords.
+  in-body config (`@Serialize { rename …; }`). **`#Pure fn`** is a prefix marker
+  (D-CASING1 follow-on); **`comptime`** stays a prefix keyword.
 
 ## M4 — errors as values (done)
 
@@ -275,10 +275,11 @@ Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 
 ## M6 phase 2 — `jet test` + `jet new` (done)
 
-**`@test fn name { … }`** (S43, S82) — top-level blocks only. Bodies parse like a
-parameterless function; use **`require(cond)`** / **`require(cond, "msg")`**
-and **`require_eq(a, b)`** (S36) for checks. Duplicate test names → **E0105**;
-a nested `test` block → **E0601**. **`jet run`** / **`jet build`** ignore test
+**`#Test "name" { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
+Bodies parse like a parameterless function; use **`require(cond)`** /
+**`require(cond, "msg")`** and **`require_eq(a, b)`** (S36) for checks. Duplicate
+test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` →
+**E0052**. **`jet run`** / **`jet build`** ignore test
 blocks; only **`jet test`** compiles and runs them.
 
 **`jet test <file.jet>`** (or a directory of `*.jet` files) builds one harness
