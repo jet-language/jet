@@ -149,6 +149,60 @@ impl<'a> Parser<'a> {
         body
     }
 
+    /// D-UNINIT1 (opt C): parse `#uninit name: Type` — a binding with no
+    /// initializer, gated by `use core.mem` (the gate is checked in sema).
+    /// The type annotation is required; an initializer is rejected here.
+    /// Not yet wired into `stmt` — see the note in the `TokKind::Hash` arm.
+    #[allow(dead_code)]
+    fn uninit_binding(&mut self) -> Result<Stmt, Diagnostic> {
+        let hash_span = self.peek().span;
+        self.bump(); // `#`
+        let marker = self.bump(); // `uninit`
+        let marker_span = Span::new(hash_span.start, marker.span.end);
+        // S6-R: the marker may end its line; skip the synthetic terminator before
+        // the binding it annotates (same as `#audit` before `#unsafe`).
+        if matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        let (name, name_span) = self.expect_ident("for the uninitialized binding name")?;
+        if !matches!(self.peek().kind, TokKind::Colon) {
+            return Err(Diagnostic::error(
+                "E0421",
+                format!("`#{}` needs a type annotation", Syntax::ATTR_UNINIT),
+                "an uninitialized binding has no value to infer its type from, so the type must be written".to_string(),
+                format!("write `#{} {}: <Type>`, e.g. `#{} buffer: [4096]U8`", Syntax::ATTR_UNINIT, name, Syntax::ATTR_UNINIT),
+                Some(name_span),
+            ));
+        }
+        self.bump(); // `:`
+        let (ty, ty_span) = self.type_()?;
+        if matches!(self.peek().kind, TokKind::ColonColon | TokKind::ColonEq) {
+            let sigil_span = self.peek().span;
+            return Err(Diagnostic::error(
+                "E0422",
+                format!("`#{}` has no initializer", Syntax::ATTR_UNINIT),
+                format!("`#{}` declares a binding you fill in later; it cannot also be given a value here", Syntax::ATTR_UNINIT),
+                format!("drop the initializer — write `#{} {}: <Type>` and write to `{}` before reading it", Syntax::ATTR_UNINIT, name, name),
+                Some(sigil_span),
+            ));
+        }
+        self.finish_stmt()?;
+        Ok(Stmt::Val(Binding {
+            mutable: true,
+            name,
+            name_span,
+            pattern: None,
+            ty: Some(ty),
+            ty_span: Some(ty_span),
+            // Harmless placeholder — never evaluated; sema/codegen branch on
+            // `uninit` first and use `ty` for the binding's type.
+            init: Expr::Int(0, marker_span),
+            is_comptime: false,
+            ct: None,
+            uninit: true,
+        }))
+    }
+
     fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwTest => {
@@ -499,6 +553,10 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::Hash => {
+                // D-UNINIT1 (opt C): `#uninit name: Type` parsing is implemented in
+                // `uninit_binding` but NOT yet wired here — it stays unexposed until
+                // the sema write-before-read proof (E0420) and MaybeUninit codegen land,
+                // so no mis-compiling/unsafe path exists. See sidequests/visible-uninit.md.
                 // S58 (E2-M13): `#audit("…")` / `#unsafe { … }` — the audited gate.
                 self.at_unsafe_stmt()
             }
@@ -1198,6 +1256,7 @@ impl<'a> Parser<'a> {
                 init,
                 is_comptime: false,
                 ct: None,
+                uninit: false,
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
@@ -1220,6 +1279,7 @@ impl<'a> Parser<'a> {
             init,
             is_comptime: false,
             ct: None,
+            uninit: false,
         })
     }
 
@@ -1352,6 +1412,7 @@ impl<'a> Parser<'a> {
                 init,
                 is_comptime: false,
                 ct: None,
+                uninit: false,
             });
         }
         let (name, name_span) = self.expect_ident("after a binding keyword")?;
@@ -1374,6 +1435,7 @@ impl<'a> Parser<'a> {
             init,
             is_comptime: false,
             ct: None,
+            uninit: false,
         })
     }
 
@@ -1530,6 +1592,7 @@ impl<'a> Parser<'a> {
             init,
             is_comptime: true,
             ct: None,
+            uninit: false,
         })
     }
 

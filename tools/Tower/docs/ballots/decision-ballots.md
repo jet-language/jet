@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **34 open decisions across 20 cards** (incl. testing ergonomics + jet.regex), plus a deferred-ballots list and informational notes.
+> **17 open decisions across 13 cards** (incl. testing ergonomics), plus a deferred-ballots list and informational notes.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -40,66 +40,9 @@ four-capability vocabulary. `take` and `view` are already ratified ownership key
 (S10, M2); the open work is parameter-position annotations, the copy/share verbs, the
 manifest flag, and the inference defaults. Owner has final say on all syntax (I7, I8).
 
-Cross-references ballot c07 (`D-TGT1..D-TGT5`, `lib-exe-targets-model.md`): **D-CAP5**
-is blocked on **D-TGT1** (whether lib/exe survives), and the manifest spelling in
-**D-CAP4** should match whatever field style **D-TGT3** ratifies for `targets:`.
-
----
-
-### D-CAP1 — Capability keyword spellings (rec A)
-
-**User story.** Mara is porting a Rust game loop to Jet. She never wants to write a
-borrow or a lifetime, but she does want to read a function signature and know at a
-glance whether `heal(player)` keeps the player, mutates it, or just looks at it. The
-words on the page have to mean what a beginner thinks they mean — and they have to be
-the *same* words the compiler uses in its error messages.
-
-| Option | Keywords | Reuses S10? | New tokens | Familiarity |
-|--------|----------|-------------|------------|-------------|
-| A | `view` / `edit` / `take` / `share` | `view`,`take` | `edit`,`share` | plain-English, no overlap with `mut` |
-| B | `view` / `mut` / `take` / `share` | `view`,`take`,`mut` | `share` | reuses ratified `mut`, but `mut` reads as Rust |
-| C | `read` / `write` / `own` / `share` | none | all 4 | S10 already **rejected** `read`/`write`/`owned` |
-| D | `look` / `change` / `keep` / `share` | none | all 4 | maximally beginner, but invents fresh jargon |
-
-- **Option A — view / edit / take / share.** Two keywords already exist; add `edit` and
-  `share`. The four words are distinct, plain, and map one-to-one onto the four
-  capabilities.
-
-```jet
-fn heal(player: edit Player) { player.hp += 10 }
-fn draw(scene: view Scene)   { render(scene) }
-fn add(player: take Player)  { party.members.push(player) }
-fn cache(tex: share Texture) { textures.insert(tex) }
-```
-
-- **Option B — reuse `mut` for the edit capability.** `mut` is already ratified (S10);
-  spend zero new tokens on the mutate slot.
-
-```jet
-fn heal(player: mut Player) { player.hp += 10 }
-// reads as Rust's `&mut`; the plan's diagnostics vocab explicitly bans
-// surfacing &mut-flavored wording to beginners.
-```
-
-- **Option C — read / write / own / share.** Verb-symmetric set.
-
-```jet
-fn heal(player: write Player) { player.hp += 10 }
-// S10 (ratified) already rejected `read`/`write`/`owned` as the canonical
-// ownership words. Re-proposing them would reverse a ratified decision.
-```
-
-- **Option D — look / change / keep / share.** Most beginner-legible verbs.
-
-```jet
-fn heal(player: change Player) { player.hp += 10 }
-fn draw(scene: look Scene)     { render(scene) }
-fn add(player: keep Player)    { party.members.push(player) }
-// but `take`/`view` are already ratified — this would orphan two live keywords.
-```
-
-**Recommendation:** A — keeps the two ratified keywords, adds the two genuinely-missing
-verbs, and avoids re-litigating S10's rejection of `read`/`write`.
+D-CAP1 (keyword spellings), D-CAP4/5/6, and all of c07 (D-TGT1..D-TGT5) were
+ratified 2026-06-21 — see `syntax-decisions.md`. **D-CAP2** (copy/share form) and
+**D-CAP3** (annotation order) remain open below.
 
 ---
 
@@ -156,6 +99,47 @@ quotable verbatim in the post-take fix-it (`use copy player` / `use share player
 
 ---
 
+**Owner Q (2026-06-21) — refresh me on the capability model; isn't `share` unsupportable
+under the borrow checker (mutable = one, immutable = many)? What's inferred vs explicit?**
+
+Your borrow-checker intuition is exactly right, and `share` does **not** break it —
+because `share` is **shared ownership, not a shared *mutable* borrow.** The four
+capabilities map cleanly onto what Rust already enforces:
+
+| Jet capability | What it means | Rust it lowers to | Borrow-checker rule |
+|---|---|---|---|
+| `view x` | "I'll only read it" | `&T` | **many** allowed at once |
+| `edit x` | "I'll mutate it in place" | `&mut T` | **exactly one**, no other live access |
+| `take x` | "I own it now" | `T` (moved) | the old name is dead after |
+| `share x` | "we co-own it" | `Rc<T>` / `Arc<T>` | many owners, **read-only** value |
+
+The key: a **shared value is immutable.** `share` hands out multiple co-owners of the
+*same* heap value (reference-counted), and you can only `view` through a share — there is
+never a `&mut` to a shared value. So "mutable XOR shared" holds: `edit` is the exclusive
+one; `view` and `share` are the many-readers cases. (`view` borrows for a scope; `share`
+co-owns past the scope. To mutate a shared value you must opt into interior mutability —
+an explicit expert tier, never implicit.) This is precisely Rust's `&T` / `&mut T` / `T` /
+`Rc<T>` quartet, just renamed into plain verbs.
+
+`copy` (this card) is the **fourth escape hatch**: instead of sharing one value, *duplicate*
+it so each party owns an independent copy (Rust `.clone()` into an owned `T`). `copy` and
+`share` are the two answers to "I used a value after it was `take`n" — duplicate it, or
+co-own it.
+
+**Beginner (inferred) vs expert (explicit):** for a `fn` parameter, the compiler **infers**
+the capability from the body — read-only use → `view`; mutation → `edit`; the value escapes
+(stored/returned/moved) → `take`. The beginner writes `fn heal(player: Player)` and never
+types a capability; the contract is inferred and (for libraries) can be published (D-CAP4/5/6).
+The **expert** writes the capability explicitly (`fn heal(player: edit Player)`) to *lock*
+the contract so a later refactor that changes it is a visible API break, not a silent one.
+At a **call site**, the one thing that is never inferred is duplicate-vs-share after a
+`take` (the plan kills implicit clone, L0201) — that's exactly what `copy`/`share` (this
+card) make the user say out loud. So: capabilities on *signatures* are inferred-for-beginners
+/ explicit-for-experts; `copy`/`share` at *call sites* are always explicit (a one-word,
+reviewable choice). Full model: `tools/Tower/docs/sidequests/memory-capability-model.md`.
+
+---
+
 ### D-CAP3 — Annotation order: `player: edit Player` vs. `edit player: Player` (rec A)
 
 **User story.** Priya reads a signature `fn write(file: edit File, data: view Bytes)`.
@@ -203,433 +187,6 @@ property of the value, not a command.
 
 ---
 
-### D-CAP4 — `api` manifest spelling (rec A)
-
-**User story.** Devi publishes a library and wants its public capability signatures
-locked so a future refactor that flips `view` to `edit` is flagged as an API break, not
-shipped silently. She opens `pkg.jet` and needs one line that looks like every other
-field she already sets in the `payload:` identity block (`name:`, `version:`). `pkg.jet`
-is Jet syntax, not TOML (S52 amended; U1 → U10 → D-JPK-FILES).
-
-| Option | Spelling | Matches existing manifest style | Ratification cost |
-|--------|----------|---------------------------------|-------------------|
-| A | field `api: stable` / `api: explicit` | yes — colon fields like `name:`, `targets:` | low |
-| B | statement `package api = stable` | introduces `=` assignment into the manifest | new manifest grammar |
-| C | attribute `#[api(stable)] package` | attribute syntax on the package decl | new attribute surface |
-| D | per-target field inside `targets:` | granular, but couples to D-TGT shape | blocked on D-TGT3 |
-
-- **Option A — `api:` field.** A plain manifest field alongside the rest of `payload:`.
-
-```jet
-// pkg.jet
-payload: { name: "raylib-jet", version: "0.4.0", api: stable }
-//                                                ^^^^^^^^^^^ record public
-//                                          capability signatures; flag breaks
-packages: { raylib_jet: library }
-```
-
-- **Option B — `payload api = ...` statement.** The plan's literal first draft.
-
-```jet
-// pkg.jet
-payload api = stable
-// introduces `key = value` assignment; the rest of pkg.jet uses `key: value`.
-```
-
-- **Option C — attribute.** Attribute on the package declaration.
-
-```jet
-#[api(stable)]
-payload: { name: "raylib_jet", version: "0.4.0" }
-// adds an attribute grammar to the manifest that nothing else there uses.
-```
-
-- **Option D — per-target.** Capability mode declared inside each target.
-
-```jet
-// pkg.jet — speculative per-target shape proposed by c07 (D-TGT3)
-targets: [
-    library { api: stable },
-    executable,
-]
-// most precise once targets land, but its exact shape depends on D-TGT3
-// (bare keyword vs. block). Do not ratify ahead of c07.
-```
-
-**Recommendation:** A — `api: stable` / `api: explicit` matches the ratified colon-field
-manifest style and costs no new grammar. If c07 ratifies per-target blocks (D-TGT3),
-Option D can later layer on top without contradicting A.
-
----
-
-### D-CAP5 — Which targets emit capability metadata (rec A, provisional — defer to D-TGT1)
-
-**User story.** Sol builds a project that produces both a runnable game and a reusable
-engine crate from one `pkg.jet`. The engine half must publish capability metadata so
-downstream consumers compile against a checked contract; the game half should just infer
-everything and stay ergonomic. Today that split rides one `pkg.jet`'s `packages:` block —
-`library` vs `executable` (U10/D-ILE1) — but c07's `lib-exe-targets-model.md` may dissolve that into
-fine-grained `targets:`. This card decides which *target* carries metadata emission once
-that happens.
-
-This decision is **blocked on D-TGT1** (ballot c07): if lib/exe is merely augmented
-(D-TGT1 Option A) the existing rule stands; if it is replaced (D-TGT1 Option B) the rule
-must move onto the new target vocabulary. The options below are the same rule expressed
-against each possible c07 outcome.
-
-| Option | Carrier of "emit metadata" | Depends on | Ergonomic default applies to |
-|--------|----------------------------|-----------|------------------------------|
-| A | any target that produces a consumable library artifact | D-TGT1=A or B | binary/app targets |
-| B | only an explicit `library` target; all else infer-only | D-TGT1=B | every non-library target |
-| C | metadata always emitted, gated purely by `api:` (D-CAP4) | independent of D-TGT | n/a — `api:` decides |
-
-- **Option A — library-producing targets emit; binaries infer.** Preserves today's
-  intent (`Library` emits, `Executable` does not) regardless of how D-TGT1 reshapes the
-  vocabulary.
-
-```jet
-// pkg.jet  — targets per D-TGT (c07, unratified)
-targets: [library, executable]
-// `library` artifact ships capability metadata; `executable` infers and emits nothing.
-pub fn step(world: World) { world.tick() }   // metadata: step(world: edit World)
-```
-
-- **Option B — only an explicit `library` target emits.** Tighter: anything not named
-  `library` is infer-only, even if it is consumable.
-
-```jet
-targets: [staticlib]   // not literally `library` → no metadata under Option B
-// risks a consumable artifact with no published contract.
-```
-
-- **Option C — decouple from targets; let `api:` decide.** Metadata emission is governed
-  only by D-CAP4's `api:` field, ignoring target kind.
-
-```jet
-targets: [executable]
-api: stable          // emits capability metadata even for an executable
-// simplest rule, but emits contracts for artifacts nobody consumes.
-```
-
-**Recommendation:** A, provisional — ratify D-TGT1 first (c07), then confirm "any
-library-producing target emits, binaries infer." A holds under either D-TGT1 outcome and
-keeps today's behavior intact.
-
----
-
-### D-CAP6 — When does `api: explicit` become the library default (rec A)
-
-**User story.** Two years from now a beginner runs `jet new mylib` and writes one `pub`
-function with no annotations. The question the owner is deciding: does that just work
-(inference fills the contract), or does the toolchain refuse until she hand-writes
-`edit`/`view` on every public signature? This is the simplicity-ratchet call (I8): make
-the easy thing the default unless safety demands otherwise — and capability *safety* is
-already guaranteed by inference, so explicitness here buys documentation, not safety.
-
-| Option | Default for libraries | Beginner friction | When explicit is needed |
-|--------|-----------------------|-------------------|-------------------------|
-| A | inference; `api: explicit` opt-in forever | none | author opts in for visible contracts |
-| B | inference now, flip to explicit at v1.0 | none now, breaks later | forced on everyone at 1.0 |
-| C | explicit required for libraries from day one | high — every `pub` annotated | always |
-
-- **Option A — opt-in forever.** Inference is always the library default; `api: explicit`
-  is a tool authors reach for deliberately.
-
-```jet
-// pkg.jet has no `api:` line — inference fills the contract
-pub fn heal(player: Player) { player.hp += 10 }
-// published metadata: heal(player: edit Player)   — inferred, no error
-```
-
-- **Option B — flip to explicit at 1.0.** Ergonomic now, mandatory later.
-
-```jet
-// pre-1.0: compiles. post-1.0: same code errors —
-//   error: pub `heal` must declare capabilities under api = explicit
-//   fix:   pub fn heal(player: edit Player)
-// a silent future break to every library in the ecosystem.
-```
-
-- **Option C — explicit from day one.** Every public signature annotated, always.
-
-```jet
-pub fn heal(player: Player) { player.hp += 10 }
-// error: pub `heal` must declare capabilities
-//   fix: pub fn heal(player: edit Player) { … }
-// taxes the beginner for documentation inference already provides — fails I8.
-```
-
-**Recommendation:** A — inference already guarantees safety, so explicitness is a
-documentation preference, not a correctness gate. Keep it opt-in (I8); never auto-flip.
-
----
-
-## Cross-references to ballot c07 (D-TGT)
-
-- **D-CAP5** is gated on **D-TGT1** (replace vs. augment lib/exe). Ratify D-TGT1 before
-  finalizing which target emits capability metadata.
-- **D-CAP4 Option A** (`api:` field) should match the colon-field manifest style; if
-  **D-TGT3** ratifies per-target blocks, **D-CAP4 Option D** (`library { api: stable }`)
-  becomes available as a follow-on without contradicting A.
-
----
-
-## Library / executable targets — board card c07
-
-
-These five cards reshape the `packages:` block in `pkg.jet` (D-JPK-FILES, latest;
-renamed from `payload.jet`/`pack.jet` — see U1 → U10 → D-JPK-FILES) from a
-single `kind:` per package into fine-grained *targets*. They reuse the ratified
-manifest shape (U10: bare keyword `name: kind`, or block `name: { kind: …, … }`)
-and the `#test` prefix attribute (S82 marker, sigil `@`→`#` per D-ATTR1, latest).
-None of D-TGT1..D-TGT5 is ratified.
-
-D-TGT1 gates D-CAP5 in `memory-capability-model.md` (which target emits
-capability metadata). Resolve D-TGT1 first; the capability defaults follow.
-
----
-
-### D-TGT1 — Replace `kind:` or augment it? (rec B)
-
-**User story.** Priya ships `httpx`: a request library other packages `use`, plus
-a `httpx` CLI that probes endpoints. Today U10 forces one `kind:` per package, so
-she has to split it into two packages or bolt the CLI on as a special case. She
-wants one package that openly declares it is both a library and an executable.
-
-| Option | Concepts the author learns | Migration cost | Failure mode |
-|---|---|---|---|
-| A — augment | two (`kind:` *and* `targets:`) | none (old form stays) | two ways to say the same thing diverge over time |
-| B — replace | one (`targets:`) | one-line lint per old entry | brief churn while `kind:` is deprecated |
-
-- **Option A — augment: keep `kind:`, add `targets:` alongside.** Both forms stay
-  first-class; `targets:` is merely preferred.
-
-```jet
-// pkg.jet — old kind: still canonical, targets: optional
-packages:
-  httpx: { kind: library }        // still valid, no warning
-  probe: { targets: [executable] }    // new form
-```
-
-- **Option B — replace: `targets:` is canonical, `kind:` is a deprecation lint.**
-  `kind:` is parsed and rewritten to a one-element `targets:` list with an
-  advisory.
-
-```jet
-// pkg.jet — kind: triggers a migration advisory
-packages:
-  httpx: { kind: library }
-//        ^^^^^^^^^^^^^^^ advisory: `kind: library` is deprecated; write
-//        `targets: [library]`. (run `jet fix` to migrate)
-  probe: { targets: [executable] }    // canonical
-```
-
-**Recommendation:** B — one concept (targets) is simpler than two; `kind:`
-collapses to a single-line migration the compiler can auto-fix.
-
----
-
-### D-TGT2 — Which targets ship in the first increment? (rec A)
-
-**User story.** Marco is wiring up the first release of the targets model. He needs
-the targets that real packages reach for on day one — without blocking on tooling
-that does not exist yet (`benchmark` harness, `plugin` loader).
-
-| Option | Targets shipped | Tooling required now | Risk |
-|---|---|---|---|
-| A — core four | library, executable, test, example | none beyond build + `jet test` | none |
-| B — all six | + benchmark, plugin | benchmark harness, plugin loader | ships keywords with no working backend |
-
-- **Option A — core four: `library`, `executable`, `test`, `example`.** The four whose
-  build paths already exist. `benchmark`/`plugin` are rejected as unknown target
-  keywords until their tooling lands.
-
-```jet
-packages:
-  httpx: {
-    targets: [
-      library,
-      executable { name: "httpx", entry: "src/cli.jet" },
-      example { name: "probe", entry: "examples/probe.jet" },
-    ]
-  }
-// `jet test` runs the package's #test fns; no target needed (see D-TGT5)
-```
-
-- **Option B — all six now, including `benchmark` and `plugin`.** Keywords accepted
-  immediately, even though their backends are stubs.
-
-```jet
-packages:
-  httpx: {
-    targets: [library, benchmark { entry: "bench/throroughput.jet" }, plugin]
-  }
-// error: target `plugin` has no backend yet — its tooling design is unresolved.
-//        Declared targets must be buildable.
-```
-
-- **Option C — library + executable only this increment.** Defer `test`/`example` too,
-  matching today's two-kind surface exactly.
-
-```jet
-packages:
-  httpx: { targets: [library, executable { entry: "src/cli.jet" }] }
-// example { … } -> error: unknown target `example` (not in this increment)
-```
-
-**Recommendation:** A — `test` and `example` have working build paths and high
-demand; `benchmark`/`plugin` correctly wait on their own designs (I8).
-
----
-
-### D-TGT3 — Manifest spelling: bare keyword vs. block (rec A)
-
-**User story.** Lena maintains a package whose `library` target needs no options at
-all, but whose `executable` target needs an explicit entry module. She wants the simple
-target to stay one word and only reach for a block where she actually sets a field —
-the same rule U10 already gives her for `kind:`.
-
-| Option | Zero-field target | Familiarity | Ceremony |
-|---|---|---|---|
-| A — bare allowed, block when fields | `library` | matches U10 `name: kind` | minimal |
-| B — block always | `library {}` | new rule to learn | empty braces everywhere |
-
-- **Option A — bare keyword allowed; block required only when fields are set.**
-  Mirrors U10's ratified `name: kind` vs `name: { kind: …, … }`.
-
-```jet
-packages:
-  app: {
-    targets: [
-      library,                                  // bare — no fields
-      executable { name: "app", entry: "src/main.jet" },  // block — has fields
-    ]
-  }
-```
-
-- **Option B — block-only: every target is a block, even with no fields.**
-
-```jet
-packages:
-  app: {
-    targets: [
-      library {},                               // mandatory empty block
-      executable { name: "app", entry: "src/main.jet" },
-    ]
-  }
-// library -> error: target entries must be blocks; write `library {}`
-```
-
-**Recommendation:** A — consistent with the already-ratified U10 shorthand; empty
-`{}` is pure noise.
-
----
-
-### D-TGT4 — Convention for default executable entry point (no rec)
-
-**User story.** Sam writes `targets: [executable]` with no `entry:` and expects it to
-just build. The owner has ruled against designs that dictate file structure, so the
-real question is whether a bare `executable` is even allowed, and if so how its entry is
-found — without the manifest mandating where Sam's files live.
-
-| Option | File-structure mandate | Bare `executable` allowed | Failure mode |
-|---|---|---|---|
-| A — explicit `entry:` always | none | no | clear error: "specify `entry:`" |
-| B — convention search | yes (fixed search paths) | yes | ambiguous match across conventions |
-| C — single-root-file rule | soft (root layout) | yes, when one `.jet` at root | breaks the moment a second root file appears |
-
-- **Option A — require `entry:` on every `executable` (no convention).** No path is ever
-  assumed; a bare `executable` is rejected with a fix.
-
-```jet
-packages:
-  app: { targets: [executable] }
-// error: an `executable` target needs an entry module.
-//   fix: executable { entry: "src/main.jet" }
-```
-
-- **Option B — bare `executable` allowed; compiler searches fixed conventions.** Tries
-  e.g. `src/main.jet`, then `<package>.jet`; errors only if none or several match.
-
-```jet
-packages:
-  app: { targets: [executable] }
-// resolves: found src/main.jet -> entry for `executable`
-// (if both src/main.jet and app.jet exist:)
-// error: ambiguous entry for `executable` — src/main.jet and app.jet both match;
-//        add `entry:` to disambiguate.
-```
-
-- **Option C — bare `executable` valid only when exactly one `.jet` sits at package root.**
-
-```jet
-packages:
-  app: { targets: [executable] }   // valid: only app/main.jet at root
-// add a second root file and:
-// error: `executable` has no `entry:` and the package root has 2 `.jet` files;
-//        add `entry:`.
-```
-
-**Recommendation:** none — genuine owner call. Option A is the safest (no
-file-structure assumption, no ambiguity) but trades away the zero-config
-convenience that B/C buy with a layout convention the owner has resisted.
-
----
-
-### D-TGT5 — `test` target vs. `#test fn` (S82) (rec C)
-
-**User story.** Dahlia has unit tests written as ratified S82 `#test` functions next
-to her code, and a separate end-to-end script under `tests/`. She wants `jet test` to
-just run her `#test` fns with no manifest entry, while still being able to point at
-the standalone integration file when she has one.
-
-| Option | Unit `#test` fns | Integration file | Manifest entry for units? |
-|---|---|---|---|
-| A — explicit test target | not auto-run | declared target | yes (required) |
-| B — implicit only | auto-collected | no path for it | no |
-| C — both (hybrid) | auto-collected | optional `test { entry: … }` | no |
-
-- **Option A — separate `test` target carries everything; `#test` fns aren't auto-run.**
-  Nothing runs unless a `test` target names a file.
-
-```jet
-packages:
-  app: { targets: [library, test { entry: "tests/all.jet" }] }
-// `jet test` runs only tests/all.jet; the #test fn below is ignored unless that
-// file imports and invokes it.
-#test
-fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }
-```
-
-- **Option B — implicit only: `jet test` collects `#test` fns; no `test` target exists.**
-  No way to point at an out-of-tree integration file as a target.
-
-```jet
-packages:
-  app: { targets: [library] }
-// `jet test` auto-collects every #test fn in the package — no target declared.
-#test
-fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }
-// tests/e2e.jet -> not built (no target slot for a standalone file)
-```
-
-- **Option C — hybrid: `#test` fns auto-collected; `test { entry: … }` optional for
-  out-of-tree files.** Both coexist.
-
-```jet
-packages:
-  app: { targets: [library, test { entry: "tests/e2e.jet" }] }
-// `jet test` runs BOTH: every #test fn in src/ (auto) AND tests/e2e.jet (declared)
-#test
-fn reversing_twice(xs: [Int]) { require_eq(reverse(reverse(xs)), xs) }
-```
-
-**Recommendation:** C — honors ratified S82 (unit `#test` fns always just work, no
-ceremony) while still giving integration files that live outside the source tree a
-declared home.
-
----
-
 ## Step-through debugger — board card c52
 
 
@@ -642,66 +199,7 @@ declared home.
 ---
 
 
-Two choices reach the owner. D-DBG1 (the `jet debug` command name) is already ratified. D-OBS1 scheduled the DAP debugger as a GA gate. The open decisions below cover the line-table artifact format and the policy for generated/library frames that have no Jet source line.
-
----
-
-### D-OBS2 — Debug line-table format (rec A)
-
-**User story.** A Zed extension author wants to write a third-party DAP adapter that reads Jet's source map and translates VS Code breakpoints to Jet lines. They need to know where to find the line table and whether it is stable enough to rely on between compiler versions.
-
-| Option | Location | Parser complexity | Third-party stable? | Debug-build overhead |
-|--------|----------|-------------------|---------------------|----------------------|
-| A — inline `// jet:line` comments in generated `.rs` | Same file as codegen output | Scan lines for prefix; linear pass | Fragile: any Rust reformatter strips comments | Near-zero: comments don't affect compilation |
-| B — sidecar `.jetmap` JSON file | `<file>.jetmap` beside the temp Rust file | Parse one JSON object | Stable: a versioned schema; third parties read one file | Negligible: written once per compile; schema-versioned |
-| C — embed line table in the binary as a custom section | ELF/Mach-O `.jet_lines` section | Needs a binary reader (not std-only without careful scoping) | Stable at the binary level, invisible to source tools | Binary size: small table per translation unit |
-
-- **Option A — inline `// jet:line <rust>=<jet>` comments in the generated `.rs` file.**
-  The adapter scans the temp `.rs` for lines matching `// jet:line <rust>=<jet>` and builds the translation table in memory. No new file to manage.
-
-    ```
-    $ jet debug examples/features/05_loops.jet
-    # adapter reads build/tmp/05_loops.rs:
-    #   // jet:line 12=7
-    #   // jet:line 14=8
-    # translates editor breakpoint loops.jet:7 → rust line 12
-    breakpoint hit  loops.jet:7  in main()
-    ```
-
-    Third-party tools that want to read the line table must parse the generated Rust source (which may be reformatted or stripped of comments by `rustfmt`). I6: std-only, trivially.
-
-- **Option B — sidecar `.jetmap` JSON file beside the generated Rust.**
-  Codegen writes `build/tmp/05_loops.jetmap` alongside `build/tmp/05_loops.rs`. Schema: `{ "version": 1, "source": "examples/features/05_loops.jet", "lines": [[12, 7], [14, 8], …] }`. The adapter reads one file. Third-party tools have a stable, schema-versioned contract.
-
-    ```
-    $ ls build/tmp/
-    05_loops.rs   05_loops.jetmap
-
-    # .jetmap content:
-    { "version": 1, "source": "examples/features/05_loops.jet",
-      "lines": [[12, 7], [14, 8], [16, 9]] }
-
-    $ jet debug examples/features/05_loops.jet
-    breakpoint hit  loops.jet:7  in main()
-    (jet-dbg) step
-       8 |     total += i
-    locals:  n = 5   total = 0   i = 1
-    ```
-
-    I6: hand-written JSON serialization in `Source/Debug/linemap.rs`, zero crates. Codegen stays dumb (I3): records `(jet_line, rust_line)` pairs it already has; the formatter writes a small JSON object.
-
-- **Option C — custom binary section in the compiled artifact.**
-  Codegen emits DWARF-adjacent line information in a custom ELF/Mach-O section (`__jet,__lines`). The adapter reads the binary. No extra file, fully self-contained artifact.
-
-    ```shell
-    $ jet debug examples/features/05_loops.jet
-    # adapter reads jet_lines section from the compiled binary
-    breakpoint hit  loops.jet:7  in main()
-    ```
-
-    Requires a binary format writer and reader in `Source/Debug/` (std-only but non-trivial); platform binary format differences (ELF vs Mach-O vs PE) require per-platform branches. Viable for GA; heavyweight for a first iteration.
-
-**Recommendation:** B. A versioned sidecar JSON is the simplest stable contract for both the built-in adapter and any third-party tools, requires no binary format work, and is trivially std-only. The schema version field future-proofs format evolution without breaking existing adapters. If the intermediate Rust files are cleaned up after compilation, the adapter reads the map during the session and the file can be discarded; the binary retains full DWARF from `rustc` for lldb's use.
+One choice remains for the owner. D-DBG1 (the `jet debug` command name) and D-OBS2 (the line-table is a sidecar `.jetmap`, ratified 2026-06-21) are settled; D-OBS1 scheduled the DAP debugger as a GA gate. The open decision below covers the policy for generated/library frames that have no Jet source line.
 
 ---
 
@@ -762,168 +260,111 @@ Two choices reach the owner. D-DBG1 (the `jet debug` command name) is already ra
 
 ## Allocators — board card c05
 
-### D-ALLOC2 — What `arena.alloc(value)` returns, and how `reset`/`free` relate to outstanding allocations (rec A)
+> D-ALLOC2 ratified **2026-06-21 (option A — scope-bound `view`)**. A needs a **region**
+> (the lifetime of the `arena ::` scope) that `view` (S10/c06) does not yet have, so it
+> cannot be built until the region rule below is decided. D-REGION1 is the follow-on.
 
-D-ALLOC1 ratified the *spelling* (`arena :: mem.Arena.new()`, `node :: arena.alloc(value)`)
-and D-ALLOC-D ratified *two verbs* (`reset` keeps the buffer, `free` returns it to the OS).
-Neither said what `alloc` **returns** or what the type system does when you touch an
-allocation after `reset`/`free`. The c05 runtime shipped a stub where `alloc(v)` just
-returns `v` — no real arena. This card picks the real return semantics. It is the load-bearing
-decision: it determines whether arenas in a safe-by-default language are *statically* safe
-(Rust's bar) or rely on a runtime trap, and whether Jet needs a region/lifetime story it
-does not yet have.
+### D-REGION1 — How is an allocation region denoted? (rec A)
 
-**User story.** Priya is writing a game in Jet. Each frame she allocates thousands of
-short-lived scratch objects — collision pairs, particle nodes, path segments — into a
-per-frame arena, then wipes the whole thing at end-of-frame with one `reset` and reuses
-the buffer next frame. She wants the cheap bulk-free that makes arenas worth using, and she
-*never* wants a dangling read: if she stashes a frame-N node in a list that outlives the
-`reset`, the compiler must stop her — by name, at the use site — not hand her a corrupted
-read at runtime. She has never written a lifetime and does not want to start.
+**User story.** Priya allocates per-frame scratch into an arena and wipes it with one
+`reset`. She has never written a lifetime and does not want to. The compiler still has to
+stop her from stashing a frame-N node where it outlives the arena. The question: does she
+write *anything* to mark the region, or does the compiler infer it from the `arena ::`
+binding scope she already wrote?
 
-**Prior art (confirmed current APIs).**
+| Option | Region is | User writes | Escape check | Familiarity |
+|--------|-----------|-------------|--------------|-------------|
+| A — implicit, scope-inferred (rec) | the lexical scope of the `arena ::` binding | nothing | view tied to that scope; escaping it is E0631 | no lifetimes — matches Jet's "never write a borrow" promise |
+| B — explicit `region r { … }` block | a named region introduced by a block | `region r { … }` wrapper | views carry `r`; leaving the block ends `r` | one new block keyword; visible but more ceremony |
+| C — named lifetime on the binding | a user-named region label | `arena ::'a mem.Arena.new()` | views carry `'a` | Rust's `'a` — the exact thing Jet promised never to surface |
 
-- **Zig `std.heap.ArenaAllocator`** — `allocator.create(T)` returns `*T`, `alloc(T, n)` returns
-  `[]T` (a real pointer/slice). `deinit()` frees everything; `reset(.retain_capacity)` rewinds
-  the bump pointer but keeps the buffer. Outstanding pointers after a reset are silently
-  dangling — the language does nothing; correctness is on the programmer. Fast, **not statically safe.**
-- **Rust `bumpalo::Bump` / `typed-arena`** — `alloc(value)` returns `&'bump mut T`, a reference whose
-  lifetime is tied to the arena's borrow. `reset(&mut self)` takes `&mut self`, which the borrow
-  checker can only grant when **no** outstanding `&'bump T` references are live. Use-after-reset is
-  a *compile error*, not a trap. **Statically safe — this is the gold standard, and the cost is a
-  real lifetime/region in the type system.**
-- **Odin `mem.Arena`** — allocations come back as `rawptr` / typed pointers via `context.allocator`;
-  `free_all` / `arena_free_all` rewinds and keeps the first block. Outstanding pointers after
-  `free_all` dangle; safety is by convention. **Not statically safe.**
-- **C++ `std::pmr::monotonic_buffer_resource`** — `allocate()` returns `void*`; `deallocate()` is a
-  no-op; `release()` (or destruction) returns everything upstream at once. Pure pointer + bulk-free,
-  **no static guard at all.**
-- **Jai** — temporary-storage / pool allocators give the same per-frame bump-and-reset ergonomics
-  (`reset_temporary_storage`); pointer-based, manual lifetime discipline, no compiler enforcement.
-
-**The spectrum.** One axis: *pointer + bulk-free* (Zig, Odin, C++, Jai) is trivial to implement and
-maximally flexible, but the language cannot tell you when you've outlived your allocation — it's
-exactly the class of bug a memory-safe language exists to delete. *Lifetime-bound reference* (Rust)
-makes use-after-reset a compile error, but only because Rust pays for a borrow checker with regions.
-Jet sits in between: it has ownership (S10 `take`/`view`/`mut`/`ref`) and the c06 capability model,
-but **no user-facing region/lifetime mechanism today** and **no raw pointers exposed to users ever.**
-
-| Option | `alloc(value)` returns | Static safety (use-after-reset) | reset / free model | Fits S10 / c06 ownership | Prior art |
-|--------|------------------------|---------------------------------|--------------------|--------------------------|-----------|
-| A scope-bound view | a `view` into arena storage, valid only inside the arena's lexical scope | **Yes** — checker forbids escaping the scope and forbids any use after `reset`/`free` | `reset`/`free` take the arena by `mut`; legal only when no live view escapes the binding | extends `view` (S10) with a region tied to the `arena ::` binding scope | Rust bumpalo / typed-arena |
-| B opaque handle | an opaque `Handle<T>` (index into arena-owned storage), not a reference | **Yes** — `reset`/`free` bump a generation; sema marks every handle from the old generation dead, use names the site | `reset`/`free` invalidate all outstanding handles; arena *owns* the values | generational-index arenas (Rust `slotmap`/ECS); no new region machinery | 
-| C owned clone (stub) | an owned `T` (the value, cloned into arena-managed storage if it lived there at all) | N/A — nothing dangles because nothing is shared | `reset`/`free` drop arena-owned copies; callers hold independent owned values | trivially fits — it's just `take`/owned values | current c05 stub (barely an arena) |
-
-- **Option A — scope-bound view (à la Rust, the safe gold standard).** `alloc` returns a `view T`
-  bound to the *region* introduced by the `arena ::` binding. You may read/write the allocation
-  freely **inside** that scope; the checker forbids it from escaping (storing it somewhere that
-  outlives the arena) and forbids any use after `reset`/`free`, which require `mut arena` and are
-  only legal once no escaping view is live. This is bumpalo's `&'bump T` reworded in Jet's
-  capability vocabulary — no lifetimes typed by the user, but a real region behind the scenes.
-
-```jet
-use core.mem
-
-fn frame(world: view World) {
-    arena :: mem.Arena.new(capacity: 1 << 20)
-
-    node :: arena.alloc(CollisionPair{ a: 1, b: 2 })
-    node.a += world.gravity            // ok — used inside the arena's scope
-
-    arena.reset()                      // ok — `node` is not used after this point
-}
-```
+- **Option A — implicit, scope-inferred (rec).** The region *is* the scope of the
+  `arena ::` binding; no syntax. The checker attaches that scope to each `alloc` view and
+  rejects escape/use-after-reset by name.
 
 ```jet
 fn frame(world: view World, out: mut [view CollisionPair]) {
     arena :: mem.Arena.new(capacity: 1 << 20)
-    node :: arena.alloc(CollisionPair{ a: 1, b: 2 })
-
-    out.push(node)   // error[E0631]: arena allocation escapes the arena it was allocated in
-                     //  --> frame.jet:4:14
-                     //   |
-                     // 4 |     out.push(node)
-                     //   |              ^^^^ `node` is a view into `arena`, which is freed
-                     //   |                   when this function returns
-                     //   = note: an arena allocation may not outlive the `arena ::` that made it
-                     //   help: store an owned copy instead — `out.push(node.copy())`
+    node  :: arena.alloc(CollisionPair{ a: 1, b: 2 })
+    node.a += world.gravity        // ok — inside the arena's scope
+    out.push(node)                 // error[E0631]: `node` escapes the arena that made it
 }
 ```
+
+- **Option B — explicit `region r { … }` block.** A region is a named block; views inside
+  it carry `r` and may not leave it.
+
+```jet
+fn frame(out: mut [view CollisionPair]) {
+    region r {
+        arena :: mem.Arena.new()
+        node  :: arena.alloc(CollisionPair{ a: 1, b: 2 })
+        out.push(node)             // error[E0631]: `node` may not leave region `r`
+    }
+}
+```
+
+- **Option C — named lifetime on the binding.** A Rust-style label names the region.
+
+```jet
+fn frame() {
+    arena ::'a mem.Arena.new()     // surfaces a lifetime name — the thing Jet promised to hide
+    node  :: arena.alloc(Node{ id: 7 })
+}
+```
+
+**Recommendation:** A as the inferred **beginner** default, **plus B as the explicit expert
+tier** (see the owner Q below) — not A *xor* B. C reintroduces exactly the borrow-lifetime
+surface Jet exists to avoid. Unblocks D-ALLOC2-A on ratification.
+
+---
+
+**Owner Q (2026-06-21) — how is this supportive of experts? Jet is beginner-automagic AND
+expert-full-control.**
+
+You're right to push on this — A alone is only the beginner half. The dual-facet answer is
+**A is the inferred default; B (`region r { … }`) is the expert opt-in**, and both ship.
+That's the same shape as the rest of Jet (capabilities are inferred but can be written;
+`@unsafe`/`core.mem` is the expert gate over safe defaults):
+
+- **Beginner / automagic (A, inferred):** write `arena :: mem.Arena.new()`, allocate, and
+  the region *is* that binding's scope. No lifetime, no `region` block, no annotation. The
+  checker silently proves no allocation escapes. 99% of code never names a region.
 
 ```jet
 fn frame() {
     arena :: mem.Arena.new()
-    node :: arena.alloc(Node{ id: 7 })
-    arena.reset()           // wipes the buffer
-    print(node.id)          // error[E0632]: use of arena allocation after `reset`
-                            //  --> frame.jet:5:11
-                            //   |
-                            // 4 |     arena.reset()
-                            //   |     ----- `arena` reset here, invalidating `node`
-                            // 5 |     print(node.id)
-                            //   |           ^^^^ `node` was allocated before the reset
-                            //   help: move the `reset` after the last use of `node`
+    node  :: arena.alloc(Node{ id: 7 })   // region inferred from `arena ::`
+    use(node)                              // freed at scope end, automatically
 }
 ```
 
-- **Option B — opaque generational handle.** `alloc` returns an opaque `Handle<T>` — an
-  index plus a generation, never a reference. Reads go through `arena.get(handle) -> view T`.
-  `reset`/`free` bump the arena's generation; sema knows every handle minted before the bump is
-  dead and reports a use-after at the access site. Handles are plain values, so they *can* be
-  stored anywhere and outlive the arena — using a stale one is the error, caught statically when
-  the generation is statically known, and trapped at runtime otherwise (still memory-safe: a dead
-  handle never reads freed memory, it returns a checked failure). No region machinery needed.
+- **Expert / full control (B, explicit `region`):** the moment an expert needs a region the
+  inference *can't* give them — one spanning **two** allocators, or **narrower** than the
+  enclosing function, or one they pass to a helper so allocations can flow back out under a
+  named bound — they write it explicitly. The named region is the expert's lever; the
+  checker enforces the same escape rule against `r` instead of an inferred scope.
 
 ```jet
-fn frame() {
-    arena :: mem.Arena.new()
-    h :: arena.alloc(Node{ id: 7 })   // h : Handle<Node>
-    arena.reset()                     // generation bumps
-    n :: arena.get(h)                 // error[E0633]: handle invalidated by `reset`
-                                      //  --> frame.jet:5:21
-                                      //   |
-                                      // 4 |     arena.reset()
-                                      //   |     ----- generation bumped here; `h` is from the old generation
-                                      // 5 |     n :: arena.get(h)
-                                      //   |                    ^ `h` no longer names a live allocation
-                                      //   help: re-allocate after the reset, or move the reset later
+fn build(out: edit Scene) {
+    region r {                              // expert names the region explicitly
+        scratch :: mem.Arena.new()
+        staging :: mem.Arena.new()          // two arenas, ONE region `r`
+        for part in source {
+            node :: scratch.alloc(part.mesh)
+            out.commit(node, in: r)         // legal: `node` lives as long as `r`
+        }
+    }                                       // both arenas freed here, together
+    // a beginner never writes `region`; an expert reaches for it when scope-inference
+    // is too coarse or too fine for what they're building.
 }
 ```
 
-- **Option C — owned clone (the current c05 stub).** `alloc(value)` returns an owned `T`; the
-  arena owns at most a managed copy. `reset`/`free` drop the arena's copies, but callers already
-  hold independent owned values, so nothing can dangle — because nothing was ever shared. It is
-  trivially safe and trivially fits S10 (`take`/owned), but it is **barely an arena**: there is no
-  shared bump-allocated storage, every `alloc` is a clone, and `reset` frees nothing the caller
-  can see. It buys none of the per-frame win Priya came for. Listed for honesty and as the
-  fallback if a region story can't land this milestone.
-
-```jet
-fn frame() {
-    arena :: mem.Arena.new()
-    node :: arena.alloc(Node{ id: 7 })   // node : Node — an owned value, not shared
-    arena.reset()                        // drops the arena's copy; `node` is untouched
-    print(node.id)                       // prints 7 — no aliasing, so no use-after to catch.
-                                         // also: this allocated nothing into a shared buffer.
-}
-```
-
-**Recommendation:** A — scope-bound `view`. Safe-by-default (philosophy P1) means use-after-reset
-must be a *compile error*, not a runtime trap or undefined behavior; only A and B clear that bar,
-and only A gives the genuine shared-buffer bump allocation that makes arenas worth shipping
-(B's per-access indirection and runtime fallback are a weaker, slower compromise). A is also the
-design every language *lauded* for allocator safety converged on (Rust bumpalo / typed-arena).
-
-**Interaction with c06 / S10 — and the gap this exposes.** A extends `view` (S10) but needs
-something S10 does **not** have: a **region** — the lifetime of the `arena ::` binding scope — that
-the checker can attach to each allocation and use to forbid escape and use-after-`reset`. That is a
-new piece of the capability model. It should be specified as part of c06 (the `view` capability
-already there is the natural home) or as an explicit follow-on region card; **D-ALLOC2-A cannot be
-implemented until that region rule exists.** B is the escape hatch if the owner wants real arenas
-*this* milestone without taking on regions — it's safe and needs no new type-system machinery, at
-the cost of indirection and a runtime check on statically-unknown handles. C needs nothing new but
-isn't really an arena. Recommend ratifying A as the target and sequencing the region work into c06;
-fall back to B only if regions slip the milestone.
+So experts are not boxed in by the automagic: A removes lifetimes from the 99% path, and B
+hands the expert an explicit, named region with full control over the 1% — exactly the
+beginner-magic / expert-control split. (C is still rejected: a Rust-style `'a` *forces* the
+lifetime surface on everyone, which is neither the beginner default nor a clean expert tier.)
+**Revised recommendation: ratify A + B together.**
 
 ---
 
@@ -1052,184 +493,6 @@ pub fn checkout(req: Request) -> Response ! {net, db, log} ? {
 - **S60** deliberately rejected a full effects system (`pure fn` is the one ratified effect-tag). The `#(net, db, log)` effect surface **reopens S60**. D-QUAL1 is the place to decide that reopening explicitly.
 - **S56 / S83** ratified user-defined derives via the external connector `~~` (`derive Point~~Serialize`); `#[…]` is for built-in derive *markers*. Keep the two distinct: `#[…]` lists markers, `~~` attaches a derive impl.
 - **Manifest surface**: the `module shop.checkout { … }` block overlaps `pkg.jet` (`payload:`/`packages:`, D-JPK-FILES) and module paths (D-MOD1 uses `.`). Decide whether capability policy lives in `pkg.jet`, in an in-source `module { }` block, or both.
-
----
-
-## Qualifier taxonomy (decide first) — board card c62
-
-### D-QUAL2 — How many kinds of qualifier? (rec B)
-
-> **Decide this before D-QUAL1.** D-QUAL2 is the taxonomy foundation; D-QUAL1
-> (c62) asks *where* qualifiers live across three surfaces (signature /
-> declaration / manifest), and that routing rule only makes sense once the
-> owner has decided *how many distinct kinds of qualifier exist*. Ratify
-> D-QUAL2 first to give D-QUAL1 a stable vocabulary to route. D-QUAL2 does not
-> duplicate D-QUAL1's surface decision — it feeds it.
-
-**User story.** Priya is a mid-level dev joining the Jet project. She reads
-the spec page on "qualifiers" and finds four overlapping terms: *trait*,
-*attribute*, *tag*, *effect*. She can't tell which apply to types, which to
-functions, which carry methods, which are just markers. She asks a colleague
-and gets a different answer. The taxonomy decision is the fix: one mental model
-that lets anyone answer her question from first principles.
-
-**How this relates to D-QUAL1.** D-QUAL1 decides the *surface* — `#(…)` for
-effects, `#[…]` for tags, manifest for policy. That surface routing is sound
-regardless of which taxonomy option wins here, but the *names* and *beginner
-explanation* change: under Option B the one-liner is "methods → trait, no
-methods → tag"; under Option A it requires four sentences; under Option C it
-requires a footnote about why traits are special labels. Ratify D-QUAL2, then
-confirm the D-QUAL1 vocabulary matches.
-
-| Option | Kinds | Beginner rule | Dispatch story | Re-teaching cost |
-|--------|-------|---------------|----------------|-----------------|
-| A — four kinds | trait / attribute / tag / effect | four sentences, four words | each kind dispatched differently | status quo; complexity already present |
-| B — two kinds | trait (has methods) / tag (no methods) | one sentence | `#Name` attaches either; traits dispatch via vtable, tags erase at runtime | one doc pass + small sema change to first-class `tag` |
-| C — one kind | "label" (labels with methods = traits) | one word, one footnote | hides vtable-vs-marker distinction | maximally small vocabulary; may confuse experts |
-
-#### How other languages do this
-
-- **Rust** — splits the space three ways: `trait` (has methods, dispatches),
-  `derive`/attribute macros (`#[derive(..)]`, compiler-driven codegen), and
-  marker traits (`Send`, `Copy` — empty bodies, no methods). Beginners conflate
-  all three. Takeaway: the marker-vs-method split is the real line; Jet draws it
-  once as tag-vs-trait instead of leaving three half-overlapping concepts.
-- **Swift** — `protocol` (methods, dispatch) vs. marker protocols
-  (`@_marker`, no requirements, erased) vs. property wrappers / attributes.
-  Takeaway: even Swift bolts on a separate "marker protocol" concept; Jet's tag
-  *is* that, first-class, no special case.
-- **Haskell** — type classes (methods) vs. empty/marker classes vs. `DataKinds`
-  promoted constructors used as phantom labels. Takeaway: the "class with no
-  methods" is already used as a pure label everywhere; Jet names that the tag.
-- **Go** — interfaces (methods, dispatch) and struct tags (string metadata, no
-  methods, read by reflection). Takeaway: Go already has exactly two kinds and a
-  beginner can say which is which — proof the two-kind split is teachable.
-- **Java** — interfaces (methods) vs. marker interfaces (`Serializable`, empty)
-  vs. annotations (`@Override`, metadata). Takeaway: three kinds where two would
-  do; the marker-interface idiom shows "no methods = pure label" is well-trodden.
-
-Across all five, the load-bearing distinction is *has methods (dispatches) vs.
-no methods (pure label, erases)*. Option B is the only one that makes that the
-whole vocabulary.
-
-- **Option A — Four kinds: trait, attribute, tag, effect.** Keep the four
-  existing concepts distinct and separately named. Traits have methods and
-  enable dispatch. Attributes are compiler-understood markers (`#Serialize`,
-  `#Comparable`). Tags are user-attached value-facts or typestate markers
-  (`#paid`, `#tainted`). Effects are runtime-reach annotations (`#(db, net)`).
-
-```jet
-// A trait: has methods, enables dispatch
-trait Drawable {
-    fn draw(self, canvas: mut Canvas)
-}
-
-// An attribute: compiler-understood marker on a declaration
-#Serialize
-struct Order { id: Int, total: Float }
-
-// A tag: user value-fact, no methods, attaches to a value
-fn charge(o: Order) -> Receipt #paid ? {
-    // ...
-}
-
-// An effect: runtime-reach annotation on a signature
-fn save(o: Order) #(db) -> Unit ? {
-    // error if you call this from a pure context:
-    // error[E0730]: `save` declares effect `#(db)`; caller must also
-    //               declare `#(db)` or wrap the call in an effect region.
-}
-```
-
-The problem: a beginner who asks "what's the difference between a tag and an
-attribute?" has no clear answer. Both are `#Name`-shaped, neither has methods.
-The distinction is implementation-level (compiler-known vs user-defined),
-which the beginner doesn't have context to reason about yet. Four overlapping
-concepts fight the simplicity ratchet (I8).
-
-- **Option B — Two kinds: trait (has methods) + tag (no methods).
-  (RECOMMENDED)** Collapse attributes, tags, effects, typestate markers,
-  units, taint, must-use, and tool-markers into one concept: **tag**. A tag is
-  any `#Name` that carries no method body. Traits are anything with at least
-  one method. The `#Name { … }` scoped-region form (S82, D-ATTR1) attaches
-  the same way; the region's *body* is the method-vs-no-method discriminator.
-  Derives are traits (they attach method impls). Effects like `#(db)` are tags
-  whose propagation rule is tracked by sema — they erase at runtime, no
-  dispatch needed.
-
-```jet
-// A trait — has methods; dispatch is real
-trait Drawable {
-    fn draw(self, canvas: mut Canvas)
-}
-
-// Tags — no methods; erase at codegen
-#[Serialize, Comparable]   // built-in tags that trigger compiler-generated impls
-struct Order { id: Int, total: Float }
-
-fn charge(o: Order #unpaid) -> Receipt #paid ? {
-    // #unpaid / #paid are user-defined tags; they are typestate
-    // sema checks them; codegen erases them.
-    // ...
-}
-
-fn save(o: Order) -> Unit ? {
-    // declared effect tag via D-QUAL1's #(…) surface:
-    // #(db) is a tag that propagates along call sites
-}
-
-// Error: tag used where a trait (dispatch) is expected
-fn render_all(items: [#Drawable]) {
-    //               ^^^^^^^^^^
-    // error[E0731]: `#Drawable` is a tag (no methods); to dispatch on it,
-    //               declare it as a trait: `trait Drawable { fn draw(…) }`
-    //               and use it as a type: `fn render_all(items: [Drawable])`
-}
-```
-
-```jet
-// Error: trying to write methods on a tag declaration
-tag Comparable {
-    fn compare(self, other: Self) -> Int  // error[E0732]: a `tag` may not
-                                          // declare methods; use `trait`
-}
-```
-
-Cost: sema gains a first-class `tag` keyword (or policy: a `#Name` with no
-method body is automatically a tag). One documentation pass renames "attribute"
-and "effect" to "tag" in teaching material. The codegen change is zero —
-tags already erase.
-
-- **Option C — One kind: "label" (traits are labels-with-methods).** Every
-  `#Name` is a label. Traits are the subset of labels that also carry a method
-  body. There is no user-facing distinction; the compiler figures it out from
-  context.
-
-```jet
-// C spells everything the same; the compiler infers kind from usage
-#Drawable           // label — has methods somewhere? trait. Else: tag.
-#Serialize          // label — compiler-known: generates impls
-#paid               // label — value-fact: typestate
-
-fn render(item: #Drawable) {
-    item.draw(canvas)  // ok if #Drawable turns out to have a `draw` method
-    // but: how does the beginner know whether #Drawable will dispatch
-    // or be erased? They have to look up whether #Drawable has methods.
-    // The "label" term hides the most load-bearing distinction in the type system.
-}
-```
-
-The failure mode: "label" is a smaller vocabulary but demands the learner
-understand the vtable-vs-erase distinction anyway, just with no word for it.
-The term "trait" is load-bearing in error messages, docs, and impl blocks; a
-rename to "label" would break all of them.
-
-**Recommendation:** B — "methods → trait, no methods → tag" is the shortest
-rule that correctly captures the dispatch-vs-marker split. Option A is the
-current reality and the source of beginner confusion. Option C erases the one
-distinction that actually matters for understanding dispatch.
-
----
 
 ---
 
@@ -1396,472 +659,6 @@ the surface spelling against D-QUAL1 and answering effect-polymorphism, and reop
 S60 explicitly.
 
 ---
-
----
-
-## Scoped capabilities — board card c67
-
-### D-SCAP1 — Lend a power, get it back: scoped capabilities (rec A)
-
-**User story.** Devi runs a plugin host. A third-party coupon plugin needs to read
-*one* config file, once, during init — and nothing else, ever. She does not want the
-plugin holding a filesystem handle it can stash, pass around, or reuse after init.
-She wants to hand it the power to read that file, watch it use it inside a bounded
-scope, and have the power *evaporate* the instant the scope ends — the same shape as
-the `#audit`/`#unsafe` gate (S58) she already trusts, and the same RAII "cleanup at
-scope end" story Jet teaches for files (S63).
-
-This is **not** the c06 D-CAP capabilities (`take`/`view`/`edit`/`share`), which are
-about *value ownership* — who may read or mutate a value. D-SCAP1 is about handing
-out a revocable **power** — authority to perform an effect (filesystem access,
-network access) — into a scope, then taking it back. D-CAP answers "who owns this
-`Player`?"; D-SCAP1 answers "is this code *allowed* to touch the disk right now?"
-
-| Option | Capability is | Granted/revoked by | Can it be stashed & reused? | Built on |
-|--------|---------------|--------------------|-----------------------------|----------|
-| A — capability *value*, RAII-revoked (rec) | a first-class value you hold | granted into a scope; auto-revoked at scope end (S63) | no — escaping it is a compile error | D-EFF1 + S63 |
-| B — capability = effect tag only | a `#fs` tag on a function | the `#caps(fs){ }` region (D-EFF1) | no — there's no value at all | D-EFF1 only |
-
-#### How other languages do this
-
-- **Object-capability model (E, Caja; Pony reference capabilities)** — authority *is*
-  an unforgeable reference; you can only do what you hold a capability object for, and
-  you pass it explicitly. Takeaway: the canonical "no ambient authority" model — a
-  capability is a value, exactly Option A.
-- **Austral** — *linear* capability values: a capability is consumed/threaded
-  linearly so it can't be duplicated or leaked, and regions bound its scope.
-  Takeaway: linearity is how you make "get it back" enforceable at compile time; A
-  borrows the scope-bound version without requiring full linearity.
-- **Java SecurityManager** — *deprecated for removal* (JEP 411, deprecated in Java 17).
-  A runtime, stack-inspecting, global permission monitor that proved unmaintainable
-  and was a frequent CVE source. Takeaway: the cautionary tale — ambient,
-  runtime-checked, global permissions are exactly what *not* to build; D-SCAP1 is
-  static and erased.
-- **POSIX capabilities / Capsicum (FreeBSD)** — process-level rights: Capsicum drops a
-  process into "capability mode" where it can act only through pre-granted file
-  descriptors. Takeaway: OS-level proof that scoping authority to held handles works;
-  Jet does it at the language level, at compile time.
-- **Wasm / WASI preview 2** — a component starts with **no ambient authority** and can
-  only touch resources the host explicitly grants; not providing a resource implicitly
-  revokes the capability. Takeaway: the modern, mainstream endorsement of cap-based
-  security as the default — Jet's `#grant(fs) { … }` scope is the same idea, in-language.
-
-- **Option A — capability values, revoked by scope / RAII (rec).** A capability is a
-  first-class value granted into a lexical scope. Inside the scope you hold it and may
-  perform the effect it authorizes; at scope end it is revoked by the same RAII rule
-  S63 already teaches ("when a value goes out of scope, Jet cleans it up"). Letting the
-  capability *escape* — storing it somewhere that outlives the grant — is a compile
-  error, so it can't be stashed and reused. Layered on D-EFF1: the capability is what
-  authorizes a `#fs`/`#net` effect inside the region; without it the effect is rejected.
-
-```jet
-fn init_plugin(p: view Coupon) {
-    #grant(fs) { caps ->                 // grant fs authority into this scope
-        cfg :: caps.read("coupon.toml")? // ok — caps authorizes the #fs effect
-        p.configure(cfg)
-    }                                    // caps revoked here (RAII, S63)
-    // p can no longer touch the disk — it never held a capability value
-}
-
-// Escape is rejected — the power can't outlive the grant:
-fn leaky(store: mut [FsCap]) {
-    #grant(fs) { caps ->
-        store.push(caps)   // error[E0711]: capability `caps` escapes the `#grant` that lent it
-                           //  --> plugin.jet:3:20
-                           //   |
-                           // 3 |         store.push(caps)
-                           //   |                    ^^^^ `caps` is revoked when this `#grant`
-                           //   |                         scope ends; storing it would outlive
-                           //   |                         the authority
-                           //   = note: a lent capability may not be stored, returned, or shared
-                           //   help: do the filesystem work inside the `#grant` scope, or take a
-                           //         capability parameter on a function the caller grants per-call
-    }
-}
-
-// Using a #fs effect with no capability in scope is rejected at the call site:
-fn sneaky(p: view Coupon) {
-    cfg :: read("secret")?   // error[E0712]: `#fs` effect requires a filesystem capability
-                             //   help: wrap the access in `#grant(fs) { caps -> … }`,
-                             //         or take an `FsCap` parameter
-}
-```
-
-- **Option B — capabilities as effect tags only (no first-class value).** No
-  capability *value* exists. Authority is purely the D-EFF1 region: inside
-  `#caps(fs) { … }` the `#fs` effect is permitted, outside it isn't. Simpler — it's
-  just D-EFF1 — but you can't *hand* a capability to a callee as a value, can't model
-  "this plugin holds an fs cap and nothing else for the duration of a call it makes,"
-  and the grant/revoke is implicit in lexical nesting rather than an explicit lent
-  thing.
-
-```jet
-fn init_plugin(p: view Coupon) {
-    #caps(fs) {
-        cfg :: read("coupon.toml")?   // ok — region permits #fs
-        p.configure(cfg)
-        // but: nothing to pass to p so that p itself may read one file and no more.
-        // p.load() either is called inside this region (gets ALL of #fs) or outside
-        // it (gets none). No middle ground, no per-call lending.
-    }
-}
-```
-
-**Recommendation:** A — a capability *value* is the only form that can be lent to a
-callee, checked for escape, and revoked by the RAII rule users already know (S63);
-it's the natural generalization of the S58 `#audit`/`#unsafe` gate from "unsafe ops"
-to "any guarded power." B is strictly a subset (it's just D-EFF1's region) and can't
-express per-call lending. Gated on D-EFF1 landing first.
-
----
-
----
-
-## Units as a tag — board card c68
-
-### D-UNIT1 — Units of measure: library newtype vs. first-class tag (rec B)
-
-**User story.** Amara is writing a budget tracker. She has a `price: Float` and
-a `tax_rate: Float`. Last week she accidentally added them and got a nonsense
-total. She wants the compiler to reject `price + tax_rate` outright, and she
-wants to write `9.99.usd` in a literal, not `Usd(9.99)`. She is not a type
-theorist; she just wants the bug class to disappear.
-
-**Relationship to D-DIST2 (ratified).** D-DIST2 ratified units of measure as a
-*stdlib extension* riding on top of distinct types (D-DIST1: `UserId :: distinct
-Int`). Option A below is exactly what D-DIST2 shipped: a `struct Usd(Float)`
-distinct-type wrapper, hand-built in stdlib, with explicit constructor and
-`.raw()` unwrap (D-DIST3). Option B is the *upgrade* to that ratified baseline:
-instead of one hand-written distinct struct per unit, units become a
-**parameterised tag** `#unit(usd)` on a numeric type, letting the compiler
-generate the wrapper, enforce dimensional algebra, and make the literal syntax
-natural. Ratifying B does not undo D-DIST1/D-DIST3; it adds a higher-level
-surface that compiles down to the same erased newtype.
-
-| Option | Literal syntax | Arithmetic safety | New language surface | Erase at runtime | Dimensional algebra |
-|--------|---------------|-------------------|---------------------|-----------------|---------------------|
-| A — library newtype (D-DIST2 as-shipped) | `Usd(9.99)` | yes — distinct types block `Usd + Eur` | none (stdlib only) | yes | manual via impl |
-| B — `#unit(usd)` tag (RECOMMENDED) | `9.99.usd` | yes — tag mismatch is E0xxx | parameterised tag on numerics | yes — erases to `f64` | derived by compiler |
-
-**How other languages do this.**
-
-- **F# units of measure** — `[<Measure>] type usd` then `9.99<usd>`; `9.99<usd> + 8.00<eur>` is a type error; fully erased at runtime. The gold standard for compile-time, zero-cost units; Jet's erased-tag model mirrors this exactly.
-- **Frink** — a runtime units language where every number carries its dimension; handles unit conversion automatically (`3 feet + 1 meter`). Jet takeaway: conversion rules should be explicit; silent conversion is the bug class we're killing.
-- **Rust `uom` crate** — phantom-type dimensional system; `Length<meter, f64>`; safe but verbose; the type names leak into every signature. Jet takeaway: units should be invisible in erased code; user sees `Float`, not `Quantity<f64, UnitDef<…>>`.
-- **Haskell `dimensional`** — similar to `uom`; `Quantity d a` where `d` is a type-level dimension vector. Jet takeaway: the type-level machinery should be hidden behind the tag; users declare `#unit(kg)`, the compiler does the algebra.
-- **Ada dimensioned types** — `type Meters is new Float`; dimensional algebra via explicit subtype declarations; verbose but well-understood in safety-critical domains. Jet takeaway: safe-by-default is worth a little ceremony; the ceremony should be one `#unit` declaration, not a full newtype per unit.
-
-**Options.**
-
-- **Option A — library newtype (D-DIST2 as-shipped).** One distinct struct per unit, manually declared in stdlib or user code. Constructor is `Usd(expr)`, unwrap is `.raw()` (D-DIST3). Arithmetic only between two `Usd` values via the `#Numeric` marker (D-DIST3). No literal method. This is fully working today.
-
-```jet
-// stdlib or user declares:
-Usd :: distinct Float
-
-// user code
-price: Usd :: Usd(9.99)
-tax:   Float :: 0.08
-
-total :: price + Usd(tax * price.raw())   // ok: Usd + Usd
-
-// error case
-bad :: price + tax
-// error[E0127]: cannot add `Usd` and `Float`
-//  --> budget.jet:7:16
-//   |
-// 7 |     bad :: price + tax
-//   |                  ^ type mismatch: `Usd` vs `Float`
-//   = note: `Usd` is a distinct type; arithmetic requires both sides to be `Usd`
-//   help: wrap `tax` → `Usd(tax)`, or unwrap price → `price.raw()`
-
-// no natural literal — must write Usd(9.99) everywhere
-```
-
-- **Option B — `#unit(usd)` tag (RECOMMENDED).** A parameterised tag attaches a unit to any numeric binding or expression. The compiler derives a distinct wrapper internally (same erasure as A), enforces unit matching in arithmetic, and exposes a method-call literal syntax `9.99.usd`.
-
-```jet
-// stdlib declares a unit family (one line per physical dimension):
-#unit_family(currency) { usd, eur, gbp }
-
-// user code
-price: Float #unit(usd) :: 9.99.usd
-tax:   Float            :: 0.08
-
-tip:   Float #unit(usd) :: 1.50.usd
-
-// ok: same unit
-total :: price + tip    // Float #unit(usd)
-
-// error case — different units
-bad :: price + 8.00.eur
-// error[E0128]: unit mismatch: `usd` and `eur`
-//  --> budget.jet:10:18
-//   |
-// 10 |     bad :: price + 8.00.eur
-//    |                    ^^^^^^^^ unit `eur`; expected `usd`
-//    = note: `price` carries unit `usd`; you cannot add different currency units
-//    help: convert explicitly — `8.00.eur.to_usd(rate)` — or use `.raw()` to strip the unit
-
-// error case — unit + bare float
-bad2 :: price + tax
-// error[E0129]: cannot add `Float #unit(usd)` and bare `Float`
-//  --> budget.jet:13:18
-//   |
-// 13 |     bad2 :: price + tax
-//     |                    ^^^ bare `Float` (no unit); `price` has unit `usd`
-//     help: attach the unit → `tax.usd` — or strip price → `price.raw()`
-```
-
-**Recommendation:** B — the literal syntax (`9.99.usd`), compiler-derived algebra,
-and single-declaration units make this a genuine beginner-friendly safety layer
-rather than a boilerplate exercise. It is the natural upgrade to D-DIST2, not a
-replacement. Gated on D-QUAL2 (parameterised tags).
-
----
-
----
-
-## Linear / must-use values — board card c69
-
-### D-LIN1 — Money that can't leak: linear / must-use values (rec A)
-
-**User story.** Kenji writes a payment service. A `Receipt` is proof of payment;
-it must be saved to the database or returned to the caller — it must never be
-silently discarded. Today `fn charge(…) -> Receipt` compiles fine even if the
-caller writes `charge(order)` on a line by itself and throws the receipt away.
-Kenji wants the compiler to catch that, with a clear message naming the dropped
-value, every time, on every code path.
-
-Jet already has the substrate: `take` moves a value into the callee (S10), so
-values are already consumed at most once. Linear = consumed *exactly* once — the
-tag adds the "at least once" half.
-
-| Option | Prevents silent drop | Prevents copy | Cost to author | Failure mode |
-|--------|---------------------|---------------|---------------|--------------|
-| A — `#linear` tag (RECOMMENDED) | yes — every path must consume | yes — `#linear` implies `#no_copy` | one tag on the type; good errors | compiler error naming the unconsumed binding |
-| B — `#must_use` only | warn/err on ignored *call result* | no | zero — just a tag | only catches the ignored-return case; drop in a variable is silent |
-
-**How other languages do this.**
-
-- **Rust (affine types / move semantics)** — values are moved, not copied, unless they implement `Copy`; a moved value cannot be used again. Affine = used *at most* once. Jet already has this via `take`. Linear = at most once *and* at least once; Rust does not enforce the "at least once" half without the `#[must_use]` attribute.
-- **Austral** — true linear types: every linear value must be consumed on every code path; the compiler names the un-consumed binding at the branch where it escapes. The gold standard for "exactly-once" enforcement; Jet's `#linear` is this model.
-- **Linear Haskell (`%1` multiplicity)** — function arrows annotated with a multiplicity: `f :: a %1 -> b` means `f` consumes its argument exactly once. Jet takeaway: the constraint lives on the *type*, not the *function arrow* — a `Receipt` is always linear, not "linear only when passed to certain functions."
-- **Clean (uniqueness types)** — a `*a` is a *unique* value; only one reference may exist at a time; the compiler tracks aliasing. Jet takeaway: uniqueness and linearity overlap; Jet's tag is closer to linearity (must consume) than uniqueness (no aliasing), which is the weaker, more teachable property.
-- **Granule / quantitative type theory** — each variable has a *grade* (how many times it may be used); `0` = erased, `1` = linear, `ω` = unrestricted. Jet takeaway: we only need grade `1`; shipping the whole grade lattice would be I8-violating over-engineering.
-- **Rust `#[must_use]`** — an attribute on a type or function; the compiler *warns* (not errors) when a `must_use` value is ignored at a call site, but not when the value is bound to a variable and then the variable is dropped. Option B is exactly this; it catches 80% of the cases with zero new machinery.
-
-**Options.**
-
-- **Option A — `#linear` tag (RECOMMENDED).** The tag on a type means: every binding of that type must be consumed (passed to a `take` parameter, returned, or explicitly dropped via `drop(x)`) on every reachable code path. The compiler tracks consumption through branches; any path that lets a `#linear` value go out of scope silently is a compile error.
-
-```jet
-// type declaration
-#[linear]
-struct Receipt {
-    order_id: OrderId
-    amount:   Float #unit(usd)
-}
-
-// fn that produces one
-fn charge(take order: Order) -> Receipt ? {
-    // ... payment logic ...
-    ok(Receipt { order_id: order.id, amount: order.total })
-}
-
-// correct usage — consumed via return
-fn process(take order: Order) -> String ? {
-    receipt :: charge(order)?
-    save_to_db(take receipt)?    // take = consume
-    ok("saved")
-}
-
-// error — binding created but never consumed
-fn bad_process(take order: Order) -> String ? {
-    receipt :: charge(order)?
-    // ... forgot to save ...
-    ok("done")
-    // error[E0140]: linear value `receipt` is not consumed before it goes out of scope
-    //  --> payment.jet:18:5
-    //   |
-    // 14 |     receipt :: charge(order)?
-    //    |     ------- linear value bound here
-    // 18 |     ok("done")
-    //    |     ^^^^^^^^^^ `receipt` escapes scope unconsumed on this path
-    //    = note: `Receipt` is `#linear`; it must be consumed on every path
-    //    help: pass it somewhere → `save_to_db(take receipt)?`
-    //          or explicitly discard → `drop(receipt)` (requires an `#audit`)
-}
-
-// error — silent drop in a branch
-fn conditional(take order: Order, save: Bool) -> String ? {
-    receipt :: charge(order)?
-    if save {
-        save_to_db(take receipt)?
-    }
-    // error[E0141]: linear value `receipt` not consumed on the `else` branch
-    //  --> payment.jet:28:5
-    //   |
-    // 24 |     receipt :: charge(order)?
-    //    |     ------- linear value bound here
-    // 28 |     }   ← else branch here
-    //    |     ^ `receipt` is consumed in the `if` arm but not the `else` arm
-    //    help: add `drop(receipt)` in the else arm, or consume it unconditionally before the branch
-    ok("done")
-}
-```
-
-- **Option B — `#must_use` only (weaker stepping stone).** The tag causes the compiler to error when the return value of a call is immediately discarded (not bound). It does *not* enforce consumption of a bound variable.
-
-```jet
-#[must_use]
-struct Receipt {
-    order_id: OrderId
-    amount:   Float
-}
-
-// error — ignored call result
-fn bad1(take order: Order) -> String ? {
-    charge(order)?       // result not bound
-    // error[E0142]: value of type `Receipt` (marked `#must_use`) is ignored
-    //  --> payment.jet:6:5
-    //   |
-    // 6 |     charge(order)?
-    //   |     ^^^^^^^^^^^^^^ return value discarded
-    //   help: bind it → `receipt :: charge(order)?`
-    ok("done")
-}
-
-// NOT caught — variable bound then silently dropped
-fn bad2(take order: Order) -> String ? {
-    receipt :: charge(order)?
-    // receipt never used — but #must_use only checks the call site, not the binding
-    ok("done")   // compiles. bug ships.
-}
-```
-
-**Recommendation:** A — the "at least once" guarantee is the entire point; Option B
-only catches the most obvious case and lets the subtler one through. Implement B
-first as the simpler stepping stone (it is a strict subset of A), then lift to A.
-Both options are gated on D-QUAL2.
-
----
-
----
-
-## Taint tracking — board card c70
-
-### D-TAINT1 — Untrusted input can't reach the sink (rec A)
-
-**User story.** Sam owns security for a Jet web service. Last quarter an injection bug
-shipped because a request body flowed — through three helper functions and a struct
-field — straight into a SQL string with no escaping. Code review missed it; the
-dangerous path was four hops long. Sam wants the *compiler* to know that anything
-derived from `req.body()` is untrusted, to keep that mark riding along through every
-assignment and helper call, and to refuse to let it reach a query unless it has passed
-through a blessed sanitizer first. He wants the 80% "don't let user input hit the
-sink" win — not a PhD information-flow lattice.
-
-| Option | Tracks | User writes | Spread / strip | Defer to later? |
-|--------|--------|-------------|----------------|-----------------|
-| A — `#tainted` tag + sanitizers (rec) | one bit: tainted or not | a `#tainted` source + blessed sanitizer fns | derive-from-tainted ⇒ tainted; sanitizer strips it | no — ship it on D-EFF1 |
-| B — full information-flow control | a security lattice + declassification | levels, labels, declassify rules | lattice join on every flow | yes — IFC ballot (#30/#33) |
-
-#### How other languages do this
-
-- **Perl taint mode (`-T`)** — the original: data from outside the program is
-  *tainted*; tainted data can't be used in `system`, `exec`, SQL, etc.; a regex
-  capture is the blessed untaint. Runtime, one bit. Takeaway: the exact 80% model
-  Option A copies — but Jet does it *statically*, not at runtime.
-- **Ruby `$SAFE` / taint** — had a similar object-taint flag; **deprecated in 2.7 and
-  removed in 3.0 with no replacement** ([Feature #16131](https://bugs.ruby-lang.org/issues/16131)).
-  It was a global, runtime, mutable safe-level that proved too coarse and too easy to
-  bypass. Takeaway: a runtime, global taint flag is a known failure; Jet makes taint a
-  static, per-value, erased fact instead.
-- **Java Checker Framework** — `@Tainted` / `@Untainted` type qualifiers checked by a
-  pluggable type system at compile time; sanitizers return `@Untainted`. Takeaway: the
-  static, type-qualifier version of taint — the closest precedent for A, and proof it
-  works as a compile-time check.
-- **Meta Pysa (Python) / Hack** — taint as static *taint analysis*: sources, sinks,
-  and sanitizers declared in config; the analyzer reports any source→sink flow.
-  Takeaway: at scale, taint is run as source/sink/sanitizer triples — Jet bakes that
-  triple into the language (`#tainted` source, sink = effect, sanitizer fn).
-- **JIF / Jif & FlowCaml** — full **information-flow control**: a security-label
-  lattice, principals, and explicit *declassification* to lower a label. Takeaway:
-  the heavyweight end — expressive but research-grade ceremony; this is Option B, and
-  Jet defers it to a dedicated IFC ballot.
-
-Built on D-EFF1's propagation: a "sink" is just an effect (`#db`, `#exec`, `#net`), so
-"tainted value reaches a sink" is checked by the same engine that propagates effects.
-The taint is a static, per-value tag, erased in codegen (I3).
-
-- **Option A — `#tainted` tag + sanitizer functions (rec).** A value can carry a
-  `#tainted` tag (attached at an untrusted source, inline per S82/D-ATTR1). The tag
-  **spreads**: anything derived from a tainted value — assignment, interpolation,
-  field store, function return — is tainted. A function marked a **sanitizer** is the
-  one blessed way to strip it: its return is `#untainted` regardless of input. A
-  tainted value reaching a sink effect is a compile error naming the sink.
-
-```jet
-fn handle(req: Request) #(db) -> Response ? {
-    raw  :: req.body() #tainted         // source: untrusted, tagged inline
-    name :: "user_" + raw               // derived ⇒ still #tainted (spreads)
-
-    save(name)?                         // error[E0721]: tainted value reaches a `#db` sink
-                                        //  --> handler.jet:4:10
-                                        //   |
-                                        // 4 |     save(name)?
-                                        //   |          ^^^^ `name` is derived from `req.body()`
-                                        //   |               (untrusted) and has not been sanitized
-                                        //   = note: `save` performs `#db`, a taint sink
-                                        //   help: pass it through a sanitizer first —
-                                        //         `save(escape_sql(name))?`
-    Response.ok()
-}
-
-// A blessed sanitizer strips the tag:
-sanitizer fn escape_sql(s: String #tainted) -> String {   // takes tainted, returns clean
-    s.replace("'", "''")                                  // return is #untainted by contract
-}
-
-fn ok(req: Request) #(db) -> Response ? {
-    raw   :: req.body() #tainted
-    clean :: escape_sql(raw)            // #untainted — tag stripped
-    save(clean)?                        // ok — sink sees only sanitized data
-    Response.ok()
-}
-```
-
-- **Option B — full information-flow control.** A security-label lattice (levels,
-  principals), label-join on every flow, and explicit declassification to lower a
-  label — JIF/FlowCaml-grade. Strictly more powerful (handles confidentiality *and*
-  integrity, multiple trust levels, implicit-flow leaks through control flow) but
-  research-grade ceremony for the common case, and a large type-system commitment.
-
-```jet
-fn handle(req: Request #label(Untrusted)) -> Response ? {
-    raw :: req.body()                   // label: Untrusted
-    // every binding carries a lattice label; branching on a secret taints the
-    // branch (implicit flow); lowering requires an explicit, audited declassify:
-    clean :: declassify(escape_sql(raw), to: Trusted, because: "SQL-escaped")
-    save(clean)?
-    Response.ok()
-}
-// Powerful, but: lattices, principals, implicit-flow tracking, and declassify
-// ceremony on the 80% case that one #tainted bit already covers.
-```
-
-**Recommendation:** A — one bit (tainted / not) plus blessed sanitizers covers the
-injection-class bug Sam actually ships, rides D-EFF1's existing propagation for free,
-and stays beginner-legible. Full IFC (B) is real and worth its own future ballot
-(#30/#33), but it is the wrong altitude for v1 (I8 simplicity ratchet). Gated on
-D-EFF1 landing first.
-
----
-
-**Sources** (prior-art confirmation):
-- Ruby $SAFE/taint removal — [Feature #16131: Remove $SAFE, taint and trust](https://bugs.ruby-lang.org/issues/16131), [Ruby 3.0 changes](https://rubyreferences.github.io/rubychanges/3.0.html)
-- WASI preview 2 capability model — [Capabilities-Based Security with WASI](https://marcokuoni.ch/blog/15_capabilities_based_security/), [Bytecode Alliance — WASI 0.2 Launched](https://bytecodealliance.org/articles/WASI-0.2)
 
 <!-- value-tags cluster: D-UNIT1, D-LIN1, D-STATE1 -->
 
@@ -2355,10 +1152,13 @@ v1 roadmap; no prior-art consensus on how to make it ergonomic without macros
 identifiable information) and have the compiler refuse to let it flow into a
 logging call or a non-encrypted storage write without an explicit sanitize
 step — enforced at compile time, not by code review.
-*Why deferred:* Generalizes D-TAINT1 (taint tracking) and requires the full
-effect/tag propagation model from D-EFF1 and D-QUAL1 to be ratified first;
-the compliance dimension (what counts as a legal sink) is a policy question
-that also interacts with the manifest capability model (D-QUAL1 Option A,
+*Why deferred:* This is **D-TAINT1 Option B** (full information-flow control —
+security-label lattice, principals, `declassify`), which the **owner explicitly
+deferred to post-Epoch-3 on 2026-06-21** when ratifying D-TAINT1 Option A
+(`#tainted` + sanitizers). Captured here so it is not lost. Generalizes D-TAINT1
+and requires the full effect/tag propagation model from D-EFF1 and D-QUAL1 to be
+ratified first; the compliance dimension (what counts as a legal sink) is a policy
+question that also interacts with the manifest capability model (D-QUAL1 Option A,
 manifest surface). Board items #30/#33.
 
 ---
@@ -2682,131 +1482,6 @@ fn copy_file(src: String, dst: String) -> () ? Error {
 ```
 
 **Reopen (owner-only):** you could later add `defer expr` as sugar over `scope.guard` (same Drop-backed lowering, zero runtime cost). For: it's the spelling Jai/Go/Swift/Odin/Zig converge on. Against: D-SUGAR5 declined it; it adds a second cleanup spelling and reintroduces Go's leak-by-omission class. No agent reopens this without your instruction.
-
----
-
-## Visible uninitialization — board card c76
-
-### D-UNINIT1 — Visible uninitialization (rec B)
-
-**User story.** Priya is writing a hot networking path that fills a 4 KB stack
-buffer from a socket read. Auto-zeroing the buffer every call is measurably
-wasteful — she's profiled it. She adds `use core.mem` to opt in to the
-low-level tier (S58) and wants to tell the compiler "I'll fill every byte
-before I read it; skip the zero-fill." She expects a compile error, not
-undefined behavior, if she ever forgets.
-
-| Option | Spelling | Beginner legibility | Tokens introduced | Gate required | Failure mode |
-|--------|----------|--------------------|--------------------|---------------|--------------|
-| A | `buffer: [4096]U8 := ---` | poor — `---` reads as punctuation noise | none (sigil) | `use core.mem` | opaque; cryptic to grep for |
-| B | `buffer: [4096]U8 := uninit` | high — reads as English | `uninit` keyword | `use core.mem` | clearest in diagnostics, quotable in fix-it |
-| C | `#uninit buffer: [4096]U8` | medium — attribute-style matches `#unsafe` idiom | none (reuses `#`) | `use core.mem` | separates the "no init" signal from the binding site |
-
-**How other languages do this**
-
-- **Jai (`---`):** `buf: [4096] u8 = ---;` — the three-dash sigil is Jai-specific  
-  vocabulary with no prior-art meaning. Terse but opaque. Jet takeaway: don't borrow
-  the sigil; borrow the idea that the programmer makes an explicit, visible choice.
-- **Zig (`= undefined`):** `var buf: [4096]u8 = undefined;` — a keyword that looks
-  like a value. Zig's safety mode traps reads in debug builds; release mode is silent
-  UB. Jet takeaway: a keyword is the right shape; the compile-time proof (not a
-  runtime trap) is the right safety rail.
-- **C (implicit):** `char buf[4096];` — no annotation needed; the buffer is uninit
-  by default. The footgun Jet explicitly avoids: silence where UB lurks. Jet
-  takeaway: the absence of syntax is the wrong default; opt-in, not opt-out.
-- **Rust (`MaybeUninit`):** `let mut buf = MaybeUninit::<[u8; 4096]>::uninit();` —
-  correct and safe, but the user must manually call `.assume_init()` after writing,
-  with no compiler enforcement that writes actually occurred. Jet wraps this and adds
-  the write-before-read proof in sema. Jet takeaway: `MaybeUninit` is the right
-  lowering target; the ergonomic surface above it should be a keyword, not a type.
-- **C# (`stackalloc` / `SkipLocalsInit`):** `Span<byte> buf = stackalloc byte[4096];`
-  zeroes by default; `[SkipLocalsInit]` on the method skips zeroing for the whole
-  frame — coarse-grained and invisible at the variable. Jet takeaway: per-binding
-  opt-out is finer-grained and safer than per-function attributes.
-
-- **Option A — `= ---` (Jai marker).**
-
-```jet
-use core.mem
-
-fn fill(sock: Socket) {
-    buffer: [4096]U8 := ---   // skip zero-fill; Jai-style
-
-    sock.read(mut buffer)?
-
-    // Compile error if buffer is read before a full write:
-    // E0420  read of possibly-uninitialized value `buffer`
-    //        hint: every path through this function must write
-    //              `buffer` before reading it
-    //        note: declared `:= ---` at line 4
-    process(buffer)
-}
-```
-
-Grep for `:= ---` in a 50-file codebase: noisy, ambiguous with subtraction chains.
-
-- **Option B — `:= uninit` (keyword).**
-
-```jet
-use core.mem
-
-fn fill(sock: Socket) {
-    buffer: [4096]U8 := uninit   // skip zero-fill; explicit opt-out
-
-    sock.read(mut buffer)?
-
-    // If the read is removed and buffer is used before write:
-    // E0420  read of possibly-uninitialized value `buffer`
-    //        declared `:= uninit` at line 4; a write to every
-    //        element must precede this read on all paths
-    //        fix: write to `buffer` first, or remove `:= uninit`
-    process(buffer)
-}
-```
-
-`uninit` is a reserved word gated behind `use core.mem`; outside that gate the compiler
-teaches: `:= uninit` is an expert-tier construct — add `use core.mem` at the top of this file.
-
-- **Option C — `#uninit` attribute.**
-
-```jet
-use core.mem
-
-fn fill(sock: Socket) {
-    #uninit
-    buffer: [4096]U8
-
-    sock.read(mut buffer)?
-
-    // E0420  read of possibly-uninitialized value `buffer`
-    //        declared with `#uninit` at line 4
-    process(buffer)
-}
-```
-
-The `#` sigil is consistent with `#unsafe` / `#audit` (D-ATTR1, ratified). However,
-placing the annotation on a *separate line* splits the meaning from the binding; it is
-easy to insert a blank line between them and forget the relationship.
-
-**Recommendation:** B — `:= uninit` is a value-position keyword that sits exactly where
-the initial value would be, making the opt-out structurally visible at the binding site.
-It is quotable verbatim in diagnostics ("declared `:= uninit`"), greppable, and reads as
-plain English. The compile-time write-before-read proof (not a runtime trap) is the
-non-negotiable safety rail that separates this from Zig's `= undefined` and C's silence.
-
-**Implementation notes (for agent after ratification):**
-- Gated by `use core.mem` (S58); outside that gate emit a teaching error pointing at
-  the gate requirement.
-- Sema tracks `MaybeUninit` state per binding; performs a dataflow analysis on all paths
-  to ensure the binding is written before any read. Read-before-write on any path is
-  E0420 (snapshot required, I4).
-- Codegen lowers to `MaybeUninit::<T>::uninit()` in generated Rust; after the sema proof
-  passes, uses `.assume_init()` — no generated `unsafe` leaks outside the `#unsafe` gate
-  (I1).
-- `uninit` is not a valid default parameter value, struct field default, or const context;
-  sema rejects each with a specific sub-code of E0420.
-
----
 
 ---
 
@@ -3154,56 +1829,6 @@ syntax now so plans can be written against a fixed spelling.
    chosen, to enable per-container overrides later?
 3. Interaction with `#Serialize` and reflection: does SOA layout affect the
    serialized representation?
-
----
-
-## jet.regex (persona #1 gap) — board card c79
-
-### D-REGEX1 — How does `jet.regex` ship? (rec B)
-
-The 2026-06-20 persona brief found a missing `jet.regex` is the **#1 gap** — it blocks 4 of 9 personas (CLI text-processing, ETL filtering, HTTP route matching, library validation). But regex can't just be built: **I6** says the compiler carries zero external crates, stdlib sub-libraries may bootstrap with crates only **until the end of Epoch 3**, and **any new stdlib external dep requires owner approval**. So this is your call, not a silent build.
-
-**User story.** Mara writes a CLI that greps logs; Elena filters an ETL feed; Tariq matches HTTP routes. All three reach for `regex.match(pattern, text)` on day one and find nothing. Whatever ships must be memory-safe and must not ReDoS (catastrophic backtracking) on hostile input — Jet's whole promise.
-
-| Option | Time to unblock personas | I6 posture | ReDoS-safe | Maintenance |
-|---|---|---|---|---|
-| A — native engine now | slow (weeks) | clean (no dep ever) | yes (build it linear-time) | ours forever |
-| B — bootstrap `regex` crate, native-ize before Epoch 3 ends | fast (days) | I6-sanctioned bootstrap; needs your dep approval | yes (Rust `regex` is linear-time) | temporary dep, then ours |
-| C — defer regex | none (gap persists) | n/a | n/a | none |
-
-**How other languages do this.**
-- **Rust `regex`** — DFA/NFA hybrid, **guaranteed linear time, no backtracking** (no ReDoS). The crate B would bootstrap on. Takeaway: the safe, fast reference implementation.
-- **Google RE2** — the linear-time automaton engine Rust's `regex` descends from; built precisely to kill ReDoS on untrusted input. Takeaway: the design target for a native Jet engine (Option A).
-- **PCRE / Perl / Python `re`** — backtracking; powerful (backreferences) but **ReDoS-prone** on adversarial patterns. Takeaway: the model Jet must NOT copy by default.
-- **Go `regexp`** — RE2-based, linear-time, deliberately omits backreferences for safety. Takeaway: precedent that dropping backtracking-only features is an acceptable, safety-positive trade.
-
-- **Option A — native engine now.** Hand-write an RE2-style linear-time matcher in Jet/Rust under `jet.regex`, no external crate.
-
-  ```jet
-  use jet.regex as re
-  m :: re.match("(\\d+)-(\\d+)", "8080-9090")?   // native engine, no dependency
-  print(m.group(1))   // 8080
-  ```
-  Cleanest I6 story (never a dep), full control, but weeks of work and a real risk of subtle bugs in a from-scratch engine.
-
-- **Option B — bootstrap the `regex` crate now, native-ize before Epoch 3 ends (recommended).** Ship `jet.regex` backed by Rust's `regex` crate immediately to unblock the 4 personas; replace it with a native engine before the I6 Epoch-3 deadline. Requires your approval of the dep.
-
-  ```jet
-  use jet.regex as re
-  m :: re.match("(\\d+)-(\\d+)", "8080-9090")?   // same surface; backed by `regex` crate for now
-  print(m.group(1))   // 8080
-  ```
-  Unblocks users in days and is ReDoS-safe (the crate is linear-time); the cost is a temporary sanctioned dependency and a scheduled native-ization before Epoch 3 ends.
-
-- **Option C — defer regex.** Ship nothing; the 4 personas keep hand-rolling string scans.
-
-  ```jet
-  // no jet.regex — users write manual scanners
-  fn has_port(s: String) -> Bool { s.contains("-") && s.split("-").all((p) => p.is_digits()) }
-  ```
-  Zero work and zero dep, but leaves the single biggest adoption gap open.
-
-**Recommendation:** **B** — I6 explicitly sanctions bootstrap crates through Epoch 3, the `regex` crate is the memory-safe linear-time gold standard, and it unblocks the most personas fastest; schedule the native-ization (Option A's engine) as the pre-Epoch-3-close replacement so the end state is still dependency-free. Pick A only if you want native-first now and accept the slower timeline. This card exists because B needs your dep approval (I6).
 
 ---
 

@@ -2,9 +2,7 @@
 //! `packages:`.
 
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
-use super::{
-    Dep, DepSource, ManifestError, PackageEntry, PackageKind, PackageMeta,
-};
+use super::{Dep, DepSource, ManifestError, PackageEntry, PackageMeta, Target};
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
 
@@ -120,52 +118,130 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, ManifestEr
         if entry.is_empty() {
             continue;
         }
-        // D-ILE1: `kind` is optional. A bare `name` lets the kind be inferred
-        // from the module's `fn main`; `name: library` / `name: executable` /
-        // `name: { kind: … }` states it explicitly (an explicit kind wins).
-        let (name, kind) = match entry.split_once(':') {
+        // D-TGT1: a package declares `targets:`, not `kind:`. A bare `name` leaves
+        // targets inferred from the module's `fn main` (D-ILE1); `name: <target>`
+        // is the single-target shorthand (D-TGT3); `name: { targets: [ … ] }` lists
+        // them.
+        let (name, targets) = match entry.split_once(':') {
             Some((k, v)) => {
                 let name = k.trim().to_string();
                 let value = v.trim();
-                let kind = if value == Syntax::PACKAGE_KIND_LIBRARY {
-                    PackageKind::Library
-                } else if value == Syntax::PACKAGE_KIND_EXECUTABLE {
-                    PackageKind::Executable
-                } else if let Some(inner) = value.strip_prefix('{') {
+                let targets = if let Some(inner) = value.strip_prefix('{') {
                     let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
                     parse_package_entry_block(&name, inner)?
                 } else {
-                    return Err(ManifestError::BadPackageKind {
-                        name,
-                        value: value.to_string(),
-                    });
+                    vec![parse_target(&name, value)?]
                 };
-                (name, Some(kind))
+                (name, targets)
             }
-            None => (entry.to_string(), None),
+            None => (entry.to_string(), Vec::new()),
         };
-        packages.push(PackageEntry { name, kind });
+        packages.push(PackageEntry { name, targets });
     }
     Ok(packages)
 }
 
-fn parse_package_entry_block(name: &str, body: &str) -> Result<PackageKind, ManifestError> {
+/// Parse one target keyword and validate its optional config block
+/// (`executable { entry: "…" }`; D-TGT3/D-TGT4/D-CAP4). The keyword must be a
+/// shipped target; the block may carry only `entry:`/`name:`/`api:`, and `api:`
+/// must be `stable`/`explicit`.
+fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
+    let (keyword, block) = match value.split_once('{') {
+        Some((kw, rest)) => {
+            let body = rest.trim_end().strip_suffix('}').unwrap_or(rest.trim_end());
+            (kw.trim(), Some(body))
+        }
+        None => (value.trim(), None),
+    };
+    let kind = match keyword {
+        k if k == Syntax::TARGET_LIBRARY => Target::Library,
+        k if k == Syntax::TARGET_EXECUTABLE => Target::Executable,
+        k if k == Syntax::TARGET_TEST => Target::Test,
+        k if k == Syntax::TARGET_EXAMPLE => Target::Example,
+        k if Syntax::TARGET_RESERVED.contains(&k) => {
+            return Err(ManifestError::ReservedTarget {
+                name: name.to_string(),
+                value: k.to_string(),
+            });
+        }
+        other => {
+            return Err(ManifestError::BadTarget {
+                name: name.to_string(),
+                value: other.to_string(),
+            });
+        }
+    };
+    if let Some(body) = block {
+        validate_target_block(name, body)?;
+    }
+    Ok(kind)
+}
+
+/// A target block (`{ entry: …, name: …, api: … }`) accepts only those three
+/// fields, and `api:` only `stable`/`explicit` (D-TGT3/D-TGT4/D-CAP4).
+fn validate_target_block(name: &str, body: &str) -> Result<(), ManifestError> {
     for (key, value) in key_value_entries(body) {
-        if key == Syntax::PACKAGE_FIELD_KIND {
-            let v = value.trim();
-            if v == Syntax::PACKAGE_KIND_LIBRARY {
-                return Ok(PackageKind::Library);
-            } else if v == Syntax::PACKAGE_KIND_EXECUTABLE {
-                return Ok(PackageKind::Executable);
-            } else {
-                return Err(ManifestError::BadPackageKind {
+        if key == Syntax::TARGET_FIELD_ENTRY || key == Syntax::TARGET_FIELD_NAME {
+            // entry/name are free-form strings consumed by the build pipeline.
+        } else if key == Syntax::TARGET_FIELD_API {
+            let v = unquote(&value);
+            if v != Syntax::API_MODE_STABLE && v != Syntax::API_MODE_EXPLICIT {
+                return Err(ManifestError::BadTargetField {
                     name: name.to_string(),
-                    value: v.to_string(),
+                    detail: format!(
+                        "`{}` must be `{}` or `{}`, not `{}`",
+                        Syntax::TARGET_FIELD_API,
+                        Syntax::API_MODE_STABLE,
+                        Syntax::API_MODE_EXPLICIT,
+                        v,
+                    ),
                 });
             }
+        } else {
+            return Err(ManifestError::BadTargetField {
+                name: name.to_string(),
+                detail: format!(
+                    "unknown target field `{key}` (allowed: `{}`, `{}`, `{}`)",
+                    Syntax::TARGET_FIELD_ENTRY,
+                    Syntax::TARGET_FIELD_NAME,
+                    Syntax::TARGET_FIELD_API,
+                ),
+            });
         }
     }
-    Err(ManifestError::MalformedPackageEntry {
-        name: name.to_string(),
-    })
+    Ok(())
+}
+
+fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, ManifestError> {
+    for (key, value) in key_value_entries(body) {
+        if key == Syntax::PACKAGE_FIELD_KIND_REMOVED {
+            // D-TGT1: `kind:` was removed in favor of `targets:`.
+            return Err(ManifestError::KindFieldRemoved {
+                name: name.to_string(),
+            });
+        }
+        if key == Syntax::PACKAGE_FIELD_TARGETS {
+            return parse_targets_list(name, value.trim());
+        }
+    }
+    // No `targets:` field — kind is inferred at realize time (D-ILE1). Other
+    // fields (version/bin) are accepted and ignored for now.
+    Ok(Vec::new())
+}
+
+/// Parse a `[ library, executable { entry: "…" }, … ]` target list.
+fn parse_targets_list(name: &str, value: &str) -> Result<Vec<Target>, ManifestError> {
+    let inner = value
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(value);
+    let mut targets = Vec::new();
+    for entry in top_level_commas(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        targets.push(parse_target(name, entry)?);
+    }
+    Ok(targets)
 }

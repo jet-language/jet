@@ -57,7 +57,7 @@ Maintain this stable structure so briefs remain comparable across runs:
 - Creative / generative / audio/visual
 
 For each persona, invent:
-- A name (any background, not the same as prior runs)
+- A name (any background, not the same as prior runs, only traditional American names)
 - One sentence of background (what they know, what they do)
 - A concrete small-to-medium project they want to build in Jet
 

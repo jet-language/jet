@@ -211,6 +211,23 @@ impl<'a> Checker<'a> {
                     self.moved.remove(name); // report once
                     return None;
                 }
+                // D-UNINIT1: reading a `#uninit` binding before it is written.
+                if self.uninit.contains_key(name) {
+                    self.diags.push(Diagnostic::error(
+                        "E0420",
+                        format!("`{}` may be read before it is given a value", name),
+                        format!(
+                            "`{}` was declared `#uninit`, so it holds no value until you write to it — this read could see garbage",
+                            name
+                        ),
+                        format!(
+                            "write to `{}` on every path before reading it (e.g. fill it via `mut {}`)",
+                            name, name
+                        ),
+                        Some(*span),
+                    ));
+                    self.uninit.remove(name); // report once, then resolve its type below
+                }
                 if let Some(info) = self.lookup(name) {
                     return Some(info.ty.clone());
                 }
@@ -245,6 +262,8 @@ impl<'a> Checker<'a> {
             } => self.infer_slice(base, start, end, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
+                // D-UNINIT1: a `mut` arg is the fill site, not a read.
+                self.clear_uninit_mut_args(&call.args);
                 match self.check_call(call, true) {
                     Some(Some(t)) => Some(t),
                     Some(None) => {
@@ -362,7 +381,11 @@ impl<'a> Checker<'a> {
                 method_span,
                 args,
                 recv_type,
-            } => self.infer_method_call(receiver, method, *method_span, args, recv_type),
+            } => {
+                // D-UNINIT1: a `mut` arg is the fill site, not a read.
+                self.clear_uninit_mut_args(args);
+                self.infer_method_call(receiver, method, *method_span, args, recv_type)
+            }
             Expr::StructLit {
                 type_name,
                 type_args,

@@ -1,6 +1,6 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, BindPattern, Binding, ElseBranch,
+    AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch,
     Expr, ForKind, IfStmt, IndexKind, LValue, Pattern, Stmt, Type,
 };
 use crate::Collections::is_map_key_type;
@@ -457,14 +457,20 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_branches(&mut self, branches: &mut [&mut Vec<Stmt>]) {
         let before = self.moved.clone();
         let mut after = self.moved.clone();
+        // D-UNINIT1: each branch starts from the pre-switch uninit set (so reads are
+        // checked) and inits don't leak between arms; conservatively, a switch does
+        // not count as initializing after it (it may not be exhaustive).
+        let before_u = self.uninit.clone();
         for body in branches.iter_mut() {
             self.moved = before.clone();
+            self.uninit = before_u.clone();
             self.check_block(body, true);
             for (k, v) in self.moved.drain() {
                 after.entry(k).or_insert(v);
             }
         }
         self.moved = after;
+        self.uninit = before_u;
     }
 
     pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
@@ -476,6 +482,7 @@ impl<'a> Checker<'a> {
                 op_span: _,
                 value,
             } => {
+                let is_compound = op.is_some();
                 if let (Some(op), LValue::Index { span, .. }) = (op, &*target) {
                     self.diags.push(Diagnostic::error(
                         "E0003",
@@ -490,6 +497,25 @@ impl<'a> Checker<'a> {
                 }
                 let vt = self.infer(value);
                 self.note_move_if_direct_ident(value);
+                // D-UNINIT1: a plain `name = …` initializes a `#uninit` binding; a
+                // compound `name += …` reads it first, so it's a read-before-write.
+                if let LValue::Local { name, name_span } = &*target {
+                    if self.uninit.contains_key(name) {
+                        if is_compound {
+                            self.diags.push(Diagnostic::error(
+                                "E0420",
+                                format!("`{}` may be read before it is given a value", name),
+                                format!(
+                                    "`{}+=` reads `{}` first, but it was declared `#uninit` and has no value yet",
+                                    name, name
+                                ),
+                                format!("give `{}` a value with `{} = …` before updating it", name, name),
+                                Some(*name_span),
+                            ));
+                        }
+                        self.uninit.remove(name);
+                    }
+                }
                 match target {
                     LValue::Local { name, name_span } => {
                         let name_span = *name_span;
@@ -879,7 +905,11 @@ impl<'a> Checker<'a> {
                     self.loop_labels.push(n.clone());
                 }
                 self.loop_depth += 1;
+                // D-UNINIT1: a loop body may run 0 times, so writes inside it don't
+                // count as initializing after the loop.
+                let saved_u = self.uninit.clone();
                 self.check_block(body, true);
+                self.uninit = saved_u;
                 self.loop_depth -= 1;
                 if label.is_some() {
                     self.loop_labels.pop();
@@ -897,6 +927,9 @@ impl<'a> Checker<'a> {
                 if let Some((n, _)) = label {
                     self.loop_labels.push(n.clone());
                 }
+                // D-UNINIT1: a loop body may run 0 times; writes inside it don't
+                // count as initializing after the loop.
+                let saved_u = self.uninit.clone();
                 match kind {
                 ForKind::Range { start, end, step } => {
                     for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
@@ -1037,6 +1070,7 @@ impl<'a> Checker<'a> {
                     self.loop_depth -= 1;
                 }
                 }
+                self.uninit = saved_u;
                 if label.is_some() {
                     self.loop_labels.pop();
                 }
@@ -1087,7 +1121,9 @@ impl<'a> Checker<'a> {
                     self.loop_labels.push(n.clone());
                 }
                 self.loop_depth += 1;
+                let saved_u = self.uninit.clone();
                 self.check_block(inner, true);
+                self.uninit = saved_u;
                 self.loop_depth -= 1;
                 if label.is_some() {
                     self.loop_labels.pop();
@@ -1117,6 +1153,11 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
         let before = self.moved.clone();
         let mut after = before.clone();
+        // D-UNINIT1: definite-assignment merge. A `#uninit` name is initialized
+        // after the `if` only if it is written on *every* path; it stays uninit if
+        // still-uninit in any branch (or, with no `else`, on the fall-through).
+        let before_u = self.uninit.clone();
+        let mut after_u: HashMap<String, Span> = HashMap::new();
         let bindings = self.check_condition_with_bindings(&mut ifs.cond);
         self.push_scope();
         for (name, ty) in bindings {
@@ -1138,13 +1179,25 @@ impl<'a> Checker<'a> {
         for (k, v) in self.moved.drain() {
             after.entry(k).or_insert(v);
         }
+        for (k, v) in std::mem::take(&mut self.uninit) {
+            after_u.entry(k).or_insert(v);
+        }
         self.moved = before.clone();
+        self.uninit = before_u.clone();
         match &mut ifs.else_branch {
-            None => {}
+            None => {
+                // The cond-false path runs no branch, so everything stays uninit.
+                for (k, v) in &before_u {
+                    after_u.entry(k.clone()).or_insert(*v);
+                }
+            }
             Some(ElseBranch::Else(else_body)) => {
                 self.check_block(else_body, true);
                 for (k, v) in self.moved.drain() {
                     after.entry(k).or_insert(v);
+                }
+                for (k, v) in std::mem::take(&mut self.uninit) {
+                    after_u.entry(k).or_insert(v);
                 }
             }
             Some(ElseBranch::ElseIf(next)) => {
@@ -1152,9 +1205,13 @@ impl<'a> Checker<'a> {
                 for (k, v) in self.moved.drain() {
                     after.entry(k).or_insert(v);
                 }
+                for (k, v) in std::mem::take(&mut self.uninit) {
+                    after_u.entry(k).or_insert(v);
+                }
             }
         }
         self.moved = after;
+        self.uninit = after_u;
     }
 
     /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): check a `comptime if` statement.
@@ -1562,9 +1619,87 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-UNINIT1 (opt C): `#uninit name: Type` — gate on `use core.mem`, restrict
+    /// to plain-data types (E0423), declare the binding, and record it as
+    /// not-yet-written so the dataflow can prove write-before-read (E0420).
+    pub(crate) fn check_uninit_binding(&mut self, b: &mut Binding) {
+        let has_mem = self
+            .std_imports
+            .values()
+            .any(|m| m == Syntax::CORE_MEM_MODULE);
+        if !has_mem {
+            self.diags.push(Diagnostic::error(
+                "E0424",
+                format!("`#{}` needs the low-level memory tier", Syntax::ATTR_UNINIT),
+                format!(
+                    "`#{}` skips the automatic zero-fill — an expert-tier operation",
+                    Syntax::ATTR_UNINIT
+                ),
+                format!(
+                    "add `use {}` at the top of this file to opt in",
+                    Syntax::CORE_MEM_MODULE
+                ),
+                Some(b.name_span),
+            ));
+        }
+        let (ty, ty_span) = match (&b.ty, b.ty_span) {
+            (Some(t), Some(s)) => (self.resolve_type(t.clone()), s),
+            _ => return,
+        };
+        if let Some(slot) = b.ty.as_mut() {
+            *slot = ty.clone();
+        }
+        self.check_declared_type(&ty, ty_span);
+        if !is_pod_uninit_type(&ty) {
+            self.diags.push(Diagnostic::error(
+                "E0423",
+                format!("`#{}` needs a plain-data type", Syntax::ATTR_UNINIT),
+                format!(
+                    "`{}` may own heap memory or need cleanup, so leaving it uninitialized is unsafe",
+                    ty.show()
+                ),
+                "use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`)".to_string(),
+                Some(ty_span),
+            ));
+        }
+        self.declare(
+            &b.name,
+            b.name_span,
+            LocalInfo {
+                ty,
+                mutable: true,
+                param_conv: None,
+                decl_loop_depth: self.loop_depth,
+                sendable: true,
+                task_lint_span: None,
+            },
+        );
+        self.uninit.insert(b.name.clone(), b.name_span);
+    }
+
+    /// D-UNINIT1: clear an `#uninit` binding's not-yet-written flag when it is
+    /// passed as a `mut` argument (the fill case) — the callee writes it. Call
+    /// before inferring the args so the read-hook doesn't flag the fill site.
+    pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
+        if self.uninit.is_empty() {
+            return;
+        }
+        for arg in args {
+            if arg.convention == AccessConvention::Mutate {
+                if let Expr::Ident(n, _) = &arg.expr {
+                    self.uninit.remove(n);
+                }
+            }
+        }
+    }
+
     pub(crate) fn check_binding(&mut self, b: &mut Binding) {
         if b.pattern.is_some() {
             self.check_destructuring_binding(b);
+            return;
+        }
+        if b.uninit {
+            self.check_uninit_binding(b);
             return;
         }
         let mut annot_valid = true;
@@ -2036,4 +2171,16 @@ impl<'a> Checker<'a> {
         ));
     }
 
+}
+
+/// D-UNINIT1: a `#uninit` binding is restricted to plain-data ("POD") types —
+/// no heap ownership, no Drop glue — so an uninitialized value can never expose
+/// freed/owned state. v1 allows scalars, `Char`, `U8`, and fixed arrays of those.
+pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::Char => true,
+        Type::Named(n) if n == "U8" => true,
+        Type::FixedList { elem, .. } => is_pod_uninit_type(elem),
+        _ => false,
+    }
 }

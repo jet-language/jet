@@ -290,12 +290,13 @@ before continuing.
 | E1207 | jet   | registry dependency not yet supported (M12.2) |
 | E1208 | jet   | toolchain `jet:` field in `pkg.jet` incompatible (M12.1) |
 | E1209 | jet   | reserved section used non-empty (M12.1) |
-| E1210 | jet   | unknown package kind in `packages:` block (U10) |
-| E1211 | jet   | `packages:` block-form entry missing `kind` field (U10) |
+| E1210 | jet   | unknown or reserved target in `packages:` block (D-TGT1/D-TGT2) |
+| E1211 | jet   | `packages:` block-form entry uses the removed `kind:` field — write `targets:` (D-TGT1) |
 | E1212 | jet   | package declared in `packages:` but no `module <name>` found in source tree (U10) |
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
 | E1214 | jet   | `jetpack.toml` has a malformed line — not a valid `key = "value"` assignment or `[table]` header (D-JPK-FILES) |
 | E1215 | jet   | `jetpack.toml` contains an unknown table or key name, with a did-you-mean suggestion (D-JPK-FILES) |
+| E1216 | jet   | a `targets:` block has an unknown field, or `api:` is not `stable`/`explicit` (D-TGT3/D-CAP4) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |

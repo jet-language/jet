@@ -64,6 +64,24 @@ and `jet fmt` can enforce a project preference; the language never forces one.
 Tie-break rule: when a decision trades rank N against rank M, the smaller
 number wins. When it trades effort against anything, effort loses.
 
+## Effort is never a deterrent (owner-directed, absolute)
+
+Implementation difficulty, build time, or "this is a lot of work" must **never**
+weigh in a recommendation, a decision, an option ranking, or a choice of scope.
+The owner has chosen to put in hard work up front so it pays dividends. A path
+being hard is **not** a reason against it — and is sometimes the signal that it
+is the *right* path. Never present "easier to build" as an advantage or "harder
+to build" as a drawback; weigh only the ranked priorities above (safety,
+beginner experience, performance, one path, long-term correctness).
+
+**Do it right the first time.** Build features fully and end-to-end — parser →
+sema → codegen → diagnostics → examples → tests → docs — the first time. Never
+ship a stub, a partial slice, or a "ratified, milestone-pending" placeholder
+with the intent to "come back later," unless the work is genuinely blocked on an
+unratified upstream decision (name the gate). Half-building and revisiting is
+slower and worse than doing it completely once. "We'll finish it later" is not a
+plan; finishing it now is.
+
 ## Resolved conflicts (do not relitigate without owner sign-off)
 
 **C1 — Beginner-first vs. borrow checking.** Resolved by *progressive

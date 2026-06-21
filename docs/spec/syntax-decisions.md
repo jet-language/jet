@@ -9,6 +9,14 @@ How to ratify: move the row to Ratified with your chosen option. Agents
 then update `Source/Syntax.rs` (and parser if structural), re-bless ui
 snapshots (`UPDATE_EXPECT=1 cargo test`), and update docs/spec/spec.md.
 
+**Ratify = then build it, end to end.** An owner ballot answer on a decision with no
+open upstream gate **is the "go"**: implement it fully — parser → sema → codegen, a
+`tests/ui` snapshot for every diagnostic (I4), a golden-tested `examples/` entry where
+user-visible (I5), all `cargo test` green — not a doc edit alone. A ratified entry may
+sit **"milestone pending" / `src/` untouched ONLY when it is gated on another decision
+that is still unratified** (e.g. a feature waiting on `D-EFF1`); name the gate in the
+entry. "Ratified but unbuilt with no open gate" is not an allowed state.
+
 ## Ratified
 
 **N1 — Language name** *(ratified 2026-06-11)*: **Jet**. Binary: `**jet`**.
@@ -1716,6 +1724,211 @@ A subsumes option C; the free-builtin `make(Node, in: arena)` form (B) is reject
 An arena value is **not** `@unsafe` — `use core.mem` is the opt-in gate (D-ALLOC-B).
 Ships with the `core.mem` arena work (D-REF2).
 
+### Targets model & capability vocabulary (ratified 2026-06-21)
+
+The c07 targets reshape (all five D-TGT) and the decided half of the c06 capability
+model (D-CAP1/4/5/6). D-CAP2 (copy/share form) and D-CAP3 (annotation order) stay
+**open** — until they ratify, the capability words below are reserved spellings only;
+their parameter-position syntax is not yet finalized.
+
+**D-TGT1 — `targets:` replaces `kind:`** *(ratified 2026-06-21, option B; owner:
+"fully remove kind, we are still greenfield"; supersedes U10 / D-ILE1 on the kind
+field)*: a package declares a **`targets:` list**, not a `kind:`. `kind:` is **removed
+entirely** — no deprecation alias; a `kind:` field in `packages:` is now an unknown
+field (teaching error → "write `targets: [ … ]`"). When `targets:` is omitted the
+D-ILE1 inference carries forward onto the new vocabulary: a module with `fn main()`
+infers `[executable]`, otherwise `[library]`. Rejected: augmenting `kind:` with a
+parallel `targets:` (option A — two ways to say one thing).
+
+**D-TGT2 — first-increment targets** *(ratified 2026-06-21, option A)*: the shipped
+targets are **`library`**, **`executable`**, **`test`**, **`example`** — the four with
+working build paths. **`benchmark`** and **`plugin`** are **reserved** target keywords
+(owner: denote them for future addressing): writing one is a teaching error ("target
+`benchmark` has no backend yet"), not an unknown-keyword error. Rejected: shipping all
+six now (option B — keywords with stub backends).
+
+**D-TGT3 — bare keyword or block** *(ratified 2026-06-21, option A)*: a target with no
+fields is a **bare keyword** (`library`); a target with fields is a **block**
+(`executable { entry: "src/cli.jet" }`). Mirrors the ratified U10 `name: kind` vs
+`name: { … }` shorthand. Rejected: mandatory empty `{}` (option B — pure noise).
+
+**D-TGT4 — default executable entry** *(ratified 2026-06-21, option B; owner call, no
+rec)*: a bare `executable` is allowed; the compiler searches fixed conventions —
+**`src/main.jet`**, then **`<package>.jet`** — for the entry module. Zero matches or
+two-or-more matches is an error asking for an explicit `entry:`. Rejected: requiring
+`entry:` always (option A — no zero-config path); single-root-file rule (option C).
+
+**D-TGT5 — `#test` fns + optional `test` target** *(ratified 2026-06-21, option C,
+hybrid)*: `jet test` **auto-collects** every `#test` fn (S82 marker, `#` per D-ATTR1)
+in the package; a **`test { entry: … }`** target is optional, for an out-of-tree
+integration file. Both run. Rejected: an explicit `test` target carrying everything,
+`#test` not auto-run (option A); implicit-only with no out-of-tree slot (option B).
+
+**D-CAP1 — capability keyword spellings** *(ratified 2026-06-21, option A)*: the
+four-capability vocabulary is **`view` / `edit` / `take` / `share`**. `view` and `take`
+are already ratified ownership keywords (S10); **`edit`** and **`share`** are new
+reserved capability words. Parameter-position placement is still **open (D-CAP3)** and
+the copy/share call form is **open (D-CAP2)** — only the spellings are fixed here.
+Rejected: reusing `mut` for the edit slot (option B — reads as Rust `&mut`); `read` /
+`write` / `own` (option C — S10 already rejected these); `look` / `change` / `keep`
+(option D — orphans the live `take` / `view` keywords).
+
+**D-CAP4 — `api:` is a per-target field** *(ratified 2026-06-21, option D; rides
+D-TGT3 blocks)*: a library target records its public capability signatures by setting
+**`api:`** inside its target block — `library { api: stable }` (record + flag API
+breaks) or `library { api: explicit }`. Default is inference (D-CAP6). Rejected: a
+top-level `api:` field (option A), a `payload api = …` statement (option B), an
+attribute (option C).
+
+**D-CAP5 — which targets emit capability metadata** *(ratified 2026-06-21, option A)*:
+**any target that produces a consumable library artifact** emits capability metadata;
+**executable/binary targets infer and emit nothing**. Holds under D-TGT1=B. Rejected:
+only a literally-named `library` target emits (option B); decouple from targets and let
+`api:` alone decide (option C).
+
+**D-CAP6 — library capability default** *(ratified 2026-06-21, option A)*: inference is
+the library default **forever**; `api: explicit` is opt-in and never auto-flips.
+Inference already guarantees capability *safety*, so explicitness buys documentation,
+not correctness — keeping it opt-in honors the simplicity ratchet (I8). Rejected:
+flipping to mandatory-explicit at 1.0 (option B — silent future break); explicit from
+day one (option C — taxes the beginner for what inference provides).
+
+### Safety tiers — scoped capabilities, units, single-use (ratified 2026-06-21)
+
+Three value/effect-safety features, each **ratified as the target** but **gated** on an
+upstream decision still in the ballot — implementation is sequenced after the gate, no
+`src/` change until then.
+
+**D-SCAP1 — Scoped capabilities** *(ratified 2026-06-21, option A; gated on D-EFF1)*: a
+**capability is a first-class value** granted into a lexical scope —
+`#grant(fs) { caps -> … }` — and **revoked at scope end** by the RAII rule (S63). The
+capability authorizes its effect (`#fs`/`#net`) inside the scope; letting it escape
+(stored, returned, shared) is a compile error (**E0711**), and using an effect with no
+capability in scope is **E0712**. This is **authority to perform an effect**, distinct
+from the c06 value-ownership capabilities (`view`/`edit`/`take`/`share`); it generalizes
+the S58 `#audit`/`#unsafe` gate from "unsafe ops" to "any guarded power." **Gated on
+D-EFF1** (the effect system, c66) — the capability is what authorizes an effect region,
+so D-EFF1 must land first. Rejected: effect-tag-only capabilities with no value (option
+B — can't lend a power per-call).
+
+**D-UNIT1 — Units of measure as a tag** *(ratified 2026-06-21, option B; gated on
+D-QUAL2)*: units are a **parameterised tag `#unit(usd)`** on a numeric type, declared in
+families (`#unit_family(currency) { usd, eur, gbp }`), with method-literal syntax
+**`9.99.usd`**. The compiler derives the wrapper (erases to the raw numeric, F#-style)
+and enforces unit-matching arithmetic — unit-vs-unit mismatch is **E0128**, unit-vs-bare
+is **E0129**; `.raw()` strips the unit. This is the **upgrade** to D-DIST2 (the
+hand-written `distinct` newtype stays valid and is the fallback); it does not undo
+D-DIST1/D-DIST3. **Gated on D-QUAL2** (parameterised tags). Rejected: library-newtype
+only (option A — boilerplate per unit, no natural literal).
+
+**D-LIN1 — Single-use (must-consume) values** *(ratified 2026-06-21, option A; gated on
+D-QUAL2; owner renamed `linear` → `SingleUse`)*: a type marked **`#SingleUse`** must be
+consumed **exactly once on every reachable path** — passed to a `take` parameter,
+returned, or explicitly `drop(x)`'d (drop requires an `#audit`). `#SingleUse` implies
+`#no_copy`. The checker tracks consumption through branches and names the unconsumed
+binding — **E0140** (unconsumed at scope end), **E0141** (unconsumed on one branch). This
+adds the "at least once" half to `take`'s "at most once" (S10). **Naming (owner call):**
+the type-theory term *linear* is spelled **`SingleUse`** — plain words over jargon, the
+same precedent as the `view`/`edit`/`take`/`share` capability vocabulary. **Gated on
+D-QUAL2**; `#must_use` (option B) is the strict-subset stepping stone and may ship first.
+Rejected: `#must_use`-only (option B — misses the bound-then-silently-dropped case).
+
+### Uninitialized memory & `jet.regex` (ratified 2026-06-21)
+
+**D-UNINIT1 — Visible uninitialization** *(ratified 2026-06-21, option C; owner chose
+the attribute form over the rec)*: skipping the default zero-fill of a binding is opted
+into with the **`#uninit` attribute** on the binding — `#uninit buffer: [4096]U8` —
+reusing the `#` marker sigil (D-ATTR1) like `#unsafe`/`#audit`. Gated behind
+**`use core.mem`** (S58 low-level tier); outside that gate it is a teaching error
+pointing at the gate. Safety is a **compile-time** write-before-read proof: sema tracks
+each `#uninit` binding's initialized state by dataflow across all paths, and a read on
+any path that may precede a full write is **E0420** (snapshot required when implemented,
+I4). Codegen lowers to `MaybeUninit::<T>::uninit()` after the proof passes — never a
+runtime trap (the rail Zig's `= undefined` and C's silence lack). **Status:** the sema
+write-before-read proof (E0420, with the gate E0424 and POD-only E0423) is implemented
+and green; **codegen is gated on a discovered prerequisite** — `[N]T` fixed-lists
+currently lower to `Vec<T>`, on which `MaybeUninit` is unsafe and the safe lowering
+zero-fills (defeating the feature), so fixed arrays must first become real stack arrays
+`[T; N]` (proposed owner decision **D-FIXARR1**, board card c82). The parser stays
+unwired until then. Rejected: `:= ---` Jai sigil (option A — opaque, greps
+badly); `:= uninit` value-keyword
+(option B, the rec — owner preferred the `#`-marker idiom).
+
+**D-REGEX1 — `jet.regex` ships on the `regex` crate** *(ratified 2026-06-21, option B;
+owner-approved I6 bootstrap dep)*: `jet.regex` ships now backed by Rust's **`regex`**
+crate (DFA/NFA hybrid, **linear-time, no ReDoS**), surface `use jet.regex as re` /
+`re.match(pattern, text)?`. This is an explicit, **owner-approved I6 exception** — the
+one external stdlib dep sanctioned for the regex bootstrap — carrying a standing
+obligation to **native-ize (replace with an in-house RE2-style engine) before the end of
+Epoch 3**, so the end state stays dependency-free (I6). The compiler (`Source/`) takes no
+crate; the dep lives only in the `jet.regex` stdlib sub-library. Rejected: native engine
+first (option A — weeks of work, blocks the #1 persona gap meanwhile); defer (option C —
+leaves the largest adoption gap open).
+
+### Qualifier taxonomy (ratified 2026-06-21)
+
+**D-QUAL2 — Two kinds of qualifier** *(ratified 2026-06-21, option B)*: there are exactly
+**two** kinds — **`trait`** (has at least one method; dispatches via vtable) and **`tag`**
+(no methods; erases at runtime). The beginner rule is one sentence: *methods → trait, no
+methods → tag.* This collapses the former four overlapping concepts — attributes, effects,
+typestate markers, units, taint, must-use, tool-markers — all into **tag**. A `#Name` with
+no method body is a tag; derives are traits (they attach method impls); effects like
+`#(db)` are tags whose propagation sema tracks. Sema gains a first-class **`tag`** keyword
+(declaring methods on a `tag` is **E0732**; using a tag where dispatch is expected is
+**E0731**, with a fix-it to declare a `trait`); codegen is unchanged (tags already erase).
+This is the **taxonomy foundation** that gates **D-QUAL1** (surface routing, still open) and
+**unblocks the value-tags cluster** — D-UNIT1 (`#unit`) and D-LIN1 (`#SingleUse`) now have
+their tag machinery; their exact inline spelling still rides D-QUAL1's surface decision.
+No upstream gate on the tag foundation — slated for full end-to-end implementation (the
+`tag` keyword + dispatch-vs-marker enforcement + E0731/E0732 snapshots); D-QUAL1 only
+adds the effect-routing surface on top. Rejected: four kinds (option A —
+the status quo and the source of "what's a tag vs an attribute?" confusion); one "label"
+kind (option C — erases the dispatch-vs-marker distinction that actually matters).
+
+**D-TAINT1 — Taint tracking** *(ratified 2026-06-21, option A; gated on D-EFF1; option B
+deferred post-Epoch-3)*: an untrusted value carries a **`#tainted`** tag, attached inline
+at its source (S82/D-ATTR1). The tag **spreads** — anything derived from a tainted value
+(assignment, interpolation, field store, return) is tainted. A function declared
+**`sanitizer fn`** is the one blessed way to strip it: its return is `#untainted` by
+contract. A tainted value reaching a **sink effect** (`#db`/`#exec`/`#net`) is **E0721**,
+naming the sink with a "pass it through a sanitizer" fix-it. This rides D-EFF1's effect
+propagation (a sink is just an effect) and the tag is static, erased in codegen (I3).
+**Gated on D-EFF1.** **Option B deferred (owner, 2026-06-21 — captured, not lost):** full
+**information-flow control** (security-label lattice, principals, explicit `declassify`)
+is real and handles confidentiality + multi-level integrity + implicit-flow leaks, but is
+research-grade ceremony for the v1 injection-class win (I8). It is **deferred to
+post-Epoch-3** as the dedicated IFC ballot — tracked as **D-IFC1** in the deferred-ballots
+list (board items #30/#33). Rejected-for-now: shipping IFC as the v1 taint model (B —
+wrong altitude for the 80% case one `#tainted` bit already covers).
+
+**D-ALLOC2 — Arena `alloc` return + reset/free safety** *(ratified 2026-06-21, option A;
+gated on a new region rule)*: `arena.alloc(value)` returns a **scope-bound `view`** into the
+arena's storage — readable/writable inside the `arena ::` binding scope, but the checker
+**forbids it escaping** (store/return/share → **E0631**) and **forbids any use after
+`reset`/`free`** (**E0632**; `reset`/`free` take the arena by `mut`, legal only when no
+escaping view is live). This is bumpalo/typed-arena's `&'bump T` reworded in Jet's
+capability vocabulary — real shared bump-allocation, use-after-reset a *compile error*, no
+runtime trap (P1 safe-by-default). **Gate:** A needs a **region** — the lifetime of the
+`arena ::` scope — which `view` (S10/c06) does not yet have; **D-ALLOC2-A cannot be built
+until that region rule is ratified.** A follow-on decision **D-REGION1** (where regions are
+denoted/inferred, part of c06) is queued in the ballot; option B (opaque generational
+`Handle<T>`) is the recorded fallback if regions slip. Replaces the c05 stub where
+`alloc(v)` just returned `v`. Rejected: opaque handle as the primary (option B — per-access
+indirection + a runtime check on statically-unknown handles); owned-clone stub (option C —
+"barely an arena", no shared buffer).
+
+**D-OBS2 — Debug line-table format** *(ratified 2026-06-21, option B)*: the Jet→Rust line
+table is a **sidecar `<file>.jetmap` JSON file** written beside the generated Rust, schema
+`{ "version": 1, "source": "<path>", "lines": [[rust_line, jet_line], …] }`. A versioned,
+std-only, third-party-readable contract: any DAP adapter reads one file to translate editor
+breakpoints to Jet lines. Codegen records the `(jet_line, rust_line)` pairs it already
+holds (I3 — codegen stays dumb); a hand-written serializer (`Source/Debug/linemap.rs`)
+writes the JSON (zero crates, I6). rustc retains full DWARF for lldb. Part of the DAP
+debugger (rides D-OBS1's source-map foundation → GA). Rejected: inline `// jet:line`
+comments (option A — a reformatter or `rustfmt` strips comments, so it is not a stable
+contract for third-party tools); custom binary section (option C — invisible to source
+tools and platform-coupled per ELF/Mach-O/PE, the wrong fit for an editor-facing map).
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -1817,6 +2030,24 @@ upgrade that must re-earn an owner crate sign-off.
 
 | Date       | ID  | Decision                                    | By    |
 | ---------- | --- | ------------------------------------------- | ----- |
+| 2026-06-21 | D-OBS2 | debug line-table is a sidecar `<file>.jetmap` JSON (versioned, std-only); part of the DAP debugger | owner |
+| 2026-06-21 | D-ALLOC2 | arena `alloc` returns scope-bound `view`; use-after-reset/escape = compile error (E0631/E0632); gated on new region rule (D-REGION1) | owner |
+| 2026-06-21 | D-TAINT1 | `#tainted` tag + `sanitizer fn`; tainted→sink is E0721 (gated on D-EFF1); full IFC (opt B) deferred post-Epoch-3 → D-IFC1 | owner |
+| 2026-06-21 | D-QUAL2 | two qualifier kinds — `trait` (methods, dispatches) vs `tag` (no methods, erases); unblocks value-tags cluster | owner |
+| 2026-06-21 | D-UNINIT1 | `#uninit` binding marker, gated by `use core.mem`; write-before-read proof (E0420) | owner |
+| 2026-06-21 | D-REGEX1 | `jet.regex` on the Rust `regex` crate (owner-approved I6 bootstrap; native-ize before Epoch 3 ends) | owner |
+| 2026-06-21 | D-SCAP1 | scoped capabilities: `#grant(fs) { caps -> … }`, RAII-revoked (gated on D-EFF1) | owner |
+| 2026-06-21 | D-UNIT1 | units as `#unit(usd)` tag + `9.99.usd` literal (gated on D-QUAL2) | owner |
+| 2026-06-21 | D-LIN1 | single-use values `#SingleUse` (renamed from `linear`; gated on D-QUAL2) | owner |
+| 2026-06-21 | D-TGT1 | `targets:` list replaces `kind:` (kind removed; greenfield) | owner |
+| 2026-06-21 | D-TGT2 | first targets: library, executable, test, example; benchmark/plugin reserved | owner |
+| 2026-06-21 | D-TGT3 | bare keyword (no fields) or block (with fields) | owner |
+| 2026-06-21 | D-TGT4 | bare `executable` searches `src/main.jet` then `<package>.jet` | owner |
+| 2026-06-21 | D-TGT5 | `#test` fns auto-collected; optional `test { entry: … }` | owner |
+| 2026-06-21 | D-CAP1 | capability words `view` / `edit` / `take` / `share` (edit, share new) | owner |
+| 2026-06-21 | D-CAP4 | `api:` per-target field — `library { api: stable }` | owner |
+| 2026-06-21 | D-CAP5 | library-producing targets emit capability metadata; binaries infer | owner |
+| 2026-06-21 | D-CAP6 | inference is the library default forever; `api: explicit` opt-in | owner |
 | 2026-06-17 | D-DEP1 | third-party deps ship as FFI-wrapping Jet packages (`extern rust`, S50); compiler stays zero-crate; native port later keeps API | owner |
 | 2026-06-17 | D-NET1 | TLS via `rustls` delivered as the `jet.tls` package (D-DEP1); `jet.http`→`jet.tls`; no compiler crate | owner |
 | 2026-06-17 | D-OBS1 | observability foundation (source maps + Jet-line panic reports) in M12; full DAP debugger at GA (M17) | owner |

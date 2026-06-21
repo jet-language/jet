@@ -60,21 +60,32 @@ pub struct PackageMeta {
     pub jet_constraint: Option<String>,
 }
 
-/// A package's kind (U10): `library` is imported for code; `executable` installs
-/// a binary on PATH (the devshell case).
+/// The realize axis for a package (U10): `library` is imported for code;
+/// `executable` installs a binary on PATH (the devshell case). Derived from a
+/// package's `targets:` list (D-TGT1) — an executable target wins, else library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageKind {
     Library,
     Executable,
 }
 
-/// One entry in the `packages: { … }` block (U10). `kind` is `None` when the
-/// manifest omits it (D-ILE1) — the kind is then inferred from the module's
+/// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The four
+/// shipped targets; `benchmark`/`plugin` are reserved and rejected at parse time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Library,
+    Executable,
+    Test,
+    Example,
+}
+
+/// One entry in the `packages: { … }` block (U10 + D-TGT1). `targets` is empty when
+/// the manifest declares none (D-ILE1) — the kind is then inferred from the module's
 /// `fn main` at realize time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageEntry {
     pub name: String,
-    pub kind: Option<PackageKind>,
+    pub targets: Vec<Target>,
 }
 
 /// Where a dependency resolves from.
@@ -125,10 +136,17 @@ pub enum ManifestError {
     /// An inline git dep (D-JPK23) is missing `git`, or doesn't have exactly
     /// one of `tag`/`branch`/`rev`.
     BadGitDep { name: String, reason: &'static str },
-    /// A `packages:` entry's kind is not `library` or `executable` (E1210).
-    BadPackageKind { name: String, value: String },
-    /// A `packages:` block-form entry (`{ kind: … }`) is missing the `kind` field (E1211).
-    MalformedPackageEntry { name: String },
+    /// A `packages:` entry names a target that is not a known shipped target (E1210).
+    BadTarget { name: String, value: String },
+    /// A `packages:` entry names a reserved target (`benchmark`/`plugin`) whose
+    /// backend has not shipped yet (E1210, D-TGT2).
+    ReservedTarget { name: String, value: String },
+    /// A `packages:` block-form entry uses the removed `kind:` field; write
+    /// `targets: [ … ]` instead (E1211, D-TGT1).
+    KindFieldRemoved { name: String },
+    /// A target block carries an unknown field, or `api:` has a value other than
+    /// `stable`/`explicit` (E1215, D-TGT3/D-CAP4).
+    BadTargetField { name: String, detail: String },
     /// A reserved top-level key (`dev_deps`/`patch`/`workspace`) was used
     /// non-empty (carries forward jet.toml's reserved-section guard, S52/E1209).
     ReservedSection(&'static str),
@@ -151,14 +169,20 @@ impl PackManifest {
         Some(parse(&text))
     }
 
-    /// The declared kind of package `name`. Returns `None` when the package is
-    /// not listed *or* lists no `kind` (D-ILE1) — both leave the kind to be
-    /// inferred from the source at realize time.
+    /// The declared kind of package `name`, derived from its `targets:` list
+    /// (D-TGT1): an `executable` target wins, else a `library` target. Returns
+    /// `None` when the package is not listed *or* declares no library/executable
+    /// target (D-ILE1) — both leave the kind to be inferred from the source at
+    /// realize time.
     pub fn package_kind(&self, name: &str) -> Option<PackageKind> {
-        self.packages
-            .iter()
-            .find(|p| p.name == name)
-            .and_then(|p| p.kind.clone())
+        let entry = self.packages.iter().find(|p| p.name == name)?;
+        if entry.targets.iter().any(|t| *t == Target::Executable) {
+            Some(PackageKind::Executable)
+        } else if entry.targets.iter().any(|t| *t == Target::Library) {
+            Some(PackageKind::Library)
+        } else {
+            None
+        }
     }
 }
 
@@ -249,43 +273,49 @@ deps: {
         let m = parse(FULL).unwrap();
         assert_eq!(m.packages.len(), 2);
         assert_eq!(m.packages[0].name, "web");
-        assert_eq!(m.packages[0].kind, Some(PackageKind::Library));
+        assert_eq!(m.packages[0].targets, vec![Target::Library]);
         assert_eq!(m.packages[1].name, "cli");
-        assert_eq!(m.packages[1].kind, Some(PackageKind::Executable));
+        assert_eq!(m.packages[1].targets, vec![Target::Executable]);
+        assert_eq!(m.package_kind("web"), Some(PackageKind::Library));
+        assert_eq!(m.package_kind("cli"), Some(PackageKind::Executable));
     }
 
     #[test]
-    fn package_kind_is_optional_and_inferred() {
-        // D-ILE1: a bare `name` omits `kind` (inferred from the module's
-        // `fn main` at realize time); an explicit kind still wins.
+    fn targets_are_optional_and_inferred() {
+        // D-ILE1/D-TGT1: a bare `name` declares no targets (inferred from the
+        // module's `fn main` at realize time); an explicit target still wins.
         let src =
             "payload: { name: \"x\", version: \"1\" }\npackages: { deploy, web: library }";
         let m = parse(src).unwrap();
         assert_eq!(m.packages.len(), 2);
         assert_eq!(m.packages[0].name, "deploy");
-        assert_eq!(m.packages[0].kind, None);
+        assert!(m.packages[0].targets.is_empty());
         assert_eq!(m.packages[1].name, "web");
-        assert_eq!(m.packages[1].kind, Some(PackageKind::Library));
-        // package_kind collapses "not listed" and "listed without kind" to None
-        // so the provider infers in both cases.
+        assert_eq!(m.packages[1].targets, vec![Target::Library]);
+        // package_kind collapses "not listed" and "no library/executable target"
+        // to None so the provider infers in both cases.
         assert_eq!(m.package_kind("deploy"), None);
         assert_eq!(m.package_kind("web"), Some(PackageKind::Library));
         assert_eq!(m.package_kind("absent"), None);
     }
 
     #[test]
-    fn packages_block_form() {
+    fn packages_block_targets_list() {
+        // D-TGT1/D-TGT3: a block-form package lists `targets:`; bare and
+        // block-with-fields target entries coexist.
         let src = r#"
 payload: { name: "x", version: "1" }
 packages: {
-    server: { kind: executable },
-    utils:  { kind: library },
+    server: { targets: [executable { entry: "src/cli.jet" }] },
+    utils:  { targets: [library, test] },
 }
 "#;
         let m = parse(src).unwrap();
         assert_eq!(m.packages.len(), 2);
-        assert_eq!(m.packages[0].kind, Some(PackageKind::Executable));
-        assert_eq!(m.packages[1].kind, Some(PackageKind::Library));
+        assert_eq!(m.packages[0].targets, vec![Target::Executable]);
+        assert_eq!(m.packages[1].targets, vec![Target::Library, Target::Test]);
+        assert_eq!(m.package_kind("server"), Some(PackageKind::Executable));
+        assert_eq!(m.package_kind("utils"), Some(PackageKind::Library));
     }
 
     #[test]
@@ -297,35 +327,75 @@ packages: {
     }
 
     #[test]
-    fn bad_package_kind_bare_errors() {
+    fn bad_target_bare_errors() {
+        let src = "payload: { name: \"x\", version: \"1\" }\npackages: { web: zonk }";
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::BadTarget { ref name, ref value }
+                if name == "web" && value == "zonk"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn reserved_target_errors() {
+        // D-TGT2: `plugin`/`benchmark` are reserved until their backends land.
         let src = "payload: { name: \"x\", version: \"1\" }\npackages: { web: plugin }";
         let err = parse(src).unwrap_err();
         assert!(
-            matches!(err, ManifestError::BadPackageKind { ref name, ref value }
+            matches!(err, ManifestError::ReservedTarget { ref name, ref value }
                 if name == "web" && value == "plugin"),
             "{err:?}"
         );
     }
 
     #[test]
-    fn bad_package_kind_in_block_errors() {
+    fn target_block_accepts_known_fields() {
+        // D-TGT3/D-TGT4/D-CAP4: entry/name/api are valid target-block fields.
+        let src = r#"
+payload: { name: "x", version: "1" }
+packages: {
+    app: { targets: [executable { name: "app", entry: "src/cli.jet" }, library { api: stable }] },
+}
+"#;
+        let m = parse(src).unwrap();
+        assert_eq!(m.packages[0].targets, vec![Target::Executable, Target::Library]);
+        assert_eq!(m.package_kind("app"), Some(PackageKind::Executable));
+    }
+
+    #[test]
+    fn target_block_unknown_field_errors() {
         let src =
-            "payload: { name: \"x\", version: \"1\" }\npackages: { web: { kind: plugin } }";
+            "payload: { name: \"x\", version: \"1\" }\npackages: { app: { targets: [executable { bogus: 1 }] } }";
         let err = parse(src).unwrap_err();
         assert!(
-            matches!(err, ManifestError::BadPackageKind { ref name, ref value }
-                if name == "web" && value == "plugin"),
+            matches!(err, ManifestError::BadTargetField { ref name, ref detail }
+                if name == "app" && detail.contains("bogus")),
             "{err:?}"
         );
     }
 
     #[test]
-    fn malformed_package_entry_missing_kind_errors() {
+    fn target_block_bad_api_mode_errors() {
+        // D-CAP4: api: only stable/explicit.
         let src =
-            "payload: { name: \"x\", version: \"1\" }\npackages: { web: { desc: \"no kind\" } }";
+            "payload: { name: \"x\", version: \"1\" }\npackages: { app: { targets: [library { api: zonk }] } }";
         let err = parse(src).unwrap_err();
         assert!(
-            matches!(err, ManifestError::MalformedPackageEntry { ref name } if name == "web"),
+            matches!(err, ManifestError::BadTargetField { ref name, ref detail }
+                if name == "app" && detail.contains("zonk")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn kind_field_is_removed() {
+        // D-TGT1: the old `kind:` field is a teaching error pointing at `targets:`.
+        let src =
+            "payload: { name: \"x\", version: \"1\" }\npackages: { web: { kind: executable } }";
+        let err = parse(src).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::KindFieldRemoved { ref name } if name == "web"),
             "{err:?}"
         );
     }

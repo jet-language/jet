@@ -128,3 +128,11 @@ or forks unless the owner explicitly asks for one.
 - When in doubt, the ranked priorities in docs/spec/philosophy.md decide. Effort is the
   resource you spend; safety and beginner experience are the ones you
   don't.
+- **Difficulty is never a deterrent, and never an argument** (philosophy.md →
+  "Effort is never a deterrent"). Never let "this is hard / a lot of work / would
+  take a long time" influence a recommendation, an option ranking, or how much you
+  scope. Hard work up front is the chosen currency; a hard path is often the right
+  one. **Do it right the first time** — full, end-to-end, the first time. Never
+  ship a stub or "milestone-pending" placeholder meaning to revisit, unless
+  genuinely blocked on an unratified upstream decision (name the gate). Don't even
+  *mention* implementation difficulty as a factor; weigh only the ranked priorities.

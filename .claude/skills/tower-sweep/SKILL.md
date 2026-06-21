@@ -33,6 +33,46 @@ decision that no agent has reviewed. Concretely:
 - **implementation** — actively being built. → action via subagent.
 - **done** — shipped.
 
+## Processing an answered ballot (the owner just decided — do ALL of this, not just the log)
+
+When the owner drops decisions into `ballots/ballot-results.md`, ratifying into
+`syntax-decisions.md` is **step one of five, not the whole job.** A decision is not
+"processed" until its card and plan are moved and — if unblocked — it is **built end to
+end.** For every answered decision:
+
+1. **Honor every word the owner wrote.** A ballot line may carry a *question* or *request*
+   ("can this be called X?", "ensure Y is captured", "defer Z"), not just a letter. Address
+   the request explicitly — rename, capture the deferral as a tracked card/deferred-entry,
+   etc. — and reflect it in the ratified text. Never silently treat a question as a clean pick.
+2. **Ratify** into `syntax-decisions.md` (Ratified section + decision log).
+3. **Strip** the decided card from `decision-ballots.md` (leave still-open sub-decisions).
+4. **Reconcile the board card** (`board.json`, surgical edit):
+   - All the card's decisions answered **and no upstream open decision gates it** →
+     move to **implementation** and build it now (step 5).
+   - Some sub-decisions still open, **or** gated on another *unratified* decision (e.g. a
+     feature gated on D-EFF1 while D-EFF1 is still open) → keep in **decisions**; record in
+     the plan which gate it waits on. Do **not** mark it "ready" — it isn't.
+   - Ratified but gated on a decision that **just became ratified** → it is now unblocked →
+     **implementation**.
+5. **Update the plan** (`sidequests/<slug>.md`) to match the ratified choice, then **implement
+   end to end** (see standard below). When green, move the card to **done** and delete the
+   plan from `sidequests/` (its durable rationale already lives in `syntax-decisions.md`).
+
+### Implementation standard — non-negotiable
+
+"Implemented" means a **100% end-to-end, fully functional** vertical slice, never a stub or a
+"ratified, milestone-pending" doc edit:
+
+- parser → sema → codegen all wired, behavior reachable from real `.jet` source;
+- every new diagnostic has a code in `diagnostics.md` **and** a `tests/ui` snapshot (I4);
+- a runnable example in `examples/` with golden-tested output where the feature is user-visible (I5);
+- unit/integration tests for the new paths; `nix develop -c cargo test` fully green;
+- docs touched (`spec.md`, `syntax-decisions.md` status) updated to match real behavior.
+
+"Ratified but not yet implemented / `src/` untouched" is **only** legitimate for a decision
+**still gated on an unratified upstream decision**. The owner's ballot answer on an unblocked
+decision **is** the "go" — do not park it.
+
 ## Sweep procedure
 
 1. **Reconcile with reality first (cheap, durable — do before fanning out).**
@@ -97,6 +137,12 @@ Then close with `**Recommendation:**` and a one-line *why*.
   `rg "\bD-XXX\b" docs/spec/syntax-decisions.md`.
 - Give a rich menu of original syntax candidates, never 2–3 derivative ones. Never
   invent syntax that contradicts a ratified decision — read `syntax-decisions.md`.
+- **Implementation difficulty must never appear in a tradeoff column, an option
+  ranking, or the recommendation** (philosophy.md → "Effort is never a deterrent").
+  Rank options only on safety, beginner experience, performance, one-path, and
+  long-term correctness. "Easier/faster to build" is not an advantage; "harder to
+  build" is not a drawback. If a column like "ratification cost" or "effort" sneaks
+  in, drop it.
 
 ## Hard constraints
 

@@ -432,6 +432,11 @@ pub(crate) struct Checker<'a> {
     /// or reset in this scope — maps name → verb ("free"/"reset").
     /// E3104 fires if `.alloc()` is called on a freed/reset allocator.
     freed_allocators: HashMap<String, String>,
+    /// D-UNINIT1 (ratified 2026-06-21): `#uninit` bindings not yet definitely
+    /// written — maps name → the `#uninit` decl span. A read while still in this
+    /// map is E0420 (write-before-read proof); a write clears it. Branch-merged
+    /// in `check_if` (intersection of "initialized").
+    uninit: HashMap<String, Span>,
     /// True while inferring an expression that the generated Rust will only
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.

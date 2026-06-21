@@ -111,66 +111,76 @@ function ratifiedCount() {
 
 const DECISION_ID = /^(D-[A-Z0-9-]+|S\d+-[A-Z]+|S\d+|N\d+|U\d+)$/;
 
-// The "## Open decisions" section. Everything open lives here — no other
-// sections to hide things behind.
+// The "## Open decisions" region. Everything from that heading to EOF is the
+// ballot: this file's sole purpose is open decisions, and each board card is now
+// its own "## <name> — board card cXX" section. (Earlier this stopped at the
+// next "## ", which silently swallowed every card under the preamble.)
 function openSection(md) {
   const m = md.match(/^## Open decisions\s*$/m);
   if (!m) return "";
-  const body = md.slice(m.index + m[0].length);
-  const next = body.search(/^## /m);
-  return next >= 0 ? body.slice(0, next) : body;
+  return md.slice(m.index + m[0].length);
 }
 
-// Parse the open section into a flat, ordered list of entries. Tolerant of two
-// shapes mixed freely:
-//   • Full card:   "### <ID> — <title> (rec X)" with intro / Option bullets / Recommendation
-//                  → kind:"decision", selectable.
-//   • Group head:  "### <group name>" (no leading ID) whose "- **<ID>** — …"
-//                  bullets each become kind:"open" (visible, ask-to-expand).
-// Loose intro prose before the first "###" renders as a kind:"explainer".
+// Parse the open region into a flat, ordered list of entries. The structure:
+//   • Group section: "## <name> — board card cXX" → sets the group label that
+//                    the cards beneath it carry; its intro prose renders as an
+//                    explainer.
+//   • Full card:     "### <ID> — <title> (rec X)" with intro / Option bullets /
+//                    Recommendation → kind:"decision", selectable.
+//   • Group head:    "### <group name>" (no leading ID) whose "- **<ID>** — …"
+//                    bullets each become kind:"open" (visible, ask-to-expand).
+// Loose intro prose before the first heading renders as a kind:"explainer".
+// (H1 "# …" lines are dividers inside sections — folded into block content.)
 function parseBallot(md) {
   const body = openSection(md);
   if (!body) return [];
   const blocks = [];
-  let pre = [], cur = null;
+  let pre = null, cur = null, group = "";
+  const flushPre = () => {
+    if (pre && pre.join("").trim()) blocks.push({ header: null, group, lines: pre });
+    pre = null;
+  };
   for (const line of body.split("\n")) {
     if (line.startsWith("### ")) {
-      if (cur) blocks.push(cur); else if (pre.join("").trim()) blocks.push({ header: null, lines: pre });
-      pre = null; cur = { header: line.slice(4).trim(), lines: [] };
+      if (cur) blocks.push(cur); else flushPre();
+      cur = { header: line.slice(4).trim(), group, lines: [] };
+    } else if (line.startsWith("## ")) {
+      // level-2 section header → new group label for the cards that follow
+      if (cur) { blocks.push(cur); cur = null; } else flushPre();
+      group = line.slice(3).trim();
     } else if (cur) cur.lines.push(line);
-    else if (pre) pre.push(line);
+    else (pre ??= []).push(line);
   }
-  if (cur) blocks.push(cur);
+  if (cur) blocks.push(cur); else flushPre();
 
   const out = [];
-  let group = "";
   for (const blk of blocks) {
     if (blk.header === null) {
       const html = renderMd(blk.lines.join("\n"));
-      if (html.trim()) out.push({ kind: "explainer", title: "", html });
+      if (html.trim()) out.push({ kind: "explainer", group: blk.group, title: "", html });
       continue;
     }
     const dash = blk.header.indexOf(" — ");
     const maybeId = dash > 0 ? blk.header.slice(0, dash).trim() : "";
     if (dash > 0 && DECISION_ID.test(maybeId)) {
-      // full decision card — tagged with the last group heading we saw
+      // full decision card — tagged with the group section it sits under
       let title = blk.header.slice(dash + 3).trim();
       let rec = "";
       const rm = title.match(/\(([^)]*)\)\s*$/);
       if (rm) { rec = rm[1].trim(); title = title.slice(0, rm.index).trim(); }
-      out.push({ kind: "decision", id: maybeId, group, title, rec, ...splitCard(blk.lines) });
+      out.push({ kind: "decision", id: maybeId, group: blk.group, title, rec, ...splitCard(blk.lines) });
     } else if (bulletItems(blk.lines).length) {
-      // group header with one-liner bullets → emit ask-to-expand entries
-      group = blk.header;
+      // ### group header with one-liner bullets → emit ask-to-expand entries
       for (const item of bulletItems(blk.lines)) {
         const m = item.match(/^\*\*([^*]+)\*\*\s*(?:—|-)?\s*([\s\S]*)$/);
         const id = m ? m[1].trim() : "";
         const rest = m ? m[2].trim() : item;
-        out.push({ kind: "open", group, id, html: renderMd("- " + rest) });
+        out.push({ kind: "open", group: blk.group, id, html: renderMd("- " + rest) });
       }
     } else {
-      // bare group heading (its decisions follow as their own ### cards)
-      group = blk.header;
+      // ### sub-heading with no id and no bullets → render its prose as explainer
+      const html = renderMd(blk.lines.join("\n"));
+      if (html.trim()) out.push({ kind: "explainer", group: blk.group, title: blk.header, html });
     }
   }
   return out;
@@ -187,7 +197,19 @@ function bulletItems(lines) {
 }
 
 function splitCard(lines) {
-  const isOpt = (l) => /^- \*\*Option [A-Za-z0-9] —/.test(l);
+  // Some option headers hard-wrap before their closing **; rejoin them so the
+  // single-line capture below sees the whole "**Option X — …**" on one line.
+  const merged = [];
+  for (let i = 0; i < lines.length; i++) {
+    let l = lines[i];
+    if (/^- \*\*Option /.test(l)) {
+      while ((l.match(/\*\*/g) || []).length < 2 && i + 1 < lines.length) l += " " + lines[++i].trim();
+    }
+    merged.push(l);
+  }
+  lines = merged;
+  // Keys may be multi-char or non-ASCII: A, A2, Cβ (compound cards like D-CTX1).
+  const isOpt = (l) => /^- \*\*Option \S+ —/.test(l);
   const isRec = (l) => /^\*\*Recommendation:/.test(l);
   const intro = [], options = [];
   let rec = [], mode = "intro", optBuf = null;
@@ -196,7 +218,7 @@ function splitCard(lines) {
     if (isRec(line)) { flushOpt(); mode = "rec"; rec.push(line); continue; }
     if (isOpt(line)) {
       flushOpt(); mode = "opt";
-      const m = line.match(/^- \*\*Option ([A-Za-z0-9]) — (.+?)\*\*(.*)$/);
+      const m = line.match(/^- \*\*Option (\S+) — (.+?)\*\*(.*)$/);
       const optName = m[2].replace(/\.\s*$/, "").replace(/\s*\(recommended\)\s*$/i, "").trim();
       optBuf = { key: m[1], name: optName, lines: [m[3].trim()] };
       continue;

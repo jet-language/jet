@@ -342,21 +342,28 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadGitDep { name, reason } => {
             e1206(&file, &format!("dependency `{name}`'s git struct {reason}"))
         }
-        ManifestError::BadPackageKind { name, value } => e1210(
+        ManifestError::BadTarget { name, value } => e1210(
             &file,
             &format!(
-                "package `{name}` has kind `{value}`, which is not `{}` or `{}`",
-                Syntax::PACKAGE_KIND_LIBRARY,
-                Syntax::PACKAGE_KIND_EXECUTABLE,
+                "package `{name}` lists target `{value}`, which is not a known target"
             ),
         ),
-        ManifestError::MalformedPackageEntry { name } => e1211(
+        ManifestError::ReservedTarget { name, value } => e1210(
             &file,
             &format!(
-                "package `{name}` is declared as a block but is missing the `{}` field",
-                Syntax::PACKAGE_FIELD_KIND,
+                "package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)"
             ),
         ),
+        ManifestError::KindFieldRemoved { name } => e1211(
+            &file,
+            &format!(
+                "package `{name}` uses `{}:`, which was removed",
+                Syntax::PACKAGE_FIELD_KIND_REMOVED,
+            ),
+        ),
+        ManifestError::BadTargetField { name, detail } => {
+            e1216(&file, &format!("package `{name}`: {detail}"))
+        }
         ManifestError::ReservedSection(section) => e1209(&file, section),
     }
 }
@@ -389,12 +396,14 @@ pub fn e1209(_file: &str, section: &str) -> Diagnostic {
 fn e1210(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1210",
-        format!("`{}` has an unknown package kind", Syntax::PAYLOAD_FILE),
+        format!("`{}` lists an unknown target", Syntax::PAYLOAD_FILE),
         detail.to_string(),
         format!(
-            "use `{}` or `{}` as the package kind",
-            Syntax::PACKAGE_KIND_LIBRARY,
-            Syntax::PACKAGE_KIND_EXECUTABLE,
+            "use a shipped target: `{}`, `{}`, `{}`, or `{}`",
+            Syntax::TARGET_LIBRARY,
+            Syntax::TARGET_EXECUTABLE,
+            Syntax::TARGET_TEST,
+            Syntax::TARGET_EXAMPLE,
         ),
         None,
     )
@@ -403,14 +412,30 @@ fn e1210(_file: &str, detail: &str) -> Diagnostic {
 fn e1211(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1211",
-        format!("`{}` has a malformed package entry", Syntax::PAYLOAD_FILE),
+        format!("`{}` uses the removed `kind:` field", Syntax::PAYLOAD_FILE),
         detail.to_string(),
         format!(
-            "add a `{}: {}` or `{}: {}` field to the block",
-            Syntax::PACKAGE_FIELD_KIND,
-            Syntax::PACKAGE_KIND_LIBRARY,
-            Syntax::PACKAGE_FIELD_KIND,
-            Syntax::PACKAGE_KIND_EXECUTABLE,
+            "write `{}: [{}]` (or `[{}]`) instead",
+            Syntax::PACKAGE_FIELD_TARGETS,
+            Syntax::TARGET_EXECUTABLE,
+            Syntax::TARGET_LIBRARY,
+        ),
+        None,
+    )
+}
+
+fn e1216(_file: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1216",
+        format!("`{}` has an invalid target field", Syntax::PAYLOAD_FILE),
+        detail.to_string(),
+        format!(
+            "a target block accepts `{}: \"…\"`, `{}: \"…\"`, and `{}: {}|{}`",
+            Syntax::TARGET_FIELD_ENTRY,
+            Syntax::TARGET_FIELD_NAME,
+            Syntax::TARGET_FIELD_API,
+            Syntax::API_MODE_STABLE,
+            Syntax::API_MODE_EXPLICIT,
         ),
         None,
     )

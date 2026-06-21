@@ -132,6 +132,12 @@ pub const KW_UNSAFE: &str = "unsafe";
 /// requires `use core.mem`.
 pub const CORE_MEM_MODULE: &str = "core.mem";
 
+/// D-UNINIT1 (ratified 2026-06-21, opt C): the `#uninit` binding marker —
+/// `#uninit name: Type` declares a binding with no initializer, opting out of
+/// the default zero-fill. Gated by `use core.mem` (S58); sema proves
+/// write-before-read (E0420) and codegen lowers to `MaybeUninit`.
+pub const ATTR_UNINIT: &str = "uninit";
+
 /// S58 (ratified 2026-06-12): the pointer type — `Ptr<T>`.
 pub const TYPE_PTR: &str = "Ptr";
 
@@ -692,15 +698,50 @@ pub const MANIFEST_BLOCK_PAYLOAD: &str = "payload";
 /// discovered by name in the tree; the old `exports: [module …]` folds into this.
 pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
 
-/// U10 (ratified 2026-06-16): a package's kind. `library` is imported for its
-/// code; `executable` installs a binary on PATH (the devshell case). Written as a
-/// bare keyword (`deploy: executable`) or inside a `{ kind: … }` block.
-pub const PACKAGE_KIND_LIBRARY: &str = "library";
-pub const PACKAGE_KIND_EXECUTABLE: &str = "executable";
+/// D-TGT1/D-TGT2 (ratified 2026-06-21): a package's build targets, replacing the
+/// removed `kind:` (U10). The four shipped targets — `library` is imported for its
+/// code, `executable` installs a binary on PATH, `test`/`example` build their own
+/// artifacts. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
+/// `{ targets: [ … ] }` list.
+pub const TARGET_LIBRARY: &str = "library";
+pub const TARGET_EXECUTABLE: &str = "executable";
+pub const TARGET_TEST: &str = "test";
+pub const TARGET_EXAMPLE: &str = "example";
 
-/// U10 (ratified 2026-06-16): the per-package block field naming its kind —
-/// `deploy: { kind: executable, … }`.
-pub const PACKAGE_FIELD_KIND: &str = "kind";
+/// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
+/// recognized but rejected (no backend yet) until their tooling lands.
+pub const TARGET_RESERVED: &[&str] = &["benchmark", "plugin"];
+
+/// D-TGT1 (ratified 2026-06-21): the per-package field listing build targets —
+/// `app: { targets: [library, executable { entry: "src/cli.jet" }] }`. A bare
+/// keyword value (`app: library`) is the single-target shorthand (D-TGT3). The
+/// former `kind:` field is removed; using it is a teaching error (E1211).
+pub const PACKAGE_FIELD_TARGETS: &str = "targets";
+
+/// D-TGT1 (ratified 2026-06-21): the removed per-package kind field. Recognized
+/// only to emit a migration teaching error pointing at `targets:`.
+pub const PACKAGE_FIELD_KIND_REMOVED: &str = "kind";
+
+/// D-TGT3/D-TGT4/D-CAP4 (ratified 2026-06-21): fields a target block may carry —
+/// `entry:` (D-TGT4 entry module), `name:` (output/bin name), `api:` (D-CAP4
+/// capability mode). Parsed when present; behavior lands with the realize pipeline.
+pub const TARGET_FIELD_ENTRY: &str = "entry";
+pub const TARGET_FIELD_NAME: &str = "name";
+pub const TARGET_FIELD_API: &str = "api";
+
+/// D-CAP4/D-CAP6 (ratified 2026-06-21): library capability-API modes. Default is
+/// inference (no `api:`); `stable` records signatures + flags breaks, `explicit`
+/// requires hand-written capability annotations on every `pub` signature.
+pub const API_MODE_STABLE: &str = "stable";
+pub const API_MODE_EXPLICIT: &str = "explicit";
+
+/// D-CAP1 (ratified 2026-06-21): the four-capability vocabulary —
+/// `view`/`edit`/`take`/`share`. `view` and `take` are ratified ownership keywords
+/// (S10); `edit` and `share` are reserved here. Parameter-position placement
+/// (D-CAP3) and the copy/share call form (D-CAP2) are still open, so these are
+/// reserved spellings only — not yet wired into the parser.
+pub const CAPABILITY_EDIT: &str = "edit";
+pub const CAPABILITY_SHARE: &str = "share";
 
 /// D-REL3 (ratified 2026-06-16): the project compatibility marker —
 /// `edition: "2026"` in the `payload: { … }` block of `pkg.jet`. An edition

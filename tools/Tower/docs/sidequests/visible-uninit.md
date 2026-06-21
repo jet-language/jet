@@ -1,132 +1,125 @@
 # Plan: Visible uninitialization (D-UNINIT1)
 
-**Status: plan — awaiting owner decision D-UNINIT1.**
+**Status: implementation — D-UNINIT1 ratified 2026-06-21, option C (`#uninit` marker).**
 
----
+**Landed (green, all 42 test binaries pass):**
+- AST `Binding.uninit` field (placeholder `Expr::Int(0,…)` init, so the 46 `b.init` walkers need no edits).
+- `Syntax::ATTR_UNINIT`.
+- Parser method `uninit_binding` (`#uninit name: Type`, E0421 missing-type, E0422 has-initializer) —
+  **written and `#[allow(dead_code)]`, intentionally NOT wired into the `TokKind::Hash` dispatch**
+  until sema+codegen make the path safe (no mis-compiling/unsafe surface exists meanwhile).
 
-## Goal
+**Sema dataflow DONE (green, inert until parser wired):** `Checker.uninit` flow-state;
+`check_uninit_binding` (gate E0424 on `use core.mem`, POD-only E0423, declare, mark
+uninit); read-hook E0420 in CheckerInfer (mirrors use-after-move); writes clear it
+(plain `name = …`; `mut`-pass via `clear_uninit_mut_args`); compound `+=` is E0420;
+branch-merge threaded through `check_if` (intersection: stays uninit if uninit on any
+path; no-`else` keeps fall-through) and `check_branches` (conservative — switch doesn't
+initialize); loops restore the pre-loop set (0-iteration path). Parser `uninit_binding`
+(E0421/E0422) written, still UNWIRED.
 
-Let expert-tier code skip the automatic zero-fill of a local binding, for measurable
-performance wins in hot buffer paths (network I/O, codecs, parsers). The safety rail —
-compile-time read-before-write proof — is preserved unconditionally. There is no mode
-where an uninitialized read becomes undefined behavior.
+## ⛔ BLOCKER discovered during codegen — needs a prerequisite decision
 
----
+`MaybeUninit::uninit().assume_init()` (the ratified lowering) requires the binding to be
+a **stack value** of a fixed size. But this codebase lowers `[N]T` fixed-lists to
+**`Vec<T>`** (`Source/Codegen/Context.rs:252`), a heap value. An uninitialized `Vec`
+(garbage ptr/len/cap) is **undefined behavior** on use/drop — so MaybeUninit is unsafe
+here — and the only *safe* `Vec` lowering, `vec![0u8; N]`, **zero-fills**, defeating the
+entire purpose of `#uninit` (the buffer case `[4096]U8` is exactly a fixed-list).
 
-## Pipeline touch points
+**Therefore D-UNINIT1's codegen + parser-wiring are gated on a prerequisite:** `[N]T`
+fixed arrays must lower to a real stack array `[T; N]` (so `MaybeUninit<[T; N]>` is sound
+and skips the fill). That is a user-visible representation change (copy vs move, sizing,
+slicing, passing) and should be an **owner decision** (proposed id **D-FIXARR1**), tracked
+as board card **c82**. Until it lands, `#uninit` stays parser-unwired and codegen-less —
+the sema proof is ready to switch on the moment the representation supports it.
 
-### 1. Lexer
+Scalars (`Int`/`U8`/…) *would* work with MaybeUninit today, but a single uninitialized
+scalar has no perf benefit — the feature exists for buffers — so shipping a scalars-only
+`#uninit` would be a misleading partial. Hold for the array representation.
 
-Add `uninit` as a reserved keyword. Outside a `use core.mem` context the lexer emits
-the token normally; sema rejects it with a teaching error. This matches the pattern
-used for other `core.mem`-gated vocabulary.
+**Remaining once D-FIXARR1 lands:** MaybeUninit codegen (stack array), wire the parser
+dispatch, diagnostics.md (E0420–E0424) + ui snapshots + golden buffer example + unit tests.
 
-### 2. Parser
+## Ratified surface (option C — NOT the old `:= uninit` form)
 
-Accept `= uninit` in the initializer position of a local binding:
+```jet
+use core.mem
 
-```
-local-binding = name [ ":" Type ] ( "::" | ":=" ) ( expr | "uninit" )
-```
-
-`uninit` is not valid as:
-- a struct field default
-- a const or comptime expression
-- a default parameter value
-
-Each invalid position gets a distinct sub-code of E0420.
-
-### 3. Sema — gate check
-
-If `uninit` appears without `use core.mem` in scope, emit:
-
-```
-E0419  `= uninit` requires `use core.mem`
-       add `use core.mem` at the top of this file to enable
-       the expert low-level tier (see S58)
-```
-
-### 4. Sema — write-before-read dataflow
-
-For a binding declared `= uninit`, sema tracks a `MaybeInit` lattice value
-(`Uninit | Init | MaybeInit`) on every binding through control flow. A read of a
-`MaybeInit` or `Uninit` binding emits:
-
-```
-E0420  read of possibly-uninitialized value `<name>`
-       declared `= uninit` at <location>
-       every path through this function must write `<name>`
-       before reading it
-       fix: write to `<name>` before this point, or remove `= uninit`
+fn fill(sock: Socket) {
+    #uninit buffer: [4096]U8      // no initializer; skip the zero-fill
+    sock.read(mut buffer)?        // fills it — counts as the initializing write
+    process(buffer)               // ok: written before read
+}
 ```
 
-Whole-array writes (`sock.read(mut buffer)?`) mark the entire binding `Init`.
-Partial-index writes (`buffer[0] = x`) mark only the indexed slot; a subsequent
-whole-array read remains `MaybeInit` until all slots are provably written (v1 can
-conservatively mark any partial write as `MaybeInit` and require the user to
-write the whole thing or use a loop).
+`#uninit` is the marker sigil `#` (D-ATTR1) in a new position: immediately before a
+local binding that has a **type annotation and no initializer**. Gated by `use core.mem`
+(S58); outside that gate → teaching error pointing at the gate. Type annotation is
+**required** (no value to infer from).
 
-### 5. Codegen — lowering to `MaybeUninit`
+## Implementation design (exact)
 
-```rust
-// Jet:  buffer: [4096]u8 = uninit
-// Rust (generated, inside the user's #unsafe-gated region or std/mem internals):
-let mut buffer = MaybeUninit::<[u8; 4096]>::uninit();
-// … after sema proves all paths write before read …
-// At the first proven-safe read site:
-let buffer = unsafe { buffer.assume_init() };
-```
+### AST — DONE
+`Binding.uninit: bool` (default false). For `#uninit`, parser sets `uninit:true`,
+`mutable:true`, `ty:Some(_)`, and `init = Expr::Unit` (a harmless placeholder so the
+46 existing `b.init` walkers — purity, comptime, REPL — stay correct without edits).
 
-The `unsafe` block in generated Rust is produced only inside the codegen path for
-`= uninit` bindings, which are already gated by `use core.mem` / `#unsafe` (S58).
-Invariant I1 is not violated: no `unsafe` appears in generated Rust without a
-corresponding user-written gate.
+### Parser (Source/Parser/Statements.rs)
+In statement dispatch on `TokKind::Hash`, peek the marker ident: if it is
+`Syntax::ATTR_UNINIT`, parse `#uninit name: Type` → `Stmt::Val(Binding{ uninit:true,
+mutable:true, name, ty:Some, ty_span, init: Expr::Unit(marker_span), .. })`. Errors:
+no type annotation → E0421 ("`#uninit` needs a type: `#uninit buf: [N]U8`"); an
+initializer present (`#uninit x: T := e`) → E0422 ("`#uninit` has no initializer").
 
----
+### Gate (sema)
+A `#uninit` binding in a module without `use core.mem` → the existing core.mem gate
+diagnostic (reuse the S58 path, like `Arena`). Check in `check_binding`.
 
-## v1 scope
+### Sema dataflow — write-before-read (mirror the `moved` flow-state)
+The checker already tracks `moved: HashMap<name,Span>` with branch-merge in `check_if`
+(CheckerCore.rs:456, **union** = moved-in-any-branch). Definite-assignment is the
+mirror: add `uninit: HashMap<String,Span>` = locals declared `#uninit` and not yet
+definitely written.
+- `check_binding` with `b.uninit` → `uninit.insert(name, span)` (after gate check).
+- **Write (removes from `uninit`)**: `Stmt::Assign{ target: Ident(name), op:None }`
+  (check RHS first, then remove); a call arg that is a direct `Ident(name)` passed with
+  `AccessConvention::Mutate` (the fill case — `mut buffer`).
+- **Read (errors if still in `uninit`)**: any `Expr::Ident(name)` resolved as a read
+  while `name ∈ uninit` → **E0420** ("read of possibly-uninitialized `name`"; note the
+  `#uninit` decl span; fix: write it first). Hook at the ident-resolution read site
+  (CheckerCore — same place use-after-`moved` is reported). The mut-pass and assign-LHS
+  positions must NOT count as reads (handle them before/instead of the generic read).
+- **`if` merge (intersection of "initialized")**: in `check_if`, alongside the existing
+  `moved` union, thread `uninit`: `before = uninit.clone()`; each branch starts from
+  `before`; a name is **still uninit after** if it is still uninit in **any** branch
+  (union of branch-remaining); with **no `else`**, the fall-through keeps `before`, so
+  body inits don't count (result ⊇ before). (Initialized-after = initialized in every
+  path.)
+- **Loops (`while`/`for`)**: body may run 0 times → restore `uninit = before` after the
+  loop (inits inside the body don't escape); reads inside the body are checked against
+  the live set (sound: first-iteration read of a body-only init is flagged).
+- `op Some` compound-assign (`buffer += …`) reads first → E0420 if uninit. Index/field
+  writes are partial → do NOT clear `uninit` (sound conservative; the real fill is the
+  `mut`-pass).
 
-- Stack-local bindings only (`let`/`var` — i.e., `name := uninit`). Heap allocation
-  of uninit values is deferred.
-- Whole-binding writes mark `Init`; partial-index writes mark `MaybeInit`
-  (conservative; accepted for v1).
-- Arrays and structs are the primary use case; uninit of scalar types is allowed but
-  the compiler hints that zeroing a scalar is free.
-- No `uninit` in `const`, comptime, or struct-field-default positions.
+### Codegen (Source/Codegen/Statement.rs `Stmt::Val` arm)
+`b.uninit` → restrict to no-Drop ("POD": primitives, fixed arrays of POD, structs of
+POD); a Drop type → **E0423** at sema ("`#uninit` needs a plain-data type; `T` has
+cleanup"). Lower to:
+`let mut <name>: <T> = unsafe { core::mem::MaybeUninit::uninit().assume_init() };`
+The generated `unsafe` is licensed by the `use core.mem` tier (I1). Sema's
+write-before-read proof makes the read sound; this skips the zero-fill (the perf goal).
+All later uses are plain `T` — no `assume_init` juggling per use.
 
----
+### Diagnostics (docs/spec/diagnostics.md) + tests
+E0420 (read before write), E0421 (missing type), E0422 (initializer present), E0423
+(Drop type). Each: `tests/ui` snapshot. Example: `examples/features/NN_uninit.jet`
+(green path: declare, fill via `mut`, read) with golden output, golden-tested.
+Unit tests for the dataflow (if-both-branches ok; if-one-branch E0420; loop-body init
+doesn't escape; compound-assign E0420).
 
-## Safety rail
-
-Read-before-write is a **compile error on all paths**, not a runtime trap and not a
-debug-only check. This is the hard line between Jet and Zig (`= undefined` traps only
-in debug builds). The `MaybeUninit` lowering is the mechanism; sema carries the proof.
-
----
-
-## Test plan
-
-1. **E0419 snapshot** — `= uninit` without `use core.mem` → teaching error.
-2. **E0420 snapshot (read before write)** — binding declared `= uninit`, read before
-   any write on at least one path → E0420 with fix-it.
-3. **E0420 snapshot (partial write)** — only some indices written before a whole read
-   → E0420 (conservative v1 rule).
-4. **Happy-path example** — `examples/features/uninit_buffer.jet` fills a 4 KB buffer
-   and processes it; golden test checks output (I5).
-5. **Invalid positions** — `= uninit` in const, struct field default, default param →
-   distinct E0420 sub-code per position (I4).
-
----
-
-## Open questions
-
-- Should `uninit` be a hard keyword everywhere (preferred, simpler) or a contextual
-  keyword valid only after `=` in a binding? Hard keyword avoids parser ambiguity;
-  contextual avoids reserving a common name. Recommendation: hard keyword (consistent
-  with `use core.mem` gating — it is always expert vocabulary).
-- Partial-array init tracking: v1 uses conservative `MaybeInit` for any partial write.
-  Future: per-index bitvector for fixed-size arrays where the size is a compile-time
-  constant. Defer to v2.
-- Should `uninit` bindings be forbidden from crossing `?` / error-propagation points?
-  A write inside a fallible call might not execute if the call returns an error. Sema
-  should treat fallible calls as non-writing for dataflow purposes (conservative).
+## Invariants
+I1 (generated `unsafe` only under the `use core.mem` gate), I2 (rustc never speaks —
+sema owns E0420), I3 (codegen dumb — just emits the MaybeUninit line), I4 (every E-code
+has a snapshot), I5 (example is golden-tested).
