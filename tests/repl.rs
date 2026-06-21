@@ -278,6 +278,7 @@ fn repl_probe_exact_outputs() {
     let out = run_transcript(&["add_three(10)"], Some(&project_dir));
     eprintln!("PROJECT_ADD_THREE: {:?}", out);
     std::fs::remove_dir_all(&fixture).ok();
+
 }
 
 // ── D-REPL10=A: --project mode ───────────────────────────────────────────
@@ -318,4 +319,74 @@ fn repl_project_loads_items() {
 
     // Clean up.
     std::fs::remove_dir_all(&fixture).ok();
+}
+
+// ── S16/D-REPL10: `use` imports carried across REPL inputs ────────────────
+
+#[test]
+fn repl_use_import_accepted() {
+    // A bare `use core.math as math` import is accepted (not "expected a
+    // statement, found `use`"), and reports `ok`.
+    let out = run_transcript(&["use core.math as math"], None);
+    assert!(out.contains("ok"), "import should be accepted, got: {:?}", out);
+    assert!(!out.contains("E0003"), "import must not be a statement error, got: {:?}", out);
+}
+
+#[test]
+fn repl_use_import_resolves_alias_in_later_input() {
+    // The import typed in input 1 must make `math` resolve in input 2 — the
+    // alias is carried across inputs (this is the c55 cross-input delta). Before
+    // the fix this produced E0107 ("nothing named `math`").
+    let out = run_transcript(&["use core.math as math", "r :: math.sqrt(16.0)"], None);
+    assert!(
+        !out.contains("E0107") && !out.contains("nothing named `math`"),
+        "carried import should resolve the alias, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_use_import_persists_across_unrelated_input() {
+    // An intervening unrelated input must not drop the import: the alias still
+    // resolves two inputs later.
+    let out = run_transcript(
+        &["use core.math as math", "x :: 1", "r :: math.sqrt(9.0)"],
+        None,
+    );
+    assert!(
+        !out.contains("E0107") && !out.contains("nothing named `math`"),
+        "import should persist across inputs, got: {:?}",
+        out
+    );
+}
+
+#[test]
+fn repl_use_unknown_core_module_rejected() {
+    // An unknown core module reports E1001 and is not retained.
+    let out = run_transcript(&["use core.bogus as b"], None);
+    assert!(out.contains("E1001"), "unknown core module should error, got: {:?}", out);
+    assert!(!out.contains("ok"), "bad import must not be accepted, got: {:?}", out);
+}
+
+#[test]
+fn repl_use_repl_incompatible_module_hard_rejected() {
+    // Modules the interpreter can't run (fs, tasks, …) hard-reject with E1802
+    // before being treated as an import.
+    let out = run_transcript(&["use core.fs as fs"], None);
+    assert!(out.contains("E1802"), "core.fs should hard-reject, got: {:?}", out);
+}
+
+#[test]
+fn repl_reset_clears_imports() {
+    // After :reset, a carried import is gone — the alias no longer resolves.
+    let out = run_transcript(
+        &["use core.math as math", ":reset", "r :: math.sqrt(4.0)"],
+        None,
+    );
+    assert!(out.contains("session reset"), "got: {:?}", out);
+    assert!(
+        out.contains("error"),
+        "after reset the alias must not resolve, got: {:?}",
+        out
+    );
 }

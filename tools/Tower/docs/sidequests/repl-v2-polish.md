@@ -129,6 +129,42 @@ User { name: "ana" }
 
 ## Open decisions
 
+## Status (2026-06-21)
+
+The three documented deltas (moves across inputs D-REPL8, `:run` D-REPL-FUEL,
+`--project` D-REPL10) shipped and are green. The remaining gap was the one the
+card flags: a `use …` line typed in the REPL was rejected (`E0003: expected a
+statement, found the keyword \`use\``) and never carried, so an alias couldn't
+resolve in later inputs.
+
+**Done in this pass (`Source/REPL.rs` + `tests/repl.rs`):**
+
+- `use core.X as a` / `use a.{Item}` lines now classify as `InputKind::Import`,
+  accumulate in `Session.import_srcs`, and prepend to every synthetic program
+  (sema check, item check, `:run` materialization). `:reset` clears them.
+- Cross-input resolution: an import on line N makes its alias resolve in any
+  later input. The single-file checker can't register core-module aliases, so
+  import-bearing checks route through the Loader bundle path
+  (`run_sema_bundle`, `Check` mode, temp file) — the same path `jet check` uses.
+  Import-free checks keep the cheaper `check_with_mode` (spans unchanged).
+- Bad imports are rejected and not retained: unknown core module → `E1001`;
+  REPL-incompatible module (`core.fs`/`core.tasks`/…) → existing `E1802`
+  hard-reject (fires before import classification). 6 new transcript tests.
+- No new diagnostic code introduced (reuses E1001/E1802/E0107), so no
+  diagnostics.md / ui-snapshot change needed (I4 satisfied).
+
+**Deferred fork — interpreter CoreLib runtime.** Sema now *resolves*
+`math.sqrt(x)` across inputs, but the comptime tree-walker can't *execute*
+core-module calls, so evaluating one inline still errors `E0956` (\`math\` can't
+run at compile time yet). Running it works via `:run` (native codegen has
+CoreLib — verified `print(math.sqrt(16.0))` → `4.0`). Making core calls
+*interpret* inline means teaching `Source/Comptime/` all of CoreLib's runtime —
+a large change touching the interpreter, not the REPL, affecting every core
+module. Out of scope for c55; track as its own card if inline core execution in
+the REPL is wanted.
+
+## Original notes
+
 **No owner decision — finishing ratified work.** All three deltas implement
 already-ratified decisions: D-REPL8 (move semantics across inputs), D-REPL-FUEL
 (`:run`), and D-REPL10 (`--project`). Each already has its decision ID,

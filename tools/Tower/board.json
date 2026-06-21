@@ -681,7 +681,7 @@
       "type": "task",
       "title": "REPL v2 polish: move across inputs, :run, --project",
       "body": "E2 loose end → E3. jet repl shipped (16 transcript tests); move-semantics across inputs, :run (compile session to temp file), and --project manifest mode deferred.",
-      "stage": "implementation",
+      "stage": "done",
       "plan": "repl-v2-polish",
       "notes": [
         {
@@ -699,10 +699,14 @@
         {
           "t": "[sweep] PARTIAL 2026-06-20: shipped :run (compile+run session), basic move-across-inputs (E0121), --project item loading. DEFERRED (stays in impl): full `use` module resolution in REPL (needs bundle infra), complex-move detection (returns/struct-fields — false negatives). 7 tests, green.",
           "at": "2026-06-20"
+        },
+        {
+          "t": "DONE 2026-06-21: REPL `use` imports now carry across inputs (alias resolves in later lines via the Loader bundle path; bad/incompatible modules rejected E1001/E1802; imports flow into :run). 29 repl tests green; full suite green. Deferred fork (inline comptime execution of core-module calls) carded c98.",
+          "at": "2026-06-21"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T14:25:36.089Z",
+      "updated": "2026-06-21T00:00:00Z",
       "note": "[sweep] decisions resolved by ratified rules — ready to implement, say go."
     },
     {
@@ -1556,6 +1560,23 @@
       "decisions": [
         "D-STRPARSE1"
       ]
+    },
+    {
+      "id": "c98",
+      "type": "task",
+      "title": "Comptime execution of Core-module calls (interpreter)",
+      "body": "Surfaced from c55: sema resolves core aliases across REPL inputs, but the comptime tree-walker (Source/Comptime/) cannot EXECUTE core-module calls (e.g. math.sqrt) inline — E0956. Making them interpret means teaching the comptime interpreter all of CoreLib runtime, a large interpreter change affecting every core module. Want inline comptime core execution? Decide scope. Runs fine via :run / native codegen already.",
+      "stage": "far-horizon",
+      "plan": null,
+      "notes": [
+        {
+          "t": "created 2026-06-21: deferred fork from c55 (REPL) / related to c97 (c61 comptime)",
+          "at": "2026-06-21"
+        }
+      ],
+      "created": "2026-06-21T00:00:00Z",
+      "updated": "2026-06-21T00:00:00Z",
+      "decisions": []
     }
   ],
   "questions": [

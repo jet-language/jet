@@ -119,6 +119,10 @@ pub struct Session {
     /// Raw source text for each accumulated top-level item declaration.
     /// Re-parsed on each sema check step so the full item list is visible.
     pub item_srcs: Vec<String>,
+    /// D-REPL10/S16: accumulated `use …;` import lines. Prepended to every
+    /// synthetic program so an import typed in one input (e.g.
+    /// `use core.math as math`) keeps resolving in later inputs.
+    pub import_srcs: Vec<String>,
     /// Accumulated `val` binding sources: `val x: Int = 0;` style lines.
     /// These are added after each successful `val` step so sema sees them.
     pub binding_srcs: Vec<String>,
@@ -149,6 +153,7 @@ impl Session {
     pub fn new() -> Self {
         Session {
             item_srcs: Vec::new(),
+            import_srcs: Vec::new(),
             binding_srcs: Vec::new(),
             func_defs: HashMap::new(),
             scope: HashMap::new(),
@@ -161,6 +166,7 @@ impl Session {
 
     pub fn reset(&mut self) {
         self.item_srcs.clear();
+        self.import_srcs.clear();
         self.binding_srcs.clear();
         self.func_defs.clear();
         self.scope.clear();
@@ -174,6 +180,16 @@ impl Session {
     /// This is inserted at program top-level, so `val` bindings are NOT here.
     fn accumulated_src(&self) -> String {
         self.item_srcs.join("\n")
+    }
+
+    /// Accumulated `use …;` import lines, one per line, with a trailing newline
+    /// when non-empty so they sit cleanly above the items in a synthetic program.
+    fn import_src(&self) -> String {
+        if self.import_srcs.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", self.import_srcs.join("\n"))
+        }
     }
 
     /// Build the accumulated val-binding stubs for insertion INSIDE a function body.
@@ -338,6 +354,15 @@ fn collect_moved_in_callarg(
     }
 }
 
+/// A process-and-counter-unique temp file name so concurrent REPL sessions
+/// (e.g. parallel transcript tests) don't clobber each other's temp files.
+fn unique_temp_name(tag: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    format!("__jet_repl_{}_{}_{}.jet", tag, std::process::id(), n)
+}
+
 // ── :run ───────────────────────────────────────────────────────────────────
 
 /// Materialize the session + stmt_srcs to a temp `.jet` file and run it
@@ -349,17 +374,18 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         return;
     }
 
-    // Materialize: items + a main() that replays statement inputs.
+    // Materialize: imports + items + a main() that replays statement inputs.
+    let import_src = session.import_src();
     let item_src = session.item_srcs.join("\n");
     let stmt_body = session.stmt_srcs.join("\n");
     let jet_src = if stmt_body.trim().is_empty() {
-        format!("{}\nfn main() {{}}\n", item_src)
+        format!("{}{}\nfn main() {{}}\n", import_src, item_src)
     } else {
-        format!("{}\nfn main() {{\n{}\n}}\n", item_src, stmt_body)
+        format!("{}{}\nfn main() {{\n{}\n}}\n", import_src, item_src, stmt_body)
     };
 
     // Write to a temp file.
-    let tmp_path = std::env::temp_dir().join("__jet_repl_run__.jet");
+    let tmp_path = std::env::temp_dir().join(unique_temp_name("run"));
     if let Err(e) = std::fs::write(&tmp_path, &jet_src) {
         let _ = writeln!(out_sink, "error: couldn't write temp file: {}", e);
         return;
@@ -405,12 +431,13 @@ fn cmd_run_transcript(session: &Session) -> String {
         return "note: session is empty — nothing to run\n".to_string();
     }
 
+    let import_src = session.import_src();
     let item_src = session.item_srcs.join("\n");
     let stmt_body = session.stmt_srcs.join("\n");
     let jet_src = if stmt_body.trim().is_empty() {
-        format!("{}\nfn main() {{}}\n", item_src)
+        format!("{}{}\nfn main() {{}}\n", import_src, item_src)
     } else {
-        format!("{}\nfn main() {{\n{}\n}}\n", item_src, stmt_body)
+        format!("{}{}\nfn main() {{\n{}\n}}\n", import_src, item_src, stmt_body)
     };
 
     // Parse and interpret the materialized source.
@@ -507,6 +534,8 @@ enum InputKind {
     Stmts(Vec<Stmt>, bool /* suppress echo */, String /* check_src */),
     /// A top-level item declaration to add to the session.
     Item(String /* raw src */),
+    /// A `use …;` import line to carry across the session (S16/D-REPL10).
+    Import(String /* normalized src, ends in `;\n` */),
     /// Empty input — nothing to do.
     Empty,
     /// Hard-reject with an E1802 message naming the feature.
@@ -580,6 +609,14 @@ fn looks_like_item(text: &str) -> bool {
         || t.starts_with("module ")
 }
 
+/// Detect whether the text is a `use …` import line (S16). `pub use` re-exports
+/// are also imports. The parser collects these into `Program.imports`.
+fn looks_like_import(text: &str) -> bool {
+    let t = text.trim_start();
+    let t = t.strip_prefix("pub").map(|s| s.trim_start()).unwrap_or(t);
+    t.starts_with("use ") || t == "use"
+}
+
 /// Detect hard-reject features (D-REPL6=A).
 fn reject_feature(text: &str) -> Option<&'static str> {
     let t = text.trim();
@@ -639,9 +676,39 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         return Ok(InputKind::Meta(cmd, arg));
     }
 
-    // Hard rejects (D-REPL6=A)
+    // Hard rejects (D-REPL6=A) — these fire before imports so e.g.
+    // `use core.fs as fs` reports E1802 (the module needs the real compiler).
     if let Some(feature) = reject_feature(trimmed) {
         return Ok(InputKind::Reject(feature.to_string()));
+    }
+
+    // `use …` import line (S16). Carry it across the session so a later input
+    // can resolve through its alias (D-REPL10).
+    if looks_like_import(trimmed) {
+        // The parser wants a trailing `;`; REPL inputs may omit it.
+        let normalized = {
+            let t = trimmed.trim_end();
+            if t.ends_with(';') {
+                t.to_string()
+            } else {
+                format!("{};", t)
+            }
+        };
+        let full = format!("// repl:{}\n{}\n", step, normalized);
+        let (toks, lex_diags) = crate::Lexer::lex(&full);
+        if !lex_diags.is_empty() {
+            return Err(lex_diags);
+        }
+        match crate::Parser::parse(&toks) {
+            Ok(prog) if prog.items.is_empty() && !prog.imports.is_empty() => {
+                return Ok(InputKind::Import(format!("{}\n", normalized)));
+            }
+            Ok(_) => {
+                // Parsed but isn't a clean single import — fall through to the
+                // normal statement/item paths to produce a precise diagnostic.
+            }
+            Err(ds) => return Err(ds),
+        }
     }
 
     // `;` at end suppresses expression echo (D-REPL16=B).
@@ -771,8 +838,9 @@ fn type_check_stmts(session: &Session, check_src: &str, step: usize) -> Vec<Diag
         format!("{}\n{}", binding_stubs, check_src)
     };
     let prog_src = format!(
-        "{}{}\nfn __repl_check_{}__() {{\n{}\n}}\n",
+        "{}{}{}\nfn __repl_check_{}__() {{\n{}\n}}\n",
         PRELOAD_SRC,
+        session.import_src(),
         session.accumulated_src(),
         step,
         body,
@@ -784,8 +852,9 @@ fn type_check_stmts(session: &Session, check_src: &str, step: usize) -> Vec<Diag
 /// new item, then run sema. Returns errors only.
 fn type_check_item(session: &Session, new_item_src: &str) -> Vec<Diagnostic> {
     let prog_src = format!(
-        "{}{}\n{}\n",
+        "{}{}{}\n{}\n",
         PRELOAD_SRC,
+        session.import_src(),
         session.accumulated_src(),
         new_item_src,
     );
@@ -807,9 +876,48 @@ fn run_sema(src: &str) -> Vec<Diagnostic> {
         Ok(p) => p,
         Err(ds) => return ds,
     };
+    // When the program has imports (a `use …` carried across the session),
+    // the single-file checker can't resolve core-module aliases — only the
+    // Loader-driven bundle path registers `core_imports`. Route through it via
+    // a temp file so e.g. `use core.math as math` makes `math.sqrt(…)` resolve
+    // (S16/D-REPL10). The common import-free path keeps the cheaper checker so
+    // existing transcript spans are unchanged.
+    if !prog.imports.is_empty() {
+        return run_sema_bundle(src);
+    }
     // CompileMode::Check: type-check without requiring `main`.
     let all = crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check);
     all.into_iter()
+        .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+        .collect()
+}
+
+/// Sema-check a synthetic program that contains imports, via the Loader bundle
+/// path (the only path that registers core-module aliases). Writes `src` to a
+/// temp `.jet` file and runs `Check` mode so no `main` is required.
+fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
+    let tmp_path = std::env::temp_dir().join(unique_temp_name("check"));
+    if std::fs::write(&tmp_path, src).is_err() {
+        // Fall back to the single-file checker if the temp write fails.
+        let (toks, _) = crate::Lexer::lex(src);
+        if let Ok(mut prog) = crate::Parser::parse(&toks) {
+            return crate::Sema::check_with_mode(&mut prog, crate::Sema::CompileMode::Check)
+                .into_iter()
+                .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
+                .collect();
+        }
+        return Vec::new();
+    }
+    let path_str = tmp_path.to_string_lossy().to_string();
+    let diags = match crate::Loader::load_entry(&path_str) {
+        Ok(mut bundle) => {
+            crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
+        }
+        Err(ds) => ds,
+    };
+    let _ = std::fs::remove_file(&tmp_path);
+    diags
+        .into_iter()
         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
         .collect()
 }
@@ -1039,6 +1147,19 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                 println!("{}", green("ok", color));
             }
 
+            InputKind::Import(src) => {
+                // Try it against the accumulated session so a bad import
+                // (unknown core module, etc.) reports before being kept.
+                session.import_srcs.push(src);
+                let errors = type_check_item(&session, "");
+                if !errors.is_empty() {
+                    session.import_srcs.pop();
+                    render_diags(&step_src, trimmed, &errors, color);
+                    continue;
+                }
+                println!("{}", green("ok", color));
+            }
+
             InputKind::Stmts(stmts, suppress, check_src) => {
                 let errors = type_check_stmts(&session, &check_src, session.step);
                 if !errors.is_empty() {
@@ -1196,6 +1317,10 @@ fn print_help(color: bool) {
         "  Tip: {} is auto-imported — type `print(\"hello\")` to try it.",
         bold("core.io", color)
     );
+    println!(
+        "  Tip: a `{}` line is kept for the whole session — import once, use it on any later line.",
+        bold("use core.math as math", color)
+    );
 }
 
 // ── transcript test harness (D-REPL20=A) ──────────────────────────────────
@@ -1305,6 +1430,19 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                 }
                 session.item_srcs.push(src);
                 rebuild_funcs(&mut session);
+                out.push_str("ok\n");
+            }
+
+            InputKind::Import(src) => {
+                session.import_srcs.push(src);
+                let errors = type_check_item(&session, "");
+                if !errors.is_empty() {
+                    session.import_srcs.pop();
+                    for d in &errors {
+                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                    }
+                    continue;
+                }
                 out.push_str("ok\n");
             }
 
