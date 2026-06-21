@@ -6,12 +6,15 @@
       "type": "task",
       "title": "Attributes: @ → #",
       "body": "Move the attribute/marker sigil. Ratified 2026-06-19 (D-ATTR1=B, D-ATTR2=A, D-ATTR3=B: labels stay @).",
-      "stage": "planned",
-      "plan": "attr-at-to-hash",
+      "stage": "done",
       "notes": [
         {
           "t": "READY — D-ATTR1/2/3 ratified (@→# for markers). Plan attr-at-to-hash drafted. Say 'go' to implement.",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -80,7 +83,10 @@
       ],
       "created": "2026-06-19T00:00:00Z",
       "updated": "2026-06-19T13:13:02.842Z",
-      "note": "[sweep] runtime shipped as stub; D-ALLOC2 (arena return semantics, prior-art-backed) queued — pick before real impl."
+      "note": "[sweep] runtime shipped as stub; D-ALLOC2 (arena return semantics, prior-art-backed) queued — pick before real impl.",
+      "decisions": [
+        "D-ALLOC2"
+      ]
     },
     {
       "id": "c06",
@@ -96,7 +102,15 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T00:00:00Z"
+      "updated": "2026-06-19T00:00:00Z",
+      "decisions": [
+        "D-CAP1",
+        "D-CAP2",
+        "D-CAP3",
+        "D-CAP4",
+        "D-CAP5",
+        "D-CAP6"
+      ]
     },
     {
       "id": "c07",
@@ -112,7 +126,14 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-19T00:00:00Z"
+      "updated": "2026-06-19T00:00:00Z",
+      "decisions": [
+        "D-TGT1",
+        "D-TGT2",
+        "D-TGT3",
+        "D-TGT4",
+        "D-TGT5"
+      ]
     },
     {
       "id": "c09",
@@ -139,12 +160,16 @@
       "type": "task",
       "title": "Surface JSON coercions from lenient decode",
       "body": "D-JSON1 coerces \"8080\"→8080; show what was coerced. Tracked as decision D-JSON3.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": null,
       "notes": [
         {
           "t": "DECIDED — D-JSON3 ratified (option B: one log line per coercion; decoded value comes back plain). No open syntax. Ready to plan + build — say 'go'.",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -155,8 +180,7 @@
       "type": "task",
       "title": "CLI arg passthrough convention",
       "body": "How jet run passes --flags to the program; -- separator?",
-      "stage": "planned",
-      "plan": "cli-arg-passthrough",
+      "stage": "done",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decision D-CLI1 in ballot (rec A).",
@@ -164,6 +188,10 @@
         },
         {
           "t": "Ratified: D-CLI1=A (error + teach on an unknown `--`-flag before `--`, via E2102). Ready — say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
           "at": "2026-06-20"
         }
       ],
@@ -175,8 +203,7 @@
       "type": "task",
       "title": "Reduce L0201 implicit-clone warning noise",
       "body": "Fires on every String passed to stdlib that stores it. Smarter ownership model or suppression.",
-      "stage": "planned",
-      "plan": "clone-warning-noise",
+      "stage": "done",
       "notes": [
         {
           "t": "revisit post-v1 with evidence",
@@ -189,6 +216,10 @@
         {
           "t": "Ratified: D-L0201=A (liveness-gate the implicit-clone lint — fire only on a dead/wasteful clone). Ready — say go.",
           "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -199,8 +230,7 @@
       "type": "task",
       "title": "REPL: make print 'just work'",
       "body": "Put print in core/prelude rather than auto-importing std.io magically.",
-      "stage": "planned",
-      "plan": "repl-print-prelude",
+      "stage": "done",
       "notes": [
         {
           "t": "Plan drafted + vetted (print already ambient; gap is asymmetry). Decision D-PRELUDE1 in ballot (rec B).",
@@ -208,6 +238,10 @@
         },
         {
           "t": "Ratified: D-PRELUDE1=B (`print` + `input` ambient; `eprint`/`args`/`read_all_input` stay behind `use core.io`). Ready — say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
           "at": "2026-06-20"
         }
       ],
@@ -219,8 +253,7 @@
       "type": "idea",
       "title": "Structural pattern matching",
       "body": "Nested enum/record destructuring, exhaustiveness, guards, wildcards, or-patterns, range patterns, unreachable-arm diagnostics.",
-      "stage": "planned",
-      "plan": "pattern-matching",
+      "stage": "done",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decisions D-PATW/D-PATR/D-PATO in ballot (all rec A).",
@@ -228,6 +261,10 @@
         },
         {
           "t": "Ratified: D-PATW=D (`_` ignores a payload field, `else` is the catch-all), D-PATR=A (range patterns at all positions, reuse S22 `..`, gap-checked), D-PATO=B (`|` for structural or-patterns). Ready — say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
           "at": "2026-06-20"
         }
       ],
@@ -239,8 +276,7 @@
       "type": "idea",
       "title": "defer for deterministic cleanup",
       "body": "Lexical scope-exit, LIFO, runs on all exit paths, infallible.",
-      "stage": "planned",
-      "plan": "defer-cleanup",
+      "stage": "done",
       "notes": [
         {
           "t": "note: D-SUGAR5 declined defer once; RAII (S63) is current story",
@@ -253,6 +289,10 @@
         {
           "t": "D-DEFER1 ratified B: ship stdlib core.scope.guard(() => {…}) value; no new syntax, defer (C) stays declined. Logged in syntax-decisions.md. Ready to implement.",
           "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -263,8 +303,7 @@
       "type": "idea",
       "title": "Typed error families + IntoError conversion",
       "body": "Convert error types across module boundaries (today ? needs same E).",
-      "stage": "planned",
-      "plan": "typed-error-families",
+      "stage": "done",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decision D-ERR-CONV in ballot (rec A: impl Source -> Target).",
@@ -272,6 +311,10 @@
         },
         {
           "t": "Ratified: D-ERR-CONV=A (`impl Source -> Target { … }`; uses `->`, NOT S83`s `~~`). Ready — say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
           "at": "2026-06-20"
         }
       ],
@@ -283,8 +326,7 @@
       "type": "idea",
       "title": "Distinct types & units",
       "body": "newtype-style distinct types (Haskell newtype / F# units / Odin distinct).",
-      "stage": "planned",
-      "plan": "distinct-types-units",
+      "stage": "done",
       "notes": [
         {
           "t": "Plan drafted + vetted. Decisions D-DIST1/2/3 in ballot (rec C / defer / A).",
@@ -292,6 +334,10 @@
         },
         {
           "t": "Ratified: D-DIST1=C (`UserId :: distinct Int`), D-DIST2=B (units in scope but as a stdlib extension, not core syntax), D-DIST3=A (explicit both ways, `.raw()` unwrap, `#Numeric` opt-in same-type arithmetic, E0127). All three decided — ready, say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
           "at": "2026-06-20"
         }
       ],
@@ -303,8 +349,7 @@
       "type": "idea",
       "title": "Odin-style when (compile-time if)",
       "body": "Compile-time conditional; relates to comptime.",
-      "stage": "planned",
-      "plan": "comptime-when",
+      "stage": "done",
       "notes": [
         {
           "t": "Plan drafted + vetted (when retired -> comptime if). Decisions D-WHEN1/D-WHEN2 in ballot (rec A).",
@@ -312,6 +357,10 @@
         },
         {
           "t": "Ratified: D-WHEN1=A (`comptime if`), D-WHEN2=A (dropped arm: name-resolution only). Ready — say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
           "at": "2026-06-20"
         }
       ],
@@ -323,7 +372,7 @@
       "type": "idea",
       "title": "Range-based switch arms",
       "body": "Odin-style range arms in if/match dispatch.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": "range-switch-arms",
       "notes": [
         {
@@ -332,6 +381,10 @@
         },
         {
           "t": "Ratified: D-RANGE1=A (`..` arm ranges desugar to `>= && <=`), D-RANGE2=A (c25 owns the terse sugar + porting-error teaching under D-PATR`s checker). Ready — say go.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
           "at": "2026-06-20"
         }
       ],
@@ -371,12 +424,16 @@
       "type": "bug",
       "title": "LSP keyword recognition broken (substring / wrong position)",
       "body": "Keywords highlighted inside identifiers (e.g. 'print'); can't use keyword-like names as variables. LSP needs an audit toward flagship quality.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": "lsp-keyword-highlighting",
       "notes": [
         {
           "t": "plan exists; needs review",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -436,7 +493,7 @@
       "type": "task",
       "title": "Package build-from-source + M9 wave-2 (regex/archive/db)",
       "body": "E2 loose end → E3. jetpack step to compile a dependency from its Jet source (provider.rs realize()); wave-2 rings ship on top. Plan: tools/Tower/docs/plans/epoch-3/package-build-from-source.md.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": null,
       "notes": [
         {
@@ -446,6 +503,10 @@
         {
           "t": "Plan exists: tools/Tower/docs/plans/epoch-3/package-build-from-source.md → moved to planned.",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -456,7 +517,7 @@
       "type": "task",
       "title": "Testing ergonomics: property tests, doctests, coverage",
       "body": "E2 loose end → E3. Syntax-gated (needs property-test surface + shrinking; /// doc-comment convention). Plan: tools/Tower/docs/plans/epoch-3/testing-docs-ergonomics.md.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": null,
       "notes": [
         {
@@ -466,6 +527,10 @@
         {
           "t": "Plan exists: tools/Tower/docs/plans/epoch-3/testing-docs-ergonomics.md → moved to planned.",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -493,14 +558,18 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-OBS2",
+        "D-DBG2"
+      ]
     },
     {
       "id": "c53",
       "type": "task",
       "title": "jet bind: auto-invoke on cache miss + hash invalidation",
       "body": "E2 loose end → E3. Native bind backend (src/cbind.rs) shipped; compile-time auto-invoke and Phase-3 header/cflags hash invalidation deferred. Plan: tools/Tower/docs/plans/epoch-3/c-header-bindings.md.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": null,
       "notes": [
         {
@@ -510,6 +579,10 @@
         {
           "t": "Plan exists: tools/Tower/docs/plans/epoch-3/c-header-bindings.md → moved to planned.",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -520,7 +593,7 @@
       "type": "task",
       "title": "Pure-eval: transitive impurity traces + rich --pure rendering",
       "body": "E2 loose end → E3. E3401 shows one level (direct impure callee); transitive chains deferred. jet eval --pure rich struct/list rendering deferred.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": "pure-eval-traces",
       "notes": [
         {
@@ -534,6 +607,10 @@
         {
           "t": "Ratified: D-EVAL1=A (`jet eval --pure`: pretty by default, `--json` for machine output). Ready — say go.",
           "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -544,7 +621,7 @@
       "type": "task",
       "title": "REPL v2 polish: move across inputs, :run, --project",
       "body": "E2 loose end → E3. jet repl shipped (16 transcript tests); move-semantics across inputs, :run (compile session to temp file), and --project manifest mode deferred.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": "repl-v2-polish",
       "notes": [
         {
@@ -554,6 +631,10 @@
         {
           "t": "Plan drafted + vetted. No decision needed — finishing ratified D-REPL8/FUEL/10. Ready to implement.",
           "at": "2026-06-19"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -605,8 +686,7 @@
       "type": "task",
       "title": "Named-args follow-ups (D-NARG-D2, D-NARG-D4)",
       "body": "Ratified extensions to D-NARG1: (D-NARG-D2) defaults may reference earlier params — fn box(w: Int, h: Int = w); (D-NARG-D4) dedicated label-mismatch diagnostic carved out of E0104.",
-      "stage": "planned",
-      "plan": "named-args-followups",
+      "stage": "done",
       "notes": [
         {
           "t": "Split off from c02 (D-NARG1/2 shipped, plan deleted). Both ratified, not yet implemented — would otherwise be orphaned. Needs a plan.",
@@ -619,6 +699,10 @@
         {
           "t": "Ratified: D-NARG-DIAG=A (mint E0125 label-mismatch + E0126 later-param-ref). Ready — say go.",
           "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Implemented + adversarially audited 2026-06-20; full suite green (--test-threads=1). Plan removed from sidequests.",
+          "at": "2026-06-20"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
@@ -629,7 +713,7 @@
       "type": "task",
       "title": "comptime Layer 2: compile-time pure eval + data embedding",
       "body": "S60 ratified-to-pursue (A): promote comptime Layer 2 from post-1.0 — pure compile-time evaluation + data embedding. Builds on existing comptime.rs / pure-eval work.",
-      "stage": "planned",
+      "stage": "implementation",
       "plan": "comptime-layer2",
       "notes": [
         {
@@ -642,6 +726,10 @@
         },
         {
           "t": "D-CT-L2NAME ratified A: keep both numbers, added cross-reference note on S60 (capability tier, not S26 derive layer). Docs-only naming fix. Embedding work files under S60. Ready to implement.",
+          "at": "2026-06-20"
+        },
+        {
+          "t": "[sweep] Decided / no open owner decision — moved to implementation (agent build queue, not owner docket).",
           "at": "2026-06-20"
         }
       ],
@@ -667,7 +755,11 @@
       ],
       "created": "2026-06-19T14:10:14.852Z",
       "updated": "2026-06-19T14:10:14.852Z",
-      "note": "[owner] promoted from far-horizon; D-QUAL1 (Variant D + hybrids) queued in ballot. Flags interactions with D-ATTR2/S60/S56/S83/D-JPK-FILES."
+      "note": "[owner] promoted from far-horizon; D-QUAL1 (Variant D + hybrids) queued in ballot. Flags interactions with D-ATTR2/S60/S56/S83/D-JPK-FILES.",
+      "decisions": [
+        "D-QUAL2",
+        "D-QUAL1"
+      ]
     },
     {
       "id": "c63",
@@ -730,7 +822,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-EFF1"
+      ]
     },
     {
       "id": "c67",
@@ -745,7 +840,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-SCAP1"
+      ]
     },
     {
       "id": "c68",
@@ -760,7 +858,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-UNIT1"
+      ]
     },
     {
       "id": "c69",
@@ -775,7 +876,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-LIN1"
+      ]
     },
     {
       "id": "c70",
@@ -790,7 +894,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-TAINT1"
+      ]
     },
     {
       "id": "c71",
@@ -805,7 +912,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-STATE1"
+      ]
     },
     {
       "id": "c72",
@@ -820,7 +930,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-TXN1"
+      ]
     },
     {
       "id": "c73",
@@ -835,7 +948,10 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-20"
+      "updated": "2026-06-20",
+      "decisions": [
+        "D-MIGRATE1"
+      ]
     }
   ],
   "questions": [

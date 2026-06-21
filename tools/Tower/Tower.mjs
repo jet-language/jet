@@ -900,6 +900,7 @@ function card(c){
   const i=S.stages.indexOf(c.stage);
   const back=i>0?S.stages[i-1]:null,fwd=i<S.stages.length-1?S.stages[i+1]:null;
   const planLink=c.plan?'<a class="plan" href="#" title="open plan" onclick="openDoc(\\'sidequest\\',\\''+attr(c.plan)+'\\');return false;">▤ '+esc(c.plan)+'</a>':'';
+  const decBadge=(c.decisions&&c.decisions.length)?'<span class="decs" title="open ballot decisions for this card — see the Decisions tab">⚖ '+c.decisions.map(esc).join(', ')+'</span>':'';
   const typeSel='<select class="typesel" title="change type" onchange="changeType(\\''+c.id+'\\',this.value)">'+
     ['task','idea','bug'].map(t=>'<option'+(c.type===t?' selected':'')+'>'+t+'</option>').join('')+'</select>';
   const stageSel='<select class="stagesel" title="jump to stage" onchange="moveCard(\\''+c.id+'\\',this.value)">'+
@@ -914,7 +915,7 @@ function card(c){
       '<button onclick="moveCard(\\''+c.id+'\\',\\''+(back||'')+'\\')" '+(back?'':'disabled')+' title="'+(back||'')+'">◀</button>'+
       stageSel+
       '<button onclick="moveCard(\\''+c.id+'\\',\\''+(fwd||'')+'\\')" '+(fwd?'':'disabled')+' title="'+(fwd||'')+'">▶</button></div>'+
-      planLink+'<span class="note-in" onclick="addNote(\\''+c.id+'\\')">+note</span>'+
+      planLink+decBadge+'<span class="note-in" onclick="addNote(\\''+c.id+'\\')">+note</span>'+
       '<span class="x" title="delete" onclick="delCard(\\''+c.id+'\\')">✕</span></div>'+notes+'</div></div>';
 }
 async function moveCard(id,stage){if(!stage)return;const c=findCard(id);if(c)c.stage=stage;await api('/api/card/update',{id,stage});await load();}
