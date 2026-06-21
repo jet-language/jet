@@ -139,13 +139,23 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle);
         let items = compute_completions(&db, src, 14, "test.jet");
+        // `val` and `var` are retired (FOREIGN_VAL/FOREIGN_VAR); they must not appear.
         assert!(
-            items.iter().any(|i| i.label == "val"),
-            "expected val in completions"
+            !items.iter().any(|i| i.label == "val"),
+            "val is retired (D-BIND1); must not appear in completions"
         );
+        // Real keywords must appear:
         assert!(
             items.iter().any(|i| i.label == "fn"),
             "expected fn in completions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "when"),
+            "expected when (KW_SWITCH) in completions"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "use"),
+            "expected use (KW_USE) in completions"
         );
     }
 }

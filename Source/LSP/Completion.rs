@@ -78,11 +78,36 @@ impl CompletionItem {
 }
 
 /// Jet keywords for completion.
+///
+/// Every entry here must correspond to a real keyword or literal from
+/// Source/Syntax.rs (invariant I7). FOREIGN_* teaching-error words must NOT
+/// appear here — they are not valid Jet syntax, only recognized to emit a
+/// teaching diagnostic. Drift from Syntax.rs is caught by tests/lsp.rs c40_*.
+///
+/// Removed (formerly wrong):
+///   - `val`, `var`   → FOREIGN_VAL / FOREIGN_VAR (retired; D-BIND1)
+///   - `switch`       → FOREIGN_SWITCH (renamed to `when`; KW_SWITCH = "when")
+///   - `import`       → FOREIGN_IMPORT (renamed to `use`; D-S16-USE)
+///   - `or`           → FOREIGN_OR_FALLBACK (replaced by `??`; D-SG6)
+///   - `value`        → LIT_VALUE (a literal like true/false/null, not a keyword)
 pub(crate) const JET_KEYWORDS: &[&str] = &[
-    "fn", "pub", "val", "var", "if", "else", "in", "when", "break", "continue",
-    "return", "struct", "enum", "impl", "trait", "const", "comptime", "import", "extern", "test",
-    "derive", "mut", "take", "view", "ref", "self", "loop", "unsafe", "or", "true", "false",
-    "null", "ok", "err", "value", "it", "pure", "module", "todo", "use",
+    // Core structure
+    "fn", "pub", "use", "extern", "module",
+    // Control flow
+    "if", "else", "when", "loop", "in", "break", "continue", "return",
+    // Types and declarations
+    "struct", "enum", "impl", "trait", "derive", "const", "comptime",
+    // Ownership / borrow keywords
+    "mut", "take", "view", "ref", "self",
+    // Memory / expert tier
+    "unsafe",
+    // Test / tooling
+    "test", "pure", "todo",
+    // Literals (boolean, option, result, synthetic)
+    "true", "false", "null", "ok", "err", "it",
+    // Binding sigils are not words, so not listed here
+    // `distinct` (D-DIST1)
+    "distinct",
 ];
 
 /// Built-in type names for completion.

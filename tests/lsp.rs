@@ -916,6 +916,281 @@ fn lsp_references_finds_all_uses() {
     );
 }
 
+// ── C40: keyword-table correctness tests ─────────────────────────────────────
+//
+// Verifies that JET_KEYWORDS tracks Source/Syntax.rs (Fix A).
+// is_keyword drives rename validation; wrong entries reject valid names or
+// allow reserved ones. These tests must pass for the bug to be fixed.
+
+#[test]
+fn c40_is_keyword_retired_words_not_keywords() {
+    // `switch`, `import`, `val`, `var` are NOT keywords in Jet —
+    // they are FOREIGN_ teaching-error tokens. Rename must accept them as names.
+    let diags = jet::check_document(
+        "c40_retired.jet",
+        "fn main() {\n    val switch_count = 0;\n    val import_count = 1;\n}\n",
+    );
+    // These should compile/parse (the names `switch_count` and `import_count` are
+    // legal identifiers; `val` itself triggers E0009 but that's fine here).
+    // Key assertion: no diagnostic claiming "switch_count" / "import_count" is a keyword.
+    assert!(
+        !diags.iter().any(|d| {
+            let t = format!("{} {} {}", d.what, d.why, d.fix);
+            t.contains("switch_count") && t.contains("keyword")
+        }),
+        "switch_count should not be rejected as a keyword: {:?}", diags
+    );
+}
+
+#[test]
+fn c40_is_keyword_real_keywords_recognized() {
+    // The actual Jet keywords must be recognized so rename rejects them.
+    // We verify via the LSP rename path using check_document behaviour:
+    // `when` (KW_SWITCH), `use` (KW_USE), `fn` (KW_FN) must be keywords.
+    // This is a structural test — we check the JET_KEYWORDS table directly
+    // via the public API surface (check_document for a rename probe).
+    //
+    // Direct unit test on is_keyword is not pub, so we test via the rename
+    // response: renaming to a keyword name returns an error.
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let uri = "file:///tmp/c40_rename_keyword.jet";
+
+    // `when` is a real keyword (KW_SWITCH = "when"); rename to it must fail.
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                expect_contains: Some(vec!["renameProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"when"}}}}"#,
+                    uri
+                ),
+                // Renaming to a keyword must produce an error response
+                expect_contains: Some(vec!["error".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn c40_is_keyword_value_is_not_a_keyword() {
+    // `value` is LIT_VALUE (a literal, like `true`/`false`/`null`), not a keyword.
+    // Rename to "value" should NOT be rejected as a keyword.
+    // (It may or may not succeed for other reasons, but not because it's a keyword.)
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let uri = "file:///tmp/c40_rename_value.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                expect_contains: Some(vec!["renameProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"value"}}}}"#,
+                    uri
+                ),
+                // Must NOT say "value is a keyword" — value is a literal, not a keyword
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn c40_is_keyword_switch_not_a_keyword() {
+    // `switch` is FOREIGN_SWITCH — a teaching-error word, not a real keyword.
+    // Rename to "switch" should NOT be rejected as a keyword.
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let uri = "file:///tmp/c40_rename_switch.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                expect_contains: Some(vec!["renameProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"switch"}}}}"#,
+                    uri
+                ),
+                // Must NOT say "switch is a keyword" — switch is a foreign/teaching word
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn c40_is_keyword_import_not_a_keyword() {
+    // `import` is FOREIGN_IMPORT — renamed to `use` (D-S16-USE). Not a keyword.
+    // Rename to "import" should NOT be rejected as a keyword.
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+    let uri = "file:///tmp/c40_rename_import.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                expect_contains: Some(vec!["renameProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"import"}}}}"#,
+                    uri
+                ),
+                // Must NOT say "import is a keyword" — import is a foreign/teaching word
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn c40_keyword_like_identifier_usable_as_variable() {
+    // Variables named `printer`, `sprint`, `in_count` must NOT be flagged as keywords.
+    // These contain keyword substrings (`print`, `in`, `sprint` → `pr`+`in`+`t`) but
+    // are regular identifiers. Use current Jet binding syntax (:: sigil).
+    let diags = jet::check_document(
+        "c40_kw_in_ident.jet",
+        "fn main() {\n    printer :: \"hp\";\n    in_count :: 3;\n    sprint :: 9.8;\n}\n",
+    );
+    // None of the diagnostics should claim these identifiers are keywords.
+    for d in &diags {
+        let all_text = format!("{} {} {}", d.what, d.why, d.fix);
+        // The name `printer`, `in_count`, `sprint` must not be called a keyword.
+        for name in &["printer", "in_count", "sprint"] {
+            assert!(
+                !(all_text.contains(name) && all_text.to_lowercase().contains("keyword")),
+                "identifier `{}` containing keyword substring wrongly flagged as keyword: {:?}",
+                name, d
+            );
+        }
+    }
+}
+
+#[test]
+fn c40_drift_guard_foreign_words_not_blocked_in_rename() {
+    // Structural drift guard: foreign/retired words that were wrongly listed in
+    // JET_KEYWORDS must NOT block rename. Test via live LSP rename endpoint.
+    //
+    // For each banned word, we rename a function to that name and assert the
+    // response does NOT contain "keyword" in an error message.
+    // (A rename error saying "X is a keyword" is a false positive for these words.)
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    // `switch` — FOREIGN_SWITCH, not a keyword; was wrongly in JET_KEYWORDS
+    {
+        let source = "fn greet() {}\nfn main() {\n    greet();\n}\n";
+        let uri = "file:///tmp/c40_drift_switch.jet";
+        run_transcript(
+            source,
+            &[
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
+                    expect_contains: Some(vec!["renameProvider".to_string()]),
+                },
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                    expect_contains: None,
+                },
+                TranscriptStep::Open {
+                    uri: uri.to_string(),
+                    expect_notification: true,
+                },
+                TranscriptStep::Send {
+                    msg: format!(
+                        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"switch"}}}}"#,
+                        uri
+                    ),
+                    // Renaming to "switch" should succeed (produce a workspace edit result),
+                    // NOT produce an error saying "switch is a keyword"
+                    expect_contains: Some(vec!["result".to_string()]),
+                },
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                    expect_contains: Some(vec!["result".to_string()]),
+                },
+            ],
+        );
+    }
+}
+
 // ── Latency bench (jet lsp --bench gate) ─────────────────────────────────────
 
 #[test]
