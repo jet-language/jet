@@ -4,42 +4,48 @@
     <img src="./assets/jetlang.png" width="120px" />
 </h1>
 
-Jet is a compiled, memory-safe language built for beginners and small tools.
-You write Jet; the compiler checks everything in plain language, then generates
-Rust for speed. No `unsafe`, no exceptions, no hidden control flow.
+Jet is a compiled, memory-safe language: magic out-of-the-box for beginners,
+full expert control behind explicit opt-in. You write Jet; the compiler checks
+everything in plain language, then generates Rust for speed. No hidden `unsafe`,
+no exceptions, no hidden control flow.
+
+**Current status: Epoch 3** (Epoch 1 v1.0 + Epoch 2 GA are complete — see [roadmap](docs/spec/roadmap.md)).
 
 ## Quickstart
 
 ```bash
-nix develop                  # Rust, rustc, jet wrapper — see docs/dev/nix.md
-cargo build
-jet run examples/features/01_hello.jet
+nix develop -c cargo build
+nix develop -c jet run examples/features/01_hello.jet
 ```
 
 `hello, world` means the toolchain is working. Next:
 
 ```bash
-jet check examples/features/02_functions.jet
-cargo test                   # golden examples + error snapshots
+nix develop -c jet check examples/features/02_functions.jet
+nix develop -c cargo test    # golden examples + error snapshots
 ```
 
-Read the **[15-minute tour](docs/guide/tour.md)** for the full language sketch.
+The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified syntax decisions are in [docs/spec/syntax-decisions.md](docs/spec/syntax-decisions.md).
 
 ## Showcase tools
 
-Three real CLI tools live in `examples/showcase/`. They are golden-tested like
+Seven real programs live in `examples/showcase/`. They are golden-tested like
 `examples/features/` and show what Jet looks like in practice.
 
-| Tool | Lines | What it exercises |
-|------|------:|-------------------|
-| [jetgrep](examples/showcase/jetgrep.jet) | 253 | `std.fs`, `std.io`, `std.process`, CLI flags, exit codes |
-| [jsonfmt](examples/showcase/jsonfmt.jet) | 56 | `std.json`, fallible `T ? E`, stdin/files |
-| [wordfreq](examples/showcase/wordfreq.jet) | 96 | `Map`, sorting, directory walk, closures |
+| Tool | What it exercises |
+|------|-------------------|
+| [jetgrep](examples/showcase/jetgrep.jet) | `core.fs`, `core.io`, `core.process`, CLI flags, exit codes |
+| [jsonfmt](examples/showcase/jsonfmt.jet) | `core.json`, fallible `T ? E`, stdin/files |
+| [wordfreq](examples/showcase/wordfreq.jet) | `Map`, sorting, directory walk, closures |
+| [library](examples/showcase/library.jet) | library authoring, associated types, error conversion |
+| [lowlevel](examples/showcase/lowlevel.jet) | `#unsafe`, `#audit`, `Ptr<T>`, expert low-level tier |
+| [freestanding](examples/showcase/freestanding.jet) | `--freestanding`, no-std cross-compilation |
+| [http_service](examples/showcase/http_service.jet) | HTTP server, blocking networking, TLS |
 
 ```bash
-jet run examples/showcase/jetgrep.jet pattern examples/showcase/fixtures/
-jet run examples/showcase/jsonfmt.jet examples/showcase/fixtures/sample.json
-jet run examples/showcase/wordfreq.jet examples/showcase/fixtures/
+nix develop -c jet run examples/showcase/jetgrep.jet pattern examples/showcase/fixtures/
+nix develop -c jet run examples/showcase/jsonfmt.jet examples/showcase/fixtures/sample.json
+nix develop -c jet run examples/showcase/wordfreq.jet examples/showcase/fixtures/
 ```
 
 ## Errors that teach
@@ -48,7 +54,7 @@ Every diagnostic has a stable code, plain **what / why / fix**, and a snapshot
 test. Try a typo:
 
 ```bash
-jet check tests/ui/unknown_function.jet
+nix develop -c jet check tests/ui/unknown_function.jet
 ```
 
 Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
@@ -59,50 +65,51 @@ Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
 **How is Jet different from Rust?**  
 Jet keeps ownership and safety but drops most of Rust's surface syntax and
 jargon. Errors are values (`T ? E`), not exceptions. There is no macro
-system, no `async`/`await` in v1, and the compiler never speaks rustc's
-language to you.
+system, no `async`/`await`, and the compiler never speaks rustc's language to
+you. Expert unsafe is opt-in via `#unsafe { … }` / `#audit("…")`, not the default.
 
 **How is Jet different from Go?**  
-Jet is statically typed with generics and traits, explicit `val`/`var`, and
-stricter error handling — you cannot ignore a fallible result. No goroutines
-in v1; use `std.tasks` channels when you need concurrency (v1 is blocking).
+Jet is statically typed with generics and traits, and stricter error handling —
+you cannot ignore a fallible result. Bindings are `name :: value` (immutable)
+or `name := value` (mutable). Use `core.tasks` channels for concurrency
+(blocking; async is deferred to a later epoch).
 
 **Where is async?**  
-Not in v1. Use blocking I/O and `std.tasks` for background work. Async syntax
-is planned post-1.0 (see [roadmap](docs/spec/roadmap.md)).
+Deferred to a later epoch. Use blocking I/O and `core.tasks` for background
+work today (see [roadmap](docs/spec/roadmap.md)).
 
-**Why semicolons?**  
-Statements end with `;`. Block headers (`if`, `while`, `for`, `fn`) do not.
-`jet fmt` settles every formatting argument — run it and move on.
+**Do I type semicolons?**  
+No. The lexer inserts statement terminators automatically (Go-style). Block
+headers (`if`, `loop`, `fn`) don't need them; line continuation works when
+the next line starts with `.` or a binary operator. `jet fmt` handles layout.
 
 **Can I use this in production?**  
-Jet is approaching v1.0. The compiler and stdlib are still evolving; pin your
-toolchain in `jet.toml` and read [versioning](docs/reference/versioning.md).
+Jet is at Epoch 3 (v1.0 + GA are complete). Pin your toolchain in `pkg.jet`
+and read [versioning](docs/reference/versioning.md).
 
 ## Repo map
 
 | Path | What |
 |------|------|
 | [docs/](docs/README.md) | Docs index — start here to find anything |
-| [docs/guide/](docs/guide/) | Learner's guide + 15-minute tour |
 | [docs/spec/](docs/spec/) | Authoritative: philosophy, syntax decisions, diagnostics, roadmap |
 | [docs/reference/](docs/reference/) | Stdlib, versioning, generated error pages |
-| [tools/Tower/docs/](tools/Tower/docs/) | Milestone implementation plans |
 | [docs/research/](docs/research/) | Exploratory notes & cross-language idea banks |
-| [examples/features/](examples/features/) | Executable spec with golden expected output |
-| [examples/showcase/](examples/showcase/) | Real CLI tools (jetgrep, jsonfmt, wordfreq) |
+| [tools/Tower/docs/](tools/Tower/docs/) | Project management: milestone plans, ballots, epoch tracking |
+| [examples/features/](examples/features/) | Executable spec — golden-tested feature programs |
+| [examples/showcase/](examples/showcase/) | Seven real programs (jetgrep, jsonfmt, wordfreq, library, lowlevel, freestanding, http_service) |
 | [editors/](editors/) | VS Code / Zed extensions + tree-sitter grammar |
-| [tests/ui/](tests/ui/) | Snapshot-pinned diagnostics |
+| [tests/ui/](tests/ui/) | Snapshot-pinned diagnostic fixtures |
 | `Source/` | Compiler: lexer → parser → sema → codegen |
 
 ## Nix / NixOS
 
 ```bash
 nix build                    # produces ./result/bin/jet
-nix develop                  # dev shell
+nix develop                  # dev shell with Rust, jet, and repo utilities
 ```
 
-See [docs/dev/nix.md](docs/dev/nix.md) for flake inputs and `configuration.nix`.
+All `jet` and `cargo` commands should run inside `nix develop -c …` to use the pinned toolchain.
 
 ## License
 

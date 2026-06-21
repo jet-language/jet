@@ -5,9 +5,9 @@ process control, math, time, random numbers, JSON, tasks, and channels —
 enough to write real command-line tools. Every fallible call returns a
 `T ? E` value; nothing in core std panics on its own.
 
-**How it works today:** std modules are built into the compiler. Import them by
+**How it works today:** std modules are built into the compiler. Use them by
 name; the compiler type-checks your calls and generates only the helpers you
-actually use (see [Imports](#imports) and [Pay for what you call](#pay-for-what-you-call)).
+actually use (see [Using modules](#using-modules) and [Pay for what you call](#pay-for-what-you-call)).
 
 **Canonical name:** `jet.core`. The short spelling `core` is reserved and means the
 same thing.
@@ -21,49 +21,49 @@ See S66 for acronym capitalization.
 ## Quick start
 
 ```jet
-import core.fs as fs;
-import core.io as io;
-import core.env as env;
+use core.fs as fs
+use core.io as io
+use core.env as env
 
 fn main() {
-    val args = io.args();
+    args :: io.args()
     if args.len() < 2 {
-        io.eprint("usage: greet <name>");
-        return;
+        io.eprint("usage: greet <name>")
+        return
     }
-    val name = args.get(1) ?? return;
-    val greeting = env.get("GREETING") ?? "hello";
-    fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return;
-    print(fs.read("/tmp/greet.txt") ?? return);
+    name :: args.get(1) ?? return
+    greeting :: env.get("GREETING") ?? "hello"
+    fs.write("/tmp/greet.txt", "{greeting}, {name}!") ?? return
+    print(fs.read("/tmp/greet.txt") ?? return)
 }
 ```
 
 Build and run (extra words after the file become program arguments):
 
 ```bash
-jet run tool.jet World
-# or: jet build tool.jet && ./build/tool World
+nix develop -c jet run tool.jet World
+# or: nix develop -c jet build tool.jet && ./build/tool World
 ```
 
 ---
 
-## Imports
+## Using modules
 
-Std uses **module imports** — no quotes, unlike file imports.
+Std modules use `use` — no quotes, unlike file imports.
 
 ```jet
-import core.fs as fs;           // one submodule
-import jet.core.json as json;   // same module, canonical spelling
+use core.fs as fs           // one submodule
+use jet.core.json as json   // same module, canonical spelling
 ```
 
-Both `import core.fs` and `import jet.core.fs` resolve to the same compiler-known
+Both `use core.fs` and `use jet.core.json` resolve to the same compiler-known
 module.
 
 **Not allowed:**
 
 ```jet
-import core.math { clamp };     // selective imports — use an alias instead
-import "std/fs";               // quoted paths are for .jet files only
+import core.fs as fs        // teaching error E0015 — use `use core.fs`
+use "std/fs"               // quoted paths are for .jet files only
 ```
 
 If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
@@ -78,12 +78,12 @@ Fallible std functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet
-import core.fs as fs;
+use core.fs as fs
 
 fn main() {
-    val text = fs.read("data.txt") ?? return;   // stop on error
-    val upper = text.to_upper();
-    fs.write("out.txt", upper) ?? panic("couldn't save");  // bug if this fails
+    text :: fs.read("data.txt") ?? return   // stop on error
+    upper :: text.to_upper()
+    fs.write("out.txt", upper) ?? panic("couldn't save")  // bug if this fails
 }
 ```
 
@@ -94,8 +94,8 @@ automatic conversion between error types in v1.
 
 ## Pay for what you call
 
-Importing `std.fs` costs nothing in the generated binary until you **call**
-something from it. A program that imports every std module but only calls
+Using `core.fs` costs nothing in the generated binary until you **call**
+something from it. A program that uses every std module but only calls
 `print` stays hello-world sized. Only the helpers your program can reach are
 compiled in.
 
@@ -103,23 +103,23 @@ compiled in.
 
 ## Modules
 
-### `std.fs` — files and folders
+### `core.fs` — files and folders
 
-Whole-file helpers only (no open file handles in v1). Paths are plain
+Whole-file helpers only (streaming I/O added in E2-M7). Paths are plain
 `String`s.
 
 ```jet
-import core.fs as fs;
+use core.fs as fs
 
 fn main() {
-    val path = "/tmp/notes.txt";
-    fs.write(path, "hello\n") ?? return;
-    fs.append(path, "world\n") ?? return;
-    print(fs.read(path) ?? return);        // "hello\nworld\n"
-    print(fs.exists(path));                // true
-    print(fs.is_dir("/tmp"));              // true
-    val names = fs.list_dir("/tmp") ?? return;
-    print(names.len());
+    path :: "/tmp/notes.txt"
+    fs.write(path, "hello\n") ?? return
+    fs.append(path, "world\n") ?? return
+    print(fs.read(path) ?? return)        // "hello\nworld\n"
+    print(fs.exists(path))                // true
+    print(fs.is_dir("/tmp"))              // true
+    names :: fs.list_dir("/tmp") ?? return
+    print(names.len())
 }
 ```
 
@@ -141,23 +141,23 @@ fn main() {
 
 ---
 
-### `std.io` — terminal and arguments
+### `core.io` — terminal and arguments
 
 ```jet
-import core.io as io;
+use core.io as io
 
 fn main() {
-    val args = io.args();                    // [String]; index 0 is the program name
-    val name = io.input("your name? ") ?? return;  // reads one line, strips newline
-    print("hi, {name}");
-    io.eprint("(log) done");                 // like print, but to stderr
+    args :: io.args()                    // [String]; index 0 is the program name
+    name :: io.input("your name? ") ?? return  // reads one line, strips newline
+    print("hi, {name}")
+    io.eprint("(log) done")                 // like print, but to stderr
 }
 ```
 
 Pipe input for scripts:
 
 ```bash
-printf "Ada\n" | jet run ask.jet
+printf "Ada\n" | nix develop -c jet run ask.jet
 ```
 
 | Function | Returns | What it does |
@@ -167,23 +167,23 @@ printf "Ada\n" | jet run ask.jet
 | `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 
-`print` stays in the core prelude (no import). Use `io.eprint` for stderr.
+`print` stays in the core prelude (no `use` needed). Use `io.eprint` for stderr.
 
 ---
 
-### `std.env` — environment and working directory
+### `core.env` — environment and working directory
 
 ```jet
-import core.env as env;
+use core.env as env
 
 fn main() {
-    val home = env.home_dir();               // String? — may be null
-    val mode = env.get("MODE") ?? "dev";     // String? from the environment
-    env.set("MODE", "prod");                 // set for child processes
-    val here = env.current_dir() ?? return;  // current working directory
-    print(home ?? "(no home)");
-    print(mode);
-    print(here);
+    home :: env.home_dir()               // String? — may be null
+    mode :: env.get("MODE") ?? "dev"     // String? from the environment
+    env.set("MODE", "prod")              // set for child processes
+    here :: env.current_dir() ?? return  // current working directory
+    print(home ?? "(no home)")
+    print(mode)
+    print(here)
 }
 ```
 
@@ -196,17 +196,17 @@ fn main() {
 
 ---
 
-### `std.process` — exit and subprocesses
+### `core.process` — exit and subprocesses
 
 ```jet
-import core.process as process;
+use core.process as process
 
 fn main() {
-    val result = process.run(["echo", "hi"]) ?? return;
-    print(result.code);       // exit code as Int
-    print(result.output);     // stdout as String
-    print(result.errors);     // stderr as String
-    process.exit(0);          // end the program with an exit code (never returns)
+    result :: process.run(["echo", "hi"]) ?? return
+    print(result.code)       // exit code as Int
+    print(result.output)     // stdout as String
+    print(result.errors)     // stderr as String
+    process.exit(0)          // end the program with an exit code (never returns)
 }
 ```
 
@@ -219,23 +219,23 @@ fn main() {
 
 ---
 
-### `std.math` — numbers
+### `core.math` — numbers
 
 ```jet
-import core.math as math;
+use core.math as math
 
 fn main() {
-    print(math.sqrt(2.0));
-    print(math.pow(2.0, 10.0));
-    print(math.abs(-3));                     // works on Int and Float
-    print(math.min(3, 7));                   // generic over Comparable types
-    print(math.max(3.5, 7.2));
-    print(math.floor(3.9));
-    print(math.ceil(3.1));
-    print(math.round(3.6));                  // returns Int
-    print(math.clamp(15, 0, 10));            // 10
-    print(math.pi);
-    print(math.e);
+    print(math.sqrt(2.0))
+    print(math.pow(2.0, 10.0))
+    print(math.abs(-3))                     // works on Int and Float
+    print(math.min(3, 7))                   // generic over Comparable types
+    print(math.max(3.5, 7.2))
+    print(math.floor(3.9))
+    print(math.ceil(3.1))
+    print(math.round(3.6))                  // returns Int
+    print(math.clamp(15, 0, 10))            // 10
+    print(math.pi)
+    print(math.e)
 }
 ```
 
@@ -250,19 +250,19 @@ fn main() {
 
 ---
 
-### `std.random` — random numbers
+### `core.random` — random numbers
 
 ```jet
-import core.random as random;
+use core.random as random
 
 fn main() {
-    random.seed(42);                         // make the sequence repeatable
-    print(random.int(1, 6));                 // inclusive range (like dice)
-    print(random.float());                   // 0.0 .. 1.0
-    val items = [10, 20, 30];
-    print(random.pick(items));               // one item, or null if list empty
-    random.shuffle(mut items);               // shuffle in place
-    print(items);
+    random.seed(42)                         // make the sequence repeatable
+    print(random.int(1, 6))                 // inclusive range (like dice)
+    print(random.float())                   // 0.0 .. 1.0
+    items :: [10, 20, 30]
+    print(random.pick(items))               // one item, or null if list empty
+    random.shuffle(mut items)               // shuffle in place
+    print(items)
 }
 ```
 
@@ -279,20 +279,21 @@ not for tests.
 
 ---
 
-### `std.time` — clock and delays
+### `core.time` — clock and delays
 
-Time in v1 is **Unix milliseconds** only — no dates, time zones, or formatting.
+Time in core std is **Unix milliseconds** only — no dates, time zones, or
+formatting (use `jet.time` for calendars).
 
 ```jet
-import core.time as time;
+use core.time as time
 
 fn main() {
-    val started = time.now();                // milliseconds since 1970-01-01 UTC
-    time.sleep(100);                         // pause ~100 ms (blocking)
-    val sw = time.start();                   // Stopwatch
-    time.sleep(50);
-    print(sw.elapsed_millis());              // at least 50
-    print(time.now() - started);
+    started :: time.now()                // milliseconds since 1970-01-01 UTC
+    time.sleep(100)                      // pause ~100 ms (blocking)
+    sw :: time.start()                   // Stopwatch
+    time.sleep(50)
+    print(sw.elapsed_millis())           // at least 50
+    print(time.now() - started)
 }
 ```
 
@@ -309,22 +310,22 @@ this to pin output; normal programs ignore it.
 
 ---
 
-### `std.json` — parse and print JSON
+### `core.json` — parse and print JSON
 
-Dynamic JSON — you walk a `JSON` enum by hand. Typed JSON structs come later.
+Dynamic JSON — you walk a `JSON` enum by hand.
 
 ```jet
-import core.json as json;
+use core.json as json
 
 fn main() {
-    val raw = "{{\"name\":\"jet\",\"ok\":true,\"n\":1.5}}";
-    val data = json.parse(raw) ?? return;
-    print(json.render(data));                 // compact one line
-    print(json.render_pretty(data));           // indented
+    raw :: "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
+    data :: json.parse(raw) ?? return
+    print(json.render(data))                 // compact one line
+    print(json.render_pretty(data))          // indented
 
     if data == Object(entries) {
         if entries.contains("name") {
-            print(entries["name"]);
+            print(entries["name"])
         }
     }
 }
@@ -343,44 +344,44 @@ fn main() {
 
 ---
 
-### `std.tasks` — tasks and channels
+### `core.tasks` — tasks and channels
 
 Blocking tasks and typed channels are Jet's concurrency model. There is no
 `async`/`await` and no mutex API; tasks communicate by sending owned values.
 
 ```jet
-import core.tasks as tasks;
+use core.tasks as tasks
 
 fn sum_range(first: Int, last: Int) -> Int {
-    var total = 0;
-    for n in first..last {
-        total = total + n;
+    total := 0
+    loop n in first..last {
+        total += n
     }
-    return total;
+    return total
 }
 
 fn main() {
-    val a = tasks.spawn(() => sum_range(1, 25));
-    val b = tasks.spawn(() => sum_range(26, 50));
-    val c = tasks.spawn(() => sum_range(51, 75));
-    val d = tasks.spawn(() => sum_range(76, 100));
-    print(a.join() + b.join() + c.join() + d.join());
+    a :: tasks.spawn(() => sum_range(1, 25))
+    b :: tasks.spawn(() => sum_range(26, 50))
+    c :: tasks.spawn(() => sum_range(51, 75))
+    d :: tasks.spawn(() => sum_range(76, 100))
+    print(a.join() + b.join() + c.join() + d.join())
 }
 ```
 
 Channels carry one type:
 
 ```jet
-import core.tasks as tasks;
+use core.tasks as tasks
 
 fn main() {
-    val ch: Channel<Int> = tasks.channel();
-    val sender = ch.sender();
-    val task = tasks.spawn(take(sender) () => {
-        sender.send(42);
-    });
-    task.join();
-    print(ch.receive() ?? panic("channel closed"));
+    ch: Channel<Int> :: tasks.channel()
+    sender :: ch.sender()
+    task :: tasks.spawn(take(sender) () => {
+        sender.send(42)
+    })
+    task.join()
+    print(ch.receive() ?? panic("channel closed"))
 }
 ```
 
@@ -407,12 +408,12 @@ error (**E1003**).
 
 ```jet
 fn main() {
-    val b: U8 = 255;
-    print(b.to_int());                       // 255 as Int
-    val n = 42.to_u8() ?? return;            // checked conversion
-    val bytes = "hi".bytes();                // [U8]
-    val text = String.from_bytes(bytes) ?? return;
-    print(text);
+    b: U8 :: 255
+    print(b.to_int())                       // 255 as Int
+    n :: 42.to_u8() ?? return              // checked conversion
+    bytes :: "hi".bytes()                  // [U8]
+    text :: String.from_bytes(bytes) ?? return
+    print(text)
 }
 ```
 
@@ -435,35 +436,27 @@ Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
 | `eprintln(...)` | `io.eprint(...)` |
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
+| `import core.fs` | `use core.fs` (teaching error E0015) |
+| `val x = …` / `var x = …` | `x :: …` (immutable) / `x := …` (mutable) |
 
 ---
 
-## What's not in v1 std
+## First-party ring (`jet.*` packages)
 
-These are intentionally out of scope for the frozen core; they may appear as
-first-party packages later:
+Core std (`jet.core`) stays at the eight modules above. The first-party ring
+ships as versioned `jet.*` packages. These shipped in Epoch 2:
 
-- Networking and HTTP
-- Regular expressions, CSV, TOML
-- Calendar dates, time zones, formatted dates
-- Crypto, archives, SQLite
-- Open file handles and streaming I/O (whole-file reads only)
-- Async / threads (concurrency is v2)
-
-### First-party ring (post-core, adoption priority)
-
-Core std stays the eight modules above. The ring ships as versioned `jet.*` packages with reserved short import names.
-
-| Order | Package | Unlocks |
-|---|---|---|
-| 1 | `jet.http` (client) | API calls — blocking on streaming I/O + error conversion |
-| 2 | `jet.regex` | grep-class tools, validation |
-| 3 | `jet.csv` + `jet.toml` | data files, configs |
-| 4 | `jet.http` (server) | small services — after tasks |
-| 5 | `jet.time` (calendar) | dates/timezones |
-| 6 | `jet.crypto` | hash/random/hmac — vetted primitives only |
-| 7 | `jet.archive` | zip/tar/gzip |
-| 8 | `jet.db` (sqlite) | FFI-tier machinery |
+| Package | What it unlocks |
+|---------|-----------------|
+| `jet.http` | HTTP client + server, blocking networking, TLS |
+| `jet.regex` | grep-class tools, text validation |
+| `jet.csv` | CSV data files |
+| `jet.toml` | TOML config files |
+| `jet.log` | Structured logging / tracing / metrics |
+| `jet.time` | Calendar dates, time zones, formatted dates |
+| `jet.crypto` | Hash, HMAC, vetted random primitives |
+| `jet.archive` | zip / tar / gzip |
+| `jet.db` | SQLite (FFI-tier) |
 
 ---
 
@@ -471,26 +464,7 @@ Core std stays the eight modules above. The ring ships as versioned `jet.*` pack
 
 Today, std lives in the compiler as typed signatures plus Rust prelude templates
 (`Source/Prelude/Std.rs`). The **API** is Jet; the **implementation** is Rust until
-packages land.
-
-To ship a Jet-source standard library, these prerequisites are still open:
-
-| Prerequisite | Milestone | Why it's needed |
-|--------------|-----------|-----------------|
-| Package manager + store | **M12** | `jet.core` must install as a real package (`jet.toml`, lockfile, content-addressed store) |
-| Toolchain-selected `jet.core` | **M12 + SL2** | Compiler picks one std version; imports resolve through the package graph |
-| OS boundary story | **M7 (partial)** | Files, processes, and env ultimately need the OS — either keep thin `extern rust` shims or expand FFI |
-| Error conversion for `?` | post-v1 | Multi-module std wants propagating across error enums without boilerplate |
-| Streaming I/O | post-v1 | Jet-source std can't rely on whole-file helpers forever |
-
-**What Jet can already express:** JSON parsing logic, PRNG algorithms, math
-helpers, and data structures — the language has structs, enums, generics,
-traits, closures, and fallible `T ? E` values. **What still needs a native bridge:** syscalls
-(read/write files, spawn processes, sleep, environment).
-
-The likely migration path: M12 delivers `jet.core` as a bundled first-party
-package; pure Jet modules replace Rust where possible; a small audited native
-layer stays for I/O and process control until Jet has its own OS interface.
+the package system fully stabilizes.
 
 ---
 
@@ -502,4 +476,4 @@ layer stays for I/O and process control until Jet has its own OS interface.
 | `examples/features/30_json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/31_cli.jet` | Args, environment, exit codes |
 
-Run the full battery: `cargo test --test golden` and `cargo test --test stdlib`.
+Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test stdlib`.

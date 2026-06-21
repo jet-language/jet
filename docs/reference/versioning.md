@@ -1,15 +1,13 @@
 # Versioning policy
 
-Jet follows [semantic versioning](https://semver.org/) after **v1.0.0**.
+Jet follows [semantic versioning](https://semver.org/). **v1.0.0 shipped** (Epoch 1
+verified 2026-06-14); the project is now in Epoch 3. See [roadmap](../spec/roadmap.md).
 
-## Before 1.0
+## Versioning rules
 
-While Jet is pre-1.0, minor releases may include syntax or stdlib changes.
-Examples and the language tour are the executable spec — if they still pass,
-the release is consistent. Breaking changes should still be called out in
-release notes.
-
-## After 1.0
+Jet is post-v1.0. Examples and the language spec (`docs/spec/spec.md`) are the
+executable contract — if they still pass, the release is consistent. Breaking
+changes are called out in release notes and require a version bump per:
 
 | Change kind | Version bump | Migration |
 |-------------|--------------|-----------|
@@ -37,7 +35,7 @@ the compiler prints a diagnostic with a manual fix.
 
 Diagnostic codes (`E0102`, etc.) are **stable forever** once published.
 Wording may improve; codes are never reused or renumbered (see
-[04-diagnostics](admin/04-diagnostics.md)).
+[diagnostics spec](../spec/diagnostics.md)).
 
 ### Toolchain pin
 
