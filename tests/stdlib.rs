@@ -398,3 +398,63 @@ fn main() {
     assert_eq!(stdout, "500500\n");
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// c45 drift-guard: `std_module_items` in Sema/CheckerStdlib.rs must cover
+/// every module in `Loader::KNOWN_STD_MODULES` (and no extras).
+///
+/// `std_module_items` is `pub(crate)` so we can't call it directly from here.
+/// Instead we parse the source file and extract the string literals used as
+/// match arm heads — the same technique used in tests/decisions.rs for
+/// Source/Syntax.rs. This breaks if the match arm format changes, which is
+/// exactly the right tripwire: a format change must be mirrored here.
+#[test]
+fn std_module_items_covers_known_std_modules() {
+    let src = fs::read_to_string("Source/Sema/CheckerStdlib.rs")
+        .expect("Source/Sema/CheckerStdlib.rs must exist");
+
+    // Extract the `std_module_items` function body.
+    let fn_start = src
+        .find("pub(crate) fn std_module_items(")
+        .expect("std_module_items function not found in CheckerStdlib.rs");
+    // Find the closing `}` at top-level indent (just after the last arm).
+    let fn_body = &src[fn_start..];
+    // Collect all string literal match arm heads: lines matching `"<module>" =>`
+    let mut items_keys: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for line in fn_body.lines() {
+        let trimmed = line.trim();
+        // A match arm head looks like: `"core.fs" => &[` or `"core" => &[],`
+        if trimmed.starts_with('"') {
+            if let Some(end) = trimmed[1..].find('"') {
+                let key = &trimmed[1..1 + end];
+                // Stop at lines that are array entries, not match arms.
+                let after = trimmed[1 + end + 1..].trim_start();
+                if after.starts_with("=>") {
+                    items_keys.insert(key);
+                }
+            }
+        }
+        // Stop when we reach the wildcard arm or the closing brace of the function.
+        if trimmed == "_ => &[]," || trimmed == "_ => &[]" {
+            break;
+        }
+    }
+
+    let known: std::collections::BTreeSet<&str> =
+        jet::Loader::KNOWN_STD_MODULES.iter().copied().collect();
+
+    let missing_from_items: Vec<&&str> = known.iter().filter(|m| !items_keys.contains(*m)).collect();
+    let extra_in_items: Vec<&&str> = items_keys.iter().filter(|m| !known.contains(*m)).collect();
+
+    assert!(
+        missing_from_items.is_empty(),
+        "std_module_items is missing arms for modules in KNOWN_STD_MODULES: {:?}\n\
+         Add a match arm in Source/Sema/CheckerStdlib.rs for each.",
+        missing_from_items
+    );
+    assert!(
+        extra_in_items.is_empty(),
+        "std_module_items has arms for modules NOT in KNOWN_STD_MODULES: {:?}\n\
+         Either add to KNOWN_STD_MODULES in Source/Loader.rs or remove the arm.",
+        extra_in_items
+    );
+}
