@@ -174,10 +174,37 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
                 UnOp::Not => format!("(!({}))", i),
             }
         }
-        Expr::Binary(op, l, r, _) => {
+        Expr::Binary(op, l, r, span) => {
             let ls = emit_expr(cx, l, env);
             let rs = emit_expr(cx, r, env);
-            format!("(({}) {} ({}))", ls, op.spell(), rs)
+            // D-NUMOPS1: plain integer `+`/`-`/`*`/`/` traps on overflow. Floats and
+            // `#Numeric` distinct types keep the native Rust operator (they have no
+            // `JetArith` impl). When neither operand's type resolves, fall back to
+            // the native operator — always valid Rust, just not trap-checked.
+            use crate::AST::BinOp;
+            let trap_method = match op {
+                BinOp::Add => Some("jet_add"),
+                BinOp::Sub => Some("jet_sub"),
+                BinOp::Mul => Some("jet_mul"),
+                BinOp::Div => Some("jet_div"),
+                _ => None,
+            };
+            let is_int_arith = trap_method.is_some()
+                && (operand_is_integer(cx, l, env) == Some(true)
+                    || operand_is_integer(cx, r, env) == Some(true));
+            if is_int_arith {
+                let (line, _) = span_line_col(&cx.src, span.start);
+                format!(
+                    "({}).{}(({}), {:?}, {})",
+                    ls,
+                    trap_method.unwrap(),
+                    rs,
+                    cx.file,
+                    line
+                )
+            } else {
+                format!("(({}) {} ({}))", ls, op.spell(), rs)
+            }
         }
         Expr::Call(call) => emit_call(cx, call, env),
         Expr::Deref(inner, _) => format!("*{}", emit_expr(cx, inner, env)),
@@ -700,6 +727,20 @@ pub(crate) fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Ty
             expr_jet_ty(receiver, env)
         }
         _ => None,
+    }
+}
+
+/// D-NUMOPS1: `Some(true)` if `e` is provably a plain integer (`Int`/`IntN`),
+/// `Some(false)` if it's some other resolved type (float, distinct, …), `None`
+/// if its type can't be determined. Drives overflow-trap codegen on arithmetic;
+/// literals, negation, and nested arithmetic resolve without env help.
+fn operand_is_integer(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Option<bool> {
+    match e {
+        Expr::Int(..) => Some(true),
+        Expr::Float(..) => Some(false),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => operand_is_integer(cx, inner, env),
+        Expr::Binary(_, l, _, _) => operand_is_integer(cx, l, env),
+        _ => expr_jet_ty_with_cx(cx, e, env).map(|t| t.is_integer()),
     }
 }
 

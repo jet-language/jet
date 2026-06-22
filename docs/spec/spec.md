@@ -649,9 +649,14 @@ float→float conversions are infallible (a float→int via `.to_int()` truncate
 (`U8.MAX` = 255, `I32.MIN`, `Int.MAX`); float constants `Float.INFINITY`/`NAN`/
 `EPSILON` (also on `F32`); float predicates `.is_nan()`/`.is_infinite()`/
 `.is_finite()`; integer bit queries `.count_ones()`/`.count_zeros()`/
-`.leading_zeros()`/`.trailing_zeros()`. The overflow policy (plain integer
-arithmetic traps on overflow; `wrapping`/`saturating`/`checked` opt-ins) is the
-remaining piece of the surface.
+`.leading_zeros()`/`.trailing_zeros()`.
+
+**Overflow is checked by default (D-NUMOPS1).** Plain integer `+`/`-`/`*`/`/`
+**traps** at runtime (exit 70 with the source location) when the result leaves
+the type's range, rather than wrapping silently — a corruption becomes a caught
+bug. This holds in every build (debug and release). Floats and `#Numeric`
+distinct types keep the native operators. The `wrapping`/`saturating`/`checked`
+opt-ins (per-op escape hatches) are the remaining piece of the surface.
 
 Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and

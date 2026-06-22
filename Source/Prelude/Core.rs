@@ -31,6 +31,40 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("  --> {}:{}", file, line);
     std::process::exit(70);
 }
+// D-NUMOPS1: plain integer arithmetic traps on overflow (safe by default) — a
+// silent corruption becomes a caught bug. Each `+`/`-`/`*`/`/` on a fixed-width
+// integer lowers to one of these, which panic with the source location instead
+// of wrapping. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the use
+// site. Floats and `#Numeric` distinct types keep the plain Rust operators.
+trait JetArith: Copy {
+    fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
+    fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
+    fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self;
+    fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self;
+}
+macro_rules! jet_arith_impl {
+    ($($t:ty),*) => { $(
+        impl JetArith for $t {
+            fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
+                self.checked_add(rhs).unwrap_or_else(|| jet_panic(file, line,
+                    &format!("this addition overflows the value's type (the result is outside its range)")))
+            }
+            fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
+                self.checked_sub(rhs).unwrap_or_else(|| jet_panic(file, line,
+                    &format!("this subtraction overflows the value's type (the result is outside its range)")))
+            }
+            fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
+                self.checked_mul(rhs).unwrap_or_else(|| jet_panic(file, line,
+                    &format!("this multiplication overflows the value's type (the result is outside its range)")))
+            }
+            fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
+                self.checked_div(rhs).unwrap_or_else(|| jet_panic(file, line,
+                    &format!("this division can't be done (dividing by zero, or overflow)")))
+            }
+        }
+    )* };
+}
+jet_arith_impl!(i8, i16, i32, i64, u8, u16, u32, u64);
 /// E3001 (E2-M12, D-OBS1/D-OBS2): rich panic report — includes the function name,
 /// a source-line context box, and (in debug builds only) safe local variable values.
 /// `col` is 1-based; `caret_len` covers the highlighted span in the source line.
