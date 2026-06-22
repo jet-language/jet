@@ -1350,7 +1350,7 @@
       "type": "task",
       "title": "Derive capabilities from sema/effects, not Rust text",
       "body": "Audit finding: capability reporting is currently based on substring scans of generated Rust. For policy, sandboxing, package builds, and enterprise audit, derive capabilities from semantic resolution/effect data instead. Evidence: Source/lib.rs Capabilities::from_rust checks rust.contains(\"jet_net_\"), rust.contains(\"unsafe {\"), etc.; docs/spec/diagnostics.md and package-build language imply stronger capability guarantees.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P0",
       "workOrder": 5,
       "plan": "sema-derived-capabilities",
@@ -1361,6 +1361,10 @@
         },
         {
           "t": "Plan added 2026-06-22: sema-derived-capabilities. No open owner decision blocks the plan; next step is implementation on go.",
+          "at": "2026-06-22"
+        },
+        {
+          "t": "IMPLEMENTED 2026-06-22: Capabilities::from_sema replaces the from_rust substring scans at both compile sites. Derives network/file_io/crypto/concurrency from the resolved-Core-call set (bundle.used_core, alias-resolved in sema), unsafe from #Unsafe-fn presence + core.mem use, ffi from extern-rust/C-link declarations. Found+fixed two latent bugs: text scan false-POSITIVES on string literals containing a marker, and false-NEGATIVED real Core use because codegen helper names drifted from the hard-coded patterns (fs.read no longer emits jet_fs_). from_rust kept only as a test cross-check. tests/capabilities.rs (4); full suite green. NOTE for future: tie network/file/io to the c66 effect summaries too once package policy needs per-fn capability granularity; current program-level set is sufficient for the audit bar.",
           "at": "2026-06-22"
         }
       ],
