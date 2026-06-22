@@ -447,7 +447,7 @@ fn cmd_run_transcript(session: &Session) -> String {
     }
     let prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
-        Err(ds) => return format!("error: materialization parse error: {}\n", ds.first().map(|d| d.what.as_str()).unwrap_or("?")),
+        Err(ds) => return format!("error: could not build this value: {}\n", ds.first().map(|d| d.what.as_str()).unwrap_or("?")),
     };
     // Find main() and run it through the interpreter with DEV_FUEL_BUDGET.
     let mut func_defs: HashMap<String, Func> = HashMap::new();
