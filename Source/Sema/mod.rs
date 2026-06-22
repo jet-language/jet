@@ -440,8 +440,6 @@ pub(crate) struct Checker<'a> {
     fn_name: String,
     /// Context type for bare `null` (E0308).
     expected_type: Option<Type>,
-    /// Enclosing type when checking a method body.
-    owner_type: Option<String>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
     /// D-ALLOC-D (ratified 2026-06-19): allocator names that have been freed

@@ -1325,7 +1325,6 @@ pub(crate) fn check_func_body_bundle(
         view_return: f.is_view_return,
         fn_name: f.name.clone(),
         expected_type: None,
-        owner_type: owner_type.map(str::to_string),
         iter_borrowed: HashSet::new(),
         freed_allocators: HashMap::new(),
         arena_views: HashMap::new(),
