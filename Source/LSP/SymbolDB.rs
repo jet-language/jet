@@ -89,6 +89,7 @@ impl SymbolDB {
     }
 
     /// Find definition(s) of `name` (all modules).
+    #[allow(dead_code)] // wired in M13 (LSP go-to-def)
     fn find_def(&self, name: &str) -> Option<&SymDef> {
         self.defs.iter().find(|d| d.name == name)
     }
@@ -101,6 +102,7 @@ impl SymbolDB {
     }
 
     /// Find any ref or def name at `offset` in module `path`.
+    #[allow(dead_code)] // wired in M13 (LSP rename / hover)
     fn name_at_offset(&self, path: &str, offset: usize) -> Option<&str> {
         // Check defs first
         if let Some(d) = self.def_at_offset(path, offset) {
@@ -114,6 +116,7 @@ impl SymbolDB {
     }
 
     /// All references to `name` across all modules.
+    #[allow(dead_code)] // wired in M13 (LSP find-all-references)
     fn all_refs(&self, name: &str) -> Vec<&SymRef> {
         self.refs.iter().filter(|r| r.name == name).collect()
     }

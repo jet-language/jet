@@ -239,6 +239,7 @@ pub(crate) fn compute_rename(
 // ── Semantic tokens ───────────────────────────────────────────────────────────
 //
 // Token type indices (must match the legend in initialize_response).
+#[allow(dead_code)] // wired in c41 (semantic token highlighting)
 mod st {
     pub const KEYWORD: u32 = 0;
     pub const TYPE: u32 = 1;
@@ -255,6 +256,7 @@ mod st {
 }
 
 // Modifier bitmasks
+#[allow(dead_code)] // wired in c41 (semantic token highlighting)
 mod sm {
     pub const DECLARATION: u32 = 1 << 0;
     pub const READONLY: u32 = 1 << 1;
