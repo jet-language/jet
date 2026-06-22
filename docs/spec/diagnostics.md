@@ -488,6 +488,7 @@ is fixed).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2501 | `{method}` is not available on a {direction} file handle. | `files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error. | Use the correct handle type for the operation: `files.open` to read, `files.create`/`files.append` to write. |
+| E2502 | A line stream can only be used directly in a loop. | `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.) | Iterate it directly: `loop line in handle.lines() { … }`. |
 | L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line in handle.lines() { … }` to stream line-by-line. Not emitted yet. |
 
 ## Package supply-chain diagnostics (E2-M8, D-PKGS1–4)

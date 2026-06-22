@@ -1846,6 +1846,27 @@ impl<'a> Checker<'a> {
         self.lambda_binding = saved_bind;
         self.expected_type = saved_expected;
 
+        // E2502 (E2-M7): a line stream — `FileReader.lines()` / `StdinHandle
+        // .lines()` — is a loop-source-only value. It may only be consumed
+        // directly by `loop line in handle.lines()`; binding it to a name lets it
+        // escape loop position, where there is no meaningful lowering. (Codegen
+        // previously emitted a placeholder that rustc rejected — an I2 hole. This
+        // moves the guarantee into sema, c109/I3.)
+        if let Some(Type::Named(n)) = &it {
+            if n == "FileLines" || n == "StdinLines" {
+                self.diags.push(Diagnostic::error(
+                    "E2502",
+                    "a line stream can only be used directly in a loop".to_string(),
+                    "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use".to_string(),
+                    format!(
+                        "iterate it directly: `loop {} in handle.lines() {{ … }}`",
+                        if b.name.is_empty() { "line" } else { b.name.as_str() }
+                    ),
+                    Some(b.init.span()),
+                ));
+            }
+        }
+
         // E2302 (tier-2 references, E2-M5): a `ref` field stored from a value
         // that won't outlive the struct would dangle ("how long can this view
         // live?"). Inspected here at the binding site, read-only — the struct

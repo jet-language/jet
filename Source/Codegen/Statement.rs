@@ -549,8 +549,10 @@ fn emit_pattern_match_switch(
         emit_stmts(cx, body, env, out, indent + 2, false);
         out.push_str(&format!("{}    }}\n", pad));
     } else {
-        // I2 / I3: always emit a fallthrough so rustc never sees an incomplete match.
-        // Sema already verified exhaustiveness; this arm is dead but keeps rustc happy.
+        // I2 / I3: always emit a fallthrough so rustc never sees an incomplete
+        // match. Sema already proved exhaustiveness (E0307 fires on a `when`/match
+        // that misses a case), so this arm is statically dead — it exists only
+        // because rustc cannot see the sema proof.
         out.push_str(&format!(
             "{}    _ => unreachable!(\"jet: exhaustiveness bug\"),\n",
             pad
@@ -1232,7 +1234,8 @@ pub(crate) fn emit_for_in(
         {
             // E2-M7: streaming line iteration — `loop line in handle.lines()`.
             // BufRead::lines() on BufReader<File> is lazy and uses bounded memory.
-            // Each line error is converted to a runtime panic naming the resource (E2502).
+            // A mid-stream read error becomes a runtime panic (E3001) naming the
+            // resource. (`.lines()` outside loop position is rejected in sema, E2502.)
             let recv = emit_expr(cx, receiver, env);
             out.push_str(&format!(
                 "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",

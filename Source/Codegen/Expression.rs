@@ -648,7 +648,9 @@ fn emit_enum_lit(
             .iter()
             .map(|a| match a {
                 EnumLitArg::Positional(e) => emit_boxed_enum_arg(cx, type_name, variant, e, env),
-                _ => unreachable!(),
+                // Dead by the enclosing `.all(... Positional)` guard, not a sema
+                // fact — every arg in this branch is positional.
+                _ => unreachable!("all args are positional in this branch"),
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -1042,10 +1044,14 @@ fn emit_builtin_method(
                 cx.root_prefix, recv
             ))
         }
-        // .lines() as an expression (outside a loop) — emit an empty vec placeholder;
-        // sema prevents this from being used anywhere meaningful.
+        // c109/I3: `.lines()` is consumed in loop position by `emit_for_in`
+        // (lowered to `BufRead::lines`); it never reaches this expression path,
+        // because sema rejects a line stream bound or used as a value (E2502).
+        // This arm is dead — emit a diverging `unreachable!` (valid in any type
+        // position, so no I2 risk) to document the sema guarantee.
         "lines" if matches!(&rty, Some(Type::Named(n)) if n == "FileReader") => {
-            Some(format!("/* FileLines handled in loop */ &mut ({})", recv))
+            let _ = &recv;
+            Some("unreachable!(\"jet: a line stream is loop-source-only (E2502)\")".to_string())
         }
         // D-STDIN1=A: StdinHandle methods.
         "read_line" if matches!(&rty, Some(Type::Named(n)) if n == "StdinHandle") => {
@@ -1054,8 +1060,10 @@ fn emit_builtin_method(
                 cx.root_prefix, recv
             ))
         }
+        // c109/I3: dead for the same reason as the FileReader arm above (E2502).
         "lines" if matches!(&rty, Some(Type::Named(n)) if n == "StdinHandle") => {
-            Some(format!("/* StdinLines handled in loop */ &mut ({})", recv))
+            let _ = &recv;
+            Some("unreachable!(\"jet: a line stream is loop-source-only (E2502)\")".to_string())
         }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): arena/bump/pool/fixed
         // instance methods. recv is a `JetArena`/`JetBump`/`JetPool`/`JetFixed`.
