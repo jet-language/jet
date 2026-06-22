@@ -635,8 +635,65 @@ impl<'a> Checker<'a> {
                     args: vec![t],
                 });
             }
+            // D-ROUTE1=A: jet.http.router() → HttpRouter.
+            ("jet.http", "router") => {
+                if !args.is_empty() {
+                    self.diags.push(wrong_core_arity("router", 0, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                }
+                return Some(Type::Named("HttpRouter".to_string()));
+            }
+            // D-ROUTE1=A: http.parse(raw_string) → HttpRequest (parses HTTP/1.1 bytes).
+            ("jet.http", "parse") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("parse", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
+                return Some(Type::Named("HttpRequest".to_string()));
+            }
+            // D-ROUTE1=A: http.dispatch(router, req) → HttpResponse.
+            ("jet.http", "dispatch") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity("dispatch", 2, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                let router_ty = self.infer(&mut args[0].expr);
+                match &router_ty {
+                    Some(Type::Named(n)) if n == "HttpRouter" => {}
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`http.dispatch` needs an HttpRouter, not {}", other.show()),
+                            "build a router with `http.router()` and register routes with `.get/.post/…`".to_string(),
+                            "write `http.dispatch(router, req)`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    _ => {}
+                }
+                if let Some(arg) = args.get_mut(1) {
+                    let req_ty = self.infer(&mut arg.expr);
+                    match &req_ty {
+                        Some(Type::Named(n)) if n == "HttpRequest" => {}
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`http.dispatch` needs an HttpRequest, not {}", other.show()),
+                                "parse the raw request with `http.parse(raw)`".to_string(),
+                                "write `http.dispatch(router, req)` where `req` is an HttpRequest".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                return Some(Type::Named("HttpResponse".to_string()));
+            }
             // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
-            // handler: fn(HttpRequest) -> HttpResponse (lambda or fn reference).
+            // handler: fn(HttpRequest) -> HttpResponse (lambda) or HttpRouter.
             ("jet.http", "serve") => {
                 if args.len() != 2 {
                     self.diags.push(wrong_core_arity("serve", 2, args.len(), span));
@@ -644,16 +701,17 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
-                // Check the handler arg — accept any callable (lambda or fn pointer).
+                // Accept an HttpRouter or a callable (lambda/fn pointer).
                 let handler_ty = self.infer(&mut args[1].expr);
                 match &handler_ty {
                     Some(Type::Fn { .. }) => {}
+                    Some(Type::Named(n)) if n == "HttpRouter" => {}
                     Some(other) => {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`http.serve` handler must be a function, not {}", other.show()),
+                            format!("`http.serve` handler must be a function or HttpRouter, not {}", other.show()),
                             "the handler is called with each incoming `HttpRequest`".to_string(),
-                            "write a lambda: `(req) => HttpResponse { status: \"200 OK\", body: req.body, headers: [:] }`".to_string(),
+                            "pass a router (`http.router()`) or a lambda: `(req) => HttpResponse { … }`".to_string(),
                             Some(args[1].expr.span()),
                         ));
                     }
@@ -924,7 +982,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
         | "FileReader" | "FileWriter" | "FileLines"
         // E2-M10: networking opaque types.
-        | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse"
+        | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
     ) || is_json_type_name(name)
@@ -1086,6 +1144,10 @@ pub(crate) fn net_method_return(
         ("HttpRequest", "path") => Some(Some(str_ty.clone())),
         ("HttpRequest", "body") => Some(Some(str_ty.clone())),
         ("HttpRequest", "header") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        // D-ROUTE1=A: req.param("name") → String? (none if not a param route or name absent).
+        ("HttpRequest", "param") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        // D-ROUTE1=A: HttpRouter registration methods.
+        ("HttpRouter", "get" | "post" | "put" | "delete") => Some(Some(unit.clone())),
         // TcpListener methods.
         ("TcpListener", "accept") => Some(Some(result_ty(
             Type::Named("TcpStream".to_string()),

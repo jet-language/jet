@@ -289,6 +289,11 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
                 };
                 parts.push(format!("{}: {}", field_name, emit_expr(cx, e, env)));
             }
+            // D-ROUTE1=A: HttpRequest has a `params` field (set by dispatch) that
+            // users never provide; always initialize it to an empty BTreeMap.
+            if type_name == "HttpRequest" && is_prelude_struct {
+                parts.push("params: std::collections::BTreeMap::new()".to_string());
+            }
             let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
             if let Some(trait_name) = as_trait {
                 format!(
@@ -801,6 +806,24 @@ fn emit_builtin_method(
                 format!("jet_list_remove(&mut ({}), {}, {:?}, {})", recv, arg(0), cx.file, line)
             }
         }),
+        // D-ROUTE1=A: router.get/post/put/delete must come BEFORE the generic `"get"` arm.
+        // Emit the handler as a boxed Send+Sync closure so it satisfies JetHttpHandler.
+        "get" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRouter") => Some(format!(
+            "{}jet_http_router_register(&mut ({}), \"GET\".to_string(), {}, {})",
+            cx.root_prefix, recv, arg(0), emit_router_handler(cx, args, env)
+        )),
+        "post" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRouter") => Some(format!(
+            "{}jet_http_router_register(&mut ({}), \"POST\".to_string(), {}, {})",
+            cx.root_prefix, recv, arg(0), emit_router_handler(cx, args, env)
+        )),
+        "put" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRouter") => Some(format!(
+            "{}jet_http_router_register(&mut ({}), \"PUT\".to_string(), {}, {})",
+            cx.root_prefix, recv, arg(0), emit_router_handler(cx, args, env)
+        )),
+        "delete" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRouter") => Some(format!(
+            "{}jet_http_router_register(&mut ({}), \"DELETE\".to_string(), {}, {})",
+            cx.root_prefix, recv, arg(0), emit_router_handler(cx, args, env)
+        )),
         "get" => Some(match rty {
             Some(Type::Map { .. }) => format!("({}).get(&({}).clone()).cloned()", recv, arg(0)),
             _ => format!("({}).get({} as usize).cloned()", recv, arg(0)),
@@ -929,6 +952,10 @@ fn emit_builtin_method(
         "header" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRequest") => Some(format!(
             "({}).headers.get(&{}).cloned()", recv, arg(0)
         )),
+        // D-ROUTE1=A: req.param(name) → String?
+        "param" if matches!(&rty, Some(Type::Named(n)) if n == "HttpRequest") => Some(format!(
+            "{}jet_http_request_param(&({}), &({}))", cx.root_prefix, recv, arg(0)
+        )),
         // E2-M10: HttpResponse field accessors.
         "status" if matches!(&rty, Some(Type::Named(n)) if n == "HttpResponse") => Some(format!(
             "({}).status.clone()", recv
@@ -995,6 +1022,36 @@ fn emit_builtin_method(
         )),
         _ => None,
     }
+}
+
+/// D-ROUTE1=A: emit the handler argument for router.get/post/put/delete as a
+/// `Box<dyn Fn(JetHttpRequest)->JetHttpResponse + Send + Sync>` (JetHttpHandler).
+/// The second arg (index 1) is the handler: either a named fn reference or a lambda.
+fn emit_router_handler(
+    cx: &Cx,
+    args: &[crate::AST::CallArg],
+    env: &HashMap<String, Slot>,
+) -> String {
+    let Some(handler_arg) = args.get(1) else {
+        return "/* missing handler */".to_string();
+    };
+    // For a named function reference (Ident not in local env = top-level fn),
+    // emit it directly — Rust can coerce fn items to the closure bound.
+    if let Expr::Ident(name, _) = &handler_arg.expr {
+        if env.get(name).is_none() {
+            let rust_name = mangle(name);
+            return format!(
+                "Box::new(move |__req: {}JetHttpRequest| {}(&__req)) as Box<dyn Fn({}JetHttpRequest) -> {}JetHttpResponse + Send + Sync>",
+                cx.root_prefix, rust_name, cx.root_prefix, cx.root_prefix
+            );
+        }
+    }
+    // For a lambda, emit it directly — lambdas are already closures.
+    let inner = emit_expr(cx, &handler_arg.expr, env);
+    format!(
+        "Box::new({}) as Box<dyn Fn({}JetHttpRequest) -> {}JetHttpResponse + Send + Sync>",
+        inner, cx.root_prefix, cx.root_prefix
+    )
 }
 
 /// D-REGEX1: qualify a regex runtime function with the FFI bridge crate name.
@@ -1185,9 +1242,31 @@ fn emit_core_call(
         ("jet.http", "post") => {
             format!("{}(&({}), &({}))", helper("jet_http_post"), arg(0), arg(1))
         }
+        // D-ROUTE1=A: jet.http.router() → JetHttpRouter.
+        ("jet.http", "router") => format!("{}()", helper("jet_http_router_new")),
+        // D-ROUTE1=A: http.parse(raw) → JetHttpRequest.
+        ("jet.http", "parse") => format!("{}(&({}))", helper("jet_http_parse_request"), arg(0)),
+        // D-ROUTE1=A: http.dispatch(router, req) → JetHttpResponse.
+        ("jet.http", "dispatch") => format!(
+            "{}(&({}), {})",
+            helper("jet_http_router_dispatch"), arg(0), arg(1)
+        ),
         ("jet.http", "serve") => {
-            // serve(addr, handler): blocking; handler is a closure/fn.
-            format!("{}(&({}), {})", helper("jet_http_serve"), arg(0), arg(1))
+            // serve(addr, handler): blocking — handler is a closure/fn or HttpRouter.
+            // Detect a router arg by inspecting the Expr: a Lambda is always a closure;
+            // anything else is assumed to be an HttpRouter (sema already enforced this).
+            let is_lambda = args.get(1).map(|a| matches!(a.expr, crate::AST::Expr::Lambda(_))).unwrap_or(false);
+            if is_lambda {
+                format!("{}(&({}), {})", helper("jet_http_serve"), arg(0), arg(1))
+            } else {
+                // Wrap the router in a closure so jet_http_serve's F: Fn bound is satisfied.
+                let rtr = arg(1);
+                let root = &cx.root_prefix;
+                format!(
+                    "{{ let __rtr = {}; {}(&({}), move |req| {}jet_http_router_dispatch(&__rtr, req)); }}",
+                    rtr, helper("jet_http_serve"), arg(0), root
+                )
+            }
         }
         // D-REGEX1: jet.regex — calls land in the FFI bridge crate (the only place
         // the `regex` crate lives). `regex_fn` qualifies them with the bridge crate

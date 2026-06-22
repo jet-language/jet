@@ -102,6 +102,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "TcpStream" => Some("JetTcpStream"),
         "HttpRequest" => Some("JetHttpRequest"),
         "HttpResponse" => Some("JetHttpResponse"),
+        "HttpRouter" => Some("JetHttpRouter"),
         _ => None,
     }
 }

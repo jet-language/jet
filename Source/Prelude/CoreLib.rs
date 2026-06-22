@@ -1015,6 +1015,7 @@ pub struct JetHttpRequest {
     pub path: String,
     pub body: String,
     pub headers: std::collections::BTreeMap<String, String>,
+    pub params: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -1022,6 +1023,25 @@ pub struct JetHttpResponse {
     pub status: String,
     pub body: String,
     pub headers: std::collections::BTreeMap<String, String>,
+}
+
+// D-ROUTE1=A: HTTP router — registration + :param dispatch.
+#[derive(Clone)]
+enum RouteSegment {
+    Static(String),
+    Param(String),
+}
+
+type JetHttpHandler = Box<dyn Fn(JetHttpRequest) -> JetHttpResponse + Send + Sync>;
+
+struct JetHttpRoute {
+    method: String,
+    segments: Vec<RouteSegment>,
+    handler: JetHttpHandler,
+}
+
+pub struct JetHttpRouter {
+    routes: Vec<JetHttpRoute>,
 }
 
 impl JetShow for JetTcpListener {
@@ -1035,6 +1055,9 @@ impl JetShow for JetHttpRequest {
 }
 impl JetShow for JetHttpResponse {
     fn jet_show(&self) -> String { format!("HTTP {}", self.status) }
+}
+impl JetShow for JetHttpRouter {
+    fn jet_show(&self) -> String { format!("HttpRouter({} routes)", self.routes.len()) }
 }
 
 fn jet_net_tcp_listen(addr: &String) -> Result<JetTcpListener, String> {
@@ -1222,7 +1245,7 @@ fn jet_http_parse_request(raw: &str) -> JetHttpRequest {
             headers.insert(k.to_lowercase(), v.to_string());
         }
     }
-    JetHttpRequest { method, path, body, headers }
+    JetHttpRequest { method, path, body, headers, params: std::collections::BTreeMap::new() }
 }
 
 fn jet_http_format_response(resp: &JetHttpResponse) -> String {
@@ -1233,4 +1256,118 @@ fn jet_http_format_response(resp: &JetHttpResponse) -> String {
     out.push_str("\r\n");
     out.push_str(&resp.body);
     out
+}
+
+// D-ROUTE1=A: router runtime ──────────────────────────────────────────────────
+
+fn jet_http_router_new() -> JetHttpRouter {
+    JetHttpRouter { routes: Vec::new() }
+}
+
+fn jet_http_router_parse_pattern(pattern: &str) -> Vec<RouteSegment> {
+    pattern.split('/').filter_map(|seg| {
+        if seg.is_empty() { return None; }
+        if let Some(name) = seg.strip_prefix(':') {
+            Some(RouteSegment::Param(name.to_string()))
+        } else {
+            Some(RouteSegment::Static(seg.to_string()))
+        }
+    }).collect()
+}
+
+fn jet_http_router_register(router: &mut JetHttpRouter, method: String, pattern: String, handler: JetHttpHandler) {
+    // E2804 (runtime): duplicate method+pattern panics at registration time.
+    let segs = jet_http_router_parse_pattern(&pattern);
+    let is_dup = router.routes.iter().any(|r| {
+        r.method == method && r.segments.len() == segs.len() && r.segments.iter().zip(segs.iter()).all(|(a, b)| {
+            match (a, b) {
+                (RouteSegment::Static(x), RouteSegment::Static(y)) => x == y,
+                (RouteSegment::Param(_), RouteSegment::Param(_)) => true,
+                _ => false,
+            }
+        })
+    });
+    if is_dup {
+        panic!("E2804: duplicate route `{} {}`", method, pattern);
+    }
+    router.routes.push(JetHttpRoute {
+        method,
+        segments: segs,
+        handler,
+    });
+}
+
+/// Count static segments in a route (for precedence: more statics win).
+fn route_static_count(segs: &[RouteSegment]) -> usize {
+    segs.iter().filter(|s| matches!(s, RouteSegment::Static(_))).count()
+}
+
+fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetHttpResponse {
+    let path_segs: Vec<&str> = req.path.split('/').filter(|s| !s.is_empty()).collect();
+    // Collect matching routes with their static count (for precedence).
+    let mut candidates: Vec<(usize, usize)> = Vec::new(); // (route_idx, static_count)
+    for (i, route) in router.routes.iter().enumerate() {
+        if route.segments.len() != path_segs.len() { continue; }
+        let mut ok = true;
+        for (rseg, pseg) in route.segments.iter().zip(path_segs.iter()) {
+            if let RouteSegment::Static(s) = rseg {
+                if s != pseg { ok = false; break; }
+            }
+        }
+        if ok { candidates.push((i, route_static_count(&route.segments))); }
+    }
+    if candidates.is_empty() {
+        return JetHttpResponse {
+            status: "404 Not Found".to_string(),
+            body: "404 not found".to_string(),
+            headers: std::collections::BTreeMap::new(),
+        };
+    }
+    // Pick highest static-count match with the right method; otherwise 405.
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    let method_match = candidates.iter().find(|(i, _)| router.routes[*i].method == req.method);
+    let Some((route_idx, _)) = method_match.copied() else {
+        return JetHttpResponse {
+            status: "405 Method Not Allowed".to_string(),
+            body: "405 method not allowed".to_string(),
+            headers: std::collections::BTreeMap::new(),
+        };
+    };
+    let route = &router.routes[route_idx];
+    let mut params = std::collections::BTreeMap::new();
+    for (rseg, pseg) in route.segments.iter().zip(path_segs.iter()) {
+        if let RouteSegment::Param(name) = rseg {
+            params.insert(name.clone(), pseg.to_string());
+        }
+    }
+    let mut req2 = req;
+    req2.params = params;
+    (route.handler)(req2)
+}
+
+fn jet_http_serve_router(addr: &String, router: JetHttpRouter) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind(addr.as_str())
+        .unwrap_or_else(|e| { eprintln!("E2801: bind on `{}` failed: {}", addr, e); std::process::exit(1); });
+    let router = std::sync::Arc::new(router);
+    loop {
+        let (mut stream, _peer) = match listener.accept() {
+            Ok(x) => x,
+            Err(e) => { eprintln!("E2801: accept failed: {}", e); continue; }
+        };
+        let r = router.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 16384];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let raw = String::from_utf8_lossy(&buf[..n]).into_owned();
+            let req = jet_http_parse_request(&raw);
+            let resp = jet_http_router_dispatch(&r, req);
+            let response_text = jet_http_format_response(&resp);
+            let _ = stream.write_all(response_text.as_bytes());
+        });
+    }
+}
+
+fn jet_http_request_param(req: &JetHttpRequest, name: &String) -> Option<String> {
+    req.params.get(name.as_str()).cloned()
 }

@@ -156,6 +156,9 @@ fn emit_stmt(
                 &b.ty,
                 Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
                     || n == "TcpStream"
+                    // D-ROUTE1=A: HttpRouter bindings need `let mut` because route
+                    // registration mutates the router before it is passed to serve.
+                    || n == "HttpRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
             );
             let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
@@ -1294,7 +1297,14 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
         .enumerate()
         .map(|(i, p)| format!("__jet_a{}: {}", i, cx.rust_type(p)))
         .collect();
-    let arg_calls: Vec<String> = (0..params.len()).map(|i| format!("__jet_a{i}")).collect();
+    // Non-scalar Named types are passed by reference in Jet Rust functions.
+    let arg_calls: Vec<String> = params.iter().enumerate().map(|(i, p)| {
+        if matches!(p, Type::Named(_) | Type::String | Type::List(_) | Type::Map { .. }) {
+            format!("&__jet_a{i}")
+        } else {
+            format!("__jet_a{i}")
+        }
+    }).collect();
     let _ = ret;
     format!(
         "Box::new(move |{}| {}({})) as {}",
