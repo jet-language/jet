@@ -1119,6 +1119,7 @@ impl<'a> Checker<'a> {
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
                     task_lint_span: None,
+                    task_has_view_capture: false,
                 },
             );
         }
@@ -1265,6 +1266,28 @@ impl<'a> Checker<'a> {
                     self.consume_builtin_receiver(receiver, method);
                     let _ = span;
                     return ret;
+                }
+                ("Task", "detach") => {
+                    // D-DETACH1: consume the Task handle (marks it moved → L1101 won't fire).
+                    // E1103 fires if the task had a sendability problem at spawn (E1102 already
+                    // fired); detaching an unsound task is doubly dangerous.
+                    if let Expr::Ident(name, _) = receiver {
+                        if self.view_capture_tasks.contains(name.as_str()) {
+                            self.diags.push(Diagnostic::error(
+                                "E1103",
+                                format!(
+                                    "can't detach task `{}` — it captured a value that can't cross a thread boundary",
+                                    name
+                                ),
+                                "a detached task runs unsupervised; it must only hold values it owns cleanly".to_string(),
+                                "fix the E1102 error at the spawn site first, then `.detach()` is safe".to_string(),
+                                Some(span),
+                            ));
+                        }
+                    }
+                    self.consume_builtin_receiver(receiver, method);
+                    let _ = span;
+                    return None; // detach() returns nothing
                 }
                 ("Sender", "send") => {
                     return self.finish_sender_send(recv_ty, args, span);

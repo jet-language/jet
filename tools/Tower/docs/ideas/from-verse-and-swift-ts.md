@@ -98,8 +98,11 @@ The deep logic-programming version is correctly flagged as a skip.
 **What it is.** Verse lets programmers choose indentation *or* curly braces. The
 research says: don't — pick one and commit.
 **Source.** Section 5 "What to skip", dual-syntax row.
-**Status.** `ALREADY RATIFIED (S1)` — Jet committed to significant indentation.
-**CEO note.** Skip — already settled; included only so the "skip" list is traceable.
+**Status.** `ALREADY RATIFIED (S3)` — Jet committed to **curly braces `{ }`** for
+all blocks/scopes and **explicitly rejected significant indentation** (and `end`
+keywords). This anti-idea agrees with the ratified decision: no dual syntax, no
+Python-style indentation — braces only.
+**CEO note.** Skip — already settled in favor of braces; included only so the "skip" list is traceable.
 
 ### 8. North-star: transactional shared global state + auto-distribution
 **What it is.** Verse's UE6 headline — "global state just works, transactionally
@@ -314,7 +317,7 @@ correctly filed as "later." Don't let it block shipping no-GC speed.
   in both files and is one card; capability-safe components and capabilities are
   one card).
 - **Already covered (skip or track existing item):** 14 —
-  #1 (S7/S34/S71), #2 (D-EFF1/c66), #3 (D-TXN1/c72), #4 (S53), #7 (S1),
+  #1 (S7/S34/S71), #2 (D-EFF1/c66), #3 (D-TXN1/c72), #4 (S53), #7 (S3),
   #9 (c64, with a real tension to resolve), #11 (D-MIGRATE1/c73), #12 (D-UNIT1),
   #13 (D-TAINT1), #15 (D-CAP/D-SCAP), #16 (I4), plus partials #14 (`[T#N]`) and
   #25 (manual concurrency S53/E2-M1).

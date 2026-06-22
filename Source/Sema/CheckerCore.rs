@@ -86,6 +86,7 @@ impl<'a> Checker<'a> {
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
                     task_lint_span: None,
+                    task_has_view_capture: false,
                 },
             );
         }
@@ -711,7 +712,7 @@ impl<'a> Checker<'a> {
                             "L1101",
                             "a spawned task is dropped without `.join()`".to_string(),
                             "the program may end before this task finishes".to_string(),
-                            "store the task in a binding and call `.join()`".to_string(),
+                            "store the task in a binding and call `.join()`, or chain `.detach()` for fire-and-forget".to_string(),
                             Some(expr.span()),
                         ));
                     }
@@ -979,6 +980,7 @@ impl<'a> Checker<'a> {
                             decl_loop_depth: self.loop_depth,
                             sendable: true,
                             task_lint_span: None,
+                            task_has_view_capture: false,
                         },
                     );
                     for s in body.iter_mut() {
@@ -1023,6 +1025,10 @@ impl<'a> Checker<'a> {
                         }
                         // E2-M7: `loop line in handle.lines()` — streaming line iterator.
                         Some(Type::Named(n)) if n == "FileLines" => {
+                            self.declare_loop_var(var.clone(), *var_span, &Type::String);
+                        }
+                        // D-STDIN1=A: `loop line in io.stdin().lines()` — streaming stdin iterator.
+                        Some(Type::Named(n)) if n == "StdinLines" => {
                             self.declare_loop_var(var.clone(), *var_span, &Type::String);
                         }
                         Some(other) => {
@@ -1201,6 +1207,7 @@ impl<'a> Checker<'a> {
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
                     task_lint_span: None,
+                    task_has_view_capture: false,
                 },
             );
         }
@@ -1406,6 +1413,7 @@ impl<'a> Checker<'a> {
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
                         task_lint_span: None,
+                        task_has_view_capture: false,
                     },
                 );
             }
@@ -1467,6 +1475,7 @@ impl<'a> Checker<'a> {
                                 decl_loop_depth: self.loop_depth,
                                 sendable: true,
                                 task_lint_span: None,
+                                task_has_view_capture: false,
                             },
                         );
                     }
@@ -1498,6 +1507,7 @@ impl<'a> Checker<'a> {
                             decl_loop_depth: self.loop_depth,
                             sendable: true,
                             task_lint_span: None,
+                            task_has_view_capture: false,
                         },
                     );
                 }
@@ -1702,6 +1712,7 @@ impl<'a> Checker<'a> {
                 decl_loop_depth: self.loop_depth,
                 sendable: true,
                 task_lint_span: None,
+                task_has_view_capture: false,
             },
         );
         self.uninit.insert(b.name.clone(), b.name_span);
@@ -1724,12 +1735,17 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_binding(&mut self, b: &mut Binding) {
+        // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.
+        let prev_binding_name = self.current_binding_name.take();
+        self.current_binding_name = Some(b.name.clone());
         if b.pattern.is_some() {
             self.check_destructuring_binding(b);
+            self.current_binding_name = prev_binding_name;
             return;
         }
         if b.uninit {
             self.check_uninit_binding(b);
+            self.current_binding_name = prev_binding_name;
             return;
         }
         let mut annot_valid = true;
@@ -1912,6 +1928,7 @@ impl<'a> Checker<'a> {
                 self.report_view_escape(src, "be stored in another binding", *src_span);
             }
         }
+        let task_has_view_capture = self.view_capture_tasks.contains(&b.name);
         self.declare(
             &b.name,
             b.name_span,
@@ -1922,8 +1939,10 @@ impl<'a> Checker<'a> {
                 decl_loop_depth: self.loop_depth,
                 sendable: binding_sendable,
                 task_lint_span,
+                task_has_view_capture,
             },
         );
+        self.current_binding_name = prev_binding_name;
     }
 
     /// S74: a `val`/`var` binding that destructures a struct (`Point { x, y }`)
@@ -2164,6 +2183,7 @@ impl<'a> Checker<'a> {
                 decl_loop_depth: self.loop_depth,
                 sendable,
                 task_lint_span,
+                task_has_view_capture: false,
             },
         );
     }

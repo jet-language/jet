@@ -32,6 +32,7 @@ impl<'a> Checker<'a> {
                             decl_loop_depth: 0,
                             sendable: true,
                             task_lint_span: None,
+                            task_has_view_capture: false,
                         },
                     );
                 }
@@ -50,6 +51,7 @@ impl<'a> Checker<'a> {
                         decl_loop_depth: 0,
                         sendable: true,
                         task_lint_span: None,
+                        task_has_view_capture: false,
                     },
                 );
             }
@@ -803,6 +805,30 @@ pub(crate) fn register_struct(
             .map(|f| (f.stored_ref_label.clone(), f.ty.clone()))
             .collect(),
     );
+    // D-REPRC1: `#layout(c)` structs may not contain growable fields.
+    if s.layout == Some(crate::AST::StructLayout::C) {
+        for f in &s.fields {
+            let growable = matches!(
+                &f.ty,
+                Type::List(_) | Type::Map { .. } | Type::String
+            );
+            if growable {
+                let layout_span = s.layout_span.unwrap_or(s.name_span);
+                diags.push(Diagnostic::error(
+                    "E1104",
+                    format!(
+                        "`#layout(c)` struct `{}` has a growable field `{}` ({})",
+                        s.name,
+                        f.name,
+                        f.ty.name()
+                    ),
+                    "growable types (`[T]`, `Map`, `String`) don't have a stable C layout".to_string(),
+                    "use a fixed-size array `[T#N]` instead, or remove `#layout(c)`".to_string(),
+                    Some(layout_span),
+                ));
+            }
+        }
+    }
     let ref_fields: Vec<_> = s.fields.iter().filter(|f| f.is_stored_ref).collect();
     if ref_fields.len() >= 2 {
         let unlabeled = ref_fields
@@ -1032,6 +1058,8 @@ pub(crate) fn check_func_body(
         borrow_ctx: false,
         lambda_escapes: true,
         is_task_spawn: false,
+        view_capture_tasks: HashSet::new(),
+        current_binding_name: None,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
         m9,

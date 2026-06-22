@@ -1194,6 +1194,8 @@ pub(crate) fn emit_for_in(
 ) {
     let pad = "    ".repeat(indent);
     let coll = emit_expr(cx, collection, env);
+    // D-STDIN1=A: track whether we opened an extra block that needs closing.
+    let mut needs_extra_close = false;
     if let Some((v2, _)) = var2 {
         out.push_str(&format!(
             "{}{}for (_jet_k, _jet_v) in ({coll}).iter() {{\n",
@@ -1232,6 +1234,28 @@ pub(crate) fn emit_for_in(
             out.push_str(&format!(
                 "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",
                 pad, lbl, recv
+            ));
+            out.push_str(&format!(
+                "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
+                pad,
+                mangle(var),
+                cx.root_prefix,
+                cx.file,
+                0
+            ));
+        } else if method == "lines"
+            && (matches!(expr_jet_ty(receiver, env), Some(Type::Named(n)) if n == "StdinHandle")
+                || matches!(receiver.as_ref(), Expr::MethodCall { method: m, .. } if m == "stdin"))
+        {
+            // D-STDIN1=A: streaming stdin iteration — `loop line in io.stdin().lines()`.
+            // The receiver is an inline io.stdin() call, so we must materialise it into
+            // a local to avoid a temporary that's dropped before the loop body runs.
+            let recv = emit_expr(cx, receiver, env);
+            out.push_str(&format!("{}{{ let mut _jet_stdin_h = {};\n", pad, recv));
+            needs_extra_close = true;
+            out.push_str(&format!(
+                "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut _jet_stdin_h.inner) {{\n",
+                pad, lbl
             ));
             out.push_str(&format!(
                 "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
@@ -1283,6 +1307,10 @@ pub(crate) fn emit_for_in(
         env.remove(v2);
     }
     out.push_str(&format!("{}}}\n", pad));
+    // D-STDIN1=A: close the outer block introduced to hold the JetStdinReader local.
+    if needs_extra_close {
+        out.push_str(&format!("{}}}\n", pad));
+    }
 }
 
 fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {

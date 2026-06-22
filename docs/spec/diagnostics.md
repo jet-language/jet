@@ -287,7 +287,10 @@ before continuing.
 | E1004 | sema  | unknown item in core module |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
-| L1101 | sema  | Task value dropped without `.join()`       |
+| E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
+| E1104 | sema  | `#layout(c)` struct contains a growable field (D-REPRC1) |
+| E1105 | sema  | `#layout(…)` variant not yet supported (D-REPRC1 reserved) |
+| L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
 | E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
 | E2303 | sema  | `ref`/`view` crosses a task/channel boundary (E2-M5; emitted as E1102) |
@@ -426,7 +429,10 @@ CLI.
 |------|------|-----|-----|
 | E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
 | E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; `view` borrows, `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the borrowed field, or hand a closure over with `take`. |
-| L1101 | A `Task` is dropped without `.join()`. | The program may end before that task finishes. | Call `.join()` on the task before it goes out of scope. |
+| E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
+| E1104 | `#layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#layout(c)` if C interop is not required. |
+| E1105 | `#layout(packed)`, `#layout(align(N))`, or `#layout(columnar)` written on a struct. | Only `#layout(c)` is implemented in this release; the other variants are reserved for future milestones. | Use `#layout(c)` for C-compatible layout, or omit `#layout` for the default. |
+| L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Use `tasks.channel()`, `sender.send`, and `channel.receive`. |
 

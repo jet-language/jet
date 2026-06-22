@@ -879,6 +879,24 @@ pub const KW_RENAME: &str = "rename"; // D-MIGRATE1
 /// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.
 pub const SCHEMA_CACHE_SUBDIR: &str = "cache/schema"; // D-MIGRATE1
 
+/// D-DETACH1 (ratified; D-DETACH1 = A): consumes a Task handle without joining
+/// — fire-and-forget daemon semantics. Main may return while the task runs.
+/// Only valid on owned tasks; capturing a `view` borrow is rejected at spawn
+/// time (E1102) and flagged again at the detach site (E1103).
+pub const TASK_DETACH: &str = "detach"; // D-DETACH1
+
+/// D-REPRC1 (ratified; D-REPRC1 = B): `#layout(…)` struct attribute — controls
+/// the memory layout of the generated Rust struct. `#layout(c)` stamps
+/// `#[repr(C)]` for C interop. Field order is preserved as written.
+/// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
+pub const ATTR_LAYOUT: &str = "layout"; // D-REPRC1
+/// D-REPRC1: the C-compatible layout variant — `#layout(c)` → `#[repr(C)]`.
+pub const LAYOUT_C: &str = "c"; // D-REPRC1
+/// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
+pub const LAYOUT_PACKED: &str = "packed";     // D-REPRC1 (reserved)
+pub const LAYOUT_ALIGN: &str = "align";       // D-REPRC1 (reserved)
+pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA2 (reserved)
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Canonical keyword/type/builtin tables (c44: single source of truth).
 //

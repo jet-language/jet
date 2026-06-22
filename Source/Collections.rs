@@ -153,6 +153,8 @@ fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("join", 0) => Some(args.first().cloned()),
+        // D-DETACH1: fire-and-forget — consumes the Task handle, returns unit.
+        ("detach", 0) => Some(None),
         _ => None,
     }
 }

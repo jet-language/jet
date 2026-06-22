@@ -91,6 +91,9 @@ fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "FileWriter" => Some("JetFileWriter"),
         // FileLines is an internal sema marker; it should never appear in emitted Rust.
         "FileLines" => Some("()"),
+        // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
+        "StdinHandle" => Some("JetStdinReader"),
+        "StdinLines" => Some("()"),
         _ => None,
     }
 }

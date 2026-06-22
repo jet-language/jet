@@ -295,6 +295,13 @@ impl<'a> Parser<'a> {
                     self.func_with_purity(true).map(Item::Func)
                 }
                 TokKind::KwPub => match self.peek2().kind {
+                    // D-REPRC1: `pub #layout(c) struct Name { … }`
+                    TokKind::Hash if {
+                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
+                    } => {
+                        self.bump(); // consume `pub`
+                        self.layout_struct_def(true).map(Item::Struct)
+                    }
                     // D-MIGRATE1: `pub #PublishedSchema struct Name { … }`
                     TokKind::Hash if {
                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
@@ -345,6 +352,10 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::Hash if self.at_numeric_distinct_def() => {
                     self.distinct_def(false).map(Item::Distinct)
+                }
+                // D-REPRC1: `#layout(c) struct Name { … }`
+                TokKind::Hash if self.at_layout_struct() => {
+                    self.layout_struct_def(false).map(Item::Struct)
                 }
                 // D-MIGRATE1: `#PublishedSchema struct Name { … }`
                 TokKind::Hash if self.at_published_schema_struct() => {
@@ -1113,6 +1124,8 @@ impl<'a> Parser<'a> {
             derives,
             is_published_schema: false,
             published_schema_span: None,
+            layout: None,
+            layout_span: None,
         })
     }
 
@@ -1641,6 +1654,74 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // --- layout attribute (D-REPRC1) ----------------------------------------
+
+    /// D-REPRC1: true when `#layout(…) struct` or `#layout(…) pub struct` is at
+    /// the cursor. Token stream: `# layout ( variant ) [struct | pub]`.
+    fn at_layout_struct(&self) -> bool {
+        if !matches!(&self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) {
+            return false;
+        }
+        // peek3 must be `(`
+        matches!(&self.peek3().kind, TokKind::LParen)
+    }
+
+    /// D-REPRC1: parse `#layout(variant) [pub] struct Name { … }`.
+    /// Only `c` is supported; `packed`, `align`, `columnar` parse-and-error.
+    fn layout_struct_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+        let attr_start = self.peek().span;
+        self.bump(); // consume `#`
+        let (attr_name, attr_name_span) = self.expect_ident("after `#`")?;
+        debug_assert_eq!(attr_name, Syntax::ATTR_LAYOUT);
+        self.expect(TokKind::LParen, "after `#layout`")?;
+        let (variant, variant_span) = self.expect_ident("inside `#layout(…)`")?;
+        let layout = match variant.as_str() {
+            v if v == Syntax::LAYOUT_C => Some(crate::AST::StructLayout::C),
+            v if v == Syntax::LAYOUT_PACKED
+                || v == Syntax::LAYOUT_ALIGN
+                || v == Syntax::LAYOUT_COLUMNAR =>
+            {
+                return Err(Diagnostic::error(
+                    "E1105",
+                    format!("`#layout({})` is reserved and not yet supported", v),
+                    "only `#layout(c)` is implemented in this release".to_string(),
+                    "use `#layout(c)` for C-compatible layout, or omit `#layout` for the default".to_string(),
+                    Some(variant_span),
+                ));
+            }
+            _ => {
+                return Err(Diagnostic::error(
+                    "E1105",
+                    format!("`#layout({})` isn't a known layout variant", variant),
+                    "the supported variants are: `c` (C-compatible layout)".to_string(),
+                    "write `#layout(c)` for C-compatible layout".to_string(),
+                    Some(variant_span),
+                ));
+            }
+        };
+        let attr_end = self.peek().span;
+        self.expect(TokKind::RParen, "to close `#layout(…)`")?;
+        let attr_span = Span::new(attr_start.start, attr_end.end);
+        // Consume optional semicolons (newline-inserted) before `struct`/`pub`.
+        while matches!(&self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        let is_pub = outer_is_pub || if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.bump();
+            true
+        } else {
+            false
+        };
+        let mut def = self.struct_def_after_pub(is_pub)?;
+        def.layout = layout;
+        def.layout_span = Some(attr_span);
+        let _ = attr_name_span;
+        Ok(def)
+    }
+
     // --- published-schema marker + migration blocks (D-MIGRATE1) -----------
 
     /// D-MIGRATE1 (ratified 2026-06-22): true when `#PublishedSchema struct` or
@@ -1751,6 +1832,8 @@ impl<'a> Parser<'a> {
             derives,
             is_published_schema: false,
             published_schema_span: None,
+            layout: None,
+            layout_span: None,
         })
     }
 

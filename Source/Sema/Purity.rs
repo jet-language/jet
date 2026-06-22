@@ -67,6 +67,12 @@ pub(crate) fn is_impure_builtin(name: &str) -> bool {
     crate::Syntax::IMPURE_BUILTINS.contains(&name)
 }
 
+/// D-STDIN1=A: std module calls that are impure (read from environment/stdin).
+/// Unlike `is_nondeterministic_core` (E3403), these fire E3401 in pure context.
+pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
+    matches!((module, method), ("core.io", "stdin" | "input" | "read_all_input"))
+}
+
 /// E3403: std calls that are non-deterministic — their result depends on wall
 /// clock or RNG, so they cannot appear in a pure evaluation. Keyed on the
 /// resolved `(module, method)` pair (std calls are method calls on a module

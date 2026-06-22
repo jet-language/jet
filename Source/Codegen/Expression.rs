@@ -839,6 +839,13 @@ fn emit_builtin_method(
         "reverse" => Some(format!("({}).reverse()", recv)),
         "sort" => Some(format!("({}).sort()", recv)),
         "join" if args.is_empty() => Some(format!("({}).join()", recv)),
+        // D-DETACH1: fire-and-forget — drop the JetTask handle (Rust drops the JoinHandle,
+        // which detaches the thread; the task keeps running). Returns unit.
+        // No type guard: `detach` is only valid on Task values (sema enforces this);
+        // codegen drops the handle unconditionally.
+        "detach" if args.is_empty() => {
+            Some(format!("{{ let _detach = ({}); }}", recv))
+        }
         "join" => Some(format!(
             "({}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
             recv,
@@ -904,6 +911,16 @@ fn emit_builtin_method(
         // sema prevents this from being used anywhere meaningful.
         "lines" if matches!(&rty, Some(Type::Named(n)) if n == "FileReader") => {
             Some(format!("/* FileLines handled in loop */ &mut ({})", recv))
+        }
+        // D-STDIN1=A: StdinHandle methods.
+        "read_line" if matches!(&rty, Some(Type::Named(n)) if n == "StdinHandle") => {
+            Some(format!(
+                "{}jet_std_io_stdin_read_line(&mut ({}))",
+                cx.root_prefix, recv
+            ))
+        }
+        "lines" if matches!(&rty, Some(Type::Named(n)) if n == "StdinHandle") => {
+            Some(format!("/* StdinLines handled in loop */ &mut ({})", recv))
         }
         // D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): arena/bump/pool/fixed
         // instance methods. recv is a `JetArena`/`JetBump`/`JetPool`/`JetFixed`.
@@ -1138,6 +1155,8 @@ fn emit_core_call(
             }
         }
         ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
+        // D-STDIN1=A: io.stdin() → JetStdinReader handle.
+        ("core.io", "stdin") => format!("{}()", helper("jet_std_io_stdin")),
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
         ("core.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
         ("core.env", "set") => format!(
@@ -1212,6 +1231,8 @@ fn emit_core_call(
         ("jet.log", "set_level") => format!("{}(&({}))", helper("jet_ring_log_set_level"), arg(0)),
         // E2-M12 D-OBS3: trace context for structured log records.
         ("jet.log", "set_trace_id") => format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0)),
+        // D-LOGFMT1=A: explicit log format override.
+        ("jet.log", "setup") => format!("{}(&({}))", helper("jet_ring_log_setup"), arg(0)),
         ("jet.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
         // D-JSON3=B: lenient decode emits one log line per coercion; decoded value is plain.
         ("jet.json", "decode") => format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0)),

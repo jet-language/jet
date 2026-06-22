@@ -7,18 +7,17 @@ need to make. Each report ends at the decision seam: its "open decisions" are
 the future ballot rows. Approve a direction and a report converts cleanly into
 a sidequest plan.
 
-| # | Proposal | What it covers | One-line read |
+Only genuinely-unexplored ideas remain here. Anything already carded or
+ratified has been extracted out (the proposal files note where).
+
+| # | Proposal | What's left (un-carded) | One-line read |
 |---|---|---|---|
-| **P1** | [Qualifier system](P1-qualifier-system.md) | trait vs attribute vs **tag** boundary; maturity tags; capabilities & prohibitions; uncertainty & cost dimensions | Ratify the taxonomy first — it's cheap and unblocks every "is this a trait or an attribute?" question. |
-| **P2** | [Content-addressed definitions](P2-content-addressed-definitions.md) | Unison-style identity = content hash; free renames; no merge conflicts; dependency-hell relief | Adopt as an invisible build cache now; the visible name/version model is a gated, larger design. |
-| **P3** | [Reactive / dataflow](P3-reactive-dataflow.md) | spreadsheet-style auto-recalculation | Take the derived dataflow *graph* as tooling; reject reactivity as the evaluation model. |
-| **P4** | [Sigils & fan-out](P4-sigils-and-fanout.md) | reference sigil `@` vs `&`; namespace fan-out `s.{…}` | Two sugar notes with real sigil-budget / one-operator-two-axes conflicts to weigh. |
+| **P1** | [Qualifier system — leftover policies](P1-qualifier-system.md) | maturity tags (`experimental`/`tested`/`hardened`); general value **uncertainty**; **cost/budget** types | The taxonomy + effects are ratified (c62/c66, D-QUAL1/2, D-EFF1); these three policies on the tag engine have no card yet. |
+| **P2** | [Content-addressed definitions](P2-content-addressed-definitions.md) | Unison-style identity = content hash; free renames; no merge conflicts; dependency-hell relief | Genuinely new — not carded. Adopt as an invisible build cache now; the visible name/version model is a gated, larger design. |
 
-**The linchpin is P1 §1** — the trait/attribute/tag decision rule. P1's other
-sections and the value dimensions all classify themselves against it, so it is
-the one piece worth ratifying on its own.
+Fully extracted and removed (now tracked entirely as cards + decisions):
 
-Already-decided scratchpad items, for the record (not re-proposed):
-
-- `@`→`#` **attribute** sigil — ratified (D-ATTR1, board card c01). Distinct
-  from P4's *reference* sigil note.
+- **P3 — reactive / dataflow** → card **c64**, decision **D-REACT1** (reactivity
+  = tooling + opt-in `jet.reactive` library, not core semantics).
+- **P4 — sigils & fan-out** → card **c65**, decision **D-FANOUT2** (defer
+  namespace fan-out; keep S75 call fan-out; reference sigil stays `&`).

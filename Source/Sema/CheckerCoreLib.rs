@@ -317,6 +317,15 @@ impl<'a> Checker<'a> {
             // Return the declared type so the call site doesn't cascade.
             return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
+        // D-STDIN1=A / E3401: `pure fn` cannot read from stdin.
+        if self.in_pure && is_impure_core(module, name) {
+            let api = format!("{}.{}", module_short_name(module), name);
+            self.diags.push(e3401(&self.fn_name.clone(), &api, &[], span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+        }
         let sig = core_fixed_sig(module, name);
         match (module, name) {
             ("core.mem", "volatile_read") => {
@@ -981,6 +990,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
         | "FileReader" | "FileWriter" | "FileLines"
+        | "StdinHandle" | "StdinLines"
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
@@ -1094,6 +1104,14 @@ pub(crate) fn file_handle_method_return(
                     Some(span),
                 ));
                 Some(None)
+            }
+            _ => None,
+        },
+        // D-STDIN1=A: StdinHandle methods.
+        "StdinHandle" => match method {
+            "lines" if n_args == 0 => Some(Some(Type::Named("StdinLines".to_string()))),
+            "read_line" if n_args == 0 => {
+                Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
             }
             _ => None,
         },
@@ -1373,6 +1391,8 @@ pub(crate) fn core_fixed_sig(
         ("core.io", "read_all_input") => {
             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
         }
+        // D-STDIN1=A: streaming line-by-line stdin.
+        ("core.io", "stdin") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
         ("core.env", "get") => Some((
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
@@ -1467,6 +1487,8 @@ pub(crate) fn core_fixed_sig(
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
         ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
+        // D-LOGFMT1=A: override log output format ("json" | "text").
+        ("jet.log", "setup") => Some((vec![(read, Type::String)], None)),
         // jet.json: first-party JSON with coercion surfacing (D-JSON1, D-JSON3).
         // `decode` is the lenient variant: coerces string→number/bool, emits one log
         // line per coercion (D-JSON3=B), and returns the value plain.
@@ -1606,7 +1628,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "copy",
             "rename",
         ],
-        "core.io" => &["args", "input", "read_all_input", "eprint"],
+        "core.io" => &["args", "input", "read_all_input", "eprint", "stdin"],
         "core.env" => &["get", "set", "current_dir", "home_dir"],
         "core.process" => &["exit", "run"],
         "core.math" => &[
@@ -1629,7 +1651,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "jet.csv" => &["parse", "render"],
         "jet.toml" => &["parse", "render"],
         "jet.yaml" => &["parse", "render"],
-        "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id"],
+        "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id", "setup"],
         "jet.json" => &["parse", "decode", "render", "render_pretty"],
         "jet.time" => &["now", "format"],
         "jet.crypto" => &["sha256", "sha256_bytes"],

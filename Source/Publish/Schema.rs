@@ -295,6 +295,8 @@ mod tests {
             derives: vec![],
             is_published_schema: true,
             published_schema_span: None,
+            layout: None,
+            layout_span: None,
         };
         let snap = snapshot_from_struct(&s, "2.0.0");
         let text = snap.write();

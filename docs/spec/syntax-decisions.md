@@ -45,9 +45,10 @@ newline). Rejected: `println` — recognized only as foreign syntax (S14).
 S14), lowercase `int`/`text`.
 
 **S2 — Variable bindings (M1)** *(ratified 2026-06-11; **superseded 2026-06-18
-by D-BIND1**)*: bindings use **Odin-style sigils** — `**name :: expr`** for an
+by D-BIND1**; **immutable sigil superseded again 2026-06-22 by D-BIND2 — `::` → `@=`**)*:
+bindings use **Odin-style sigils** — ~~`name :: expr`~~ **`name @= expr`** (D-BIND2) for an
 immutable binding, `**name := expr**` for a mutable binding, with an optional
-type annotation before the sigil (`ratio: Float :: 3.14`, `count: Int := 0`).
+type annotation before the sigil (`ratio: Float @= 3.14`, `count: Int := 0`).
 `=` stays reassignment of an existing `:=` binding (S17). The former keywords
 `**val**` / `**var**` are **retired to teaching errors** (E_KEYWORD_RETIRED →
 "use `name :: value` / `name := value`"). Rejected: `set` (sounds like
@@ -1979,6 +1980,229 @@ The lowercase spellings (`test`/`todo`/`pure`) are retired to teaching errors po
 `#`-marker forms (S14 pattern). Amends S43, S60, D-TOOL2, S82 on spelling only — semantics
 unchanged.
 
+### Owner batch (ratified 2026-06-22)
+
+This batch drains the open ballot (cards c06, c09, c51, c64–c66, c73, c77–c78, c82,
+c90–c91, c94, c97–c98, c102–c105). Each entry is also a row in the decision log.
+
+**D-UNSAFE2 — `#Audit` text merges into `#Unsafe`** *(ratified 2026-06-22, option B)*:
+the safety justification becomes the argument to the gate: `#Unsafe("reason") { … }` (and
+`#Unsafe("reason") fn`). The separate `#Audit("…")` marker line is **retired** — the
+unsafe description IS the review artifact, not a second LOC. Owner: "the recommendation
+is naive." Amends D-LL1/E2-M13's two-marker form; `#Audit` spellings move to a teaching
+error pointing at `#Unsafe("…")`. UNBLOCKED. (c09)
+
+**D-FIXARR1 — `[T#N]` lowers to a real fixed stack array** *(ratified 2026-06-22, option
+B)*: the ratified S76 `[T#N]` type becomes a real fixed-size stack array in codegen (no
+`Vec` lowering). Copies when `T` is copyable, moves otherwise; a `[T#N]` widens to `[T]`
+by copying into a growable list when passed to a `[T]` slot; `var x := [1,2,3]` keeps
+S76's beginner rule (widens to `[Int]`). Unlocks `#Uninit` (D-UNINIT1) soundness with no
+new syntax. UNBLOCKED. (c82)
+
+**D-CAP2 — `copy` / `share` are prefix keywords** *(ratified 2026-06-22, option A)*:
+duplicate-vs-share after a `take` is spelled with a leading verb at the call site —
+`party.add(copy player)` / `party.add(share player)` — never inferred (the plan kills
+implicit clone, L0201). UNBLOCKED. (c06)
+
+**D-CAP3 — capability sits on the type side** *(ratified 2026-06-22, option A)*: parameter
+capability attaches to the type, not the binding: `fn write(file: edit File, data: view
+Bytes)`. Consistent with `name: Type` everywhere; no type written ⇒ capability inferred
+too (one location for both). UNBLOCKED. (c06)
+
+**D-EFF2 — effect polymorphism (hybrid)** *(ratified 2026-06-22, option D)*: default is
+transparent flow-through — a higher-order fn's effect set is its own body plus, at each
+call, the effects of statically-known function arguments (zero syntax; Marcus's
+`#Pure`-violation errors at his line). Escaping/boxed function values default to the
+maximal effect set (sound). Two optional expert levers: `#Pure fn(…)` / `#(net) fn(…)`
+**param types** to demand/bound a callback, and `#(via f)` on the **signature** to publish
+a tight pass-through that holds when the value escapes. Effect rows are static + erased
+(I3). (c66)
+
+**D-EFF3 — effects on trait methods (dispatch contract)** *(ratified 2026-06-22, option
+C)*: a trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn
+render(self) #(gpu)`). The bound is BOTH the impl obligation (an impl's inferred effects
+must be ⊆ the bound, else E0710) AND the dispatch contract (a trait-object call's effect IS
+the declared bound; un-annotated methods inferred per-impl under static dispatch, E0711
+with a fix-it when called through an object under an effect ceiling). Safe-by-default holds
+through dynamic dispatch. (c66)
+
+> **D-EFF2 + D-EFF3 complete the effect-system surface.** With D-EFF1=B, D-QUAL1=1, D-EFF2=D,
+> D-EFF3=C ratified, the effect-system surface is now **fully decided**. Implementation of
+> the whole cluster (D-EFF1 and everything gated on it — D-SCAP1/D-TAINT1/D-DET1/D-TXN1/
+> D-TXN2/D-PROP1) was waiting only on these two sub-questions; the gate is cleared. Build now.
+
+**D-MIGRATE2A — `add f: T = val`** *(ratified 2026-06-22, option A)*: a migration adds a
+field with a default using the `=` already used for struct-field defaults: `add verified:
+Bool = false`. UNBLOCKED. (c73)
+
+**D-MIGRATE2D — `remove f`** *(ratified 2026-06-22, option A)*: a migration deletes a field
+with the plain verb `remove legacy_id` (not `drop` — `drop` connotes destructive
+db-level deletion). UNBLOCKED. (c73)
+
+**D-MIGRATE2E — `change f: Old -> New via { expr }`, verb spelled `change`** *(ratified
+2026-06-22, option B structure, owner-renamed)*: a field type-change is spelled `change`
+(not `transform`); it carries an inline converter in curly braces and supports both
+multi-line and single-line forms: `change price: Int -> Usd via { (cents) => Usd(cents) }`.
+Owner: "instead of the word transform use **change**. Keep the structure/syntax the same as
+b." Reuses the ratified `->` arrow; omitting the converter falls back to an `impl Old ->
+New` in scope (D-MIGRATE2B). UNBLOCKED. (c73)
+
+**D-MIGRATE2F — no `reorder` verb** *(ratified 2026-06-22, option B)*: reordering a
+struct's fields is not a tracked breaking change and needs no migration verb; field order
+belongs to a serializer's own versioning, not the `#PublishedSchema` baseline. UNBLOCKED.
+(c73)
+
+**D-MIGRATE2B — converter source: inline wins, else named `impl`** *(ratified 2026-06-22,
+option C)*: a `change` converter resolves in order — (1) the inline `via { … }`, (2) an
+`impl Old -> New` in scope, (3) E0910 asking for one. One resolution rule; reuses the
+ratified D-ERR-CONV `impl Source -> Target` surface (invoked by the migration machinery at
+data-load time, not by `?`). UNBLOCKED. (c73)
+
+**D-MIGRATE2C — `jet schema` surface** *(ratified 2026-06-22, option A)*: squash with
+`jet schema squash --before <ver>` (the flag names the cutoff, removing through/at/before
+ambiguity); `jet schema status` confirmed; **no** separate `jet schema check` verb — `jet
+build`'s E0910 is already the CI gate (a second verb would re-implement detection, I3).
+UNBLOCKED. (c73)
+
+**D-JSONOUT1 — built-in `#[Serialize]` marker drives JSON** *(ratified 2026-06-22, option
+A)*: a built-in `#[Serialize]` marker (distinct from S56 user-derives) makes the compiler
+generate `json.render`/typed decode by walking fields; one marker covers in and out; field
+rename via `#json("name")`. **Must coordinate with D-SERDE1** — the same serialize model
+backs JSON, so JSON is one format of the unified serde data model, not a parallel path.
+Owner: "joined at the hip with the serde planning." Gated-on D-SERDE1 (shared model). (c90)
+
+**D-ARGS1 — builder-spec CLI parsing** *(ratified 2026-06-22, option A)*: a builder spec
+(`args.spec().flag(…).option(…).positional(…)`) parsed against `io.args()` gives typed
+values, an auto-generated `--help`, and teaching errors today with no S56 dependency; the
+spec value can later back a `#[Args]` struct form once derives land. Generated `--help` and
+error text are product copy → snapshot-tested. UNBLOCKED. (c91)
+
+**D-MATHLIB1 — `jet.linalg` ring package** *(ratified 2026-06-22, option A)*: numerics
+(vectors, matrices, dot/cross/matmul, decompositions/FFT later) ship as a first-party ring
+package like regex/csv/toml — keeps Core small (I8); can offer comptime-sized matrices
+(rides D-FIXARR1/S76). Native-vs-bootstrap-crate (I6) is an impl gate decided like regex.
+UNBLOCKED. (c94)
+
+**D-SIMD1 — safe portable lane types** *(ratified 2026-06-22, option A)*: first-class
+portable lane types (`F32x4`/`F64x2`) with safe ops lowering to portable SIMD with scalar
+fallback — memory-safe by default (I1). Raw target intrinsics stay available behind
+`#Unsafe`. UNBLOCKED. (c94)
+
+**D-REACT1 — reactivity is tooling + a library, not core semantics** *(ratified 2026-06-22,
+option B)*: ordinary binding semantics are unchanged; the compiler may expose the derived
+dataflow graph to tooling/IDEs, and runtime reactivity ships as an opt-in `jet.reactive`
+library. UNBLOCKED. (c64)
+
+**D-FANOUT2 — defer namespace/member fan-out** *(ratified 2026-06-22, option B)*: only the
+ratified S75 call fan-out `f.[a,b,c]` ships; a second fan-out axis (`service.{start,stop}`
+/ `obj.[x,y]`) waits for real-use evidence before another dot/bracket meaning is added.
+UNBLOCKED. (c65)
+
+**D-STRPARSE1 — runtime parse APIs + comptime `Result`/`Option`** *(ratified 2026-06-22,
+option A)*: add runtime string-parse APIs (`parse_int`, `.lines()`, …) AND allow comptime
+evaluation through `Result`/`Option` for pure parse paths, so comptime schema/config
+ingestion works. UNBLOCKED. (c97)
+
+**D-CTCORE1 — curated pure comptime-Core whitelist** *(ratified 2026-06-22, option B)*:
+comptime executes only a curated whitelist of deterministic, pure Core functions (math,
+string helpers); other Core calls (`fs.read`, `env.get`, …) produce a teaching diagnostic.
+No inline execution of arbitrary Core at comptime — keeps builds reproducible and comptime
+pure; build-time I/O stays the explicit, audited tier (rides D-CTIO1's `embed_*`). The
+whitelist grows with tests. UNBLOCKED. (c98)
+
+**D-JIT1 — stay-interpreter-for-v1, JIT behind a seam** *(ratified 2026-06-22, option D)*:
+`jet serve` ships hot-reload on the proven comptime interpreter behind a stable
+`JitBackend` seam; a Cranelift JIT lands later as tier-1 (interpreter stays permanent
+tier-0). rustc-in-the-interactive-loop (B) rejected as an I2 hazard. A runtime-side
+Cranelift dep (D+) needs separate owner dep-approval (I6 runtime exception); without it,
+plain D holds. UNBLOCKED. (c77)
+
+**D-HOTSWAP1 — module-boundary swap + type-stable state preservation** *(ratified
+2026-06-22, option B)*: the hot-reload unit is a module; a type-stable edit swaps code and
+keeps the module's live state; a type/layout-changing edit does NOT reinterpret old data —
+it does a clean, announced, connection-drained restart. The type-surface check is a sema
+job (I3). UNBLOCKED. (c77)
+
+**D-DEVMODE1 — one `jet dev` verb (auto-detect) + dev↔release identity is a HARD RULE**
+*(ratified 2026-06-22, option A for home; Q2 ratified as a hard rule)*: `jet dev <entry>`
+is the single dev command — it detects run-to-completion programs (rerun on save) vs
+resident programs (hot-swap on save); experts override with `--restart`/`--swap`/`--watch=off`
+flags, not a second verb. **Q2 hard rule (owner: "Programs must absolutely behave identically
+as release build & interpreter/JIT"):** a program's output under the dev runtime
+(interpreter/JIT) MUST be byte-identical to the release (rustc) build; a `tests/` mode runs
+every golden example through both paths and diffs — **any divergence is a release blocker**,
+not a warning. UNBLOCKED. (c77)
+
+**D-SOA2A — the `soa` layout keyword is renamed `columnar`** *(ratified 2026-06-22, option
+C)*: the layout keyword inside `#layout(…)` is **`columnar`** (Arrow/Parquet column-store
+term, self-defining, no concurrency-vocabulary collision). This **renames the ratified
+D-SOA1 `#layout(soa)` to `#layout(columnar)`** (see the amended D-SOA1 entry). Implementation
+stays deferred post-v1 (Later tier). (c78)
+
+**D-SOA2B — whole-struct columnar only in v1** *(ratified 2026-06-22, option A)*:
+`#layout(columnar)` converts every field; partial annotation (`#layout(columnar: x, y)`)
+is deferred — two memory regions need new ownership/aliasing surface. Deferred post-v1.
+(c78)
+
+**D-SOA2C — reserve the per-container prefix-keyword spelling** *(ratified 2026-06-22,
+option A)*: reserve `columnar [Particle]` (prefix keyword on a list type) for a future
+per-use layout override; a layout is a storage modifier, not a type parameter, so the
+generic-style `Columnar<T>` form is not reserved. Pure grammar reservation; nothing ships
+today. Deferred post-v1. (c78)
+
+**D-SOA2D — `#layout(columnar)` is serialization-transparent** *(ratified 2026-06-22, option
+A)*: serialization sees the logical struct; output is identical with or without the layout
+attribute. `#layout` is a memory concern only; columnar serialization (e.g. Arrow IPC) is a
+purpose-built serializer, not the default `#[Serialize]`. Deferred post-v1. (c78)
+
+**D-TEST1 — a parameterized `#Test fn` is a property test** *(ratified 2026-06-22, option
+B)*: an `#Test fn` with parameters is a property test (inputs generated from the parameter
+types, automatic invisible shrinking); one with no parameters is a unit test. Zero new
+syntax — matches the S82 worked example. UNBLOCKED. (c51)
+
+**D-TEST4 — doctest: fenced ```jet block + `// =>` trailing comment** *(ratified 2026-06-22,
+option A)*: code examples inside `///` doc comments (S49) run as tests; expected output is a
+`// =>` comment on the producing line; a mismatch fires E2901. Reuses the `//` comment marker
+(S5); no new tokens. UNBLOCKED. (c51)
+
+**D-BIND2 — immutable binding spelled `@=`** *(ratified 2026-06-22, option A)*: the immutable
+binding is `name @= expr`. `:=` stays the mutable binding, `=` stays reassignment of a `:=`
+binding (S17). This is a fundamental token change: **`@=` supersedes the `::` immutable
+binding** spent by D-BIND1/S2 (2026-06-18). Owner picked A (`@=`), not the card's rec C
+(`$=`). Requires a repo-wide migration of `::`-bindings to `@=` (implementation). UNBLOCKED.
+(c102)
+
+**D-NUMOPS1 — checked-by-default integer overflow + expert numeric surface** *(ratified
+2026-06-22, option A)*: plain integer arithmetic **traps on overflow** by default
+(safe-by-default; a silent corruption becomes a caught bug); experts opt a specific op into
+`wrapping(…)` / `saturating(…)` / `checked(…) -> T?`, visible at the use site. Ship the
+standard numeric value/op surface: per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON` +
+predicates (`is_nan`), bit ops (`<<`, `&`, `count_ones`), and explicit width conversions
+(`.to_u8()?` narrowing, `.to_i64()` widening — no implicit narrowing). **Gated on D-SG9's
+sized integers being implemented first** (the `Type` enum is still Int/Float); implementing
+D-SG9 (esp. `U8`) also unblocks `embed_bytes` (c75). (c103)
+
+**D-SERDE1 — one format-agnostic Serialize/Deserialize data model** *(ratified 2026-06-22,
+option A)*: a type derives `Serialize`/`Deserialize` once against an abstract data model;
+each format (JSON/CSV/TOML/binary) is an adapter implementing a `Serializer`/`Deserializer`
+protocol, so one derive drives every present and future format. Adds `Deserialize` as the
+symmetric counterpart to S55's `Serialize`; field attributes `#[rename/default/skip/flatten/
+rename_all]`. CSV (D-CSVROW1) and JSON (D-JSONOUT1) are arms of THIS model, sharing one
+decoder path. Data model lives in Core; each format adapter is a ring library. **Gated on
+user-defined derives (S56, Epoch 3)** — ratify the shape now, build when S56 lands. (c104)
+
+**D-ITER1 — full lazy iterator-adapter set** *(ratified 2026-06-22, option A)*: ship the
+everyday lazy adapter family (enumerate, zip, chunks, windows, take/skip(_while), flat_map,
+scan, group_by, dedup, step_by, peekable, partition, find/position, fold/reduce, min/max_by,
+…) as methods on the ratified iterator protocol (D-EXT1 Tier 1) — lazy, allocation-free
+until a terminal op, no new grammar. Conservative familiar spellings. UNBLOCKED. (c105)
+
+**D-DBG2 amendment — owner affirmed C (expert raw-frame access)** *(ratified 2026-06-22)*:
+the owner's final ballot picked **C (surface raw Rust frames)**. This does NOT introduce an
+unconditional I2 violation: C is satisfied by the existing expert opt-in `jet debug
+--raw-frames` (the default view stays clean — I2 intact). See the amended D-DBG2 decision-log
+row.
+
 ## Enforcement
 
 Ratified decisions are **frozen**. `cargo test` runs `tests/decisions.rs`,
@@ -2080,12 +2304,45 @@ upgrade that must re-earn an owner crate sign-off.
 
 | Date       | ID  | Decision                                    | By    |
 | ---------- | --- | ------------------------------------------- | ----- |
+| 2026-06-22 | D-UNSAFE2 | merge audit text into unsafe (B): the safety reason becomes the argument to the gate — `#Unsafe("reason") { … }` / `#Unsafe("reason") fn` — and the separate `#Audit("…")` marker is retired (the unsafe description IS the review artifact). Amends D-LL1/E2-M13; `#Audit` → teaching error pointing at `#Unsafe("…")`. UNBLOCKED. c09 | owner |
+| 2026-06-22 | D-FIXARR1 | `[T#N]` lowers to a real fixed stack array (B): the ratified S76 type becomes a real fixed-size stack array in codegen (no `Vec`); copies when `T` copyable, moves otherwise; widens to `[T]` by copy into a growable list when passed to a `[T]` slot; `var x := [1,2,3]` keeps S76 (widens to `[Int]`). Unlocks `#Uninit` (D-UNINIT1) soundness, no new syntax. UNBLOCKED. c82 | owner |
+| 2026-06-22 | D-CAP2 | `copy`/`share` are prefix keywords (A): duplicate-vs-share after a `take` is a leading call-site verb (`add(copy player)` / `add(share player)`), never inferred (kills implicit clone L0201). UNBLOCKED. c06 | owner |
+| 2026-06-22 | D-CAP3 | capability on the type side (A): `fn write(file: edit File, data: view Bytes)` — capability rides the type, consistent with `name: Type`; no type written ⇒ capability inferred too. UNBLOCKED. c06 | owner |
+| 2026-06-22 | D-EFF2 | effect polymorphism, hybrid (D): default transparent flow-through (own body + statically-known fn-arg effects, zero syntax); escaping/boxed fn values default maximal (sound); expert levers `#Pure fn(…)`/`#(net) fn(…)` param types (demand/bound a callback) and `#(via f)` on the signature (publish a tight pass-through that holds when escaping). Static + erased (I3). With D-EFF3 this completes the effect-system surface and clears the D-EFF1 impl gate. c66 | owner |
+| 2026-06-22 | D-EFF3 | effects on trait methods, dispatch contract (C): a trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn render(self) #(gpu)`) that is BOTH the impl obligation (inferred ⊆ bound, else E0710) AND the dispatch contract (a trait-object call's effect = the declared bound; un-annotated inferred per-impl statically, E0711 + fix-it when called through an object under an effect ceiling). Safe-by-default holds through dynamic dispatch. Completes the effect-system surface; clears the D-EFF1 impl gate. c66 | owner |
+| 2026-06-22 | D-MIGRATE2A | migration add-field (A): `add f: T = val` — reuses `=` from struct-field defaults. UNBLOCKED. c73 | owner |
+| 2026-06-22 | D-MIGRATE2D | migration remove-field (A): plain verb `remove f` (not `drop`). UNBLOCKED. c73 | owner |
+| 2026-06-22 | D-MIGRATE2E | migration change-type (B structure, verb renamed `change`): `change f: Old -> New via { expr }` — owner renamed `transform`→`change`; multi-line or single-line `via { … }`; reuses the `->` arrow; omitting the converter falls back to an `impl Old -> New` in scope (D-MIGRATE2B). UNBLOCKED. c73 | owner |
+| 2026-06-22 | D-MIGRATE2F | migration reorder (B): no `reorder` verb — field order is not a tracked breaking change; belongs to a serializer's own versioning, not the `#PublishedSchema` baseline. UNBLOCKED. c73 | owner |
+| 2026-06-22 | D-MIGRATE2B | converter source (C): resolve a `change` converter as (1) inline `via { … }`, (2) `impl Old -> New` in scope, (3) E0910 asking for one. Reuses D-ERR-CONV's `impl Source -> Target` (invoked by migration machinery at data-load time, not by `?`). UNBLOCKED. c73 | owner |
+| 2026-06-22 | D-MIGRATE2C | `jet schema` surface (A): squash via `jet schema squash --before <ver>` (flag names the cutoff); `jet schema status` confirmed; NO separate `jet schema check` — `jet build`'s E0910 is already the CI gate (a 2nd verb would re-implement detection, I3). UNBLOCKED. c73 | owner |
+| 2026-06-22 | D-JSONOUT1 | built-in `#[Serialize]` marker drives JSON (A): built-in marker (distinct from S56 user-derives) generates `json.render`/typed decode by field-walk; one marker covers in+out; rename via `#json("name")`. **Coordinate with D-SERDE1** — JSON is one format of the unified serde model, not a parallel path (owner: "joined at the hip with the serde planning"). Gated-on D-SERDE1 (shared model). c90 | owner |
+| 2026-06-22 | D-ARGS1 | builder-spec CLI parsing (A): `args.spec().flag(…).option(…).positional(…)` parsed against `io.args()` → typed values + auto `--help` + teaching errors, no S56 dep; later backs a `#[Args]` struct form when derives land. `--help`/error text = product copy → snapshot-tested. UNBLOCKED. c91 | owner |
+| 2026-06-22 | D-MATHLIB1 | `jet.linalg` ring package (A): numerics ship as a first-party ring package (like regex/csv/toml), keeping Core small (I8); comptime-sized matrices ride D-FIXARR1/S76. Native-vs-bootstrap-crate is an I6 impl gate decided like regex. UNBLOCKED. c94 | owner |
+| 2026-06-22 | D-SIMD1 | safe portable lane types (A): first-class `F32x4`/`F64x2` with safe ops lowering to portable SIMD + scalar fallback (memory-safe by default, I1); raw target intrinsics stay behind `#Unsafe`. UNBLOCKED. c94 | owner |
+| 2026-06-22 | D-REACT1 | reactivity = tooling + library, not core semantics (B): ordinary binding semantics unchanged; compiler may expose the dataflow graph to tooling; runtime reactivity ships as opt-in `jet.reactive`. UNBLOCKED. c64 | owner |
+| 2026-06-22 | D-FANOUT2 | defer namespace/member fan-out (B): only the ratified S75 call fan-out `f.[a,b,c]` ships; a second axis (`s.{…}` / `obj.[x,y]`) waits for real-use evidence. UNBLOCKED. c65 | owner |
+| 2026-06-22 | D-STRPARSE1 | runtime parse APIs + comptime Result/Option (A): add runtime string-parse APIs (`parse_int`, `.lines()`) AND comptime evaluation through `Result`/`Option` for pure parse paths (comptime schema/config ingestion). UNBLOCKED. c97 | owner |
+| 2026-06-22 | D-CTCORE1 | curated pure comptime-Core whitelist (B): comptime executes only a curated whitelist of deterministic pure Core fns (math/string); other Core calls (`fs.read`, `env.get`) → teaching diagnostic. No inline arbitrary-Core execution at comptime — builds stay reproducible, comptime stays pure; build-time I/O is the explicit audited tier (D-CTIO1 `embed_*`). Whitelist grows with tests. UNBLOCKED. c98 | owner |
+| 2026-06-22 | D-JIT1 | stay-interpreter-for-v1, JIT behind a seam (D): `jet serve` ships hot-reload on the comptime interpreter behind a stable `JitBackend` seam; Cranelift JIT lands later as tier-1 (interpreter = permanent tier-0); rustc-in-the-interactive-loop rejected (I2 hazard). A runtime-side Cranelift dep (D+) needs separate owner dep-approval (I6 runtime exception); else plain D. UNBLOCKED. c77 | owner |
+| 2026-06-22 | D-HOTSWAP1 | module-boundary swap + type-stable state preservation (B): reload unit = module; type-stable edit swaps code, keeps live state; a type/layout change does NOT reinterpret old data — clean announced connection-drained restart. Type-surface check is sema (I3). UNBLOCKED. c77 | owner |
+| 2026-06-22 | D-DEVMODE1 | one `jet dev` verb auto-detect (A) + dev↔release identity is a HARD RULE: `jet dev <entry>` detects run-to-completion (rerun) vs resident (hot-swap); experts override with `--restart`/`--swap`/`--watch=off` flags, not a 2nd verb. **Q2 hard rule (owner):** dev (interpreter/JIT) output MUST be byte-identical to the release (rustc) build — a `tests/` mode diffs every golden example through both paths; **any divergence is a release blocker**, not a warning. UNBLOCKED. c77 | owner |
+| 2026-06-22 | D-SOA2A | `soa` layout keyword renamed `columnar` (C): the `#layout(…)` keyword is `columnar` (Arrow/Parquet term); **renames ratified D-SOA1 `#layout(soa)` → `#layout(columnar)`** (D-SOA1 row amended). Impl deferred post-v1. c78 | owner |
+| 2026-06-22 | D-SOA2B | whole-struct columnar only in v1 (A): `#layout(columnar)` converts every field; partial annotation deferred (two memory regions need new ownership/aliasing surface). Deferred post-v1. c78 | owner |
+| 2026-06-22 | D-SOA2C | reserve per-container prefix spelling (A): reserve `columnar [Particle]` (prefix keyword on a list type) for a future per-use override; generic-style `Columnar<T>` not reserved (layout is a storage modifier, not a type param). Grammar reservation only. Deferred post-v1. c78 | owner |
+| 2026-06-22 | D-SOA2D | `#layout(columnar)` serialization-transparent (A): serialization sees the logical struct; output identical with/without the layout attribute; columnar serialization is a purpose-built serializer, not default `#[Serialize]`. Deferred post-v1. c78 | owner |
+| 2026-06-22 | D-TEST1 | parameterized `#Test fn` is a property test (B): an `#Test fn` with params = property test (inputs generated from param types, automatic invisible shrinking); no params = unit test. Zero new syntax (matches S82). UNBLOCKED. c51 | owner |
+| 2026-06-22 | D-TEST4 | doctest = fenced ```jet block + `// =>` trailing comment (A): code in `///` doc comments (S49) runs as tests; expected output is `// =>` on the producing line; mismatch fires E2901; reuses `//` (S5), no new tokens. UNBLOCKED. c51 | owner |
+| 2026-06-22 | D-BIND2 | immutable binding spelled `@=` (A, NOT the card's rec `$=`): `name @= expr` immutable; `:=` stays mutable, `=` stays reassignment (S17). **`@=` supersedes the `::` immutable binding** spent by D-BIND1/S2 (fundamental token change); requires a repo-wide migration of `::`-bindings to `@=`. UNBLOCKED. c102 | owner |
+| 2026-06-22 | D-NUMOPS1 | checked-by-default integer overflow + expert numeric surface (A): plain integer arithmetic traps on overflow; opt-ins `wrapping`/`saturating`/`checked(…)->T?` visible at the use site; ship per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON` + predicates, bit ops, explicit width conversions (`.to_u8()?` / `.to_i64()`, no implicit narrowing). **Gated on D-SG9's sized ints being implemented first** (Type enum still Int/Float); implementing D-SG9 (U8) also unblocks `embed_bytes` (c75). c103 | owner |
+| 2026-06-22 | D-SERDE1 | one format-agnostic Serialize/Deserialize data model (A): derive `Serialize`/`Deserialize` once against an abstract data model; each format (JSON/CSV/TOML/binary) is a `Serializer`/`Deserializer`-protocol adapter (one derive, every present+future format). Adds `Deserialize` counterpart to S55; field attrs `#[rename/default/skip/flatten/rename_all]`. CSV (D-CSVROW1) + JSON (D-JSONOUT1) are arms of this model, one decoder path. Model in Core; adapters are ring libs. **Gated on user-defined derives (S56, Epoch 3)** — ratify shape now, build when S56 lands. c104 | owner |
+| 2026-06-22 | D-ITER1 | full lazy iterator-adapter set (A): ship the everyday lazy family (enumerate/zip/chunks/windows/take_while/skip_while/flat_map/scan/group_by/dedup/step_by/peekable/partition/find/fold/min_by/…) as methods on the ratified iterator protocol (D-EXT1 Tier 1) — lazy, allocation-free until a terminal op, no new grammar; conservative familiar spellings. UNBLOCKED. c105 | owner |
 | 2026-06-22 | D-EFF1 | effect system (B): inferred per-fn effect set propagated along calls (Koka-style rows), erased in codegen (I3 — no handler/monad/runtime value); `pure fn` becomes the empty set; assert/restrict at boundaries (`#(net, db)` on the signature) and in `#caps(net) { … }` regions (out-of-set + impure-`pure` diagnostics; the card's illustrative E0701/E0702 collide with existing FFI codes — real codes assigned from the free range at impl). **Reopens S60's "no further effects" stance** (S60's `pure` spelling+meaning preserved as ⊥). Surface spelling pinned to `#(…)` by D-QUAL1=1 (sub-Qs 4+5 resolved). **Implementation gated on new D-EFF2 (effect polymorphism / higher-order propagation) + D-EFF3 (trait-method effects)**; diagnostic quality is an impl concern. Carries D-SCAP1/D-TAINT1/D-DET1/D-TXN1/D-TXN2 | owner |
 | 2026-06-22 | D-QUAL1 | qualifier-surface dialect = **Option 1 (Sigil-pure)**: effects ride the signature as `#(net, db)`; the tag/trait list stays the bare `#[Serialize, Comparable]` form (**D-ATTR2 kept, untouched**); roles `role X = #(…)` / `#[…]`; manifest policy `plugins.coupon: deny(fs, db)` in the in-source `module { }` block; declaration-heavy grouping uses the same `#[ effects:…, facts:… ]` labeled bracket (purely additive); value-facts ride the value (`#tainted`, `#paid`). Delivers Core D + Roles + Unified block. Same `#(…)` surface as D-EFF1 — one spelling, no duplicate. **Reopens S60's effect surface**; follow-on must place capability policy across pkg.jet (D-JPK-FILES) vs the in-source block | owner |
 | 2026-06-22 | D-TXN1 | `#transact { }` rollback (A): semantic contract — every `?`-failure inside the block calls `rollback(mut self)` (the `Rollback` trait) in reverse order on the values mutated so far; clean exit commits, zero runtime cost beyond the rollback calls; a non-`Rollback` mutation inside the block is a compile error naming the type + fix-it (the card's illustrative E0801 is already assigned — real code from the free range at impl). Honest by construction (only declared-reversible types are covered). Semantic contract ratified now; the effect-region wiring follows **D-EFF1**. Ships with D-TXN2 | owner |
 | 2026-06-22 | D-MIGRATE1 | compile-time enforcement of breaking data-shape changes (A): `#PublishedSchema` types have their field layout snapshotted at release (`.jet/cache/`); a breaking change without a declared migration is **E0910** (compile error, not a lint; the card said E0901 but that code is already assigned — use E0910, first free slot); `migration UserRecord { rename old -> new }` unblocks it. The CHECK is core sema (I3); the up/down conversion fns (`from_vXXX`) are generated by the Build-tier versioning library (#11). Bloat bounded by published-API × support-window (squash-to-baseline + support-floor). **Scope locked to the card's grammar** (`#PublishedSchema` + `migration { rename a -> b }`); other ops (add-with-default, type-change, delete) + `jet schema status`/`squash` verbs → follow-on **D-MIGRATE2**. Unblocked → build now | owner |
-| 2026-06-22 | D-SOA1 | cache-friendly data layout (A): `#layout(soa) struct …` — whole-struct structure-of-arrays, field access (`p.x`) unchanged, layout is part of the type (consistent with D-ATTR1). **Syntax ratified; implementation deferred post-v1 (Later tier).** Owner: wants a better name than "SOA" → new naming ballot; 3 open Qs (partial `#layout(soa: f, …)`; future-reserve the Option-B `soa [T]` per-container spelling; `#Serialize`/reflection interaction) → new ballot **D-SOA2** | owner |
-| 2026-06-22 | D-DBG2 | no-Jet-source-line frame policy (A + expert opt-in): **default A** — the DAP adapter steps over any frame absent from the `.jetmap` and surfaces only Jet frames (I2 intact — no Rust paths in the default view); **expert opt-in `jet debug --raw-frames`** surfaces the raw Rust frame (file+line) for adapter/expert debugging, an explicit, flagged I2 carve-out scoped to the debugger surface. Owner note: once Jet self-hosts there is no underlying Rust and the distinction dissolves. Implements c52's open policy (D-DBG1 verb + D-OBS1/2 already ratified) | owner |
+| 2026-06-22 | D-SOA1 | cache-friendly data layout (A): **`#layout(columnar) struct …`** (keyword renamed from `soa` by D-SOA2A=C) — whole-struct structure-of-arrays, field access (`p.x`) unchanged, layout is part of the type (consistent with D-ATTR1). **Syntax ratified; implementation deferred post-v1 (Later tier).** The four D-SOA2 follow-on Qs are now resolved: D-SOA2A=C (keyword = `columnar`), D-SOA2B=A (whole-struct only), D-SOA2C=A (reserve per-container prefix form `columnar [T]`), D-SOA2D=A (serialization-transparent) | owner |
+| 2026-06-22 | D-DBG2 | no-Jet-source-line frame policy — **owner ballot affirmed C (expert access to raw Rust frames)**, satisfied by the expert opt-in `jet debug --raw-frames` so the default view stays clean (NO unconditional I2 violation): **default** — the DAP adapter steps over any frame absent from the `.jetmap` and surfaces only Jet frames (I2 intact — no Rust paths in the default view); **expert opt-in `jet debug --raw-frames`** surfaces the raw Rust frame (file+line) for adapter/expert debugging, an explicit, flagged I2 carve-out scoped to the debugger surface. Owner note: once Jet self-hosts there is no underlying Rust and the distinction dissolves. Implements c52's open policy (D-DBG1 verb + D-OBS1/2 already ratified) | owner |
 | 2026-06-22 | D-DETACH1 | intentional task detach (A): `task.detach()` — a method on the spawn handle that consumes it and exempts it from L1101 ("task value dropped without `.join()`"); reads as a deliberate choice, quotable in the L1101 fix-it. A detached task that captures a borrowed `view` of the caller's scope is a compile error (it can outlive the borrow) with a "pass an owned `copy`/`share`" fix-it. Keeps one spawn verb | owner |
 | 2026-06-22 | D-REPRC1 | C-compatible struct layout (**B**, not rec A): `#layout(c)` — C repr joins the **one `#layout(…)` family** alongside `#layout(soa)` (D-SOA1) and `#layout(packed)` / `#layout(align(N))`; codegen stamps `#[repr(C)]` on the generated struct. A growable field (`[U32]`) under `#layout(c)` is a compile error (use fixed `[U32#N]` or drop the annotation). Owner chose the unified-family fork the rec flagged → reconciles with D-SOA1/D-SOA2 (the SOA rename applies only to the `soa` slot; `c`/`packed`/`align` are sibling layout kinds) | owner |
 | 2026-06-22 | D-STDIN1 | streaming stdin (A): `io.stdin()` handle with `.lines()` / `.read_line()`, mirroring the file reader (reuses the `FileLines` streaming type) so one idiom spans files + stdin and a fn written for one accepts the other; constant-memory. `read_all_input` stays as a small-input convenience; a `#Pure fn` reading stdin stays rejected (impure) | owner |
@@ -2339,7 +2596,7 @@ upgrade that must re-earn an owner crate sign-off.
 | 2026-06-19 | D-RANGE1 | **range arms reuse inclusive `..`, desugar to `>= && <=`** (A): `90..100 -> "A"`; one range token across loops (S22), slices (S40), and arms. Exhaustiveness governed by D-PATR. **Ratified, implemented 2026-06-20** | owner |
 | 2026-06-19 | D-RANGE2 | **arm-head range ownership** (A): S22 owns the `..` token; c20/D-PATR owns arm-head range *semantics* (checking + exhaustiveness); c25 owns only the terse `lo..hi ->` sugar + `..=`/`step`/inverted-band porting-error teaching, shippable first under D-PATR's rules. One spelling, one checker. **Ratified, partially implemented 2026-06-20 (range arms shipped via c20/D-PATR; `..=`/`step`/inverted-band teaching pending c25)** | owner |
 | 2026-06-19 | D-ERR-CONV | **`impl Source -> Target { … }`** (A): reuses `->` + `impl`; conversion declared once, total, rejected unless declared (orphan rule S28 applies); `?` applies it; `Fallible` unifies as prelude `impl T -> Error`. Owner asked whether S83's `~~` belongs here — **no**: `~~` attaches a member to a type, an error conversion is a distinct construct (a `Source→Target` declaration), so `->` is correct (verified vs `tools/Tower/docs/sidequests/typed-error-families.md`). **Ratified, implemented 2026-06-20** | owner |
-| 2026-06-19 | D-DIST1 | **`UserId :: distinct Int`** (C, binding form): reuses the ratified `::` immutable sigil (D-BIND1) + the `distinct` keyword; no new separator token; `distinct`-over-`distinct` chaining rejected in v1. **Ratified, implemented 2026-06-20** | owner |
+| 2026-06-19 | D-DIST1 | **`UserId :: distinct Int`** (C, binding form): reuses the ratified `::` immutable sigil (D-BIND1) + the `distinct` keyword; no new separator token; `distinct`-over-`distinct` chaining rejected in v1. **Ratified, implemented 2026-06-20.** **2026-06-22: spelling follows D-BIND2 — the `::` becomes `@=` (`UserId @= distinct Int`); covered by the `@=` migration** | owner |
 | 2026-06-19 | D-DIST2 | **units of measure: in scope, delivered as a stdlib extension** (B + owner comment): units are NOT deferred, but ride on top of distinct types (D-DIST1) via a **stdlib extension layer, not core-language syntax**. Distinct types ship in core; dimensional algebra (derived units) lives in stdlib. **Ratified, not yet implemented** | owner |
 | 2026-06-19 | D-WHEN1 | **`comptime if`** (A): reuses two ratified words; condition is a comptime expression; only the selected arm is checked + lowered. Extends S57's bindings-only comptime scope; the S26 dispatch law (no comptime type/trait/generic selection) is unchanged. **Ratified, implemented 2026-06-20** | owner |
 | 2026-06-19 | D-WHEN2 | **unselected `comptime if` arm: name-resolution only** (A): the dropped arm is scanned for unknown names (typos still teach) but not type-checked against its surroundings (off-target intrinsics allowed). **Ratified, implemented 2026-06-20** | owner |

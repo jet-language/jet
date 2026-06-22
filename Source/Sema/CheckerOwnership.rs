@@ -324,7 +324,7 @@ impl<'a> Checker<'a> {
                 "L1101",
                 format!("task `{}` is dropped without `.join()`", name),
                 "the program may end before this task finishes".to_string(),
-                "call `.join()` on the task before it goes out of scope".to_string(),
+                "call `.join()` on the task before it goes out of scope, or call `.detach()` if fire-and-forget is intentional".to_string(),
                 Some(span),
             ));
         }
@@ -561,6 +561,15 @@ impl<'a> Checker<'a> {
                 "give the task plain owned data, or remove the borrowed field before spawning"
             }
         };
+        // D-DETACH1: if this E1102 fires in a task spawn context, record the task
+        // binding name so E1103 fires too when `.detach()` is called on it. A
+        // detached task with sendability problems is doubly dangerous: it can't
+        // safely send the captured value across threads AND it runs unsupervised.
+        if matches!(crossing, SendCrossing::TaskCapture | SendCrossing::TaskResult) {
+            if let Some(name) = &self.current_binding_name {
+                self.view_capture_tasks.insert(name.clone());
+            }
+        }
         self.diags.push(Diagnostic::error(
             "E1102",
             what,

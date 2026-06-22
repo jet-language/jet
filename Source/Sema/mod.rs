@@ -319,6 +319,9 @@ pub(crate) struct LocalInfo {
     sendable: bool,
     /// Binding span for a Task value that must be consumed with `.join()`.
     task_lint_span: Option<Span>,
+    /// D-DETACH1: set when the task's spawn lambda captured a view borrow (E1102
+    /// fired at spawn time). Used by the `detach()` handler to emit E1103.
+    task_has_view_capture: bool,
 }
 
 /// D-ALLOC2 (ratified 2026-06-21): bookkeeping for an arena-`view` binding —
@@ -463,6 +466,12 @@ pub(crate) struct Checker<'a> {
     lambda_escapes: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
+    /// D-DETACH1: task names whose spawn lambda captured a view borrow (E1102 fired).
+    /// At `.detach()`, if the task is in this set, E1103 fires too.
+    view_capture_tasks: HashSet<String>,
+    /// D-DETACH1: the binding name currently being elaborated (set at check_binding
+    /// entry, cleared after). Used to record view-capturing task names.
+    current_binding_name: Option<String>,
     /// M8: binding name when checking `val f = (…) => …` (E0804 self-call).
     lambda_binding: Option<String>,
     /// Names mutably captured by an escaping lambda still in scope (E0204).

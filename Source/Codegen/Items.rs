@@ -74,8 +74,21 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     }
     // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
     // keeps cross-module references compiling (R2: sema is the gatekeeper).
+    // D-REPRC1: `#layout(c)` stamps `#[repr(C)]` before any `#[derive(...)]`.
+    let repr_c = s.layout == Some(crate::AST::StructLayout::C);
     if derives.is_empty() {
-        out.push_str(&format!("pub struct user_{}{} {{\n", s.name, type_params));
+        if repr_c {
+            out.push_str(&format!("#[repr(C)]\npub struct user_{}{} {{\n", s.name, type_params));
+        } else {
+            out.push_str(&format!("pub struct user_{}{} {{\n", s.name, type_params));
+        }
+    } else if repr_c {
+        out.push_str(&format!(
+            "#[repr(C)]\n#[derive({})]\npub struct user_{}{} {{\n",
+            derives.join(", "),
+            s.name,
+            type_params
+        ));
     } else {
         out.push_str(&format!(
             "#[derive({})]\npub struct user_{}{} {{\n",

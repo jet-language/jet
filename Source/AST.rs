@@ -645,6 +645,13 @@ pub struct Param {
     pub default: Option<Box<Expr>>,
 }
 
+/// D-REPRC1 (ratified; D-REPRC1 = B): the variant of `#layout(…)` on a struct.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructLayout {
+    /// `#layout(c)` → `#[repr(C)]` on the generated Rust struct.
+    C,
+}
+
 #[derive(Debug)]
 pub struct StructDef {
     pub is_pub: bool,
@@ -662,6 +669,9 @@ pub struct StructDef {
     /// before `struct`. The span is retained for pointing at the annotation in E0910.
     pub is_published_schema: bool,
     pub published_schema_span: Option<Span>,
+    /// D-REPRC1 (ratified; D-REPRC1 = B): `#layout(…)` attribute. `None` = default layout.
+    pub layout: Option<StructLayout>,
+    pub layout_span: Option<Span>,
 }
 
 /// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name :: distinct Base`.

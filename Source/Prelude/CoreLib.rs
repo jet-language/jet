@@ -480,6 +480,26 @@ fn jet_std_io_read_all_input() -> Result<String, jet_std::IoError> {
     Ok(s)
 }
 
+// D-STDIN1=A: streaming line-by-line stdin.
+struct JetStdinReader {
+    inner: std::io::BufReader<std::io::Stdin>,
+}
+fn jet_std_io_stdin() -> JetStdinReader {
+    JetStdinReader { inner: std::io::BufReader::new(std::io::stdin()) }
+}
+fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, jet_std::IoError> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    match r.inner.read_line(&mut line) {
+        Ok(0) => Ok(None),
+        Ok(_) => {
+            while line.ends_with('\n') || line.ends_with('\r') { line.pop(); }
+            Ok(Some(line))
+        }
+        Err(e) => Err(jet_std::IoError::Other { message: e.to_string() }),
+    }
+}
+
 fn jet_std_env_get(name: &String) -> Option<String> { std::env::var(name).ok() }
 fn jet_std_env_set(name: &String, value: &String) { std::env::set_var(name, value); }
 fn jet_std_env_current_dir() -> Result<String, jet_std::IoError> {
@@ -805,9 +825,11 @@ fn jet_ring_yaml_render(data: &std::collections::BTreeMap<String, String>) -> St
 //   {"level":"info","body":"...","ts":<unix-ms>}
 // When a trace_id is set (log.set_trace_id), it appears as "trace_id":"...".
 // Log level: 0=debug, 1=info, 2=warn, 3=error. Default is info (1).
+// D-LOGFMT1=A: format 0=auto (TTY→text, else JSON), 1=json, 2=text.
 thread_local! {
     static JET_LOG_LEVEL: std::cell::Cell<u8> = std::cell::Cell::new(1);
     static JET_LOG_TRACE_ID: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+    static JET_LOG_FORMAT: std::cell::Cell<u8> = std::cell::Cell::new(0);
 }
 
 fn jet_ring_log_set_level(level: &String) {
@@ -819,6 +841,22 @@ fn jet_ring_log_set_level(level: &String) {
 
 fn jet_ring_log_set_trace_id(id: &String) {
     JET_LOG_TRACE_ID.with(|t| *t.borrow_mut() = id.clone());
+}
+
+// D-LOGFMT1=A: explicit format override.
+fn jet_ring_log_setup(format: &String) {
+    let n: u8 = match format.as_str() { "json" => 1, "text" => 2, _ => 0 };
+    JET_LOG_FORMAT.with(|f| f.set(n));
+}
+
+fn jet_log_format_active() -> u8 {
+    let explicit = JET_LOG_FORMAT.with(|f| f.get());
+    if explicit != 0 {
+        return explicit;
+    }
+    // Auto-detect: text if stderr is a terminal, JSON otherwise.
+    use std::io::IsTerminal;
+    if std::io::stderr().is_terminal() { 2 } else { 1 }
 }
 
 fn jet_log_json_escape(s: &str) -> String {
@@ -836,11 +874,7 @@ fn jet_log_json_escape(s: &str) -> String {
     out
 }
 
-fn jet_log_emit(level: &str, msg: &str) {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+fn jet_log_emit_json(level: &str, msg: &str, ts: i64) {
     let trace = JET_LOG_TRACE_ID.with(|t| t.borrow().clone());
     if trace.is_empty() {
         eprintln!(
@@ -857,6 +891,38 @@ fn jet_log_emit(level: &str, msg: &str) {
             jet_log_json_escape(&trace),
             ts,
         );
+    }
+}
+
+fn jet_log_emit_text(level: &str, msg: &str, ts: i64) {
+    let secs = ts / 1000;
+    let (y, mo, d, h, mi, s) = unix_to_ymdhms(secs);
+    let level_tag = match level {
+        "debug" => "DEBUG", "info" => "INFO", "warn" => "WARN", "error" => "ERROR", _ => level,
+    };
+    let trace = JET_LOG_TRACE_ID.with(|t| t.borrow().clone());
+    if trace.is_empty() {
+        eprintln!(
+            "[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z | {}",
+            level_tag, y, mo, d, h, mi, s, msg
+        );
+    } else {
+        eprintln!(
+            "[{}] {:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z trace={} | {}",
+            level_tag, y, mo, d, h, mi, s, trace, msg
+        );
+    }
+}
+
+fn jet_log_emit(level: &str, msg: &str) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    if jet_log_format_active() == 2 {
+        jet_log_emit_text(level, msg, ts);
+    } else {
+        jet_log_emit_json(level, msg, ts);
     }
 }
 

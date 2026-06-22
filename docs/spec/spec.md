@@ -245,6 +245,13 @@ impl Circle {
   D-MIGRATE2. Single-file runs accept the marker but only enforce the check
   when a project snapshot exists.
 
+- **Struct layout control (D-REPRC1):** `#layout(c)` before a struct stamps
+  `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
+  sharing. Field order is preserved as written. Growable fields (`[T]`, `Map`,
+  `String`) are rejected with **E1104** because they lack a stable C layout;
+  fixed-size arrays `[T#N]` are allowed. Reserved variants (`packed`, `align(N)`,
+  `columnar`) parse but error with **E1105** until their milestones ship.
+
 ## M4 — errors as values (done)
 
 Fallible functions return **`T ? E`** (S34): `T` is the success payload,
@@ -651,9 +658,15 @@ values, and no closures unless handed over with `take`.
 
 `task.join() -> T` waits for the task and consumes the `Task<T>` handle. Calling
 `.join()` twice is ordinary use-after-move (**E0121**). Dropping a `Task`
-without joining emits **L1101** because the program may end before the task
-finishes. A panic inside a task is reported when joined and exits with the
-runtime panic code.
+without joining or detaching emits **L1101** because the program may end before
+the task finishes. A panic inside a task is reported when joined and exits with
+the runtime panic code.
+
+`task.detach()` (D-DETACH1) fire-and-forgets the task — it consumes the
+`Task<T>` handle so **L1101** is suppressed, and the task continues running in
+the background. Detach is sound only when the spawned lambda holds fully-owned
+data; if E1102 already fired at spawn, **E1103** fires at the `.detach()` call
+site to flag the double hazard.
 
 `tasks.channel<T>() -> Channel<T>` creates a receive half. `ch.sender() ->
 Sender<T>` creates a clonable send half. `sender.send(value)` moves a `T` into
