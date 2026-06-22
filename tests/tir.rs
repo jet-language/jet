@@ -257,3 +257,98 @@ fn main() {
     // i=2: j=1 prints 2-1, i==2 -> break @outer.
     assert_eq!(stdout, "1-1\n2-1\ndone\n");
 }
+
+// --- c109 Phase 3: structs --------------------------------------------------
+
+/// Struct literal, a struct-typed param with scalar field reads (borrow
+/// position — no clone), a struct return value, and a struct-typed local. All
+/// of `sum_pt`, `origin`, and `main` are inside the subset, so all route
+/// through the TIR. The scalar field-read arithmetic (`p.x + p.y`) must NOT
+/// overflow-trap: in the AST path a field operand is unresolved, so the plain
+/// `+` is used — the TIR reproduces that exactly (parity).
+#[test]
+fn struct_literal_field_read_and_return() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Point {
+    x: Int
+    y: Int
+}
+fn sum_pt(p: Point) -> Int {
+    return (p.x + p.y)
+}
+fn origin() -> Point {
+    return Point { x: 0, y: 0 }
+}
+fn main() {
+    p @= Point { x: 3, y: 4 }
+    print(sum_pt(p))
+    print(p.x)
+    o @= origin()
+    print(sum_pt(o))
+}
+";
+    let (code, stdout) = build_and_run("tir_struct_pt", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "7\n3\n0\n");
+}
+
+/// A String struct field read in interpolation (a borrow-position read, so no
+/// clone is inserted) plus a struct literal whose String field is moved from an
+/// owned local. `describe` and `main` both route through the TIR.
+#[test]
+fn struct_string_field_in_interpolation() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Person {
+    name: String
+    age: Int
+}
+fn describe(p: Person) {
+    print(\"{p.name} is {p.age}\")
+}
+fn main() {
+    label @= \"Ada\"
+    p @= Person { name: label, age: 36 }
+    describe(p)
+    print(p.age)
+}
+";
+    let (code, stdout) = build_and_run("tir_struct_person", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Ada is 36\n36\n");
+}
+
+/// Nested struct: a struct field whose type is itself a covered struct. Both the
+/// nested literal (`Outer { inner: Inner { … }, … }`) and the chained field read
+/// (`o.inner.v`) are covered, so `deep` and `main` route through the TIR.
+#[test]
+fn nested_struct_literal_and_chained_field() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Inner {
+    v: Int
+}
+struct Outer {
+    inner: Inner
+    tag: Int
+}
+fn deep(o: Outer) -> Int {
+    return (o.inner.v + o.tag)
+}
+fn main() {
+    o @= Outer { inner: Inner { v: 10 }, tag: 5 }
+    print(deep(o))
+    print(o.inner.v)
+}
+";
+    let (code, stdout) = build_and_run("tir_struct_nested", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "15\n10\n");
+}

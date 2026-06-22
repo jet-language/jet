@@ -154,6 +154,40 @@ everything, the AST codegen path is deleted (final phase).
   locals/env so a `let` inside a loop (or the range loop's `i` var, bound as `Int`) does not leak
   past it. This mirrors the existing `if`-branch scoping exactly.
 
+## Refinements learned in Phase 3 (structs)
+
+- **Sema rewrites owning field reads into `.clone()` MethodCalls *before* codegen.**
+  `CheckerInfer::infer` (Source/Sema/CheckerInfer.rs) replaces a non-`Copy` struct-field
+  read in owning position (`return p.name`, a struct-lit field value, etc.) with an
+  `Expr::MethodCall{method:"clone"}` via `field_read_to_clone`. So by the time `tir_covers`
+  runs, an owning field read is a *method call*, which the subset excludes (`_ => false`).
+  The only `Expr::Field` nodes that survive to codegen are **borrow-position** reads (inside
+  `print(..)`, arithmetic, an interpolation, a comparison), which the AST path emits as a
+  plain `(recv).field` with no deref/clone. The TIR reproduces that exactly. **Consequence:**
+  Phase 3 covers field *reads* in borrow position only; any function that moves a non-`Copy`
+  field out (the common "getter returning a String field") stays on the AST path until
+  **Phase 6/7** make the clone fact total. This is the right seam — the clone decision lives
+  in sema's elaboration, not codegen.
+- **Field assignment `s.field = value` is not a Jet construct.** `expr_to_lvalue`
+  (Source/Parser/Expressions.rs) only admits `Ident`/`Index`; `LValue` has no `Field`
+  variant; a field assign is rejected at parse time (E0003). Struct mutation is method-only
+  (`mut self`) — a Phase 7 concern. There was nothing to lower for "field assignment."
+- **A struct-field operand must not enable the overflow trap.** The AST `operand_is_integer`
+  resolves a field read to `None` (`expr_jet_ty` has no `Field` arm), so `p.x + p.y` emits a
+  plain `+`, never `jet_add` — even though both fields are `Int`. The TIR's `overflow` flag
+  therefore **cannot** be computed from `TExpr.ty` (which is total even for a field); it must
+  replay `operand_is_integer` on the *AST operands* (`ast_operand_is_integer`). A literal or
+  resolvable local operand still traps (`p.x + 1` → `jet_add`), matching the AST path
+  bit-for-bit. General lesson: when a TIR field is *more* total than the AST's re-derivation,
+  the parity-preserving decision is the AST's, not the "better" one — reproduce the AST's
+  partiality where it is load-bearing.
+- **Gate struct coverage by walking the resolved layout, not the surface.** `struct_is_covered`
+  consults `cx.struct_fields`/`boxed_edges`/`enum_variants`/`foreign_types` to admit only a
+  plain user struct whose every field is scalar/String/Char or another covered struct, with a
+  visited set to terminate on (and exclude) recursion. This keeps the gate cx-aware and total,
+  and naturally excludes prelude structs (HttpRequest), foreign/imported types, and recursive
+  (boxed) structs whose field reads would need deref handling.
+
 ## Phases
 
 | # | Scope | Status |
@@ -161,7 +195,7 @@ everything, the AST codegen path is deleted (final phase).
 | 0 | Inventory + TIR type-model design | ✅ done (4b89af5) |
 | 1 | Simple functions: literals, operators, bindings, returns, if/else, calls, print | ✅ done (398138b) — 54 fns routed |
 | 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels) | ✅ done (c109 Phase 2) — +3 example fns routed (e.g. fizzbuzz `main`). Excludes `loop x in <collection>` (ForKind::In, key/value map form) → Phase 5. |
-| 3 | Structs: struct literals, field access/assign, struct-typed params/locals/returns | pending |
+| 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → Phase 7), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only → Phase 7). |
 | 4 | Enums + `when`/match + patterns (incl. range/or patterns) | pending |
 | 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | pending |
 | 6 | Ownership facts: clone insertion, `take`/`mut`/`view`, Shared/Arc auto-clone | pending |

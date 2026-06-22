@@ -160,6 +160,23 @@ pub(crate) enum TExprKind {
         rhs: Box<TExpr>,
     },
     Unary { op: UnOp, operand: Box<TExpr> },
+    /// c109 Phase 3: a struct literal `S { f: v, … }`. `rust_type` is the already
+    /// resolved Rust type head (`user_S` or `user_S::<…>`); each field carries its
+    /// *mangled* Rust name and its value expression. No clone/coercion is applied
+    /// at the literal site (mirrors the AST path: a field value is emitted as-is —
+    /// the value's own move/clone facts already live in its sub-expression).
+    StructLit {
+        rust_type: String,
+        fields: Vec<(String, TExpr)>,
+    },
+    /// c109 Phase 3: a struct field *read* `recv.field` in borrow position. The
+    /// AST path never derefs/clones a plain field read (Rust reads the place;
+    /// owning reads were already rewritten to a `.clone()` MethodCall in sema and
+    /// are excluded from the subset). `field_rust` is the mangled field name.
+    Field {
+        recv: Box<TExpr>,
+        field_rust: String,
+    },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
         cond: Box<TExpr>,
@@ -212,16 +229,15 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     if f.is_view_return {
         return false;
     }
-    // Params must be scalars or String, with no default expressions.
+    // Params must be scalars, String, or a covered struct type, with no defaults.
     for p in &f.params {
-        if p.default.is_some() || !is_subset_param_ty(&p.ty) {
+        if p.default.is_some() || !is_subset_param_ty(&p.ty, cx) {
             return false;
         }
     }
-    // Return type, if present, must be a scalar or String (matches the body's
-    // value types; the subset never returns structs/lists/options/etc.).
+    // Return type, if present, must be a scalar, String, or a covered struct type.
     if let Some(rt) = &f.return_type {
-        if !is_subset_param_ty(rt) {
+        if !is_subset_param_ty(rt, cx) {
             return false;
         }
     }
@@ -232,10 +248,69 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
-/// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool) or
-/// Char or String. Nothing compound.
-fn is_subset_param_ty(ty: &Type) -> bool {
-    ty.is_scalar() || matches!(ty, Type::Char | Type::String)
+/// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
+/// Char, String, or a covered *plain user struct* (c109 Phase 3). Lists, maps,
+/// options, enums, traits, generics, recursive (boxed) structs are still out.
+fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
+    ty.is_scalar() || matches!(ty, Type::Char | Type::String) || is_covered_struct_ty(ty, cx)
+}
+
+/// c109 Phase 3: `ty` is a plain user struct the subset can lower. It must be a
+/// bare `Type::Named(S)` that:
+///  - is a known struct (`cx.struct_fields` has it), not an enum/trait/generic;
+///  - is NOT a compiler/prelude/foreign/core type (those use different Rust
+///    heads and field spellings the subset does not emit);
+///  - is NOT generic and has NO boxed (recursive) edge — a `Box<…>` field read
+///    needs deref handling the subset deliberately avoids.
+/// Field types may themselves be scalars/String/Char or another covered struct
+/// (checked recursively, with a visited set to terminate); a non-covered field
+/// type (list/map/option/enum/fn/boxed) excludes the owning struct.
+fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Named(name) = ty else {
+        return false;
+    };
+    struct_is_covered(name, cx, &mut HashSet::new())
+}
+
+fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    // A struct that is a trait/enum or a non-user (foreign/core/prelude) type is
+    // out. `cx.struct_fields` only holds user structs declared in this module.
+    if cx.trait_names.contains(name)
+        || cx.enum_variants.contains_key(name)
+        || cx.foreign_types.contains_key(name)
+        || net_handle_rust_type(name).is_some()
+        || crate::Generics::is_type_var_name(name)
+    {
+        return false;
+    }
+    let Some(fields) = cx.struct_fields.get(name) else {
+        return false;
+    };
+    if !seen.insert(name.to_string()) {
+        // A cycle means a recursive (boxed) struct — excluded.
+        return false;
+    }
+    let ok = fields.iter().all(|(fname, fty)| {
+        // Any boxed (recursive) edge is excluded — field reads would need deref.
+        if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
+            return false;
+        }
+        field_ty_covered(fty, cx, seen)
+    });
+    seen.remove(name);
+    ok
+}
+
+/// A struct *field* type the subset can lower: scalar/String/Char, or another
+/// covered struct. Compound/optional/enum/fn field types exclude the struct.
+fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
+        return true;
+    }
+    match ty {
+        Type::Named(n) => struct_is_covered(n, cx, seen),
+        _ => false,
+    }
 }
 
 /// `locals` is the set of names bound as params/locals so far in this scope.
@@ -386,8 +461,51 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             else_body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals))
                 && expr_in_subset(else_value, cx, &else_locals)
         }
-        // Everything else (method calls, indexing, slices, struct/enum lits,
-        // collections, lambdas, ?/try, ??, fan-out, optionals, fields, …) is out.
+        // c109 Phase 3: a struct literal `S { f: v, … }`. Covered only when `S`
+        // is a plain user struct the subset lowers, with no trait coercion or
+        // cross-module namespace, and every field value is itself in-subset.
+        Expr::StructLit {
+            type_name,
+            type_args,
+            import_ns,
+            as_trait,
+            fields,
+            ..
+        } => {
+            // A trait-object coercion (S48) or an imported-namespace struct uses
+            // a different Rust head the subset does not emit — exclude.
+            if as_trait.is_some() || import_ns.is_some() {
+                return false;
+            }
+            // The named type must be a covered user struct (this also rejects the
+            // prelude structs like HttpRequest, whose fields are spelled plainly).
+            if !is_covered_struct_ty(&Type::Named(type_name.clone()), cx) {
+                return false;
+            }
+            // Generic struct instantiation is out (the subset has no generics).
+            if !type_args.is_empty() {
+                return false;
+            }
+            fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals))
+        }
+        // c109 Phase 3: a struct field *read*. A non-Copy owning read was already
+        // rewritten to a `.clone()` MethodCall by sema (which the subset excludes,
+        // via the `MethodCall` arm below being absent — `_ => false`); what reaches
+        // here is a borrow-position read. Cover it when the receiver is in-subset.
+        // (`receiver.field` where the receiver is a known module/enum path is not a
+        // `Field` value read — sema lowers those to other nodes — so a plain
+        // in-subset receiver is the struct-value case.)
+        Expr::Field(receiver, member, _) => {
+            // `.clone` is never a real field; defensively exclude (sema's synthetic
+            // clone is a MethodCall, not a Field, but a user `.clone` field read
+            // would collide with the clone-emit special-case in the AST path).
+            if member == "clone" {
+                return false;
+            }
+            expr_in_subset(receiver, cx, locals)
+        }
+        // Everything else (method calls, indexing, slices, enum lits,
+        // collections, lambdas, ?/try, ??, fan-out, optionals, opt-fields, …) is out.
         _ => false,
     }
 }
@@ -642,12 +760,18 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);
             let rhs = lower_expr(r, cx, env);
-            // Overflow decision, computed here from total operand types — this is
-            // the fact that today's `operand_is_integer` re-derives in codegen.
-            // Note: `operand_is_integer` only inspects the LEFT spine of nested
-            // arithmetic, so mirror that exactly (lhs first, then rhs).
+            // Overflow decision, computed here once — this is the fact today's
+            // `operand_is_integer` re-derives in codegen. It must mirror that
+            // function EXACTLY (Codegen/Expression.rs): only a *resolvable*
+            // integer operand traps. A struct-field read resolves to `None` in the
+            // AST path (`expr_jet_ty` has no `Field` arm), so it does NOT trap —
+            // hence we can't just inspect `TExpr.ty`, which is total even for a
+            // field. We instead replay `operand_is_integer` on the AST operands.
+            // `operand_is_integer` inspects only the LEFT spine of nested
+            // arithmetic, so check the left operand first, then the right.
             let overflow = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-                && (lhs.ty.is_integer() || rhs.ty.is_integer());
+                && (ast_operand_is_integer(l, env) == Some(true)
+                    || ast_operand_is_integer(r, env) == Some(true));
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
             // A comparison/logical op yields Bool; arithmetic keeps the operand type.
             let ty = if op.is_comparison() || matches!(op, BinOp::And | BinOp::Or) {
@@ -738,8 +862,79 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        // c109 Phase 3: a struct literal. The gate already proved the type is a
+        // plain covered user struct (no trait coercion, no import namespace, no
+        // generic args), so the Rust head is `user_<name>` and field names mangle.
+        // Field values are lowered as-is — no clone/coercion at the literal site
+        // (mirrors the AST path; a value's own move/clone facts live in itself).
+        Expr::StructLit {
+            type_name, fields, ..
+        } => {
+            let tfields = fields
+                .iter()
+                .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
+                .collect();
+            TExpr {
+                ty: Type::Named(type_name.clone()),
+                kind: TExprKind::StructLit {
+                    rust_type: format!("user_{}", type_name),
+                    fields: tfields,
+                },
+            }
+        }
+        // c109 Phase 3: a struct field read in borrow position. Resolve the field
+        // type ONCE here from the receiver's resolved struct type (totality). A
+        // covered function never reaches here with a non-struct receiver (sema
+        // guarantees field reads target struct values).
+        Expr::Field(receiver, member, _) => {
+            let recv = lower_expr(receiver, cx, env);
+            let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
+            TExpr {
+                ty: field_ty,
+                kind: TExprKind::Field {
+                    recv: Box::new(recv),
+                    field_rust: mangle(member),
+                },
+            }
+        }
         _ => unreachable!("expression not in TIR subset"),
     }
+}
+
+/// Replay codegen's `operand_is_integer` (Codegen/Expression.rs) on an AST
+/// operand, using the lowering env for identifier types. The result MUST match
+/// that function bit-for-bit so the TIR's overflow-trap decision is identical to
+/// the AST path's. Like the original: literals/negation/nested-arithmetic-left
+/// resolve structurally; an `Ident` resolves via its slot type; everything else
+/// (notably a struct-field read) is unresolved (`None`) and so never traps.
+fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
+    match e {
+        Expr::Int(..) => Some(true),
+        Expr::Float(..) => Some(false),
+        Expr::Unary(UnOp::Neg, inner, _) => ast_operand_is_integer(inner, env),
+        Expr::Binary(_, l, _, _) => ast_operand_is_integer(l, env),
+        // Mirror `expr_jet_ty`: only `Ident`/`Str`/`Char` resolve here. A `Field`
+        // (and anything else) resolves to `None` — exactly as the AST path does,
+        // so a field operand never enables the overflow trap.
+        Expr::Ident(name, _) => env.ty_of(name).map(|t| t.is_integer()),
+        Expr::Str(..) => Some(false),
+        Expr::Char(..) => Some(false),
+        _ => None,
+    }
+}
+
+/// Look up a field's declared type on a resolved struct receiver type. Returns
+/// `None` when the receiver is not a known struct or the field is absent — both
+/// impossible for a covered function (sema validated the access).
+fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Type> {
+    let Type::Named(name) = recv_ty else {
+        return None;
+    };
+    cx.struct_fields
+        .get(name)?
+        .iter()
+        .find(|(f, _)| f == field)
+        .map(|(_, t)| t.clone())
 }
 
 /// The type of an integer literal given its elaborated width.
@@ -1015,6 +1210,22 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 UnOp::Not => format!("(!({}))", i),
             }
         }
+        // c109 Phase 3: `user_S { f: v, … }`. The Rust head and mangled field
+        // names were resolved at lowering; values format like any other node.
+        TExprKind::StructLit { rust_type, fields } => {
+            let parts = fields
+                .iter()
+                .map(|(field_rust, v)| format!("{}: {}", field_rust, emit_tir_expr(v, cx)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{} {{ {} }}", rust_type, parts)
+        }
+        // c109 Phase 3: `(recv).field`. Mirrors the AST `Expr::Field` emit form
+        // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
+        // MethodCall in sema and excluded from the subset).
+        TExprKind::Field { recv, field_rust } => {
+            format!("({}).{}", emit_tir_expr(recv, cx), field_rust)
+        }
         TExprKind::IfExpr {
             cond,
             then_body,
@@ -1115,6 +1326,50 @@ mod tests {
         // A method call (`.bumped()`) is not a covered construct.
         let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) -> Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) -> Int {\n return c\n}\nfn caller() -> Int {\n x @= C { n: 1 }\n return x.bumped()\n}\n";
         assert!(!covers(src, "caller"));
+    }
+
+    // c109 Phase 3: structs.
+
+    #[test]
+    fn covers_struct_param_and_scalar_field_read() {
+        // A plain struct param with a scalar field read (borrow position) and a
+        // struct literal + struct return are all in the subset.
+        let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) -> Int {\n return (p.x + p.y)\n}\nfn origin() -> Point {\n return Point { x: 0, y: 0 }\n}\n";
+        assert!(covers(src, "sum_pt"));
+        assert!(covers(src, "origin"));
+    }
+
+    #[test]
+    fn covers_nested_struct() {
+        // A struct field whose type is itself a covered struct, with a chained
+        // field read and a nested literal.
+        let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n tag: Int }\nfn deep(o: Outer) -> Int {\n return (o.inner.v + o.tag)\n}\n";
+        assert!(covers(src, "deep"));
+    }
+
+    #[test]
+    fn rejects_recursive_boxed_struct() {
+        // A self-referential struct needs a `Box<…>` field; reading through it
+        // requires deref handling the subset deliberately avoids — exclude.
+        let src = "struct Node { value: Int\n next: Node }\nfn val(n: Node) -> Int {\n return n.value\n}\n";
+        assert!(!covers(src, "val"));
+    }
+
+    #[test]
+    fn rejects_struct_with_list_field() {
+        // A non-scalar/non-struct field type (a list) is outside the subset, so
+        // the owning struct is not covered as a param.
+        let src = "struct Bag { items: [Int] }\nfn first_tag(b: Bag) -> Int {\n return 0\n}\n";
+        assert!(!covers(src, "first_tag"));
+    }
+
+    #[test]
+    fn rejects_generic_struct_literal() {
+        // A generic struct (`Pair<Int> { … }`) carries non-empty `type_args` and
+        // its field types reference type vars — both outside the subset (no
+        // generics in Phase 3). The owning fn stays on the AST path.
+        let src = "struct Pair<T> { first: T\n second: T }\nfn mk() -> Pair<Int> {\n return Pair<Int> { first: 1, second: 2 }\n}\n";
+        assert!(!covers(src, "mk"));
     }
 
     // c109 Phase 2: control-flow loops are now covered.
