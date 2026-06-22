@@ -52,7 +52,7 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
     }
     for item in &prog.items {
         if !first {
-            f.blank_line_between_items();
+            f.blank_separator_before_item();
         }
         first = false;
         f.emit_leading(item_span_start(item, src));
@@ -281,6 +281,22 @@ impl<'a> Fmt<'a> {
             self.newline();
             self.pending_blank = true;
         }
+    }
+
+    /// Top-level definitions (types, functions, etc.) are separated by exactly
+    /// one blank line (owner, 2026-06-22): end the current line, then guarantee a
+    /// single empty line before the next item — never cut it, never double it.
+    fn blank_separator_before_item(&mut self) {
+        if self.out.is_empty() {
+            return;
+        }
+        if !self.at_line_start {
+            self.newline();
+        }
+        if !self.out.ends_with("\n\n") {
+            self.out.push('\n');
+        }
+        self.pending_blank = true;
     }
 
     fn emit_remaining_comments(&mut self) {
