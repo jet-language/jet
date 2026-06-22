@@ -4,13 +4,59 @@
 
 use std::collections::HashMap;
 
-use crate::AST::Expr;
+use crate::AST::{CallArg, Expr, StrPart};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Builtins::{apply_method, apply_mutating, as_bool};
 use super::Diagnostics::{comptime_panic, unsupported};
 use super::Interpreter::{Flow, Interp};
 use super::Value::CtValue;
+
+/// D-CTIO1 (ratified 2026-06-22): a comptime embed path must be a string
+/// literal that stays inside the project — never computed, never absolute, and
+/// never escaping via `..`. Computed or escaping paths can't be audited at
+/// build time and open a supply-chain hole, so they are E0957, not file reads.
+/// `builtin` names the function (`embed_file` / `embed_bytes`) for the message.
+fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, Diagnostic> {
+    let path = match &arg.expr {
+        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+            StrPart::Lit(s) => s.clone(),
+            _ => return Err(embed_path_err(builtin, "literal", span)),
+        },
+        _ => return Err(embed_path_err(builtin, "literal", span)),
+    };
+    let p = std::path::Path::new(&path);
+    if p.is_absolute() {
+        return Err(embed_path_err(builtin, "absolute", span));
+    }
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(embed_path_err(builtin, "escape", span));
+    }
+    Ok(path)
+}
+
+fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
+    let (msg, why, fix) = match kind {
+        "literal" => (
+            format!("`{builtin}` path must be a string literal"),
+            "a computed path can't be audited at build time, so the compiler can't tell which file it reads".to_string(),
+            format!("pass the path inline, e.g. `{builtin}(\"data/file\")`"),
+        ),
+        "absolute" => (
+            format!("`{builtin}` path must be relative"),
+            "an absolute path reaches outside the project".to_string(),
+            "use a path relative to this file's own directory".to_string(),
+        ),
+        _ => (
+            format!("`{builtin}` path escapes the project with `..`"),
+            "`..` could read files outside your project; embeds must stay inside it".to_string(),
+            "drop the `..` and use a path under this file's directory".to_string(),
+        ),
+    };
+    Diagnostic::error("E0957", msg, why, fix, Some(span))
+}
 
 impl<'a> Interp<'a> {
     /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
@@ -86,7 +132,7 @@ impl<'a> Interp<'a> {
         }
         // The two sanctioned comptime builtins.
         if name == "embed_file" {
-            return self.eval_embed_file(args, span, scope);
+            return self.eval_embed_file(args, span);
         }
         if name == "panic" {
             let msg = match args.first() {
@@ -157,17 +203,13 @@ impl<'a> Interp<'a> {
 
     fn eval_embed_file(
         &mut self,
-        args: &[crate::AST::CallArg],
+        args: &[CallArg],
         span: Span,
-        scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let arg = args
             .first()
             .ok_or_else(|| unsupported("embed_file with no path", span))?;
-        let path_val = self.eval(&arg.expr, scope)?;
-        let CtValue::Str(rel) = path_val else {
-            return Err(unsupported("embed_file with a non-text path", span));
-        };
+        let rel = check_embed_path("embed_file", arg, span)?;
         let full = self.base_dir.join(&rel);
         match std::fs::read(&full) {
             Ok(bytes) => match String::from_utf8(bytes) {

@@ -1,0 +1,15 @@
+Error [E0957]: `embed_file` path must be a string literal
+  --> tests/ui/comptime_embed_nonliteral.jet:1:14
+    |
+  1 | comptime D = embed_file("a" + "b")
+    |              ^^^^^^^^^^
+ Why: a computed path can't be audited at build time, so the compiler can't tell which file it reads
+ Fix: pass the path inline, e.g. `embed_file("data/file")`
+
+Error [E0107]: nothing named `D` exists here
+  --> tests/ui/comptime_embed_nonliteral.jet:3:13
+    |
+  3 |     print("{D}")
+    |             ^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `D :: ...`

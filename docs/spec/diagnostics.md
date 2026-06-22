@@ -251,6 +251,7 @@ before continuing.
 | E0954 | parse | teaching: `comptime val`/`comptime var`/`const` → `comptime x = …` |
 | E0955 | sema  | `embed_file`: missing / unreadable / not UTF-8 |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
+| E0957 | sema  | `embed_file`/`embed_bytes` path not a literal, absolute, or escaping via `..` |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | sema  | fan-out callee is not callable with exactly one argument (S75) |
 | E0962 | sema  | fan-out item doesn't fit the parameter type (S75) |
