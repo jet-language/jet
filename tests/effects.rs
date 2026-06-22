@@ -8,6 +8,55 @@ fn codes(src: &str) -> Vec<&'static str> {
     }
 }
 
+/// I3 / D-EFF1: effect annotations (`#(…)`, `#Pure`, trait-method bounds) are a
+/// compile-time proof only — they must leave NO trace in generated Rust. The
+/// annotated program and its annotation-stripped twin generate byte-identical
+/// Rust.
+#[test]
+fn effect_annotations_are_erased() {
+    let annotated = r#"
+trait Shape { #Pure fn area(self) -> Int; }
+struct Square { side: Int }
+impl Square: Shape { fn area(self) -> Int { return self.side * self.side; } }
+#Pure fn sq(n: Int) -> Int { return n * n; }
+fn load(p: String) #(Io) { print(p); }
+fn run(n: Int) #(Io) { load("{sq(n)}"); }
+fn main() { s @= Square { side: 3 }; print("{s.area()}"); run(2); }
+"#;
+    let plain = r#"
+trait Shape { fn area(self) -> Int; }
+struct Square { side: Int }
+impl Square: Shape { fn area(self) -> Int { return self.side * self.side; } }
+fn sq(n: Int) -> Int { return n * n; }
+fn load(p: String) { print(p); }
+fn run(n: Int) { load("{sq(n)}"); }
+fn main() { s @= Square { side: 3 }; print("{s.area()}"); run(2); }
+"#;
+    let a = jet::compile(annotated).expect("annotated compiles").rust;
+    let b = jet::compile(plain).expect("plain compiles").rust;
+    assert_eq!(a, b, "effect annotations must leave no trace in generated Rust (I3)");
+}
+
+/// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
+/// carries no effect machinery (no `Caps`, no `#(`, no effect runtime), and the
+/// body runs unchanged.
+#[test]
+fn caps_region_erases_to_plain_block() {
+    let src = r#"
+fn main() {
+    #Caps(Io) {
+        print("inside");
+    }
+    print("outside");
+}
+"#;
+    let rust = jet::compile(src).expect("compiles").rust;
+    assert!(!rust.contains("Caps"), "generated Rust must not mention Caps:\n{rust}");
+    assert!(!rust.contains("#("), "generated Rust must carry no effect annotation:\n{rust}");
+    // The region body is still emitted (a plain block).
+    assert!(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}");
+}
+
 /// A `#(Fs)` bound that matches the body's only effect compiles clean.
 #[test]
 fn declared_bound_matching_body_ok() {
