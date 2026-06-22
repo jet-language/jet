@@ -1741,6 +1741,28 @@ fn emit_call(cx: &Cx, call: &crate::AST::Call, env: &HashMap<String, Slot>) -> S
         let arg = emit_expr(cx, &call.args[0].expr, env);
         return format!("println!(\"{{}}\", ({}).jet_show())", arg);
     }
+    // D-NUMOPS1: overflow opt-ins lower the wrapped op to Rust's matching method.
+    // `checked_*` returns `Option`; the others return the value. Sema validated
+    // the shape, so the argument is one integer `+`/`-`/`*`/`/`.
+    if matches!(
+        call.name.as_str(),
+        Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+    ) && !cx.sigs.contains_key(&call.name)
+    {
+        if let Some(Expr::Binary(op, l, r, _)) = call.args.first().map(|a| &a.expr) {
+            use crate::AST::BinOp;
+            let suffix = match op {
+                BinOp::Add => "add",
+                BinOp::Sub => "sub",
+                BinOp::Mul => "mul",
+                BinOp::Div => "div",
+                _ => "add",
+            };
+            let ls = emit_expr(cx, l, env);
+            let rs = emit_expr(cx, r, env);
+            return format!("({}).{}_{}({})", ls, call.name, suffix, rs);
+        }
+    }
     // D-PRELUDE1 = B: bare `input(...)` is ambient — same lowering as `io.input(...)`.
     // Only applies when the user has not defined their own `input` function
     // (user-defined shadows the prelude, handled by sema; codegen follows suit).

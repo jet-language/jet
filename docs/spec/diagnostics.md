@@ -284,8 +284,9 @@ before continuing.
 | E0983 | jetpack | `use <pkg>` names a declared `library` dependency that hasn't been realized yet (U17) |
 | E1001 | jet   | unknown core module |
 | E1002 | jet   | local module shadows reserved first-party root/name |
-| E1003 | sema  | U8 literal out of range |
+| E1003 | sema  | integer literal out of range for its width |
 | E1004 | sema  | unknown item in core module |
+| E1005 | sema  | overflow opt-in not wrapping a single integer op |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |

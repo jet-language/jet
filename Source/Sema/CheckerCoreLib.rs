@@ -1753,6 +1753,18 @@ pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) 
     )
 }
 
+/// D-NUMOPS1 (E1005): a `wrapping`/`saturating`/`checked` opt-in wasn't given a
+/// single integer `+`/`-`/`*`/`/` to wrap.
+pub(crate) fn overflow_opt_in_error(kind: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1005",
+        format!("`{kind}` must wrap a single integer `+`, `-`, `*`, or `/`"),
+        "the overflow opt-ins apply to one arithmetic operation on whole numbers".to_string(),
+        format!("write it around one operation, e.g. `{kind}(a + b)`"),
+        Some(span),
+    )
+}
+
 /// D-NUMOPS1: the type of a numeric type-constant — `MIN`/`MAX` on any numeric
 /// type, `INFINITY`/`NAN`/`EPSILON` on floats. `None` if `member` isn't one.
 pub(crate) fn numeric_const_type(nt: &Type, member: &str) -> Option<Type> {

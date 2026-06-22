@@ -655,8 +655,12 @@ float→float conversions are infallible (a float→int via `.to_int()` truncate
 **traps** at runtime (exit 70 with the source location) when the result leaves
 the type's range, rather than wrapping silently — a corruption becomes a caught
 bug. This holds in every build (debug and release). Floats and `#Numeric`
-distinct types keep the native operators. The `wrapping`/`saturating`/`checked`
-opt-ins (per-op escape hatches) are the remaining piece of the surface.
+distinct types keep the native operators.
+
+An expert opts a **single** operation out at the use site:
+`wrapping(a + b)` wraps around, `saturating(a + b)` clamps to the type's range,
+and `checked(a + b) -> T?` returns `null` on overflow (handle with `?`/`??`).
+Each takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005**.
 
 Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and

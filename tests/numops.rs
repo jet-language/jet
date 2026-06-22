@@ -70,3 +70,19 @@ fn arithmetic_within_range_succeeds() {
     assert_eq!(code, 0, "in-range arithmetic should succeed");
     assert_eq!(stdout.trim(), "150");
 }
+
+#[test]
+fn overflow_opt_ins_do_not_trap() {
+    if !have_rustc() {
+        return;
+    }
+    // 200 + 100 overflows U8 (max 255): wrapping → 44, saturating → 255,
+    // checked → null (here fallen back to 0).
+    let src = "fn main() {\n    a: U8 @= 200\n    b: U8 @= 100\n    fb: U8 @= 0\n    \
+               print(wrapping(a + b))\n    print(saturating(a + b))\n    \
+               print(checked(a + b) ?? fb)\n}\n";
+    let (code, stdout, stderr) = build_and_run("u8_opt_ins", src);
+    assert_eq!(code, 0, "opt-ins must not trap: {stderr}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines, ["44", "255", "0"], "wrapping/saturating/checked outputs");
+}

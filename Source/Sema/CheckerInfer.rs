@@ -804,7 +804,13 @@ impl<'a> Checker<'a> {
             OrFallback::Value(e) => {
                 // Infer in place: sema rewrites inside the fallback (index
                 // kinds, S25 distribution, field clones) must reach codegen.
-                let ft = self.infer(e)?;
+                // D-SG9: the fallback shares the success type, so a fixed-width
+                // literal fallback (`x ?? 0` where `x` is `U8?`) elaborates to it.
+                let saved = self.expected_type.clone();
+                self.expected_type = Some(payload.clone());
+                let ft = self.infer(e);
+                self.expected_type = saved;
+                let ft = ft?;
                 if ft != payload {
                     self.diags.push(Diagnostic::error(
                         "E0405",
@@ -2729,7 +2735,50 @@ impl<'a> Checker<'a> {
     ///   None             — problem already reported
     ///   Some(None)       — fine, no value handed back
     ///   Some(Some(ty))   — fine, hands back `ty`
+    /// D-NUMOPS1: type a `wrapping`/`saturating`/`checked` opt-in. The single
+    /// argument must be one integer `+`/`-`/`*`/`/`; `wrapping`/`saturating`
+    /// return the operand width, `checked` returns it optional (`null` on
+    /// overflow). E1005 otherwise.
+    fn check_overflow_opt_in(&mut self, call: &mut Call) -> Option<Type> {
+        let kind = call.name.clone();
+        if call.args.len() != 1 {
+            let mut ty = None;
+            for a in call.args.iter_mut() {
+                ty = ty.or(self.infer(&mut a.expr));
+            }
+            self.diags.push(overflow_opt_in_error(&kind, call.name_span));
+            // Hand back a plausible type so the use site doesn't cascade.
+            return ty.filter(Type::is_integer).or(Some(Type::Int));
+        }
+        let arg_ty = self.infer(&mut call.args[0].expr);
+        let is_arith = matches!(
+            &call.args[0].expr,
+            Expr::Binary(op, _, _, _)
+                if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+        );
+        let int_ok = arg_ty.as_ref().is_some_and(|t| t.is_integer());
+        if !is_arith || !int_ok {
+            self.diags.push(overflow_opt_in_error(&kind, call.name_span));
+            return arg_ty.filter(Type::is_integer).or(Some(Type::Int));
+        }
+        let t = arg_ty.unwrap();
+        if kind == Syntax::BUILTIN_CHECKED {
+            Some(Type::Option(Box::new(t)))
+        } else {
+            Some(t)
+        }
+    }
+
     pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+        // D-NUMOPS1: `wrapping`/`saturating`/`checked` opt-ins wrap a single integer
+        // `+`/`-`/`*`/`/`. A user-defined function of the same name shadows them.
+        if matches!(
+            call.name.as_str(),
+            Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+        ) && !self.funcs.contains_key(&call.name)
+        {
+            return Some(self.check_overflow_opt_in(call));
+        }
         if call.name == Syntax::FOREIGN_PRINTLN || call.name == Syntax::FOREIGN_EPRINTLN {
             let target = if call.name == Syntax::FOREIGN_EPRINTLN {
                 "io.eprint"

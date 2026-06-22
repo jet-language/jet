@@ -481,6 +481,12 @@ pub const FOREIGN_OR_FALLBACK: &str = "or";
 
 /// S36 (ratified M4): bug-stop builtins (like `print`).
 pub const BUILTIN_PANIC: &str = "panic";
+/// D-NUMOPS1 (ratified 2026-06-22): per-op overflow opt-ins. Each wraps a single
+/// integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around, `saturating(…)` clamps to
+/// the type's range, `checked(…) -> T?` returns `null` on overflow.
+pub const BUILTIN_WRAPPING: &str = "wrapping";
+pub const BUILTIN_SATURATING: &str = "saturating";
+pub const BUILTIN_CHECKED: &str = "checked";
 pub const BUILTIN_REQUIRE: &str = "require";
 /// S43 (ratified M6): equality assertion in test blocks.
 pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
