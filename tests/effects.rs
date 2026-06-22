@@ -91,6 +91,35 @@ fn main() { print(calc()); }
     assert!(codes(src).contains(&"E0745"), "expected E0745, got {:?}", codes(src));
 }
 
+/// D-EFF3: an impl of a `#Pure` trait method that reaches an effect is E0742.
+#[test]
+fn trait_impl_exceeding_bound_is_e0742() {
+    let src = r#"
+use core.fs as fs
+trait Hasher { #Pure fn hash(self) -> Int; }
+struct Doc { path: String }
+impl Doc: Hasher {
+    fn hash(self) -> Int { body @= fs.read(self.path) ?? ""; return body.len(); }
+}
+fn main() { d @= Doc { path: "x" }; print(d.hash()); }
+"#;
+    assert!(codes(src).contains(&"E0742"), "impl exceeding #Pure bound should be E0742: {:?}", codes(src));
+}
+
+/// A conformant impl of a bounded trait method compiles clean.
+#[test]
+fn trait_impl_within_bound_ok() {
+    let src = r#"
+trait Shape { #Pure fn area(self) -> Int; }
+struct Square { side: Int }
+impl Square: Shape {
+    fn area(self) -> Int { return self.side * self.side; }
+}
+fn main() { s @= Square { side: 5 }; print("{s.area()}"); }
+"#;
+    assert!(codes(src).is_empty(), "conformant impl should compile: {:?}", codes(src));
+}
+
 /// D-EFF2 (transparent flow-through): passing a named effectful function as a
 /// callback flows its effects to the caller, surfacing at the call site.
 #[test]

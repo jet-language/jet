@@ -70,6 +70,10 @@ impl<'a> Fmt<'a> {
         self.newline();
         self.with_indent(|f| {
             for m in &t.methods {
+                // D-EFF3: `#Pure` prefix bound on a trait method.
+                if m.is_pure {
+                    f.write(&format!("#{} ", Syntax::KW_PURE));
+                }
                 f.write("fn ");
                 f.write(&m.name);
                 f.write("(");
@@ -80,6 +84,11 @@ impl<'a> Fmt<'a> {
                     f.fmt_param(p);
                 }
                 f.write(")");
+                // D-EFF3: `#(Gpu)` effect bound between params and the arrow.
+                if let Some(effects) = &m.declared_effects {
+                    let list = effects.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+                    f.write(&format!(" #({})", list));
+                }
                 if let Some(ret) = &m.return_type {
                     f.write(" -> ");
                     f.fmt_return_type(ret);

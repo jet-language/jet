@@ -1005,6 +1005,31 @@ signature publishes a tight pass-through that holds even when the value escapes.
 The conservative default is correct without them; they trade syntax for
 precision.
 
+### Effects on trait methods (D-EFF3)
+
+A trait method may declare an effect upper bound — `#Pure fn hash(self)` (the
+empty set) or `fn render(self) #(Gpu)`. The bound is two things at once:
+
+- **The impl obligation.** Every implementation's inferred effects must fit
+  inside the bound, or it is **E0742**. So a trait can promise "all `hash`
+  implementations are pure" and the compiler holds every impl to it.
+- **The dispatch contract.** A call through a trait object (`Box<dyn Trait>`)
+  sees the declared bound as its effect, because the concrete impl is unknown at
+  the call site — so safe-by-default survives dynamic dispatch.
+
+```jet
+trait Shape {
+    #Pure fn area(self) -> Int;   // every impl must be pure
+}
+impl Square: Shape {
+    fn area(self) -> Int { return self.side * self.side; }   // OK — pure
+}
+```
+
+An un-annotated trait method is inferred per-impl under static dispatch; the
+dynamic-dispatch fix-it (annotate the method when it's called through an object
+under an effect ceiling, E0743) is the remaining surface here.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

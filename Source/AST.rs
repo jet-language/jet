@@ -656,6 +656,16 @@ pub struct TraitMethodSig {
     pub span: Span,
     /// D-LIB2: optional default body for a trait method.
     pub default_body: Option<Vec<Stmt>>,
+    /// D-EFF3: `#Pure fn hash(self)` — the method declares the empty effect set
+    /// as its upper bound. Every impl's inferred effects must be empty (E0742),
+    /// and a dynamic-dispatch call sees the empty set.
+    pub is_pure: bool,
+    /// D-EFF3: `fn render(self) #(Gpu)` — an effect upper bound on the method.
+    /// `None` = un-annotated (per-impl effects under static dispatch; a
+    /// trait-object call under an effect ceiling is E0743). `Some(list)` is BOTH
+    /// the impl obligation (inferred ⊆ bound, else E0742) AND the dispatch
+    /// contract (a trait-object call's effect IS the bound).
+    pub declared_effects: Option<Vec<(String, Span)>>,
 }
 
 /// S28: `impl Trait { … }` inside a struct or enum body.

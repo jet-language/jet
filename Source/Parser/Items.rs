@@ -1415,7 +1415,16 @@ impl<'a> Parser<'a> {
                     continue;
                 }
             }
-            methods.push(self.trait_method_sig()?);
+            // D-EFF3: a trait method may carry a `#Pure` prefix declaring the
+            // empty effect set as its upper bound.
+            let is_pure = if self.at_pure_fn() {
+                self.bump(); // `#`
+                self.bump(); // `Pure`
+                true
+            } else {
+                false
+            };
+            methods.push(self.trait_method_sig(is_pure)?);
         }
         self.bump();
         Ok(TraitDef {
@@ -1427,7 +1436,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn trait_method_sig(&mut self) -> Result<TraitMethodSig, Diagnostic> {
+    fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
         let start = self.peek().span;
         self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
         let (name, name_span) = self.expect_ident("after `fn`")?;
@@ -1443,6 +1452,8 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "to close the parameter list")?;
+        // D-EFF3: optional `#(Gpu)` effect bound between params and the arrow.
+        let declared_effects = self.parse_opt_effect_annotation()?;
         let mut return_type = None;
         let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
@@ -1474,6 +1485,8 @@ impl<'a> Parser<'a> {
             is_view_return,
             span: Span::new(start.start, end),
             default_body,
+            is_pure,
+            declared_effects,
         })
     }
 

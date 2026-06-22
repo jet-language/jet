@@ -327,6 +327,54 @@ pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// E0742 (D-EFF3): an impl of a trait method uses effects beyond the upper
+/// bound the trait method declares (`#Pure fn …` / `fn … #(Gpu)`).
+pub fn e0742(
+    trait_name: &str,
+    method: &str,
+    over: &EffectSet,
+    bound: &EffectSet,
+    span: Span,
+) -> Diagnostic {
+    let over_list = show_set(over);
+    let bound_desc = if bound.is_empty() {
+        format!("`{}` declares `{}` `#{}`, so impls must be pure", trait_name, method, crate::Syntax::KW_PURE)
+    } else {
+        format!("`{}` bounds `{}` to `#({})`, so impls may use only those", trait_name, method, show_set(bound))
+    };
+    Diagnostic::error(
+        "E0742",
+        format!("this `{}` impl uses the effect `{}`, which the trait doesn't allow", method, over_list),
+        format!("{}; `{}` is outside that bound", bound_desc, over_list),
+        format!("remove the `{}` work from this impl, or widen the bound on the trait method", over_list),
+        Some(span),
+    )
+}
+
+/// D-EFF3: enforce trait-method effect upper bounds against each impl's inferred
+/// effects. `trait_bounds[(trait, method)]` is `Some(bound)` when the trait
+/// method declares one (`#Pure` → empty set). Impl methods are keyed
+/// `Type::method` in `solved`. An impl whose inferred set exceeds the bound is
+/// E0742.
+pub fn check_trait_obligations(
+    impls: &[(String, String, String, Span)],
+    trait_bounds: &HashMap<(String, String), EffectSet>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for (trait_name, type_name, method, span) in impls {
+        let Some(bound) = trait_bounds.get(&(trait_name.clone(), method.clone())) else {
+            continue;
+        };
+        let key = format!("{type_name}::{method}");
+        let inferred = solved.get(&key).cloned().unwrap_or_default();
+        let over: EffectSet = inferred.difference(bound).copied().collect();
+        if !over.is_empty() {
+            diags.push(e0742(trait_name, method, &over, bound, *span));
+        }
+    }
+}
+
 /// E0745: a `#Pure fn` also carries a non-empty `#(…)` bound — a contradiction.
 pub fn e0745(fn_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(

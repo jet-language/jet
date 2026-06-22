@@ -613,6 +613,67 @@ pub(crate) fn check_effect_boundaries(
             _ => {}
         }
     }
+
+    // D-EFF3: trait-method effect bounds. Build the per-method bounds from every
+    // trait, the (trait, type, method) list from every trait impl, then enforce
+    // each impl's inferred effects ⊆ the trait's bound (E0742).
+    let mut trait_bounds: HashMap<(String, String), EffectSet> = HashMap::new();
+    let mut impls: Vec<(String, String, String, Span)> = Vec::new();
+    for item in items {
+        if let Item::Trait(t) = item {
+            for m in &t.methods {
+                let bound = match (m.is_pure, &m.declared_effects) {
+                    (true, _) => Some(EffectSet::new()), // `#Pure` → empty bound
+                    (false, Some(list)) => {
+                        let mut set = EffectSet::new();
+                        let mut ok = true;
+                        for (name, span) in list {
+                            match Effect::parse(name) {
+                                Some(e) => {
+                                    set.insert(e);
+                                }
+                                None => {
+                                    diags.push(unknown_effect(name, *span));
+                                    ok = false;
+                                }
+                            }
+                        }
+                        if ok { Some(set) } else { None }
+                    }
+                    (false, None) => None, // un-annotated: per-impl, no obligation
+                };
+                if let Some(b) = bound {
+                    trait_bounds.insert((t.name.clone(), m.name.clone()), b);
+                }
+            }
+        }
+    }
+    let mut push_impl = |trait_name: &str, type_name: &str, methods: &[Func]| {
+        for m in methods {
+            impls.push((trait_name.to_string(), type_name.to_string(), m.name.clone(), m.name_span));
+        }
+    };
+    for item in items {
+        match item {
+            Item::Impl(i) => {
+                if let Some(t) = &i.trait_name {
+                    push_impl(t, &i.type_name, &i.methods);
+                }
+            }
+            Item::Struct(s) => {
+                for block in &s.trait_impls {
+                    push_impl(&block.trait_name, &s.name, &block.methods);
+                }
+            }
+            Item::Enum(e) => {
+                for block in &e.trait_impls {
+                    push_impl(&block.trait_name, &e.name, &block.methods);
+                }
+            }
+            _ => {}
+        }
+    }
+    check_trait_obligations(&impls, &trait_bounds, solved, diags);
 }
 
 

@@ -211,6 +211,7 @@ before continuing.
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
 | E0740 | sema  | a function's inferred effects exceed its declared `#(…)` bound (D-EFF1) |
 | E0741 | sema  | an effect used inside a `#Caps(…)` region is not in its cap list (D-EFF1) |
+| E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0745 | sema  | a `#Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
@@ -591,6 +592,7 @@ reported as **E0119** (unknown name).
 |------|------|-----|-----|
 | E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `#(…)` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `#(…)` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
 | E0741 | This `#Caps` region uses the effect `{effect}`, which it doesn't allow. | `#Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
+| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn render(self) #(Gpu)`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0745 | `{fn}` is `#Pure` but also declares effects. | `#Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `#Pure` to allow the listed effects. |
 
 ## C FFI diagnostics (E2-M14, S59)

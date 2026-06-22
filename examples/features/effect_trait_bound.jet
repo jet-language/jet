@@ -1,0 +1,24 @@
+// D-EFF3: a trait method may declare an effect upper bound. `#Pure fn area`
+// means every implementation must be pure — its inferred effects must fit
+// inside the empty set, or it is E0742. The bound holds for all impls, so a
+// caller can rely on it. (A `fn render(self) #(Gpu)` form bounds to a set.)
+
+trait Shape {
+    #Pure fn area(self) -> Int;
+}
+
+struct Square {
+    side: Int,
+}
+
+impl Square: Shape {
+    // No annotation needed: the impl's inferred effects (empty) fit the bound.
+    fn area(self) -> Int {
+        return self.side * self.side;
+    }
+}
+
+fn main() {
+    s @= Square { side: 5 };
+    print("{s.area()}");
+}

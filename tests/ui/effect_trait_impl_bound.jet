@@ -1,0 +1,21 @@
+use core.fs as fs
+
+trait Hasher {
+    #Pure fn hash(self) -> Int;
+}
+
+struct Doc {
+    path: String,
+}
+
+impl Doc: Hasher {
+    fn hash(self) -> Int {
+        body @= fs.read(self.path) ?? "";
+        return body.len();
+    }
+}
+
+fn main() {
+    d @= Doc { path: "x" };
+    print(d.hash());
+}
