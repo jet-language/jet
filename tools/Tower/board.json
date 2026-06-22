@@ -384,7 +384,7 @@
       "type": "idea",
       "title": "Effect system (effects as inferred tags)",
       "body": "Effects as tags on functions (#net/#fs/#io/...); pure fn = empty set; inferred + propagated, annotated at boundaries, capped via #caps(){} regions. Compile-time, erases in codegen. Reopens S60.",
-      "stage": "ready",
+      "stage": "done",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-EFF1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -396,6 +396,10 @@
         },
         {
           "t": "UNBLOCKED 2026-06-22: D-EFF2 (=D hybrid polymorphism) and D-EFF3 (=C trait dispatch contract) are now ratified in syntax-decisions.md, clearing the D-EFF1 implementation gate. Full effect-system surface decided: D-EFF1=B (inferred per-fn effect set, Koka-style rows, erased in codegen), D-QUAL1=1 (`#(…)` surface), D-EFF2=D, D-EFF3=C. Ready to implement; build unblocks c67/c70/c72/c99/c100.",
+          "at": "2026-06-22"
+        },
+        {
+          "t": "IMPLEMENTED 2026-06-22 (6 committed slices, full suite green): effect engine (Source/Sema/Effects.rs) — 10-effect vocabulary (Net/Fs/Io/Db/Time/Rand/Env/Exec/Log/Gpu) grounded in Core APIs, per-fn inference over the call graph (fixpoint), erased in codegen (I3, byte-identical-Rust test). Surface (PascalCase per D-CASING1): `#(Net, Db)` boundary on signatures → E0740; `#Caps(Net){ }` restriction regions (Stmt::Caps, transparent block) → E0741; `#Pure`=∅ reconciled (effectful Core calls in #Pure now E3401; #Pure+#(...) = E0745); unknown effect name = E0119. D-EFF2 transparent flow-through default (lambda inline + named-fn-arg edges + escaping→maximal). D-EFF3 trait-method bounds → E0742 (impl obligation). Parser/formatter round-trip, spec.md, diagnostics.md, ui snapshots, golden examples (effects/effect_caps/effect_higher_order/effect_trait_bound), tests/effects.rs (19). REMAINING ADDITIVE SURFACE (not blocking riders): D-EFF2 expert levers `#(E) fn(…)` param-type bounds + E0744 and `#(via f)` tight pass-through; D-EFF3 dispatch-contract fix-it E0743 (un-annotated trait-object call under a ceiling). Riders c67/c70/c72/c99/c100 now unblocked — they need effect classification + propagation, which is shipped.",
           "at": "2026-06-22"
         }
       ],
