@@ -180,7 +180,6 @@ impl Cx {
                 name.clone()
             }
             Type::Named(name) if name == "Unit" => "()".to_string(),
-            Type::Named(name) if name == "U8" => "u8".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
             // D-REGEX1: a regex `Match` is a list of capture groups (index 0 = whole
             // match), each `Some` if it participated. `.group(n)` is plain indexing.

@@ -714,7 +714,7 @@ pub(crate) fn expr_jet_ty_with_cx(cx: &Cx, expr: &Expr, env: &HashMap<String, Sl
                 let str_ty = || Type::String;
                 let unit_ty = || Type::Named("Unit".to_string());
                 let list_str = || Type::List(Box::new(Type::String));
-                let list_u8 = || Type::List(Box::new(Type::Named("U8".to_string())));
+                let list_u8 = || Type::List(Box::new(Type::IntN { signed: false, bits: 8 }));
                 let result = |ok: Type, err: Type| Type::Result { ok: Box::new(ok), err: Box::new(err) };
                 let list_list_str = || Type::List(Box::new(Type::List(Box::new(Type::String))));
                 let map_str_str = || Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) };
@@ -760,12 +760,78 @@ fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
         || matches!(inner, Type::Named(n) if cx.trait_names.contains(n))
 }
 
+/// D-NUMOPS1: the Rust type, spelling, and integer `(signed, bits)` (or `None`
+/// for a float) that a `to_*` width-conversion method targets.
+fn conv_rust_target(method: &str) -> Option<(&'static str, &'static str, Option<(bool, u8)>)> {
+    Some(match method {
+        "to_i8" => ("i8", "I8", Some((true, 8))),
+        "to_i16" => ("i16", "I16", Some((true, 16))),
+        "to_i32" => ("i32", "I32", Some((true, 32))),
+        "to_i64" | "to_int" => ("i64", "Int", Some((true, 64))),
+        "to_u8" => ("u8", "U8", Some((false, 8))),
+        "to_u16" => ("u16", "U16", Some((false, 16))),
+        "to_u32" => ("u32", "U32", Some((false, 32))),
+        "to_u64" => ("u64", "U64", Some((false, 64))),
+        "to_f32" => ("f32", "F32", None),
+        "to_f64" | "to_float" => ("f64", "Float", None),
+        _ => return None,
+    })
+}
+
+/// D-SG9: parse a numeric type name (`Int`, `U8`, `I32`, `Float`, `F32`) to an
+/// integer `(signed, bits)`, or `None` for floats / non-numeric names.
+fn parse_int_name(name: &str) -> Option<(bool, u8)> {
+    match name {
+        "Int" => Some((true, 64)),
+        "Float" | "F32" | "F64" => None,
+        _ => {
+            let signed = name.starts_with('I');
+            if (signed || name.starts_with('U')) && name.len() > 1 {
+                name[1..].parse::<u8>().ok().map(|b| (signed, b))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// D-NUMOPS1: emit a width conversion. Widening (target range ⊇ source range) and
+/// every float-targeted/float-sourced conversion is an infallible `as`; integer
+/// narrowing is a checked `try_from` returning `Result<T, String>`.
+fn numeric_conversion(method: &str, recv: &str, src_name: Option<&str>) -> Option<String> {
+    let (dst_rust, dst_spelling, dst_int) = conv_rust_target(method)?;
+    let Some((dsigned, dbits)) = dst_int else {
+        // Float target: int→float or float→float, always representable.
+        return Some(format!("(({}) as {})", recv, dst_rust));
+    };
+    let src_int = src_name.and_then(parse_int_name);
+    match src_int {
+        Some((ssigned, sbits)) => {
+            let (slo, shi) = crate::AST::int_range(ssigned, sbits);
+            let (dlo, dhi) = crate::AST::int_range(dsigned, dbits);
+            if dlo <= slo && shi <= dhi {
+                Some(format!("(({}) as {})", recv, dst_rust)) // widening
+            } else {
+                Some(format!(
+                    "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
+                     \"value doesn't fit in {dst_spelling}\".to_string())"
+                ))
+            }
+        }
+        // Float (or unknown) source converting to an integer target: a saturating
+        // `as` cast. Sema only reaches a float→int conversion as the infallible
+        // form, so this stays type-consistent.
+        None => Some(format!("(({}) as {})", recv, dst_rust)),
+    }
+}
+
 fn emit_builtin_method(
     cx: &Cx,
     receiver: &Expr,
     method: &str,
     method_span: crate::Diagnostics::Span,
     args: &[crate::AST::CallArg],
+    recv_type: Option<&str>,
     env: &HashMap<String, Slot>,
 ) -> Option<String> {
     let recv = emit_expr(cx, receiver, env);
@@ -888,9 +954,15 @@ fn emit_builtin_method(
         "values" => Some(format!("({}).values().cloned().collect::<Vec<_>>()", recv)),
         "contains_key" => Some(format!("({}).contains_key(&{})", recv, arg(0))),
         "to_string" => Some(format!("({}).jet_show()", recv)),
-        "to_float" => Some(format!("({}) as f64", recv)),
-        "to_int" => Some(format!("({}) as i64", recv)),
-        "to_u8" => Some(format!("{}jet_int_to_u8({})", cx.root_prefix, recv)),
+        // D-NUMOPS1: width conversions. Source width comes from sema (`recv_type`,
+        // authoritative) with a literal/expr fallback; widening is `as`, narrowing
+        // is a checked `try_from` returning `Result<T, String>`.
+        _ if conv_rust_target(method).is_some() => {
+            let src = recv_type
+                .map(|s| s.to_string())
+                .or_else(|| rty.as_ref().map(|t| t.name()));
+            numeric_conversion(method, &recv, src.as_deref())
+        }
         "elapsed_millis" => Some(format!(
             "{}jet_stopwatch_elapsed_millis(&({}))",
             cx.root_prefix, recv
@@ -1490,7 +1562,7 @@ fn emit_method_call(
         }
     }
     // Built-in collection/string methods take precedence when they match.
-    if let Some(s) = emit_builtin_method(cx, receiver, method, method_span, args, env) {
+    if let Some(s) = emit_builtin_method(cx, receiver, method, method_span, args, recv_type, env) {
         return s;
     }
     if let Expr::Ident(type_name, _) = receiver {

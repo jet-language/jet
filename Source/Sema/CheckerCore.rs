@@ -2239,7 +2239,7 @@ impl<'a> Checker<'a> {
 pub(crate) fn is_pod_uninit_type(ty: &Type) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char => true,
-        Type::Named(n) if n == "U8" => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::FixedList { elem, .. } => is_pod_uninit_type(elem),
         _ => false,
     }

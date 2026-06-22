@@ -2230,6 +2230,11 @@ impl<'a> Checker<'a> {
             }
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+            // D-NUMOPS1: hand codegen the receiver's numeric width so it picks the
+            // same widening/narrowing form sema just chose for the return type.
+            if recv_ty.is_numeric() {
+                *recv_type_out = Some(recv_ty.name());
+            }
             return self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
         }
         if let Type::TraitObject(trait_name) = &recv_ty {

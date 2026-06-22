@@ -635,9 +635,19 @@ own distinct type. Rules:
   expected.
 
 The sized types erase to their Rust equivalents (`u8`…`i64`, `f32`) at codegen,
-so they cross the C ABI by value (S59). Overflow policy, the `wrapping`/
-`saturating`/`checked` opt-ins, per-type `MIN`/`MAX`, and the width-conversion
-methods are the D-NUMOPS1 expert numeric surface.
+so they cross the C ABI by value (S59).
+
+**Width conversions (D-NUMOPS1)** are named methods, never implicit:
+`.to_i8() … .to_i64()/.to_int()`, `.to_u8() … .to_u64()`, `.to_f32()`,
+`.to_f64()/.to_float()`. A conversion whose target range fully contains the
+source range is **widening** and infallible (returns the target type); any
+other integer conversion is **narrowing** and fallible (returns `T ? String`,
+handled with `?`/`??`) — there is no silent truncation. Int→float and
+float→float conversions are infallible (a float→int via `.to_int()` truncates).
+
+Overflow policy, the `wrapping`/`saturating`/`checked` opt-ins, per-type
+`MIN`/`MAX`, and float `INFINITY`/`NAN`/`EPSILON` are the rest of the D-NUMOPS1
+expert numeric surface.
 
 Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and

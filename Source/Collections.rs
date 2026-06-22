@@ -44,7 +44,6 @@ pub fn builtin_method_return(
         Type::FixedList { elem, .. } => list_method_return(elem, method, arg_count),
         Type::Map { key, value } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
-        Type::Named(n) if n == "U8" => u8_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
         Type::Apply { name, args } if name == "Channel" => {
@@ -53,11 +52,83 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == "Sender" => {
             sender_method_return(args, method, arg_count)
         }
-        Type::Int | Type::Float | Type::Bool | Type::Char => {
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             builtin_static_return(recv_ty, method, arg_count)
         }
         _ => None,
     }
+}
+
+/// D-SG9: the byte type `U8`.
+fn u8t() -> Type {
+    Type::IntN { signed: false, bits: 8 }
+}
+
+/// `(signed, bits)` if `ty` is an integer type (`Int` = signed 64-bit).
+fn int_kind(ty: &Type) -> Option<(bool, u8)> {
+    match ty {
+        Type::Int => Some((true, 64)),
+        Type::IntN { signed, bits } => Some((*signed, *bits)),
+        _ => None,
+    }
+}
+
+/// The target type a `to_*` width-conversion method names (D-SG9/D-NUMOPS1).
+fn conv_target(method: &str) -> Option<Type> {
+    Some(match method {
+        "to_i8" => Type::IntN { signed: true, bits: 8 },
+        "to_i16" => Type::IntN { signed: true, bits: 16 },
+        "to_i32" => Type::IntN { signed: true, bits: 32 },
+        "to_i64" | "to_int" => Type::Int,
+        "to_u8" => Type::IntN { signed: false, bits: 8 },
+        "to_u16" => Type::IntN { signed: false, bits: 16 },
+        "to_u32" => Type::IntN { signed: false, bits: 32 },
+        "to_u64" => Type::IntN { signed: false, bits: 64 },
+        "to_f32" => Type::Float32,
+        "to_f64" | "to_float" => Type::Float,
+        _ => return None,
+    })
+}
+
+/// D-NUMOPS1: an integer width conversion is *widening* (infallible) when the
+/// target range fully contains the source range; otherwise *narrowing*
+/// (fallible — returns `T ? String`, with no silent truncation).
+fn int_conv_widening(src: (bool, u8), dst: (bool, u8)) -> bool {
+    let (slo, shi) = crate::AST::int_range(src.0, src.1);
+    let (dlo, dhi) = crate::AST::int_range(dst.0, dst.1);
+    dlo <= slo && shi <= dhi
+}
+
+/// D-SG9/D-NUMOPS1: width-conversion methods and `to_string` for any numeric
+/// receiver (`Int`, `Float`, and the fixed widths). Returns `None` for names
+/// this doesn't own so callers can keep trying other tables.
+fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    if method == "to_string" && nargs == 0 {
+        return Some(Some(Type::String));
+    }
+    let target = conv_target(method)?;
+    if nargs != 0 {
+        return None;
+    }
+    // Integer source.
+    if let Some(src) = int_kind(ty) {
+        return Some(Some(match int_kind(&target) {
+            // int → int: widening is infallible, narrowing is fallible.
+            Some(dst) if int_conv_widening(src, dst) => target,
+            Some(_) => Type::Result {
+                ok: Box::new(target),
+                err: Box::new(Type::String),
+            },
+            // int → float: always representable.
+            None => target,
+        }));
+    }
+    // Float source: float→float (explicit precision change) and float→int
+    // (saturating truncation) are both infallible and explicit.
+    if matches!(ty, Type::Float | Type::Float32) {
+        return Some(Some(target));
+    }
+    None
 }
 
 fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -70,21 +141,14 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             ok: Box::new(Type::Float),
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
-        (Type::Int, "to_string", 0) => Some(Some(Type::String)),
-        (Type::Int, "to_float", 0) => Some(Some(Type::Float)),
-        (Type::Int, "to_u8", 0) => Some(Some(Type::Result {
-            ok: Box::new(Type::Named("U8".to_string())),
-            err: Box::new(Type::String),
-        })),
         (Type::String, "from_bytes", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::String),
             err: Box::new(Type::Named(crate::Syntax::TYPE_UTF8_ERROR.to_string())),
         })),
-        (Type::Float, "to_string", 0) => Some(Some(Type::String)),
-        (Type::Float, "to_int", 0) => Some(Some(Type::Int)),
         (Type::Bool, "to_string", 0) => Some(Some(Type::String)),
         (Type::Char, "to_string", 0) => Some(Some(Type::String)),
-        _ => None,
+        // D-SG9/D-NUMOPS1: width conversions + `to_string` for any numeric type.
+        _ => numeric_method_return(ty, method, nargs),
     }
 }
 
@@ -127,18 +191,11 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("len" | "is_empty", 0) => Some(Some(Type::Int)),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         ("trim" | "to_upper" | "to_lower" | "to_string", 0) => Some(Some(Type::String)),
-        ("bytes", 0) => Some(Some(Type::List(Box::new(Type::Named("U8".to_string()))))),
+        ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
         ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
-        _ => None,
-    }
-}
-
-fn u8_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("to_int", 0) => Some(Some(Type::Int)),
         _ => None,
     }
 }
@@ -237,7 +294,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::String => match method {
             "contains" | "starts_with" | "ends_with" | "split" => Some(vec![Type::String]),
-            "from_bytes" => Some(vec![Type::List(Box::new(Type::Named("U8".to_string())))]),
+            "from_bytes" => Some(vec![Type::List(Box::new(u8t()))]),
             "replace" => Some(vec![Type::String, Type::String]),
             "slice" => Some(vec![Type::Int, Type::Int]),
             "repeat" => Some(vec![Type::Int]),
