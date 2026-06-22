@@ -177,7 +177,7 @@ fn too_deep(span: Span) -> Diagnostic {
             "the compiler keeps things simple by allowing at most {} levels of nesting",
             MAX_NESTING
         ),
-        "split the expression into smaller steps with `val` bindings".to_string(),
+        "split the nested code into smaller steps with `val` bindings".to_string(),
         Some(span),
     )
 }
@@ -317,10 +317,10 @@ impl<'a> Parser<'a> {
             TokKind::RBrace | TokKind::Eof => Ok(()),
             other => Err(Diagnostic::error(
                 "E0003",
-                format!("expected the end of this statement, found {}", describe(other)),
-                "each statement goes on its own line (no `;` — the line break ends it)"
+                format!("something unexpected appeared after this line, found {}", describe(other)),
+                "each line ends where the line break is (no `;` needed)"
                     .to_string(),
-                "put the next statement on a new line".to_string(),
+                "put the next line of code on a new line".to_string(),
                 Some(self.peek().span),
             )),
         }

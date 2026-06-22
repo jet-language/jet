@@ -649,7 +649,7 @@ impl<'a> Parser<'a> {
                             "E0003",
                             "this line computes a value but doesn't do anything with it"
                                 .to_string(),
-                            "a statement must have an effect: a call, a binding, an assignment, or `return`".to_string(),
+                            "only calls, bindings, assignments, and `return` are allowed here".to_string(),
                             format!(
                                 "use the value, e.g. `x {} ...` or `{}(...)`",
                                 Syntax::SIGIL_BIND_IMMUT,
@@ -664,7 +664,7 @@ impl<'a> Parser<'a> {
             }
             other => Err(Diagnostic::error(
                 "E0003",
-                format!("expected a statement, found {}", describe(other)),
+                format!("expected a call, binding, assignment, or `return`, found {}", describe(other)),
                 "inside a function body, write a call, binding, assignment, or `return`"
                     .to_string(),
                 format!(
@@ -959,7 +959,7 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0003",
                 "an `if` used as a value needs an `else` branch".to_string(),
-                "in expression position both outcomes must produce a value (S68)".to_string(),
+                "when `if` produces a value, both branches must produce one (S68)".to_string(),
                 "add `else { … }` so every path has a value".to_string(),
                 Some(self.peek().span),
             ));
@@ -998,7 +998,7 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         "this `if` branch is empty but is used as a value".to_string(),
-                        "an `if` in expression position must end each branch with a value (S68)"
+                        "when `if` produces a value, each branch must end with one (S68)"
                             .to_string(),
                         "put a value as the last line, like `{ x }`".to_string(),
                         Some(span),
