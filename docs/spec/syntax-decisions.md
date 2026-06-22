@@ -1839,7 +1839,7 @@ Rejected: `#must_use`-only (option B — misses the bound-then-silently-dropped 
 
 **D-UNINIT1 — Visible uninitialization** *(ratified 2026-06-21, option C; owner chose
 the attribute form over the rec)*: skipping the default zero-fill of a binding is opted
-into with the **`#Uninit` attribute** on the binding — `#Uninit buffer: [4096]U8` —
+into with the **`#Uninit` attribute** on the binding — `#Uninit buffer: [U8#4096]` —
 reusing the `#` marker sigil (D-ATTR1) like `#Unsafe`/`#Audit`. Gated behind
 **`use core.mem`** (S58 low-level tier); outside that gate it is a teaching error
 pointing at the gate. Safety is a **compile-time** write-before-read proof: sema tracks
@@ -1848,10 +1848,10 @@ any path that may precede a full write is **E0420** (snapshot required when impl
 I4). Codegen lowers to `MaybeUninit::<T>::uninit()` after the proof passes — never a
 runtime trap (the rail Zig's `= undefined` and C's silence lack). **Status:** the sema
 write-before-read proof (E0420, with the gate E0424 and POD-only E0423) is implemented
-and green; **codegen is gated on a discovered prerequisite** — `[N]T` fixed-lists
+and green; **codegen is gated on a discovered prerequisite** — `[T#N]` fixed-size lists
 currently lower to `Vec<T>`, on which `MaybeUninit` is unsafe and the safe lowering
-zero-fills (defeating the feature), so fixed arrays must first become real stack arrays
-`[T; N]` (proposed owner decision **D-FIXARR1**, board card c82). The parser stays
+zero-fills (defeating the feature), so fixed-size lists must first lower as real stack
+arrays (proposed owner decision **D-FIXARR1**, board card c82). The parser stays
 unwired until then. Rejected: `:= ---` Jai sigil (option A — opaque, greps
 badly); `:= uninit` value-keyword
 (option B, the rec — owner preferred the `#`-marker idiom).

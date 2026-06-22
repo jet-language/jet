@@ -21,14 +21,14 @@ initialize); loops restore the pre-loop set (0-iteration path). Parser `uninit_b
 ## ⛔ BLOCKER discovered during codegen — needs a prerequisite decision
 
 `MaybeUninit::uninit().assume_init()` (the ratified lowering) requires the binding to be
-a **stack value** of a fixed size. But this codebase lowers `[N]T` fixed-lists to
+a **stack value** of a fixed size. But this codebase lowers `[T#N]` fixed-size lists to
 **`Vec<T>`** (`Source/Codegen/Context.rs:252`), a heap value. An uninitialized `Vec`
 (garbage ptr/len/cap) is **undefined behavior** on use/drop — so MaybeUninit is unsafe
 here — and the only *safe* `Vec` lowering, `vec![0u8; N]`, **zero-fills**, defeating the
-entire purpose of `#Uninit` (the buffer case `[4096]U8` is exactly a fixed-list).
+entire purpose of `#Uninit` (the buffer case `[U8#4096]` is exactly a fixed-size list).
 
-**Therefore D-UNINIT1's codegen + parser-wiring are gated on a prerequisite:** `[N]T`
-fixed arrays must lower to a real stack array `[T; N]` (so `MaybeUninit<[T; N]>` is sound
+**Therefore D-UNINIT1's codegen + parser-wiring are gated on a prerequisite:** `[T#N]`
+fixed-size lists must lower to a real stack array (so `MaybeUninit<[T; N]>` is sound
 and skips the fill). That is a user-visible representation change (copy vs move, sizing,
 slicing, passing) and should be an **owner decision** (proposed id **D-FIXARR1**), tracked
 as board card **c82**. Until it lands, `#Uninit` stays parser-unwired and codegen-less —
@@ -47,7 +47,7 @@ dispatch, diagnostics.md (E0420–E0424) + ui snapshots + golden buffer example 
 use core.mem
 
 fn fill(sock: Socket) {
-    #Uninit buffer: [4096]U8      // no initializer; skip the zero-fill
+    #Uninit buffer: [U8#4096]     // no initializer; skip the zero-fill
     sock.read(mut buffer)?        // fills it — counts as the initializing write
     process(buffer)               // ok: written before read
 }

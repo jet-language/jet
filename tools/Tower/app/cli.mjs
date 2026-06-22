@@ -16,14 +16,15 @@ export function status() {
   out(`${C.cyn}BOARD${C.rst}  ${cards.length} cards (${cards.filter((c) => c.type === "bug").length} bugs)`);
   for (const st of STAGES) {
     const n = cards.filter((c) => c.stage === st);
-    if (n.length) out(`  ${C.dim}${STAGE_LABELS[st].padEnd(9)}${C.rst} ${n.map((c) => c.title).slice(0, 4).join("; ")}`);
+    if (n.length) out(`  ${C.dim}${STAGE_LABELS[st].padEnd(9)}${C.rst} ${n.map((c) => `${c.workOrder ? "#" + c.workOrder + " " : ""}${c.priority || "P2"} ${c.title}`).slice(0, 4).join("; ")}`);
   }
   out("");
   if (s.worklist.length) {
     out(`${C.cyn}READY FOR CLAUDE${C.rst}  ${s.worklist.length} queued`);
     for (const w of s.worklist) {
       const tag = w.auto ? `${C.grn}auto${C.rst}` : `${C.yel}gated${C.rst}`;
-      out(`  ${tag}  ${C.b}${w.id}${C.rst} ${w.text} — ${C.dim}${truncate(w.title, 44)}${C.rst}`);
+      const order = w.workOrder ? `#${String(w.workOrder).padStart(2, "0")} ` : "";
+      out(`  ${tag}  ${order}${w.priority || "P2"} ${C.b}${w.id}${C.rst} ${w.text} — ${C.dim}${truncate(w.title, 44)}${C.rst}`);
     }
     out("");
   }

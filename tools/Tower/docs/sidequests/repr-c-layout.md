@@ -25,7 +25,7 @@ binder D-CBIND3 — neither pins Jet-side struct layout.
 - **parser**: a layout annotation on a `struct` item (form is the decision).
 - **sema**: a layout-tagged struct is only allowed where its guarantees hold;
   e.g. it cannot contain a Jet-managed (non-`repr(C)`-safe) field like a growable
-  `[T]` without a diagnostic. Interacts with c82 (fixed arrays `[T;N]`): a
+  `[T]` without a diagnostic. Interacts with c82 (fixed-size lists `[T#N]`): a
   `repr(C)` struct of fixed arrays is the firmware case.
 - **codegen**: emit `#[repr(C)]` on the generated Rust struct (this is the one
   place generated Rust legitimately mirrors a layout attribute).

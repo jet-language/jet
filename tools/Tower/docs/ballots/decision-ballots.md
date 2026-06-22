@@ -37,11 +37,156 @@ it's time to decide it.
 > Three follow-ons the ratifications spawned are now **open** below: **D-EFF2** + **D-EFF3**
 > (the two effect-system sub-questions the owner asked be crosschecked + carded — surface
 > spelling and S60 reopen are already settled by D-QUAL1=1, so these are non-duplicate),
-> under **c66**; **D-MIGRATE2** (the migration-op vocabulary + `jet schema` verbs beyond
-> the ratified `rename`) under **c73**; and **D-SOA2** (a better name than "SOA" + the
+> under **c66**; **D-MIGRATE2A/B/C** (the migration-op vocabulary, converter source,
+> and `jet schema` verbs beyond the ratified `rename`) under **c73**; and **D-SOA2** (a better name than "SOA" + the
 > three deferred layout questions, owner-requested) under **c78**. Cards **c25** (range
 > sugar) and **c55** (REPL v2) are implement-only. Submitting a decision records it in
 > `syntax-decisions.md` and removes it from this file.
+
+---
+
+## Safety and syntax cleanup — board cards c09, c82
+
+### D-UNSAFE2 — Keep `#Unsafe` / `#Audit` separate or merge the audit text into unsafe? (rec A)
+
+**Gist:** Keep the existing two-marker model: `#Audit("reason")` documents, `#Unsafe { }`
+authorizes.
+
+**Story.** Mara reviews a low-level driver patch. She wants to search for every unsafe
+region and separately inspect the human justification for each one. If the audit reason
+is folded into `#Unsafe("reason")`, the two jobs become one overloaded marker.
+
+**In the wild:**
+
+```jet
+use core.mem
+
+#Audit("MMIO status register; volatile read is required by the device manual")
+#Unsafe {
+    ready :: mem.read_volatile(status_ptr)
+}
+```
+
+**Other languages:**
+
+```rust
+// Rust splits the operation (`unsafe`) from review policy (`SAFETY:` comments).
+// Jet makes both machine-checkable instead of relying on comment convention.
+unsafe {
+    // SAFETY: pointer is valid for this register.
+}
+```
+
+**Tradeoffs:**
+
+| Option | Surface | Searchability | Review quality | Churn |
+|--------|---------|---------------|----------------|-------|
+| **A — keep `#Audit` + `#Unsafe` separate (rec)** | two explicit markers | best | best: reason and region are distinct | none |
+| B — `#Unsafe("reason") { }` | one marker | good | weaker for multi-line / multi-reason audits | medium |
+| C — comments only | no marker for the reason | poor | unenforced convention | low |
+
+- **Option A — separate markers (recommended).** `#Audit` remains the review artifact;
+  `#Unsafe` remains the capability boundary.
+
+```jet
+#Audit("calls C API that requires null-terminated buffer")
+#Unsafe { c.send(ptr) }
+```
+
+- **Option B — reason inside `#Unsafe`.** Shorter, but the safety reason becomes an
+  argument to the effect gate rather than its own auditable artifact.
+
+```jet
+#Unsafe("calls C API that requires null-terminated buffer") { c.send(ptr) }
+```
+
+- **Option C — comments.** Cheapest syntax, but loses the enforceable "unsafe needs an
+  audit" rule.
+
+```jet
+// audit: calls C API that requires null-terminated buffer
+#Unsafe { c.send(ptr) }
+```
+
+**Recommendation:** **A**. It matches the current shipped surface, keeps audit text
+machine-checkable, and avoids churn in one of Jet's most credibility-sensitive areas.
+
+---
+
+### D-FIXARR1 — Should fixed-size lists `[T#N]` lower to real stack arrays? (rec B)
+
+**Gist:** Make the existing `[T#N]` type a real fixed stack array in codegen.
+
+**Story.** Walter writes firmware for a soil-moisture sensor. He needs a 4096-byte
+scratch buffer that lives on the stack and is filled by DMA, so he writes
+`#Uninit scratch: [U8#4096]`. Today that fixed-size list still lowers through `Vec`,
+which means heap allocation or zero-fill. He wants the fixed-size promise to be real.
+
+**In the wild:**
+
+```jet
+use core.mem
+
+struct Frame {
+    header: [U8#8]
+    crc: [U8#4]
+}
+
+fn read_frame(dev: edit Device) -> Frame {
+    #Uninit raw: [U8#12]
+    dev.fill(edit raw)
+    return Frame { header: raw[0..8], crc: raw[8..12] }
+}
+```
+
+**Other languages:**
+
+```rust
+let a: [u8; 12] = [0; 12];                 // fixed, stack
+let m = MaybeUninit::<[u8; 12]>::uninit();  // sound because layout is fixed
+```
+
+```zig
+var raw: [12]u8 = undefined;               // fixed, stack, uninitialized
+```
+
+**Tradeoffs:**
+
+| Option | Stack / no heap | `#Uninit` sound | Beginner model | Surface churn |
+|--------|-----------------|-----------------|----------------|---------------|
+| A — keep `Vec` lowering | no | no | same as list | none |
+| **B — real stack array for `[T#N]` (rec)** | yes | yes | "a list whose size is locked" | none |
+| C — add separate `[T; N]` spelling | yes | yes | three collection-ish types | high |
+
+- **Option A — keep the current `Vec<T>` lowering.** This preserves the current backend
+  but makes `#Uninit` either unsafe or forced to zero-fill, defeating the feature.
+
+```jet
+#Uninit raw: [U8#4096]   // secretly cannot be an uninitialized Vec safely
+```
+
+- **Option B — lower `[T#N]` to a real fixed stack array (recommended).** Keep S76's
+  ratified spelling. Assignment copies when `T` is copyable and moves otherwise, following
+  the element type's existing value semantics. A `[T#N]` widens to `[T]` by copying into a
+  growable list when passed to a `[T]` slot. `var x := [1, 2, 3]` keeps S76's beginner rule
+  and widens to `[Int]`; experts who need a mutable fixed array write `x: [Int#3]`.
+
+```jet
+pts: [Int#3] :: [10, 20, 30]
+first :: pts[0..2]       // first: [Int], copied out as a growable list
+```
+
+- **Option C — introduce a separate fixed-array spelling.** This reopens the spelling
+  S76 already settled and adds another collection kind.
+
+```jet
+refined: [Int#3] :: [1, 2, 3]
+stacked: [Int; 3] :: [1, 2, 3]   // rejected direction: extra spelling
+```
+
+**Recommendation:** **B**. S76 already chose `[T#N]`; the only remaining question is
+whether the backend honors it. Making `[T#N]` stack-backed unlocks D-UNINIT1 without new
+syntax and makes the existing type mean what it says.
 
 ---
 
@@ -591,7 +736,7 @@ This error fires *only* when the surrounding context demands an effect ceiling (
 
 ## Safe schema changes — board card c73
 
-### D-MIGRATE2 — Full migration-operation vocabulary + `jet schema` verbs (rec: per sub-question below)
+### D-MIGRATE2A — Migration operation vocabulary (rec A/A/A/B)
 
 **User story.** Sam maintains `jet-records`, a published library. In v1 the core type was:
 
@@ -606,11 +751,13 @@ struct UserRecord {
 
 In v2 Sam wants to (1) rename `name` → `display_name` (already ratified, D-MIGRATE1), (2) drop `legacy_id` (an internal artifact some consumers serialized anyway), and (3) change `price` from raw `Int` cents to a `Usd` value type. Without migrations the compiler fires E0910 on all three. The ratified vocabulary has exactly one verb — `rename old -> new`. This card decides the rest.
 
-> **Context.** D-MIGRATE1 ratified Option A — compile-time `#PublishedSchema` shape enforcement; a breaking change with no migration is E0910; `migration Type { rename a -> b }` unblocks it. Scope was deliberately locked to `rename`. Reuses ratified syntax: the `migration Type { }` block, `impl Source -> Target { }` (D-ERR-CONV), distinct construction `Usd(cents)` (D-DIST3), the `->` arrow.
+> **Context.** D-MIGRATE1 ratified Option A — compile-time `#PublishedSchema` shape enforcement; a breaking change with no migration is E0910; `migration Type { rename a -> b }` unblocks it. Scope was deliberately locked to `rename`. Owner requested this be split into multiple cards so each choice is independent. This card decides only the migration block's operation vocabulary.
+
+**Gist:** Pick the extra verbs allowed inside `migration Type { }`.
 
 ---
 
-#### Sub-question 1a — Add a field with a default
+#### Add a field with a default
 
 A new field has no value in already-serialized data; the migration supplies a default.
 
@@ -733,7 +880,46 @@ struct UserRecord { price: Usd, display_name: String, verified: Bool }
 
 ---
 
-#### Sub-question 2 — Type-change conversions: inline vs. named converter
+**Recommendation:** Ratify the vocabulary as **A/A/A/B**: `add f: T = val`, `remove f`,
+`change f: Old -> New via <expr>`, and no `reorder` verb. This keeps the block small,
+plain, and focused on schema shape changes that actually affect compatibility.
+
+---
+
+### D-MIGRATE2B — Migration type-change converter source (rec C)
+
+**Gist:** Decide whether `change f: Old -> New` gets its converter inline, from a named
+conversion impl, or both.
+
+**Story.** Sam changes `price: Int` into `price: Usd`. For a trivial cents wrapper, an
+inline lambda is clearest. For a real legacy cleanup that parses text, clamps old bad
+values, and logs a note, a named converter is cleaner and testable.
+
+**In the wild:**
+
+```jet
+migration UserRecord {
+    change price: Int -> Usd via (cents) => Usd(cents)
+}
+```
+
+**Other languages:**
+
+```rust
+impl From<i64> for Usd { fn from(cents: i64) -> Usd { Usd(cents) } }
+```
+
+```sql
+ALTER TABLE users ALTER COLUMN price TYPE usd USING cents_to_usd(price);
+```
+
+**Tradeoffs:**
+
+| Option | Best for | Local readability | Reuse/testability | Extra mechanism |
+|---|---|---|---|---|
+| A — always inline `via` | short transforms | best | weak | lambda in migration |
+| B — named converter only | non-trivial transforms | split from field | best | reuses conversion impl |
+| **C — inline wins, else named impl (rec)** | both | best for short case | best for long case | one resolution rule |
 
 - **Option A — always inline `via` lambda.** Conversion sits next to the field.
 
@@ -766,7 +952,15 @@ migration UserRecord { change price: Int -> Usd }
 
 ---
 
-#### Sub-question 3 — The `jet schema` verb surface
+### D-MIGRATE2C — `jet schema` command surface (rec A/B)
+
+**Gist:** Decide the user-facing schema maintenance commands after migration blocks exist.
+
+**Story.** Sam has ten released versions. He wants a human-readable status command before a
+release, and later he wants to collapse old migrations into a new baseline so the repository
+does not accumulate years of compatibility code.
+
+**In the wild:**
 
 ```shell
 $ jet schema status
@@ -779,6 +973,21 @@ UserRecord (jet-records v1.0.0 → current)
   No uncommitted breaking changes.
 ```
 `jet schema status` — confirm this spelling/output (no decision needed).
+
+**Other languages:**
+
+```shell
+$ diesel migration run
+$ prisma migrate status
+$ alembic current
+```
+
+**Tradeoffs:**
+
+| Choice | Option A | Option B | Recommendation |
+|---|---|---|---|
+| Squash cutoff spelling | `jet schema squash --before <ver>` | `jet schema squash <ver>` | **A** |
+| Separate CI gate | `jet schema check` | rely on `jet build` / E0910 | **B** |
 
 **Squash flag:**
 
@@ -840,15 +1049,11 @@ migration UserRecord {
 }
 ```
 
-| Sub-question | Recommendation |
+| Card | Recommendation |
 |---|---|
-| 1a add-field | `add f: T = val` |
-| 1b remove-field | `remove f` |
-| 1c type-change | `change f: Old -> New via <expr>` (inline) + `impl Old -> New` (named) |
-| 1d reorder | not a tracked breaking change |
-| 2 conversion supply | both; inline `via` wins, fall back to `impl` |
-| 3 squash flag | `--before <ver>` |
-| 3 CI gate | use `jet build`; no extra verb |
+| D-MIGRATE2A | `add f: T = val`; `remove f`; `change f: Old -> New via <expr>`; no `reorder` |
+| D-MIGRATE2B | both converter forms; inline `via` wins, fall back to `impl Old -> New` |
+| D-MIGRATE2C | `jet schema squash --before <ver>`; use `jet build` as the CI gate |
 
 ## Persona-gap decisions — board cards c83–c96 (2026-06-20 persona run)
 
@@ -1079,6 +1284,296 @@ available behind `#Unsafe`/`#Audit` for the last-mile expert case. B is a nice
 additive sugar but can't be the primitive (it's unpredictable).
 
 ---
+
+---
+
+## Proposal follow-ups and comptime gaps — board cards c64, c65, c97, c98
+
+### D-REACT1 — Should reactive/dataflow be core semantics, tooling, or a library? (rec B)
+
+**Gist:** Keep normal execution semantics; use the derived dataflow graph for tooling and
+ship reactivity as an opt-in library.
+
+**Story.** Priya builds a dashboard. She wants cells to recompute when their inputs
+change, but she does not want every Jet program to become a spreadsheet runtime where
+assignment secretly installs observers.
+
+**In the wild:**
+
+```jet
+use jet.reactive as rx
+
+price := rx.signal(10)
+qty := rx.signal(3)
+total := rx.derived(() => price.get() * qty.get())
+```
+
+**Other languages:**
+
+```swift
+// SwiftUI makes reactivity a framework layer, not the whole language.
+@State var count = 0
+```
+
+```ts
+// Solid/Svelte: explicit reactive layer on top of normal JavaScript semantics.
+const total = createMemo(() => price() * qty())
+```
+
+**Tradeoffs:**
+
+| Option | Core semantics risk | Tooling value | Beginner surprise | Scope |
+|--------|---------------------|---------------|-------------------|-------|
+| A — make Jet reactive by default | high | high | high | language-wide |
+| **B — dataflow graph for tooling + `jet.reactive` lib (rec)** | low | high | low | opt-in |
+| C — no reactive story | low | low | low | none |
+
+- **Option A — reactive by default.** Every binding participates in a dependency graph.
+  Powerful, but collides with ownership, mutation, and predictable systems semantics.
+
+```jet
+total :: price * qty   // later price changes would imply total changes too
+```
+
+- **Option B — tooling graph plus opt-in library (recommended).** The compiler can expose
+  dependency information to IDEs/build tools, while runtime reactivity is explicit.
+
+```jet
+total := rx.derived(() => price.get() * qty.get())
+```
+
+- **Option C — no reactive surface.** Keeps the language small but forfeits an obvious
+  application-framework layer.
+
+```jet
+// users hand-roll observers, invalidation, and graph debugging
+```
+
+**Recommendation:** **B**. It captures the Blueprint/tooling value without changing the
+meaning of ordinary bindings, and it leaves app-level reactivity to a library where it
+belongs.
+
+---
+
+### D-FANOUT2 — Add namespace/member fan-out sugar beyond S75 call fan-out? (rec B)
+
+**Gist:** Defer namespace/member fan-out; keep only the already-ratified call fan-out
+until real use proves the second axis.
+
+**Story.** Alana sees `f.[a, b, c]` and asks whether `service.{start, stop, status}` or
+`obj.[x, y]` should also exist. It is tempting sugar, but it risks making `.` carry too
+many meanings right after S75 landed.
+
+**In the wild:**
+
+```jet
+scores :: normalize.[raw_a, raw_b, raw_c]   // S75: already ratified and implemented
+```
+
+**Other languages:**
+
+```js
+// JavaScript has destructuring, not member fan-out syntax.
+const { start, stop } = service
+```
+
+```swift
+// Swift keeps key paths explicit.
+users.map(\.name)
+```
+
+**Tradeoffs:**
+
+| Option | Expressiveness | Parser/formatter risk | Reader cost | Timing |
+|--------|----------------|-----------------------|-------------|--------|
+| A — add namespace/member fan-out now | medium | medium | medium | early |
+| **B — defer; keep S75 only (rec)** | enough for now | low | low | evidence-driven |
+| C — reject permanently | low | low | low | closes useful door |
+
+- **Option A — add the sugar now.** Introduce a second fan-out axis for member or
+  namespace selection.
+
+```jet
+handlers :: routes.{get, post, delete}
+```
+
+- **Option B — defer (recommended).** Keep S75's function-call fan-out as the only
+  shipped form and collect examples before adding another dot/bracket meaning.
+
+```jet
+handlers :: [routes.get, routes.post, routes.delete]
+```
+
+- **Option C — reject permanently.** Forces explicit lists forever.
+
+```jet
+handlers :: [routes.get, routes.post, routes.delete]
+```
+
+**Recommendation:** **B**. S75 is new; another compact fan-out form should wait for
+evidence so Jet does not accrete clever punctuation faster than users can read it.
+
+---
+
+### D-STRPARSE1 — String parse APIs and comptime `Result`/`Option` evaluation (rec A)
+
+**Gist:** Add normal runtime string parsing APIs and allow comptime evaluation through
+`Result`/`Option` for pure parse paths.
+
+**Story.** Nora writes a comptime schema loader. She can read embedded text, but she
+cannot cleanly split it into lines and parse numbers at comptime because the string
+methods and `Result` flow are incomplete there.
+
+**In the wild:**
+
+```jet
+const ports = embed_str("ports.txt")
+    .lines()
+    .map((line) => line.parse_int()?)
+```
+
+**Other languages:**
+
+```rust
+let n: i64 = "42".parse()?;
+```
+
+```zig
+const n = try std.fmt.parseInt(i64, "42", 10);
+```
+
+**Tradeoffs:**
+
+| Option | Runtime usefulness | Comptime usefulness | Implementation scope |
+|--------|--------------------|---------------------|----------------------|
+| **A — add parse APIs + comptime `Result`/`Option` (rec)** | high | high | medium |
+| B — runtime APIs only | high | low | low |
+| C — no new APIs | low | low | none |
+
+- **Option A — both runtime parse APIs and comptime `Result`/`Option` (recommended).**
+
+```jet
+n :: "42".parse_int()?
+lines :: text.lines()
+```
+
+- **Option B — runtime only.** Good for apps, still blocks comptime data ingestion.
+
+```jet
+n :: input.parse_int()?   // ok at runtime, not in const/comptime paths
+```
+
+- **Option C — no new surface.** Users keep writing ad hoc parsers.
+
+```jet
+// manual digit loops everywhere
+```
+
+**Recommendation:** **A**. Parsing text into typed values is a core library expectation,
+and the comptime path is exactly where Jet wants schema/config ingestion to feel strong.
+
+---
+
+### D-CTCORE1 — Should comptime execute Core-module calls inline? (rec B)
+
+**Gist:** Add a curated comptime Core whitelist first, not the whole runtime Core.
+
+**Story.** Imani writes `const root = math.sqrt(81)` and expects it to fold. The native
+program can call `core.math`, but the comptime interpreter cannot execute arbitrary Core
+module calls yet.
+
+**In the wild:**
+
+```jet
+use core.math as math
+
+const tile = math.sqrt(256)
+```
+
+**Other languages:**
+
+```zig
+const tile = std.math.sqrt(256.0); // comptime when inputs are comptime-known
+```
+
+```rust
+const N: usize = 4 + 4; // only const-approved functions are callable in const contexts
+```
+
+**Tradeoffs:**
+
+| Option | Power | Determinism risk | Maintenance |
+|--------|-------|------------------|-------------|
+| A — execute all Core calls | highest | high | high |
+| **B — curated pure whitelist (rec)** | useful | low | medium |
+| C — no Core calls at comptime | low | low | low |
+
+- **Option A — all Core calls.** Maximum power, but drags IO, platform, allocation, and
+  runtime behavior into the interpreter boundary.
+
+```jet
+const data = fs.read("x")   // bad direction: compile-time effects by accident
+```
+
+- **Option B — curated pure whitelist (recommended).** Only deterministic, pure Core
+  functions are callable at comptime; other calls produce a teaching diagnostic.
+
+```jet
+const tile = math.sqrt(256)
+const lines = "a\nb".lines()
+```
+
+- **Option C — no Core calls.** Keeps comptime tiny, but forces duplicate evaluator code.
+
+```jet
+const tile = 16   // user must precompute or write local helpers
+```
+
+**Recommendation:** **B**. It gives users the expected pure math/string helpers while
+preserving the compile-time effect boundary. The whitelist can grow with tests.
+
+**Owner Q (2026-06-22) — I don't understand the downside. Why not just allow all Core
+calls?**
+
+The downside is that "all Core at comptime" changes comptime from **pure evaluation** into
+**running a second copy of the runtime during compilation**. That creates five concrete
+problems:
+
+1. **Builds stop being reproducible by default.** `fs.read`, `env.get`, `time.now`,
+   `random`, `process.run`, networking, and current-directory access can produce different
+   outputs on two machines or two minutes apart. If those are allowed in arbitrary comptime
+   code, the same source can compile into different binaries without the source changing.
+2. **Compilation gains ambient side effects.** A package could run a process, touch the
+   network, read secrets from the environment, or depend on local files just because an
+   imported module has a `const` initializer. That fights Jet's supply-chain and package
+   trust story unless every compile is sandboxed and audited.
+3. **The interpreter must faithfully duplicate the whole runtime.** Core functions today are
+   Rust-backed runtime helpers. Letting all of them run at comptime means reimplementing or
+   safely bridging file handles, sockets, TLS, subprocesses, clocks, randomness, readers,
+   writers, paths, JSON, channels, allocation behavior, and platform errors inside the
+   comptime interpreter. Any mismatch becomes "works at runtime, fails at comptime" or worse,
+   silently different behavior.
+4. **Security policy becomes backwards.** The safe default should be "comptime is pure unless
+   you explicitly opt into build-time IO." Option A makes IO/network/process execution the
+   default capability of the compiler itself. That should be an expert, audited build recipe
+   tier, not something reachable through a normal `const`.
+5. **Error messages get worse.** With a whitelist, an unsupported call gets a clean teaching
+   error: "`fs.read` is build-time IO; use `@embed`/package recipe/etc." With all-Core, every
+   platform/runtime failure becomes a compile failure that depends on the user's machine.
+
+So B is not "less power forever." It is sequencing:
+
+```jet
+const n = math.sqrt(81)          // allowed: deterministic pure whitelist
+const parts = "a,b".split(",")   // allowed once String helpers are whitelisted
+const home = env.get("HOME")     // rejected: ambient machine state
+const data = fs.read("x.json")   // rejected here; use explicit build-time IO / embed path
+```
+
+The expert path is still available: add explicit build-time IO APIs later (`@embed`,
+package recipes, sandboxed build steps, or a named `#BuildIO`/recipe capability). The line is
+that **plain comptime stays deterministic and pure**, while build-time effects are explicit,
+auditable, and package-policy-visible.
 
 ---
 
@@ -1992,7 +2487,7 @@ per-function coverage) can proceed independently of D-TEST1 and D-TEST4.
 > only re-decides the *immutable* spelling; `:=` (mutable) and `=` (reassignment,
 > S17) are unchanged.
 
-### D-BIND2 — Spelling of the immutable binding (rec A — `$=`)
+### D-BIND2 — Spelling of the immutable binding (rec C — `$=`)
 
 **User story.** Sam skims a 60-line function at editor-zoom-out (minimap) looking
 for which values are fixed and which can change. Today immutable is `name :: expr`
@@ -2015,84 +2510,76 @@ The immutable form is the outlier on both axes the owner named: no `=`, and a
 leading glyph identical to the mutable form. (`=` alone can't be the immutable
 binding — it already means *reassign an existing `:=` binding*, S17.)
 
-| Option | Immutable spelling | Has `=` | Distinct from `:=` at a glance | Width vs `:=` | Sigil collision | Ratification cost |
-|--------|--------------------|---------|-------------------------------|---------------|-----------------|-------------------|
-| **A `$=` (rec)** | `name $= expr` | ✓ | **high** — different leading glyph (`$` vs `:`) | same (2 ch) | `$` is unused in Jet (verified) | reopen S2; mechanical token swap |
-| B `=:` (mirror) | `name =: expr` | ✓ | **low** — mirror of `:=`, blurs when fast/zoomed | same | none | reopen S2 |
-| C `::=` (BNF) | `name ::= expr` | ✓ | medium — shares colon family; `::=` vs `:=` differ by colon count | wider (3 ch) | none | reopen S2 |
-| D `::` (status quo) | `name :: expr` | ✗ | high (already) | same | n/a | none |
+| Option | Immutable spelling | Logic signal | Psychology / first impression | Distinct from `:=` at a glance | Collision / baggage |
+|--------|--------------------|--------------|-------------------------------|-------------------------------|---------------------|
+| A `@=` | `name @= expr` | "anchored / located / attached" | feels deliberate and technical | high | `@` already carries label/address vibes |
+| B `#=` | `name #= expr` | "marked / tagged / fixed by marker" | feels declarative and metadata-adjacent | high | `#` is already Jet's attribute sigil |
+| **C `$=` (rec)** | `name $= expr` | "named value / fixed value" | feels lightweight, value-centric, and clearly non-mutable | high | `$` is unused in Jet today |
 
-- **Option A — `$=` (recommended).** Immutable becomes `name $= expr`; mutable
-  stays `name := expr`. `$` is a completely unused glyph in Jet's grammar (no
-  string-interpolation use — S8 uses `{…}` — no sigil, no operator; verified
-  against `Source/`), so adopting it introduces no collision. The leading glyph
-  differs entirely from `:=`, so the two are unmistakable shrunk down; and `$=`
-  carries the `=` that unifies the family.
+This is now the focused set: three two-character candidates, all prefix forms, all
+containing `=`, all visually far from `:=`. The real question is not which one is
+"available" — all three are available enough — but what *mental model* each one teaches.
+
+- **Option A — `@=`.** Immutable becomes `name @= expr`; mutable stays `name := expr`.
+  Its logic is "anchor this name to this value." That is coherent, but the psychology is
+  more ambiguous: `@` often reads as location, address, label, mention, or indirection.
+  In Jet specifically, `@` already has semantic gravity from loop labels, and in systems
+  contexts it leans toward "address-like" rather than "fixed value." So `@=` looks crisp
+  on the page, but it teaches the wrong thing: *where* or *which one*, not *unchangeable*.
 
 ```jet
-// the family now reads consistently — every binder/assigner has `=`,
-// and the two binders are unmistakable at a glance:
-ratio: Float $= 3.14          // immutable: leading $, fixed
-count: Int   := 0             // mutable:   leading :, changeable
+ratio: Float @= 3.14
+count: Int   := 0
 count = count + 1             // reassign:  bare =, S17 (mutable only)
-
-name  $= "Ada"                // immutable
-limit := 10                   // mutable
-
-// zoomed-out / minimap distinctness — $ vs : is obvious where :: vs := blurs:
-//   $= …   $= …   := …   $= …   := …
 ```
 
+- **Option B — `#=`.** Logic: "this binding is marked/fixed." Psychologically this is the
+  most *declarative* of the three. It feels like a definition stamp. The problem is local
+  language coherence: Jet already spent `#` on attributes/tags (`#Pure`, `#Test`, `#Unsafe`,
+  `#Audit`, `#layout`, etc.). Reusing `#` for a core binding operator creates a visual field
+  where "things beginning with `#`" no longer belong to one conceptual family. That weakens
+  one of Jet's current strengths: `#` means marker/qualifier syntax.
+
 ```jet
-// item-level and distinct-type forms move with it (D-DIST1):
-UserId $= distinct Int        // was `UserId :: distinct Int`
+ratio: Float #= 3.14
+count: Int   := 0
+```
+
+- **Option C — `$=` (recommended).** Logic: "this name is a value binding." The symbol is
+  economically strong because it does **not** already mean "attribute", "address", "label",
+  or "operator family" inside Jet. Psychologically it reads light, plain, and value-oriented.
+  `$` already connotes "a named value" across shell, PHP, interpolation syntax, and general
+  programmer culture, but it does **not** carry a strong assignment meaning. That makes `$=`
+  easy to learn as "bind this fixed value here" without dragging in another Jet feature's
+  semantics. It also stays maximally distinct from `:=` in minimap/zoomed-out reading.
+
+```jet
+ratio: Float $= 3.14
+count: Int   := 0
+count = count + 1
+
+UserId $= distinct Int
 PI     $= 3.14159
 ```
 
-- **Option B — `=:` (mirror of `:=`).** Symmetric and minimal, but it is the exact
-  visual inverse of the mutable sigil — precisely the confusion the owner asked to
-  avoid. At small sizes `=:` and `:=` are near-indistinguishable.
+**Logic / psychology summary.**
 
-```jet
-ratio: Float =: 3.14          // immutable
-count: Int   := 0             // mutable — one glyph swap away; blurs when zoomed out
-```
+| Prefix | What it logically suggests | What it psychologically feels like | Main risk |
+|---|---|---|---|
+| `@` | anchored / addressed / attached | technical, pointed, location-like | teaches address/label more than constness |
+| `#` | marked / declared / qualified | declarative, stamped, metadata-like | collapses binding into the attribute/tag family |
+| `$` | value / name / fixed slot | lightweight, value-centric, readable | some shell/PHP flavor, but no direct assignment baggage |
 
-- **Option C — `::=` (BNF "is defined as").** Semantically apt (a constant
-  *definition*) and keeps the `::`-immutability association while adding `=`. But
-  it stays in the colon family, so `::=` vs `:=` differ only by colon count — still
-  blurrable at a glance — and it is three characters, breaking the even width with
-  `:=`.
+**Recommendation:** **C (`$=`)**. `@=` and `#=` are both internally coherent, but each
+reuses a prefix Jet already wants to mean something else: `@` is directional/label-like and
+`#` is Jet's marker/qualifier family. `$=` is the only one of the three that gives you the
+owner's two hard requirements at once:
 
-```jet
-ratio: Float ::= 3.14         // immutable — reads "is defined as"
-count: Int    := 0            // mutable — colon-family neighbor; count the colons to tell them apart
-```
+1. It contains `=` and keeps the binding family visually consistent.
+2. It is obviously not `:=` at a glance.
 
-- **Option D — status quo `::`.** No change. Keeps the just-ratified D-BIND1, but
-  leaves the immutable form as the family outlier with no `=` — the thing the owner
-  wants fixed. Listed as the honest baseline.
-
-```jet
-ratio: Float :: 3.14          // immutable — no `=`, leading `:` shared with `:=`
-count: Int   := 0             // mutable
-```
-
-**How others do it.** Odin/Go use `::` / `:=` (the colon family Jet shipped — the
-exact pair the owner finds blurry). Pascal/Ada/Go use `:=` for assignment with no
-distinct constant sigil. No mainstream language uses `$=` for binding, so it
-carries no conflicting muscle-memory — a clean glyph for a clean meaning. (`$` is
-"variable" in shell/PHP, but never an *assignment* operator, so no false analogy.)
-
-**Recommendation:** **A (`$=`)**. It is the only candidate that satisfies both
-owner constraints at once — contains `=` (family consistency) *and* leads with a
-distinct glyph that never blurs against `:=` (B and C both stay one-glyph or
-colon-count away). `$` is verified-free in the grammar, so the change is a
-contained, mechanical token swap (lexer two-char scan `$` `=`, `SIGIL_BIND_IMMUT`
-in `Source/Syntax.rs`, the `E0985` val/var teaching error target, and a
-repo-wide `::`-binding → `$=` migration across examples/tests/docs/`jet fmt`
-emitter). Reopens S2/D-BIND1 explicitly; frees the `::` token again (S83 already
-moved external-defs to `~~`, so nothing reclaims it — it simply becomes available).
+And it does that **without** stealing meaning from another established Jet sigil family. That
+is the decisive tradeoff.
 
 **Owner Q (2026-06-22) — `$` is fine for me, but for people using Jet globally: is such a
 commonly needed symbol an issue? What if people don't have it on their keyboard? How likely

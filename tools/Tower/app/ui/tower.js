@@ -18,6 +18,7 @@ async function api(url, body) { const r = await fetch(url, { method: "POST", hea
 async function load() { S = await (await fetch("/api/state")).json(); render(); }
 const decisions = () => S.ballot.filter((x) => x.kind === "decision");
 const stageLabel = (st) => (S.stageLabels && S.stageLabels[st]) || st.replace(/-/g, " ");
+const priorityLabel = (p) => (S.priorityLabels && S.priorityLabels[p]) || p || "P2";
 
 function render() {
   if (!TABS.some((t) => t[0] === active)) active = "board";
@@ -76,6 +77,8 @@ function worklistPanel() {
   const open = sec.worklist;
   const rows = wl.map((w) =>
     `<div class="wl"><span class="gate ${w.auto ? "auto" : "gated"}">${w.auto ? "auto" : "gated"}</span>` +
+    `<span class="ord">${w.workOrder ? "#" + esc(String(w.workOrder)) : "—"}</span>` +
+    `<span class="prio ${esc(w.priority || "P2")}">${esc(w.priority || "P2")}</span>` +
     `<span class="wid">${esc(w.id)}</span><span class="wact">${esc(w.text)}</span>` +
     `<span class="wttl">${esc(w.title)}</span></div>`).join("");
   const inner = `<div class="wl-rows">${rows}</div>` +
@@ -108,12 +111,21 @@ function fileForm() {
     '<input class="grow" id="add-ttl" placeholder="Task, idea, or bug…">' +
     '<select class="sel" id="add-type"><option value="task">task</option><option value="idea">idea</option><option value="bug">bug</option></select>' +
     '<select class="sel" id="add-stage">' + S.stages.map((s) => `<option value="${s}"${s === "frozen" ? " selected" : ""}>${esc(stageLabel(s))}</option>`).join("") + "</select>" +
+    '<select class="sel" id="add-priority">' + (S.priorities || ["P0", "P1", "P2", "P3"]).map((p) => `<option value="${p}"${p === "P2" ? " selected" : ""}>${esc(priorityLabel(p))}</option>`).join("") + "</select>" +
+    '<input class="orderin" id="add-order" type="number" min="1" placeholder="order">' +
     '<button class="sm" onclick="addCard()">File</button></div>' +
     '<textarea id="add-body" placeholder="Details (optional)"></textarea></div>';
 }
 async function addCard() {
   const t = $("add-ttl"); if (!t.value.trim()) return;
-  const j = await api("/api/card/add", { type: $("add-type").value, title: t.value, body: $("add-body").value, stage: $("add-stage").value });
+  const j = await api("/api/card/add", {
+    type: $("add-type").value,
+    title: t.value,
+    body: $("add-body").value,
+    stage: $("add-stage").value,
+    priority: $("add-priority").value,
+    workOrder: $("add-order").value,
+  });
   if (j.ok) { t.value = ""; $("add-body").value = ""; await load(); toast("Filed."); }
 }
 
@@ -163,13 +175,15 @@ function card(c) {
   const planLink = c.plan ? `<a class="plan" title="open plan" onclick="openDoc('sidequest','${attr(c.plan)}')">▤ ${esc(c.plan)}</a>` : "";
   const typeSel = `<select class="typesel" title="change type" onchange="changeType('${c.id}',this.value)">` +
     ["task", "idea", "bug"].map((t) => `<option${c.type === t ? " selected" : ""}>${t}</option>`).join("") + "</select>";
+  const prioritySel = `<select class="priosel ${esc(c.priority || "P2")}" title="change priority" onchange="changePriority('${c.id}',this.value)">` +
+    (S.priorities || ["P0", "P1", "P2", "P3"]).map((p) => `<option value="${p}"${(c.priority || "P2") === p ? " selected" : ""}>${esc(p)}</option>`).join("") + "</select>";
   const stageSel = `<select class="stagesel" title="jump to stage" onchange="moveCard('${c.id}',this.value)">` +
     S.stages.map((s) => `<option value="${s}"${s === c.stage ? " selected" : ""}>${esc(stageLabel(s))}</option>`).join("") + "</select>";
   const notes = (c.notes && c.notes.length) ? '<div class="notes">' + c.notes.map((n, idx) =>
     `<div class="note">•&nbsp;<span class="nt" contenteditable="true" spellcheck="false" data-id="${c.id}" data-i="${idx}" data-orig="${attr(n.t)}" onblur="saveNote(this)" onkeydown="fieldKey(event,this)">${esc(n.t)}</span>` +
     `<span class="at">${esc(n.at)}</span><span class="ndel" title="delete note" onclick="delNote('${c.id}',${idx})">✕</span></div>`).join("") + "</div>" : "";
   return `<div class="card ${c.type}"><div class="edge"></div><div class="body">` +
-    `<div class="top"><span class="cid">${esc(c.id)}</span>${typeSel}</div>` +
+    `<div class="top"><span class="cid">${esc(c.id)}</span>${c.workOrder ? `<span class="ord">#${esc(String(c.workOrder))}</span>` : ""}${prioritySel}${typeSel}</div>` +
     `<span class="ttl" contenteditable="true" spellcheck="false" data-id="${c.id}" data-orig="${attr(c.title)}" onblur="saveField(this,'title')" onkeydown="fieldKey(event,this)">${esc(c.title)}</span>` +
     `<div class="bd" contenteditable="true" spellcheck="false" data-ph="${c.type === "bug" ? "Describe the defect…" : "Add a description…"}" data-id="${c.id}" data-orig="${attr(c.body || "")}" onblur="saveField(this,'body')" onkeydown="fieldKey(event,this)">${esc(c.body || "")}</div>` +
     statusChips(c) +
@@ -177,11 +191,14 @@ function card(c) {
     `<button onclick="moveCard('${c.id}','${back || ""}')" ${back ? "" : "disabled"} title="${back ? stageLabel(back) : ""}">◀</button>` +
     stageSel +
     `<button onclick="moveCard('${c.id}','${fwd || ""}')" ${fwd ? "" : "disabled"} title="${fwd ? stageLabel(fwd) : ""}">▶</button></div>` +
+    `<input class="orderedit" type="number" min="1" placeholder="order" value="${c.workOrder || ""}" title="recommended work order" onchange="changeWorkOrder('${c.id}',this.value)">` +
     planLink + `<span class="note-in" onclick="addNote('${c.id}')">+note</span>` +
     `<span class="x" title="delete" onclick="delCard('${c.id}')">✕</span></div>${notes}</div></div>`;
 }
 async function moveCard(id, stage) { if (!stage) return; const c = findCard(id); if (c) c.stage = stage; await api("/api/card/update", { id, stage }); await load(); }
 async function changeType(id, type) { const c = findCard(id); if (c) c.type = type; await api("/api/card/update", { id, type }); await load(); }
+async function changePriority(id, priority) { const c = findCard(id); if (c) c.priority = priority; await api("/api/card/update", { id, priority }); await load(); }
+async function changeWorkOrder(id, workOrder) { const c = findCard(id); if (c) c.workOrder = workOrder ? Number(workOrder) : null; await api("/api/card/update", { id, workOrder }); await load(); }
 async function delCard(id) { if (confirm("Delete this card?")) { await api("/api/card/delete", { id }); await load(); toast("Deleted."); } }
 async function addNote(id) { const n = prompt("Add a note:"); if (n && n.trim()) { await api("/api/card/update", { id, note: n }); await load(); } }
 async function saveField(el, field) {

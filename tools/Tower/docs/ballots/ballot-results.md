@@ -1,16 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-22 11:11_ — **✅ PROCESSED 2026-06-22** (all 14 ratified into
-`syntax-decisions.md`, cards stripped, board reconciled). The first eight were processed in
-the prior pass; the six added in this batch:
-- **D-DETACH1=A** — `task.detach()` consumes the handle + silences L1101.
-- **D-REPRC1=B** (not rec A) — `#layout(c)` joins the unified `#layout(…)` family (with `soa`/`packed`/`align`).
-- **D-STDIN1=A** — `io.stdin().lines()` reuses the file `FileLines` streaming type.
-- **D-TERM1=A** — scoped `live { }` primitive (renamed from "raw mode"); full TUI is a separate `jet.tui` library.
-- **D-LSDIR1=A + path.join** — `fs.list_dir -> [DirEntry]`, plus the `path.join` helper per your comment.
-- **D-CSVROW1=A** — comptime `csv.decode<Row>`, folded into the unified serde model (D-SERDE1) per your comment.
-
-D-DBG2 stays as resolved live (A default + expert `--raw-frames`), regardless of the "C" line here.
+_submitted 2026-06-22 13:57_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -62,3 +52,41 @@ Comment: Include a path.join helper (C) to be shipped also for experts who need 
 **D-CSVROW1** — Typed CSV row decoding
 Decision: **A**
 Comment: We are working on a serde equivalent in jet which handles serialization/deserialization for toml, yaml, json, etc. -> So CSV should be included in that plan
+
+**D-UNSAFE2** — Keep `#Unsafe` / `#Audit` separate or merge the audit text into unsafe?
+Decision: **B**
+Comment: The recommendation is naive. The unsafe description IS the review artifact, it just isnt two separate LOCs.
+
+**D-FIXARR1** — Should fixed-size lists `[T#N]` lower to real stack arrays?
+Decision: **B**
+
+**D-JSONOUT1** — Serialize a typed struct to JSON
+Decision: **A**
+Comment: We will be building our own implementation of rust's serde with json compatibility. I am fine with the serialize tag but need this to be joined at the hip with the serde planning
+
+**D-MATHLIB1** — Linear-algebra library home & scope
+Decision: **A**
+
+**D-REACT1** — Should reactive/dataflow be core semantics, tooling, or a library?
+Decision: **B**
+
+**D-FANOUT2** — Add namespace/member fan-out sugar beyond S75 call fan-out?
+Decision: **B**
+
+**D-STRPARSE1** — String parse APIs and comptime `Result`/`Option` evaluation
+Decision: **A**
+
+**D-BIND2** — Spelling of the immutable binding
+Decision: **A**
+
+**D-TEST4** — doctest convention
+Decision: **A**
+
+**D-NUMOPS1** — Integer overflow behavior + the expert numeric value/op surface
+Decision: **A**
+
+**D-SERDE1** — A unified, format-agnostic Serialize/Deserialize model
+Decision: **A**
+
+**D-ITER1** — Standard lazy iterator-adapter set
+Decision: **A**

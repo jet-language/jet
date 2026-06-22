@@ -4,7 +4,7 @@ import { readdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { P, read } from "./paths.mjs";
 import { renderMd } from "./markdown.mjs";
-import { loadBoard, STAGES, STAGE_LABELS } from "./board.mjs";
+import { compareCards, loadBoard, STAGES, STAGE_LABELS, PRIORITIES, PRIORITY_LABELS } from "./board.mjs";
 import { parseBallot, answeredIds, cardDecisionLinks } from "./ballot.mjs";
 
 function readDocList(dir) {
@@ -74,6 +74,7 @@ export function buildState() {
   const answered = answeredIds();
   const links = cardDecisionLinks(md);
   const board = loadBoard();
+  board.cards = [...board.cards].sort(compareCards);
 
   for (const c of board.cards) {
     const linked = links[c.id] || [];
@@ -84,8 +85,10 @@ export function buildState() {
   // Worklist: cards with a Claude action that isn't blocked on the owner.
   const worklist = board.cards
     .filter((c) => c.status.action && !c.status.owner)
+    .sort(compareCards)
     .map((c) => ({
       id: c.id, title: c.title, type: c.type, stage: c.stage, plan: c.plan,
+      priority: c.priority, workOrder: c.workOrder,
       action: c.status.action, auto: !!c.status.auto,
       text: ACTION_TEXT[c.status.action] || c.status.action,
       decided: c.status.decided,
@@ -98,6 +101,8 @@ export function buildState() {
     board,
     stages: STAGES,
     stageLabels: STAGE_LABELS,
+    priorities: PRIORITIES,
+    priorityLabels: PRIORITY_LABELS,
     ballot,
     links,
     worklist,

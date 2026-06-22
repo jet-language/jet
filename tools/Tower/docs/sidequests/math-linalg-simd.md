@@ -29,7 +29,7 @@ Two distinct gaps:
   intrinsics. Touches **sema** (new types), **codegen** (lower to Rust
   `std::simd`/`core::arch`), and the safety story: are SIMD ops safe-by-default or
   expert-tier behind `#Unsafe`? Interacts with D-SG9 sized floats (the lane type)
-  and c82 fixed arrays `[T;N]` (SIMD-friendly layout).
+  and c82 fixed-size lists `[T#N]` (SIMD-friendly layout).
 
 ## Invariants in play
 

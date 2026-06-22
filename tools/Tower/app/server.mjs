@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { P, UI, ROOT, read, rel, now, stamp, C, out } from "./paths.mjs";
-import { loadBoard, saveBoard, makeCard, STAGES } from "./board.mjs";
+import { loadBoard, saveBoard, makeCard, STAGES, PRIORITIES, normalizeWorkOrder } from "./board.mjs";
 import { buildState, resolveDoc } from "./state.mjs";
 import { renderMd } from "./markdown.mjs";
 import { writeResults, queueRegen, recordQuestion, queueIngest } from "./writes.mjs";
@@ -62,6 +62,8 @@ function handlePost(url, p, res, json) {
       if (!c) return json(res, 404, { ok: false, error: "no card" });
       if (p.stage && STAGES.includes(p.stage)) c.stage = p.stage;
       if (p.type && ["task", "idea", "bug"].includes(p.type)) c.type = p.type;
+      if (p.priority && PRIORITIES.includes(String(p.priority).toUpperCase())) c.priority = String(p.priority).toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(p, "workOrder")) c.workOrder = normalizeWorkOrder(p.workOrder);
       if (typeof p.title === "string" && p.title.trim()) c.title = p.title.trim();
       if (typeof p.body === "string") c.body = p.body.trim();
       if (typeof p.plan === "string") c.plan = p.plan.trim() || null;

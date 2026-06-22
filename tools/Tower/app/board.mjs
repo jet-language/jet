@@ -18,12 +18,36 @@ export const STAGE_LABELS = {
   frozen: "Frozen", backlog: "Backlog", deciding: "Deciding",
   planning: "Planning", ready: "Ready", building: "Building", done: "Done",
 };
+export const PRIORITIES = ["P0", "P1", "P2", "P3"];
+export const PRIORITY_LABELS = {
+  P0: "P0 - Blocker",
+  P1: "P1 - High",
+  P2: "P2 - Medium",
+  P3: "P3 - Later",
+};
 // Legacy v1 stage names → v2. Applied on load.
 const LEGACY = {
   "far-horizon": "frozen", "pre-plan": "backlog", "decisions": "deciding",
   "blocked": "deciding", "planned": "ready", "implementation": "building",
 };
 export const normalizeStage = (s) => LEGACY[s] || (STAGES.includes(s) ? s : "backlog");
+export const normalizePriority = (p) => PRIORITIES.includes(String(p || "").toUpperCase())
+  ? String(p).toUpperCase()
+  : "P2";
+export const normalizeWorkOrder = (n) => {
+  if (n === null || n === undefined || n === "") return null;
+  const x = Number(n);
+  return Number.isFinite(x) && x > 0 ? Math.floor(x) : null;
+};
+
+export function compareCards(a, b) {
+  const ao = normalizeWorkOrder(a.workOrder), bo = normalizeWorkOrder(b.workOrder);
+  if (ao !== null || bo !== null) return (ao ?? 999999) - (bo ?? 999999);
+  const ap = PRIORITIES.indexOf(normalizePriority(a.priority));
+  const bp = PRIORITIES.indexOf(normalizePriority(b.priority));
+  if (ap !== bp) return ap - bp;
+  return String(a.created || "").localeCompare(String(b.created || ""));
+}
 
 export function loadBoard() {
   if (!existsSync(P.board)) return { scratch: "", cards: [], questions: [], ingest: [] };
@@ -33,6 +57,8 @@ export function loadBoard() {
   for (const c of b.cards) {
     c.stage = normalizeStage(c.stage);
     c.type ??= "task";
+    c.priority = normalizePriority(c.priority);
+    c.workOrder = normalizeWorkOrder(c.workOrder);
     c.notes ??= [];
   }
   return b;
@@ -48,6 +74,8 @@ export function makeCard(p) {
     title: (p.title || "").trim(),
     body: (p.body || "").trim(),
     stage: STAGES.includes(p.stage) ? p.stage : normalizeStage(p.stage),
+    priority: normalizePriority(p.priority),
+    workOrder: normalizeWorkOrder(p.workOrder),
     plan: p.plan || null,
     notes: [],
     created: now(),
