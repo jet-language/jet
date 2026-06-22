@@ -1266,37 +1266,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn enum_lit_args(&mut self) -> Result<Vec<EnumLitArg>, Diagnostic> {
-        let mut args = Vec::new();
-        if matches!(self.peek().kind, TokKind::RParen) {
-            return Ok(args);
-        }
-        loop {
-            if matches!(self.peek().kind, TokKind::Ident(_)) {
-                let name = if let TokKind::Ident(n) = self.peek().kind.clone() {
-                    n
-                } else {
-                    unreachable!()
-                };
-                if matches!(self.peek2().kind, TokKind::Colon) {
-                    self.bump();
-                    self.bump();
-                    let expr = self.expr()?;
-                    args.push(EnumLitArg::Named { label: name, expr });
-                } else {
-                    args.push(EnumLitArg::Positional(self.expr()?));
-                }
-            } else {
-                args.push(EnumLitArg::Positional(self.expr()?));
-            }
-            if matches!(self.peek().kind, TokKind::RParen) {
-                break;
-            }
-            self.expect(TokKind::Comma, "between enum variant arguments")?;
-        }
-        Ok(args)
-    }
-
     /// S31: try to parse a pattern on the right of `==`.
     ///
     /// Only unambiguous pattern spellings: `null`, `value(n)`, and

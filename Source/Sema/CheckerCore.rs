@@ -253,21 +253,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn type_known(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Named(n) => self.registry.contains(n) || core_type_known(n),
-            Type::Option(inner) | Type::List(inner) | Type::Shared(inner) => self.type_known(inner),
-            Type::Map { key, value } => self.type_known(key) && self.type_known(value),
-            Type::Char => true,
-            Type::Result { ok, err } => self.type_known(ok) && self.type_known(err),
-            Type::Fn { params, ret } => {
-                params.iter().all(|p| self.type_known(p))
-                    && ret.as_ref().map_or(true, |r| self.type_known(r))
-            }
-            Type::Tuple(fields) => fields.iter().all(|(_, t)| self.type_known(t)),
-            _ => true,
-        }
-    }
 
     /// Returns true when a diagnostic was emitted (the mismatch is already
     /// reported); callers may add a context-specific error otherwise.
@@ -460,25 +445,6 @@ impl<'a> Checker<'a> {
 
     /// Check two alternative branches with independent move states, then
     /// keep the union (a value moved in either branch counts as gone).
-    pub(crate) fn check_branches(&mut self, branches: &mut [&mut Vec<Stmt>]) {
-        let before = self.moved.clone();
-        let mut after = self.moved.clone();
-        // D-UNINIT1: each branch starts from the pre-switch uninit set (so reads are
-        // checked) and inits don't leak between arms; conservatively, a switch does
-        // not count as initializing after it (it may not be exhaustive).
-        let before_u = self.uninit.clone();
-        for body in branches.iter_mut() {
-            self.moved = before.clone();
-            self.uninit = before_u.clone();
-            self.check_block(body, true);
-            for (k, v) in self.moved.drain() {
-                after.entry(k).or_insert(v);
-            }
-        }
-        self.moved = after;
-        self.uninit = before_u;
-    }
-
     pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
             Stmt::Val(b) => self.check_binding(b),

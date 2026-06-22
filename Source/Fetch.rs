@@ -112,7 +112,6 @@ struct ResolvedPkg {
     fingerprint: String,
     deps: Vec<String>,
     source_dir: PathBuf,
-    tree_hash: String,
 }
 
 impl<'a> Resolver<'a> {
@@ -284,7 +283,6 @@ impl<'a> Resolver<'a> {
                         fingerprint: fp,
                         deps: trans_deps,
                         source_dir: abs_path,
-                        tree_hash: th,
                     },
                 );
             }
@@ -380,7 +378,6 @@ impl<'a> Resolver<'a> {
                         fingerprint: fp,
                         deps: trans_deps,
                         source_dir: clone_dir,
-                        tree_hash: git_tree_hash,
                     },
                 );
             }

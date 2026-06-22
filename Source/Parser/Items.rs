@@ -234,20 +234,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn module_path(&mut self) -> Result<(String, Span), Diagnostic> {
-        let (first, first_span) = self.expect_ident("after `import`")?;
-        let mut name = first;
-        let mut end = first_span.end;
-        while matches!(self.peek().kind, TokKind::Dot) {
-            self.bump();
-            let (part, span) = self.expect_ident("after `.` in an import")?;
-            name.push('.');
-            name.push_str(&part);
-            end = span.end;
-        }
-        Ok((name, Span::new(first_span.start, end)))
-    }
-
     pub(super) fn program(&mut self) -> Program {
         let mut imports = Vec::new();
         let mut items = Vec::new();
@@ -1204,64 +1190,6 @@ impl<'a> Parser<'a> {
             let (ty, ty_span) = self.type_()?;
             Ok(VariantPayload::Single(ty, ty_span))
         }
-    }
-
-    pub(super) fn impl_def(&mut self) -> Result<ImplDef, Diagnostic> {
-        self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
-        let (type_name, type_span) = self.parse_type_path("after `impl`")?;
-        let (trait_name, trait_span) = if matches!(self.peek().kind, TokKind::Colon) {
-            self.bump();
-            let (t, ts) = self.expect_ident("after `:` in `impl Type: Trait`")?;
-            (Some(t), Some(ts))
-        } else {
-            (None, None)
-        };
-        // S62: `impl Type: Trait using field_name;` — delegation form.
-        if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
-            if kw == "using" && trait_name.is_some() {
-                self.bump(); // consume `using`
-                let (field, _) = self.expect_ident("after `using` for the delegation field")?;
-                self.finish_stmt()?; // consume `;`
-                return Ok(ImplDef {
-                    type_name,
-                    type_span,
-                    trait_name,
-                    trait_span,
-                    methods: Vec::new(),
-                    delegation_field: Some(field),
-                    assoc_type_impls: Vec::new(),
-                });
-            }
-        }
-        self.expect(TokKind::LBrace, "to open the `impl` body")?;
-        let mut methods = Vec::new();
-        let mut assoc_type_impls = Vec::new();
-        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
-            // D-LIB2: `type Name = ConcreteType;` associated type implementation.
-            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
-                if kw == "type" {
-                    let kw_span = self.bump().span;
-                    let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
-                    self.expect(TokKind::Eq, "after associated type name")?;
-                    let (assoc_ty, _) = self.type_()?;
-                    self.finish_stmt()?;
-                    assoc_type_impls.push((assoc_name, Span::new(kw_span.start, name_span.end), assoc_ty));
-                    continue;
-                }
-            }
-            methods.push(self.method_in_type()?);
-        }
-        self.bump();
-        Ok(ImplDef {
-            type_name,
-            type_span,
-            trait_name,
-            trait_span,
-            methods,
-            delegation_field: None,
-            assoc_type_impls,
-        })
     }
 
     /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
