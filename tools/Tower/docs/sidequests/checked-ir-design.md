@@ -406,6 +406,64 @@ everything, the AST codegen path is deleted (final phase).
   lowering); methods whose body uses any not-yet-covered construct (core/stdlib calls,
   `?`/optionals, lambdas → Phases 8–10); and the `self`-reassignment lowering bug.
 
+## Refinements learned in Phase 8 (fallible + optional)
+
+- **`T?`/`T ? E` need NO special type lowering — `cx.rust_type` already does it.**
+  `Type::Option`→`Option<…>` and `Type::Result`→`Result<…, …>` are pre-existing
+  `rust_type` arms, and the TIR emitter already routes params/returns through
+  `rust_param_type`/`rust_return_type`. So covering optionals/fallibles was purely a
+  *gate widening* (`is_covered_fallible_ty`: an `Option`/`Result` whose payload(s) are
+  covered value types, incl. sema's default `Error`→`String`) plus the expression/
+  statement nodes — no new type-emit code. A list/map *of* options stays excluded
+  (`collection_elem_covered` does not admit `Option`/`Result`): element clone for an
+  option-element collection is a separate, deferred decision.
+- **`TryConvert` is the total fact; the `?` trace-frame location must be resolved at
+  LOWERING, not emit.** The AST `Expr::Try` reads `cx.current_fn`/`cx.src`/`cx.file`
+  *at emit time*; but `emit_tir_toplevel`/`emit_tir_method` set `cx.current_fn` only
+  just before emitting the body, and lowering ran earlier. So the `TExprKind::Try`
+  node carries the pre-escaped `file`/`fn_name` and the resolved `line` as total
+  fields (the enclosing fn name threaded onto `LowerEnv.fn_name`). The three convert
+  arms reproduce `Expression.rs` byte-for-byte: `None`→bare `jet_trace_err(x,…)?`,
+  `Fallible`→`.map_err(|e| e.to_error())` (D-ERR2), `Typed(fn)`→`.map_err(<fn>)`
+  (D-ERR-CONV). All three verified byte-identical (None in `13_errors`, Typed in a
+  scalar-payload `impl Source -> Target`, Fallible shares the same code path).
+- **The `??` Panic fallback form is deferred.** `OrFallback::{Value,Return}` are
+  reproduced exactly (`match … { Ok(v)/Some(v) => v, Err(_)/None => fb }`, with the
+  `is_option` total fact picking Result vs Option). The `panic(…)` form
+  (`emit_or_fallback_rhs`→`emit_panic_stop`) depends on `safe_locals_expr`, which
+  iterates the *full Slot env* (rust_name/deref/jet_ty, sorted) — a per-function state
+  the TIR's `LowerEnv` does not model 1:1. Rather than risk a divergent locals dump,
+  the gate excludes any `??` whose fallback is `panic(…)` (`orfallback_rhs_in_subset`)
+  — conservative, stays on the AST path. Reproducing it is a clean follow-up.
+- **`value(x)`/`null` and `ok(x)`/`err(e)` are trivial constructor nodes**
+  (`Some(x)`/`None`/`Ok(x)`/`Err(e)`) — but a scalar-payload *error-enum* literal
+  inside `err(…)` (`Bad.Code(1)`) **parses as a `MethodCall`, not an `EnumLit`**, and
+  is only rewritten to `Expr::EnumLit` by *full sema* (Phase-4 finding, again). So a
+  `build_cx`-only gate unit test can't see the rewrite (it sees a static-method-call
+  shape, excluded); the constructor path is proven end-to-end by `tests/tir.rs`. A
+  bare `err("msg")`/`ok(x)` over scalars/strings parses directly as `Expr::Ok`/`Err`,
+  so those *are* gate-testable without sema.
+- **`?.` optional chaining reads the `flatten` total fact** (sema): `true`→`.and_then`
+  (the field is itself optional), `false`→`.map`, reproducing
+  `(base).clone().{and_then|map}(|__optv| __optv.{member})` exactly. A nested
+  `a?.b?.c` chains these; verified byte-identical incl. a mixed map/and_then chain.
+- **`when ok/err/value/null` is a third switch shape (C).** It reuses the `EnumMatch`
+  TStmt (a Rust `match` with `Ok(b)`/`Err(b)`/`Some(b)`/`None` patterns + the same
+  `_ => unreachable!()` fallthrough for the no-`else` case), with the bound payload's
+  type read from the subject's resolved `Result`/`Option` (totality) — reproducing
+  `add_pattern_bindings`. The subject can be a covered *fallible user fn call* (its
+  return type is total from `cx.fn_types`); a deref-clone scrutinee never arises (a
+  fallible/optional subject in-subset is a value, not a by-reference enum param).
+- **Verified byte-identical** via a forced-AST-path diff (temporary `JET_NO_TIR`
+  bypass) on: `examples/features/13_errors.jet` (`T ? E` + `ok`/`err` + `?` + `??`
+  value + `when ok/err`), `12_option.jet` (`T?` + `value`/`null` + `??`),
+  `72_typed_error_families.jet` (unchanged — its String/nested-enum error payloads
+  keep it on the AST path, no regression), and three crafted programs (a Typed
+  error-conversion `?`, an optional `?.` chain incl. flattening, a `?? return`) — all
+  byte-for-byte identical, then the instrumentation removed. ~5 example fns now route
+  through the TIR (`13_errors` `parse_age`/`load`/`main`, `12_option`
+  `find_even`/`main`).
+
 ## Phases
 
 | # | Scope | Status |
@@ -419,7 +477,7 @@ everything, the AST codegen path is deleted (final phase).
 | 6 | Methods + method calls (recv_type → resolved target), trait-impl methods, the sema-inserted `.clone()` | ✅ done (c109 Phase 6) — +3 example fns routed (58→61) **plus** the clone path unblocks getters that move a non-Copy field out (Phases 3–5 excluded these). Covers: the synthetic `.clone()` MethodCall (owning field read / borrowed value); user-defined **instance** methods (`recv.m(args)`) on a covered struct/enum whose `recv_type` is a covered type and whose name is not a builtin/core/special intercept; trait-impl methods (bare name, no `user_` mangle, via `cx.trait_methods`); method args with `implicit_clone`/`shared_auto_clone`/`Read`/`Mutate`/`Move` conventions (mirroring `emit_call_args`). Excludes: **static** calls (`Type.m()` — `recv_type` is `None`); any method whose name a core/stdlib/collection/string/numeric lowering intercepts (`emit_builtin_method` + `.raw()`/`.snapshot()`/alloc); Fn-typed method args (Box-coercion form); core/foreign/prelude-type receivers; fallible/optional methods (→ Phase 8). The method *body* (it has `self`) routed via the AST path until **Phase 7** covered `self`-functions. |
 | 6b | Remaining ownership facts: `take`/`mut`/`view` access conventions on free-function args, general Shared/Arc auto-clone outside method args | pending — the Phase-6 method-arg path already emits `Arc::clone(&…)` and `&mut (…)` from the total flags; extend the same to free `Call` args + view returns. |
 | 7 | Method bodies + static methods | ✅ done (c109 Phase 7) — ~4 example methods routed (`10_structs` `Point::dist_sq`/`Point::unit`, `63_named_args` `Rect::new`/`Rect::area`). Covers: **inherent** method *bodies* (instance + static) on a covered struct/enum, hooked into `emit_method`. The `self` slot reproduces `emit_method` exactly (place `self`, no deref, type `None`); the receiver form is `&self`/`&mut self`/`self` per the resolved convention (`TFuncKind::Method`). **Static** (associated) methods are covered on both sides — the body (no self) and the call site (`Type.make(x)` → `user_<T>::user_<m>(x)`, a new `TExprKind::StaticCall`, which Phase 6 deferred). `Self` params/returns resolve to the owning type. Excludes: **trait-impl** method bodies (distinct signature — bare name, no `pub`, always `&self`, self `jet_ty: Some(T)`; a separate provable-parity hook); **delegation** (`using field`), **generic-type**, and **`view`-returning** methods; any `mut self`/`view self` method that **reassigns `self`** (`self = …` is a pre-existing AST-path I2 hole, gated out via `stmt_assigns_self`); methods whose body uses any not-yet-covered construct (core/stdlib calls, `?`/optionals, lambdas → Phases 8–10). |
-| 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | pending |
+| 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | ✅ done (c109 Phase 8) — ~5 example fns routed (`13_errors` `parse_age`/`load`/`main`, `12_option` `find_even`/`main`). Covers: **optional** `T?` (`Type::Option`) and **fallible** `T ? E` (`Type::Result`) params/locals/returns whose payloads are covered value types (incl. default `Error`→`String`); the `value(x)`/`null` and `ok(x)`/`err(e)` constructors; the `?` propagation operator carrying the total `TryConvert` (`None`/`Fallible`/`Typed(fn)` → bare / `.map_err(\|e\| e.to_error())` / `.map_err(<fn>)`, all wrapped in `jet_trace_err(…)?` with the trace-frame `file`/`line`/`fn_name` resolved at lowering); the `??` fallback (`OrFallback::{Value,Return}`, `is_option` total → `match` over Result/Option); `?.` optional chaining (the total `flatten` fact → `.and_then`/`.map`); and `when ok/err/value/null` matches (Shape C, reusing `EnumMatch`). Excludes: the `??` **panic** fallback form (`safe_locals_expr` reproduction deferred); String/struct/collection-payload error *enums* (non-covered enum → excluded); list/map *of* options; core/stdlib fallible calls (`fs.read` → Phase 10, but a USER fallible call is covered); nested `T??` (sema-rejected anyway). |
 | 9 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | pending |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |

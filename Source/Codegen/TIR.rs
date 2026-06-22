@@ -35,7 +35,8 @@
 use super::*;
 use crate::AST::{
     AccessConvention, BinOp, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind,
-    LValue, Param, PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type, UnOp, VariantPayload,
+    LValue, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart, SwitchArm, TryConvert, Type, UnOp,
+    VariantPayload,
 };
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -337,6 +338,69 @@ pub(crate) enum TExprKind {
         else_body: Vec<TStmt>,
         else_value: Box<TExpr>,
     },
+    /// c109 Phase 8: `value(x)` — a present optional (`Some(x)`).
+    Present(Box<TExpr>),
+    /// c109 Phase 8: bare `null` — an absent optional (`None`).
+    Absent,
+    /// c109 Phase 8: `ok(x)` — a success value of `T ? E` (`Ok(x)`).
+    Ok(Box<TExpr>),
+    /// c109 Phase 8: `err(e)` — a failure value of `T ? E` (`Err(e)`).
+    Err(Box<TExpr>),
+    /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
+    /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
+    /// bare propagate, a `Fallible` calls `.to_error()`, a `Typed(fn)` calls the
+    /// declared conversion. The frame-trace location (`file`, `line`, `fn_name`) is
+    /// resolved at lowering so the emitted `jet_trace_err(…)?` matches the AST path
+    /// byte-for-byte (the emitter never reads `cx.current_fn`/`cx.src`).
+    Try {
+        inner: Box<TExpr>,
+        convert: TTryConvert,
+        /// Pre-escaped Rust string literal for the source file (`escape_rust_str`).
+        file: String,
+        line: usize,
+        /// Pre-escaped Rust string literal for the enclosing function name.
+        fn_name: String,
+    },
+    /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`). `is_option`
+    /// is the TOTAL sema fact: `true` → the value is `T?` and lowers to a
+    /// `match … { Some(v) => v, None => fb }`; `false` → the value is `T ? E` and
+    /// lowers to `match … { Ok(v) => v, Err(_) => fb }`. The fallback is a value or
+    /// an early `return` (the panic form is deferred — its `safe_locals_expr`
+    /// reproduction is out of subset).
+    OrFallback {
+        value: Box<TExpr>,
+        fallback: TOrFallback,
+        is_option: bool,
+    },
+    /// c109 Phase 8: optional field/chain `base?.member` (`Expr::OptField`). The
+    /// `flatten` fact (TOTAL, from sema) picks the combinator: `true` → `.and_then`
+    /// (the field is itself optional), `false` → `.map`. Mirrors the AST path's
+    /// `(base).clone().{and_then|map}(|__optv| __optv.{member})` exactly.
+    OptField {
+        base: Box<TExpr>,
+        member_rust: String,
+        flatten: bool,
+    },
+}
+
+/// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`
+/// (the total sema fact). Carried onto the TIR so the emitter never re-derives it.
+pub(crate) enum TTryConvert {
+    /// Error types match — bare `jet_trace_err(x, …)?`.
+    None,
+    /// Source error implements `Fallible` — `.map_err(|e| e.to_error())` (D-ERR2).
+    Fallible,
+    /// Declared `impl Source -> Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
+    /// holds the mangled Rust conversion-function name.
+    Typed(String),
+}
+
+/// c109 Phase 8: the resolved right-hand side of a `??` fallback (`AST::OrFallback`),
+/// minus the Panic form (deferred). `Value` is an expression; `Return` is an early
+/// `return [expr]` from the enclosing function.
+pub(crate) enum TOrFallback {
+    Value(Box<TExpr>),
+    Return(Option<Box<TExpr>>),
 }
 
 pub(crate) enum TStrPart {
@@ -525,10 +589,48 @@ fn stmt_assigns_self(s: &Stmt) -> bool {
 }
 
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
-/// Char, String, a covered *plain user struct* (c109 Phase 3), or a covered
-/// *plain user enum* (c109 Phase 4). Lists, maps, options, traits, generics,
+/// Char, String, a covered *plain user struct* (c109 Phase 3), a covered
+/// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
+/// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Traits, generics,
 /// recursive (boxed) types are still out.
 fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
+    ty.is_scalar()
+        || matches!(ty, Type::Char | Type::String)
+        || is_covered_struct_ty(ty, cx)
+        || is_covered_enum_ty(ty, cx)
+        || is_covered_collection_ty(ty, cx)
+        || is_covered_fallible_ty(ty, cx)
+}
+
+/// c109 Phase 8: `ty` is an optional `T?` (`Type::Option`) or a fallible `T ? E`
+/// (`Type::Result`) whose payload(s) are themselves covered *value* types. Both
+/// lower through `cx.rust_type` (`Option<…>` / `Result<…, …>`) exactly as the AST
+/// path does, so a covered-payload optional/fallible param/return needs no special
+/// emit. A nested `T??` (Option of Option) never reaches here — sema rejects it —
+/// but the recursion would handle it anyway. A list/map *of* options is still
+/// excluded (`collection_elem_covered` does not admit `Option`/`Result`), because
+/// element clone/coercion for those is deferred.
+fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
+    match ty {
+        Type::Option(inner) => fallible_payload_covered(inner, cx),
+        Type::Result { ok, err } => {
+            fallible_payload_covered(ok, cx) && fallible_payload_covered(err, cx)
+        }
+        _ => false,
+    }
+}
+
+/// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T ? E`) the subset
+/// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
+/// or sema's default error type `Error` (`Type::Named("Error")`, which `cx.rust_type`
+/// lowers to plain `String` — its construction/binding is a String, so no clone/box
+/// decision the subset can't make).
+fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
+    if let Type::Named(n) = ty {
+        if n == "Error" {
+            return true;
+        }
+    }
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
         || is_covered_struct_ty(ty, cx)
@@ -910,7 +1012,68 @@ fn switch_in_subset(
         }
         return true;
     }
+    // Shape C (c109 Phase 8): a fallible/optional pattern match — every arm head is
+    // an `ok(b)`/`err(b)`/`value(b)`/`null` pattern over the subject. Lowers to a
+    // Rust `match` over the subject's `Result`/`Option`, exactly like the enum-match
+    // shape but with `Ok(..)`/`Err(..)`/`Some(..)`/`None` patterns. The subject must
+    // be in-subset (checked above) and resolve to a `Result`/`Option` — but a covered
+    // subject already guarantees that here (its type came from a covered fn/local).
+    if arms
+        .iter()
+        .all(|a| arm_fallible_pattern(&a.cond, subject).is_some())
+    {
+        for a in arms {
+            let pat = arm_fallible_pattern(&a.cond, subject).expect("checked above");
+            let mut body_locals = locals.clone();
+            // `ok(b)`/`err(b)`/`value(b)` bind one name; `null` binds nothing.
+            if let Some(b) = fallible_pattern_binding(&pat) {
+                body_locals.insert(b);
+            }
+            if !a
+                .body
+                .iter()
+                .all(|s| stmt_in_subset(s, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        if let Some(body) = else_body {
+            let mut else_locals = locals.clone();
+            if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
+                return false;
+            }
+        }
+        return true;
+    }
     false
+}
+
+/// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
+/// subject — `subject == ok(b)` / `err(b)` / `value(b)` / `null`. Returns the
+/// `Pattern::{Ok,Err,Present,Absent}`, else `None` (a variant/range/comparison arm).
+fn arm_fallible_pattern(cond: &Expr, subject: &Expr) -> Option<Pattern> {
+    match cond {
+        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(s, subject) => {
+            match pattern {
+                Pattern::Ok { .. }
+                | Pattern::Err { .. }
+                | Pattern::Present { .. }
+                | Pattern::Absent(_) => Some(pattern.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The single name an `ok(b)`/`err(b)`/`value(b)` pattern binds (`null` binds none).
+fn fallible_pattern_binding(pattern: &Pattern) -> Option<String> {
+    match pattern {
+        Pattern::Ok { binding, .. }
+        | Pattern::Err { binding, .. }
+        | Pattern::Present { binding, .. } => Some(binding.clone()),
+        _ => None,
+    }
 }
 
 /// Mirror codegen's `switch_arm_pattern_owned` (Statement.rs): an arm whose head
@@ -1199,9 +1362,46 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         Expr::MethodCall { receiver, method, args, recv_type, .. } => {
             method_call_in_subset(receiver, method, args, recv_type, cx, locals)
         }
-        // Everything else (lambdas, ?/try, ??, fan-out, optionals,
-        // opt-fields, tuples, …) is out.
+        // c109 Phase 8: optional constructors `value(x)` / `null`. Covered when the
+        // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
+        Expr::Present(inner, _) => expr_in_subset(inner, cx, locals),
+        Expr::Absent(_) => true,
+        // c109 Phase 8: fallible constructors `ok(x)` / `err(e)`. Covered when the
+        // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
+        Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
+        // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is a
+        // total sema fact (`None`/`Fallible`/`Typed(fn)`), reproduced verbatim. The
+        // inner fallible value must itself be in-subset (a user fallible fn call, a
+        // local, an `ok`/`err` literal). A core/stdlib fallible call (e.g. `fs.read`)
+        // is NOT in-subset (it stays on the AST path — Phase 10), so a `?` on one is
+        // excluded automatically.
+        Expr::Try(inner, _, _) => expr_in_subset(inner, cx, locals),
+        // c109 Phase 8: the `??` fallback operator. `is_option` is total. The value
+        // and the fallback must be in-subset. The Panic fallback form is deferred
+        // (its `safe_locals_expr` reproduction is out of subset) — only Value and
+        // early-`return` fallbacks are covered.
+        Expr::OrFallback { value, fallback, .. } => {
+            expr_in_subset(value, cx, locals) && orfallback_rhs_in_subset(fallback, cx, locals)
+        }
+        // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
+        // (from sema). The base must be in-subset; the member read lowers to a plain
+        // `.map`/`.and_then` closure access (no further dispatch).
+        Expr::OptField { base, .. } => expr_in_subset(base, cx, locals),
+        // Everything else (lambdas, fan-out, tuples, deref, …) is out.
         _ => false,
+    }
+}
+
+/// c109 Phase 8: is a `??` fallback right-hand side in-subset? `Value` and early
+/// `return [expr]` are covered; the `panic(…)` form is deferred (it reproduces
+/// `emit_panic_stop`/`safe_locals_expr`, which depend on the full Slot env in a way
+/// the TIR does not yet model — staying on the AST path is the safe choice).
+fn orfallback_rhs_in_subset(fallback: &OrFallback, cx: &Cx, locals: &HashSet<String>) -> bool {
+    match fallback {
+        OrFallback::Value(e) => expr_in_subset(e, cx, locals),
+        OrFallback::Return(None, _) => true,
+        OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
+        OrFallback::Panic { .. } => false,
     }
 }
 
@@ -1392,6 +1592,10 @@ fn arg_conv_in_subset(a: &crate::AST::CallArg) -> bool {
 /// partiality where it is load-bearing" lesson, again).
 struct LowerEnv {
     locals: HashMap<String, (String, Option<Type>)>,
+    /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
+    /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
+    /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
+    fn_name: String,
 }
 
 impl LowerEnv {
@@ -1427,6 +1631,7 @@ impl LowerEnv {
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     let mut env = LowerEnv {
         locals: HashMap::new(),
+        fn_name: f.name.clone(),
     };
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
@@ -1462,6 +1667,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv {
         locals: HashMap::new(),
+        fn_name: f.name.clone(),
     };
     let mut params = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
@@ -1686,8 +1892,107 @@ fn lower_switch(
     if else_body.is_some() && arms.iter().all(|a| arm_head_range(&a.cond, subject).is_some()) {
         return lower_range_switch(subject, arms, else_body, cx, env);
     }
+    // Shape C (c109 Phase 8): all arms are fallible/optional patterns → a Rust match
+    // over the subject's Result/Option (`Ok(..)`/`Err(..)`/`Some(..)`/`None`).
+    if arms
+        .iter()
+        .all(|a| arm_fallible_pattern(&a.cond, subject).is_some())
+    {
+        return lower_fallible_match(subject, arms, else_body, cx, env);
+    }
     // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
     lower_enum_match(subject, arms, else_body, cx, env)
+}
+
+/// c109 Phase 8: lower a fallible/optional pattern match (`when … { it == ok(n) ->
+/// … }`). Reuses the `EnumMatch` TStmt — the scrutinee is the subject's emitted form
+/// (a covered fallible/optional value: a user fallible fn call, an optional local,
+/// etc.; no by-reference clone arises since those subjects are not deref'd enum
+/// params), and each arm's pattern is the Rust `Ok(b)`/`Err(b)`/`Some(b)`/`None`,
+/// mirroring `emit_match_pattern`. Binding payload types come from the subject's
+/// resolved Result/Option type (totality), reproducing `add_pattern_bindings`.
+fn lower_fallible_match(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TStmt {
+    // The subject's resolved type carries the ok/err/present payload types. Lower the
+    // subject once to get both its emitted string and its total type.
+    let subject_t = lower_expr(subject, cx, env);
+    let subject_ty = subject_t.ty.clone();
+    // A by-reference enum param is cloned in the enum-match path; a fallible/optional
+    // subject in-subset is never a deref'd slot (it is a fn-call value or an owned
+    // local), so the scrutinee is the plain emitted form — matching the AST path,
+    // whose `subj` clone branch only fires for a deref'd `Ident`.
+    let scrutinee = match subject {
+        Expr::Ident(name, _) if env.is_borrowed(name) => {
+            format!("({}).clone()", env.rust_name_of(name))
+        }
+        _ => emit_tir_expr(&subject_t, cx),
+    };
+    let mut tarms = Vec::new();
+    for arm in arms {
+        let pattern = arm_fallible_pattern(&arm.cond, subject).expect("gate proved fallible arm");
+        let pat = tir_fallible_pattern(&pattern);
+        let mut body_env = clone_env(env);
+        tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
+        let body = lower_stmts(&arm.body, cx, &mut body_env);
+        tarms.push(TMatchArm { pattern: pat, guard: None, body });
+    }
+    let else_lowered = else_body.as_ref().map(|body| {
+        let mut branch = clone_env(env);
+        lower_stmts(body, cx, &mut branch)
+    });
+    // No explicit `else` → the AST path (`emit_pattern_match_switch`) appends
+    // `_ => unreachable!(…)` so rustc sees a complete match (sema proved E0307).
+    let fallthrough = else_body.is_none();
+    TStmt::EnumMatch {
+        scrutinee,
+        arms: tarms,
+        else_body: else_lowered,
+        fallthrough,
+    }
+}
+
+/// c109 Phase 8: the Rust match pattern for a fallible/optional pattern, mirroring
+/// `emit_match_pattern`'s Ok/Err/Present/Absent arms (Statement.rs).
+fn tir_fallible_pattern(pattern: &Pattern) -> String {
+    match pattern {
+        Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
+        Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
+        Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
+        Pattern::Absent(_) => "None".to_string(),
+        _ => unreachable!("non-fallible pattern in fallible match (gate)"),
+    }
+}
+
+/// c109 Phase 8: bind the ok/err/present payload to its resolved type, read from the
+/// subject's Result/Option type. Mirrors `add_pattern_bindings`'s Ok/Err/Present
+/// arms (the binding's `jet_ty` is the inner type so any arithmetic on it traps
+/// exactly as the AST path; `null` binds nothing).
+fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, subject_ty: &Type) {
+    let (binding, ty) = match (pattern, subject_ty) {
+        (Pattern::Ok { binding, .. }, Type::Result { ok, .. }) => {
+            (binding.clone(), Some((**ok).clone()))
+        }
+        (Pattern::Err { binding, .. }, Type::Result { err, .. }) => {
+            (binding.clone(), Some((**err).clone()))
+        }
+        (Pattern::Present { binding, .. }, Type::Option(inner)) => {
+            (binding.clone(), Some((**inner).clone()))
+        }
+        // The subject type didn't resolve to the expected shape (impossible for a
+        // covered subject — sema validated it); bind with no type (matches the AST
+        // path's `jet_ty: None` fallback).
+        (Pattern::Ok { binding, .. }, _)
+        | (Pattern::Err { binding, .. }, _)
+        | (Pattern::Present { binding, .. }, _) => (binding.clone(), None),
+        // `null` (Absent) binds nothing.
+        _ => return,
+    };
+    env.locals.insert(binding.clone(), (mangle(&binding), ty));
 }
 
 fn lower_enum_match(
@@ -1913,6 +2218,7 @@ fn expr_ast_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
 fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
+        fn_name: env.fn_name.clone(),
     }
 }
 
@@ -2244,6 +2550,121 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     start: Box::new(start_t),
                     end: Box::new(end_t),
                     line,
+                },
+            }
+        }
+        // c109 Phase 8: `value(x)` → `Some(x)`. The result type is `T?` where `T` is
+        // the inner's resolved type (totality). Mirrors `Expr::Present`.
+        Expr::Present(inner, _) => {
+            let t = lower_expr(inner, cx, env);
+            TExpr {
+                ty: Type::Option(Box::new(t.ty.clone())),
+                kind: TExprKind::Present(Box::new(t)),
+            }
+        }
+        // c109 Phase 8: bare `null` → `None`. The element type is unresolved here
+        // (`Int` placeholder) — like an empty `vec![]`, Rust infers it from the
+        // binding/return context. Mirrors `Expr::Absent`.
+        Expr::Absent(_) => TExpr {
+            ty: Type::Option(Box::new(Type::Int)),
+            kind: TExprKind::Absent,
+        },
+        // c109 Phase 8: `ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is
+        // the inner's; the err type is unresolved here (Rust infers it from the
+        // function return context, exactly as the AST path's bare `Ok(x)` does).
+        Expr::Ok(inner, _) => {
+            let t = lower_expr(inner, cx, env);
+            TExpr {
+                ty: Type::Result {
+                    ok: Box::new(t.ty.clone()),
+                    err: Box::new(Type::Named("Error".to_string())),
+                },
+                kind: TExprKind::Ok(Box::new(t)),
+            }
+        }
+        // c109 Phase 8: `err(e)` → `Err(e)`. The err type is the inner's; the ok type
+        // is unresolved here (inferred from the function return context).
+        Expr::Err(inner, _) => {
+            let t = lower_expr(inner, cx, env);
+            TExpr {
+                ty: Type::Result {
+                    ok: Box::new(Type::Int),
+                    err: Box::new(t.ty.clone()),
+                },
+                kind: TExprKind::Err(Box::new(t)),
+            }
+        }
+        // c109 Phase 8: the `?` propagation operator. The `TryConvert` decision is the
+        // total sema fact — reproduce it exactly (none/Fallible/Typed). The result
+        // type is the inner `Result`'s ok type (the `?` unwraps it). The trace-frame
+        // location is resolved here so emit never reads `cx.current_fn`/`cx.src`.
+        Expr::Try(inner, span, convert) => {
+            let inner_t = lower_expr(inner, cx, env);
+            // `?` unwraps a `Result<T, E>` to `T` (the value type). If the inner type
+            // resolved to a Result, take its ok type; else fall back to the inner type
+            // (never load-bearing in the covered subset — a `?` result feeds a binding
+            // carrying sema's `b.ty`, or an `ok(...)` wrap whose own type is total).
+            let result_ty = match &inner_t.ty {
+                Type::Result { ok, .. } => (**ok).clone(),
+                other => other.clone(),
+            };
+            let tconvert = match convert {
+                TryConvert::None => TTryConvert::None,
+                TryConvert::Fallible => TTryConvert::Fallible,
+                TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
+            };
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty: result_ty,
+                kind: TExprKind::Try {
+                    inner: Box::new(inner_t),
+                    convert: tconvert,
+                    file: escape_rust_str(&cx.file),
+                    line,
+                    fn_name: escape_rust_str(&env.fn_name),
+                },
+            }
+        }
+        // c109 Phase 8: the `??` fallback operator. `is_option` is the total sema fact
+        // (Result vs Option). The value + fallback are lowered; the result type is the
+        // unwrapped value type (Some/Ok payload). Mirrors `emit_or_fallback`.
+        Expr::OrFallback { value, fallback, is_option, .. } => {
+            let value_t = lower_expr(value, cx, env);
+            let result_ty = match &value_t.ty {
+                Type::Option(inner) => (**inner).clone(),
+                Type::Result { ok, .. } => (**ok).clone(),
+                other => other.clone(),
+            };
+            let tfallback = match fallback {
+                OrFallback::Value(e) => TOrFallback::Value(Box::new(lower_expr(e, cx, env))),
+                OrFallback::Return(None, _) => TOrFallback::Return(None),
+                OrFallback::Return(Some(e), _) => {
+                    TOrFallback::Return(Some(Box::new(lower_expr(e, cx, env))))
+                }
+                // The gate excludes the Panic form, so this never arises.
+                OrFallback::Panic { .. } => unreachable!("gate excludes panic fallback"),
+            };
+            TExpr {
+                ty: result_ty,
+                kind: TExprKind::OrFallback {
+                    value: Box::new(value_t),
+                    fallback: tfallback,
+                    is_option: *is_option,
+                },
+            }
+        }
+        // c109 Phase 8: optional chaining `base?.member`. The `flatten` fact is total
+        // (from sema): true → `.and_then`, false → `.map`. The result type is `T?`;
+        // resolving the inner field type here is not load-bearing (emit only formats
+        // the combinator + member access), so carry the base's optional type.
+        Expr::OptField { base, member, flatten, .. } => {
+            let base_t = lower_expr(base, cx, env);
+            TExpr {
+                ty: base_t.ty.clone(),
+                kind: TExprKind::OptField {
+                    base: Box::new(base_t),
+                    member_rust: mangle(member),
+                    flatten: *flatten,
                 },
             }
         }
@@ -2984,6 +3405,73 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let e = emit_tir_expr(end, cx);
             format!("jet_slice_vec(&({}), {}, {}, {:?}, {})", b, a, e, cx.file, line)
         }
+        // c109 Phase 8: `value(x)` → `Some(x)` / `null` → `None`. Mirrors the AST
+        // `Expr::Present`/`Expr::Absent` exactly.
+        TExprKind::Present(inner) => format!("Some({})", emit_tir_expr(inner, cx)),
+        TExprKind::Absent => "None".to_string(),
+        // c109 Phase 8: `ok(x)` → `Ok(x)` / `err(e)` → `Err(e)`. Mirrors the AST
+        // `Expr::Ok`/`Expr::Err`.
+        TExprKind::Ok(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
+        TExprKind::Err(inner) => format!("Err({})", emit_tir_expr(inner, cx)),
+        // c109 Phase 8: the `?` propagation operator. Mirrors `Expr::Try` byte-for-byte
+        // (Expression.rs): a debug trace frame wraps the value, then the error is
+        // converted per the total `TryConvert`, then `?` propagates. `file`/`fn_name`
+        // were pre-escaped at lowering; `line` is plain.
+        TExprKind::Try { inner, convert, file, line, fn_name } => {
+            let v = emit_tir_expr(inner, cx);
+            match convert {
+                // S80/D-LIB3: error implements Fallible → `.map_err(|e| e.to_error())`.
+                TTryConvert::Fallible => format!(
+                    "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
+                    v, file, line, fn_name
+                ),
+                // D-ERR-CONV: declared `impl Source -> Target` → `.map_err(<fn>)`.
+                TTryConvert::Typed(conv_fn) => format!(
+                    "jet_trace_err({}.map_err({}), {}, {}, {})?",
+                    v, conv_fn, file, line, fn_name
+                ),
+                // Error types match — bare propagate.
+                TTryConvert::None => {
+                    format!("jet_trace_err({}, {}, {}, {})?", v, file, line, fn_name)
+                }
+            }
+        }
+        // c109 Phase 8: the `??` fallback operator. Mirrors `emit_or_fallback`
+        // (Statement.rs): a `Result` value unwraps `Ok`, an `Option` value unwraps
+        // `Some`; the fallback runs on `Err(_)`/`None`. Decision read off the total
+        // `is_option` flag — no re-inference.
+        TExprKind::OrFallback { value, fallback, is_option } => {
+            let v = emit_tir_expr(value, cx);
+            let fb = emit_tir_orfallback_rhs(fallback, cx);
+            if *is_option {
+                format!("match {} {{ Some(__jet_v) => __jet_v, None => {} }}", v, fb)
+            } else {
+                format!("match {} {{ Ok(__jet_ok) => __jet_ok, Err(_) => {} }}", v, fb)
+            }
+        }
+        // c109 Phase 8: optional chaining `base?.member`. Mirrors `Expr::OptField`:
+        // `(base).clone().{and_then|map}(|__optv| __optv.{member})`. The combinator is
+        // the total `flatten` fact (flatten → `and_then`, else → `map`).
+        TExprKind::OptField { base, member_rust, flatten } => {
+            let combinator = if *flatten { "and_then" } else { "map" };
+            format!(
+                "({}).clone().{}(|__optv| __optv.{})",
+                emit_tir_expr(base, cx),
+                combinator,
+                member_rust
+            )
+        }
+    }
+}
+
+/// c109 Phase 8: format a `??` fallback right-hand side, mirroring
+/// `emit_or_fallback_rhs` (Statement.rs) for the Value and early-`return` forms (the
+/// Panic form is excluded by the gate).
+fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String {
+    match fallback {
+        TOrFallback::Value(e) => emit_tir_expr(e, cx),
+        TOrFallback::Return(None) => "return".to_string(),
+        TOrFallback::Return(Some(e)) => format!("return {}", emit_tir_expr(e, cx)),
     }
 }
 
@@ -3125,9 +3613,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_option_param() {
-        // An optional-typed param is still outside the subset (optionals → Phase 8).
-        assert!(!covers("fn f(p: Int?) -> Int {\n return 0\n}\n", "f"));
+    fn covers_option_param() {
+        // c109 Phase 8: an optional-typed param (`Int?`) is now inside the subset
+        // (was excluded through Phase 7). The payload is a covered value type.
+        assert!(covers("fn f(p: Int?) -> Int {\n return 0\n}\n", "f"));
+    }
+
+    #[test]
+    fn rejects_list_of_option_param_still() {
+        // A list whose element is itself optional (`[Int?]`) is still excluded — the
+        // collection element-coverage does not admit optionals (clone/coercion for an
+        // option-element collection is deferred), even though a bare `Int?` is covered.
+        assert!(!covers("fn f(xs: [Int?]) -> Int {\n return 0\n}\n", "f"));
     }
 
     #[test]
@@ -3428,5 +3925,56 @@ mod tests {
         // is independent — `new` as a *static body* is still a plain method def.)
         // The static *call*-site exclusion is covered by `is_intercepted_method_name`.
         assert!(is_intercepted_method_name("new"));
+    }
+
+    // c109 Phase 8: fallible + optional.
+
+    #[test]
+    fn covers_fallible_return_and_try() {
+        // A `T ? Error` return (default-error fallible) with `ok`/`err` over scalar
+        // values and `?` propagation of a covered fallible call — all in-subset
+        // (Phase 8). (`Error` lowers to `String`; the constructors here take a scalar
+        // and a String literal, which parse as `Expr::Ok`/`Expr::Err` directly — no
+        // sema EnumLit rewrite needed, so `build_cx` alone proves the gate. A
+        // scalar-payload *error enum* literal is `Bad.Code(1)`, which parses as a
+        // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
+        // proven end-to-end by `tests/tir.rs::fallible_try_and_or_fallback`.)
+        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return err(\"bad\")\n }\n return ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n @= f(x)?\n return ok((n + 1))\n}\n";
+        assert!(covers(src, "f"));
+        assert!(covers(src, "g"));
+    }
+
+    #[test]
+    fn covers_optional_return_and_chaining() {
+        // A `T?` return with `value`/`null`, plus `?.` chaining over a covered struct.
+        // (Multi-letter struct name; a single uppercase letter reads as a type var.)
+        let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) -> (Int?) {\n if x > 0 {\n return value(x)\n }\n return null\n}\nfn ch(a: (Addr?)) -> (String?) {\n return a?.city\n}\n";
+        assert!(covers(src, "opt"));
+        assert!(covers(src, "ch"));
+    }
+
+    #[test]
+    fn covers_or_fallback_value_and_return() {
+        // `??` with a value fallback and with an early-`return` fallback.
+        let src = "fn v(x: (Int?)) -> Int {\n return x ?? 0\n}\nfn r(x: (Int?)) -> Int {\n return x ?? return -1\n}\n";
+        assert!(covers(src, "v"));
+        assert!(covers(src, "r"));
+    }
+
+    #[test]
+    fn rejects_or_fallback_panic_form() {
+        // The `panic(…)` fallback form is deferred (its `safe_locals_expr`
+        // reproduction is out of subset) — the owning fn stays on the AST path.
+        let src = "fn p(x: (Int?)) -> Int {\n return x ?? panic(\"missing\")\n}\n";
+        assert!(!covers(src, "p"));
+    }
+
+    #[test]
+    fn rejects_string_payload_error_enum() {
+        // A `T ? E` whose error enum has a String payload is excluded — the error
+        // enum is not a covered (scalar-payload) enum, so its construction/binding
+        // would need clone decisions the subset can't make.
+        let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return err(Oops.Msg(\"bad\"))\n }\n return ok(x)\n}\n";
+        assert!(!covers(src, "f"));
     }
 }

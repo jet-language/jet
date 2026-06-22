@@ -871,3 +871,166 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "17\n");
 }
+
+// c109 Phase 8: fallible + optional.
+
+/// A fallible `T ? E` function with `ok`/`err` constructors and `?` propagation
+/// across a covered scalar-payload error enum, consumed with `??` value fallback.
+/// `parse_age`, `load`, and `main` all route through the TIR.
+#[test]
+fn fallible_try_and_or_fallback() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum ParseError {
+    Empty
+    BadDigit(Int)
+}
+fn parse_age(raw: Int) -> Int ? ParseError {
+    if raw == 0 {
+        return err(ParseError.Empty)
+    }
+    if raw == 1 {
+        return err(ParseError.BadDigit(raw))
+    }
+    return ok((raw * 2))
+}
+fn load(raw: Int) -> Int ? ParseError {
+    n @= parse_age(raw)?
+    return ok((n + 1))
+}
+fn main() {
+    a @= load(21) ?? 0
+    print(a)
+    b @= load(0) ?? 99
+    print(b)
+}
+";
+    let (code, stdout) = build_and_run("tir_fallible", src);
+    assert_eq!(code, 0);
+    // load(21): parse_age→ok(42), n=42, ok(43); ?? → 43.
+    // load(0):  parse_age→err(Empty), ? propagates Err; ?? → 99.
+    assert_eq!(stdout, "43\n99\n");
+}
+
+/// The `??` fallback in its early-`return` form (a `T ? E` value), plus `ok`/`err`.
+#[test]
+fn or_fallback_return_form() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn checked(x: Int) -> Int ? Error {
+    if x == 0 {
+        return err(\"zero\")
+    }
+    return ok((100 / x))
+}
+fn safe(x: Int) -> Int {
+    return checked(x) ?? return -1
+}
+fn main() {
+    print(safe(4))
+    print(safe(0))
+}
+";
+    let (code, stdout) = build_and_run("tir_or_return", src);
+    assert_eq!(code, 0);
+    // safe(4): checked→ok(25), ?? → 25. safe(0): checked→err, ?? return -1.
+    assert_eq!(stdout, "25\n-1\n");
+}
+
+/// An optional `T?` with `value`/`null` constructors and a `??` fallback.
+#[test]
+fn optional_value_null_and_fallback() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn first_even(limit: Int) -> (Int?) {
+    loop i in 1..limit {
+        if (i % 2) == 0 {
+            return value(i)
+        }
+    }
+    return null
+}
+fn main() {
+    print(first_even(9) ?? 0)
+    print(first_even(1) ?? 0)
+}
+";
+    let (code, stdout) = build_and_run("tir_optional", src);
+    assert_eq!(code, 0);
+    // first_even(9)→value(2); first_even(1)→null → 0.
+    assert_eq!(stdout, "2\n0\n");
+}
+
+/// Optional field chaining `?.` (both `.map` and flattening `.and_then`), with a
+/// nested optional field. `nick` routes through the TIR.
+#[test]
+fn optional_chaining() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Profile {
+    handle: (String?)
+}
+struct Account {
+    profile: Profile
+}
+fn handle_of(a: (Account?)) -> (String?) {
+    return a?.profile?.handle
+}
+fn main() {
+    p @= Profile { handle: value(\"jay\") }
+    acct @= Account { profile: p }
+    print(handle_of(value(acct)) ?? \"none\")
+    missing: (Account?) @= null
+    print(handle_of(missing) ?? \"none\")
+}
+";
+    let (code, stdout) = build_and_run("tir_optchain", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "jay\nnone\n");
+}
+
+/// A `when` over a fallible value with `ok`/`err` patterns (Shape C). The subject
+/// is a user fallible fn call; the bound payload prints.
+#[test]
+fn fallible_when_match() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn classify(x: Int) -> Int ? Error {
+    if x == 0 {
+        return err(\"bad\")
+    }
+    return ok((x + 10))
+}
+fn main() {
+    if classify(5) {
+        it == ok(n) -> {
+            print(n)
+        }
+        it == err(e) -> {
+            print(e)
+        }
+    }
+    if classify(0) {
+        it == ok(n) -> {
+            print(n)
+        }
+        it == err(e) -> {
+            print(e)
+        }
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_fallible_when", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "15\nbad\n");
+}
