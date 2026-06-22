@@ -352,3 +352,143 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "15\n10\n");
 }
+
+// --- c109 Phase 4: enums + when/match + patterns ----------------------------
+
+/// A unit-variant enum, enum literals (`Light.Red` etc.), and two exhaustive
+/// variant matches (the `_ => unreachable!` fallthrough is dead but mandatory).
+/// `next`, `label`, and `main` (an enum-typed local + covered helper calls) all
+/// route through the TIR. Mirrors examples/features/11_enums.jet.
+#[test]
+fn enum_unit_variants_and_exhaustive_match() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Light {
+    Red
+    Yellow
+    Green
+}
+fn next(light: Light) -> Light {
+    if light {
+        Red -> { return Light.Yellow }
+        Yellow -> { return Light.Green }
+        Green -> { return Light.Red }
+    }
+}
+fn label(light: Light) -> String {
+    if light {
+        Red -> { return \"stop\" }
+        Yellow -> { return \"caution\" }
+        Green -> { return \"go\" }
+    }
+}
+fn main() {
+    start @= Light.Red
+    print(label(start))
+    print(label(next(start)))
+}
+";
+    let (code, stdout) = build_and_run("tir_enum_unit", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "stop\ncaution\n");
+}
+
+/// Scalar-payload variants, an enum literal with a payload (`Conn.Active(42)`), a
+/// payload binding read in the arm body, an or-pattern sharing a binding
+/// (`Active(id) | Reconnecting(id)`), and a wildcard slot (`Idle(_)`).
+#[test]
+fn enum_payload_or_pattern_and_binding() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Conn {
+    Active(Int)
+    Reconnecting(Int)
+    Idle(Int)
+    Closed
+}
+fn describe(c: Conn) -> String {
+    if c {
+        c == Active(id) | Reconnecting(id) -> { return \"live:{id}\" }
+        c == Idle(_) -> { return \"idle\" }
+        c == Closed -> { return \"closed\" }
+    }
+    return \"unknown\"
+}
+fn main() {
+    print(describe(Conn.Active(42)))
+    print(describe(Conn.Reconnecting(7)))
+    print(describe(Conn.Idle(99)))
+    print(describe(Conn.Closed))
+}
+";
+    let (code, stdout) = build_and_run("tir_enum_payload", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "live:42\nlive:7\nidle\nclosed\n");
+}
+
+/// A range pattern in a *payload* slot (`Good(200..299)`, lowered to a match-arm
+/// guard) alongside wildcard slots, all over an exhaustive enum match.
+#[test]
+fn enum_payload_range_pattern_guard() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Http {
+    Good(Int)
+    Fail(Int)
+}
+fn classify(r: Http) -> String {
+    if r {
+        r == Good(200..299) -> { return \"success\" }
+        r == Good(400..499) -> { return \"client error\" }
+        r == Good(_) -> { return \"other\" }
+        r == Fail(_) -> { return \"network error\" }
+    }
+    return \"unknown\"
+}
+fn main() {
+    print(classify(Http.Good(201)))
+    print(classify(Http.Good(404)))
+    print(classify(Http.Good(302)))
+    print(classify(Http.Fail(0)))
+}
+";
+    let (code, stdout) = build_and_run("tir_enum_range", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "success\nclient error\nother\nnetwork error\n");
+}
+
+/// An arm-head range switch over a scalar subject with an `else` (the mixed-switch
+/// `if/else if … else` lowering, with the parity `_jet_switch_subject` binding).
+/// Mirrors examples/features/71_pattern_matching.jet's `score_grade`.
+#[test]
+fn arm_head_range_switch() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn grade(score: Int) -> String {
+    if score {
+        0..59 -> { return \"F\" }
+        60..69 -> { return \"D\" }
+        70..89 -> { return \"C\" }
+        90..100 -> { return \"A\" }
+        else -> { return \"?\" }
+    }
+}
+fn main() {
+    print(grade(95))
+    print(grade(72))
+    print(grade(45))
+    print(grade(120))
+}
+";
+    let (code, stdout) = build_and_run("tir_range_switch", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "A\nC\nF\n?\n");
+}

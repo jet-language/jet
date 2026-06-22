@@ -34,8 +34,8 @@
 
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, ElseBranch, Expr, ForKind, Func, IfStmt, LValue, Param, Stmt, StrPart,
-    Type, UnOp,
+    AccessConvention, BinOp, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, LValue, Param,
+    PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type, UnOp, VariantPayload,
 };
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -120,6 +120,51 @@ pub(crate) enum TStmt {
     Break(Option<String>),
     /// `continue` / `continue @name`.
     Continue(Option<String>),
+    /// c109 Phase 4: an exhaustive `when`/match on an enum subject (`Stmt::Switch`
+    /// whose arms are all variant patterns). Lowers to a Rust `match`, mirroring
+    /// `emit_pattern_match_switch` byte-for-byte. `subject` is the already-lowered
+    /// subject expression; `clone_subject` reproduces the AST path's `(subj).clone()`
+    /// when the subject reads as a borrow (a by-reference enum param), so the match
+    /// owns the value. Each arm carries its resolved Rust pattern string and an
+    /// optional range-guard string (both fully resolved at lowering — emit makes no
+    /// pattern decision). `fallthrough` records whether the AST path appends the
+    /// `_ => unreachable!("jet: exhaustiveness bug")` arm (true when there is no
+    /// explicit `else`); sema already proved exhaustiveness (E0307), so the dead arm
+    /// exists only because rustc cannot see that proof.
+    EnumMatch {
+        /// The fully-resolved Rust scrutinee string. For a by-reference subject it
+        /// is `({rust_name}).clone()` (cloned so the match owns the value); for a
+        /// by-value subject it is the subject's emitted form. Resolved at lowering.
+        scrutinee: String,
+        arms: Vec<TMatchArm>,
+        else_body: Option<Vec<TStmt>>,
+        fallthrough: bool,
+    },
+    /// c109 Phase 4: a `when`/match whose arms are all arm-head *range* patterns
+    /// (`0..59 -> …`) over a scalar subject, plus a required `else`. The AST path
+    /// (`emit_mixed_switch`) lowers this to an `if/else if … else` chain wrapped in
+    /// a block that binds `_jet_switch_subject` to a borrow of the subject (the
+    /// binding is unused in this form but emitted for parity). Each arm's `(lo, hi)`
+    /// becomes `(subj >= lo && subj <= hi)`, reading the subject's resolved place.
+    RangeSwitch {
+        /// The subject's emitted Rust string, used both for the `_jet_switch_subject`
+        /// borrow binding and inside each arm's range condition — exactly as the AST
+        /// path re-emits `subject` (resolved once here).
+        subject_str: String,
+        arms: Vec<(i64, i64, Vec<TStmt>)>,
+        else_body: Vec<TStmt>,
+    },
+}
+
+/// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
+/// fully-resolved Rust match pattern (`user_Light::user_Red`,
+/// `user_Conn::user_Active(user_id) | user_Conn::user_Reconnecting(user_id)`,
+/// `user_Http::user_Good(__jet_range_0)`); `guard` is the optional `if …` range
+/// guard. Both are computed once at lowering — emit only formats them.
+pub(crate) struct TMatchArm {
+    pub(crate) pattern: String,
+    pub(crate) guard: Option<String>,
+    pub(crate) body: Vec<TStmt>,
 }
 
 /// A lowered expression: a resolved `Type` plus its kind. `ty` is **total** — it
@@ -177,6 +222,16 @@ pub(crate) enum TExprKind {
         recv: Box<TExpr>,
         field_rust: String,
     },
+    /// c109 Phase 4: an enum literal `Enum.Variant`, `Variant(args)`, or a
+    /// named-payload `Variant { f: v, … }`. The Rust head (`user_Enum::user_Variant`)
+    /// is resolved at lowering. `payload` carries the resolved arg form. The subset
+    /// admits only scalar/Char payload values, so no clone/box decision is ever
+    /// needed (a scalar arg is never borrowed-in-env, never a boxed edge — the AST
+    /// path's `emit_boxed_enum_arg` is a no-op for these), keeping emit decision-free.
+    EnumLit {
+        prefix: String,
+        payload: TEnumPayload,
+    },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
         cond: Box<TExpr>,
@@ -190,6 +245,17 @@ pub(crate) enum TExprKind {
 pub(crate) enum TStrPart {
     Lit(String),
     Interp(TExpr),
+}
+
+/// c109 Phase 4: the resolved payload shape of an enum literal.
+pub(crate) enum TEnumPayload {
+    /// `Enum.Variant` — no payload, emits just the prefix.
+    Unit,
+    /// `Variant(a, b, …)` — positional payload values, emitted as `prefix(a, b)`.
+    Positional(Vec<TExpr>),
+    /// `Variant { f: v, … }` — named payload, emitted as `prefix { f: v, … }`.
+    /// Each field's Rust name is already mangled at lowering.
+    Named(Vec<(String, TExpr)>),
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -249,10 +315,83 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
 }
 
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
-/// Char, String, or a covered *plain user struct* (c109 Phase 3). Lists, maps,
-/// options, enums, traits, generics, recursive (boxed) structs are still out.
+/// Char, String, a covered *plain user struct* (c109 Phase 3), or a covered
+/// *plain user enum* (c109 Phase 4). Lists, maps, options, traits, generics,
+/// recursive (boxed) types are still out.
 fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
-    ty.is_scalar() || matches!(ty, Type::Char | Type::String) || is_covered_struct_ty(ty, cx)
+    ty.is_scalar()
+        || matches!(ty, Type::Char | Type::String)
+        || is_covered_struct_ty(ty, cx)
+        || is_covered_enum_ty(ty, cx)
+}
+
+/// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
+/// bare `Type::Named(E)` that:
+///  - is a known enum (`cx.enum_variants` has it), not a struct/trait/foreign/core
+///    type (JSON, prelude, imported enums use different Rust heads/spellings);
+///  - is NOT generic and has NO boxed (recursive) edge — a `Box<…>` payload needs
+///    box/deref handling the subset deliberately avoids (recursive enums → later);
+///  - is derivable `Clone` (`cx.cloneable`) — the exhaustive-match lowering clones a
+///    by-reference subject (`(subj).clone()`), so the enum must be Clone in Rust;
+///  - has every variant payload restricted to scalar/Char fields. A String/struct/
+///    list/option payload would need clone/box decisions at the literal site and in
+///    pattern bindings (`emit_boxed_enum_arg`, borrowed-payload clone) that the
+///    subset cannot reproduce from total facts — exclude the whole enum on any.
+fn is_covered_enum_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Named(name) = ty else {
+        return false;
+    };
+    enum_is_covered(name, cx)
+}
+
+fn enum_is_covered(name: &str, cx: &Cx) -> bool {
+    // Foreign/core/JSON enums (different Rust head/variant spelling) are out.
+    if cx.foreign_types.contains_key(name)
+        || crate::Generics::is_type_var_name(name)
+        || is_json_type_name(name)
+        || core_enum_or_prelude(name)
+    {
+        return false;
+    }
+    let Some(variants) = cx.enum_variants.get(name) else {
+        return false;
+    };
+    // A by-reference subject is cloned in the match lowering — require Clone.
+    if !cx.cloneable.contains(name) {
+        return false;
+    }
+    variants.iter().all(|(vname, payload)| {
+        // Any boxed (recursive) edge is excluded — payload box/deref handling.
+        let payload_tys: Vec<&Type> = match payload {
+            VariantPayload::Unit => Vec::new(),
+            VariantPayload::Single(t, _) => {
+                if cx.boxed_edges.contains(&(name.to_string(), vname.clone())) {
+                    return false;
+                }
+                vec![t]
+            }
+            VariantPayload::Named(fs) => {
+                for f in fs {
+                    let key = format!("{}.{}", vname, f.name);
+                    if cx.boxed_edges.contains(&(name.to_string(), key)) {
+                        return false;
+                    }
+                }
+                fs.iter().map(|f| &f.ty).collect()
+            }
+        };
+        // Every payload field must be a plain scalar or Char — no String/struct/
+        // collection/option payloads (they bring clone/box decisions).
+        payload_tys
+            .iter()
+            .all(|t| t.is_scalar() || matches!(t, Type::Char))
+    })
+}
+
+/// A name that resolves to a compiler/core/prelude enum or opaque type rather
+/// than a plain user enum — those are excluded from the enum subset.
+fn core_enum_or_prelude(name: &str) -> bool {
+    net_handle_rust_type(name).is_some() || alloc_handle_rust_type(name).is_some()
 }
 
 /// c109 Phase 3: `ty` is a plain user struct the subset can lower. It must be a
@@ -375,7 +514,16 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         // The parser only admits them inside a loop body, so they are always valid
         // where they appear; the label name is reproduced verbatim at lowering.
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => true,
-        // switch, unsafe, region, caps, comptime-if, context — all still out.
+        // c109 Phase 4: a `when`/match (`Stmt::Switch`). Covered only in the two
+        // shapes the TIR reproduces exactly — an exhaustive enum match or an
+        // all-range-arm scalar switch (see `switch_in_subset`).
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => switch_in_subset(subject, arms, else_body, cx, locals),
+        // unsafe, region, caps, comptime-if, context — all still out.
         _ => false,
     }
 }
@@ -397,6 +545,204 @@ fn if_in_subset(ifs: &IfStmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
             body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals))
         }
         Some(ElseBranch::ElseIf(next)) => if_in_subset(next, cx, locals),
+    }
+}
+
+/// c109 Phase 4: is a `Stmt::Switch` (`when`/match) inside the subset? Covered in
+/// exactly the two shapes the TIR reproduces byte-for-byte:
+///   (A) **exhaustive enum match** — every arm is a variant pattern over a covered
+///       enum subject (`switch_arm_pattern_owned` is Some, none are ranges). Lowers
+///       to a Rust `match` (`emit_pattern_match_switch`).
+///   (B) **range switch** — every arm is an arm-head range pattern (`0..59 -> …`)
+///       over a scalar subject AND an `else` is present. Lowers to an if/else chain
+///       (`emit_mixed_switch`).
+/// Anything else (mixed comparison/Bool arms, optional/`ok`/`err` patterns, a
+/// non-covered subject) stays on the AST path.
+fn switch_in_subset(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    locals: &mut HashSet<String>,
+) -> bool {
+    if arms.is_empty() {
+        return false;
+    }
+    // The subject must itself be in-subset (so it lowers + so `it` never escapes).
+    if !expr_in_subset(subject, cx, locals) {
+        return false;
+    }
+    // Shape A: all arms are variant patterns (exhaustive enum match).
+    if arms
+        .iter()
+        .all(|a| arm_variant_pattern(cx, &a.cond, subject).is_some())
+    {
+        // Subject must be a covered enum (its variants are scalar-payload only).
+        let subj_enum = arms.iter().find_map(|a| {
+            arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
+        });
+        let Some(enum_name) = subj_enum else {
+            return false;
+        };
+        if !enum_is_covered(&enum_name, cx) {
+            return false;
+        }
+        for a in arms {
+            let pat = arm_variant_pattern(cx, &a.cond, subject).expect("checked above");
+            // Each arm's payload bindings extend the body scope; check on a clone.
+            let mut body_locals = locals.clone();
+            add_pattern_binding_names(&pat, &mut body_locals);
+            if !a
+                .body
+                .iter()
+                .all(|s| stmt_in_subset(s, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        if let Some(body) = else_body {
+            let mut else_locals = locals.clone();
+            if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    // Shape B: all arms are arm-head range patterns over a scalar subject, with an
+    // `else`. (Range arms bind nothing.) The subject's type must resolve to an
+    // integer/char local so the conditions type-check.
+    if else_body.is_some()
+        && arms.iter().all(|a| arm_head_range(&a.cond, subject).is_some())
+    {
+        // The subject must be a plain in-subset scalar place (an Ident local/param)
+        // so `_jet_switch_subject`/the conditions read it directly. Anything more
+        // complex is excluded (the AST path re-emits the subject per arm).
+        if !matches!(subject, Expr::Ident(name, _) if locals.contains(name)) {
+            return false;
+        }
+        for a in arms {
+            let mut body_locals = locals.clone();
+            if !a
+                .body
+                .iter()
+                .all(|s| stmt_in_subset(s, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        if let Some(body) = else_body {
+            let mut else_locals = locals.clone();
+            if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    false
+}
+
+/// Mirror codegen's `switch_arm_pattern_owned` (Statement.rs): an arm whose head
+/// is a variant pattern over `subject`. Returns the `Pattern` (Variant or Or of
+/// variants), or `None` for ranges / comparison / Bool arms. The arm head is a
+/// `PatternTest` (`c == Active(id)`) or a bare-value `Binary(Eq, subject, Ident)`
+/// that names a known variant. Range patterns at arm head deliberately return
+/// `None` (they go through the mixed-switch path, shape B).
+fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
+    match cond {
+        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(s, subject) => {
+            if matches!(pattern, Pattern::Range { .. }) {
+                return None;
+            }
+            // The subset covers only variant / or-of-variant patterns (no
+            // optional/`ok`/`err` patterns — those are Phase 8).
+            if pattern_is_variant_or_orvariant(pattern) {
+                Some(pattern.clone())
+            } else {
+                None
+            }
+        }
+        Expr::Binary(BinOp::Eq, lhs, rhs, _) if pattern_subjects_match(lhs, subject) => {
+            if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
+                if cx.variant_owner.contains_key(variant) {
+                    return Some(Pattern::Variant {
+                        variant: variant.clone(),
+                        bindings: Vec::new(),
+                        span: *rhs_span,
+                    });
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// True for a `Variant` pattern or an `Or` whose every alternative is a `Variant`.
+/// Excludes optional/result patterns (Present/Absent/Ok/Err) — out of Phase 4.
+fn pattern_is_variant_or_orvariant(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Variant { bindings, .. } => bindings
+            .iter()
+            // Only plain name-binds, wildcards, and ranges in payload slots are
+            // covered (those are the slot kinds the TIR reproduces).
+            .all(|s| matches!(s, PatSlot::Bind(_) | PatSlot::Wildcard | PatSlot::Range { .. })),
+        Pattern::Or(alts, _) => {
+            !alts.is_empty() && alts.iter().all(pattern_is_variant_or_orvariant)
+        }
+        _ => false,
+    }
+}
+
+/// The owning enum of a variant (or or-of-variant) pattern, via `cx.variant_owner`.
+fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String> {
+    match pattern {
+        Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).cloned(),
+        Pattern::Or(alts, _) => alts.iter().find_map(|a| variant_pattern_enum(cx, a)),
+        _ => None,
+    }
+}
+
+/// An arm-head range pattern (`lo..hi -> …`), as `(lo, hi)`. Mirrors the parser's
+/// arm-head range lowering: a `PatternTest` whose pattern is `Pattern::Range`.
+fn arm_head_range(cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
+    match cond {
+        Expr::PatternTest { subject: s, pattern: Pattern::Range { lo, hi, .. }, .. }
+            if pattern_subjects_match(s, subject) =>
+        {
+            Some((*lo, *hi))
+        }
+        _ => None,
+    }
+}
+
+/// Mirror codegen's `pattern_subjects_match` (Statement.rs): an arm subject names
+/// the same ident as the switch subject, or is the implicit `it`.
+fn pattern_subjects_match(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Ident(na, _), Expr::Ident(nb, _)) => na == nb,
+        (Expr::Ident(n, _), _) if n == Syntax::KW_IT => true,
+        _ => false,
+    }
+}
+
+/// Record the names a variant (or or-of-variant) pattern binds, so an arm body's
+/// classification sees them as locals. Wildcard/Range slots bind nothing; an Or
+/// pattern binds its first alt's names (all alts bind the same names — E0317).
+fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
+    match pattern {
+        Pattern::Variant { bindings, .. } => {
+            for slot in bindings {
+                if let PatSlot::Bind(name) = slot {
+                    locals.insert(name.clone());
+                }
+            }
+        }
+        Pattern::Or(alts, _) => {
+            if let Some(first) = alts.first() {
+                add_pattern_binding_names(first, locals);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -502,10 +848,50 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             if member == "clone" {
                 return false;
             }
+            // c109 Phase 4: a *unit* enum literal reaches codegen as a `Field` whose
+            // receiver is the enum-name ident (sema only re-types it; it does NOT
+            // rewrite the node — only payload literals become `Expr::EnumLit`). The
+            // AST path emits `user_<Enum>::user_<variant>` for this case. Cover it
+            // when the enum is a covered scalar-payload enum and `member` is one of
+            // its (unit) variants. A receiver that is a known local can't also be a
+            // covered enum name, so the two branches never collide.
+            if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                if !locals.contains(enum_name)
+                    && enum_is_covered(enum_name, cx)
+                    && cx.variant_owner.get(member).map(String::as_str)
+                        == Some(enum_name.as_str())
+                {
+                    return true;
+                }
+                // A non-local ident receiver that is NOT a covered enum (a core/json/
+                // numeric path, an imported namespace, a module alias) is excluded —
+                // those use Rust heads/spellings the subset does not emit.
+                if !locals.contains(enum_name) {
+                    return false;
+                }
+            }
+            // Otherwise this is a struct field *read* — in-subset iff the receiver is.
             expr_in_subset(receiver, cx, locals)
         }
-        // Everything else (method calls, indexing, slices, enum lits,
-        // collections, lambdas, ?/try, ??, fan-out, optionals, opt-fields, …) is out.
+        // c109 Phase 4: an enum literal `Enum.Variant`/`Variant(args)`/named. Covered
+        // only when the named enum is a covered scalar-payload enum and every arg
+        // value is itself in-subset (a scalar/Char value — the enum being covered
+        // already guarantees the payload *types* are scalar, so no clone/box).
+        Expr::EnumLit { type_name, variant, args, .. } => {
+            if !enum_is_covered(type_name, cx) {
+                return false;
+            }
+            // Defensive: the variant must belong to this enum (sema guaranteed it).
+            if cx.variant_owner.get(variant).map(String::as_str) != Some(type_name.as_str()) {
+                return false;
+            }
+            args.iter().all(|a| match a {
+                EnumLitArg::Positional(e) => expr_in_subset(e, cx, locals),
+                EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+            })
+        }
+        // Everything else (method calls, indexing, slices, collections, lambdas,
+        // ?/try, ??, fan-out, optionals, opt-fields, …) is out.
         _ => false,
     }
 }
@@ -537,6 +923,24 @@ impl LowerEnv {
     }
     fn ty_of(&self, name: &str) -> Option<Type> {
         self.locals.get(name).map(|(_, t)| t.clone())
+    }
+    /// c109 Phase 4: a name reads as a borrow when its resolved place is a deref
+    /// (`(*name)`) — a by-reference parameter slot. The match lowering clones such
+    /// a subject so the `match` owns the value, mirroring `emit_pattern_match_switch`.
+    fn is_borrowed(&self, name: &str) -> bool {
+        matches!(self.locals.get(name), Some((place, _)) if place.starts_with("(*"))
+    }
+    /// The bare Rust binding name (without the deref wrapper), e.g. `user_light`
+    /// for a slot whose place is `(*user_light)`. Used by the match-subject clone,
+    /// which clones the borrow itself (`(user_light).clone()`), not `(*user_light)`.
+    fn rust_name_of(&self, name: &str) -> String {
+        match self.locals.get(name) {
+            Some((place, _)) if place.starts_with("(*") && place.ends_with(')') => {
+                place[2..place.len() - 1].to_string()
+            }
+            Some((place, _)) => place.clone(),
+            None => mangle(name),
+        }
     }
 }
 
@@ -665,6 +1069,14 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Continue(_) => TStmt::Continue(None),
         Stmt::BreakLabel(name, _) => TStmt::Break(Some(name.clone())),
         Stmt::ContinueLabel(name, _) => TStmt::Continue(Some(name.clone())),
+        // c109 Phase 4: a `when`/match. The gate already classified it as either an
+        // exhaustive enum match (shape A) or an all-range scalar switch (shape B).
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => lower_switch(subject, arms, else_body, cx, env),
         _ => unreachable!("statement not in TIR subset"),
     }
 }
@@ -699,6 +1111,243 @@ fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         cond,
         then_body,
         else_body,
+    }
+}
+
+/// c109 Phase 4: lower a `when`/match. The gate (`switch_in_subset`) has already
+/// proved one of the two covered shapes; pick the matching lowering.
+fn lower_switch(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TStmt {
+    // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
+    if else_body.is_some() && arms.iter().all(|a| arm_head_range(&a.cond, subject).is_some()) {
+        return lower_range_switch(subject, arms, else_body, cx, env);
+    }
+    // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
+    lower_enum_match(subject, arms, else_body, cx, env)
+}
+
+fn lower_enum_match(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TStmt {
+    // The match owns the value. Mirror `emit_pattern_match_switch`: a by-reference
+    // subject (a deref'd enum param) is cloned as `({rust_name}).clone()` — the
+    // borrow itself is cloned, NOT the deref'd place. Any other subject emits its
+    // plain form.
+    let scrutinee = match subject {
+        Expr::Ident(name, _) if env.is_borrowed(name) => {
+            format!("({}).clone()", env.rust_name_of(name))
+        }
+        _ => emit_tir_expr(&lower_expr(subject, cx, env), cx),
+    };
+    // Resolve the owning enum once — drives the Rust variant prefix in patterns.
+    let enum_type = arms.iter().find_map(|a| {
+        arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
+    });
+    // The subject's resolved Jet type carries the variant binding payload types.
+    let subject_ty = expr_ast_jet_ty(subject, env);
+    let mut tarms = Vec::new();
+    for arm in arms {
+        let pattern =
+            arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
+        let pat = tir_match_pattern(cx, &pattern, enum_type.as_deref());
+        let guard = tir_range_guard(&pattern);
+        // The arm body sees the variant's payload bindings, typed from the layout.
+        let mut body_env = clone_env(env);
+        tir_add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
+        let body = lower_stmts(&arm.body, cx, &mut body_env);
+        tarms.push(TMatchArm { pattern: pat, guard, body });
+    }
+    let else_lowered = else_body.as_ref().map(|body| {
+        let mut branch = clone_env(env);
+        lower_stmts(body, cx, &mut branch)
+    });
+    // No explicit `else` → the AST path appends `_ => unreachable!(…)` so rustc
+    // sees a complete match (sema already proved exhaustiveness — E0307).
+    let fallthrough = else_body.is_none();
+    TStmt::EnumMatch {
+        scrutinee,
+        arms: tarms,
+        else_body: else_lowered,
+        fallthrough,
+    }
+}
+
+fn lower_range_switch(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TStmt {
+    // The subject's emitted string — used for the borrow binding and each range
+    // condition, exactly as `emit_mixed_switch` re-emits the subject.
+    let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
+    let mut tarms = Vec::new();
+    for arm in arms {
+        let (lo, hi) = arm_head_range(&arm.cond, subject).expect("gate proved range arm");
+        let mut branch = clone_env(env);
+        let body = lower_stmts(&arm.body, cx, &mut branch);
+        tarms.push((lo, hi, body));
+    }
+    let else_lowered = {
+        let body = else_body.as_ref().expect("range switch requires else (gate)");
+        let mut branch = clone_env(env);
+        lower_stmts(body, cx, &mut branch)
+    };
+    TStmt::RangeSwitch {
+        subject_str,
+        arms: tarms,
+        else_body: else_lowered,
+    }
+}
+
+/// TIR-local reproduction of codegen's `emit_match_pattern` (Statement.rs) for the
+/// user-enum case the subset covers. Builds the Rust match pattern string from the
+/// resolved enum type and variant slots — pure formatting, no type inference. The
+/// subset excludes JSON/foreign enums, so this only handles `user_<Enum>::user_<V>`.
+fn tir_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
+    let resolved = enum_type
+        .map(|t| t.to_string())
+        .or_else(|| variant_pattern_enum(cx, pattern));
+    let prefix = resolved
+        .as_deref()
+        .map(|t| format!("user_{}", t))
+        .unwrap_or_else(|| "user_TYPE".to_string());
+    match pattern {
+        Pattern::Variant { variant, bindings, .. } => {
+            if bindings.is_empty() {
+                format!("{}::{}", prefix, mangle(variant))
+            } else {
+                let slot_pats: Vec<String> = bindings
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| match s {
+                        PatSlot::Bind(n) => mangle(n),
+                        PatSlot::Wildcard => "_".to_string(),
+                        PatSlot::Range { .. } => format!("__jet_range_{}", i),
+                    })
+                    .collect();
+                if slot_pats.len() == 1 {
+                    format!("{}::{}({})", prefix, mangle(variant), slot_pats[0])
+                } else {
+                    let fields: Vec<String> = slot_pats
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| format!("f{i}: {p}"))
+                        .collect();
+                    format!("{}::{} {{ {} }}", prefix, mangle(variant), fields.join(", "))
+                }
+            }
+        }
+        Pattern::Or(alts, _) => {
+            let pats: Vec<String> = alts
+                .iter()
+                .map(|a| tir_match_pattern(cx, a, resolved.as_deref()))
+                .collect();
+            pats.join(" | ")
+        }
+        // The gate admits only variant / or-of-variant patterns into shape A.
+        _ => unreachable!("non-variant pattern in enum match (gate)"),
+    }
+}
+
+/// TIR-local reproduction of codegen's `emit_range_guard` (Statement.rs): a payload
+/// range slot becomes `__jet_range_i >= lo && __jet_range_i <= hi`. `None` when no
+/// slot is a range. Or-patterns reuse the first alt's ranges (all alts bind alike).
+fn tir_range_guard(pattern: &Pattern) -> Option<String> {
+    match pattern {
+        Pattern::Variant { bindings, .. } => {
+            let guards: Vec<String> = bindings
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| {
+                    if let PatSlot::Range { lo, hi } = s {
+                        Some(format!(
+                            "__jet_range_{} >= {} && __jet_range_{} <= {}",
+                            i, lo, i, hi
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if guards.is_empty() {
+                None
+            } else {
+                Some(guards.join(" && "))
+            }
+        }
+        Pattern::Or(alts, _) => alts.first().and_then(tir_range_guard),
+        _ => None,
+    }
+}
+
+/// TIR-local reproduction of codegen's `add_pattern_bindings`/`variant_binding_types`
+/// for the user-enum case: bind each `Bind` slot to its payload field type, read
+/// from the resolved enum layout (`cx.enum_variants`). Wildcard/Range slots bind
+/// nothing. Or-patterns bind the first alt's names (all alts bind alike — E0317).
+fn tir_add_pattern_bindings(
+    cx: &Cx,
+    pattern: &Pattern,
+    env: &mut LowerEnv,
+    _subject_ty: Option<&Type>,
+) {
+    match pattern {
+        Pattern::Variant { variant, bindings, .. } => {
+            let tys = variant_payload_types(cx, variant);
+            for (i, slot) in bindings.iter().enumerate() {
+                if let PatSlot::Bind(b) = slot {
+                    // Payload types are scalar/Char (the enum is covered), so the
+                    // binding is a by-value local; default to Int if unresolved
+                    // (impossible for a covered enum — sema validated the access).
+                    let ty = tys
+                        .as_ref()
+                        .and_then(|ts| ts.get(i).cloned())
+                        .unwrap_or(Type::Int);
+                    env.locals.insert(b.clone(), (mangle(b), ty));
+                }
+            }
+        }
+        Pattern::Or(alts, _) => {
+            if let Some(first) = alts.first() {
+                tir_add_pattern_bindings(cx, first, env, _subject_ty);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The payload field types a variant binds, from the resolved enum layout. Mirrors
+/// `variant_binding_types` (Statement.rs) for user enums (JSON enums are excluded
+/// from the subset).
+fn variant_payload_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
+    let owner = cx.variant_owner.get(variant)?;
+    let variants = cx.enum_variants.get(owner)?;
+    let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
+    match payload {
+        VariantPayload::Unit => Some(Vec::new()),
+        VariantPayload::Single(t, _) => Some(vec![t.clone()]),
+        VariantPayload::Named(fields) => Some(fields.iter().map(|f| f.ty.clone()).collect()),
+    }
+}
+
+/// Resolve the subject's Jet type for binding payloads, mirroring `expr_jet_ty`'s
+/// reach (only an Ident resolves via its slot). Enough for the covered subset (the
+/// subject is an enum-typed local/param). Other forms resolve to `None` (the
+/// payload types come from `cx.enum_variants` regardless).
+fn expr_ast_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
+    match e {
+        Expr::Ident(name, _) => env.ty_of(name),
+        _ => None,
     }
 }
 
@@ -887,6 +1536,24 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // covered function never reaches here with a non-struct receiver (sema
         // guarantees field reads target struct values).
         Expr::Field(receiver, member, _) => {
+            // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
+            // a `Field` whose receiver is the enum-name ident (sema re-types but does
+            // not rewrite the node). The gate proved this is a covered enum + unit
+            // variant; emit `user_<Enum>::user_<variant>` (the AST path's form).
+            if let Expr::Ident(enum_name, _) = receiver.as_ref() {
+                if env.ty_of(enum_name).is_none()
+                    && cx.variant_owner.get(member).map(String::as_str)
+                        == Some(enum_name.as_str())
+                {
+                    return TExpr {
+                        ty: Type::Named(enum_name.clone()),
+                        kind: TExprKind::EnumLit {
+                            prefix: format!("user_{}::{}", enum_name, mangle(member)),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+            }
             let recv = lower_expr(receiver, cx, env);
             let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
             TExpr {
@@ -895,6 +1562,45 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     recv: Box::new(recv),
                     field_rust: mangle(member),
                 },
+            }
+        }
+        // c109 Phase 4: an enum literal. The gate proved the enum is covered (all
+        // payloads scalar/Char), so no arg is ever borrowed-in-env or a boxed edge
+        // — the AST path's `emit_boxed_enum_arg` is a no-op for these, so each arg
+        // lowers as-is with no clone/box (decision-free, byte-parity).
+        Expr::EnumLit { type_name, variant, args, .. } => {
+            let prefix = format!("user_{}::{}", type_name, mangle(variant));
+            let payload = if args.is_empty() {
+                TEnumPayload::Unit
+            } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
+                let pos = args
+                    .iter()
+                    .map(|a| match a {
+                        EnumLitArg::Positional(e) => lower_expr(e, cx, env),
+                        _ => unreachable!("all positional in this branch"),
+                    })
+                    .collect();
+                TEnumPayload::Positional(pos)
+            } else {
+                // Named-payload variant: each field carries its mangled Rust name.
+                let named = args
+                    .iter()
+                    .map(|a| match a {
+                        EnumLitArg::Named { label, expr } => {
+                            (mangle(label), lower_expr(expr, cx, env))
+                        }
+                        // A positional arg mixed with named is a sema error that
+                        // never reaches a covered function; default to a field.
+                        EnumLitArg::Positional(e) => {
+                            (String::new(), lower_expr(e, cx, env))
+                        }
+                    })
+                    .collect();
+                TEnumPayload::Named(named)
+            };
+            TExpr {
+                ty: Type::Named(type_name.clone()),
+                kind: TExprKind::EnumLit { prefix, payload },
             }
         }
         _ => unreachable!("expression not in TIR subset"),
@@ -1133,6 +1839,71 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             Some(name) => out.push_str(&format!("{}continue 'jet_{};\n", pad, name)),
             None => out.push_str(&format!("{}continue;\n", pad)),
         },
+        // c109 Phase 4: an exhaustive enum match. Mirrors `emit_pattern_match_switch`
+        // (Statement.rs) byte-for-byte; every pattern/guard string was resolved at
+        // lowering. Arm bodies emit at indent+2.
+        TStmt::EnumMatch {
+            scrutinee,
+            arms,
+            else_body,
+            fallthrough,
+        } => {
+            out.push_str(&format!("{}match {} {{\n", pad, scrutinee));
+            for arm in arms {
+                match &arm.guard {
+                    Some(guard) => {
+                        out.push_str(&format!("{}    {} if {} => {{\n", pad, arm.pattern, guard))
+                    }
+                    None => out.push_str(&format!("{}    {} => {{\n", pad, arm.pattern)),
+                }
+                emit_tir_stmts(&arm.body, cx, out, indent + 2);
+                out.push_str(&format!("{}    }}\n", pad));
+            }
+            match else_body {
+                Some(body) => {
+                    out.push_str(&format!("{}    _ => {{\n", pad));
+                    emit_tir_stmts(body, cx, out, indent + 2);
+                    out.push_str(&format!("{}    }}\n", pad));
+                }
+                None if *fallthrough => {
+                    // Sema proved exhaustiveness (E0307); this dead arm exists only
+                    // so rustc sees a complete match (I2/I3).
+                    out.push_str(&format!(
+                        "{}    _ => unreachable!(\"jet: exhaustiveness bug\"),\n",
+                        pad
+                    ));
+                }
+                None => {}
+            }
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        // c109 Phase 4: an all-range scalar switch. Mirrors `emit_mixed_switch`
+        // (Statement.rs): a wrapping block binds `_jet_switch_subject` (unused here,
+        // emitted for parity), then an `if/else if … else` chain of range tests.
+        TStmt::RangeSwitch {
+            subject_str,
+            arms,
+            else_body,
+        } => {
+            out.push_str(&format!("{}{{\n", pad));
+            let inner_pad = "    ".repeat(indent + 1);
+            out.push_str(&format!(
+                "{}let _jet_switch_subject = &({});\n",
+                inner_pad, subject_str
+            ));
+            for (i, (lo, hi, body)) in arms.iter().enumerate() {
+                let kw = if i == 0 { "if" } else { "} else if" };
+                out.push_str(&format!(
+                    "{}{} ({} >= {} && {} <= {}) {{\n",
+                    inner_pad, kw, subject_str, lo, subject_str, hi
+                ));
+                emit_tir_stmts(body, cx, out, indent + 2);
+            }
+            out.push_str(&format!("{}}} else {{\n", inner_pad));
+            emit_tir_stmts(else_body, cx, out, indent + 2);
+            out.push_str(&format!("{}}}\n", inner_pad));
+            out.push_str(&format!("{}}}\n", pad));
+        }
     }
 }
 
@@ -1226,6 +1997,27 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Field { recv, field_rust } => {
             format!("({}).{}", emit_tir_expr(recv, cx), field_rust)
         }
+        // c109 Phase 4: an enum literal. Prefix + payload were resolved at lowering;
+        // emit only formats. Mirrors `emit_enum_lit` for the scalar-payload subset.
+        TExprKind::EnumLit { prefix, payload } => match payload {
+            TEnumPayload::Unit => prefix.clone(),
+            TEnumPayload::Positional(vals) => {
+                let pos = vals
+                    .iter()
+                    .map(|v| emit_tir_expr(v, cx))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}({})", prefix, pos)
+            }
+            TEnumPayload::Named(fields) => {
+                let parts = fields
+                    .iter()
+                    .map(|(name, v)| format!("{}: {}", name, emit_tir_expr(v, cx)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{} {{ {} }}", prefix, parts)
+            }
+        },
         TExprKind::IfExpr {
             cond,
             then_body,
@@ -1408,6 +2200,67 @@ mod tests {
     fn rejects_collection_loop() {
         // `loop x in <list>` (ForKind::In) needs collections — Phase 5, not covered.
         let src = "fn f(xs: [Int]) {\n loop x in xs {\n print(x)\n }\n}\n";
+        assert!(!covers(src, "f"));
+    }
+
+    // c109 Phase 4: enums + when/match + patterns.
+
+    #[test]
+    fn covers_enum_unit_match() {
+        // A unit-variant enum, an enum literal, and an exhaustive variant match.
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) -> Light {\n if light {\n Red -> { return Light.Yellow }\n Yellow -> { return Light.Green }\n Green -> { return Light.Red }\n }\n}\n";
+        assert!(covers(src, "next"));
+    }
+
+    #[test]
+    fn covers_enum_payload_or_and_wildcard() {
+        // Scalar-payload enum, or-pattern with a shared binding, and a wildcard slot.
+        let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) -> String {\n if c {\n c == Active(id) | Reconnecting(id) -> { return \"live:{id}\" }\n c == Idle(_) -> { return \"idle\" }\n c == Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
+        assert!(covers(src, "d"));
+    }
+
+    #[test]
+    fn covers_enum_payload_range_pattern() {
+        // A range pattern in a payload slot (guard-emitted) plus a wildcard slot.
+        let src = "enum Http {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: Http) -> String {\n if r {\n r == Good(200..299) -> { return \"ok\" }\n r == Good(_) -> { return \"other\" }\n r == Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
+        assert!(covers(src, "classify"));
+    }
+
+    #[test]
+    fn covers_arm_head_range_switch() {
+        // An all-range arm-head scalar switch with an `else` (mixed-switch path).
+        let src = "fn grade(score: Int) -> String {\n if score {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
+        assert!(covers(src, "grade"));
+    }
+
+    #[test]
+    fn covers_enum_local_and_literal_in_main() {
+        // An enum-typed local bound from a literal, passed to a covered helper.
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start @= Light.Red\n print(label(start))\n}\n";
+        assert!(covers(src, "main"));
+    }
+
+    #[test]
+    fn rejects_string_payload_enum() {
+        // A String payload would need clone/borrow decisions at the literal site and
+        // in pattern bindings the subset can't reproduce — excluded.
+        let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) -> String {\n if m {\n m == Text(s) -> { return s }\n m == Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
+        assert!(!covers(src, "show"));
+    }
+
+    #[test]
+    fn rejects_recursive_enum() {
+        // A self-referential enum needs a boxed payload — pattern/literal lowering
+        // would need box/deref handling the subset avoids.
+        let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) -> Int {\n if t {\n t == Leaf(n) -> { return n }\n t == Node(inner) -> { return 1 }\n }\n return 0\n}\n";
+        assert!(!covers(src, "depth"));
+    }
+
+    #[test]
+    fn rejects_mixed_comparison_switch() {
+        // A switch mixing a comparison/Bool arm with a range arm is the general
+        // mixed-switch the subset does not cover (only all-range + else).
+        let src = "fn f(n: Int) -> String {\n if n {\n 0..10 -> { return \"low\" }\n n > 100 -> { return \"high\" }\n else -> { return \"mid\" }\n }\n}\n";
         assert!(!covers(src, "f"));
     }
 }

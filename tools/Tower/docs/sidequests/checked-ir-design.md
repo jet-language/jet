@@ -188,6 +188,44 @@ everything, the AST codegen path is deleted (final phase).
   and naturally excludes prelude structs (HttpRequest), foreign/imported types, and recursive
   (boxed) structs whose field reads would need deref handling.
 
+## Refinements learned in Phase 4 (enums + when/match + patterns)
+
+- **A *unit* enum literal is an `Expr::Field`, not `Expr::EnumLit`.** Sema's `infer_field`
+  (Source/Sema/CheckerInfer.rs) only *re-types* `Light.Yellow` (via `check_enum_lit`); it
+  does **not** rewrite the AST node. Only payload literals (`Conn.Active(42)`) parse/stay as
+  `Expr::EnumLit`. So the TIR gate + lowering had to cover **both** surfaces: `Expr::Field`
+  whose receiver is a covered-enum-name ident (→ `user_<Enum>::user_<variant>`) and
+  `Expr::EnumLit`. This was the load-bearing trap — without it the obvious `11_enums` `next`
+  stayed on the AST path. General lesson (again, Phase-3 flavored): the AST node that reaches
+  codegen is what the gate must recognise, not the surface syntax.
+- **The `when`/match is a `Stmt::Switch`; the `if subject { arm -> … }` form is the same node.**
+  There is no separate matching `Expr`. The AST path forks into two lowerings the TIR
+  reproduces exactly: `emit_pattern_match_switch` (an exhaustive Rust `match`, used when *all*
+  arms are variant patterns) and `emit_mixed_switch` (an `if/else if … else` chain, used for
+  arm-head range patterns). Phase 4 covers shape A (all-variant) and the all-range-arm-with-
+  `else` slice of shape B; a *mixed* comparison/Bool switch stays on the AST path.
+- **The match scrutinee clone is `(rust_name).clone()`, not `(*name).clone()`.** A by-reference
+  enum param (`Read` non-scalar → deref'd slot) is cloned so the `match` owns the value, but
+  `emit_pattern_match_switch` clones the *borrow* (`slot.rust_name`), not the deref'd place.
+  The TIR resolves the scrutinee string at lowering, stripping the `(*…)` wrapper for the clone
+  case — reproducing the borrow-clone exactly. Requires the enum derive `Clone`, so the gate
+  excludes non-cloneable enums.
+- **Scalar-only payloads keep clone/box decisions out of the TIR.** A String/struct/collection
+  payload would route through `emit_boxed_enum_arg` (borrowed-payload `.clone()`) and boxed
+  recursive edges (`Box::new(…)`) — decisions the subset can't reproduce from total facts. So
+  the gate admits an enum only when **every variant payload field is scalar/Char** (no boxed
+  edge). For those, `emit_boxed_enum_arg` is a provable no-op, so a literal arg / a bound payload
+  emits as-is — byte-parity. String-payload enums, recursive (boxed) enums, and fallible/optional
+  patterns (`value`/`null`/`ok`/`err`) are deferred (Phase 7/8).
+- **Pattern strings + range guards are resolved at lowering, reproducing the Statement.rs
+  formatters.** `tir_match_pattern`/`tir_range_guard`/`tir_add_pattern_bindings` mirror
+  `emit_match_pattern`/`emit_range_guard`/`add_pattern_bindings` for the user-enum case (the
+  subset excludes JSON/foreign enums, so only `user_<Enum>::user_<V>` heads arise). A payload
+  range slot (`Good(200..299)`) binds `__jet_range_i` and emits an `if …` guard; an or-pattern
+  reuses the first alt's bindings/ranges (E0317 guarantees all alts bind alike). Verified
+  byte-identical to the forced-AST path for `11_enums` + `71_pattern_matching` (incl. both
+  `main`s).
+
 ## Phases
 
 | # | Scope | Status |
@@ -196,7 +234,7 @@ everything, the AST codegen path is deleted (final phase).
 | 1 | Simple functions: literals, operators, bindings, returns, if/else, calls, print | ✅ done (398138b) — 54 fns routed |
 | 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels) | ✅ done (c109 Phase 2) — +3 example fns routed (e.g. fizzbuzz `main`). Excludes `loop x in <collection>` (ForKind::In, key/value map form) → Phase 5. |
 | 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → Phase 7), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only → Phase 7). |
-| 4 | Enums + `when`/match + patterns (incl. range/or patterns) | pending |
+| 4 | Enums + `when`/match + patterns (incl. range/or patterns) | ✅ done (c109 Phase 4) — ~7 more example fns routed (`11_enums` `next`/`label`/`main`, `71_pattern_matching` `describe_conn`/`classify`/`score_grade`/`main`). Covers plain (non-generic, non-recursive, Clone-derivable) scalar/Char-payload user enums: unit/positional/named enum literals; exhaustive variant `match` (variant patterns, positional/named/wildcard/range payload slots, or-patterns, payload bindings); arm-head range switches (`lo..hi -> …` + `else`); enum params/locals/returns. Excludes: String/struct/collection-payload enums (clone/borrow at literal & binding site → Phase 7), recursive (`Box<…>`) enums, generic enums, JSON/foreign/prelude enums, fallible/optional patterns (`value`/`null`/`ok`/`err` → Phase 8), and mixed comparison/Bool switches (general `emit_mixed_switch`). |
 | 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | pending |
 | 6 | Ownership facts: clone insertion, `take`/`mut`/`view`, Shared/Arc auto-clone | pending |
 | 7 | Methods + method calls (recv_type → resolved target), trait-impl methods | pending |
