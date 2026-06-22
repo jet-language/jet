@@ -116,14 +116,46 @@ codegen via `emit_tir`, all others via the existing AST `emit_func`. Both must p
 byte-identical Rust (golden parity). `tir_covers` widens each phase; when it covers
 everything, the AST codegen path is deleted (final phase).
 
+## Refinements learned in Phase 1 (apply to all later phases)
+
+- **The gate is `tir_covers(f, cx)` — cx-aware, not `f`-only.** It must consult program
+  tables: comptime consts inline at use sites (a bare ident emits the value, not
+  `user_<name>`), and extern/FFI + unqualified-module-import calls emit different forms.
+  Without `cx` those are false positives → I2 bugs. Gate is conservative: exclude on any
+  doubt (false negative = stays on AST path = safe; false positive = unsafe).
+- **Byte parity pulls in a few presentation facts beyond types** — all resolved at
+  lowering (still total): a `Let` records `annotated: bool` (so an inferred binding emits
+  no `: ty`); a `Binary` carries the source `line: u32` (the overflow-trap helper embeds
+  it). When adding constructs, carry whatever resolved facts the existing emit path uses,
+  as total TIR fields — never re-derive in emit.
+- **Mirror existing emit decisions exactly** to preserve parity (e.g. `operand_is_integer`
+  inspects only the left spine of nested arithmetic; the TIR `overflow` flag reproduces
+  that). Parity drift = a golden failure.
+- TIR lives in `Source/Codegen/TIR.rs`; `lower_func`/`emit_tir_func`/`tir_covers` are the
+  three entry points each phase extends. `emit_tir_func` reuses pure formatting helpers
+  (`mangle_name`, `rust_type`, the `jet_add`/… helper names, interpolation) but takes all
+  *decisions* from TIR fields.
+
 ## Phases
 
 | # | Scope | Status |
 |---|-------|--------|
-| 0 | Inventory + TIR type-model design | in progress |
-| 1 | Simple functions + local expressions (arithmetic, calls, literals, bindings, returns) — lower + codegen-from-TIR + golden parity | pending |
-| … | structs/enums, control flow, patterns, ownership/clone, collections, core calls, FFI, comptime, modules | pending |
-| N | Delete the AST codegen path; TIR is the only seam | pending |
+| 0 | Inventory + TIR type-model design | ✅ done (4b89af5) |
+| 1 | Simple functions: literals, operators, bindings, returns, if/else, calls, print | ✅ done (398138b) — 54 fns routed |
+| 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels), `when`-less | pending |
+| 3 | Structs: struct literals, field access/assign, struct-typed params/locals/returns | pending |
+| 4 | Enums + `when`/match + patterns (incl. range/or patterns) | pending |
+| 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | pending |
+| 6 | Ownership facts: clone insertion, `take`/`mut`/`view`, Shared/Arc auto-clone | pending |
+| 7 | Methods + method calls (recv_type → resolved target), trait-impl methods | pending |
+| 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | pending |
+| 9 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
+| 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | pending |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
+
+Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
+regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep
+the full suite green (golden = behavioral parity), commit one slice, update this table.
 
 ## Verification per phase
 
