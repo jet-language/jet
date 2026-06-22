@@ -90,6 +90,13 @@ fn jet_index_map<K: Ord + Clone, V: Clone>(m: &std::collections::BTreeMap<K, V>,
 fn jet_map_insert<K: Ord, V>(m: &mut std::collections::BTreeMap<K, V>, k: K, v: V) {
     m.insert(k, v);
 }
+fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> T {
+    let len = xs.len() as i64;
+    if i < 0 || i >= len {
+        jet_panic(file, line, &format!("the list has {} items, so position {} doesn't exist", len, i));
+    }
+    xs.remove(i as usize)
+}
 fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
 fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {

@@ -226,10 +226,10 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
         Expr::MethodCall {
             receiver,
             method,
+            method_span,
             args,
             recv_type,
-            ..
-        } => emit_method_call(cx, receiver, method, args, recv_type.as_deref(), env),
+        } => emit_method_call(cx, receiver, method, *method_span, args, recv_type.as_deref(), env),
         Expr::StructLit {
             type_name,
             type_args,
@@ -751,6 +751,7 @@ fn emit_builtin_method(
     cx: &Cx,
     receiver: &Expr,
     method: &str,
+    method_span: crate::Diagnostics::Span,
     args: &[crate::AST::CallArg],
     env: &HashMap<String, Slot>,
 ) -> Option<String> {
@@ -795,7 +796,10 @@ fn emit_builtin_method(
         }),
         "remove" => Some(match rty {
             Some(Type::Map { .. }) => format!("({}).remove(&({}).clone())", recv, arg(0)),
-            _ => format!("({}).remove({} as usize).unwrap()", recv, arg(0)),
+            _ => {
+                let (line, _) = span_line_col(&cx.src, method_span.start);
+                format!("jet_list_remove(&mut ({}), {}, {:?}, {})", recv, arg(0), cx.file, line)
+            }
         }),
         "get" => Some(match rty {
             Some(Type::Map { .. }) => format!("({}).get(&({}).clone()).cloned()", recv, arg(0)),
@@ -1255,6 +1259,7 @@ fn emit_method_call(
     cx: &Cx,
     receiver: &Expr,
     method: &str,
+    method_span: crate::Diagnostics::Span,
     args: &[crate::AST::CallArg],
     recv_type: Option<&str>,
     env: &HashMap<String, Slot>,
@@ -1377,7 +1382,7 @@ fn emit_method_call(
         }
     }
     // Built-in collection/string methods take precedence when they match.
-    if let Some(s) = emit_builtin_method(cx, receiver, method, args, env) {
+    if let Some(s) = emit_builtin_method(cx, receiver, method, method_span, args, env) {
         return s;
     }
     if let Expr::Ident(type_name, _) = receiver {
