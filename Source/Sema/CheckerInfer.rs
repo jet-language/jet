@@ -1894,6 +1894,13 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-NUMOPS1: numeric type constants — `U8.MAX`, `Int.MIN`,
+            // `Float.INFINITY`/`NAN`/`EPSILON`.
+            if let Some(nt) = crate::AST::numeric_type_from_name(type_name) {
+                if let Some(cty) = numeric_const_type(&nt, member) {
+                    return Some(cty);
+                }
+            }
             if self.is_known_enum(type_name) {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));

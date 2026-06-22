@@ -73,6 +73,29 @@ pub fn int_spelling(signed: bool, bits: u8) -> String {
     format!("{}{}", if signed { 'I' } else { 'U' }, bits)
 }
 
+/// D-SG9: parse a numeric type spelling to its `Type` — `Int`/`Float` and the
+/// fixed widths, with `I64`/`F64` folding to the 64-bit defaults. `None` for any
+/// non-numeric name. Inverse of `Type::name` for the numeric types.
+pub fn numeric_type_from_name(name: &str) -> Option<Type> {
+    match name {
+        "Int" | "I64" => Some(Type::Int),
+        "Float" | "F64" => Some(Type::Float),
+        "F32" => Some(Type::Float32),
+        _ => {
+            let signed = name.starts_with('I');
+            if !(signed || name.starts_with('U')) || name.len() < 2 {
+                return None;
+            }
+            let bits: u8 = name[1..].parse().ok()?;
+            match bits {
+                8 | 16 | 32 => Some(Type::IntN { signed, bits }),
+                64 if !signed => Some(Type::IntN { signed: false, bits: 64 }),
+                _ => None,
+            }
+        }
+    }
+}
+
 /// D-SG9: inclusive `(min, max)` value range of a fixed-width integer, used for
 /// literal-fits checks. `i128` holds every Jet integer width exactly.
 pub fn int_range(signed: bool, bits: u8) -> (i128, i128) {

@@ -1753,6 +1753,16 @@ pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) 
     )
 }
 
+/// D-NUMOPS1: the type of a numeric type-constant — `MIN`/`MAX` on any numeric
+/// type, `INFINITY`/`NAN`/`EPSILON` on floats. `None` if `member` isn't one.
+pub(crate) fn numeric_const_type(nt: &Type, member: &str) -> Option<Type> {
+    match member {
+        "MIN" | "MAX" => Some(nt.clone()),
+        "INFINITY" | "NEG_INFINITY" | "NAN" | "EPSILON" if nt.is_float() => Some(nt.clone()),
+        _ => None,
+    }
+}
+
 /// D-SG9/D-NUMOPS1 (E1003): an integer literal doesn't fit its fixed-width type.
 /// `U8` keeps its byte-framed wording; other widths get the general range message.
 pub(crate) fn int_range_error(signed: bool, bits: u8, span: Span) -> Diagnostic {

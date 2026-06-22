@@ -106,6 +106,18 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
     if method == "to_string" && nargs == 0 {
         return Some(Some(Type::String));
     }
+    // D-NUMOPS1: float predicates.
+    if matches!(ty, Type::Float | Type::Float32) && nargs == 0 {
+        if let "is_nan" | "is_infinite" | "is_finite" = method {
+            return Some(Some(Type::Bool));
+        }
+    }
+    // D-NUMOPS1: integer bit-population queries (count -> Int).
+    if int_kind(ty).is_some() && nargs == 0 {
+        if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
+            return Some(Some(Type::Int));
+        }
+    }
     let target = conv_target(method)?;
     if nargs != 0 {
         return None;

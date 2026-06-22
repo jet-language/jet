@@ -645,9 +645,13 @@ other integer conversion is **narrowing** and fallible (returns `T ? String`,
 handled with `?`/`??`) — there is no silent truncation. Int→float and
 float→float conversions are infallible (a float→int via `.to_int()` truncates).
 
-Overflow policy, the `wrapping`/`saturating`/`checked` opt-ins, per-type
-`MIN`/`MAX`, and float `INFINITY`/`NAN`/`EPSILON` are the rest of the D-NUMOPS1
-expert numeric surface.
+**Numeric surface (D-NUMOPS1).** Per-type bounds `TYPE.MIN`/`TYPE.MAX`
+(`U8.MAX` = 255, `I32.MIN`, `Int.MAX`); float constants `Float.INFINITY`/`NAN`/
+`EPSILON` (also on `F32`); float predicates `.is_nan()`/`.is_infinite()`/
+`.is_finite()`; integer bit queries `.count_ones()`/`.count_zeros()`/
+`.leading_zeros()`/`.trailing_zeros()`. The overflow policy (plain integer
+arithmetic traps on overflow; `wrapping`/`saturating`/`checked` opt-ins) is the
+remaining piece of the surface.
 
 Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and

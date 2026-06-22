@@ -194,6 +194,14 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
                     emit_core_field(module, member)
                 } else if is_json_type_name(alias) && member == "Null" {
                     format!("{}jet_std::Json::Null", cx.root_prefix)
+                } else if let Some(c) = crate::AST::numeric_type_from_name(alias)
+                    .filter(|_| {
+                        matches!(member.as_str(), "MIN" | "MAX" | "INFINITY" | "NEG_INFINITY" | "NAN" | "EPSILON")
+                    })
+                    .map(|nt| format!("{}::{}", cx.rust_type(&nt), member))
+                {
+                    // D-NUMOPS1: numeric type constants (`u8::MAX`, `f64::INFINITY`).
+                    c
                 } else if cx.enum_variants.contains_key(alias) {
                     // Qualify with the foreign module path when the enum type
                     // comes from an imported file-module.
@@ -954,6 +962,12 @@ fn emit_builtin_method(
         "values" => Some(format!("({}).values().cloned().collect::<Vec<_>>()", recv)),
         "contains_key" => Some(format!("({}).contains_key(&{})", recv, arg(0))),
         "to_string" => Some(format!("({}).jet_show()", recv)),
+        // D-NUMOPS1: float predicates (return bool directly).
+        "is_nan" | "is_infinite" | "is_finite" => Some(format!("({}).{}()", recv, method)),
+        // D-NUMOPS1: integer bit-population queries; Rust returns u32 → widen to Int.
+        "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" => {
+            Some(format!("(({}).{}() as i64)", recv, method))
+        }
         // D-NUMOPS1: width conversions. Source width comes from sema (`recv_type`,
         // authoritative) with a literal/expr fallback; widening is `as`, narrowing
         // is a checked `try_from` returning `Result<T, String>`.
