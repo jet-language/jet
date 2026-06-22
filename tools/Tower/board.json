@@ -1081,6 +1081,10 @@
         {
           "t": "PARTIAL 2026-06-22 (commit 5b05d3f): path hardening for embed_file shipped \u2014 literal-only, no `..`/absolute, E0957 + 3 ui snapshots. BLOCKER: embed_bytes -> [U8] cannot ship \u2014 Jet has no `U8`/byte/sized-int type (Type enum is Int(i64) only). Needs a sized-integer decision (U8 at minimum) before embed_bytes; returning [Int] would violate the ratified [U8] contract (stub, forbidden). GATE for owner: open a sized-int/U8 type decision.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "CORRECTION 2026-06-22: U8 is NOT an undecided gate \u2014 the sized-int spellings (I8..U64, F32/F64) are already ratified (D-SG9); they're just UNIMPLEMENTED in the Type enum (only Int/Float exist), same status as F32/F64. So embed_bytes is blocked on IMPLEMENTING D-SG9 sized ints (esp. U8), not on a new decision. Operations/overflow policy for sized ints is proposed in D-NUMOPS1.",
+          "at": "2026-06-22"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
@@ -1668,6 +1672,63 @@
       "updated": "2026-06-22T00:00:00Z",
       "decisions": [
         "D-BIND2"
+      ]
+    },
+    {
+      "id": "c103",
+      "type": "idea",
+      "title": "Expert numeric surface: overflow policy + values/ops",
+      "body": "Owner-requested. Sized type spellings ratified (D-SG9) but unimplemented. This decides POLICY+VALUES: integer overflow behavior (rec A: checked-by-default + wrapping/saturating/checked opt-ins; subsumes fork 2.3), per-type MIN/MAX, float INFINITY/NAN/EPSILON + predicates, bit ops, explicit width conversions. Implementing D-SG9 sized ints (U8) also unblocks embed_bytes (c75). Ballot D-NUMOPS1.",
+      "stage": "decisions",
+      "plan": null,
+      "notes": [
+        {
+          "t": "created 2026-06-22: owner-requested numeric/serde/library proposals. Ballot in decision-ballots.md.",
+          "at": "2026-06-22"
+        }
+      ],
+      "created": "2026-06-22T00:00:00Z",
+      "updated": "2026-06-22T00:00:00Z",
+      "decisions": [
+        "D-NUMOPS1"
+      ]
+    },
+    {
+      "id": "c104",
+      "type": "idea",
+      "title": "Serde-grade serialization: unified Serialize + Deserialize",
+      "body": "Owner-requested (serde). Rec A: one format-agnostic data model (serde architecture) so one #[Serialize, Deserialize] drives JSON/CSV/TOML/binary; add Deserialize counterpart to S55 Serialize; field attrs rename/default/skip/flatten/rename_all. Gated on user-defined derives (S56, Epoch 3) \u2014 ratify shape now, build when derives land. Ballot D-SERDE1.",
+      "stage": "decisions",
+      "plan": null,
+      "notes": [
+        {
+          "t": "created 2026-06-22: owner-requested numeric/serde/library proposals. Ballot in decision-ballots.md.",
+          "at": "2026-06-22"
+        }
+      ],
+      "created": "2026-06-22T00:00:00Z",
+      "updated": "2026-06-22T00:00:00Z",
+      "decisions": [
+        "D-SERDE1"
+      ]
+    },
+    {
+      "id": "c105",
+      "type": "idea",
+      "title": "Iterator adapters: lazy-sequence surface",
+      "body": "Owner-requested (library legitimacy). Rec A: full lazy adapter set (enumerate/zip/chunks/windows/group_by/take_while/flat_map/scan/dedup/step_by/peekable/partition/\u2026) as methods on the ratified iterator protocol (D-EXT1 Tier1), no new grammar, lazy to honor streaming (E2-M7). Ballot D-ITER1.",
+      "stage": "decisions",
+      "plan": null,
+      "notes": [
+        {
+          "t": "created 2026-06-22: owner-requested numeric/serde/library proposals. Ballot in decision-ballots.md.",
+          "at": "2026-06-22"
+        }
+      ],
+      "created": "2026-06-22T00:00:00Z",
+      "updated": "2026-06-22T00:00:00Z",
+      "decisions": [
+        "D-ITER1"
       ]
     }
   ],

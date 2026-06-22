@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **26 open decisions across 21 cards** (incl. testing ergonomics + the remaining persona-gap decisions from the 2026-06-20 run, plus the owner-requested constant-binding spelling D-BIND2, board card c102), plus a deferred-ballots list and informational notes. **Note:** the 2026-06-22 owner batch (D-STATE1, D-DET1, D-TXN2, D-EXT1, D-CTIO1, D-CTX1, D-ROUTE1) has been ratified and those cards stripped; **D-DBG2 is held** — owner chose C, which the card itself flags as an I2 violation (raw Rust frames shown to users), so it is deferred back to the owner rather than ratified.
+> **29 open decisions across 24 cards** (incl. testing ergonomics + the remaining persona-gap decisions from the 2026-06-20 run, the owner-requested constant-binding spelling D-BIND2 (c102), and the owner-requested numeric/serde/library trio D-NUMOPS1/D-SERDE1/D-ITER1 (c103–c105)), plus a deferred-ballots list and informational notes. **Note:** the 2026-06-22 owner batch (D-STATE1, D-DET1, D-TXN2, D-EXT1, D-CTIO1, D-CTX1, D-ROUTE1) has been ratified and those cards stripped; **D-DBG2 is held** — owner chose C, which the card itself flags as an I2 violation (raw Rust frames shown to users), so it is deferred back to the owner rather than ratified.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -2735,5 +2735,244 @@ in `Source/Syntax.rs`, the `E0985` val/var teaching error target, and a
 repo-wide `::`-binding → `$=` migration across examples/tests/docs/`jet fmt`
 emitter). Reopens S2/D-BIND1 explicitly; frees the `::` token again (S83 already
 moved external-defs to `~~`, so nothing reclaims it — it simply becomes available).
+
+---
+
+## Expert numeric surface: overflow policy + values & ops — board card c103
+
+> Owner-requested 2026-06-22 ("expand the integer and float to have values experts
+> are most likely to use"). **The sized type *spellings* are already ratified**
+> (D-SG9: `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64`; `Int`=I64, `Float`=F64) but
+> **unimplemented** (the `Type` enum is `Int`/`Float` only). This card does NOT
+> re-decide spellings — it decides the **policy + value surface** experts need on
+> top of them: arithmetic-overflow behavior, the per-type constants/operations a
+> serious language is expected to ship, and conversions. Subsumes idea-cards fork
+> **2.3** (checked overflow). Float *math* precision is the separate open D-FLOATW1;
+> implementing D-SG9's sized ints (esp. `U8`) also **unblocks `embed_bytes` (c75)**.
+
+### D-NUMOPS1 — Integer overflow behavior + the expert numeric value/op surface (rec A)
+
+**User story.** Aisha is porting a checksum and a price calculator to Jet. She needs
+(1) a `U8` that wraps deterministically in the hash, (2) an `I64` that **traps**
+instead of silently wrapping when a balance overflows, and (3) the constants and
+ops every systems language gives her: `U8.MAX`, `I64.MIN`, `F64.INFINITY`,
+`F32.EPSILON`, `x.is_nan()`, bit ops (`<<`, `&`, `count_ones`), and explicit width
+conversions. Today Jet has only `Int`/`Float` with unspecified overflow and no
+named numeric constants — so she can't express either the wrap or the trap, and
+reaches for another language. That's the legitimacy gap.
+
+| Option | Default `+`/`*` overflow | Opt-outs | Per-type values/ops | Familiar to |
+|--------|--------------------------|----------|---------------------|-------------|
+| **A — checked by default; `wrapping`/`saturating`/`checked` opt-in (rec)** | trap (debug) / defined trap (release) | `wrapping(…)`, `saturating(…)`, `checked(…)→T?` | `T.MIN`/`T.MAX`, float `INFINITY`/`NAN`/`EPSILON`, `is_nan`, bit ops, `.to_<width>()` | Rust (debug), Swift (traps) |
+| B — wrap by default (C/Go) | silent two's-complement wrap | `checked` for safety | same values | C, Go, Java |
+| C — types only, overflow unspecified | unspecified | none | minimal | status quo |
+
+- **Option A — checked by default, explicit escape hatches (recommended).** Plain
+  arithmetic on any integer width **traps on overflow** (a safety bug becomes a
+  loud failure, not silent corruption — Jet's safe-by-default identity). Experts
+  opt a specific operation into a different discipline with a named wrapper, so the
+  intent is visible at the call site. Every numeric type carries the constants and
+  operations experts expect.
+
+```jet
+// safe default: overflow traps, doesn't silently corrupt
+bal: I64 := I64.MAX
+bal = bal + 1            // panics: integer overflow (I64) — not a wrapped negative
+
+// expert opt-ins, visible at the use site:
+h: U8 := wrapping(h * 31 + byte)     // hash WANTS modular wrap — say so
+clamped: U8 := saturating(a + b)     // pin to U8.MAX instead of trapping
+maybe: I32? := checked(x * y)        // ? on overflow, handle it as a value
+
+// the values experts reach for, per type:
+lo :: I64.MIN            hi :: U8.MAX            // 255
+inf :: F64.INFINITY      nan :: F64.NAN          eps :: F32.EPSILON
+if r.is_nan() { … }                              // float predicates
+mask :: (flags << 2) & 0xFF                      // bit ops on integer widths
+n :: bits.count_ones()
+
+// explicit width conversion (mirrors D-SG9 / D-FLOATW1 — no implicit narrowing):
+small: U8 := big.to_u8()?            // ? because it can't always fit
+wide:  I64 := small.to_i64()         // widening is total, no ?
+```
+
+- **Option B — wrap by default (C/Go).** Plain `+` wraps two's-complement; you opt
+  *into* safety with `checked`. Familiar to C/Go/Java refugees and matches hardware,
+  but it makes the dangerous thing the default — the silent-overflow bug class Jet's
+  safety stance exists to kill. The hash case is ergonomic; the balance case ships
+  the bug.
+
+```jet
+bal: I64 := I64.MAX
+bal = bal + 1            // silently becomes I64.MIN — no signal; the classic CVE
+```
+
+- **Option C — types only, overflow unspecified.** Ship the widths, leave `+`
+  behavior undefined/implementation-detail, no constants. Smallest decision, but
+  "unspecified overflow" is exactly what a serious language must not have, and the
+  missing constants force every expert to hand-roll them.
+
+**How others do it.** Rust traps in debug, wraps in release, with
+`wrapping_*/saturating_*/checked_*` methods + `i32::MAX`/`f64::EPSILON` — the model
+A adapts (Jet makes the trap consistent across profiles so behavior is predictable).
+Swift traps by default with `&+` for wrap. Zig requires you to pick (`+%` wrap, `+`
+trap). C/Go wrap silently (B) — the source of countless overflow bugs. Python has
+arbitrary-precision ints (Jet declined these in D-SG9). The presence of
+`checked/wrapping/saturating` + named constants is table-stakes for a language
+claiming systems credibility.
+
+**Recommendation:** **A** — checked-by-default keeps the safe-by-default identity
+(the trap turns a silent corruption into a caught bug), while the three named
+escape hatches give experts exact control with the choice visible in review. Ship
+the per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON` + predicates, bit ops,
+and explicit `.to_<width>()` conversions as the standard surface. Prerequisite:
+implement D-SG9's sized integers (this is the work that also unblocks `embed_bytes`,
+c75). Sequence the overflow-trap codegen alongside; conversions mirror D-SG9's
+no-implicit-narrowing rule and D-FLOATW1's float policy.
+
+---
+
+## Serde-grade serialization: unified Serialize + Deserialize — board card c104
+
+> Owner-requested 2026-06-22 ("improvements based on serde"). Jet already ratified
+> a built-in **`Serialize`** derive (S55/S56) and has typed JSON/CSV
+> (D-JSONOUT1/D-CSVROW1) + `core` `parse_json`. What serde has that Jet doesn't:
+> (1) a **format-agnostic data model** so ONE derive drives JSON *and* CSV *and*
+> TOML *and* binary; (2) a **`Deserialize`** counterpart (Jet can emit typed JSON
+> but has no general typed *decode*); (3) **field attributes** (rename/default/
+> skip/flatten). The idea-cards file parks "serde-unified" as a 3-Horizon north-star
+> blocked on user-defined derives (S56, Epoch 3) — this promotes it to a concrete
+> ballot so the *shape* is decided now and built when derives land.
+
+### D-SERDE1 — A unified, format-agnostic Serialize/Deserialize model (rec A)
+
+**User story.** Dmitri has a `Config` struct. He wants `Config.to_json()`,
+`Config.to_toml()`, and `Config.from_json(text)?` to all just work from **one**
+`#[Serialize, Deserialize]` on the type — and he wants `#[rename("user-id")]` on a
+field so the wire name differs from the Jet name, and a default for a missing field
+on decode. Today he can derive `Serialize` (S55) but there's no `Deserialize`, and
+each format would be its own bespoke method — the tRPC/Zod/hand-rolled-codec mess
+Jet wants to displace.
+
+| Option | Derive count for N formats | Decode (`Deserialize`) | Field control | New machinery |
+|--------|----------------------------|------------------------|---------------|---------------|
+| **A — one data-model, format adapters (serde model) (rec)** | 1 derive, any format | yes, symmetric | `#[rename/default/skip/flatten]` | a `Serializer`/`Deserializer` protocol + per-format adapter |
+| B — per-format derives (`ToJson`, `ToToml`, …) | N derives | per-format | per-format attrs | less core, more boilerplate + drift |
+| C — Serialize only, no Deserialize | 1 (encode only) | **no** | encode attrs only | least; but can't *read* typed data |
+
+- **Option A — one data model, format adapters (the serde architecture) (rec).**
+  A type derives `Serialize`/`Deserialize` once against an abstract data model
+  (records, sequences, scalars, enums-as-tagged-unions). Each format ships an
+  adapter implementing the `Serializer`/`Deserializer` protocol; the derive is
+  written once and works for every present and future format. Field attributes
+  control the wire shape.
+
+```jet
+#[Serialize, Deserialize]
+struct Config {
+    #[rename("user-id")] user_id: Str
+    #[default] retries: Int           // missing on decode → Int's default
+    #[skip] cache: Cache              // never crosses the wire
+}
+
+cfg  :: Config.from_json(text)?       // typed decode, errors as values (S34)
+js   :: cfg.to_json()                 // same derive
+to   :: cfg.to_toml()                 // ...drives every format
+// a new `msgpack` adapter later needs ZERO changes to Config.
+```
+
+- **Option B — per-format derives.** `#[ToJson]`, `#[ToToml]`, … each generate
+  their own code. Less shared machinery, but N derives per type, N sets of
+  attributes, and the formats drift apart — the opposite of "define once."
+
+```jet
+#[ToJson, FromJson, ToToml, FromToml]   // and one more pair per format, forever
+struct Config { … }
+```
+
+- **Option C — encode-only (status quo + nothing).** Keep `Serialize`, never add
+  `Deserialize`. But a language that can write typed data and not *read* it back
+  isn't credible for config/APIs/persistence — the decode half is half the value.
+
+**How others do it.** **serde** (Rust) is the gold standard: one
+`#[derive(Serialize, Deserialize)]`, a data-model the format crates plug into,
+`#[serde(rename/default/skip/flatten/rename_all)]`; ~every Rust data library speaks
+it. Go's `encoding/json` uses struct tags but is JSON-specific and reflection-based
+(slower, less general). Python's `pydantic`/`dataclasses` validate+parse but are
+runtime. Swift's `Codable` is the closest mainstream analog to serde's compile-time
+model — one protocol, many encoders. A is serde's proven architecture, which is
+*why* serde is universally lauded.
+
+**Recommendation:** **A** — the format-agnostic data model is the entire reason
+serde won; one derive that drives every format (and future formats for free) is a
+massive legitimacy and ergonomics win and directly advances the "replace the
+TypeScript/codec dance" thesis. Add `Deserialize` as the symmetric counterpart to
+S55's `Serialize`, and the `#[rename/default/skip/flatten/rename_all]` attribute
+set. **Gated on user-defined derives (S56, Epoch 3)** — the derive engine is the
+prerequisite; ratify the shape now, build when S56 lands. Keep the data model in
+Core; each format adapter is a ring library (matches the two-tier lib design).
+
+---
+
+## Iterator adapters: the lazy-sequence surface — board card c105
+
+> Owner-requested 2026-06-22 (compare to lauded libraries; reinforce legitimacy).
+> Jet has composable iterators (E2-M7) and `map`/`filter`/`sum`. The gap vs.
+> Rust's `Iterator` / Python `itertools` / Swift sequences is the **breadth of
+> lazy adapters** experts reach for daily — the single most-cited "is this a
+> serious language?" library surface after collections.
+
+### D-ITER1 — Standard lazy iterator-adapter set (rec A)
+
+**User story.** Lena processes a log stream. She wants `lines.enumerate()`,
+`a.zip(b)`, `xs.chunks(100)`, `events.windows(2)`, `items.group_by(Item.kind)`,
+`xs.take_while(|x| x.ok)`, `xs.flat_map(expand)`, `xs.scan(0, +)` — the everyday
+toolkit. Today she writes manual `loop`s with index bookkeeping for each, which is
+exactly the boilerplate a lauded standard library removes.
+
+| Option | Adapter set | Laziness | Surface cost |
+|--------|-------------|----------|--------------|
+| **A — full lazy adapter set on the iterator protocol (rec)** | enumerate, zip, chunks, windows, take/skip(_while), flat_map, scan, group_by, dedup, step_by, peekable, partition, find/position, fold/reduce, min/max_by | lazy, allocation-free until collected | one trait-method family; no new grammar (rides the ratified iterator protocol) |
+| B — minimal set, rest in a third-party lib | map/filter/sum + a few | lazy | smaller Core; ecosystem fragmentation, everyone re-adds the basics |
+| C — eager collection methods only | operate on built lists | eager | simplest; defeats streaming (E2-M7) and allocates per step |
+
+- **Option A — the full lazy set on the iterator protocol (rec).** Each adapter is
+  a method on the ratified iterator protocol (Tier-1 blessed protocol, D-EXT1), lazy
+  and composable; nothing materializes until a terminal op (`collect`, `sum`,
+  `for`). No new grammar.
+
+```jet
+// everyday toolkit, lazy and chainable — no manual index loops:
+for (i, line) in lines.enumerate() { … }
+pairs   :: names.zip(scores)
+batches :: rows.chunks(100)                 // [[row;100], …]
+deltas  :: ticks.windows(2).map(|w| w[1] - w[0])
+byKind  :: items.group_by(Item.kind)
+head    :: xs.take_while(|x| x.is_ok())
+flat    :: nested.flat_map(|g| g.items)
+running :: nums.scan(0, |acc, x| acc + x)   // running totals, lazy
+```
+
+- **Option B — minimal Core + third-party.** Ship only the basics; leave the rest
+  to a library. Smaller Core, but every serious program pulls the same missing
+  adapters from somewhere, and the ecosystem splinters on naming — the fragmentation
+  Python/Go avoid by putting this in the standard library.
+
+- **Option C — eager only.** Methods operate on fully-built lists. Simple, but
+  allocates an intermediate per step and can't run over a stream (defeats the E2-M7
+  streaming I/O design).
+
+**How others do it.** Rust's `Iterator` (~70 adapters, all lazy, zero-cost) is the
+benchmark and a top reason Rust feels productive; `itertools` adds `group_by`,
+`chunks`, `windows`, `dedup`. Python's `itertools` is a flagship stdlib module.
+Swift's lazy sequences and C#'s LINQ are the same idea. A language without this set
+reads as a toy for data work.
+
+**Recommendation:** **A** — the lazy adapter set is high-leverage, needs no new
+grammar (methods on the ratified iterator protocol, D-EXT1 Tier 1), and removes the
+manual-loop boilerplate that makes a stdlib feel small. Put the common set in Core
+on the iterator protocol; keep it lazy to honor streaming (E2-M7). Name conservative,
+familiar spellings (`enumerate`/`zip`/`chunks`/`windows`/`group_by`) so refugees
+from Rust/Python/Swift are immediately at home.
 
 ---
