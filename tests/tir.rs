@@ -492,3 +492,101 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "A\nC\nF\n?\n");
 }
+
+// c109 Phase 5: collections — list/map literals, indexing/slicing, index-assign,
+// and `loop x in coll` / `loop k, v in map` iteration. The `IndexKind` (List/Map)
+// is carried as a total fact from sema and dispatched at lowering (never
+// re-inferred). All asserts prove rustc accepts the output (I2) and runs correctly.
+
+/// A list literal, indexing, a slice, and single-binding iteration over a
+/// list-typed param — all in one covered function pair.
+#[test]
+fn list_literal_index_slice_and_iteration() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn total(xs: [Int]) -> Int {
+    sum := 0
+    loop x in xs {
+        sum = (sum + x)
+    }
+    return sum
+}
+fn main() {
+    nums := [10, 20, 30, 40]
+    print(nums[0])
+    print(nums[1..2])
+    print(total(nums))
+}
+";
+    let (code, stdout) = build_and_run("tir_list", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\n[20, 30]\n100\n");
+}
+
+/// Indexed assignment into a list (`xs[i] = v`) — the `LValue::Index` vec form.
+#[test]
+fn list_index_assignment() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    nums := [1, 2, 3]
+    nums[1] = 99
+    print(nums[0])
+    print(nums[1])
+    print(nums[2])
+}
+";
+    let (code, stdout) = build_and_run("tir_list_assign", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n99\n3\n");
+}
+
+/// A map literal (`[:]`), map indexing, map insert (`m[k] = v`), and two-binding
+/// `loop k, v in map` iteration — the map-specific helpers and the `.iter()` clone
+/// form. BTreeMap iterates in sorted key order, so output is deterministic.
+#[test]
+fn map_literal_index_insert_and_iteration() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    counts: [String, Int] := [:]
+    counts[\"banana\"] = 3
+    counts[\"apple\"] = 5
+    print(counts[\"apple\"])
+    loop k, v in counts {
+        print(\"{k}={v}\")
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_map", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "5\napple=5\nbanana=3\n");
+}
+
+/// A non-empty map literal `[k: v, …]` returned from a covered function, then
+/// indexed in `main` — the map-builder lowering plus map indexing.
+#[test]
+fn map_literal_with_entries() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn scores() -> [String, Int] {
+    return [\"a\": 1, \"b\": 2]
+}
+fn main() {
+    s := scores()
+    print(s[\"a\"])
+    print(s[\"b\"])
+}
+";
+    let (code, stdout) = build_and_run("tir_map_entries", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n2\n");
+}

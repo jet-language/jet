@@ -34,8 +34,8 @@
 
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, LValue, Param,
-    PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type, UnOp, VariantPayload,
+    AccessConvention, BinOp, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind,
+    LValue, Param, PatSlot, Pattern, Stmt, StrPart, SwitchArm, Type, UnOp, VariantPayload,
 };
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -154,6 +154,33 @@ pub(crate) enum TStmt {
         arms: Vec<(i64, i64, Vec<TStmt>)>,
         else_body: Vec<TStmt>,
     },
+    /// c109 Phase 5: indexed assignment `coll[i] = value` (`Stmt::Assign` with an
+    /// `LValue::Index`). `is_map` is the resolved `IndexKind` (TOTAL, from sema):
+    /// `true` → `jet_map_insert(&mut (base), (i).clone(), v)`; `false` →
+    /// `(base)[i as usize] = v`. Both wrap the value in a `{ let __jet_v = …; … }`
+    /// block, byte-for-byte the AST `LValue::Index` form. Compound ops (`+=`) on an
+    /// index are not a Jet construct here (the parser/sema only admit a plain `=` to
+    /// an index lvalue), so no `op` is carried.
+    IndexAssign {
+        base: TExpr,
+        index: TExpr,
+        is_map: bool,
+        value: TExpr,
+    },
+    /// c109 Phase 5: collection iteration `loop x in coll` / `loop k, v in map`
+    /// (`Stmt::For` with `ForKind::In`). The collection's emitted Rust string is
+    /// resolved at lowering. `var2` distinguishes the two-binding map form (which
+    /// iterates `(coll).iter()` and clones each key/value) from the single-binding
+    /// form (`(coll).iter().cloned()`), reproducing `emit_for_in` exactly. The
+    /// subset excludes method-call collections (`.chars()`/`.lines()` → Phase 7),
+    /// so only the two plain `.iter()` shapes arise.
+    ForIn {
+        label: Option<String>,
+        var: String,
+        var2: Option<String>,
+        collection_str: String,
+        body: Vec<TStmt>,
+    },
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -231,6 +258,35 @@ pub(crate) enum TExprKind {
     EnumLit {
         prefix: String,
         payload: TEnumPayload,
+    },
+    /// c109 Phase 5: a list literal `[a, b, c]`. Lowers to Rust `vec![…]`. Each
+    /// element is lowered as-is (the AST path applies no clone/coercion at the
+    /// literal site — `emit_expr` per element).
+    ListLit(Vec<TExpr>),
+    /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. The empty form
+    /// lowers to `std::collections::BTreeMap::new()` (Rust infers the element
+    /// types from the binding context); a non-empty form lowers to the
+    /// `{ let mut _m = …; _m.insert((k).clone(), v); … _m }` builder, byte-for-byte
+    /// the AST `Expr::MapLit` form.
+    MapLit(Vec<(TExpr, TExpr)>),
+    /// c109 Phase 5: indexing `coll[i]` (`Expr::Index`). `is_map` is the resolved
+    /// `IndexKind` carried TOTALLY from sema (never re-inferred): `true` → the
+    /// `jet_index_map` helper, `false` → `jet_index_vec`. `line` is the source line
+    /// for the bounds/missing-key panic message, resolved at lowering.
+    Index {
+        base: Box<TExpr>,
+        index: Box<TExpr>,
+        is_map: bool,
+        line: usize,
+    },
+    /// c109 Phase 5: an inclusive copy slice `coll[a..b]` (`Expr::Slice`). Lowers
+    /// to the `jet_slice_vec` helper. `line` is the source line for the bounds
+    /// panic, resolved at lowering.
+    Slice {
+        base: Box<TExpr>,
+        start: Box<TExpr>,
+        end: Box<TExpr>,
+        line: usize,
     },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
@@ -323,6 +379,36 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || matches!(ty, Type::Char | Type::String)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
+        || is_covered_collection_ty(ty, cx)
+}
+
+/// c109 Phase 5: `ty` is a list `[E]` or map `[K, V]` the subset can lower. The
+/// element/key/value types must themselves be covered *value* types — scalar,
+/// Char, String, a covered struct/enum, or a nested covered collection — so the
+/// literal/index/iteration lowerings reproduce the AST path without any clone/box
+/// decision the subset can't make from total facts. A `FixedList` (`[E#N]`) is
+/// excluded: its element-typed param/return uses `Vec<E>` like a list, but the
+/// fixed-size construction/indexing semantics differ enough to defer (Phase 7).
+fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
+    match ty {
+        Type::List(inner) => collection_elem_covered(inner, cx),
+        Type::Map { key, value } => {
+            collection_elem_covered(key, cx) && collection_elem_covered(value, cx)
+        }
+        _ => false,
+    }
+}
+
+/// A list/map element, key, or value type the subset can lower: a scalar, Char,
+/// String, a covered struct/enum, or a nested covered collection. Anything else
+/// (option, trait object, fn, tuple, generic var, foreign type) excludes the
+/// owning collection.
+fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
+    ty.is_scalar()
+        || matches!(ty, Type::Char | Type::String)
+        || is_covered_struct_ty(ty, cx)
+        || is_covered_enum_ty(ty, cx)
+        || is_covered_collection_ty(ty, cx)
 }
 
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
@@ -468,9 +554,20 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
             locals.insert(b.name.clone());
             ok
         }
-        Stmt::Assign { target, value, .. } => {
-            matches!(target, LValue::Local { .. }) && expr_in_subset(value, cx, locals)
-        }
+        Stmt::Assign { target, value, .. } => match target {
+            LValue::Local { .. } => expr_in_subset(value, cx, locals),
+            // c109 Phase 5: indexed assignment `coll[i] = v`. The base, index, and
+            // value must all be in-subset; the `IndexKind` (List/Map) is carried
+            // totally from sema and dispatched at lowering (never re-inferred). An
+            // `IndexKind::Unknown` means sema did not resolve it — exclude (the AST
+            // path falls back to an env type-inference the TIR must not reproduce).
+            LValue::Index { base, index, kind, .. } => {
+                !matches!(kind, IndexKind::Unknown)
+                    && expr_in_subset(base, cx, locals)
+                    && expr_in_subset(index, cx, locals)
+                    && expr_in_subset(value, cx, locals)
+            }
+        },
         Stmt::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         Stmt::Return(None, _) => true,
         Stmt::Expr(e) => expr_in_subset(e, cx, locals),
@@ -506,8 +603,29 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                 body_locals.insert(var.clone());
                 body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
             }
-            // `loop x in <collection>` (ForKind::In) and the `key, value` map form
-            // need collections — Phase 5. Stay on the AST path.
+            // c109 Phase 5: `loop x in coll` / `loop k, v in map` (ForKind::In). The
+            // collection must be in-subset AND NOT a method-call receiver — a
+            // `.chars()`/`.lines()` collection takes a different `emit_for_in`
+            // branch (char iteration, streaming line reads) the subset does not
+            // reproduce. The single-binding non-method form and the two-binding map
+            // form are the only two shapes covered. The loop var(s) bind in the body
+            // scope with an *unresolved* type (matching the AST slot's `jet_ty: None`).
+            ForKind::In { collection } => {
+                if matches!(collection, Expr::MethodCall { .. }) {
+                    return false;
+                }
+                if !expr_in_subset(collection, cx, locals) {
+                    return false;
+                }
+                let mut body_locals = locals.clone();
+                body_locals.insert(var.clone());
+                if let Some((v2, _)) = var2 {
+                    body_locals.insert(v2.clone());
+                }
+                body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
+            }
+            // The Range form with a second binding (`k, v in a..b`) is not a Jet
+            // construct; stay on the AST path defensively.
             _ => false,
         },
         // `break`/`continue`, labeled or not, carry no sub-expressions to check.
@@ -890,8 +1008,33 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
             })
         }
-        // Everything else (method calls, indexing, slices, collections, lambdas,
-        // ?/try, ??, fan-out, optionals, opt-fields, …) is out.
+        // c109 Phase 5: a list literal `[a, b, c]`. Covered when every element is
+        // itself in-subset. (An empty `[]` has no elements; sema requires a context
+        // type — E0501 — which a covered binding/param/return supplies, so the
+        // resulting `vec![]` is type-inferred by Rust from that context.)
+        Expr::ListLit(elems, _) => elems.iter().all(|e| expr_in_subset(e, cx, locals)),
+        // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Covered when every key
+        // and value is in-subset. The empty `[:]` (no entries) is always covered.
+        Expr::MapLit(entries, _) => entries
+            .iter()
+            .all(|(k, v)| expr_in_subset(k, cx, locals) && expr_in_subset(v, cx, locals)),
+        // c109 Phase 5: indexing `coll[i]`. The `IndexKind` must be sema-resolved
+        // (not `Unknown`) so the helper dispatch (`jet_index_map`/`jet_index_vec`)
+        // is a total fact carried onto the TIR. Base + index must be in-subset.
+        Expr::Index { base, index, kind, .. } => {
+            !matches!(kind, IndexKind::Unknown)
+                && expr_in_subset(base, cx, locals)
+                && expr_in_subset(index, cx, locals)
+        }
+        // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists only — the AST
+        // path's `jet_slice_vec` is list-specific). Base/start/end must be in-subset.
+        Expr::Slice { base, start, end, .. } => {
+            expr_in_subset(base, cx, locals)
+                && expr_in_subset(start, cx, locals)
+                && expr_in_subset(end, cx, locals)
+        }
+        // Everything else (method calls, lambdas, ?/try, ??, fan-out, optionals,
+        // opt-fields, tuples, …) is out.
         _ => false,
     }
 }
@@ -910,8 +1053,18 @@ fn arg_conv_in_subset(a: &crate::AST::CallArg) -> bool {
 /// Per-function lowering environment: a local name -> (Rust place string, type).
 /// Built from params, extended by `let` bindings. The "place" already accounts
 /// for parameter deref, so `Local` emission needs no further resolution.
+///
+/// The type is `Option<Type>`: a binding can carry a *resolved* type, or `None`
+/// when the AST path's slot had `jet_ty: None` and we must reproduce that
+/// partiality. The load-bearing case (c109 Phase 5) is a `loop x in coll`
+/// iteration variable: `emit_for_in` binds its slot with `jet_ty: None`, so
+/// `operand_is_integer`/`expr_jet_ty` resolve the var to `None` and it never
+/// enables the overflow trap. Carrying `Some(elem_ty)` here would diverge —
+/// `x + 1` would wrongly trap. So the iteration var is stored as `None`,
+/// matching the AST path bit-for-bit (the Phase-3 "reproduce the AST's
+/// partiality where it is load-bearing" lesson, again).
 struct LowerEnv {
-    locals: HashMap<String, (String, Type)>,
+    locals: HashMap<String, (String, Option<Type>)>,
 }
 
 impl LowerEnv {
@@ -922,7 +1075,7 @@ impl LowerEnv {
         }
     }
     fn ty_of(&self, name: &str) -> Option<Type> {
-        self.locals.get(name).map(|(_, t)| t.clone())
+        self.locals.get(name).and_then(|(_, t)| t.clone())
     }
     /// c109 Phase 4: a name reads as a borrow when its resolved place is a deref
     /// (`(*name)`) — a by-reference parameter slot. The match lowering clones such
@@ -955,7 +1108,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         let rust_name = cx.mangle_name(&p.name);
         let place = param_place(&rust_name, p);
         env.locals
-            .insert(p.name.clone(), (place, p.ty.clone()));
+            .insert(p.name.clone(), (place, Some(p.ty.clone())));
         params.push((rust_name, p.ty.clone(), p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
@@ -998,7 +1151,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let annotated = b.ty.is_some();
             let ty = b.ty.clone().unwrap_or_else(|| init.ty.clone());
             env.locals
-                .insert(b.name.clone(), (mangle(&b.name), ty.clone()));
+                .insert(b.name.clone(), (mangle(&b.name), Some(ty.clone())));
             TStmt::Let {
                 name: b.name.clone(),
                 ty,
@@ -1009,18 +1162,27 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         }
         Stmt::Assign {
             target, op, value, ..
-        } => {
-            let place = match target {
-                LValue::Local { name, .. } => env.place_of(name),
-                // Excluded by the gate; defensive.
-                LValue::Index { .. } => unreachable!("indexed assign not in subset"),
-            };
-            TStmt::Assign {
-                place,
+        } => match target {
+            LValue::Local { name, .. } => TStmt::Assign {
+                place: env.place_of(name),
                 op: *op,
                 value: lower_expr(value, cx, env),
+            },
+            // c109 Phase 5: `coll[i] = v`. The `IndexKind` is resolved by sema; carry
+            // it as the total `is_map` fact (the gate excluded `Unknown`). No compound
+            // op on an index lvalue (parser admits only `=`).
+            LValue::Index { base, index, kind, .. } => {
+                let base_t = lower_expr(base, cx, env);
+                let index_t = lower_expr(index, cx, env);
+                let value_t = lower_expr(value, cx, env);
+                TStmt::IndexAssign {
+                    base: base_t,
+                    index: index_t,
+                    is_map: matches!(kind, IndexKind::Map),
+                    value: value_t,
+                }
             }
-        }
+        },
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
@@ -1043,7 +1205,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lower_stmts(body, cx, &mut branch),
             }
         }
-        Stmt::For { var, kind, body, label, .. } => match kind {
+        Stmt::For { var, var2, kind, body, label, .. } => match kind {
             ForKind::Range { start, end, step } => {
                 let start = lower_expr(start, cx, env);
                 let end = lower_expr(end, cx, env);
@@ -1052,7 +1214,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let mut branch = clone_env(env);
                 branch
                     .locals
-                    .insert(var.clone(), (mangle(var), Type::Int));
+                    .insert(var.clone(), (mangle(var), Some(Type::Int)));
                 TStmt::Range {
                     label: label_name(label),
                     var: var.clone(),
@@ -1062,8 +1224,29 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     body: lower_stmts(body, cx, &mut branch),
                 }
             }
-            // ForKind::In is excluded by the gate; defensive.
-            ForKind::In { .. } => unreachable!("collection loop not in TIR subset"),
+            // c109 Phase 5: collection iteration `loop x in coll` / `loop k, v in map`.
+            // The collection string is resolved once. The loop var(s) bind in the body
+            // scope with an *unresolved* type (`None`) — matching the AST slot's
+            // `jet_ty: None`, so they never enable the overflow trap (parity).
+            ForKind::In { collection } => {
+                let collection_str = emit_tir_expr(&lower_expr(collection, cx, env), cx);
+                let mut branch = clone_env(env);
+                branch
+                    .locals
+                    .insert(var.clone(), (mangle(var), None));
+                if let Some((v2, _)) = var2 {
+                    branch
+                        .locals
+                        .insert(v2.clone(), (mangle(v2), None));
+                }
+                TStmt::ForIn {
+                    label: label_name(label),
+                    var: var.clone(),
+                    var2: var2.as_ref().map(|(n, _)| n.clone()),
+                    collection_str,
+                    body: lower_stmts(body, cx, &mut branch),
+                }
+            }
         },
         Stmt::Break(_) => TStmt::Break(None),
         Stmt::Continue(_) => TStmt::Continue(None),
@@ -1313,7 +1496,7 @@ fn tir_add_pattern_bindings(
                         .as_ref()
                         .and_then(|ts| ts.get(i).cloned())
                         .unwrap_or(Type::Int);
-                    env.locals.insert(b.clone(), (mangle(b), ty));
+                    env.locals.insert(b.clone(), (mangle(b), Some(ty)));
                 }
             }
         }
@@ -1601,6 +1784,81 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty: Type::Named(type_name.clone()),
                 kind: TExprKind::EnumLit { prefix, payload },
+            }
+        }
+        // c109 Phase 5: a list literal. Lowers each element as-is (mirrors the AST
+        // `vec![…]` form — no clone/coercion at the literal site). The result type
+        // is `[E]` with `E` taken from the first element; an empty `[]` has no
+        // element to read, so its element type is unresolved (`Int` placeholder),
+        // but the emitted `vec![]` is type-inferred by Rust from the binding context.
+        Expr::ListLit(elems, _) => {
+            let telems: Vec<TExpr> = elems.iter().map(|e| lower_expr(e, cx, env)).collect();
+            let elem_ty = telems.first().map(|e| e.ty.clone()).unwrap_or(Type::Int);
+            TExpr {
+                ty: Type::List(Box::new(elem_ty)),
+                kind: TExprKind::ListLit(telems),
+            }
+        }
+        // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Keys/values lower as-is;
+        // the result type is `[K, V]` from the first entry (empty `[:]` → unresolved
+        // placeholder, type-inferred by Rust from context like `vec![]`).
+        Expr::MapLit(entries, _) => {
+            let tentries: Vec<(TExpr, TExpr)> = entries
+                .iter()
+                .map(|(k, v)| (lower_expr(k, cx, env), lower_expr(v, cx, env)))
+                .collect();
+            let (kt, vt) = tentries
+                .first()
+                .map(|(k, v)| (k.ty.clone(), v.ty.clone()))
+                .unwrap_or((Type::String, Type::Int));
+            TExpr {
+                ty: Type::Map {
+                    key: Box::new(kt),
+                    value: Box::new(vt),
+                },
+                kind: TExprKind::MapLit(tentries),
+            }
+        }
+        // c109 Phase 5: indexing `coll[i]`. The `IndexKind` (List/Map) is the total
+        // sema fact (`is_map`); the helper line is resolved at lowering. The result
+        // type is the list element / map value type, read from the base's resolved
+        // type (totality) — never re-inferred in emit.
+        Expr::Index { base, index, span, kind } => {
+            let base_t = lower_expr(base, cx, env);
+            let index_t = lower_expr(index, cx, env);
+            let result_ty = match &base_t.ty {
+                Type::List(elem) => (**elem).clone(),
+                Type::Map { value, .. } => (**value).clone(),
+                Type::FixedList { elem, .. } => (**elem).clone(),
+                _ => Type::Int,
+            };
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty: result_ty,
+                kind: TExprKind::Index {
+                    base: Box::new(base_t),
+                    index: Box::new(index_t),
+                    is_map: matches!(kind, IndexKind::Map),
+                    line,
+                },
+            }
+        }
+        // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists). Lowers to the
+        // `jet_slice_vec` helper; the result is a list of the same element type.
+        Expr::Slice { base, start, end, span } => {
+            let base_t = lower_expr(base, cx, env);
+            let start_t = lower_expr(start, cx, env);
+            let end_t = lower_expr(end, cx, env);
+            let result_ty = base_t.ty.clone();
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty: result_ty,
+                kind: TExprKind::Slice {
+                    base: Box::new(base_t),
+                    start: Box::new(start_t),
+                    end: Box::new(end_t),
+                    line,
+                },
             }
         }
         _ => unreachable!("expression not in TIR subset"),
@@ -1904,6 +2162,72 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
         }
+        // c109 Phase 5: indexed assignment `coll[i] = v`. Mirrors the AST
+        // `LValue::Index` form byte-for-byte: a map insert clones the key; a vec
+        // assign casts the index to `usize`. Both wrap the value in a block.
+        TStmt::IndexAssign {
+            base,
+            index,
+            is_map,
+            value,
+        } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            let v = emit_tir_expr(value, cx);
+            if *is_map {
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), __jet_v); }}\n",
+                ));
+            } else {
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; ({b})[{i} as usize] = __jet_v; }}\n",
+                ));
+            }
+        }
+        // c109 Phase 5: collection iteration. Mirrors `emit_for_in` for the two
+        // plain `.iter()` shapes (method-call collections are excluded by the gate):
+        //   single: `for _jet_item in (coll).iter().cloned() { let var = _jet_item; … }`
+        //   map k,v: `for (_jet_k, _jet_v) in (coll).iter() { let k = _jet_k.clone();
+        //             let v = _jet_v.clone(); … }`
+        TStmt::ForIn {
+            label,
+            var,
+            var2,
+            collection_str,
+            body,
+        } => {
+            let lbl = tir_label_prefix(label);
+            match var2 {
+                Some(v2) => {
+                    out.push_str(&format!(
+                        "{}{}for (_jet_k, _jet_v) in ({}).iter() {{\n",
+                        pad, lbl, collection_str
+                    ));
+                    out.push_str(&format!(
+                        "{}    let {} = _jet_k.clone();\n",
+                        pad,
+                        mangle(var)
+                    ));
+                    out.push_str(&format!(
+                        "{}    let {} = _jet_v.clone();\n",
+                        pad,
+                        mangle(v2)
+                    ));
+                }
+                None => {
+                    out.push_str(&format!(
+                        "{}{}for _jet_item in ({}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+                        pad,
+                        lbl,
+                        collection_str,
+                        pad,
+                        mangle(var)
+                    ));
+                }
+            }
+            emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
     }
 }
 
@@ -2030,6 +2354,53 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let else_block = emit_tir_value_block(else_body, else_value, cx);
             format!("if {} {} else {}", c, then_block, else_block)
         }
+        // c109 Phase 5: `[a, b, c]` → `vec![a, b, c]`. Mirrors the AST `Expr::ListLit`.
+        TExprKind::ListLit(elems) => {
+            let parts = elems
+                .iter()
+                .map(|e| emit_tir_expr(e, cx))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("vec![{}]", parts)
+        }
+        // c109 Phase 5: `[k: v, …]` / `[:]`. Mirrors the AST `Expr::MapLit` exactly:
+        // empty → `BTreeMap::new()`; non-empty → the `_m.insert((k).clone(), v)` builder.
+        TExprKind::MapLit(entries) => {
+            if entries.is_empty() {
+                "std::collections::BTreeMap::new()".to_string()
+            } else {
+                let mut s =
+                    String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                for (k, v) in entries {
+                    s.push_str(&format!(
+                        "_m.insert(({}).clone(), {}); ",
+                        emit_tir_expr(k, cx),
+                        emit_tir_expr(v, cx)
+                    ));
+                }
+                s.push_str("_m }");
+                s
+            }
+        }
+        // c109 Phase 5: `coll[i]`. Dispatch on the total `is_map` fact (never
+        // re-inferred). Mirrors the AST `Expr::Index` form: a map index borrows the
+        // key (`&(i)`), a vec index does not.
+        TExprKind::Index { base, index, is_map, line } => {
+            let b = emit_tir_expr(base, cx);
+            let i = emit_tir_expr(index, cx);
+            if *is_map {
+                format!("jet_index_map(&({}), &({}), {:?}, {})", b, i, cx.file, line)
+            } else {
+                format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
+            }
+        }
+        // c109 Phase 5: `coll[a..b]` → `jet_slice_vec`. Mirrors the AST `Expr::Slice`.
+        TExprKind::Slice { base, start, end, line } => {
+            let b = emit_tir_expr(base, cx);
+            let a = emit_tir_expr(start, cx);
+            let e = emit_tir_expr(end, cx);
+            format!("jet_slice_vec(&({}), {}, {}, {:?}, {})", b, a, e, cx.file, line)
+        }
     }
 }
 
@@ -2108,9 +2479,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_list_param() {
-        // A list parameter is outside the scalar/String subset.
-        assert!(!covers("fn sum(xs: [Int]) -> Int {\n return 0\n}\n", "sum"));
+    fn covers_list_param() {
+        // c109 Phase 5: a list parameter is now inside the subset (was excluded
+        // through Phase 4).
+        assert!(covers("fn sum(xs: [Int]) -> Int {\n return 0\n}\n", "sum"));
+    }
+
+    #[test]
+    fn rejects_option_param() {
+        // An optional-typed param is still outside the subset (optionals → Phase 8).
+        assert!(!covers("fn f(p: Int?) -> Int {\n return 0\n}\n", "f"));
     }
 
     #[test]
@@ -2197,10 +2575,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_collection_loop() {
-        // `loop x in <list>` (ForKind::In) needs collections — Phase 5, not covered.
-        let src = "fn f(xs: [Int]) {\n loop x in xs {\n print(x)\n }\n}\n";
-        assert!(!covers(src, "f"));
+    fn covers_collection_loop_over_literal() {
+        // c109 Phase 5: `loop x in [list literal]` (ForKind::In) is now covered
+        // (was deferred to this phase through Phase 4).
+        let src = "fn f() {\n loop x in [1, 2, 3] {\n print(x)\n }\n}\n";
+        assert!(covers(src, "f"));
     }
 
     // c109 Phase 4: enums + when/match + patterns.
@@ -2261,6 +2640,59 @@ mod tests {
         // A switch mixing a comparison/Bool arm with a range arm is the general
         // mixed-switch the subset does not cover (only all-range + else).
         let src = "fn f(n: Int) -> String {\n if n {\n 0..10 -> { return \"low\" }\n n > 100 -> { return \"high\" }\n else -> { return \"mid\" }\n }\n}\n";
+        assert!(!covers(src, "f"));
+    }
+
+    // c109 Phase 5: collections. (Index/slice/index-assign coverage needs the
+    // sema-resolved `IndexKind`, which `build_cx` alone does not fill, so those are
+    // proven by the byte-parity check + `tests/tir.rs`; here we gate the
+    // sema-independent constructs: list/map literals, list/map-typed params, and
+    // collection iteration.)
+
+    #[test]
+    fn covers_list_literal_and_param() {
+        // A list literal returned from a covered fn, and a list-typed param.
+        let src = "fn build() -> [Int] {\n return [1, 2, 3]\n}\nfn accept(xs: [Int]) -> Int {\n return 0\n}\n";
+        assert!(covers(src, "build"));
+        assert!(covers(src, "accept"));
+    }
+
+    #[test]
+    fn covers_map_literal_and_param() {
+        // An empty and a non-empty map literal, plus a map-typed param.
+        let src = "fn empty() -> [String, Int] {\n return [:]\n}\nfn one() -> [String, Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String, Int]) -> Int {\n return 0\n}\n";
+        assert!(covers(src, "empty"));
+        assert!(covers(src, "one"));
+        assert!(covers(src, "accept"));
+    }
+
+    #[test]
+    fn covers_single_binding_iteration() {
+        // `loop x in <list>` over a list-typed param is now covered (Phase 5).
+        let src = "fn f(xs: [Int]) {\n loop x in xs {\n print(x)\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_two_binding_map_iteration() {
+        // `loop k, v in <map>` (the two-binding map form) is covered.
+        let src = "fn f(m: [String, Int]) {\n loop k, v in m {\n print(\"{k}={v}\")\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn rejects_method_call_collection_iteration() {
+        // `loop c in s.chars()` iterates a method-call collection — a different
+        // `emit_for_in` branch (char iteration) the subset does not reproduce.
+        let src = "fn f(s: String) {\n loop c in s.chars() {\n print(c)\n }\n}\n";
+        assert!(!covers(src, "f"));
+    }
+
+    #[test]
+    fn rejects_list_of_option_param() {
+        // A list whose element is an option (`[Int?]`) is not a covered value type
+        // (optionals are Phase 8); the owning collection is excluded.
+        let src = "fn f(xs: [Int?]) -> Int {\n return 0\n}\n";
         assert!(!covers(src, "f"));
     }
 }

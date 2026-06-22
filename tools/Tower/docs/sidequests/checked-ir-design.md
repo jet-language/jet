@@ -226,6 +226,52 @@ everything, the AST codegen path is deleted (final phase).
   byte-identical to the forced-AST path for `11_enums` + `71_pattern_matching` (incl. both
   `main`s).
 
+## Refinements learned in Phase 5 (collections)
+
+- **`IndexKind` is the total fact; never re-derive Map-vs-List in emit.** Sema
+  (`CheckerCore`/`CheckerInfer`) resolves each `Expr::Index`/`LValue::Index` `kind`
+  to `List` or `Map`. The TIR carries it as a plain `is_map: bool` and the emitter
+  dispatches `jet_index_map`/`jet_map_insert` vs `jet_index_vec`/`[i as usize] = v`
+  off that bool alone. The gate **excludes any `IndexKind::Unknown`** — the AST path
+  falls back to an env type-inference (`expr_jet_ty(base)`) for the unresolved case
+  that the TIR must not reproduce; an unresolved kind means sema didn't run/resolve,
+  so staying on the AST path is the safe choice.
+- **The iteration loop var has an *unresolved* type — reproduce that partiality.**
+  `emit_for_in` binds the loop var's slot with `jet_ty: None`, so a body `x + 1`
+  resolves the var to `None` in `operand_is_integer` and does **not** trap. Carrying
+  the resolved element type (`Some(Int)`) onto the TIR var would diverge — `x + 1`
+  would wrongly emit `jet_add`. So `LowerEnv.locals` became `(place, Option<Type>)`
+  and iteration vars (both single and the two-binding map `k`/`v`) bind as `None`.
+  This is the recurring Phase-3 lesson: when a TIR fact is *more* total than the AST's
+  re-derivation, parity demands reproducing the AST's partiality where it's
+  load-bearing (here, the overflow-trap decision). Range-loop vars keep `Some(Int)`
+  (the AST slot is `jet_ty: Some(Int)`), so they still trap — matching the AST path.
+- **Method-call collections take a different `emit_for_in` branch — exclude them.**
+  `loop c in s.chars()` / `loop line in h.lines()` lower to char iteration / streaming
+  `BufRead::lines` reads, not `.iter().cloned()`. The gate excludes any iteration whose
+  collection is an `Expr::MethodCall` (and methods are out of subset anyway → Phase 7),
+  so only the two plain `.iter()` shapes (`.iter().cloned()` single; `.iter()` + per
+  key/value `.clone()` two-binding) ever arise — both reproduced byte-for-byte.
+- **Element clones live in the iteration form, not a TIR decision.** The single-binding
+  form clones each element (`.iter().cloned()`); the two-binding map form clones key and
+  value (`_jet_k.clone()`/`_jet_v.clone()`). These are fixed properties of the loop
+  shape (the var owns its value), reproduced verbatim — no per-element clone fact the
+  subset has to derive. Literal sites and field/index values are emitted as-is (mirroring
+  `Expr::ListLit`/`MapLit`/`Index`): a value's own move/clone facts live in its
+  sub-expression, exactly as Phases 3–4 established.
+- **Empty `[]`/`[:]` need no special handling.** Sema's E0501 already requires a context
+  type for an empty literal, and a covered binding/param/return supplies it; the emitted
+  `vec![]` / `BTreeMap::new()` is type-inferred by Rust from that context — byte-identical
+  to the AST path. The TIR's placeholder result-type for an empty literal is never read in
+  emit (it only feeds totality/overflow facts that an empty collection can't reach).
+- **`FixedList` (`[E#N]`) deferred.** A fixed-size list param/return uses `Vec<E>` like a
+  list, but its construction/indexing semantics differ enough that it stays on the AST path
+  (Phase 7) rather than risk a mis-lowering.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass) on a program exercising list literal + index + slice + index-assign +
+  single-binding iteration + map literal `[:]` + map index + map insert + two-binding
+  map iteration — 248 lines, byte-for-byte identical, then the instrumentation removed.
+
 ## Phases
 
 | # | Scope | Status |
@@ -235,7 +281,7 @@ everything, the AST codegen path is deleted (final phase).
 | 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels) | ✅ done (c109 Phase 2) — +3 example fns routed (e.g. fizzbuzz `main`). Excludes `loop x in <collection>` (ForKind::In, key/value map form) → Phase 5. |
 | 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → Phase 7), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only → Phase 7). |
 | 4 | Enums + `when`/match + patterns (incl. range/or patterns) | ✅ done (c109 Phase 4) — ~7 more example fns routed (`11_enums` `next`/`label`/`main`, `71_pattern_matching` `describe_conn`/`classify`/`score_grade`/`main`). Covers plain (non-generic, non-recursive, Clone-derivable) scalar/Char-payload user enums: unit/positional/named enum literals; exhaustive variant `match` (variant patterns, positional/named/wildcard/range payload slots, or-patterns, payload bindings); arm-head range switches (`lo..hi -> …` + `else`); enum params/locals/returns. Excludes: String/struct/collection-payload enums (clone/borrow at literal & binding site → Phase 7), recursive (`Box<…>`) enums, generic enums, JSON/foreign/prelude enums, fallible/optional patterns (`value`/`null`/`ok`/`err` → Phase 8), and mixed comparison/Bool switches (general `emit_mixed_switch`). |
-| 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | pending |
+| 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | ✅ done (c109 Phase 5) — list/map literals (incl. empty `[]`/`[:]`), `coll[i]` indexing (List/Map via the total sema `IndexKind`), `coll[a..b]` slicing, `coll[i] = v` index-assignment, and collection iteration (`loop x in coll` single-binding + `loop k, v in map` two-binding). List/map-typed params/locals/returns now allowed; element/key/value types may be scalar/Char/String/covered-struct/covered-enum/nested-collection. Excludes: collection *methods* (`.push`/`.len`/`.map`/etc. → Phase 7), method-call collections in iteration (`.chars()`/`.lines()` → Phase 7), `[E#N]` fixed-size lists, list-of-option/trait/fn/tuple element types, and any `Index`/index-assign whose `IndexKind` sema left `Unknown`. |
 | 6 | Ownership facts: clone insertion, `take`/`mut`/`view`, Shared/Arc auto-clone | pending |
 | 7 | Methods + method calls (recv_type → resolved target), trait-impl methods | pending |
 | 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | pending |
