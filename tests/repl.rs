@@ -67,7 +67,7 @@ fn repl_arithmetic_echo() {
 
 #[test]
 fn repl_val_binding_then_expr() {
-    let inputs = &["x :: 10", "x * 2"];
+    let inputs = &["x @= 10", "x * 2"];
     let out = run_transcript(inputs, None);
     // First input produces no output (val declaration).
     // Second produces the echo.
@@ -95,13 +95,13 @@ fn repl_bool_echo() {
 #[test]
 fn repl_suppress_semicolon() {
     // A binding declaration produces no echo.
-    let out = run_transcript(&["_ignored :: 42"], None);
+    let out = run_transcript(&["_ignored @= 42"], None);
     assert!(out.trim().is_empty(), "expected no output, got: {:?}", out);
 }
 
 #[test]
 fn repl_reset_clears_bindings() {
-    let inputs = &["x :: 10", ":reset", ":type x"];
+    let inputs = &["x @= 10", ":reset", ":type x"];
     let out = run_transcript(inputs, None);
     assert!(out.contains("session reset"), "got: {:?}", out);
     assert!(out.contains("isn't defined"), "got: {:?}", out);
@@ -129,7 +129,7 @@ fn repl_hard_reject_extern_rust() {
 
 #[test]
 fn repl_type_meta_command() {
-    let inputs = &["y :: 42", ":type y"];
+    let inputs = &["y @= 42", ":type y"];
     let out = run_transcript(inputs, None);
     assert!(out.contains("y : Int"), "got: {:?}", out);
 }
@@ -169,8 +169,8 @@ fn repl_basics_transcript() {
 
 #[test]
 fn repl_move_across_inputs_string() {
-    // `t :: s` moves s (String is non-scalar). A later reference to s must error.
-    let inputs = &["s :: \"hello\"", "t :: s", "s"];
+    // `t @= s` moves s (String is non-scalar). A later reference to s must error.
+    let inputs = &["s @= \"hello\"", "t @= s", "s"];
     let out = run_transcript(inputs, None);
     // After s is moved into t, using s in input 3 must produce an error.
     // The error will be E0121 ("was given away") because the binding_stubs_src
@@ -187,7 +187,7 @@ fn repl_move_across_inputs_string() {
 #[test]
 fn repl_move_within_single_input_still_errors() {
     // Move within a single input: x is moved in the same step it's used again.
-    let inputs = &["x :: \"hi\"", "y :: x; x"];
+    let inputs = &["x @= \"hi\"", "y @= x; x"];
     let out = run_transcript(inputs, None);
     // Within the same input, sema catches the use after move.
     assert!(out.contains("error"), "expected within-input move error, got: {:?}", out);
@@ -195,8 +195,8 @@ fn repl_move_within_single_input_still_errors() {
 
 #[test]
 fn repl_move_int_not_moved() {
-    // Int is a scalar — `t :: s` where s is an Int does NOT move s.
-    let inputs = &["s :: 42", "t :: s", "s"];
+    // Int is a scalar — `t @= s` where s is an Int does NOT move s.
+    let inputs = &["s @= 42", "t @= s", "s"];
     let out = run_transcript(inputs, None);
     // s should still be accessible since Int is copy.
     assert!(out.contains("42 : Int"), "Int should be accessible after copy, got: {:?}", out);
@@ -254,11 +254,11 @@ fn repl_probe_exact_outputs() {
     use jet::REPL::run_transcript;
 
     // Move: String binding s moved into t, then use of s
-    let out = run_transcript(&["s :: \"hello\"", "t :: s", "s"], None);
+    let out = run_transcript(&["s @= \"hello\"", "t @= s", "s"], None);
     eprintln!("MOVE_STRING: {:?}", out);
 
     // Move: Int binding s copied into t, then use of s
-    let out = run_transcript(&["s :: 42", "t :: s", "s"], None);
+    let out = run_transcript(&["s @= 42", "t @= s", "s"], None);
     eprintln!("COPY_INT: {:?}", out);
 
     // :run empty
@@ -337,7 +337,7 @@ fn repl_use_import_resolves_alias_in_later_input() {
     // The import typed in input 1 must make `math` resolve in input 2 — the
     // alias is carried across inputs (this is the c55 cross-input delta). Before
     // the fix this produced E0107 ("nothing named `math`").
-    let out = run_transcript(&["use core.math as math", "r :: math.sqrt(16.0)"], None);
+    let out = run_transcript(&["use core.math as math", "r @= math.sqrt(16.0)"], None);
     assert!(
         !out.contains("E0107") && !out.contains("nothing named `math`"),
         "carried import should resolve the alias, got: {:?}",
@@ -350,7 +350,7 @@ fn repl_use_import_persists_across_unrelated_input() {
     // An intervening unrelated input must not drop the import: the alias still
     // resolves two inputs later.
     let out = run_transcript(
-        &["use core.math as math", "x :: 1", "r :: math.sqrt(9.0)"],
+        &["use core.math as math", "x @= 1", "r @= math.sqrt(9.0)"],
         None,
     );
     assert!(
@@ -380,7 +380,7 @@ fn repl_use_repl_incompatible_module_hard_rejected() {
 fn repl_reset_clears_imports() {
     // After :reset, a carried import is gone — the alias no longer resolves.
     let out = run_transcript(
-        &["use core.math as math", ":reset", "r :: math.sqrt(4.0)"],
+        &["use core.math as math", ":reset", "r @= math.sqrt(4.0)"],
         None,
     );
     assert!(out.contains("session reset"), "got: {:?}", out);

@@ -460,7 +460,7 @@ mod s61_tests {
     fn spaced_minus_is_subtraction() {
         // Also a single-line-block regression guard (S6-R Go-rule part 2: a
         // terminator may be omitted before the closing `}`).
-        let p = program("fn main() { d :: 5 - 3 }");
+        let p = program("fn main() { d @= 5 - 3 }");
         let func = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) => Some(f),
             _ => None,

@@ -1,6 +1,6 @@
 //! M9.5 differential battery (permanent CI). For each expression, the same
 //! code is evaluated twice — once as `comptime C = e;` (the sema
-//! tree-walking interpreter) and once as a runtime `r :: e` (generated
+//! tree-walking interpreter) and once as a runtime `r @= e` (generated
 //! Rust). The program prints both; the two lines MUST be byte-identical.
 //!
 //! Divergence is a P0 miscompile-class bug (S26 rule 6: comptime implements
@@ -67,7 +67,7 @@ fn comptime_matches_runtime() {
     let dir = std::env::temp_dir();
     for (i, expr) in CASES.iter().enumerate() {
         let src = format!(
-            "comptime C = {e}\n\nfn main() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
+            "comptime C = {e}\n\nfn main() {{\n    r @= {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
             e = expr
         );
         let compiled = match jet::compile(&src) {
@@ -164,8 +164,8 @@ comptime P = Pair {left: 7, right: "seven"}
 comptime L = Light.Green
 
 fn main() {
-    p :: Pair {left: 7, right: "seven"}
-    l :: Light.Green
+    p @= Pair {left: 7, right: "seven"}
+    l @= Light.Green
     print("{P.left}")
     print("{p.left}")
     print("{P.right}")
@@ -189,8 +189,8 @@ comptime C = if 3 > 2 { 10 } else { 20 }
 comptime D = if 1 > 2 { 10 } else { 20 }
 
 fn main() {
-    c :: if 3 > 2 { 10 } else { 20 }
-    d :: if 1 > 2 { 10 } else { 20 }
+    c @= if 3 > 2 { 10 } else { 20 }
+    d @= if 1 > 2 { 10 } else { 20 }
     print("{C}")
     print("{c}")
     print("{D}")
@@ -212,7 +212,7 @@ fn double(x: Int) -> Int {
 comptime C = double.[1, 2, 3]
 
 fn main() {
-    c :: double.[1, 2, 3]
+    c @= double.[1, 2, 3]
     print("{C}")
     print("{c}")
 }

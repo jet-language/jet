@@ -6,15 +6,15 @@
 use core.mem
 #Unsafe
 fn read_int(addr: Int) -> Int {
-    p :: mem.Ptr<Int>.from_addr(addr)
+    p @= mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
 fn main() {
-    cell: Int :: 42
-    addr :: mem.address_of(cell)
+    cell: Int @= 42
+    addr @= mem.address_of(cell)
     #Audit("addr is the address of `cell`, a live stack Int")
     #Unsafe {
-        seen :: read_int(addr)
+        seen @= read_int(addr)
         print("low-level read: {seen}")
     }
 }

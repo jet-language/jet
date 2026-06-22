@@ -1,7 +1,7 @@
 Error [E1102]: `h` can't cross into a task because `Holder` isn't sendable
   --> tests/ui/ref_struct_crosses_task.jet:8:22
     |
-  8 |     t :: tasks.spawn(() => inspect(h))
+  8 |     t @= tasks.spawn(() => inspect(h))
     |                      ^^^^^^^^^^^^^
  Why: `Holder` contains `name`, which is a `ref` field; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the borrowed field before spawning

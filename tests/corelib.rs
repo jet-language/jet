@@ -141,7 +141,7 @@ fn io_input_reads_a_line_from_stdin() {
 use core.io as io
 
 fn main() {
-    name :: io.input("name? ") ?? panic("read failed")
+    name @= io.input("name? ") ?? panic("read failed")
     print("hello, {name}")
 }
 "#,
@@ -273,7 +273,7 @@ fn json_decode_lenient_surfaces_coercions() {
         r#"
 use jet.json as json
 fn main() {
-    data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
+    data @= json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Number(n) {
             print(n + 1.0)
@@ -298,7 +298,7 @@ fn main() {
         r#"
 use jet.json as json
 fn main() {
-    data :: json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
+    data @= json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Number(n) {
             print(n)
@@ -323,7 +323,7 @@ fn main() {
         r#"
 use jet.json as json
 fn main() {
-    data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
+    data @= json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == Object(m) {
         if m["port"] == Number(n) {
             print(n)
@@ -376,9 +376,9 @@ fn channel_stress_1000_messages() {
 use core.tasks as tasks
 
 fn main() {
-    ch: Channel<Int> :: tasks.channel()
-    sender :: ch.sender()
-    producer :: tasks.spawn(take(sender) () => {
+    ch: Channel<Int> @= tasks.channel()
+    sender @= ch.sender()
+    producer @= tasks.spawn(take(sender) () => {
         loop i in 1..1000 {
             sender.send(i)
         }

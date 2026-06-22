@@ -62,7 +62,7 @@ fn b1_json_text_clones_borrowed_view_param() {
         r#"
 use core.json as json
 fn wrap(x: String) -> String {
-    j :: JSON.Text(x)
+    j @= JSON.Text(x)
     return json.render(j)
 }
 fn main() {
@@ -79,7 +79,7 @@ fn b2_std_struct_field_uses_plain_name() {
         r#"
 use core.process as process
 fn main() {
-    result :: process.run(["echo", "hi"]) ?? panic("run failed")
+    result @= process.run(["echo", "hi"]) ?? panic("run failed")
     print(result.code)
     print(result.output)
     print(result.errors)
@@ -95,9 +95,9 @@ fn b3_map_get_through_object_pattern() {
         r#"
 use core.json as json
 fn main() {
-    data :: json.parse("{{\"a\":1}}") ?? panic("bad")
+    data @= json.parse("{{\"a\":1}}") ?? panic("bad")
     if data == Object(root) {
-        v :: root.get("a") ?? JSON.Null
+        v @= root.get("a") ?? JSON.Null
         print(json.render(v))
     }
 }

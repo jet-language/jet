@@ -1974,7 +1974,7 @@ impl<'a> Checker<'a> {
                 "E0311",
                 format!("`.{}()` is only valid on a distinct type value", crate::Syntax::METHOD_DISTINCT_RAW),
                 "`.raw()` unwraps a distinct type to its base representation".to_string(),
-                "only call `.raw()` on a value whose type was declared with `:: distinct`".to_string(),
+                format!("only call `.raw()` on a value whose type was declared with `{} distinct`", crate::Syntax::SIGIL_BIND_IMMUT),
                 Some(span),
             ));
             return None;

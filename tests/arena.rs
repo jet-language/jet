@@ -76,13 +76,13 @@ fn alloc_and_use_compiles_and_runs() {
 use core.mem
 
 fn main() {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
-    y :: arena.alloc(100)
+    arena @= mem.Arena.new()
+    x @= arena.alloc(42)
+    y @= arena.alloc(100)
     print(x)
     print(y)
     arena.reset()
-    z :: arena.alloc(7)
+    z @= arena.alloc(7)
     print(z)
 }
 "#;
@@ -98,8 +98,8 @@ fn view_escape_is_e0631() {
 use core.mem
 
 fn leak() -> Int {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
+    arena @= mem.Arena.new()
+    x @= arena.alloc(42)
     return x
 }
 
@@ -120,9 +120,9 @@ fn view_stored_in_binding_is_e0631() {
 use core.mem
 
 fn main() {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
-    stash :: x
+    arena @= mem.Arena.new()
+    x @= arena.alloc(42)
+    stash @= x
     print(stash)
 }
 "#;
@@ -139,8 +139,8 @@ fn use_after_reset_is_e0632() {
 use core.mem
 
 fn main() {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
+    arena @= mem.Arena.new()
+    x @= arena.alloc(42)
     arena.reset()
     print(x)
 }
@@ -158,8 +158,8 @@ fn use_after_free_is_e0632() {
 use core.mem
 
 fn main() {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
+    arena @= mem.Arena.new()
+    x @= arena.alloc(42)
     arena.free()
     print(x)
 }
@@ -178,10 +178,10 @@ use core.mem
 
 fn main() {
     region work {
-        a :: mem.Arena.new()
-        b :: mem.Bump.new()
-        first :: a.alloc(1)
-        second :: b.alloc(2)
+        a @= mem.Arena.new()
+        b @= mem.Bump.new()
+        first @= a.alloc(1)
+        second @= b.alloc(2)
         print(first)
         print(second)
     }
@@ -207,9 +207,9 @@ use core.mem
 
 fn main() {
     region r {
-        a :: mem.Arena.new()
-        v :: a.alloc(5)
-        leak :: v
+        a @= mem.Arena.new()
+        v @= a.alloc(5)
+        leak @= v
         print(leak)
     }
 }

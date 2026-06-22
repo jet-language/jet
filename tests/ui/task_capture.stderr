@@ -1,7 +1,7 @@
 Error [E1101]: `count` is a mutable value — the new task might outlive this scope
   --> tests/ui/task_capture.jet:4:22
     |
-  4 |     t :: tasks.spawn(() => {
+  4 |     t @= tasks.spawn(() => {
     |                      ^^^^^^^
  Why: tasks run concurrently; a `var` binding can't be shared between tasks
  Fix: give the task its own copy (`count.clone()`) or hand it over with `take(count)`

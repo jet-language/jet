@@ -64,7 +64,9 @@ pub enum TokKind {
     LBracket,
     RBracket,
     Colon,
-    /// D-BIND1 (ratified 2026-06-18): `::` immutable binding sigil (was `val`).
+    /// D-BIND2 (ratified): `@=` immutable binding sigil (replaces `::`).
+    AtEq,
+    /// D-BIND2: `::` is retired — lexed to emit the E0991 teaching error pointing at `@=`.
     ColonColon,
     /// D-BIND1 (ratified 2026-06-18): `:=` mutable binding sigil (was `var`).
     ColonEq,
@@ -199,7 +201,8 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::LBracket => "`[`".to_string(),
         TokKind::RBracket => "`]`".to_string(),
         TokKind::Colon => "`:`".to_string(),
-        TokKind::ColonColon => format!("`{}`", Syntax::SIGIL_BIND_IMMUT),
+        TokKind::AtEq => format!("`{}`", Syntax::SIGIL_BIND_IMMUT),
+        TokKind::ColonColon => format!("`{}`", Syntax::SIGIL_BIND_IMMUT_RETIRED),
         TokKind::ColonEq => format!("`{}`", Syntax::SIGIL_BIND_MUT),
         TokKind::Comma => "`,`".to_string(),
         TokKind::Arrow => "`->`".to_string(),

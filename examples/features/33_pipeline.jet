@@ -1,16 +1,16 @@
 use core.tasks as tasks
 fn main() {
-    ch: Channel<Int> :: tasks.channel()
-    s1 :: ch.sender()
-    t1 :: tasks.spawn(take(s1) () => {
+    ch: Channel<Int> @= tasks.channel()
+    s1 @= ch.sender()
+    t1 @= tasks.spawn(take(s1) () => {
         s1.send(30)
     })
-    s2 :: ch.sender()
-    t2 :: tasks.spawn(take(s2) () => {
+    s2 @= ch.sender()
+    t2 @= tasks.spawn(take(s2) () => {
         s2.send(10)
     })
-    s3 :: ch.sender()
-    t3 :: tasks.spawn(take(s3) () => {
+    s3 @= ch.sender()
+    t3 @= tasks.spawn(take(s3) () => {
         s3.send(20)
     })
     t1.join()

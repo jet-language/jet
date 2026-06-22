@@ -66,14 +66,14 @@ fn match_groups_find_replace_split() {
 use jet.regex as re
 
 fn main() {
-    text :: "2024-06-21 build ok"
+    text @= "2024-06-21 build ok"
 
     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
     // single braces are string interpolation (S8).
     print(re.is_match("\\d{{4}}", text) ?? panic("p"))
 
     // match + capture groups: whole + each group
-    m :: re.match("(\\d{{4}})-(\\d{{2}})-(\\d{{2}})", text) ?? panic("p")
+    m @= re.match("(\\d{{4}})-(\\d{{2}})-(\\d{{2}})", text) ?? panic("p")
     if m == value(mat) {
         print(mat.group(0) ?? "x")
         print(mat.group(1) ?? "x")
@@ -84,15 +84,15 @@ fn main() {
     }
 
     // no match -> null optional
-    none_match :: re.match("zzz", text) ?? panic("p")
+    none_match @= re.match("zzz", text) ?? panic("p")
     if none_match == null {
         print("no-match")
     }
 
     // find / find_all
-    first :: re.find("\\d+", text) ?? panic("p")
+    first @= re.find("\\d+", text) ?? panic("p")
     print(first ?? "none")
-    nums :: re.find_all("\\d+", text) ?? panic("p")
+    nums @= re.find_all("\\d+", text) ?? panic("p")
     print(nums.len())
 
     // replace / replace_all (with group reference)
@@ -100,7 +100,7 @@ fn main() {
     print(re.replace_all("\\d", text, "#") ?? panic("p"))
 
     // split
-    parts :: re.split("-", "a-b-c") ?? panic("p")
+    parts @= re.split("-", "a-b-c") ?? panic("p")
     print(parts.len())
 }
 "##;

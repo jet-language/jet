@@ -203,10 +203,10 @@ impl Session {
             if self.moved_names.contains(name) {
                 // Re-declare, then synthetically consume so sema sees it moved.
                 lines.push(stub.clone());
-                // `__moved_<name>__ :: name` — a binding whose init is `name`
+                // `__moved_<name>__ @= name` — a binding whose init is `name`
                 // (a non-scalar Ident). Sema's `note_move_if_direct_ident` marks
                 // `name` as moved immediately after this declaration.
-                lines.push(format!("__moved_{}__ :: {};", name, name));
+                lines.push(format!("__moved_{}__ @= {};", name, name));
             } else {
                 lines.push(stub.clone());
             }
@@ -217,16 +217,16 @@ impl Session {
     /// Register a val binding for sema visibility after it was evaluated.
     /// `name` and `val` come from the interpreter scope.
     pub fn record_binding(&mut self, name: &str, v: &CtValue) {
-        // Generate a synthetic `name: Type :: zero_val` for sema (D-BIND1).
+        // Generate a synthetic `name: Type @= zero_val` for sema (D-BIND2).
         // We use a zero/default value of the right type so sema accepts it.
         let type_and_val = match v {
-            CtValue::Int(_) => "Int :: 0",
-            CtValue::Float(_) => "Float :: 0.0",
-            CtValue::Bool(_) => "Bool :: false",
-            CtValue::Char(_) => "Char :: 'a'",
-            CtValue::Str(_) => "String :: \"\"",
-            CtValue::List(_) => "List<Int> :: []",
-            CtValue::Map(_) => "Map<String, Int> :: [:]",
+            CtValue::Int(_) => "Int @= 0",
+            CtValue::Float(_) => "Float @= 0.0",
+            CtValue::Bool(_) => "Bool @= false",
+            CtValue::Char(_) => "Char @= 'a'",
+            CtValue::Str(_) => "String @= \"\"",
+            CtValue::List(_) => "List<Int> @= []",
+            CtValue::Map(_) => "Map<String, Int> @= [:]",
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
             CtValue::Struct { .. } => {
                 // We can't easily construct a dummy struct; skip sema pre-check
@@ -645,11 +645,12 @@ fn reject_feature(text: &str) -> Option<&'static str> {
 }
 
 /// Detect whether text is a statement (vs. a bare expression to echo).
-/// D-BIND1: a sigil binding (`name :: v` / `name := v`) is a statement; D-IF1:
+/// D-BIND2: a sigil binding (`name @= v` / `name := v`) is a statement; D-IF1:
 /// `if` covers multi-arm dispatch (former `when`/`switch`); loops are `loop`.
 fn starts_with_stmt_keyword(t: &str) -> bool {
-    // A sigil binding contains `::` or `:=` (D-BIND1).
-    t.contains("::")
+    // A sigil binding contains `@=` or `:=` (D-BIND2). Also accept retired `::` (E0991).
+    t.contains("@=")
+        || t.contains("::")
         || t.contains(":=")
         || t.starts_with("return ")
         || t.starts_with("return")
@@ -764,8 +765,8 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         "// repl:{}\nfn __repl__() {{\n{}\n}}\n",
         step, plain_input
     );
-    // Echo-sentinel wrapping (D-BIND1: sigil binding, not the retired `val`).
-    let echo_stmt = format!("__repl_echo__ :: {}", trimmed);
+    // Echo-sentinel wrapping (D-BIND2: `@=` sigil binding).
+    let echo_stmt = format!("__repl_echo__ @= {}", trimmed);
     let echo_src = format!(
         "// repl:{}\nfn __repl__() {{\n{}\n}}\n",
         step, echo_stmt

@@ -23,17 +23,21 @@ pub const KW_FN: &str = "fn";
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
-/// S2 / D-BIND1 (ratified 2026-06-18): immutable binding sigil `name :: expr`
-/// (was the keyword `val`). Spends the `::` token (S83 external form must pick
-/// a different separator).
-pub const SIGIL_BIND_IMMUT: &str = "::";
+/// S2 / D-BIND2 (ratified): immutable binding sigil `name @= expr`
+/// (D-BIND2 = A; replaces `::` from D-BIND1). `@=` is unambiguous in the
+/// lexer because `@` + identifier is always a label or host selector.
+pub const SIGIL_BIND_IMMUT: &str = "@=";
+
+/// S2 / D-BIND2: the retired immutable-binding sigil `::` (D-BIND1 era).
+/// Recognized only for the E0991 teaching error that points at `@=`.
+pub const SIGIL_BIND_IMMUT_RETIRED: &str = "::";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`
 /// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
 pub const SIGIL_BIND_MUT: &str = ":=";
 
 /// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
-/// teaching error that points at the `::` / `:=` sigils.
+/// teaching error that points at the `@=` / `:=` sigils.
 pub const FOREIGN_VAL: &str = "val";
 pub const FOREIGN_VAR: &str = "var";
 
@@ -845,9 +849,9 @@ pub const TYPE_FIXED_SIZE_SEP: &str = "#";
 /// the keyword, not a standalone operator).
 pub const KW_QUESTION_CONTINUE: &str = "?continue";
 
-/// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — declares a
+/// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — declares a
 /// distinct type (a separate nominal type sharing the base's representation).
-/// Used in the value position of a `::` immutable binding at item level;
+/// Used in the value position of a `@=` immutable binding at item level;
 /// `distinct`-over-`distinct` chaining is rejected in v1.
 pub const KW_DISTINCT: &str = "distinct";
 

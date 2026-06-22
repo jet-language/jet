@@ -1122,10 +1122,10 @@ fn c40_is_keyword_import_not_a_keyword() {
 fn c40_keyword_like_identifier_usable_as_variable() {
     // Variables named `printer`, `sprint`, `in_count` must NOT be flagged as keywords.
     // These contain keyword substrings (`print`, `in`, `sprint` → `pr`+`in`+`t`) but
-    // are regular identifiers. Use current Jet binding syntax (:: sigil).
+    // are regular identifiers. Use current Jet binding syntax (@= sigil).
     let diags = jet::check_document(
         "c40_kw_in_ident.jet",
-        "fn main() {\n    printer :: \"hp\";\n    in_count :: 3;\n    sprint :: 9.8;\n}\n",
+        "fn main() {\n    printer @= \"hp\";\n    in_count @= 3;\n    sprint @= 9.8;\n}\n",
     );
     // None of the diagnostics should claim these identifiers are keywords.
     for d in &diags {

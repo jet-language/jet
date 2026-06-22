@@ -296,7 +296,7 @@ pub enum Item {
     Func(Func),
     Struct(StructDef),
     Enum(EnumDef),
-    /// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — a distinct type
+    /// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — a distinct type
     /// declaration. `distinct`-over-`distinct` base is rejected in sema.
     Distinct(DistinctDef),
     /// S28 (M9): `trait Name { fn sig(self) -> T; … }`.
@@ -674,7 +674,7 @@ pub struct StructDef {
     pub layout_span: Option<Span>,
 }
 
-/// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name :: distinct Base`.
+/// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name @= distinct Base`.
 #[derive(Debug)]
 pub struct DistinctDef {
     pub is_pub: bool,

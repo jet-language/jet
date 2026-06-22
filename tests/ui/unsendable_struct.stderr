@@ -1,7 +1,7 @@
 Error [E1102]: `cfg` can't cross into a task because `Config` isn't sendable
   --> tests/ui/unsendable_struct.jet:11:32
     |
- 11 |     t :: tasks.spawn(take(cfg) () => cfg.id)
+ 11 |     t @= tasks.spawn(take(cfg) () => cfg.id)
     |                                ^^^^^^^^^^^^
  Why: `Config` contains `logger`, which holds a `ref` field at `logger.sink`; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or remove the borrowed field before spawning

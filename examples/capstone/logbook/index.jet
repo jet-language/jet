@@ -37,7 +37,7 @@ fn build_backlinks(notes: [String, Note]) -> [String, [String]] {
                 existing.push(name.clone())
                 bl.insert(target, existing)
             } else {
-                new_list: [String] :: [name.clone()]
+                new_list: [String] @= [name.clone()]
                 bl.insert(target, new_list)
             }
         }
@@ -45,7 +45,7 @@ fn build_backlinks(notes: [String, Note]) -> [String, [String]] {
     return bl
 }
 pub fn build(dir: String) -> Index ? String {
-    file_names :: fs.list_dir(dir) ?? return err("cannot read directory: {dir}")
+    file_names @= fs.list_dir(dir) ?? return err("cannot read directory: {dir}")
     md_files: [String] := []
     loop p in file_names {
         if p.ends_with(".md") {
@@ -55,16 +55,16 @@ pub fn build(dir: String) -> Index ? String {
     md_files.sort()
     results: [ParsedResult] := []
     loop p in md_files {
-        full :: path.join(dir, p)
-        text :: fs.read(full) ?? ""
+        full @= path.join(dir, p)
+        text @= fs.read(full) ?? ""
         if note.parse(full, text) {
             it == ok(n) -> {
-                no_err: String? :: null
+                no_err: String? @= null
                 results.push(ParsedResult {file_path: full, note: value(n), error_msg: no_err})
             }
             it == err(e) -> {
-                msg :: parse_error_msg(e)
-                no_note: Note? :: null
+                msg @= parse_error_msg(e)
+                no_note: Note? @= null
                 results.push(ParsedResult {file_path: full, note: no_note, error_msg: value(msg)})
             }
 
@@ -73,7 +73,7 @@ pub fn build(dir: String) -> Index ? String {
     notes: [String, Note] := [:]
     errors: [String] := []
     loop r in results {
-        maybe_note :: r.note
+        maybe_note @= r.note
         if maybe_note {
             maybe_note == value(note_val) -> {
                 if notes.contains_key(note_val.name) {
@@ -83,13 +83,13 @@ pub fn build(dir: String) -> Index ? String {
                 }
             }
             maybe_note == null -> {
-                msg :: r.error_msg ?? "unknown error"
+                msg @= r.error_msg ?? "unknown error"
                 errors.push("{r.file_path}: {msg}")
             }
 
         }
     }
-    backlinks :: build_backlinks(notes)
+    backlinks @= build_backlinks(notes)
     loop name, n in notes {
         loop target in n.links {
             if notes.contains_key(target) {

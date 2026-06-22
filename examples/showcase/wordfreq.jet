@@ -6,10 +6,10 @@ use core.process as process
 fn count_file(path: String, mut counts: [String, Int]) {
     if fs.read(path) {
         it == ok(text) -> {
-            flat :: text.replace("\n", " ")
-            words :: flat.split(" ")
+            flat @= text.replace("\n", " ")
+            words @= flat.split(" ")
             loop raw in words {
-                word :: raw.trim().to_lower()
+                word @= raw.trim().to_lower()
                 if word != "" {
                     counts[word] = ((counts.get(word) ?? 0) + 1)
                 }
@@ -25,7 +25,7 @@ fn count_dir(dir: String, mut counts: [String, Int]) {
     if fs.list_dir(dir) {
         it == ok(entries) -> {
             loop entry in entries {
-                full :: "{dir}/{entry}"
+                full @= "{dir}/{entry}"
                 if fs.is_dir(full) {
                     count_dir(full, mut counts)
                 } else if entry.ends_with(".txt") {
@@ -40,8 +40,8 @@ fn count_dir(dir: String, mut counts: [String, Int]) {
     }
 }
 fn main() {
-    args :: io.args()
-    target :: args.get(1) ?? ""
+    args @= io.args()
+    target @= args.get(1) ?? ""
     if target == "" {
         print("usage: wordfreq DIR")
         process.exit(1)

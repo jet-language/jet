@@ -298,8 +298,8 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
-        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND1: ordinary
-        // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
+        // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND2: ordinary
+        // bindings are sigil-led (`name @= …` / `name := …`), no leading keyword.
         if b.is_comptime {
             self.write(Syntax::KW_COMPTIME);
             self.write(" ");

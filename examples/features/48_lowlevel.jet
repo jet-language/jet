@@ -8,21 +8,21 @@ use core.mem
 // must wrap the call in their own `#Unsafe` block.
 #Unsafe
 fn read_reg(addr: Int) -> Int {
-    p :: mem.Ptr<Int>.from_addr(addr)
+    p @= mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
 fn main() {
     // A boxed Int gives us a real, valid address to read back through the
     // pointer tier — keeping the example self-contained and deterministic.
-    cell: Int :: 1337
-    addr :: mem.address_of(cell)
+    cell: Int @= 1337
+    addr @= mem.address_of(cell)
     #Audit("addr is the address of `cell`, a live Int on this stack frame")
     #Unsafe {
-        p :: mem.Ptr<Int>.from_addr(addr)
-        seen :: mem.volatile_read(p)
+        p @= mem.Ptr<Int>.from_addr(addr)
+        seen @= mem.volatile_read(p)
         print(seen)
         // Calling an `#Unsafe fn` is allowed here because we are inside a block.
-        again :: read_reg(addr)
+        again @= read_reg(addr)
         print(again)
     }
 }

@@ -114,8 +114,9 @@ before continuing.
 | E0053 | parse | teaching: bare `pure fn` → `#Pure fn` (D-CASING1 follow-on) |
 | E0054 | parse | teaching: bare `todo` → `#Todo` (D-CASING1 follow-on) |
 | E0984 | parse | teaching: `when` → `if subject { arm -> body }` (D-IF1) |
-| E0985 | parse | teaching: `val`/`var` keyword → `name ::`/`name :=` sigil (D-BIND1) |
+| E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
+| E0991 | parse | teaching: `::` retired immutable-binding sigil → `@=` (D-BIND2) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |

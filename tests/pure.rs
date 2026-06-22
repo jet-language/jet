@@ -238,7 +238,7 @@ fn transitive_clean_program_no_error() {
     return n * n
 }
 fn main() {
-    x :: square(5)
+    x @= square(5)
 }
 "#;
     let (toks, _) = jet::Lexer::lex(src);

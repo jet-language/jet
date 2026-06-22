@@ -8,9 +8,9 @@ use core.mem
 
 fn main() {
     // Implicit region: the region is the scope of the `arena` binding.
-    arena :: mem.Arena.new()
-    first :: arena.alloc(10)
-    second :: arena.alloc(20)
+    arena @= mem.Arena.new()
+    first @= arena.alloc(10)
+    second @= arena.alloc(20)
     print(first)
     print(second)
 
@@ -18,16 +18,16 @@ fn main() {
     // `first`/`second` may not be touched after this point (that would be
     // E0632). A fresh alloc after the reset is fine.
     arena.reset()
-    reused :: arena.alloc(30)
+    reused @= arena.alloc(30)
     print(reused)
 
     // Explicit `region r { … }` (D-REGION1 opt B): a narrower, named region
     // spanning two allocators. Views made inside live only until the block ends.
     region scratch {
-        a :: mem.Arena.new()
-        b :: mem.Bump.new()
-        x :: a.alloc(1)
-        y :: b.alloc(2)
+        a @= mem.Arena.new()
+        b @= mem.Bump.new()
+        x @= a.alloc(1)
+        y @= b.alloc(2)
         print(x)
         print(y)
     }

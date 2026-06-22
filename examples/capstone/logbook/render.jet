@@ -32,14 +32,14 @@ comptime PAGE_FOOTER = "</body></html>"
 // Tags: split on " "; words starting with "#" become <span class="tag">.
 fn render_inline(s: String) -> String {
     // Pass 1: resolve [[wikilinks]].
-    link_parts :: s.split("[[")
+    link_parts @= s.split("[[")
     after_links: String := link_parts[0]
     i: Int := 1
     loop i < link_parts.len() {
-        seg :: link_parts[i]
+        seg @= link_parts[i]
         if seg.contains("]]") {
-            halves :: seg.split("]]")
-            target :: halves[0]
+            halves @= seg.split("]]")
+            target @= halves[0]
             rest: String := ""
             if halves.len() > 1 {
                 rest = halves[1]
@@ -52,12 +52,12 @@ fn render_inline(s: String) -> String {
         i = (i + 1)
     }
     // Pass 2: resolve #tags (words starting with "#").
-    words :: after_links.split(" ")
+    words @= after_links.split(" ")
     out: String := ""
     w: Int := 0
     loop w < words.len() {
-        word :: words[w]
-        sep :: if w == 0 {
+        word @= words[w]
+        sep @= if w == 0 {
             ""
         } else {
             " "
@@ -75,27 +75,27 @@ fn render_inline(s: String) -> String {
 // Leading "#" sequences → headings; empty line → <p></p>; else → <p>…</p>.
 fn render_line(line: String) -> String {
     if line.starts_with("### ") {
-        text :: render_inline(line.slice(4, (line.len() - 1)))
+        text @= render_inline(line.slice(4, (line.len() - 1)))
         return "<h3>{text}</h3>"
     }
     if line.starts_with("## ") {
-        text :: render_inline(line.slice(3, (line.len() - 1)))
+        text @= render_inline(line.slice(3, (line.len() - 1)))
         return "<h2>{text}</h2>"
     }
     if line.starts_with("# ") {
-        text :: render_inline(line.slice(2, (line.len() - 1)))
+        text @= render_inline(line.slice(2, (line.len() - 1)))
         return "<h1>{text}</h1>"
     }
     if line.trim() == "" {
         return "<p></p>"
     }
-    text :: render_inline(line)
+    text @= render_inline(line)
     return "<p>{text}</p>"
 }
 // note_to_html renders a full page for a single note, including backlinks.
 pub fn note_to_html(n: Note, backlinks: [String]) -> String {
     type_label: String := ""
-    note_kind :: n.note_type
+    note_kind @= n.note_type
     if note_kind {
         User -> {
             type_label = "user"

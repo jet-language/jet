@@ -4,8 +4,8 @@ use core.io as io
 use core.fs as fs
 use core.process as process
 fn grep_file(path: String, pattern: String, show_line_nums: Bool) -> Bool {
-    text :: fs.read(path) ?? return false
-    lines :: text.split("\n")
+    text @= fs.read(path) ?? return false
+    lines @= text.split("\n")
     matched := false
     n := 0
     loop line in lines {
@@ -22,10 +22,10 @@ fn grep_file(path: String, pattern: String, show_line_nums: Bool) -> Bool {
     return matched
 }
 fn grep_dir(dir: String, pattern: String, show_line_nums: Bool) -> Bool {
-    entries :: fs.list_dir(dir) ?? return false
+    entries @= fs.list_dir(dir) ?? return false
     matched := false
     loop entry in entries {
-        full :: "{dir}/{entry}"
+        full @= "{dir}/{entry}"
         if fs.is_dir(full) {
             if grep_dir(full, pattern, show_line_nums) {
                 matched = true
@@ -39,14 +39,14 @@ fn grep_dir(dir: String, pattern: String, show_line_nums: Bool) -> Bool {
     return matched
 }
 fn main() {
-    args :: io.args()
+    args @= io.args()
     show_line_nums := false
     recursive := false
     pattern := ""
     target := ""
     i := 1
     loop i < args.len() {
-        a :: args.get(i) ?? ""
+        a @= args.get(i) ?? ""
         if a == "-n" {
             show_line_nums = true
         } else if a == "-r" {

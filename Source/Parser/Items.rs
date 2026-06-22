@@ -1581,29 +1581,30 @@ impl<'a> Parser<'a> {
 
     // --- distinct types --------------------------------------------------
 
-    /// D-DIST1 (ratified 2026-06-19): true when the cursor is at `Name :: distinct`.
+    /// D-DIST1 (ratified 2026-06-19): true when the cursor is at `Name @= distinct` (or retired `Name :: distinct`).
     fn at_distinct_def(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(&self.peek2().kind, TokKind::ColonColon)
+            && matches!(&self.peek2().kind, TokKind::AtEq | TokKind::ColonColon)
             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
     }
 
-    /// D-DIST3 (ratified 2026-06-20): true when `#Numeric Name :: distinct` is at
+    /// D-DIST3 (ratified 2026-06-20): true when `#Numeric Name @= distinct` is at
     /// the cursor — the `#Numeric` marker followed by a distinct type declaration.
+    /// Also accepts retired `Name :: distinct` form (for E0991 teaching error).
     fn at_numeric_distinct_def(&self) -> bool {
         if !matches!(&self.peek().kind, TokKind::Hash) {
             return false;
         }
-        // peek2 = Numeric, peek3 = name, peek4 = ::, peek5 = distinct
+        // peek2 = Numeric, peek3 = name, peek4 = @= (or retired ::), peek5 = distinct
         let peek4 = &self.toks[(self.pos + 3).min(self.toks.len() - 1)].kind;
         let peek5 = &self.toks[(self.pos + 4).min(self.toks.len() - 1)].kind;
         matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NUMERIC)
             && matches!(&self.peek3().kind, TokKind::Ident(_))
-            && matches!(peek4, TokKind::ColonColon)
+            && matches!(peek4, TokKind::AtEq | TokKind::ColonColon)
             && matches!(peek5, TokKind::Ident(n) if n == Syntax::KW_DISTINCT)
     }
 
-    /// D-DIST1/D-DIST3: parse `[#Numeric] Name :: distinct BaseType`.
+    /// D-DIST1/D-DIST3: parse `[#Numeric] Name @= distinct BaseType`.
     pub(super) fn distinct_def(&mut self, is_pub: bool) -> Result<crate::AST::DistinctDef, Diagnostic> {
         let start = self.peek().span;
         // optional `#Numeric` attribute
@@ -1624,7 +1625,53 @@ impl<'a> Parser<'a> {
             false
         };
         let (name, name_span) = self.expect_ident("as the distinct type name")?;
-        self.expect(TokKind::ColonColon, "after the distinct type name")?;
+        // Accept `@=` (D-BIND2) or retired `::` (E0991 teaching error).
+        match self.peek().kind {
+            TokKind::AtEq => { self.bump(); }
+            TokKind::ColonColon => {
+                let span = self.peek().span;
+                self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0991",
+                    format!(
+                        "`{}` is the old immutable-binding sigil — use `{}` instead",
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED,
+                        Syntax::SIGIL_BIND_IMMUT
+                    ),
+                    format!(
+                        "the immutable binding sigil changed from `{}` to `{}` (D-BIND2)",
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED,
+                        Syntax::SIGIL_BIND_IMMUT
+                    ),
+                    format!(
+                        "write `{} {} {} BaseType` instead of `{} {} BaseType`",
+                        name,
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::KW_DISTINCT,
+                        name,
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED
+                    ),
+                    Some(span),
+                ));
+            }
+            _ => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "expected `{}` after the distinct type name, found {}",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        describe(&self.peek().kind)
+                    ),
+                    format!(
+                        "a distinct type declaration is `Name {} {} BaseType`",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::KW_DISTINCT
+                    ),
+                    format!("write: {} {} {} Int", name, Syntax::SIGIL_BIND_IMMUT, Syntax::KW_DISTINCT),
+                    Some(self.peek().span),
+                ));
+            }
+        }
         // consume `distinct` keyword
         match &self.peek().kind {
             TokKind::Ident(n) if n == Syntax::KW_DISTINCT => { self.bump(); }
@@ -1633,8 +1680,8 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!("expected `{}` here, found {}", Syntax::KW_DISTINCT, describe(&other)),
-                    "a distinct type declaration is `Name :: distinct BaseType`".to_string(),
-                    format!("write: {} :: {} Int", name, Syntax::KW_DISTINCT),
+                    format!("a distinct type declaration is `Name {} {} BaseType`", Syntax::SIGIL_BIND_IMMUT, Syntax::KW_DISTINCT),
+                    format!("write: {} {} {} Int", name, Syntax::SIGIL_BIND_IMMUT, Syntax::KW_DISTINCT),
                     Some(self.peek().span),
                 ));
             }

@@ -243,7 +243,7 @@ impl<'a> Parser<'a> {
         }
         self.bump(); // `:`
         let (ty, ty_span) = self.type_()?;
-        if matches!(self.peek().kind, TokKind::ColonColon | TokKind::ColonEq) {
+        if matches!(self.peek().kind, TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq) {
             let sigil_span = self.peek().span;
             return Err(Diagnostic::error(
                 "E0422",
@@ -1397,11 +1397,36 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-BIND1: consume `::` (immutable) or `:=` (mutable); returns `mutable`.
+    /// D-BIND2: consume `@=` (immutable) or `:=` (mutable); returns `mutable`.
+    /// A `::` in this position emits E0991 (teaching error) and is accepted as immutable.
     fn expect_bind_sigil(&mut self) -> Result<bool, Diagnostic> {
         match self.peek().kind {
-            TokKind::ColonColon => {
+            TokKind::AtEq => {
                 self.bump();
+                Ok(false)
+            }
+            TokKind::ColonColon => {
+                let span = self.peek().span;
+                self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0991",
+                    format!(
+                        "`{}` is the old immutable-binding sigil — use `{}` instead",
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED,
+                        Syntax::SIGIL_BIND_IMMUT
+                    ),
+                    format!(
+                        "the immutable binding sigil changed from `{}` to `{}` (D-BIND2)",
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED,
+                        Syntax::SIGIL_BIND_IMMUT
+                    ),
+                    format!(
+                        "write `name {} value` instead of `name {} value`",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::SIGIL_BIND_IMMUT_RETIRED
+                    ),
+                    Some(span),
+                ));
                 Ok(false)
             }
             TokKind::ColonEq => {
@@ -1427,15 +1452,16 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-BIND1: true when the tokens at the cursor begin a sigil binding —
-    /// `name ::`, `name :=`, `name : type ::`, or a destructuring pattern target
-    /// (`[ … ] ::`, `Ident { … } ::`). Used by the statement dispatcher to tell a
-    /// binding apart from an expression/assignment that also starts with a name.
+    /// D-BIND2: true when the tokens at the cursor begin a sigil binding —
+    /// `name @=`, `name :=`, `name : type @=`, or a destructuring pattern target
+    /// (`[ … ] @=`, `Ident { … } @=`). Also accepts retired `::` (for E0991 recovery).
+    /// Used by the statement dispatcher to tell a binding apart from an
+    /// expression/assignment that also starts with a name.
     fn looks_like_sigil_binding(&self) -> bool {
         match &self.peek().kind {
-            // `name :: e` / `name := e`
+            // `name @= e` / `name := e` / `name :: e` (retired, for E0991)
             TokKind::Ident(_) | TokKind::KwSelf
-                if matches!(self.peek2().kind, TokKind::ColonColon | TokKind::ColonEq) =>
+                if matches!(self.peek2().kind, TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq) =>
             {
                 true
             }
@@ -1483,7 +1509,7 @@ impl<'a> Parser<'a> {
                 if depth == 0 {
                     return matches!(
                         self.toks.get(i + 1).map(|t| &t.kind),
-                        Some(TokKind::ColonColon | TokKind::ColonEq)
+                        Some(TokKind::AtEq | TokKind::ColonColon | TokKind::ColonEq)
                     );
                 }
             }

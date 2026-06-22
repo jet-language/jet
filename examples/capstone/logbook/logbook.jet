@@ -25,15 +25,15 @@ fn usage() {
     io.eprint("  new <dir> <name>     create a new note")
 }
 fn cmd_index(dir: String) {
-    idx :: index.build(dir) ?? panic("cannot build index")
-    names :: index.note_names(idx)
+    idx @= index.build(dir) ?? panic("cannot build index")
+    names @= index.note_names(idx)
     print("indexed {names.len()} notes")
     loop err_msg in idx.errors {
         print("error: {err_msg}")
     }
 }
 fn cmd_lint(dir: String) {
-    idx :: index.build(dir) ?? panic("cannot build index")
+    idx @= index.build(dir) ?? panic("cannot build index")
     if idx.errors.len() == 0 {
         print("ok: no issues")
     } else {
@@ -44,16 +44,16 @@ fn cmd_lint(dir: String) {
     }
 }
 fn cmd_find(dir: String, query: String) {
-    idx :: index.build(dir) ?? panic("cannot build index")
-    results :: search.find(idx, query)
+    idx @= index.build(dir) ?? panic("cannot build index")
+    results @= search.find(idx, query)
     loop name in results {
         print("{name}")
     }
 }
 fn cmd_links(dir: String, name: String) {
-    idx :: index.build(dir) ?? panic("cannot build index")
-    notes_map: [String, Note] :: idx.notes
-    maybe_note: Note? :: notes_map.get(name)
+    idx @= index.build(dir) ?? panic("cannot build index")
+    notes_map: [String, Note] @= idx.notes
+    maybe_note: Note? @= notes_map.get(name)
     if maybe_note {
         maybe_note == value(n) -> {
             print("forward links:")
@@ -67,15 +67,15 @@ fn cmd_links(dir: String, name: String) {
         }
 
     }
-    bls_map: [String, [String]] :: idx.backlinks
-    bls: [String] :: bls_map.get(name) ?? []
+    bls_map: [String, [String]] @= idx.backlinks
+    bls: [String] @= bls_map.get(name) ?? []
     print("backlinks:")
     loop link in bls {
         print("  <- {link}")
     }
 }
 fn cmd_graph(dir: String, as_json: Bool) {
-    idx :: index.build(dir) ?? panic("cannot build index")
+    idx @= index.build(dir) ?? panic("cannot build index")
     if as_json {
         print(server.graph_json_str(idx))
     } else {
@@ -87,17 +87,17 @@ fn cmd_graph(dir: String, as_json: Bool) {
     }
 }
 fn cmd_serve(dir: String, config_path: String?) {
-    cp: String :: config_path.clone() ?? "logbook.toml"
-    cfg :: config.load(cp)
+    cp: String @= config_path.clone() ?? "logbook.toml"
+    cfg @= config.load(cp)
     log.set_level(cfg.level)
-    pid :: ffi.pid()
+    pid @= ffi.pid()
     log.info("logbook server starting pid={pid} dir={dir}")
-    idx :: index.build(cfg.notes_dir) ?? panic("cannot build index")
+    idx @= index.build(cfg.notes_dir) ?? panic("cannot build index")
     server.serve(cfg.addr, idx)
 }
 fn cmd_new(dir: String, name: String) {
-    file_path :: path.join(dir, "{name}.md")
-    writer :: files.create(file_path) ?? panic("cannot create {file_path}")
+    file_path @= path.join(dir, "{name}.md")
+    writer @= files.create(file_path) ?? panic("cannot create {file_path}")
     writer.write_line("---") ?? panic("write failed")
     writer.write_line("title: {name}") ?? panic("write failed")
     writer.write_line("tags: []") ?? panic("write failed")
@@ -108,13 +108,13 @@ fn cmd_new(dir: String, name: String) {
     print("created {file_path}")
 }
 fn main() {
-    args :: io.args()
+    args @= io.args()
     if args.len() < 2 {
         print(BANNER)
         usage()
         process.exit(2)
     }
-    cmd :: args[1]
+    cmd @= args[1]
     if cmd {
         "version" -> {
             print(BANNER)
@@ -132,11 +132,11 @@ fn main() {
             cmd_links(args[2], args[3])
         }
         "graph" -> {
-            as_json :: ((args.len() >= 4) && (args[3] == "json"))
+            as_json @= ((args.len() >= 4) && (args[3] == "json"))
             cmd_graph(args[2], as_json)
         }
         "serve" -> {
-            config_path: String? :: null
+            config_path: String? @= null
             if (args.len() >= 4) && (args[3] == "config") {
                 cmd_serve(args[2], value(args[4]))
             } else {

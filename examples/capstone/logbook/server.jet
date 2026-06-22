@@ -12,81 +12,81 @@ fn graph_json(idx: Index) -> JSON {
     nodes: [JSON] := []
     edges: [JSON] := []
     loop name, n in idx.notes {
-        node_fields: [String, JSON] :: ["id": JSON.Text(name.clone())]
-        node :: JSON.Object(node_fields)
+        node_fields: [String, JSON] @= ["id": JSON.Text(name.clone())]
+        node @= JSON.Object(node_fields)
         nodes.push(node)
         loop target in n.links {
-            edge_fields: [String, JSON] :: ["from": JSON.Text(name.clone()), "to": JSON.Text(target)]
-            edge :: JSON.Object(edge_fields)
+            edge_fields: [String, JSON] @= ["from": JSON.Text(name.clone()), "to": JSON.Text(target)]
+            edge @= JSON.Object(edge_fields)
             edges.push(edge)
         }
     }
-    arr_nodes: [JSON] :: nodes
-    arr_edges: [JSON] :: edges
-    obj: [String, JSON] :: ["nodes": JSON.Array(arr_nodes), "edges": JSON.Array(arr_edges)]
+    arr_nodes: [JSON] @= nodes
+    arr_edges: [JSON] @= edges
+    obj: [String, JSON] @= ["nodes": JSON.Array(arr_nodes), "edges": JSON.Array(arr_edges)]
     return JSON.Object(obj)
 }
 fn html_response(body: String) -> HttpResponse {
-    empty_hdrs: [String, String] :: [:]
+    empty_hdrs: [String, String] @= [:]
     return HttpResponse {status: "200 OK", body: body.clone(), headers: empty_hdrs}
 }
 fn route(req: HttpRequest, idx: Index) -> HttpResponse {
-    method :: req.method()
+    method @= req.method()
     if method {
         "GET" -> {
-            p :: req.path()
+            p @= req.path()
             if p == "/" {
-                names :: index.note_names(idx)
+                names @= index.note_names(idx)
                 return html_response(render.list_to_html(names))
             }
             if p == "/graph.json" {
-                g :: graph_json(idx)
-                body :: json.render_pretty(g)
-                hdrs: [String, String] :: ["Content-Type": "application/json"]
+                g @= graph_json(idx)
+                body @= json.render_pretty(g)
+                hdrs: [String, String] @= ["Content-Type": "application/json"]
                 return HttpResponse {status: "200 OK", body: body, headers: hdrs}
             }
             if p == "/health" {
-                empty_hdrs: [String, String] :: [:]
+                empty_hdrs: [String, String] @= [:]
                 return HttpResponse {status: "200 OK", body: "ok", headers: empty_hdrs}
             }
             if p.starts_with("/note/") {
-                name :: p.slice(6, (p.len() - 1))
-                notes_map: [String, Note] :: idx.notes
-                maybe_note: Note? :: notes_map.get(name)
+                name @= p.slice(6, (p.len() - 1))
+                notes_map: [String, Note] @= idx.notes
+                maybe_note: Note? @= notes_map.get(name)
                 if maybe_note {
                     maybe_note == value(note_val) -> {
-                        bls_map: [String, [String]] :: idx.backlinks
-                        bls: [String] :: bls_map.get(name) ?? []
-                        body :: render.note_to_html(note_val, bls)
-                        etag :: crypto.sha256(note_val.body)
+                        bls_map: [String, [String]] @= idx.backlinks
+                        bls: [String] @= bls_map.get(name) ?? []
+                        body @= render.note_to_html(note_val, bls)
+                        etag @= crypto.sha256(note_val.body)
                         hdrs: [String, String] := [:]
                         hdrs.insert("ETag", etag)
                         return HttpResponse {status: "200 OK", body: body, headers: hdrs}
                     }
                     maybe_note == null -> {
-                        empty_hdrs: [String, String] :: [:]
+                        empty_hdrs: [String, String] @= [:]
                         return HttpResponse {status: "404 Not Found", body: "note not found: {name}", headers: empty_hdrs}
                     }
 
                 }
             }
             if p.starts_with("/search") {
-                q :: req.header("q") ?? ""
-                hits :: search.find(idx, q)
-                body :: render.search_to_html(q, hits)
+                q @= req.header("q") ?? ""
+                hits @= search.find(idx, q)
+                body @= render.search_to_html(q, hits)
                 return html_response(body)
             }
-            empty_hdrs: [String, String] :: [:]
+            empty_hdrs: [String, String] @= [:]
             return HttpResponse {status: "404 Not Found", body: "not found: {p}", headers: empty_hdrs}
         }
         else -> {
-            empty_hdrs: [String, String] :: [:]
+            empty_hdrs: [String, String] @= [:]
             return HttpResponse {status: "405 Method Not Allowed", body: "only GET is supported", headers: empty_hdrs}
         }
     }
 }
 pub fn serve(addr: String, idx: Index) {
-    idx2 :: idx.clone()
+    idx2 @= idx.clone()
     http.serve(addr, take(idx2) (req: HttpRequest) => route(req, idx2))
 }
 pub fn graph_json_str(idx: Index) -> String {

@@ -489,7 +489,7 @@ fn simple_exec_runs_without_a_manifest() {
 fn args_fixture(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("jet_cli_args_{tag}.jet"));
     fs::write(&p,
-        "use core.io as io\nfn main() {\n    args :: io.args()\n    print(args.len())\n}\n",
+        "use core.io as io\nfn main() {\n    args @= io.args()\n    print(args.len())\n}\n",
     ).unwrap();
     p
 }

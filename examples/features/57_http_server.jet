@@ -5,25 +5,25 @@ use jet.http as http
 use core.net as net
 use core.tasks as tasks
 fn handle(req: HttpRequest) -> HttpResponse {
-    greeting :: "hello from Jet! method={req.method()} path={req.path()}"
+    greeting @= "hello from Jet! method={req.method()} path={req.path()}"
     return HttpResponse {status: "200 OK", body: greeting, headers: [:]}
 }
 fn main() {
-    ch: Channel<String> :: tasks.channel()
-    sender :: ch.sender()
+    ch: Channel<String> @= tasks.channel()
+    sender @= ch.sender()
     // Start the server in a background task (handles one request for golden-test determinism).
     tasks.spawn(take(sender) () => {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        addr :: listener.local_addr()
+        listener @= net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+        addr @= listener.local_addr()
         sender.send(addr)
-        stream :: listener.accept() ?? panic("accept failed")
-        _req_raw :: stream.read() ?? panic("read failed")
-        req :: HttpRequest {method: "GET", path: "/", body: "", headers: [:]}
-        resp :: handle(req)
+        stream @= listener.accept() ?? panic("accept failed")
+        _req_raw @= stream.read() ?? panic("read failed")
+        req @= HttpRequest {method: "GET", path: "/", body: "", headers: [:]}
+        resp @= handle(req)
         net.tcp_reply(stream, resp.status(), resp.body())
     })
-    addr :: ch.receive() ?? panic("no address")
+    addr @= ch.receive() ?? panic("no address")
     // Send one HTTP request and print the response body (not the address).
-    resp :: http.get("http://{addr}/") ?? panic("http get failed")
+    resp @= http.get("http://{addr}/") ?? panic("http get failed")
     print(resp.body())
 }

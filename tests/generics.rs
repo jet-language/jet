@@ -39,7 +39,7 @@ struct Pair<T> {{
 }}
 
 fn main() {{
-    p :: twice({lit})
+    p @= twice({lit})
     print(p.first)
 }}
 "#
@@ -62,8 +62,8 @@ struct Pair<T> {
 }
 
 fn main() {
-    a :: twice(1)
-    b :: twice(2.5)
+    a @= twice(1)
+    b @= twice(2.5)
     print(a.first)
     print(b.first)
 }

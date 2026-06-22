@@ -10,7 +10,7 @@ fn greet(name: String, loud: Bool = false) -> String {
 trait Greetable {
     fn greeting(self) -> String
     fn announce(self) -> String {
-        g :: self.greeting()
+        g @= self.greeting()
         return "[ {g} ]"
     }
 }
@@ -21,7 +21,7 @@ struct Person {
 }
 impl Person: Greetable {
     fn greeting(self) -> String {
-        n :: self.name
+        n @= self.name
         return "hi, I'm {n}"
     }
 }
@@ -42,7 +42,7 @@ struct ConsoleLogger {
 }
 impl ConsoleLogger: Logger {
     fn log(self, msg: String) {
-        p :: self.prefix
+        p @= self.prefix
         print("{p}: {msg}")
     }
 }
@@ -53,12 +53,12 @@ impl App: Logger using logger
 fn main() {
     print(greet("world"))
     print(greet("world", true))
-    p :: Person {name: "Ada"}
+    p @= Person {name: "Ada"}
     print(p.greeting())
     print(p.announce())
-    pt :: make_point(3, 4)
+    pt @= make_point(3, 4)
     print(pt.x)
     print(pt.y)
-    app :: App {logger: ConsoleLogger {prefix: "INFO"}}
+    app @= App {logger: ConsoleLogger {prefix: "INFO"}}
     app.log("delegation works")
 }

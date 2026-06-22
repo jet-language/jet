@@ -13,11 +13,11 @@ struct Hit {
 }
 pub fn parse_query(raw: String) -> Query {
     if raw.starts_with("#") && (raw.len() > 1) {
-        tag :: raw.slice(1, (raw.len() - 1)).trim()
+        tag @= raw.slice(1, (raw.len() - 1)).trim()
         return Query.Tag(tag)
     }
     if raw.starts_with("type:") && (raw.len() > 5) {
-        kind_str :: raw.slice(5, (raw.len() - 1)).trim()
+        kind_str @= raw.slice(5, (raw.len() - 1)).trim()
         if kind_str == "user" {
             return Query.Kind(NoteType.User)
         }
@@ -34,7 +34,7 @@ pub fn parse_query(raw: String) -> Query {
     return Query.Text(raw)
 }
 fn note_type_matches(n: Note, k: NoteType) -> Bool {
-    note_kind :: note.kind_str(n)
+    note_kind @= note.kind_str(n)
     if k {
         User -> {
             return (note_kind == "user")
@@ -99,15 +99,15 @@ fn note_score(n: Note, q: Query) -> Int {
     return sorted
 }
 pub fn find(idx: Index, raw_query: String) -> [String] {
-    q :: parse_query(raw_query)
+    q @= parse_query(raw_query)
     hits: [Hit] := []
     loop name, n in idx.notes {
         if note_matches(n, q.clone()) {
-            score :: note_score(n, q.clone())
+            score @= note_score(n, q.clone())
             hits.push(Hit {name: name, score: score})
         }
     }
-    ranked :: rank(hits)
+    ranked @= rank(hits)
     names: [String] := []
     loop h in ranked {
         names.push(h.name)
@@ -127,7 +127,7 @@ fn main() {
     print("search module loaded")
 }
 #Test "tag query parses" {
-    raw :: parse_query("#feedback")
+    raw @= parse_query("#feedback")
     if raw {
         raw == Tag(t) -> {
             require_eq(t, "feedback")
@@ -138,7 +138,7 @@ fn main() {
     }
 }
 #Test "text query is default" {
-    raw :: parse_query("owner")
+    raw @= parse_query("owner")
     if raw {
         raw == Text(s) -> {
             require_eq(s, "owner")

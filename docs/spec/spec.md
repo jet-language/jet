@@ -90,9 +90,10 @@ expr     = precedence climbing over:
   bindings are optional; mismatched annotations are E0108.
 - A program must define `fn main` with no parameters and no return type
   (E0101, E0122); execution starts there. `main` never takes `pub` (S12).
-- `name :: value` is immutable, `name := value` mutable (D-BIND1); assigning
+- `name @= value` is immutable, `name := value` mutable (D-BIND2); assigning
   to an immutable binding is E0111. The retired `val`/`var` keywords are a
-  teaching error (E0985). Names may not shadow an existing name in scope (E0118).
+  teaching error (E0985); the retired `::` sigil is a teaching error (E0991).
+  Names may not shadow an existing name in scope (E0118).
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
   `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
   pointing at interpolation. Compound assignment (S17) mirrors the binary

@@ -12,7 +12,7 @@ fn handle_root(req: HttpRequest) -> HttpResponse {
 }
 
 fn handle_user(req: HttpRequest) -> HttpResponse {
-    id :: req.param("id") ?? "unknown"
+    id @= req.param("id") ?? "unknown"
     return HttpResponse {status: "200 OK", body: "user={id}", headers: [:]}
 }
 
@@ -21,43 +21,43 @@ fn handle_create(req: HttpRequest) -> HttpResponse {
 }
 
 fn main() {
-    router :: http.router()
+    router @= http.router()
     router.get("/", handle_root)
     router.get("/users/:id", handle_user)
     router.post("/users", handle_create)
 
-    ch: Channel<String> :: tasks.channel()
-    sender :: ch.sender()
+    ch: Channel<String> @= tasks.channel()
+    sender @= ch.sender()
 
     tasks.spawn(take(sender, router) () => {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        addr :: listener.local_addr()
+        listener @= net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+        addr @= listener.local_addr()
         sender.send(addr)
         // Serve exactly 4 connections then let the task exit.
         loop i in [0, 1, 2, 3] {
-            stream :: listener.accept() ?? panic("accept failed")
-            raw :: stream.read() ?? panic("read failed")
-            req :: http.parse(raw)
-            resp :: http.dispatch(router, req)
+            stream @= listener.accept() ?? panic("accept failed")
+            raw @= stream.read() ?? panic("read failed")
+            req @= http.parse(raw)
+            resp @= http.dispatch(router, req)
             net.tcp_reply(stream, resp.status(), resp.body())
         }
     })
 
-    addr :: ch.receive() ?? panic("no address")
+    addr @= ch.receive() ?? panic("no address")
 
     // 1: GET / → "welcome"
-    r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
+    r1 @= http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body())
 
     // 2: GET /users/42 → "user=42"
-    r2 :: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
+    r2 @= http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
     print(r2.body())
 
     // 3: POST /users → "created"
-    r3 :: http.post("http://{addr}/users", "") ?? panic("POST /users failed")
+    r3 @= http.post("http://{addr}/users", "") ?? panic("POST /users failed")
     print(r3.body())
 
     // 4: GET /missing → 404
-    r4 :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
+    r4 @= http.get("http://{addr}/missing") ?? panic("GET /missing failed")
     print(r4.status())
 }

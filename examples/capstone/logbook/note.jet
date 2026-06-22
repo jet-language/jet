@@ -22,7 +22,7 @@ pub struct Note {
     pub body: String
 }
 fn parse_note_type(path: String, s: String) -> NoteType ? ParseError {
-    trimmed :: s.trim()
+    trimmed @= s.trim()
     if trimmed == "user" {
         return ok(NoteType.User)
     }
@@ -40,13 +40,13 @@ fn parse_note_type(path: String, s: String) -> NoteType ? ParseError {
 // extract_links scans body for [[target]] patterns, returns deduped list preserving order.
 fn extract_links(body: String) -> [String] {
     links: [String] := []
-    parts :: body.split("[[")
+    parts @= body.split("[[")
     i: Int := 1
     loop i < parts.len() {
-        seg :: parts[i]
+        seg @= parts[i]
         if seg.contains("]]") {
-            halves :: seg.split("]]")
-            target :: halves[0].trim()
+            halves @= seg.split("]]")
+            target @= halves[0].trim()
             if links.contains(target) {
 
             } else {
@@ -63,7 +63,7 @@ fn extract_tags(body: String) -> [String] {
     loop line in body.split("\n") {
         loop word in line.split(" ") {
             if word.starts_with("#") && (word.len() > 1) {
-                tag :: word.slice(1, (word.len() - 1)).trim()
+                tag @= word.slice(1, (word.len() - 1)).trim()
                 if tags.contains(tag) {
 
                 } else {
@@ -76,31 +76,31 @@ fn extract_tags(body: String) -> [String] {
     return tags
 }
 pub fn parse(path: String, text: String) -> Note ? ParseError {
-    sections :: text.split("---")
+    sections @= text.split("---")
     if sections.len() < 3 {
         return err(ParseError.NoFrontmatter(path))
     }
-    frontmatter :: sections[1]
-    body :: sections[2].trim()
+    frontmatter @= sections[1]
+    body @= sections[2].trim()
     name: String := ""
     description: String := ""
     type_str: String := ""
     loop line in frontmatter.split("\n") {
-        t :: line.trim()
+        t @= line.trim()
         if t.starts_with("name:") {
-            parts :: t.split(":")
+            parts @= t.split(":")
             if parts.len() > 1 {
                 name = parts[1].trim()
             }
         }
         if t.starts_with("description:") {
-            parts :: t.split(":")
+            parts @= t.split(":")
             if parts.len() > 1 {
                 description = parts[1].trim()
             }
         }
         if t.starts_with("type:") {
-            parts :: t.split(":")
+            parts @= t.split(":")
             if parts.len() > 1 {
                 type_str = parts[1].trim()
             }
@@ -115,14 +115,14 @@ pub fn parse(path: String, text: String) -> Note ? ParseError {
     if type_str == "" {
         return err(ParseError.MissingField("{path}: missing field `type`"))
     }
-    kind :: parse_note_type(path, type_str)?
-    links :: extract_links(body)
-    tags :: extract_tags(body)
-    note_path :: "{path}"
+    kind @= parse_note_type(path, type_str)?
+    links @= extract_links(body)
+    tags @= extract_tags(body)
+    note_path @= "{path}"
     return ok(Note {name: name, description: description, note_type: kind, path: note_path, links: links, tags: tags, body: body})
 }
 pub fn kind_str(n: Note) -> String {
-    k :: n.note_type
+    k @= n.note_type
     if k {
         User -> {
             return "user"
@@ -143,15 +143,15 @@ fn main() {
     print("note module loaded")
 }
 #Test "extract_links deduplicates preserving order" {
-    body :: "See [[jet-philosophy]] and [[syntax-decisions]] and [[jet-philosophy]] again."
+    body @= "See [[jet-philosophy]] and [[syntax-decisions]] and [[jet-philosophy]] again."
     require_eq(extract_links(body).join(","), "jet-philosophy,syntax-decisions")
 }
 #Test "extract_tags returns sorted deduped list" {
-    body :: "some text\n\n#design #owner"
+    body @= "some text\n\n#design #owner"
     require_eq(extract_tags(body).join(","), "design,owner")
 }
 #Test "parse succeeds on well-formed frontmatter" {
-    doc :: """
+    doc @= """
     ---
     name: owner-design
     description: owner design preferences and workflow constraints
@@ -164,14 +164,14 @@ fn main() {
 
     #design #owner
     """
-    note :: parse("test.md", doc) ?? panic("parse failed")
-    note_kind :: kind_str(note)
+    note @= parse("test.md", doc) ?? panic("parse failed")
+    note_kind @= kind_str(note)
     require_eq(note.name, "owner-design")
     require_eq(note.description, "owner design preferences and workflow constraints")
     require_eq(note_kind, "feedback")
 }
 #Test "parse error on bad type string" {
-    doc :: """
+    doc @= """
     ---
     name: test
     description: a test note

@@ -5,13 +5,13 @@ use core.fs as fs
 use core.json as json
 use core.process as process
 fn main() {
-    args :: io.args()
-    path :: args.get(1) ?? ""
+    args @= io.args()
+    path @= args.get(1) ?? ""
     if path == "" {
         print("usage: jsonfmt FILE")
         process.exit(1)
     }
-    text :: fs.read(path) ?? panic("cannot read file")
+    text @= fs.read(path) ?? panic("cannot read file")
     if json.parse(text) {
         it == ok(data) -> {
             print(json.render_pretty(data))

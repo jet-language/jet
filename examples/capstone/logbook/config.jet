@@ -11,7 +11,7 @@ pub fn load(path: String) -> Config {
     notes_dir: String := "notes"
     level: String := "info"
     if fs.exists(path.clone()) {
-        raw :: fs.read(path.clone()) ?? ""
+        raw @= fs.read(path.clone()) ?? ""
         if toml.parse(raw) {
             it == ok(table) -> {
                 addr = table.get("addr") ?? addr
@@ -29,6 +29,6 @@ pub fn load(path: String) -> Config {
     return Config {addr: addr, notes_dir: notes_dir, level: level}
 }
 fn main() {
-    cfg :: load("config.toml")
+    cfg @= load("config.toml")
     print("addr: {cfg.addr}")
 }
