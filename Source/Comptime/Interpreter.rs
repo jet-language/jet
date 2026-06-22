@@ -283,6 +283,7 @@ impl<'a> Interp<'a> {
             // D-REGION1: allocation regions are a runtime/codegen construct; the
             // comptime interpreter has no arenas, so a `region` block is declined.
             Stmt::Region { span, .. } => Err(unsupported("a `region` block", *span)),
+            Stmt::Caps { span, .. } => Err(unsupported("a `#Caps` block", *span)),
             // D-CTX1: the smart-context block is a runtime/codegen construct; the
             // comptime interpreter declines it (no thread-local context at compile time).
             Stmt::ContextBlock { span, .. } => Err(unsupported("a `#Context` block", *span)),

@@ -1494,6 +1494,7 @@ impl<'a> Parser<'a> {
                         Stmt::Loop { span: s, .. } => s.end,
                         Stmt::Unsafe { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
+                        Stmt::Caps { span, .. } => span.end,
                         Stmt::ComptimeIf { span, .. } => span.end,
                         Stmt::ContextBlock { span, .. } => span.end,
                     }

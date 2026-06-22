@@ -459,6 +459,7 @@ fn collect_view_return_hints(stmts: &[AST::Stmt], mp: &str, db: &mut SymbolDB) {
             AST::Stmt::If(if_stmt) => collect_view_return_hints_if(if_stmt, mp, db),
             AST::Stmt::While { body, .. }
             | AST::Stmt::For { body, .. }
+            | AST::Stmt::Caps { body, .. }
             | AST::Stmt::Region { body, .. }
             | AST::Stmt::Loop { body, .. } => collect_view_return_hints(body, mp, db),
             AST::Stmt::Switch {
@@ -576,7 +577,8 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
         }
         AST::Stmt::Loop { body, .. }
         | AST::Stmt::Unsafe { body, .. }
-        | AST::Stmt::Region { body, .. } => {
+        | AST::Stmt::Region { body, .. }
+        | AST::Stmt::Caps { body, .. } => {
             collect_stmts(body, mp, module, db);
         }
         AST::Stmt::Break(_)

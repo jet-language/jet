@@ -123,6 +123,39 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-EFF1 / D-QUAL1: parse a `#Caps(Net, Db) { … }` effect-restriction region
+    /// in statement position. Cursor is on the `#` token. Effect names are bare
+    /// idents; sema validates them against the known effect vocabulary (E0119).
+    fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // `#`
+        self.bump(); // `Caps`
+        let lparen = self.peek().span;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_CAPS))?;
+        let mut caps = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, span) = self.expect_ident("for an effect name")?;
+                caps.push((name, span));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between effects in the list")?;
+            }
+        }
+        let rparen = self.peek().span;
+        self.expect(TokKind::RParen, &format!("to close the `#{}(…)` list", Syntax::KW_CAPS))?;
+        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::Caps {
+            caps,
+            caps_span: Span::new(lparen.start, rparen.end),
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// S19 + D-LABEL1: parse a `loop` statement (all three header forms), with an
     /// optional `@name` label already parsed by the caller. The cursor is on the
     /// `loop` keyword.
@@ -631,6 +664,10 @@ impl<'a> Parser<'a> {
                 // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
                     return self.at_context_stmt();
+                }
+                // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
+                    return self.at_caps_stmt();
                 }
                 // S58 (E2-M13): `#Audit("…")` / `#Unsafe { … }` — the audited gate.
                 self.at_unsafe_stmt()

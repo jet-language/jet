@@ -1138,6 +1138,45 @@ impl<'a> Checker<'a> {
             Stmt::Region { body, .. } => {
                 self.check_block(body, true);
             }
+            // D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction
+            // region. Validate the cap names (E0119), open an accumulator so the
+            // effects reached inside are tallied, check the body, then seal the
+            // region for the post-pass E0741 subset check. A lexical scope.
+            Stmt::Caps { caps, caps_span, body, .. } => {
+                let mut cap_set = crate::Sema::EffectSet::new();
+                let mut bad = false;
+                for (name, span) in caps.iter() {
+                    match crate::Sema::Effect::parse(name) {
+                        Some(e) => {
+                            cap_set.insert(e);
+                        }
+                        None => {
+                            self.diags.push(unknown_effect(name, *span));
+                            bad = true;
+                        }
+                    }
+                }
+                self.region_stack.push(crate::Sema::RegionAccum {
+                    caps: cap_set,
+                    caps_span: *caps_span,
+                    direct: crate::Sema::EffectSet::new(),
+                    edges: std::collections::BTreeSet::new(),
+                    maximal: false,
+                });
+                self.check_block(body, true);
+                let acc = self.region_stack.pop().expect("pushed above");
+                // Skip the E0741 subset check when a cap name was invalid (the
+                // cap set is incomplete) — E0119 is the real problem to fix.
+                if !bad {
+                    self.fx_regions.push(crate::Sema::RegionSummary {
+                        caps: acc.caps,
+                        direct: acc.direct,
+                        edges: acc.edges,
+                        maximal: acc.maximal,
+                        caps_span: acc.caps_span,
+                    });
+                }
+            }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
             // Type-check each field value: `allocator` must be an allocator
             // handle type; `logger` must be a logger value. E0762 on mismatch.

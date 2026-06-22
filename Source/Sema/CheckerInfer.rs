@@ -2784,7 +2784,7 @@ impl<'a> Checker<'a> {
         // case the edge to that user function is recorded below).
         if !self.funcs.contains_key(&call.name) {
             if let Some(e) = builtin_effect(&call.name) {
-                self.fx_direct.insert(e);
+                self.record_effect(e);
             }
         }
         if call.name == Syntax::FOREIGN_PRINTLN || call.name == Syntax::FOREIGN_EPRINTLN {
@@ -3082,9 +3082,9 @@ impl<'a> Checker<'a> {
         // A foreign (`extern`) callee has an un-inspectable body, so it forces
         // the maximal effect set; a Jet callee's effects flow in via its edge.
         if sig.is_extern {
-            self.fx_maximal = true;
+            self.record_maximal();
         } else {
-            self.fx_edges.insert(call.name.clone());
+            self.record_edge(call.name.clone());
         }
 
         // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers

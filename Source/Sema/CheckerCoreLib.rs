@@ -307,7 +307,7 @@ impl<'a> Checker<'a> {
         // D-EFF1: record the effect this Core call contributes to the enclosing
         // function's inferred set (erased in codegen; purely a sema fact).
         if let Some(e) = core_effect(module, name) {
-            self.fx_direct.insert(e);
+            self.record_effect(e);
         }
         // E2-M15 / E3301: reject OS-dependent APIs in freestanding builds.
         if self.freestanding && is_freestanding_forbidden(module) {

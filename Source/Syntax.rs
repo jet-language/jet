@@ -511,6 +511,12 @@ pub const KW_TODO: &str = "Todo";
 /// error pointing at `#Pure`.
 pub const KW_PURE: &str = "Pure";
 
+/// D-EFF1 / D-QUAL1 (ratified 2026-06-22): the effect-restriction region marker,
+/// written `#Caps(Net, Db) { … }`. Inside the block, the body (and everything it
+/// transitively calls) may use only the listed effects; an out-of-set effect is
+/// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
+pub const KW_CAPS: &str = "Caps";
+
 /// S14 / D-CASING1 follow-on (2026-06-21): the retired lowercase spellings of
 /// the three marker keywords, recognized only for teaching errors that point at
 /// the `#Test` / `#Pure` / `#Todo` marker forms.

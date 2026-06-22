@@ -951,6 +951,31 @@ contradiction, **E0745**.
 Effects are erased: `#(Fs)`, `#Pure`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
+### Restricting a region — `#Caps(…) { … }`
+
+Where `#(…)` bounds a whole function, `#Caps(…) { … }` restricts a **block**.
+Inside the region, the only effects allowed — directly or through any call it
+reaches — are the ones listed; anything else is **E0741**. It is a hard local
+ceiling, not a grant: the effects still happen and still count toward the
+enclosing function's set.
+
+```ebnf
+caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
+```
+
+```jet
+fn main() {
+    #Caps(Fs, Io) {
+        val text = core.fs.read("x") ?? "";   // Fs — allowed
+        print(text);                            // Io — allowed
+    }
+}
+```
+
+A call inside the region that transitively touches `Net` would be E0741 even
+though no `Net` call appears literally in the block. Like every effect
+construct, `#Caps` is a plain lexical block in codegen — it erases.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

@@ -523,9 +523,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         }
     }
 
-    // D-EFF1: whole-program effect fixpoint, then enforce every `#(…)` bound.
+    // D-EFF1: whole-program effect fixpoint, then enforce every `#(…)` bound and
+    // every `#Caps(…)` region restriction.
     let solved = solve(&effect_summaries);
     check_effect_boundaries(&prog.items, &solved, &mut diags);
+    check_region_caps(&effect_summaries, &solved, &mut diags);
 
     diags
 }
@@ -613,17 +615,6 @@ pub(crate) fn check_effect_boundaries(
     }
 }
 
-/// E0119: a `#(…)` effect list names something that isn't a known effect.
-fn unknown_effect(name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0119",
-        format!("`{}` isn't a known effect", name),
-        "an effect list names compiler-known effects like `Net`, `Fs`, `Io`, `Db`, or `Time`"
-            .to_string(),
-        "use one of the known effect names, or remove it from the list".to_string(),
-        Some(span),
-    )
-}
 
 pub(crate) fn name_defined(
     name: &str,
@@ -1155,6 +1146,8 @@ pub(crate) fn check_func_body(
         fx_direct: std::collections::BTreeSet::new(),
         fx_edges: std::collections::BTreeSet::new(),
         fx_maximal: false,
+        region_stack: Vec::new(),
+        fx_regions: Vec::new(),
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
@@ -1201,6 +1194,7 @@ pub(crate) fn check_func_body(
             direct: std::mem::take(&mut ck.fx_direct),
             edges: std::mem::take(&mut ck.fx_edges),
             maximal: ck.fx_maximal,
+            regions: std::mem::take(&mut ck.fx_regions),
         },
     );
     ck.diags

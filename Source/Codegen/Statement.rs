@@ -380,6 +380,14 @@ fn emit_stmt(
             emit_stmts(cx, body, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-EFF1: a `#Caps(…) { … }` effect-restriction region lowers to a plain
+        // Rust block. The cap set is enforced entirely in sema (E0741); codegen
+        // is dumb and effects erase (I3).
+        Stmt::Caps { body, .. } => {
+            out.push_str(&format!("{}{{\n", pad));
+            emit_stmts(cx, body, env, out, indent + 1, view_return);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
         // Codegen is dumb (I3): sema has already type-checked every field.
         // Lower to a plain Rust block with a JetContextGuard RAII value per

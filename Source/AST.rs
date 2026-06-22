@@ -1080,6 +1080,17 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction region. The
+    /// `caps` list is the only effects the body (and everything it transitively
+    /// calls) may use; an out-of-set effect is E0741. `caps` names are validated
+    /// in sema. A lexical scope emitted as a plain Rust block — the restriction
+    /// is enforced entirely in sema (I3: codegen stays dumb, effects erase).
+    Caps {
+        caps: Vec<(String, Span)>,
+        caps_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `comptime if <cond> { … } else { … }`.
     /// The condition is evaluated at compile time; only the selected arm is
     /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).

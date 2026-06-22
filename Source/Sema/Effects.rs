@@ -80,6 +80,36 @@ impl Effect {
 
 pub type EffectSet = BTreeSet<Effect>;
 
+impl<'a> super::Checker<'a> {
+    /// D-EFF1: record an effect this function reaches directly — into the
+    /// function's set and every open `#Caps(…)` region (which must account for
+    /// effects reached inside it, E0741).
+    pub(crate) fn record_effect(&mut self, e: Effect) {
+        self.fx_direct.insert(e);
+        for r in &mut self.region_stack {
+            r.direct.insert(e);
+        }
+    }
+
+    /// D-EFF1: record a call-graph edge to a user function `name` — into the
+    /// function's edges and every open `#Caps(…)` region.
+    pub(crate) fn record_edge(&mut self, name: String) {
+        for r in &mut self.region_stack {
+            r.edges.insert(name.clone());
+        }
+        self.fx_edges.insert(name);
+    }
+
+    /// D-EFF1: record that a foreign (`extern`) call was reached — forcing the
+    /// maximal set on the function and every open `#Caps(…)` region.
+    pub(crate) fn record_maximal(&mut self) {
+        self.fx_maximal = true;
+        for r in &mut self.region_stack {
+            r.maximal = true;
+        }
+    }
+}
+
 /// Render a set as `Net, Fs` (canonical order) for diagnostics.
 pub fn show_set(set: &EffectSet) -> String {
     set.iter().map(|e| e.name()).collect::<Vec<_>>().join(", ")
@@ -122,6 +152,33 @@ pub struct EffectSummary {
     pub edges: BTreeSet<String>,
     /// A foreign (`extern`) call was reached: the body's effects are maximal.
     pub maximal: bool,
+    /// D-EFF1: `#Caps(…)` restriction regions found in this body (checked against
+    /// their transitive inferred set in the post-pass — E0741).
+    pub regions: Vec<RegionSummary>,
+}
+
+/// D-EFF1: an open `#Caps(…)` region's running accumulator while the checker
+/// walks its body. Sealed into a `RegionSummary` when the region closes.
+#[derive(Debug, Clone)]
+pub struct RegionAccum {
+    pub caps: EffectSet,
+    pub caps_span: Span,
+    pub direct: EffectSet,
+    pub edges: BTreeSet<String>,
+    pub maximal: bool,
+}
+
+/// D-EFF1: a `#Caps(…) { … }` region's accumulated effects, checked (transitively)
+/// against the declared cap set in the post-pass.
+#[derive(Debug, Clone)]
+pub struct RegionSummary {
+    /// The declared cap set — the only effects the region may use.
+    pub caps: EffectSet,
+    pub direct: EffectSet,
+    pub edges: BTreeSet<String>,
+    pub maximal: bool,
+    /// Span of the `#Caps(…)` list, for the diagnostic.
+    pub caps_span: Span,
 }
 
 /// Whole-program fixpoint: turn per-function summaries into transitive inferred
@@ -182,6 +239,65 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
             decl, over_list
         ),
         format!("add `{}` to the effect list, or stop using it in `{}`", over_list, fn_name),
+        Some(span),
+    )
+}
+
+/// D-EFF1: check every `#Caps(…)` region across the program against its
+/// transitive inferred effect set (region.direct ∪ maximal ∪ ⋃ solved[edge]).
+/// An effect used inside a region that its cap list omits is E0741.
+pub fn check_region_caps(
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for summary in summaries.values() {
+        for region in &summary.regions {
+            let mut inferred = region.direct.clone();
+            if region.maximal {
+                inferred.extend(Effect::all());
+            }
+            for callee in &region.edges {
+                if let Some(cs) = solved.get(callee) {
+                    inferred.extend(cs.iter().copied());
+                }
+            }
+            let over: EffectSet = inferred.difference(&region.caps).copied().collect();
+            if !over.is_empty() {
+                diags.push(e0741(&over, &region.caps, region.caps_span));
+            }
+        }
+    }
+}
+
+/// E0741: an effect used inside a `#Caps(…)` region is not in its cap list.
+pub fn e0741(over: &EffectSet, caps: &EffectSet, span: Span) -> Diagnostic {
+    let over_list = show_set(over);
+    let caps_list = if caps.is_empty() {
+        "no effects".to_string()
+    } else {
+        format!("`{}`", show_set(caps))
+    };
+    Diagnostic::error(
+        "E0741",
+        format!("this `#{}` region uses the effect `{}`, which it doesn't allow", crate::Syntax::KW_CAPS, over_list),
+        format!(
+            "`#{}(…)` restricts the region to {}; an effect reached inside — even through a call — must be in that list",
+            crate::Syntax::KW_CAPS, caps_list
+        ),
+        format!("add `{}` to the `#{}(…)` list, or move that work outside the region", over_list, crate::Syntax::KW_CAPS),
+        Some(span),
+    )
+}
+
+/// E0119: a `#(…)` or `#Caps(…)` list names something that isn't a known effect.
+pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0119",
+        format!("`{}` isn't a known effect", name),
+        "an effect list names compiler-known effects like `Net`, `Fs`, `Io`, `Db`, or `Time`"
+            .to_string(),
+        "use one of the known effect names, or remove it from the list".to_string(),
         Some(span),
     )
 }

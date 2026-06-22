@@ -443,6 +443,13 @@ pub(crate) struct Checker<'a> {
     /// D-EFF1: a foreign (`extern`) call was reached — the body's effects are
     /// the maximal set (an un-inspectable body may do anything).
     fx_maximal: bool,
+    /// D-EFF1: stack of active `#Caps(…)` regions, innermost last. Every effect
+    /// or edge recorded while one is open is also added to it (and all enclosing
+    /// regions) so the region's own effect set can be checked against its caps.
+    region_stack: Vec<RegionAccum>,
+    /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
+    /// `EffectSummary` for the post-pass E0741 check.
+    fx_regions: Vec<RegionSummary>,
     in_unsafe: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.

@@ -91,6 +91,52 @@ fn main() { print(calc()); }
     assert!(codes(src).contains(&"E0745"), "expected E0745, got {:?}", codes(src));
 }
 
+/// A `#Caps(…)` region whose body stays within the cap set compiles clean.
+#[test]
+fn caps_region_within_set_ok() {
+    let src = r#"
+fn announce(n: Int) #(Io) { print("{n}"); }
+fn main() {
+    #Caps(Io) {
+        announce(1);
+    }
+}
+"#;
+    assert!(codes(src).is_empty(), "in-set caps region should compile: {:?}", codes(src));
+}
+
+/// An effect used inside a `#Caps(…)` region but not in its cap list is E0741.
+#[test]
+fn caps_region_out_of_set_is_e0741() {
+    let src = r#"
+use core.fs as fs
+fn main() {
+    #Caps(Net) {
+        text @= fs.read("x") ?? "";
+        print(text);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0741"), "expected E0741, got {:?}", codes(src));
+}
+
+/// A `#Caps(…)` region restriction is transitive: an effect reached only through
+/// a call still trips E0741.
+#[test]
+fn caps_region_transitive_is_e0741() {
+    let src = r#"
+use core.fs as fs
+fn helper(p: String) -> String { return fs.read(p) ?? ""; }
+fn main() {
+    #Caps(Io) {
+        text @= helper("x");
+        print(text);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0741"), "transitive Fs should trip E0741: {:?}", codes(src));
+}
+
 /// An unknown effect name is E0119, and does not also trip E0740.
 #[test]
 fn unknown_effect_name_is_e0119_only() {

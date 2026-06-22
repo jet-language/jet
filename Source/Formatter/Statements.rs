@@ -153,6 +153,18 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
+            Stmt::Caps { caps, body, .. } => {
+                let list = caps
+                    .iter()
+                    .map(|(n, _)| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.write(&format!("#{}({}) {{", Syntax::KW_CAPS, list));
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-WHEN1 (ratified 2026-06-19): format like `if` with `comptime` lead.
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
                 self.write(&format!("{} {} ", Syntax::KW_COMPTIME, Syntax::KW_IF));

@@ -257,6 +257,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Loop { body: inner, span: s, .. } => inner.last().map(stmt_end).unwrap_or(s.end),
         Stmt::Unsafe { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeIf { else_body, then_body, span, .. } => else_body
             .as_ref()
             .and_then(|b| b.last())
@@ -450,6 +451,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Loop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
+        Stmt::Caps { span, .. } => span.start,
         Stmt::ComptimeIf { span, .. } => span.start,
         Stmt::ContextBlock { span, .. } => span.start,
     }
