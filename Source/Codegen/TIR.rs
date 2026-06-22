@@ -58,6 +58,22 @@ pub(crate) struct TFunc {
     pub(crate) ret: Option<Type>,
     pub(crate) is_main: bool,
     pub(crate) body: Vec<TStmt>,
+    /// c109 Phase 7: how this function is emitted. A top-level function gets
+    /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
+    /// inside an `impl` block (indented), with the `self` receiver form per the
+    /// resolved convention (or no receiver for a static method).
+    pub(crate) kind: TFuncKind,
+}
+
+/// c109 Phase 7: the emission shape of a lowered function.
+pub(crate) enum TFuncKind {
+    /// A module-level free function — `pub fn name(params) { … }`.
+    TopLevel,
+    /// An inherent method inside `impl user_<T> { … }`. `self_conv` is the receiver
+    /// convention for an instance method (`Read`→`&self`, `Mutate`→`&mut self`,
+    /// `Move`→`self`), or `None` for a STATIC (associated) method (no `self`
+    /// parameter). The method name is mangled (`user_<name>`) and emitted with `pub`.
+    Method { self_conv: Option<AccessConvention> },
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
@@ -304,6 +320,15 @@ pub(crate) enum TExprKind {
         method_rust: String,
         args: Vec<TCallArg>,
     },
+    /// c109 Phase 7: a STATIC (associated) method call `Type.make(args)`. Resolved
+    /// at lowering to `user_<Type>::user_<method>(args)` — `type_prefix` is the
+    /// already-resolved Rust type head (`user_<Type>`), `method_rust` the mangled
+    /// method name. Mirrors the AST type-name dispatch (Expression.rs ~L1644).
+    StaticCall {
+        type_prefix: String,
+        method_rust: String,
+        args: Vec<TCallArg>,
+    },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
         cond: Box<TExpr>,
@@ -394,6 +419,109 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // reference (const or fn-value), which the subset excludes.
     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
+}
+
+/// c109 Phase 7: is this method (an inherent method of `type_name`) fully inside
+/// the TIR subset? Covers two method classes:
+///   - **instance methods** — a `self` first parameter (`self`/`mut self`/`view
+///     self`/… via any convention), where `self.field` reads and covered-subset
+///     constructs (Phases 1–6) make up the body. The `self` slot lowers to the
+///     correct Rust receiver (`&self`/`&mut self`/`self`).
+///   - **static methods** — no `self` parameter; an associated function on the
+///     type (`Type.make(x) -> Type`). The body + every static call site
+///     (`Type.make(x)` → `user_Type::user_make(x)`) are covered.
+///
+/// The owning `type_name` must itself be a covered struct or enum (so the receiver
+/// place + field reads emit exactly as `emit_method` does). The rule is the same
+/// **exclude on any doubt**: a false negative just keeps the method on the AST
+/// path, a false positive risks a silent miscompile (a wrong `self` receiver).
+pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
+    // Signature shape: no generics, not unsafe/pure.
+    if !f.type_params.is_empty() || f.is_unsafe || f.is_pure {
+        return false;
+    }
+    // A `view`-returning method returns a borrow whose lowering is subtle — defer.
+    if f.is_view_return {
+        return false;
+    }
+    // The owning type must be a covered struct or enum (the receiver place and
+    // every `self.field` read then emit exactly as `emit_method` produces them).
+    let owner_ty = Type::Named(type_name.to_string());
+    if !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx) {
+        return false;
+    }
+    // The self parameter (if any) must be the FIRST parameter, per the method
+    // calling convention. A `self`-bearing method is an instance method; a method
+    // with no `self` is a static (associated) function. Any non-first `self` is
+    // malformed (sema rejects it) — exclude defensively.
+    if f.params.iter().skip(1).any(|p| p.name == Syntax::KW_SELF) {
+        return false;
+    }
+    // A `mut self` / `view self` reassignment (`self = …`) is a known AST-path I2
+    // hole (the self slot does not deref on the LHS); the covered subset never
+    // admits an assignment to `self` because `Stmt::Assign` to a `Local` named
+    // `self` would emit the buggy form. Guard it: a body that assigns `self` is out.
+    // (Field assignment `self.field = v` is already E0003 — not a Jet construct.)
+    //
+    // Non-self params + the return type must be covered value types (Self resolves
+    // to the owning type). Self-typed params carry no default.
+    for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
+        if p.default.is_some() || !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
+            return false;
+        }
+    }
+    if let Some(rt) = &f.return_type {
+        if !is_subset_param_ty(&resolve_self_ty(rt, type_name), cx) {
+            return false;
+        }
+    }
+    // `self` is a binding in scope for the body (its field reads + the implicit
+    // match subject). Non-self params join it.
+    let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
+    // The body must be entirely in-subset AND never assign to `self`.
+    f.body.iter().all(|s| {
+        !stmt_assigns_self(s) && stmt_in_subset(s, cx, &mut locals)
+    })
+}
+
+/// Resolve a `Self` type reference to the owning concrete type. Other types pass
+/// through unchanged. (In current Jet a literal `Self` return rarely type-checks —
+/// sema treats `Self` and the concrete name as distinct — but resolving it here
+/// keeps the gate total if a future sema unifies them.)
+fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
+    match ty {
+        Type::Named(n) if n == "Self" => Type::Named(type_name.to_string()),
+        _ => ty.clone(),
+    }
+}
+
+/// True if any statement in this (recursively walked) tree assigns to a local
+/// named `self`. Such an assignment is the known AST-path I2 hole for `mut self`
+/// (the self slot does not deref on the LHS), so the gate excludes the whole
+/// method. Only the constructs the subset already admits need be walked.
+fn stmt_assigns_self(s: &Stmt) -> bool {
+    match s {
+        Stmt::Assign { target: LValue::Local { name, .. }, .. } => name == Syntax::KW_SELF,
+        Stmt::Assign { .. } => false,
+        Stmt::If(ifs) => {
+            ifs.then_body.iter().any(stmt_assigns_self)
+                || match &ifs.else_branch {
+                    Some(ElseBranch::Else(body)) => body.iter().any(stmt_assigns_self),
+                    Some(ElseBranch::ElseIf(next)) => stmt_assigns_self(&Stmt::If((**next).clone())),
+                    None => false,
+                }
+        }
+        Stmt::Loop { body, .. } | Stmt::While { body, .. } | Stmt::For { body, .. } => {
+            body.iter().any(stmt_assigns_self)
+        }
+        Stmt::Switch { arms, else_body, .. } => {
+            arms.iter().any(|a| a.body.iter().any(stmt_assigns_self))
+                || else_body
+                    .as_ref()
+                    .is_some_and(|b| b.iter().any(stmt_assigns_self))
+        }
+        _ => false,
+    }
 }
 
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
@@ -1093,9 +1221,23 @@ fn method_call_in_subset(
     if method == "clone" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
+    // this (its `recv_type` is `None`). The AST path emits `user_<T>::user_<method>(…)`
+    // when the receiver is a type name in `cx.type_names` (Expression.rs ~L1644). We
+    // reproduce exactly that, and only that: the receiver is a bare type-name ident
+    // (not a local), the type is a covered struct/enum, the method is a registered
+    // user method (in `method_sigs`) that is NOT an enum *variant* (those emit an enum
+    // literal, a different lowering) and NOT a builtin/special intercept.
+    if recv_type.is_none() {
+        if let Expr::Ident(type_name, _) = receiver {
+            return static_method_call_in_subset(type_name, method, args, cx, locals);
+        }
+        return false;
+    }
     // Shape (b): a user-defined instance method. The `recv_type` is the TOTAL sema
-    // fact; a `None` means a static call / fallback-inference path the subset must
-    // NOT reproduce — exclude.
+    // fact; a `None` was handled above (static). Anything else (a fallback-inferred
+    // path) the subset must NOT reproduce — but `recv_type == Some` is the total
+    // instance-method signal.
     let Some(ty) = recv_type else {
         return false;
     };
@@ -1131,6 +1273,57 @@ fn method_call_in_subset(
     // `emit_call_args`). The arg *type* is restricted to what the emitter can wrap:
     // a covered value type; a Fn-typed param would need the Box-coercion form, so
     // exclude any method whose param at this position is a function type.
+    args.iter().zip(sig.iter()).all(|(a, (_, pty))| {
+        a.label.is_none()
+            && !matches!(pty, Type::Fn { .. })
+            && expr_in_subset(&a.expr, cx, locals)
+    })
+}
+
+/// c109 Phase 7: is a STATIC method call `Type.make(args)` inside the subset? The
+/// AST path (Expression.rs ~L1644) emits `user_<Type>::user_<method>(args)` for a
+/// `MethodCall` whose receiver is an ident in `cx.type_names`. We admit exactly that
+/// case, conservatively:
+///   - `type_name` is NOT a local (a local shadowing a type would be a field/method
+///     access, not a static call);
+///   - `type_name` is a covered struct or enum (so its `user_<T>` prefix is right);
+///   - `method` is NOT an enum *variant* of `type_name` — a `Enum.Variant(args)`
+///     receiver+method emits an enum literal (a different lowering, Expression.rs
+///     ~L1635), so exclude it (Phase 4 covers enum literals via `Expr::EnumLit`/
+///     unit `Expr::Field`, not this MethodCall shape);
+///   - `method` is NOT a builtin/special intercept (`new`, etc.);
+///   - `(type_name, method)` is a registered user method (`method_sigs`);
+///   - every arg is in-subset, unlabeled, and not Fn-typed.
+fn static_method_call_in_subset(
+    type_name: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    if locals.contains(type_name) {
+        return false;
+    }
+    if is_intercepted_method_name(method) {
+        return false;
+    }
+    let ty = Type::Named(type_name.to_string());
+    if !is_covered_struct_ty(&ty, cx) && !is_covered_enum_ty(&ty, cx) {
+        return false;
+    }
+    // An enum-name receiver whose `method` names a variant emits an enum literal,
+    // not a static call — exclude (it never reaches `method_sigs` on the AST path).
+    if let Some(variants) = cx.enum_variants.get(type_name) {
+        if variants.iter().any(|(v, _)| v == method) {
+            return false;
+        }
+    }
+    let Some(sig) = cx.method_sigs.get(&(type_name.to_string(), method.to_string())) else {
+        return false;
+    };
+    if args.len() != sig.len() {
+        return false;
+    }
     args.iter().zip(sig.iter()).all(|(a, (_, pty))| {
         a.label.is_none()
             && !matches!(pty, Type::Fn { .. })
@@ -1252,6 +1445,55 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         ret: f.return_type.clone(),
         is_main: f.name == "main",
         body,
+        kind: TFuncKind::TopLevel,
+    }
+}
+
+/// c109 Phase 7: lower an inherent method (instance or static) of `type_name` to a
+/// `TFunc`. Mirrors `emit_method`'s slot construction exactly:
+///  - the `self` parameter (if any) becomes a slot whose place is the bare `self`
+///    (rust_name `self`, NO deref — `self.field` reads emit `(self).field`, and a
+///    `when self` match scrutinee emits `self` with no clone, exactly as the AST
+///    path does for a `&self`/`&mut self`/`self` receiver) and whose type is `None`
+///    (matching `emit_method`'s `jet_ty: None` so overflow decisions are identical);
+///  - non-self params get the same `param_place` deref logic as a free function.
+/// The `self_conv` (instance) / `None` (static) and the resolved return type drive
+/// the receiver/signature in `emit_tir_func`.
+pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
+    let mut env = LowerEnv {
+        locals: HashMap::new(),
+    };
+    let mut params = Vec::new();
+    let mut self_conv: Option<AccessConvention> = None;
+    let mut is_static = true;
+    for p in &f.params {
+        if p.name == Syntax::KW_SELF {
+            // The self slot: place `self`, no deref, type None (parity with emit_method).
+            env.locals
+                .insert(Syntax::KW_SELF.to_string(), ("self".to_string(), None));
+            self_conv = Some(p.convention);
+            is_static = false;
+            continue;
+        }
+        let rust_name = mangle(&p.name);
+        let place = param_place(&rust_name, p);
+        // A `Self`-typed param resolves to the owning type for totality.
+        let pty = resolve_self_ty(&p.ty, type_name);
+        env.locals.insert(p.name.clone(), (place, Some(pty.clone())));
+        params.push((rust_name, pty, p.convention));
+    }
+    let body = lower_stmts(&f.body, cx, &mut env);
+    // An instance method carries `Some(conv)`; a static method carries `None`.
+    let kind = TFuncKind::Method {
+        self_conv: if is_static { None } else { self_conv },
+    };
+    TFunc {
+        name: f.name.clone(),
+        params,
+        ret: f.return_type.as_ref().map(|t| resolve_self_ty(t, type_name)),
+        is_main: false,
+        body,
+        kind,
     }
 }
 
@@ -2090,6 +2332,37 @@ fn lower_method_call(
             kind: TExprKind::Clone(Box::new(recv)),
         };
     }
+    // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
+    // (`static_method_call_in_subset`) proved the receiver is a covered type-name
+    // ident and `method` is a registered static method. Mirror the AST path
+    // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
+    if recv_type.is_none() {
+        let Expr::Ident(type_name, _) = receiver else {
+            unreachable!("gate proved static receiver is a type-name ident");
+        };
+        let sig = cx
+            .method_sigs
+            .get(&(type_name.clone(), method.to_string()))
+            .cloned()
+            .unwrap_or_default();
+        let targs = lower_method_args(args, &sig, env, cx);
+        let ret_ty = cx
+            .method_rets
+            .get(&(type_name.clone(), method.to_string()))
+            .cloned()
+            .flatten()
+            .map(|t| resolve_self_ty(&t, type_name))
+            .unwrap_or_else(unit_type);
+        return TExpr {
+            ty: ret_ty,
+            kind: TExprKind::StaticCall {
+                // The AST path uses `cx.type_prefix(type_name)` = `user_<T>`.
+                type_prefix: cx.type_prefix(type_name),
+                method_rust: mangle(method),
+                args: targs,
+            },
+        };
+    }
     // A user instance method on a covered type. `recv_type` is total (gate proved
     // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
     // name (trait-impl methods keep their bare name; others get the `user_` mangle).
@@ -2182,6 +2455,15 @@ fn lower_method_args(
 /// The only difference is that every decision is *read off the TIR* rather than
 /// recomputed — there is no `expr_jet_ty` / `operand_is_integer` call anywhere.
 pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
+    match &tir.kind {
+        TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
+        TFuncKind::Method { self_conv } => emit_tir_method(tir, *self_conv, cx, out),
+    }
+}
+
+/// A module-level free function: `pub fn name(params) -> ret { … }` (or `fn main`).
+/// Byte-identical to `emit_func`'s output.
+fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     let ret_clause = match &tir.ret {
         Some(t) => format!(" -> {}", rust_return_type(cx, t, false)),
         None => String::new(),
@@ -2206,6 +2488,44 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
     ));
     emit_tir_stmts(&tir.body, cx, out, 1);
     out.push_str("}\n\n");
+}
+
+/// c109 Phase 7: an inherent method, emitted INSIDE an `impl user_<T> { … }` block
+/// (the caller `emit_type_impl` already opened it). Byte-identical to `emit_method`:
+/// `    pub fn user_<name>(<self>, <params>) -> <ret> {\n … \n    }\n`. The `self`
+/// receiver form comes from `self_conv` (`Read`→`&self`, `Mutate`→`&mut self`,
+/// `Move`→`self`); a static method (`self_conv == None`) emits no receiver.
+fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, out: &mut String) {
+    let indent = 1;
+    let pad = "    ".repeat(indent);
+    let ret_clause = match &tir.ret {
+        Some(t) => format!(" -> {}", rust_return_type(cx, t, false)),
+        None => String::new(),
+    };
+    let mut params: Vec<String> = Vec::new();
+    if let Some(conv) = self_conv {
+        params.push(
+            match conv {
+                AccessConvention::Read => "&self",
+                AccessConvention::Mutate => "&mut self",
+                AccessConvention::Move => "self",
+            }
+            .to_string(),
+        );
+    }
+    for (rust_name, ty, conv) in &tir.params {
+        params.push(format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)));
+    }
+    // E2-M12 D-OBS1: track the current function name for rich panic reports.
+    *cx.current_fn.borrow_mut() = tir.name.clone();
+    out.push_str(&format!(
+        "{pad}pub fn {name}({params}){ret} {{\n",
+        name = mangle(&tir.name),
+        params = params.join(", "),
+        ret = ret_clause,
+    ));
+    emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    out.push_str(&format!("{pad}}}\n"));
 }
 
 fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
@@ -2526,6 +2846,16 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let arg_str = emit_tir_call_args(args, cx);
             format!("({}).{}({})", emit_tir_expr(recv, cx), method_rust, arg_str)
         }
+        // c109 Phase 7: a static method call. Mirrors the AST type-name dispatch:
+        // `user_<Type>::user_<method>(args)`. All facts resolved at lowering.
+        TExprKind::StaticCall {
+            type_prefix,
+            method_rust,
+            args,
+        } => {
+            let arg_str = emit_tir_call_args(args, cx);
+            format!("{}::{}({})", type_prefix, method_rust, arg_str)
+        }
         TExprKind::Binary {
             op,
             overflow,
@@ -2735,6 +3065,35 @@ mod tests {
             })
             .unwrap_or_else(|| panic!("no fn {fn_name}"));
         tir_covers(f, &cx)
+    }
+
+    /// c109 Phase 7: parse `src` and return whether the named method on `type_name`
+    /// (a struct or enum inherent method) is covered by the method gate. Looks up
+    /// the method in the type's `methods` list. As with `covers`, the
+    /// sema-dependent facts a method body needs (`recv_type` on inner method calls)
+    /// are not filled by `build_cx` alone, so the gate paths that consult them are
+    /// proven by `tests/tir.rs` + the byte-parity check; here we exercise the
+    /// sema-independent structural gating (self receiver, static shape, param/return
+    /// types, the `self`-assignment exclusion).
+    fn covers_method(src: &str, type_name: &str, method: &str) -> bool {
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        let cx = build_cx(&prog, src, "test.jet");
+        let methods: &[Func] = prog
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Struct(s) if s.name == type_name => Some(s.methods.as_slice()),
+                Item::Enum(e) if e.name == type_name => Some(e.methods.as_slice()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no type {type_name}"));
+        let f = methods
+            .iter()
+            .find(|m| m.name == method)
+            .unwrap_or_else(|| panic!("no method {type_name}.{method}"));
+        tir_covers_method(f, type_name, &cx)
     }
 
     #[test]
@@ -3011,5 +3370,63 @@ mod tests {
         assert!(!is_intercepted_method_name("bumped"));
         assert!(!is_intercepted_method_name("combine"));
         assert!(!is_intercepted_method_name("code"));
+    }
+
+    // c109 Phase 7: method bodies + static methods.
+
+    #[test]
+    fn covers_instance_method_body() {
+        // A `self` getter on a covered struct, body reading `self.field` — covered.
+        // (Multi-letter type name; a single uppercase letter reads as a type var.)
+        let src = "struct Cell {\n n: Int\n fn value(self) -> Int {\n return self.n\n }\n}\n";
+        assert!(covers_method(src, "Cell", "value"));
+    }
+
+    #[test]
+    fn covers_mut_self_method_body() {
+        // A `mut self` receiver (→ `&mut self`) whose body only reads is covered.
+        let src = "struct Acc {\n total: Int\n fn doubled(mut self) -> Int {\n return (self.total + self.total)\n }\n}\n";
+        assert!(covers_method(src, "Acc", "doubled"));
+    }
+
+    #[test]
+    fn covers_static_constructor() {
+        // A static (no-`self`) associated function returning the owning type.
+        let src = "struct Cell {\n n: Int\n fn make(v: Int) -> Cell {\n return Cell { n: v }\n }\n}\n";
+        assert!(covers_method(src, "Cell", "make"));
+    }
+
+    #[test]
+    fn covers_enum_instance_method() {
+        // A `when self` match in an enum method body is covered.
+        let src = "enum Dir {\n North\n South\n fn code(self) -> Int {\n if self {\n North -> { return 0 }\n South -> { return 1 }\n }\n }\n}\n";
+        assert!(covers_method(src, "Dir", "code"));
+    }
+
+    #[test]
+    fn rejects_self_reassignment_method() {
+        // A `mut self` method that reassigns `self` (`self = …`) is a known AST-path
+        // I2 hole (the self slot doesn't deref on the LHS) — the gate excludes it.
+        let src = "struct Acc {\n n: Int\n fn reset(mut self) {\n self = Acc { n: 0 }\n }\n}\n";
+        assert!(!covers_method(src, "Acc", "reset"));
+    }
+
+    #[test]
+    fn rejects_generic_method() {
+        // A method on a generic type isn't covered (no generics in the subset). The
+        // owning type `Box<T>` is not a covered struct, so the gate bails.
+        let src = "struct Box<T> {\n v: T\n fn get(self) -> T {\n return self.v\n }\n}\n";
+        assert!(!covers_method(src, "Box", "get"));
+    }
+
+    #[test]
+    fn rejects_intercepted_static_name() {
+        // A static method named `new` collides with the alloc/special intercept
+        // (`mem.*.new`) — the AST path special-cases the name, so the TIR static
+        // call gate must NOT claim it. (The method body itself may still route, but
+        // its *call* `Type.new()` stays on the AST path; here we check the body gate
+        // is independent — `new` as a *static body* is still a plain method def.)
+        // The static *call*-site exclusion is covered by `is_intercepted_method_name`.
+        assert!(is_intercepted_method_name("new"));
     }
 }

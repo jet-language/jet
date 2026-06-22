@@ -743,3 +743,131 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n2\n");
 }
+
+// ---------------------------------------------------------------------------
+// c109 Phase 7: method bodies + static methods. The method body (with a `self`
+// param) and static (associated) methods + their call sites now route through
+// the TIR. These prove the lowered method definitions compile (I2) and run, and
+// that static dispatch (`Type.make(x)` → `user_T::user_make(x)`) is correct.
+// ---------------------------------------------------------------------------
+
+/// A static constructor returning the owning type, plus a `self` getter that is
+/// now covered end-to-end (definition + call). Static dispatch + instance call.
+#[test]
+fn static_constructor_and_self_getter() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Counter {
+    n: Int
+
+    fn make(v: Int) -> Counter {
+        return Counter { n: v }
+    }
+    fn value(self) -> Int {
+        return self.n
+    }
+}
+fn main() {
+    c @= Counter.make(5)
+    print(c.value())
+}
+";
+    let (code, stdout) = build_and_run("tir_static_ctor", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "5\n");
+}
+
+/// A `mut self` method (receiver `&mut self`) whose body reads `self.field`. The
+/// receiver form differs from a `self` getter, exercising the `&mut self` path.
+#[test]
+fn mut_self_method_body() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Acc {
+    total: Int
+
+    fn doubled(mut self) -> Int {
+        return (self.total + self.total)
+    }
+}
+fn main() {
+    a := Acc { total: 7 }
+    print(a.doubled())
+}
+";
+    let (code, stdout) = build_and_run("tir_mut_self", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "14\n");
+}
+
+/// An enum method (a `when self` match in the body), plus a static call site,
+/// covered end-to-end.
+#[test]
+fn enum_method_body_and_static_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Sign {
+    Pos
+    Neg
+    Zero
+
+    fn make_pos() -> Sign {
+        return Sign.Pos
+    }
+    fn to_num(self) -> Int {
+        if self {
+            Pos -> { return 1 }
+            Neg -> { return 0 }
+            Zero -> { return 0 }
+        }
+    }
+}
+fn main() {
+    s @= Sign.make_pos()
+    print(s.to_num())
+}
+";
+    let (code, stdout) = build_and_run("tir_enum_method_static", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n");
+}
+
+/// An instance method that calls another method on `self` and returns a new value
+/// of the owning struct type — the method-to-method dispatch through the TIR, plus
+/// a static constructor and a method returning a fresh struct literal.
+#[test]
+fn method_calls_method_and_returns_struct() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Vec2 {
+    x: Int
+    y: Int
+
+    fn make(x: Int, y: Int) -> Vec2 {
+        return Vec2 { x: x, y: y }
+    }
+    fn sum(self) -> Int {
+        return (self.x + self.y)
+    }
+    fn shifted(self, dx: Int) -> Vec2 {
+        return Vec2 { x: (self.x + dx), y: self.y }
+    }
+}
+fn main() {
+    p @= Vec2.make(3, 4)
+    q @= p.shifted(10)
+    print(q.sum())
+}
+";
+    let (code, stdout) = build_and_run("tir_method_chain", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "17\n");
+}

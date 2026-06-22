@@ -384,6 +384,15 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
 }
 
 fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
+    // c109 Phase 7: route fully-covered inherent methods (instance + static)
+    // through the typed IR. Byte-identical Rust (golden parity), every fact
+    // resolved at lowering (I3). The method emits at indent 1 inside the `impl`
+    // block the caller opened; anything outside the subset stays on the AST path.
+    if indent == 1 && TIR::tir_covers_method(f, type_name, cx) {
+        let tir = TIR::lower_method(f, type_name, cx);
+        TIR::emit_tir_func(&tir, cx, out);
+        return;
+    }
     let pad = "    ".repeat(indent);
     let ret = f
         .return_type

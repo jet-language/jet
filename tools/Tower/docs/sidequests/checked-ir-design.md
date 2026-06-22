@@ -332,6 +332,67 @@ everything, the AST codegen path is deleted (final phase).
   clone), a trait-impl method call (bare name), and an instance method on a covered enum
   — all byte-for-byte identical, then the instrumentation removed.
 
+## Refinements learned in Phase 7 (method bodies + static methods)
+
+- **A method BODY routes through the TIR by hooking `tir_covers_method` into
+  `emit_method`** (inherent methods, `Source/Codegen/Items.rs`). The `self` slot
+  is reproduced exactly as `emit_method` builds it: place `self`, **no deref**,
+  type `None`. `self.field` then emits `(self).field` and a `when self` match emits
+  `match self {` (no `(…).clone()`, because the clone fires only on a *deref'd* slot
+  — a by-reference enum *param* — and `self`'s slot has `deref: false`). Carrying the
+  self type as `None` (not `Some(T)`) is load-bearing for parity: it matches
+  `emit_method`'s `jet_ty: None`, so any overflow-trap decision that consulted the
+  self slot agrees. (In the covered subset this never differs — `self` is a
+  struct/enum, never a bare arithmetic operand, and `self.field` is a `Field` →
+  `None` either way — but the slot is built identically regardless.)
+- **The `self` receiver form is the ONLY method-specific signature fact, carried as
+  `TFuncKind::Method { self_conv: Option<AccessConvention> }`.** `Read`→`&self`,
+  `Mutate`→`&mut self`, `Move`→`self`; a static method carries `None` (no receiver).
+  The emitter (`emit_tir_method`) prints `    pub fn user_<m>(<self>, <params>) -> …`
+  at indent 1 inside the `impl` block the caller already opened — byte-identical to
+  `emit_method`. (Top-level functions keep `TFuncKind::TopLevel` → `emit_tir_toplevel`.)
+- **`mut self`/`view self` reassignment (`self = …`) is a pre-existing AST-path I2
+  hole and is gated OUT.** The self slot does not deref on an assignment LHS, so the
+  AST path emits `self = …` where `self` is `&mut user_T` — rustc rejects it (E0308).
+  This is independent of the TIR (it miscompiles on both paths identically), but the
+  gate excludes any method whose body assigns to a local named `self`
+  (`stmt_assigns_self`) so the TIR never *claims* a method that miscompiles. (Field
+  assignment `self.field = v` is already E0003 — not a Jet construct — so the only
+  `self` mutation a `mut self` method can express in-subset is reassignment, which is
+  excluded; a covered `mut self` method therefore reads/returns like a `self` method
+  but with a `&mut self` receiver. Fixing the `self`-reassignment lowering is a
+  separate codegen-bug task, not a TIR-coverage one.)
+- **Static (associated) methods are covered on BOTH sides.** The body lowers via the
+  same `lower_method` (no self slot, `self_conv: None`). The CALL site (`Type.make(x)`)
+  — which Phase 6 deferred (its `recv_type` is `None`) — is a new `TExprKind::StaticCall`
+  resolved at lowering to `user_<Type>::user_<method>(args)`, mirroring the AST
+  type-name dispatch (Expression.rs ~L1644). The gate (`static_method_call_in_subset`)
+  admits it only when the receiver is a bare *type-name* ident (not a local), the type
+  is covered, the method is a registered `method_sigs` entry that is NOT an enum
+  *variant* (an `Enum.Variant(args)` receiver+method emits an enum literal, a different
+  lowering) and NOT a builtin/special intercept (`new`, etc.).
+- **`Self` is resolved to the owning type at lowering** (`resolve_self_ty`), for
+  params and the return. (In current Jet a literal `-> Self` rarely type-checks — sema
+  treats `Self` and the concrete type as distinct, E0113 — so realistic constructors
+  return the concrete name; the resolution keeps the gate total either way.)
+- **Single-uppercase-letter type names read as type vars** (`Generics::is_type_var_name`
+  — `len()==1 && uppercase`), so `is_covered_struct_ty("C")` is false. A real trap for
+  unit tests (use multi-letter names like `Cell`/`Acc`); irrelevant to real programs.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass on both `emit_func` and `emit_method`) on: a struct with static constructors
+  (`origin`/`make`), a `self` getter, a `mut self` getter, a method returning a fresh
+  struct, an enum method (`when self` match), a method calling another method on `self`
+  with a String arg, and the real example suite (`10_structs.jet` `dist_sq`/`unit`,
+  `63_named_args.jet` `Rect::new`/`area`) — all byte-for-byte identical, then the
+  instrumentation removed. ~4 example methods now route through the TIR
+  (`Point::dist_sq`, `Point::unit`, `Rect::new`, `Rect::area`).
+- **Still on the AST path (deferred):** **trait-impl** method bodies (`emit_trait_method`
+  has a distinct signature — bare name, no `pub`, always `&self`, self slot
+  `jet_ty: Some(T)`; a separate, provable-parity hook); **delegation** (`using field`)
+  methods; **generic-type** methods; **`view`-returning** methods (subtle borrow
+  lowering); methods whose body uses any not-yet-covered construct (core/stdlib calls,
+  `?`/optionals, lambdas → Phases 8–10); and the `self`-reassignment lowering bug.
+
 ## Phases
 
 | # | Scope | Status |
@@ -339,11 +400,12 @@ everything, the AST codegen path is deleted (final phase).
 | 0 | Inventory + TIR type-model design | ✅ done (4b89af5) |
 | 1 | Simple functions: literals, operators, bindings, returns, if/else, calls, print | ✅ done (398138b) — 54 fns routed |
 | 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels) | ✅ done (c109 Phase 2) — +3 example fns routed (e.g. fizzbuzz `main`). Excludes `loop x in <collection>` (ForKind::In, key/value map form) → Phase 5. |
-| 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → **landed Phase 6**), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only → Phase 7). |
+| 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → **landed Phase 6**), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only, and a `mut self` method reassigning `self` is a separate pre-existing codegen bug, gated out in Phase 7). |
 | 4 | Enums + `when`/match + patterns (incl. range/or patterns) | ✅ done (c109 Phase 4) — ~7 more example fns routed (`11_enums` `next`/`label`/`main`, `71_pattern_matching` `describe_conn`/`classify`/`score_grade`/`main`). Covers plain (non-generic, non-recursive, Clone-derivable) scalar/Char-payload user enums: unit/positional/named enum literals; exhaustive variant `match` (variant patterns, positional/named/wildcard/range payload slots, or-patterns, payload bindings); arm-head range switches (`lo..hi -> …` + `else`); enum params/locals/returns. Excludes: String/struct/collection-payload enums (clone/borrow at literal & binding site → Phase 7), recursive (`Box<…>`) enums, generic enums, JSON/foreign/prelude enums, fallible/optional patterns (`value`/`null`/`ok`/`err` → Phase 8), and mixed comparison/Bool switches (general `emit_mixed_switch`). |
 | 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | ✅ done (c109 Phase 5) — list/map literals (incl. empty `[]`/`[:]`), `coll[i]` indexing (List/Map via the total sema `IndexKind`), `coll[a..b]` slicing, `coll[i] = v` index-assignment, and collection iteration (`loop x in coll` single-binding + `loop k, v in map` two-binding). List/map-typed params/locals/returns now allowed; element/key/value types may be scalar/Char/String/covered-struct/covered-enum/nested-collection. Excludes: collection *methods* (`.push`/`.len`/`.map`/etc. → Phase 7), method-call collections in iteration (`.chars()`/`.lines()` → Phase 7), `[E#N]` fixed-size lists, list-of-option/trait/fn/tuple element types, and any `Index`/index-assign whose `IndexKind` sema left `Unknown`. |
-| 6 | Methods + method calls (recv_type → resolved target), trait-impl methods, the sema-inserted `.clone()` | ✅ done (c109 Phase 6) — +3 example fns routed (58→61) **plus** the clone path unblocks getters that move a non-Copy field out (Phases 3–5 excluded these). Covers: the synthetic `.clone()` MethodCall (owning field read / borrowed value); user-defined **instance** methods (`recv.m(args)`) on a covered struct/enum whose `recv_type` is a covered type and whose name is not a builtin/core/special intercept; trait-impl methods (bare name, no `user_` mangle, via `cx.trait_methods`); method args with `implicit_clone`/`shared_auto_clone`/`Read`/`Mutate`/`Move` conventions (mirroring `emit_call_args`). Excludes: **static** calls (`Type.m()` — `recv_type` is `None`); any method whose name a core/stdlib/collection/string/numeric lowering intercepts (`emit_builtin_method` + `.raw()`/`.snapshot()`/alloc); Fn-typed method args (Box-coercion form); core/foreign/prelude-type receivers; fallible/optional methods (→ Phase 8). The method *body* (it has `self`) still routes via the AST path until `self`-functions are covered. |
+| 6 | Methods + method calls (recv_type → resolved target), trait-impl methods, the sema-inserted `.clone()` | ✅ done (c109 Phase 6) — +3 example fns routed (58→61) **plus** the clone path unblocks getters that move a non-Copy field out (Phases 3–5 excluded these). Covers: the synthetic `.clone()` MethodCall (owning field read / borrowed value); user-defined **instance** methods (`recv.m(args)`) on a covered struct/enum whose `recv_type` is a covered type and whose name is not a builtin/core/special intercept; trait-impl methods (bare name, no `user_` mangle, via `cx.trait_methods`); method args with `implicit_clone`/`shared_auto_clone`/`Read`/`Mutate`/`Move` conventions (mirroring `emit_call_args`). Excludes: **static** calls (`Type.m()` — `recv_type` is `None`); any method whose name a core/stdlib/collection/string/numeric lowering intercepts (`emit_builtin_method` + `.raw()`/`.snapshot()`/alloc); Fn-typed method args (Box-coercion form); core/foreign/prelude-type receivers; fallible/optional methods (→ Phase 8). The method *body* (it has `self`) routed via the AST path until **Phase 7** covered `self`-functions. |
 | 6b | Remaining ownership facts: `take`/`mut`/`view` access conventions on free-function args, general Shared/Arc auto-clone outside method args | pending — the Phase-6 method-arg path already emits `Arc::clone(&…)` and `&mut (…)` from the total flags; extend the same to free `Call` args + view returns. |
+| 7 | Method bodies + static methods | ✅ done (c109 Phase 7) — ~4 example methods routed (`10_structs` `Point::dist_sq`/`Point::unit`, `63_named_args` `Rect::new`/`Rect::area`). Covers: **inherent** method *bodies* (instance + static) on a covered struct/enum, hooked into `emit_method`. The `self` slot reproduces `emit_method` exactly (place `self`, no deref, type `None`); the receiver form is `&self`/`&mut self`/`self` per the resolved convention (`TFuncKind::Method`). **Static** (associated) methods are covered on both sides — the body (no self) and the call site (`Type.make(x)` → `user_<T>::user_<m>(x)`, a new `TExprKind::StaticCall`, which Phase 6 deferred). `Self` params/returns resolve to the owning type. Excludes: **trait-impl** method bodies (distinct signature — bare name, no `pub`, always `&self`, self `jet_ty: Some(T)`; a separate provable-parity hook); **delegation** (`using field`), **generic-type**, and **`view`-returning** methods; any `mut self`/`view self` method that **reassigns `self`** (`self = …` is a pre-existing AST-path I2 hole, gated out via `stmt_assigns_self`); methods whose body uses any not-yet-covered construct (core/stdlib calls, `?`/optionals, lambdas → Phases 8–10). |
 | 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | pending |
 | 9 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | pending |
