@@ -228,6 +228,22 @@ impl Circle {
   declaration; `@Marker { … }` for scoped effects (`@transact`, `#Unsafe`) or
   in-body config (`@Serialize { rename …; }`). **`#Pure fn`** is a prefix marker
   (D-CASING1 follow-on); **`comptime`** stays a prefix keyword.
+- **Published schema migrations (D-MIGRATE1):** `#PublishedSchema struct Name { ... }`
+  marks a public record whose field layout is snapshotted at release under
+  `.jet/cache/schema/`. On later project builds, sema compares the current shape
+  to the saved snapshot; dropping or renaming a field without a matching
+  migration is **E0910**. The implemented migration surface is rename-only:
+
+  ```jet
+  migration UserRecord {
+      rename name -> display_name;
+  }
+  ```
+
+  The rename must target an existing field with the same type. Unsupported
+  operations inside a migration block are **E0911** and are reserved for
+  D-MIGRATE2. Single-file runs accept the marker but only enforce the check
+  when a project snapshot exists.
 
 ## M4 — errors as values (done)
 

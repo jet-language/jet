@@ -161,6 +161,8 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::ErrorConv(ec) => src[..ec.from_span.start]
             .rfind("impl")
             .unwrap_or(ec.from_span.start),
+        // D-MIGRATE1: use the migration block's own span.
+        Item::Migration(m) => m.span.start,
     }
 }
 
@@ -226,6 +228,8 @@ fn item_span_end(item: &Item) -> usize {
         Item::Distinct(d) => d.span.end,
         // D-ERR-CONV: body_span.end is after the closing `}`.
         Item::ErrorConv(ec) => ec.body_span.end,
+        // D-MIGRATE1: use the migration block's own span end.
+        Item::Migration(m) => m.span.end,
     }
 }
 

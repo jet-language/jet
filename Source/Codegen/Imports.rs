@@ -327,7 +327,8 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
             Item::CModule(cm) => emit_c_module(cm, out),
             Item::Distinct(d) => emit_distinct(cx, d, out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
+            | Item::Migration(_) => {} // D-MIGRATE1
         }
     }
     for item in items {

@@ -509,6 +509,7 @@ mod CheckerItems;
 mod Diagnostics;
 mod Captures;
 mod Purity;
+mod SchemaMigration;
 
 pub(crate) use FFI::*;
 pub(crate) use Registration::*;
@@ -517,6 +518,7 @@ pub(crate) use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Captures::*;
 pub(crate) use Purity::*;
+pub(crate) use SchemaMigration::*;
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Registration::{check, check_with_mode};

@@ -50,6 +50,12 @@ impl<'a> Fmt<'a> {
                 self.write(&text);
                 self.newline();
             }
+            // D-MIGRATE1: migration blocks are emitted verbatim (non-destructive).
+            Item::Migration(m) => {
+                let text = self.src[m.span.start..m.span.end].to_string();
+                self.write(&text);
+                self.newline();
+            }
         }
     }
 

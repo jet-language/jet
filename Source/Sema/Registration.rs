@@ -208,6 +208,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::CModule(_) => {}
             // D-ERR-CONV: registration happens in m9.register_items below.
             Item::ErrorConv(_) => {}
+            // D-MIGRATE1: migration decls are handled by the schema diff pass.
+            Item::Migration(_) => {}
         }
     }
 
@@ -504,7 +506,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::Module(_)
             | Item::CModule(_)
             | Item::CodeModule(_)
-            | Item::Distinct(_) => {}
+            | Item::Distinct(_)
+            | Item::Migration(_) => {} // D-MIGRATE1
         }
     }
 
@@ -690,7 +693,8 @@ pub(crate) fn comptime_context_from_items(
             | Item::Module(_)
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::Distinct(_)
-            | Item::ErrorConv(_) => {}
+            | Item::ErrorConv(_)
+            | Item::Migration(_) => {} // D-MIGRATE1
         }
     }
     (funcs, externs, globals)

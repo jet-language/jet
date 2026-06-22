@@ -17,6 +17,7 @@ mod Diff;
 mod Registry;
 mod Resolve;
 mod SBOM;
+mod Schema;
 mod SemVer;
 mod Vendor;
 
@@ -26,6 +27,7 @@ pub use Diff::*;
 pub use Registry::*;
 pub use Resolve::*;
 pub use SBOM::*;
+pub use Schema::*;
 pub use SemVer::*;
 pub use Vendor::*;
 

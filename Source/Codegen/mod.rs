@@ -154,7 +154,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
+            | Item::Migration(_) => {} // D-MIGRATE1: migration is sema-only (I3)
         }
     }
 
@@ -233,7 +234,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_) => {}
+            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
+            | Item::Migration(_) => {} // D-MIGRATE1: migration is sema-only (I3)
         }
     }
 

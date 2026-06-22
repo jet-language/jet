@@ -295,6 +295,13 @@ impl<'a> Parser<'a> {
                     self.func_with_purity(true).map(Item::Func)
                 }
                 TokKind::KwPub => match self.peek2().kind {
+                    // D-MIGRATE1: `pub #PublishedSchema struct Name { … }`
+                    TokKind::Hash if {
+                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
+                    } => {
+                        self.bump(); // consume `pub`
+                        self.published_schema_struct_def(true).map(Item::Struct)
+                    }
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
@@ -338,6 +345,14 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::Hash if self.at_numeric_distinct_def() => {
                     self.distinct_def(false).map(Item::Distinct)
+                }
+                // D-MIGRATE1: `#PublishedSchema struct Name { … }`
+                TokKind::Hash if self.at_published_schema_struct() => {
+                    self.published_schema_struct_def(false).map(Item::Struct)
+                }
+                // D-MIGRATE1: `migration TypeName { rename a -> b }`
+                TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
+                    self.migration_decl().map(Item::Migration)
                 }
                 TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
                 TokKind::At => {
@@ -1096,6 +1111,8 @@ impl<'a> Parser<'a> {
             methods,
             trait_impls,
             derives,
+            is_published_schema: false,
+            published_schema_span: None,
         })
     }
 
@@ -1622,5 +1639,175 @@ impl<'a> Parser<'a> {
             base_span,
             span: Span::new(start.start, end),
         })
+    }
+
+    // --- published-schema marker + migration blocks (D-MIGRATE1) -----------
+
+    /// D-MIGRATE1 (ratified 2026-06-22): true when `#PublishedSchema struct` or
+    /// `#PublishedSchema pub struct` is at the cursor.
+    /// Note: the lexer inserts a `Semi` after an identifier at end-of-line, so the
+    /// token stream is `# PublishedSchema [Semi] struct` — we check peek4 (pos+3)
+    /// when peek3 is a `Semi`, or peek3 when the marker is on the same line.
+    fn at_published_schema_struct(&self) -> bool {
+        if !matches!(&self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) {
+            return false;
+        }
+        // peek3 may be Semi (newline after marker) or KwStruct/KwPub (same-line)
+        let peek3 = &self.peek3().kind;
+        if matches!(peek3, TokKind::KwStruct | TokKind::KwPub) {
+            return true;
+        }
+        if matches!(peek3, TokKind::Semi) {
+            // look one further
+            let peek4 = &self.toks[(self.pos + 3).min(self.toks.len() - 1)].kind;
+            return matches!(peek4, TokKind::KwStruct | TokKind::KwPub);
+        }
+        false
+    }
+
+    /// D-MIGRATE1: true when `migration <TypeName> {` is at the cursor (contextual).
+    fn at_migration_block(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MIGRATION)
+            && matches!(&self.peek2().kind, TokKind::Ident(_))
+            && matches!(&self.peek3().kind, TokKind::LBrace)
+    }
+
+    /// D-MIGRATE1 (ratified 2026-06-22): parse `#PublishedSchema [pub] struct Name { … }`.
+    fn published_schema_struct_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+        let attr_start = self.peek().span;
+        self.bump(); // consume `#`
+        let (attr, attr_name_span) = self.expect_ident("after `#`")?;
+        if attr != Syntax::ATTR_PUBLISHED_SCHEMA {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`#{}` isn't a valid attribute on a struct declaration", attr),
+                "only `#PublishedSchema` is supported here".to_string(),
+                "write `#PublishedSchema` before the struct".to_string(),
+                Some(attr_name_span),
+            ));
+        }
+        let attr_span = Span::new(attr_start.start, attr_name_span.end);
+        // The lexer may insert a `Semi` after the marker identifier when `struct` is
+        // on the next line. Consume it so the next token is `struct` or `pub`.
+        while matches!(&self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        // optional `pub` after the marker
+        let is_pub = outer_is_pub || if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.bump();
+            true
+        } else {
+            false
+        };
+        let mut def = self.struct_def_after_pub(is_pub)?;
+        def.is_published_schema = true;
+        def.published_schema_span = Some(attr_span);
+        Ok(def)
+    }
+
+    /// Parse `struct Name { … }` given that pub/is_pub was already handled.
+    /// Factors out the body of `struct_def` when the `pub` keyword is already consumed.
+    fn struct_def_after_pub(&mut self, is_pub: bool) -> Result<crate::AST::StructDef, Diagnostic> {
+        self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
+        let (name, name_span) = self.expect_ident("after `struct`")?;
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::LBrace, "to open the struct body")?;
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut trait_impls = Vec::new();
+        let mut derives = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            if matches!(self.peek().kind, TokKind::KwDerive) {
+                derives.push(self.derive_line()?);
+            } else if matches!(self.peek().kind, TokKind::KwImpl) {
+                trait_impls.push(self.trait_impl_block()?);
+            } else {
+                let is_method = matches!(self.peek().kind, TokKind::KwFn)
+                    || (matches!(self.peek().kind, TokKind::KwPub)
+                        && matches!(self.peek2().kind, TokKind::KwFn));
+                if is_method {
+                    methods.push(self.method_in_type()?);
+                } else {
+                    fields.push(self.field()?);
+                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                        self.bump();
+                    }
+                }
+            }
+        }
+        self.bump(); // }
+        Ok(crate::AST::StructDef {
+            is_pub,
+            name,
+            name_span,
+            type_params,
+            fields,
+            methods,
+            trait_impls,
+            derives,
+            is_published_schema: false,
+            published_schema_span: None,
+        })
+    }
+
+    /// D-MIGRATE1 (ratified 2026-06-22): parse `migration TypeName { rename a -> b; … }`.
+    fn migration_decl(&mut self) -> Result<crate::AST::MigrationDecl, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // consume `migration` ident
+        let (type_name, type_span) = self.expect_ident("as the migrated type name")?;
+        self.expect(TokKind::LBrace, "after the migration type name")?;
+        let mut ops = Vec::new();
+        while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            // consume optional semicolons between ops
+            if matches!(&self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let op_tok = self.bump();
+            match &op_tok.kind {
+                TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
+                    let (from, from_span) = self.expect_ident("as the field to rename")?;
+                    self.expect(TokKind::Arrow, "between the old and new field names in `rename`")?;
+                    let (to, to_span) = self.expect_ident("as the new field name")?;
+                    ops.push(crate::AST::MigrationOp::Rename { from, from_span, to, to_span });
+                }
+                TokKind::Ident(other) => {
+                    let other = other.clone();
+                    // E0911: staged op → D-MIGRATE2
+                    self.diags.push(Diagnostic::error(
+                        "E0911",
+                        format!("`{}` inside `migration` is not yet supported", other),
+                        "only `rename` is implemented in this release; `add`, `drop`, and type-change ops are staged behind D-MIGRATE2".to_string(),
+                        "use `rename old -> new` for field renames; bump the major version for other shape changes for now".to_string(),
+                        Some(op_tok.span),
+                    ));
+                    // skip to `}` for recovery
+                    while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                        self.bump();
+                    }
+                }
+                _ => {
+                    let desc = describe(&op_tok.kind);
+                    self.diags.push(Diagnostic::error(
+                        "E0003",
+                        format!("expected `rename` inside migration block, found {}", desc),
+                        "a migration block only contains `rename old -> new` operations".to_string(),
+                        "write `rename fieldA -> fieldB`".to_string(),
+                        Some(op_tok.span),
+                    ));
+                    while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                        self.bump();
+                    }
+                }
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the migration block")?;
+        let end = self.toks[self.pos - 1].span;
+        let span = Span::new(start.start, end.end);
+        Ok(crate::AST::MigrationDecl { type_name, type_span, ops, span })
     }
 }

@@ -414,6 +414,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::Distinct(_) => {}
         // D-ERR-CONV: error conversions aren't yet indexed for symbols/hover.
         Item::ErrorConv(_) => {}
+        // D-MIGRATE1: migration blocks aren't yet indexed for symbols/hover.
+        Item::Migration(_) => {}
     }
 }
 

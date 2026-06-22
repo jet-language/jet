@@ -248,6 +248,8 @@ before continuing.
 | E0907 | sema  | trait impl signature mismatch |
 | E0908 | sema  | duplicate trait impl |
 | E0909 | sema  | generic instantiation too deep |
+| E0910 | sema  | `#PublishedSchema` struct dropped or renamed a field since the last release with no migration |
+| E0911 | parse | migration block contains an op not yet implemented (staged → D-MIGRATE2) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -712,6 +714,18 @@ the real output is one line):
 
 The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
 (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
+### E0910 — Published schema breaking change
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0910 | The published record `{Type}` dropped (or renamed) `{field}` since version `{version}`, with no migration to bridge it. | `#PublishedSchema` pins a record's saved shape at release. Old data already written with `{field}` could no longer be read, so a build that silently changes the shape would break readers of the published version. | Add `migration {Type} { rename {field} -> {new} }` if you renamed it; or bump the major version to publish a new shape; or mark the old field deprecated to keep reading it. |
+
+### E0911 — Staged migration op
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0911 | `{op}` inside `migration` is not yet supported. | Only `rename` is implemented in this release. Other ops — `add`, `drop`, `type-change` — are gated behind D-MIGRATE2. | Use `rename old -> new` for field renames. For other changes, bump the major version for now. |
+
 ## Process for a new diagnostic
 
 1. Claim the next code here. 2. Write what/why/fix per the voice rules.

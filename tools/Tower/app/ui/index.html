@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tower — Jet mission control</title>
+<link rel="stylesheet" href="/tower.css">
+</head><body>
+<div class="shell">
+
+<!-- left rail: directory + station status -->
+<aside class="rail">
+  <div class="brand">
+    <span class="mark">T</span>
+    <span class="wm">TOWER</span>
+    <span class="tagline">jet · mission control</span>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+  <div class="status">
+    <span class="live"><i></i>on station</span>
+    <span class="stat"><label>ratified</label><b id="rat">—</b></span>
+    <span class="stat alert" id="ingest-stat" style="display:none"><label>ingest</label><b id="ingestn">0</b></span>
+    <span class="stat"><label>last file</label><b id="last">—</b></span>
+  </div>
+</aside>
+
+<!-- working surface -->
+<div class="surface">
+  <div class="elevation" id="ribbon"></div>
+  <main>
+    <section class="view" id="v-board"></section>
+    <section class="view" id="v-decisions"></section>
+    <section class="view" id="v-proposals"></section>
+    <section class="view" id="v-scratch"></section>
+  </main>
+</div>
+
+</div>
+
+<!-- decision submit bar (overview only) -->
+<div class="bar" id="bar"><div class="inner">
+  <div class="p" id="prog"></div>
+  <button class="ghost sm" onclick="enterFocus(0)">Focus mode ↗</button>
+  <button class="go" id="submit" onclick="submitBallot()">Sign &amp; file</button>
+</div></div>
+
+<!-- DECISION FOCUS MODE -->
+<div class="focusback" id="focusback">
+  <div class="focustop">
+    <span class="ctr">Decision <b id="f-ctr">1</b> of <b id="f-tot">1</b></span>
+    <div class="dots" id="f-dots"></div>
+    <button class="ghost sm" onclick="exitFocus()">✕ Close (Esc)</button>
+  </div>
+  <div class="focusscroll" id="f-scroll"><div class="deck" id="f-deck"></div></div>
+  <div class="focusnav"><div class="inner">
+    <button class="ghost sm" id="f-prev" onclick="focusPrev()">◀ Prev</button>
+    <span class="kbd"><b>←/→</b> move · <b>1–9</b> pick · <b>Enter</b> next · <b>Esc</b> close</span>
+    <span class="spacer"></span>
+    <button class="ghost sm" onclick="jumpNextUndecided()">Next undecided ↓</button>
+    <button class="go sm" id="f-submit" onclick="submitBallot()">Sign &amp; file</button>
+    <button class="ghost sm" id="f-next" onclick="focusNext()">Next ▶</button>
+  </div></div>
+</div>
+
+<!-- doc viewer / editor -->
+<div class="docback" id="docback" onclick="closeDoc(event)">
+  <div class="docmodal" onclick="event.stopPropagation()">
+    <div class="dochead">
+      <div class="docmeta"><span class="doctitle" id="doc-title">—</span><span class="docpath mono" id="doc-path"></span></div>
+      <div class="doctools">
+        <button class="ghost sm" id="doc-edit" onclick="toggleEdit()">Edit</button>
+        <button class="go sm" id="doc-save" onclick="saveDoc()" style="display:none">Save</button>
+        <button class="ghost sm" id="doc-cancel" onclick="cancelEdit()" style="display:none">Cancel</button>
+        <button class="ghost sm" onclick="closeDoc()">✕ Close</button>
+      </div>
+    </div>
+    <div class="docbody" id="doc-view"></div>
+    <textarea class="docedit" id="doc-edit-area" style="display:none" spellcheck="false"></textarea>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/tower.js"></script>
+</body></html>

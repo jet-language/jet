@@ -270,6 +270,27 @@ pub struct ErrorConvDef {
     pub body_span: Span,
 }
 
+/// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { op; … }` block.
+#[derive(Debug)]
+pub struct MigrationDecl {
+    pub type_name: String,
+    pub type_span: Span,
+    pub ops: Vec<MigrationOp>,
+    pub span: Span,
+}
+
+/// D-MIGRATE1: one operation inside a `migration { }` block.
+#[derive(Debug)]
+pub enum MigrationOp {
+    /// `rename old_field -> new_field` — declares a field was renamed.
+    Rename {
+        from: String,
+        from_span: Span,
+        to: String,
+        to_span: Span,
+    },
+}
+
 #[derive(Debug)]
 pub enum Item {
     Func(Func),
@@ -299,6 +320,9 @@ pub enum Item {
     /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { … }` — typed
     /// error conversion; `?` applies it when propagating Source into a Target context.
     ErrorConv(ErrorConvDef),
+    /// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { rename a -> b }`
+    /// block — declares field renames on a `#PublishedSchema` struct.
+    Migration(MigrationDecl),
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
@@ -634,6 +658,10 @@ pub struct StructDef {
     pub trait_impls: Vec<TraitImplBlock>,
     /// S55: `derive Comparable;` / `derive Serialize;` lines.
     pub derives: Vec<(String, Span)>,
+    /// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` marker was present
+    /// before `struct`. The span is retained for pointing at the annotation in E0910.
+    pub is_published_schema: bool,
+    pub published_schema_span: Option<Span>,
 }
 
 /// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name :: distinct Base`.

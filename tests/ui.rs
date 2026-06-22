@@ -67,6 +67,28 @@ fn ui_snapshots() {
         }
         let src = fs::read_to_string(&path).unwrap();
 
+        // D-MIGRATE1: if a sibling NAME.published.snapshot exists, install it in a temp
+        // dir and set JET_SCHEMA_CACHE_DIR so the schema diff pass can find the prior snapshot.
+        let snap_path = path.with_extension("published.snapshot");
+        if snap_path.is_file() {
+            let snap_text = fs::read_to_string(&snap_path).unwrap();
+            // Extract type name from the snapshot.
+            let type_name = snap_text
+                .lines()
+                .find(|l| l.starts_with("type = "))
+                .and_then(|l| l.strip_prefix("type = "))
+                .unwrap_or("Unknown")
+                .trim()
+                .to_string();
+            let tmp = std::env::temp_dir()
+                .join(format!("jet_schema_ui_{}", std::process::id()));
+            fs::create_dir_all(&tmp).ok();
+            fs::write(tmp.join(format!("{}.snapshot", type_name)), &snap_text).ok();
+            std::env::set_var("JET_SCHEMA_CACHE_DIR", &tmp);
+        } else {
+            std::env::remove_var("JET_SCHEMA_CACHE_DIR");
+        }
+
         let file_arg = path.to_string_lossy();
         // E2-M15: files marked with `// @freestanding` are compiled with
         // the freestanding profile (E3301 checks enabled).

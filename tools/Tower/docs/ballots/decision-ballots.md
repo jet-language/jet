@@ -6,26 +6,42 @@ leaves this file: it is recorded in the decision log in
 ratified" section, no decided history — decided decisions never reappear.
 
 **House rule for whoever edits this file (enforced — a card missing any of these is
-not ballot-ready):** every full decision card carries, in this order, (1) a **user
-story** — a real person and what they're doing, so the owner sees why the decision
-exists; (2) a **short tradeoff comparison** — a compact table, one row per option,
-columns that actually differ (ceremony / failure mode / ratification cost /
-familiarity); and (3) a **worked example of every option** in a fenced ```jet (or
-```shell) block — what that person types, sees, and hits as an error. No abstract
-option tables standing in for examples. Close with `**Recommendation:**` + a one-line
-why. Decisions not yet drafted to that bar are listed below as one-liners with a
-recommendation; expand one into a full card when it's time to decide it.
+not ballot-ready; Tower v2 Focus Mode renders these as labeled facets, so use the
+exact bold labels):** every full decision card carries `**Gist:**` (one VERY short
+plain sentence — the headline), `**Story.**` (a real person with an
+American-traditional name and what they're doing), `**In the wild:**` (a fenced
+```jet block of realistic project code where this bites), `**Other languages:**`
+(short fenced blocks for Rust/TS/Swift/etc. when a cross-language compare helps),
+`**Tradeoffs:**` (a compact table, one row per option, columns that actually differ —
+subagent-reviewed), and a **worked example of every option** (each
+`- **Option X — <name>.**` bullet with its own fenced ```jet/```shell block; mark the
+recommended one `(recommended)`). Close with `**Recommendation:**` + a one-line why.
+Put Owner Q&A in `**Owner Q …**` blocks — Tower routes those to a separate Q&A facet,
+so keep them out of the recommendation. Decisions not yet drafted to that bar are
+listed below as one-liners with a recommendation; expand one into a full card when
+it's time to decide it.
 
 ---
 
 ## Open decisions
 
-> **29 open decisions across 24 cards** (incl. testing ergonomics + the remaining persona-gap decisions from the 2026-06-20 run, the owner-requested constant-binding spelling D-BIND2 (c102), and the owner-requested numeric/serde/library trio D-NUMOPS1/D-SERDE1/D-ITER1 (c103–c105)), plus a deferred-ballots list and informational notes. **Note:** the 2026-06-22 owner batch (D-STATE1, D-DET1, D-TXN2, D-EXT1, D-CTIO1, D-CTX1, D-ROUTE1) has been ratified and those cards stripped; **D-DBG2 is held** — owner chose C, which the card itself flags as an I2 violation (raw Rust frames shown to users), so it is deferred back to the owner rather than ratified.
-> story (why it exists), a tradeoff table, and a worked example per option. Cards
-> **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
-> choice they raised is already covered by ratified decisions — so nothing is
-> queued for them here. Submitting a decision records it in `syntax-decisions.md`
-> and removes it from this file.
+> Open decisions span the cards below: testing ergonomics, the remaining persona-gap
+> decisions from the 2026-06-20 run, the JIT/hot-reload cluster (c77), the
+> owner-requested constant-binding spelling D-BIND2 (c102), the numeric/serde/iterator
+> trio D-NUMOPS1/D-SERDE1/D-ITER1 (c103–c105), plus a deferred-ballots list and
+> informational notes. **Note (2026-06-22, batch 2):** the owner batch
+> **D-EFF1=B, D-QUAL1=1, D-TXN1=A, D-MIGRATE1=A, D-SOA1=A** has been ratified into
+> `syntax-decisions.md` and those cards stripped. **D-DBG2** resolved to **A default +
+> expert `jet debug --raw-frames`** (owner: ratify A now, raw frames behind an expert
+> flag; once Jet self-hosts there is no underlying Rust) — ratified, card stripped.
+> Three follow-ons the ratifications spawned are now **open** below: **D-EFF2** + **D-EFF3**
+> (the two effect-system sub-questions the owner asked be crosschecked + carded — surface
+> spelling and S60 reopen are already settled by D-QUAL1=1, so these are non-duplicate),
+> under **c66**; **D-MIGRATE2** (the migration-op vocabulary + `jet schema` verbs beyond
+> the ratified `rename`) under **c73**; and **D-SOA2** (a better name than "SOA" + the
+> three deferred layout questions, owner-requested) under **c78**. Cards **c25** (range
+> sugar) and **c55** (REPL v2) are implement-only. Submitting a decision records it in
+> `syntax-decisions.md` and removes it from this file.
 
 ---
 
@@ -269,708 +285,570 @@ single-location rule intact.
 
 ---
 
-## Step-through debugger — board card c52
-
-
-# Draft ballot cards — c52 (DAP debugger) + c25 (range arms)
-
-> Status: draft — not yet queued in `decision-ballots.md`
-> Date: 2026-06-20
-> Prerequisite ratified decisions: D-DBG1 (`jet debug <file>` verb), D-OBS1 (source maps + Jet-line panics), D-RANGE1 (range arms reuse `..`), D-RANGE2 (ownership split), D-PATR (range patterns + exhaustiveness)
-
----
-
-
-One choice remains for the owner. D-DBG1 (the `jet debug` command name) and D-OBS2 (the line-table is a sidecar `.jetmap`, ratified 2026-06-21) are settled; D-OBS1 scheduled the DAP debugger as a GA gate. The open decision below covers the policy for generated/library frames that have no Jet source line.
-
----
-
-### D-DBG2 — Policy for frames with no Jet source line (rec A)
-
-**User story.** A developer is stepping through a Jet program that calls `core.fs.read_file(path)`. Execution steps into generated glue code or a Rust `std` function that has no Jet source line. What does the editor show?
-
-| Option | Editor display | Beginner experience | Expert escape hatch | I2 compliance |
-|--------|---------------|---------------------|---------------------|---------------|
-| A — step over silently; surface only frames with a Jet line | Next Jet frame shown | Clean; no Rust noise | None | Yes — no Rust paths/lines ever surface |
-| B — show a synthetic frame `[jet runtime]` with no file/line | Placeholder frame visible | Slightly noisy but honest | No detail | Yes — still no Rust identity |
-| C — show the raw Rust frame (file + line) | Rust file/line in editor | Confusing; breaks I2 | Yes | No — I2 violation |
-
-- **Option A — step over any frame that has no Jet source line; resume at the next Jet frame.**
-  The adapter walks the lldb frame list, skips every frame whose Rust line does not appear in the `.jetmap` table, and surfaces only the first (innermost) Jet frame.
-
-    ```
-    # user is in main(), steps into core.fs.read_file — no Jet line
-    # adapter silently steps over the generated glue
-    # next stop: back in main() after the call returns
-    breakpoint hit  loops.jet:7  in main()
-    (jet-dbg) step
-       9 |     total += i       ← next Jet line; glue was invisible
-    locals:  n = 5   total = 5   i = 2
-    ```
-
-    Fully I2-compliant. The cost: a user cannot inspect Jet stdlib internals at the source level (they see the call complete atomically). Acceptable for v1; expert source-level stdlib debug is a post-GA concern.
-
-- **Option B — surface a synthetic frame `[jet runtime]` at any depth with no Jet source.**
-  The adapter inserts a placeholder frame when a non-Jet frame is innermost, showing a label but no file or line.
-
-    ```
-    breakpoint hit  loops.jet:7  in main()
-    (jet-dbg) step
-    [jet runtime] — inside core.fs.read_file (no Jet source available)
-    (jet-dbg) step
-       9 |     total += i
-    ```
-
-    I2-compliant (no Rust paths). More visible about what is happening, but adds an extra step/frame the user must work through. Useful if users need to know "I am inside a runtime call."
-
-- **Option C — show the raw Rust frame.**
-  The adapter passes the lldb frame through as-is when no Jet line is found. The editor shows `src/std/fs.rs:418`.
-
-    ```
-    breakpoint hit  loops.jet:7  in main()
-    (jet-dbg) step
-    /rustc/.../src/std/fs.rs:418   ← Rust path surfaced to user
-    ```
-
-    Direct I2 violation. Listed to be explicitly closed.
-
-**Recommendation:** A. Silent step-over is the cleanest beginner experience and is the hardest I2 guarantee to weaken later. The adapter can log a debug-level trace (visible only in `jet debug --verbose`) so developers of the adapter itself can see skipped frames, while users never do. Option B is a reasonable upgrade once users report that the opaqueness is confusing.
-
----
-
-## Qualifier system: traits, effects & tags — board card c62
-
-### D-QUAL1 — Organizing traits, effects & tags across three reader-split surfaces (rec A — Core D, with Roles)
-
-This is the c62 linchpin: a single rule for where every "label" concept lives — traits, effects, value-facts, capabilities, markers, prohibitions — so each surface stays sparse and every declaration stays legible. The proposal (Variant D) routes by **who reads it**, and the hybrids are optional surfaces layered on top.
-
-**User story.** Two people read the same `checkout` service. Priya, a feature dev, opens a function and needs to know *at a glance* what it touches (does it hit the network? the DB?) and what its types *are* (is `Receipt` serializable? can it be silently dropped?). Sam, the security owner, never reads function bodies — he needs *one* auditable place that says what the coupon plugin is allowed to do. Today these concerns would pile onto the same declaration and drown each other. D-QUAL1 picks a routing rule so each reader sees only their surface.
-
-**The routing rule (the whole mnemonic — shape mirrors meaning).**
-
-- **`#(…)` round parens → what it *touches*** (effects). On the signature line — a per-caller contract everyone must see.
-- **`#[…]` square brackets → what it *is*** (a static *list* of tags: derives, traits, value-facts, markers). Above the declaration, for library users.
-- **`module { … }` manifest → what it's *allowed* to do** (capability policy). One auditable place, for security/ops.
-
-Round = runtime reach. Square = a static attribute list. Manifest = permissions. A beginner needs four facts: *types hold data, `#(…)` says what a function touches, `#[…]` is the tag list, the manifest walls things off.*
-
-| Option | Effect surface | Grouping power | Beginner read | Signature-glance contract | Best when |
-|---|---|---|---|---|---|
-| **A Core D** | inline `#(…)` | good | clear | **yes** | sensible default |
-| **B × Roles** | `#(Role)` | **highest (DRY)** | high at use-site | yes (via role) | large codebases, shared policy |
-| **C × Unified block** | `#[ effects: … ]` | **highest (visual)** | high | no (look above) | declaration-heavy review |
-| **D × Grammar** | `does (…)` | good | **highest** | yes | onboarding-first teams |
-| **E × Type-row** | `! {net, db, log}` | good | lower | yes | effects must flow through generics |
-
-These compose: A is the base; B/D are surface skins; C regroups everything into the bracket block. The strongest practical combo is **A + B**, with **D** as an optional grammar skin.
-
-- **Option A — Core D (recommended).** Three surfaces, sigil-spelled. Effects inline on the signature, tag lists in `#[…]` above the declaration, capability policy in the `module { }` manifest. Inline `#fact` attaches a value-fact locally to one value.
-
-```jet
-// ── manifest: the security owner reads only this ──
-module shop.checkout {
-    plugins.coupon: deny(fs, db)        // policy collected here, never inline
-}
-
-// ── data: a list of tags reads like a list ──
-#[
-    derive(Comparable, Serialize),
-]
-struct Order { id: OrderId, total: Usd }
-
-#[
-    derive(Serialize),
-    linear,                             // value-fact: can't be silently dropped
-]
-struct Receipt { order: OrderId, paid: Usd }
-
-// ── logic ──
-fn cart_total(items: [Item]) -> Usd {   // bare: pure, inferred
-    items.sum(Item.price)
-}
-
-fn charge(o: take Order #unpaid) #(db) -> Receipt #paid ?   // typestate + effect
-
-pub fn checkout(req: Request) #(net, db, log) -> Response ? {  // contract on line 1
-    raw  :: req.body() #tainted         // value-fact rides the value inline
-    rcpt :: charge(parse(sanitize(raw))?.order)?   // sanitize strips #tainted
-    record(rcpt)?                       // MUST consume the linear receipt
-    Response.ok()
-}
-```
-
-- **Option B — Core D × Roles (named bundles).** Define a contract once in the manifest; wear it by name. A *role* is a named effect-set or tag-set, referenced wherever its members would go. The DRY answer for a many-route service. Cost: indirection — you open `Handler` to see what it touches (mitigate with `jet explain #(Handler)`).
-
-```jet
-module shop.checkout {
-    role Handler = #(net, db, log)                            // an effect role
-    role Money   = #[derive(Comparable, Serialize), linear]   // a tag role
-    plugins.coupon: deny(fs, db)
-}
-
-#[ Money ]                              // expands to the tag list above
-struct Receipt { order: OrderId, paid: Usd }
-
-pub fn checkout(req: Request) #(Handler) -> Response ? { ... }   // one word = full contract
-pub fn refund(req: Request)   #(Handler) -> Response ? { ... }   // change Handler once, both update
-```
-
-- **Option C — Core D × Unified labeled block.** Group *everything* — effects included — in the bracket list using labeled sections that self-route. Cost: effects leave the signature line, so a caller glances *above* the function instead of *at* it.
-
-```jet
-#[
-    effects: net, db, log,
-    panics:  never,
-    marker:  route("/checkout"),
-]
-pub fn checkout(req: Request) -> Response ? { ... }
-
-#[
-    derive: Comparable, Serialize,
-    facts:  linear,
-]
-struct Receipt { order: OrderId, paid: Usd }
-```
-
-- **Option D — Core D × Grammar keywords.** Keep the three surfaces but spell the two inline ones in English. Most readable for newcomers; effects (`does`) vs traits (`is`) are visually unmistakable. Cost: `is / does / forbids / as` are four keywords doing what one sigil family did, and reads less "systematic" to experts.
-
-```jet
-module shop.checkout {
-    plugins.coupon forbids (fs, db)
-}
-
-struct Receipt is (Serialize), linear { order: OrderId, paid: Usd }
-
-pub fn checkout(req: Request) does (net, db, log) -> Response ? {
-    raw :: req.body() as tainted
-    ...
-}
-```
-
-- **Option E — Core D × Type-row effects.** Make the effect surface a type row on the return. Strictly more composable (effects flow through generics uniformly), but the heaviest-looking. Worth it only if effects must propagate through generic code.
-
-```jet
-pub fn checkout(req: Request) -> Response ! {net, db, log} ? {
-    raw :: req.body() #tainted
-    ...
-}
-```
-
-**Recommendation:** **A (Core D)** as the ratified base — it keeps each surface sparse, puts the effect contract on the signature line where every caller sees it, and needs only four facts to teach. Adopt **B (Roles)** alongside it for any codebase with shared policy across many routes (the strongest practical combo is A + B). **D (Grammar)** is an optional skin to ratify later if onboarding wins over expert density; **C** and **E** are situational and can stay declined unless a review style or generic-effect-propagation need forces them.
-
-**Interactions with ratified decisions (read before ratifying — A would amend these).**
-- **D-ATTR2** ratified the multi-marker list as **bare** `#[Serialize, Comparable]` and explicitly *rejected* the Rust-literal `#[derive(…)]` form. The examples above use `#[ derive(Comparable, Serialize) ]` — ratifying D-QUAL1 as written would **reverse D-ATTR2** on that point. Decide whether tag lists keep the bare form (`#[Comparable, Serialize, linear]`) or adopt the `derive(…)`-grouped form here.
-- **S60** deliberately rejected a full effects system (`pure fn` is the one ratified effect-tag). The `#(net, db, log)` effect surface **reopens S60**. D-QUAL1 is the place to decide that reopening explicitly.
-- **S56 / S83** ratified user-defined derives via the external connector `~~` (`derive Point~~Serialize`); `#[…]` is for built-in derive *markers*. Keep the two distinct: `#[…]` lists markers, `~~` attaches a derive impl.
-- **Manifest surface**: the `module shop.checkout { … }` block overlaps `pkg.jet` (`payload:`/`packages:`, D-JPK-FILES) and module paths (D-MOD1 uses `.`). Decide whether capability policy lives in `pkg.jet`, in an in-source `module { }` block, or both.
-
----
-
 ## Effect system — board card c66
 
-### D-EFF1 — An effect system, expressed as tags on functions (rec B)
+### D-EFF2 — Effect polymorphism for higher-order functions (rec D)
 
-**User story.** Lena maintains a 200-file Jet service. A junior just landed a PR
-where a function deep inside the pricing logic — a function everyone assumed was a
-pure calculation — quietly grew a `core.net.fetch(...)` call to hit a currency API.
-Nothing flagged it. Now the pricing path makes a network round-trip per line item
-and nobody noticed until production latency spiked. Lena wants the compiler to know
-which functions touch the network, the disk, the clock, the RNG — and to *stop* a
-function she has declared pure from silently gaining a side effect. She does not
-want to hand-annotate 200 files to get it.
+**Gist:** A function that takes another function should inherit that function's effects — pick how Jet infers, bounds, and (for experts) spells that.
 
-| Option | Who writes effects | Failure mode it catches | Ceremony | Reopens S60? |
-|--------|--------------------|-------------------------|----------|--------------|
-| A — none (status quo) | nobody (`pure fn` only) | only "this `pure fn` isn't pure" | zero | no |
-| B — inferred, annotate at boundaries (rec) | compiler infers; you assert/restrict | hidden effect creep, capability leaks, taint sinks | low — boundaries only | **yes** |
-| C — explicit always | every function, every effect | same as B | high — the coloring tax | yes |
+> **Context.** D-EFF1 ratified Option B — an inferred, erased effect system; surface spelling `#(net, db)` on the signature (D-QUAL1=1); `#Pure fn` = the empty set. D-EFF1's implementation is gated on two sub-questions the owner asked be crosschecked + carded. This is one of them; D-EFF3 (trait-method effects) is the other. E-codes below are illustrative (real codes assigned from the free range at impl).
 
-#### How other languages do this
+**Story.** Marcus writes a tidy `#Pure fn summarize(rows)` that calls a stdlib `each(rows, f)` helper, passing a closure that quietly does `db.insert(r)`. He expects either a clean compile or a clear "you said pure but you touch the DB" error — *at his line*, not deep inside `each`. Later, Diane (platform owner) ships a `retry(times, action)` combinator and wants to *publish* that `retry` is exactly as effectful as the `action` handed to it — no more, no less — so callers' inferred effect sets stay tight. And Priya, reviewing a plugin, wants to *demand* that a sort comparator stays pure: `sort_by(items, key)` where `key` is forbidden from touching the network. Three people, one question: **what is a higher-order function's effect set, and who, if anyone, writes it down?**
 
-- **Koka** — row-polymorphic effect *inference*: every function's type carries an
-  inferred effect row (`<console,exn>`); you rarely write them, the compiler
-  propagates. Takeaway: inference + propagation is the proven way to avoid the
-  coloring tax — this is the model B copies.
-- **Frank / Eff / Effekt** — algebraic effects with **runtime handlers**: an effect
-  is *performed* and a dynamically-installed handler resumes the computation.
-  Takeaway: powerful but a runtime mechanism; Jet wants none of the handler runtime
-  — effects are a static fact, then erased.
-- **OCaml 5** — effect handlers in the runtime (used for the scheduler/concurrency),
-  but effects are **not yet tracked in the type system**. Takeaway: even a flagship
-  ML shipped handlers before static checking; Jet inverts that — static checking,
-  no handlers.
-- **Unison** — "abilities" are typed effects (`{IO, Exception}`) checked at compile
-  time and discharged by handlers. Takeaway: closest to a clean typed-effect surface
-  on a function signature; Jet borrows the surface, drops the handler discharge.
-- **Haskell (mtl / monad transformers)** — effects encoded as type-class
-  constraints (`MonadReader`, `MonadIO`) stacked in a transformer tower. Takeaway:
-  expressive but the stack is the coloring tax made manifest; Jet refuses to make
-  beginners thread a monad stack.
-- **Rust** — *no* effect system: `unsafe` and the `Send`/`Sync` auto-traits are the
-  only coarse "capability" propagation, and async is famously a function color.
-  Takeaway: the gap D-EFF1 fills — Rust users feel the missing effect layer most.
+The hinge is *whether the passed function is statically known at the call.* When `each(rows, (r) => …)` takes a literal lambda or a named `fn`, the compiler sees the body and the effect flows through precisely. When a function is stored in a struct, returned, or dynamically dispatched (S48 boxing), its body is *not* visible at the use site — so to stay sound its effect must live in the type or be assumed maximal. Koka needs effect-row variables because it doesn't monomorphize; Rust never sweats this because closures do. Jet already ratified exactly this split (S48: `<T>` monomorphizes, trait-in-type-position boxes), so the answer must name both halves.
 
-**Jet's is unlike all of these at runtime: STATIC + INFERRED + ERASED.** There is no
-handler, no monad, no runtime effect value. The effect set is computed in sema,
-checked against any assertion the user wrote, and then thrown away — codegen emits
-plain Rust with no trace of it (I3). An effect is just a compile-time tag on a
-function; `pure fn` (S60) is the empty set.
-
-- **Option A — no effect system; keep only `pure fn`.** S60 stands as-is. The only
-  thing the compiler knows is "this one function claimed purity." It cannot tell you
-  what an impure function touches, cannot wall the network out of a subtree, and
-  cannot back D-SCAP1 or D-TAINT1 (both need propagation).
-
+**In the wild:**
 ```jet
-pure fn price(items: [Item]) -> Usd {
-    items.sum(Item.price)          // ok — provably pure
+// stdlib combinator — its OWN body is pure; all effect comes from `f`
+fn each(xs: [Row], f: fn(Row) -> ()) {
+    for r in xs { f(r) }
 }
 
-fn quote(items: [Item]) -> Usd {   // just "not pure" — touches WHAT? unknowable
-    log(items.len())               // network? disk? clock? the type can't say
-    price(items)
+// Marcus's code
+#Pure fn summarize(rows: [Row]) -> Int {
+    each(rows, (r) => db.insert(r))   // does this compile? what's `each`'s effect here?
+    rows.len()
 }
-// A junior adds core.net.fetch(...) inside quote(). No diagnostic. Nothing to
-// assert against, because there is no effect to name.
+
+// Diane's combinator — wants to PUBLISH "retry is as effectful as action"
+fn retry(times: Int, action: fn() -> ()) { … }
+
+// Priya's review — wants to DEMAND the comparator stays pure
+fn sort_by(items: [Task], key: fn(Task) -> Int) -> [Task] { … }
 ```
 
-- **Option B — inferred effect tags; annotate at boundaries + cap regions (rec).**
-  The compiler infers each function's effect set from its body and propagates it
-  along calls (an effect of a callee is an effect of the caller, exactly like Koka's
-  rows). You only *write* an effect to **assert** ("this function touches at most
-  `#net`") or to **restrict** a region. A `pure fn` whose body gained an effect is a
-  compile error. A scoped cap region `#caps(net) { … }` (S82 + D-ATTR1 marker-region
-  form) bounds what the enclosed code may touch — anything outside the allowed set is
-  rejected at the call site. All compile-time; erased in codegen.
-
-```jet
-pure fn price(items: [Item]) -> Usd {
-    items.sum(Item.price)
-}
-
-fn quote(items: [Item]) -> Usd {   // inferred effect set: {#net} (from fetch_rate)
-    rate :: fetch_rate()?          // fetch_rate is inferred #net; quote inherits it
-    price(items) * rate
-}
-
-// Boundary assertion: the public entry point declares its contract on line 1.
-pub fn checkout(req: Request) #(net, db) -> Response ? {
-    rate :: fetch_rate()?          // #net — allowed
-    save(order)?                   // #db  — allowed
-    Response.ok()
-}
-
-// Restrict a region: inside here, only #net is permitted.
-fn render_card(c: view Card) {
-    #caps(net) {
-        thumb :: fetch_image(c.url)?    // ok — #net
-        write_temp(thumb)?              // error[E0701]: effect `#fs` not permitted
-                                        //   in this `#caps(net)` region
-                                        //  --> card.jet:4:9
-                                        //   |
-                                        // 4 |         write_temp(thumb)?
-                                        //   |         ^^^^^^^^^^ `write_temp` touches the
-                                        //   |                    disk (#fs); this region allows
-                                        //   |                    only #net
-                                        //   help: widen the region — `#caps(net, fs) { … }` —
-                                        //         or move the write outside it
-    }
-}
-
-// The bug Lena hit, now caught:
-pure fn price(items: [Item]) -> Usd {
-    rate :: fetch_rate()?          // error[E0702]: `pure fn price` performs effect `#net`
-                                   //  --> price.jet:2:13
-                                   //   |
-                                   // 2 |     rate :: fetch_rate()?
-                                   //   |             ^^^^^^^^^^^^ `fetch_rate` touches the
-                                   //   |                          network; `price` is declared pure
-                                   //   help: drop `pure`, or pass the rate in as a parameter
-    items.sum(Item.price) * rate
-}
+**Other languages:**
+```swift
+// Swift `rethrows` — transparent effect polymorphism for ONE effect (throws).
+// `map` throws only if its closure does; the caller writes nothing.
+func map<T>(_ f: (Element) rethrows -> T) rethrows -> [T]
+```
+```koka
+// Koka — explicit effect-row variable `e`; precise everywhere, no monomorphization.
+fun map( xs : list<a>, f : a -> e b ) : e list<b>
+```
+```rust
+// Rust — closures monomorphize, so the effect ("can it panic / await") rides
+// the concrete type; no annotation, but no `async`-polymorphism either ("coloring").
+fn map<F: Fn(A) -> B>(xs: Vec<A>, f: F) -> Vec<B>
 ```
 
-  **Flag — this REOPENS S60.** S60 ratified `pure fn` as the *one* effect tag and
-  "deliberately rejected a full effects system." Option B is that full system. It does
-  not contradict `pure fn`'s spelling or meaning (purity becomes the empty effect set,
-  the natural bottom of the lattice) but it *does* reverse S60's "no further effects"
-  stance. The owner must reopen S60 to ratify B. **B is recommended but gated on
-  resolving five sub-questions** before implementation: (1) **effect polymorphism /
-  coloring** — does a higher-order fn like `map(f)` propagate `f`'s effects, and how is
-  that written (Koka does it with effect-row variables; Jet needs a beginner-legible
-  answer or an explicit "effects don't cross the `fn(...)` type boundary in v1"
-  limitation); (2) **trait-bound interaction** — can a trait method declare/forbid
-  effects, and does an `impl` have to honor it; (3) **diagnostic quality** — the
-  whole value is in errors like E0701/E0702 reading well at scale; (4) **surface
-  spelling** — `#net` inline tags vs. a `! {net, fs}` return-row slot (D-QUAL1's
-  Option E) — pick one and pin it; (5) **overlap with D-QUAL1's `#(…)`** — these are
-  the same surface and must not ship two spellings.
+**Tradeoffs:**
 
-- **Option C — explicit effects always.** Every function annotates every effect it
-  performs; no inference. This is the coloring tax in full: a one-line refactor that
-  adds a `log()` call forces an effect annotation onto that function *and every
-  transitive caller*, all the way up.
+| Option | Beginner ceremony | Precision (known fn) | Precision (escaping fn) | Can assert callback purity? | Soundness | Familiarity |
+|--------|-------------------|----------------------|-------------------------|-----------------------------|-----------|-------------|
+| A — transparent only | none | exact | **maximal (lossy)** | no | sound (maximal fallback) | Swift `rethrows`, Rust |
+| B — effect-row variables | must read `#(via f)` in stdlib sigs | exact | exact | yes (`#Pure fn` param) | sound | Koka |
+| C — boundary wall | annotate every callback | maximal | maximal | only by annotation | sound | none (most conservative) |
+| D — hybrid (default A + opt-in B) | none | exact | maximal unless bounded | yes | sound | Swift + Koka |
+
+- **Option A — transparent inference only.** No syntax. A higher-order fn's effect set is the union of its own body's effects plus, *at each call site*, the effects of the function arguments whose bodies are statically known. Effects "flow through" `fn` params automatically.
 
 ```jet
-fn deep(x: Int) #log -> Int {      // add one log()...
-    log(x)
-    x + 1
-}
-fn mid(x: Int) #log -> Int { deep(x) }      // ...now mid must say #log...
-fn top(x: Int) #log -> Int { mid(x) }       // ...and top, and its callers, forever.
-// error[E0703]: `mid` calls `deep` (#log) but does not declare effect `#log`
-//   help: add `#log` to mid's signature  — repeated up the entire call chain
-```
+fn each(xs: [Row], f: fn(Row) -> ()) { for r in xs { f(r) } }   // own effects: ∅
 
-**Recommendation:** B — inference kills the coloring tax (the thing that makes C
-unlivable and A's `pure fn` an island), keeps `pure fn` meaningful as the empty set,
-and is the only option that can carry D-SCAP1 and D-TAINT1. Ratify only after pinning
-the surface spelling against D-QUAL1 and answering effect-polymorphism, and reopen
-S60 explicitly.
+#Pure fn summarize(rows: [Row]) -> Int {
+    each(rows, (r) => db.insert(r))   // ← lambda body is known → #(db) flows in
+    rows.len()
+}
+```
+```text
+error[E0712]: `summarize` is declared `#Pure` but this call performs a database effect
+  --> report.jet:4:5
+   |
+ 4 |     each(rows, (r) => db.insert(r))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `#(db)` flows in through the function argument `f`
+   |
+   = why: `#Pure` means the empty effect set; `db.insert` adds `#(db)`.
+   = fix: drop `#Pure`, or declare the boundary you accept: `fn summarize(...) -> Int #(db)`
+```
+The magic case works with zero ceremony. Its real cost is the **escaping** case: when the passed function is stored, returned, or boxed (S48), its body isn't visible, so A must assume the *maximal* effect set to stay sound — and A gives no way to **demand** a callback stays pure (Priya's `sort_by`). Precision-lossy at the boundary, and missing one expert lever.
+
+- **Option B — effect-row variables (Koka-style, Jet-spelled).** An expert names the pass-through with a parameter-reference row, `#(via f)` ("this fn's effect set *is* `f`'s"), and demands purity with a `#Pure fn(...)` parameter type. Static + inferred + **erased** — the row compiles away, no runtime value (I3-safe).
+
+```jet
+// Diane PUBLISHES the pass-through; callers get the tight inferred set, even when escaping:
+fn retry(times: Int, action: fn() -> ()) #(via action) { … }
+
+// Priya DEMANDS purity — a non-pure comparator is rejected at the call:
+fn sort_by(items: [Task], key: #Pure fn(Task) -> Int) -> [Task] { … }
+
+sort_by(tasks, (t) => fetch(t.url))   // rejected
+```
+```text
+error[E0713]: `sort_by` requires a pure comparator, but this one performs a network effect
+  --> board.jet:9:24
+   |
+ 9 |     sort_by(tasks, (t) => fetch(t.url))
+   |                    ^^^^^^^^^^^^^^^^^^^ `#(net)` here; `key` is declared `#Pure fn(Task) -> Int`
+   |
+   = why: sort order must be reproducible; an effectful key can reorder results run-to-run.
+   = fix: precompute the keys before sorting, or remove the network call from the comparator.
+```
+Precise everywhere including escaping. Cost: the variable surfaces in stdlib signatures beginners read (`#(via f)`), even though they never *write* it.
+
+- **Option C — boundary wall (v1 limitation).** Effects do not cross the `fn(...) -> ...` type boundary. A function value carries an *unknown/maximal* effect unless its type is annotated, so higher-order code is conservatively impure.
+
+```jet
+fn each(xs: [Row], f: fn(Row) -> ()) { for r in xs { f(r) } }
+
+#Pure fn summarize(rows: [Row]) -> Int {
+    each(rows, (r) => r.touch())   // pure lambda — but rejected anyway
+    rows.len()
+}
+```
+```text
+error[E0712]: `summarize` is declared `#Pure` but calls `each`, which may perform any effect
+  --> report.jet:4:5
+   |
+ 4 |     each(rows, (r) => r.touch())
+   |     ^^^^^ `each` takes a function parameter; its effect is assumed maximal here
+   |
+   = fix: annotate the boundary — `fn each(xs: [Row], f: #Pure fn(Row) -> ())`
+```
+Honest and simple, but it taxes the *common, pure* case: even a pure lambda through `each` fails without an annotation. Loses the dual-facet magic.
+
+- **Option D — hybrid: transparent default + opt-in expert row (recommended).** Default is A (flow-through for statically-known functions, zero syntax — Marcus's case just works and errors precisely). Escaping/boxed function values default to the *maximal* effect set (sound). Experts then reach for **two distinct, optional tools**: `#Pure fn(...)` (and `#(net) fn(...)`) **param types** to *demand/bound* what a callback may do (Priya), and `#(via f)` on the **signature** to *publish* a tight pass-through that holds even when the value escapes (Diane). Beginners write neither.
+
+```jet
+// Marcus — magic default, no annotation, precise error (Option A behavior):
+#Pure fn summarize(rows: [Row]) -> Int {
+    each(rows, (r) => db.insert(r))   // E0712: #(db) flows in via `f`
+    rows.len()
+}
+
+// Diane — publishes the pass-through so escaping callers stay precise:
+fn retry(times: Int, action: fn() -> ()) #(via action) { … }
+
+// Priya — demands purity:
+fn sort_by(items: [Task], key: #Pure fn(Task) -> Int) -> [Task] { … }
+```
+```text
+error[E0714]: this function value escapes, so its effect cannot be inferred from a body
+  --> queue.jet:12:18
+   |
+12 |     self.handler = (e) => http.post(e)
+   |                  ^^^^^^^^^^^^^^^^^^^ stored callbacks carry the maximal effect set
+   |
+   = note: callers of `dispatch` will conservatively inherit every effect.
+   = fix: bound the field's type — `handler: fn(Event) -> () #(net)` — to publish exactly `#(net)`.
+```
+Magic for beginners (A), full control for experts (B's two levers), sound in the escaping case by maximal fallback — and the expert tools are *additive*, never on the beginner's path.
+
+**Recommendation:** **D** — it's the only option that keeps the no-syntax flow-through beginners need *and* gives experts both levers the story demands (assert-pure and publish-pass-through), while the known-vs-escaping split is decided crisply (precise when known, sound-maximal when escaping) instead of left implicit; effect rows are static + erased, so I3 holds.
+
+**Owner Q (anticipated) — does `#(via f)` add a runtime value or a coloring tax?** No. `#(via f)` is a *static* claim resolved at compile time and **erased** — codegen emits the same plain Rust it would without effects (I3). It is not "async/await coloring": there is no separate calling convention, no wrapper type, no `.await`. A beginner calling a `#(via f)` stdlib function writes an ordinary call; the row only governs which compile-time effect-set checks fire. The only surface a beginner *sees* is the row printed in a signature they read — never one they must write.
 
 ---
 
-<!-- value-tags cluster: D-UNIT1, D-LIN1, D-STATE1 -->
+### D-EFF3 — Effects on trait methods (rec C)
 
-# Value-tag cluster — draft ballot cards
+**User story.** Two people, one trait system.
 
-Three cards. All assume tags are first-class (gated on D-QUAL2 from the c62
-qualifier-taxonomy work). UNIT1 and LIN1 are lower complexity; STATE1 is
-mid-pack. None of these cards should be ratified before D-QUAL2 settles the
-tag-vs-effect-vs-trait routing rule.
+*Mara* writes a hashing library. Her `Hash` trait backs a `Set` whose correctness depends on `hash` being deterministic — same value, same bucket, every run. She wants the compiler to *guarantee* that no downstream `impl Hash` quietly reads a clock, hits the network, or mutates global state. Today she can write "`hash` must be pure" in a doc comment and hope. She wants it to be a compile error when an impl breaks it.
 
-**Dependency note (applies to all three cards):** D-QUAL1 (c62) proposed the
-taxonomy: a *tag* is a label without methods, written `#[Tag]` on a declaration
-or `#Tag` inline on a value. D-QUAL2 is the ballot that ratifies whether tags
-are first-class in the language at all and what surface they live on. D-UNIT1,
-D-LIN1, and D-STATE1 are built on top of that; treat them as "ratify D-QUAL2
-first, then decide these in any order."
+*Devin* holds a `[Drawable]` — a list of trait objects, concrete types erased — and loops over it calling `.draw()` inside a `#Pure fn`. He needs to know, *without seeing any concrete impl*, whether iterating and drawing can touch the network. If the answer is "depends on whichever impl happens to be in the list," his `#Pure fn` guarantee is a lie. He needs the trait itself to tell him the ceiling.
 
----
+D-EFF3 decides whether a `trait` may speak about effects at all, and if so what that declaration binds.
 
----
+> **Scope.** This card is about **trait methods** only. Effect *polymorphism* for plain higher-order functions (a `map` that inherits its closure's effects) is the companion card **D-EFF2** — do not re-decide it here. Ratified syntax assumed: traits implemented via the `~~` connector (`impl Point~~Drawable`, S83); effects spelled `#(net, db)` after the param list (D-EFF1 / D-QUAL1=1, e.g. `fn render(self) #(gpu)`); `#Pure fn` = the empty effect set (⊥). Effects are **static, inferred, erased** — no runtime mechanism (I3). E-codes below are illustrative; E0710/E0711 are free today.
 
-## Scoped transactions — board card c72
+> **The spine: static vs. dynamic dispatch.** The three options *only differ at trait-object (dynamic-dispatch) call sites.* For generic, monomorphized static dispatch — `fn sort<T~~Ord>(xs: mut [T])`, where the concrete type is known — effect inference is **exact and per-impl under all three options**: the compiler sees the real `cmp` body and infers its precise effect with zero annotation. The trait-level bound only becomes load-bearing when the concrete type is *erased* — Devin's `[Drawable]`, calling `.draw()` through the object. So "does Option A make my generic `Ord` code impure?" has one answer under every option: **no.** What the options actually contest is what happens when the type is gone.
 
-### D-TXN1 — Rollback semantics for `#transact { }` (rec A)
+> **One mechanism, not two.** `#Pure fn hash(self)` in a trait is not a separate feature from `fn render(self) #(gpu)` — it is the same effect-bound machinery with the set fixed to ∅. A `#(gpu)` bound is the non-empty case. The check an impl must pass is always the same: *inferred effects of the impl method ⊆ the trait's declared bound.* `#Pure` is just the bound `{}`.
 
-**User story.** Kai is writing a game action system. A single `use_ability`
-call must spend stamina, apply a cooldown, and damage the target — or do none
-of those things if any step fails. Today he writes a ladder of manual rollback
-calls after each `?`. He misses one. The bug ships. He wants the compiler to
-guarantee that a failed sequence is cleanly unwound without him hand-writing
-the ladder.
+Each option answers the owner's three real sub-questions: **(1) may a trait declare/forbid effects? (2) must an impl honor it? (3) what is the effect when the trait says nothing?**
 
-> **Note on syntax.** The `#transact { }` scoped-region syntax is **already
-> ratified** (S82 / D-ATTR1: `#Marker { }` is the scoped-effect form). This
-> decision is about **rollback semantics** — what `#transact { }` actually
-> does when a `?` propagates — not syntax. Do not re-open the surface.
+| Option | Beginner ceremony | Soundness through dynamic dispatch | Expressiveness | Familiarity |
+|--------|-------------------|------------------------------------|----------------|-------------|
+| A — traits never mention effects | none — nothing new to learn | **unsound or pessimistic**: a trait-object call assumes maximal (`⊤`) effect; Mara *cannot* require a pure `Hash` at all | low — no way to constrain an impl | type-classes (Haskell): effect lives in the type, not the class |
+| B — traits MAY declare an upper bound; impls must satisfy it | opt-in: write `#Pure`/`#(…)` only when you mean it | partial: bound checks impls, but a trait-object call's effect is still unknown unless the bound is also read at the call site | medium — can require purity; can't yet *rely* on it through an object | Rust `const fn` in traits, `unsafe fn` signatures |
+| C — declared bound is BOTH the impl obligation AND the dispatch contract | same opt-in as B; un-annotated stays zero-ceremony | **sound**: a trait-object call's effect = the declared bound; Devin's `#Pure fn` is honest | high — purity is both required and dependable | Swift protocol `throws`/`async`; Rust trait-fn qualifiers |
 
-> **Companion decision: D-TXN2** (board card c100) — whether to *reject*
-> irreversible effects (sent emails, network POSTs) inside `#transact { }`,
-> since rollback reverts memory but can't un-send. D-TXN1 covers reversible
-> mutations; D-TXN2 covers what can't be rolled back. Ratify the two together.
-
-| Option | What rolls back | Who writes rollback logic | Honest about limits? | After D-EFF1? |
-|--------|----------------|--------------------------|----------------------|---------------|
-| A — trait-declared rollback | types that impl `Rollback` | the type author, once | yes — only types that know how | natural sequencing (after D-EFF1) |
-| B — library-only compensation | nothing (caller hand-writes) | every caller | technically honest; no language help | independent; always available |
-
-- **Option A — `#transact { }` over types that declare `Rollback`. (RECOMMENDED)**
-  A type opts into the transaction protocol by implementing the `Rollback`
-  trait. Inside a `#transact { }` block, every `?`-failure triggers the
-  reverse sequence: each step's `rollback` method is called in reverse order
-  on the values that were mutated. On clean exit (no `?` propagation), the
-  transaction commits — no rollback needed. The compiler tracks which values
-  were mutated inside the block and synthesizes the reverse-call chain.
-
-  This is honest: only operations on types that declare a rollback are
-  covered. If you use a type that doesn't implement `Rollback` inside the
-  block, sema tells you.
+- **Option A — traits may not mention effects (per-impl inference only).** (1) No — a `trait` declares only signatures; `#(…)`/`#Pure` are rejected on a trait method. (2) Nothing to honor. (3) Each impl's method effect is inferred from its own body — exact under static dispatch. But a call through a **trait object** has no concrete body to inspect, so it must conservatively assume the maximal effect set `⊤`. Mara cannot express "`hash` must be pure"; Devin's loop over `[Drawable]` is always treated as touching everything.
 
 ```jet
-trait Rollback {
-    fn rollback(mut self)
+trait Hash {
+    fn hash(self) -> U64        // no effect annotation allowed
 }
 
-struct Stamina { current: Int, reserved: Int }
+struct Point { x: Int, y: Int }
 
-impl Stamina: Rollback {
-    fn rollback(mut self) {
-        self.current += self.reserved
-        self.reserved = 0
+impl Point~~Hash {
+    fn hash(self) -> U64 { self.x.bits ^ (self.y.bits << 1) }   // inferred pure
+}
+
+// A VIOLATING impl — except under A nothing is violated; it just compiles:
+impl Session~~Hash {
+    fn hash(self) -> U64 {
+        log_to_server(self.id)      // network I/O inside hash — allowed!
+        self.id.bits
     }
 }
 
-struct Cooldown { active: Bool }
-
-impl Cooldown: Rollback {
-    fn rollback(mut self) {
-        self.active = false
-    }
-}
-
-fn use_ability(player: mut Player, target: mut Enemy) -> Unit ? {
-    #transact {
-        player.stamina.spend(10)?   // if this fails: nothing to roll back yet
-        player.cooldown.apply()?    // if this fails: rolls back stamina.spend
-        target.hp.damage(25)?       // if this fails: rolls back cooldown + stamina
-    }
-    // all three succeeded — committed, no rollback
+// Devin's cost: a trait-object call is assumed maximal-effect.
+fn fingerprint(items: [Hash]) -> U64 #(net, fs, db) {   // forced to ⊤
+    acc := 0
+    for it in items { acc ^= it.hash() }   // cannot prove pure — concrete type erased
+    acc
 }
 ```
+No diagnostic exists because there is no rule to break. Mara's invariant is unstatable; Devin's `#Pure fn` over a `[Hash]` is impossible.
+
+- **Option B — traits MAY declare an effect upper bound; impls must satisfy it.** (1) Yes — a trait method may carry `#(…)` or be `#Pure fn`; this is an *upper bound*. (2) Yes — each `impl` method's inferred effects must be `⊆` the bound, else **E0710**. (3) An *un-annotated* trait method is inferred per-impl (exact under static dispatch). The bound is checked at the impl, but it is **not** consulted at trait-object call sites — so a `[Renderer]` call still falls back to maximal effect even when the trait *did* declare a bound. B fixes Mara halfway (she can require purity) but not Devin (he still can't rely on it).
 
 ```jet
-// Error: using a non-Rollback type inside #transact
-struct Logger { entries: [String] }
-// Logger does not impl Rollback
+trait Hash {
+    #Pure fn hash(self) -> U64        // bound = ∅ : every impl's hash must be pure
+}
 
-fn risky(logger: mut Logger) -> Unit ? {
-    #transact {
-        logger.entries.push("started")?
-        //             ^^^^
-        // error[E0801]: `Logger` does not implement `Rollback`; mutations
-        //               inside `#transact` must be reversible.
-        //   fix: impl Logger: Rollback { fn rollback(mut self) { … } }
-        //        or move `logger.entries.push` outside the `#transact` block.
+struct Point { x: Int, y: Int }
+
+impl Point~~Hash {
+    #Pure fn hash(self) -> U64 { self.x.bits ^ (self.y.bits << 1) }   // ∅ ⊆ ∅ — ok
+}
+
+// VIOLATING impl:
+impl Session~~Hash {
+    fn hash(self) -> U64 {
+        log_to_server(self.id)
+        //  ^^^^^^^^^^^^^^^^^^^
+        // error[E0710]: `impl Session~~Hash`'s `hash` has effect `#(net)`, but
+        //               trait `Hash` declares `hash` as `#Pure` (effect bound ∅).
+        //   why: `Hash` promises a pure `hash`; callers (e.g. `Set`) rely on it.
+        //   fix: remove the network call, or move it behind a separate method.
+        self.id.bits
     }
 }
 ```
+Mara is satisfied. But Devin's `fingerprint(items: [Hash])` *could* now be proven pure — and under B it still isn't, because the call site doesn't read the bound. That gap is exactly what C closes.
 
-  Natural sequencing note: `#transact` is an effect region (S82). After
-  D-EFF1 ratifies the full effects model, rollback becomes a named effect
-  that propagates through call sites like any other. Ratify A now as the
-  semantic contract; the effect-system wiring follows D-EFF1.
-
-- **Option B — Library-only manual compensation.** No language change. Every
-  caller hand-writes the rollback ladder using `??` fallback arms. The `#transact`
-  syntax is not used for rollback; it could still be used for other region
-  semantics (locking, tracing), but rollback is purely caller responsibility.
+- **Option C — the declared bound is BOTH the impl obligation AND the dispatch contract. (recommended)** (1) Yes — same spelling as B. (2) Yes — same `⊆` check, same **E0710** on violation. (3) An *un-annotated* trait method is still inferred per-impl (exact, zero-ceremony under static dispatch); when called through a **trait object**, an un-annotated method is treated as maximal `⊤` — but now with a fix-it pointing at the cure. The new power: at a **trait-object call site**, the call's effect *is* the trait's declared bound. So a `[Renderer]` declared `#(gpu)` contributes exactly `#(gpu)` to its caller — no more, regardless of impl. Mara *and* Devin are both satisfied, with one mechanism.
 
 ```jet
-fn use_ability(player: mut Player, target: mut Enemy) -> Unit ? {
-    // hand-written compensation ladder — no language help
-    player.stamina.spend(10) ?? {
-        return err(Error.message("stamina failed"))
-    }
-    player.cooldown.apply() ?? {
-        player.stamina.rollback()         // caller must remember this
-        return err(Error.message("cooldown failed"))
-    }
-    target.hp.damage(25) ?? {
-        player.cooldown.rollback()        // and this
-        player.stamina.rollback()         // and this
-        return err(Error.message("damage failed"))
-    }
-    return ok(())
+trait Renderer {
+    fn render(self) #(gpu)        // upper bound: any impl may use at most #(gpu)
 }
 
-// A new teammate adds a fourth step and forgets the rollback:
-fn use_ability_v2(player: mut Player, target: mut Enemy) -> Unit ? {
-    player.stamina.spend(10) ?? { return err(Error.message("stamina")) }
-    player.cooldown.apply()  ?? { player.stamina.rollback(); return err(…) }
-    target.hp.damage(25)     ?? { player.cooldown.rollback(); player.stamina.rollback(); return err(…) }
-    emit_sound(player.sfx)?
-    // no rollback for emit_sound — partial success shipped silently
+struct Sprite { tex: Texture }
+
+impl Sprite~~Renderer {
+    fn render(self) #(gpu) { gpu_blit(self.tex) }   // #(gpu) ⊆ #(gpu) — ok
+}
+
+// Devin's loop is now provably bounded — no concrete type needed:
+fn draw_all(items: [Renderer]) #(gpu) {     // exactly #(gpu), not ⊤
+    for it in items { it.render() }         // each call's effect = the bound #(gpu)
+}
+
+// VIOLATING impl — exceeds the dispatch contract:
+impl NetSprite~~Renderer {
+    fn render(self) {
+        fetch_texture_over_http(self.url)   // adds #(net)
+        //  ^^^^^^^^^^^^^^^^^^^^
+        // error[E0710]: `impl NetSprite~~Renderer`'s `render` has effect
+        //               `#(net, gpu)`, exceeding trait `Renderer`'s bound `#(gpu)`.
+        //   why: anyone holding a `[Renderer]` was promised at most `#(gpu)`;
+        //        a hidden `#(net)` would silently break their effect guarantee.
+        //   fix: prefetch the texture before constructing `NetSprite`, or widen
+        //        the trait: `fn render(self) #(gpu, net)`.
+        gpu_blit(self.tex)
+    }
 }
 ```
+And the un-annotated-through-object case carries its own guidance:
 
-  Zero language change. Leak-by-omission is the exact failure mode Option B
-  accepts: every new step is a rollback the caller might forget.
+```jet
+trait Drawable {
+    fn draw(self)                 // no bound declared
+}
+
+fn paint(items: [Drawable]) #(gpu) {
+    for it in items { it.draw() }
+    //                ^^^^^^^^^
+    // error[E0711]: `Drawable::draw` declares no effect bound, so a call through
+    //               a `[Drawable]` trait object must assume the maximal effect set.
+    //               `paint` cannot be held to `#(gpu)` here.
+    //   why: with the concrete type erased, the compiler has no body to inspect.
+    //   fix: declare the bound on the trait — `fn draw(self) #(gpu)` — or call
+    //        each item via a generic bound `fn paint<T~~Drawable>(…)` so the
+    //        concrete effect is inferred per type (static dispatch).
+}
+```
+This error fires *only* when the surrounding context demands an effect ceiling (inside a `#Pure fn` or a `#(…)`-bounded fn). Plain unconstrained code calling `.draw()` through a `[Drawable]` is fine — it just inherits `⊤`, the honest answer.
 
 **How other languages do this.**
 
 | Language | Mechanism | Jet takeaway |
-|----------|-----------|-------------|
-| Haskell STM (`stm`) | `atomically` block over `TVar`s; the runtime retries on conflict; no partial state ever visible | Jet doesn't have shared mutable state across tasks (S53 deferred); STM's retry loop doesn't apply, but the "all-or-nothing block" idea does |
-| Clojure `dosync` / refs | Software transactional memory; `alter`/`ref-set` inside a `dosync` block; retries on conflict | Same as STM — the retry model is for concurrent shared state; Jet's `#transact` is single-threaded sequential undo |
-| Database ACID transactions | BEGIN / COMMIT / ROLLBACK; the DB engine tracks the undo log automatically | Jet's Option A is the same contract at the language level: each type declares its own undo; the block synthesizes the ROLLBACK call sequence |
-| Saga pattern (microservices) | Each step publishes a compensating action; a saga orchestrator calls compensations in reverse on failure | Option A is a local, synchronous Saga: the `Rollback` trait *is* the compensating action; `#transact` *is* the orchestrator |
-| Temporal Workflows | Compensations written as separate activities; the framework calls them on failure | More infrastructure, same idea; Jet's version is zero-framework, compiler-synthesized |
+|----------|-----------|--------------|
+| Rust — `const fn` in trait | a trait may require methods be `const`; impls must honor it; non-`const` impl is a compile error | Closest precedent: a *qualifier on a trait method that impls must satisfy*. Jet's effect bound is the same shape, generalized from "const-evaluable" to "effect set". |
+| Rust — `unsafe fn` in trait signature | the trait fixes the safety qualifier; impls match it | Same impl-obligation idea; a binary qualifier where Jet's is a lattice of effects. |
+| Haskell — type classes | the class carries **no** effect info; effects live in the method's monadic return type (`IO a`), not the class | Option A in spirit: the constraint is unstatable at the class. Jet rejects this — effects belong on the method so dispatch can read them (C). |
+| Koka — effect rows + interfaces | effects are first-class row variables; an interface method can carry a concrete or polymorphic effect | C is the monomorphic specialization: a fixed declared bound per trait method, read at both impl-check and dispatch. Row-polymorphic trait methods are D-EFF2's territory. |
+| Swift — protocol `throws` / `async` | the protocol fixes whether a method can throw / suspend; impls conform; callers through an existential see the protocol's declaration | Direct analogue of C: a protocol-declared *effect* is both the conformance rule *and* a fact the caller through an existential relies on. Effects generalize that one bit to a set. |
 
-Jet's Option A is unusually explicit: types opt in, the rollback logic is
-type-authored and auditable, and the compiler synthesizes the call sequence.
-There is no hidden retry, no global undo log, and no runtime overhead outside
-the `Rollback` calls themselves.
-
-**Recommendation:** A — `#transact { }` over `Rollback`-implementing types.
-The honesty is a feature: only operations whose authors have declared a
-rollback are covered; everything else is a compile error telling you what to
-fix. Option B is the status quo and the source of the bug Kai hit.
-
----
-
----
+**Recommendation:** C — the declared bound is both the impl obligation (**E0710** on `⊄`) and the dispatch contract (a trait-object call's effect = the declared bound; un-annotated methods inferred per-impl statically, **E0711** with a fix-it when an un-annotated method is called through an object under an effect ceiling). It is the only option that satisfies *both* user stories with one mechanism: A cannot even state Mara's pure-`Hash` requirement and forces Devin to `⊤`; B states it but still strands Devin at the dispatch boundary; C subsumes B's check and closes the boundary, so safe-by-default holds *through* dynamic dispatch — and the common generic case stays zero-ceremony because static dispatch still infers exactly.
 
 ## Safe schema changes — board card c73
 
-### D-MIGRATE1 — Compile-time enforcement of breaking data-shape changes (rec A)
+### D-MIGRATE2 — Full migration-operation vocabulary + `jet schema` verbs (rec: per sub-question below)
 
-**User story.** Dev team at a Jet shop ships a library with a public `UserRecord`
-struct. Three months later, someone renames a field. Every consumer silently
-recompiles, gets default-zero for the missing field, and ships corrupted data to
-production before anyone notices. Sam, the library author, wants the compiler to
-refuse the rename until he writes an explicit migration — the same guarantee a
-database gives when you try to drop a column.
-
-| Option | When is the break caught? | Who writes conversion? | Ignorable? | Needs recorded shape? |
-|--------|--------------------------|----------------------|------------|----------------------|
-| A — compile-time enforcement + conversion library | at compile time of the library change | the library author | no — it's a compile error | yes — a published shape must be snapshotted |
-| B — lint/warn only | at compile time, advisory | nobody required to | yes — warnings are ignorable | no |
-
-- **Option A — Compile-time enforcement: the CHECK is core; conversion is the
-  Build-tier versioning library (#11). (RECOMMENDED)** When a type is marked
-  `#[PublishedSchema]` (or equivalent), the compiler snapshots its field layout
-  at release time and stores it alongside the package (in `.jet/cache/` or
-  embedded in the artifact). On the next build, if the shape has changed in a
-  breaking way (field removed, type changed, field renamed without migration),
-  sema emits **E0901** naming the field and the published version. The author
-  must either write a migration (using the Build-tier versioning library) or
-  explicitly bump the major version with a breaking-change marker.
+**User story.** Sam maintains `jet-records`, a published library. In v1 the core type was:
 
 ```jet
-// pkg.jet — published type, shape is snapshotted at release
 #PublishedSchema
 struct UserRecord {
-    id: Int,
-    email: String,
     name: String,
+    price: Int,        // cents
+    legacy_id: String,
 }
-
-// Later: rename `name` → `display_name` without a migration:
-#PublishedSchema
-struct UserRecord {
-    id: Int,
-    email: String,
-    display_name: String,   // renamed from `name`
-}
-// error[E0901]: breaking change to published schema `UserRecord` (v0.4.0)
-//   field `name: String` removed; `display_name: String` added
-//   Consumers reading v0.4.0 data will get a missing-field error at runtime.
-//   Options:
-//     1. Write a migration: `migration UserRecord { rename name -> display_name }`
-//     2. Bump the major version and mark this as a breaking release.
-//     3. Keep the old field and deprecate it.
 ```
 
-```jet
-// With a migration — the compiler accepts the change:
-migration UserRecord {
-    rename name -> display_name
-}
+In v2 Sam wants to (1) rename `name` → `display_name` (already ratified, D-MIGRATE1), (2) drop `legacy_id` (an internal artifact some consumers serialized anyway), and (3) change `price` from raw `Int` cents to a `Usd` value type. Without migrations the compiler fires E0910 on all three. The ratified vocabulary has exactly one verb — `rename old -> new`. This card decides the rest.
 
-#PublishedSchema
-struct UserRecord {
-    id: Int,
-    email: String,
-    display_name: String,
-}
-// compiles: the migration tells consumers how to upgrade v0.4.0 → v0.5.0 data.
-```
-
-```jet
-// Consumer side — reading old data with the new shape:
-record :: UserRecord.from_v040(raw_bytes)?
-// the versioning library generates `from_v040` from the migration chain;
-// up/down conversion is the Build-tier library's job, not the compiler's.
-```
-
-  The compiler's job is the **check** — refuse a breaking shape change without
-  a declared migration. The conversion functions (`from_v040`, `to_v040`) are
-  generated by the Build-tier versioning library (#11), not by `sema` or
-  `codegen` directly. This keeps codegen dumb (I3) and gives the library room
-  to handle complex cases (field reorder, type coercion, default injection)
-  without adding new compiler machinery for each.
-
-- **Option B — Lint/warn only.** The compiler notices the structural change
-  and emits a warning, but the build does not fail. A `jet fix` or `--allow`
-  suppresses it.
-
-```jet
-// Same rename as above, no migration:
-#PublishedSchema
-struct UserRecord {
-    id: Int,
-    email: String,
-    display_name: String,
-}
-// warning[W0901]: breaking change to published schema `UserRecord` (v0.4.0)
-//   field `name: String` removed; `display_name: String` added
-//   (use --allow schema-break to suppress)
-```
-
-  Warnings are suppressible. The one time you most want an unbreakable
-  guarantee — public wire formats — is the one time a warning is ignored under
-  release deadline pressure. Option B is the database world's equivalent of a
-  migration framework you can opt out of: it exists, and the bugs still ship.
-
-**How other languages do this.**
-
-| Language | Mechanism | Jet takeaway |
-|----------|-----------|-------------|
-| Protocol Buffers | Field numbers + `reserved` keyword; removing a field number is a protocol error at decode time | Runtime check, not compile-time; Jet catches it earlier. The "number-is-identity, name-is-docs" rule is worth considering for the migration syntax |
-| Apache Avro | Reader/writer schema resolution at decode time; missing optional fields get defaults | Runtime resolution, not compile-time; Jet's check is stronger. Avro's reader/writer schema pair is the direct analog of Jet's published-vs-current shape diff |
-| Rust + serde | No built-in schema versioning; authors use `#[serde(rename = "…")]` and hope; `serde_versioning` crates exist but are optional | Jet enforces what Rust leaves as convention; the `migration` block is the `#[serde(rename)]` that the compiler requires |
-| Elm records | The compiler checks record type compatibility structurally; a renamed field is a type error at every call site, found immediately | Elm catches breaks locally (within a codebase); Jet's `#PublishedSchema` catches breaks at the library boundary, where Elm's type system stops |
-| Flyway / Alembic (database migration frameworks) | Migration scripts versioned and applied in order; the framework refuses to run if migrations are missing | The exact model Jet's option A adopts at the language level: migration = required, ordered, tracked. Jet makes it a compile error; Flyway makes it a deploy error |
-| Ecto migrations (Elixir) | Migrations are first-class modules; `mix ecto.migrate` fails if the schema is ahead of migrations | Same as Flyway; Jet's version is language-native, not a deploy-time CLI |
-
-Jet's Option A is the strongest guarantee in this table: it is a **compile
-error**, not a runtime decode error (Avro), a type error within a codebase
-(Elm), or a deploy-time failure (Flyway/Ecto). That strength comes at a cost:
-a published shape must be snapshotted and stored so the compiler can diff it.
-The `.jet/cache/` store is the natural home.
-
-**Recommendation:** A — compile-time enforcement is the only form of this
-guarantee that cannot be silenced by a deadline. The conversion library (#11)
-handles up/down migration logic without burdening the compiler; sema's job is
-exactly the check (I3). Option B is a lint, and lints get suppressed.
+> **Context.** D-MIGRATE1 ratified Option A — compile-time `#PublishedSchema` shape enforcement; a breaking change with no migration is E0910; `migration Type { rename a -> b }` unblocks it. Scope was deliberately locked to `rename`. Reuses ratified syntax: the `migration Type { }` block, `impl Source -> Target { }` (D-ERR-CONV), distinct construction `Usd(cents)` (D-DIST3), the `->` arrow.
 
 ---
 
-**Owner Q (2026-06-21) — leaning A, but how is bloat addressed? How do large codebases
-avoid 3k lines of nothing-but-migrations?**
+#### Sub-question 1a — Add a field with a default
 
-Four bounds keep the migration set small — it's bounded by *published API surface and
-your data-support window*, never by codebase size:
+A new field has no value in already-serialized data; the migration supplies a default.
 
-1. **Only `#PublishedSchema` types accrue migrations.** Internal/private structs — the
-   vast majority of a large codebase — never participate. The count scales with the
-   handful of types you actually serialize and publish, not your line count.
-2. **Migrations live in a dedicated `migrations/` tree, never inline with logic.** They're
-   build-tier declarations (they generate `from_vXXX` converters at build time), so they
-   add **zero runtime/binary cost** and don't clutter the code that does work. Your
-   business logic file is never longer because of them.
-3. **You only keep migrations back to your oldest *still-supported* data version.** A
-   migration exists to read old serialized data; once you no longer promise to read
-   v0.x data (past your support floor), its migrations are dead.
-4. **Squash to a baseline (the database "schema squash" idea).** `jet schema squash`
-   collapses every migration older than the support floor into a single fresh **baseline
-   snapshot** of the current shape, and deletes the collapsed chain. So the chain length
-   is bounded by *(breaking changes within the support window)*, not all-time history —
-   the same way Rails/Django/Prisma keep migrations from growing unbounded.
+- **Option A — `add f: T = val` (recommended).** Reads like a struct field with an initializer; reuses the `=` already used for struct-field defaults.
+
+```jet
+migration UserRecord {
+    rename name -> display_name
+    add verified: Bool = false
+}
+```
+
+- **Option B — `add f: T default val`.** A `default` keyword used nowhere else in field syntax.
+
+```jet
+migration UserRecord {
+    add verified: Bool default false
+}
+```
+
+| | `add f: T = val` | `add f: T default val` |
+|---|---|---|
+| Reads like | a field decl with init | a config/SQL clause |
+| Consistency with Jet | mirrors struct-field defaults | no parallel in ratified syntax |
+| Ambiguity | low | low |
+
+**Recommendation:** `add f: T = val` — one rule shared with struct-field defaults, not two.
+
+---
+
+#### Sub-question 1b — Remove / drop a field
+
+- **Option A — `remove f` (recommended).**
+
+```jet
+migration UserRecord {
+    remove legacy_id
+}
+```
+
+- **Option B — `drop f`.**
+
+```jet
+migration UserRecord {
+    drop legacy_id
+}
+```
+
+| | `remove` | `drop` |
+|---|---|---|
+| Reads like | "this field no longer exists" | SQL `DROP` (db-level destruction) |
+| Consistency with Jet | plain English, neutral | borrows SQL connotation |
+| Ambiguity | low | low |
+
+**Recommendation:** `remove` — `drop` implies database-level destruction; the migration step is a schema transformation, not a destructive command.
+
+---
+
+#### Sub-question 1c — Change a field's type
+
+- **Option A — `change f: Old -> New via <expr>` (recommended for the inline case).** `change` names the op; `Old -> New` reuses the `->` arrow; `via` introduces the conversion.
+
+```jet
+migration UserRecord {
+    change price: Int -> Usd via (cents) => Usd(cents)
+}
+```
+
+- **Option B — `transform f: Old -> New { <expr> }`.** A single verb with a block body for multi-line converters.
+
+```jet
+migration UserRecord {
+    transform price: Int -> Usd {
+        (cents) => Usd(cents)
+    }
+}
+```
+
+- **Option C — `change f: Old -> New` + a named `impl Old -> New { }`.** The migration line declares only; the converter is the ratified D-ERR-CONV construct (see sub-Q2).
+
+```jet
+migration UserRecord {
+    change price: Int -> Usd
+}
+
+impl Int -> Usd {              // reuses D-ERR-CONV's declaration surface
+    fn convert(cents: Int) -> Usd { Usd(cents) }
+}
+```
+
+| | `change … via` | `transform … { }` | `change` + `impl` |
+|---|---|---|---|
+| Reads like | field mutation + routing | block transformation | declaration + named converter |
+| Consistency with Jet | `->` ratified; `via` localized-new | new keyword + new block form | fully reuses D-ERR-CONV |
+| Ambiguity | low | low | low (if D-ERR-CONV known) |
+
+**Recommendation:** `change f: Old -> New via <expr>` for inline one-liners, with the `impl Old -> New { }` form (sub-Q2) when the conversion is non-trivial. Absence of `via` means "find the `impl Old -> New` in scope."
+
+---
+
+#### Sub-question 1d — Reorder fields
+
+- **Option A — `reorder [f1, f2, f3]`.** Explicit full ordering.
+
+```jet
+migration UserRecord {
+    reorder [display_name, price, verified]
+}
+```
+
+- **Option B — no verb; reordering is not a tracked breaking change (recommended).** Field order is not part of the `#PublishedSchema` baseline; order-sensitive wire formats are a serialization-library concern.
+
+```jet
+// no migration needed — reordering fields compiles cleanly
+#PublishedSchema
+struct UserRecord { price: Usd, display_name: String, verified: Bool }
+```
+
+**Recommendation:** no `reorder` verb — keep the vocabulary minimal; reordering is serialization-format-specific and belongs to a serializer's own versioning. Add later only on concrete need.
+
+---
+
+#### Sub-question 2 — Type-change conversions: inline vs. named converter
+
+- **Option A — always inline `via` lambda.** Conversion sits next to the field.
+
+```jet
+migration UserRecord { change price: Int -> Usd via (cents) => Usd(cents) }
+```
+
+- **Option B — named converter only, via `impl Old -> New { }` (D-ERR-CONV).** The migration line carries no expression; the compiler resolves the `impl` in scope.
+
+```jet
+impl Int -> Usd { fn convert(cents: Int) -> Usd { Usd(cents) } }
+
+migration UserRecord { change price: Int -> Usd }   // resolves impl Int -> Usd
+```
+
+- **Option C — both; inline `via` wins, else fall back to `impl` (recommended).** Resolution order: (1) inline `via`, (2) `impl Old -> New` in scope, (3) E0910 asking for one.
+
+```jet
+// short form — inline:
+migration UserRecord { change price: Int -> Usd via (cents) => Usd(cents) }
+
+// long form — reuse a named converter:
+impl Int -> Usd { fn convert(cents: Int) -> Usd { Usd(cents) } }
+migration UserRecord { change price: Int -> Usd }
+```
+
+> **Open point flagged for the owner / impl.** D-ERR-CONV's `impl Source -> Target { }` is ratified-scoped to *error* conversions that `?` applies automatically. Reusing the same surface here means a migration type-change conversion shares the declaration but is invoked **only by the migration machinery at data-load time, not by `?` at runtime**. Confirm that reuse (recommended — one conversion construct), or carve a distinct `migration-only` converter form if conflating the two surfaces is unwelcome.
+
+**Recommendation:** Option C — inline `via` for the common one-liner; the ratified `impl Old -> New` for non-trivial conversions. No parallel mechanism; one predictable resolution rule.
+
+---
+
+#### Sub-question 3 — The `jet schema` verb surface
 
 ```shell
 $ jet schema status
-UserRecord: baseline v3.0.0 → 2 migrations → current (v3.4.0)   # only 2 live
-Order:      baseline v3.0.0 → 0 migrations                       # never broke
+UserRecord (jet-records v1.0.0 → current)
+  baseline  v1.0.0   .jet/cache/schema/UserRecord.snapshot
+  ├─ [1] rename  name -> display_name
+  ├─ [2] remove  legacy_id
+  ├─ [3] change  price: Int -> Usd  (via impl Int -> Usd)
+  └─ [4] add     verified: Bool = false
+  No uncommitted breaking changes.
+```
+`jet schema status` — confirm this spelling/output (no decision needed).
 
-$ jet schema squash --before 3.0.0     # support floor moved to 3.0
-collapsed 11 migrations (v0.4.0..v2.9.0) into baseline @ v3.0.0; removed 340 lines
+**Squash flag:**
+
+- **Option A — `jet schema squash --before <ver>` (recommended).** Flag names the cutoff; everything strictly before is collapsed into a baseline.
+
+```shell
+$ jet schema squash --before v2.0.0
+Collapsed 4 migration steps into baseline UserRecord@v2.0.0
 ```
 
-So a 500k-line codebase with 12 published types and a 2-major-version support window
-carries maybe a few dozen live migration lines, not thousands. The "3k lines of
-migrations" failure mode is specifically what the squash-to-baseline + support-floor model
-prevents; without it (append-only forever) you'd be right to worry. **Recommend ratifying
-A with the squash/baseline tooling named as part of the Build-tier versioning library
-(#11)** so the bloat answer ships with the feature, not after.
+- **Option B — `jet schema squash <ver>` (positional).** Shorter, but ambiguous about "through" vs "before" vs "at".
+
+```shell
+$ jet schema squash v2.0.0
+```
+
+**Recommendation:** `--before <ver>` — the flag name removes the through/at ambiguity that is a real source of mistakes.
+
+**CI gate verb:**
+
+- **Option A — add `jet schema check`.** Exits non-zero on an undeclared breaking change.
+
+```shell
+$ jet schema check
+Error [E0910]: UserRecord has a breaking change with no migration declared.
+$ echo $?
+1
+```
+
+- **Option B — no extra verb; `jet build` is already the gate (recommended).**
+
+```shell
+$ jet build      # E0910 already fails the build in CI
+```
+
+**Recommendation:** no `jet schema check` — E0910 is already a compile error; a separate verb would either re-implement detection (violating I3) or shell out redundantly. Add a fast pre-compile lint later only if needed.
 
 ---
 
----
+#### Full worked example — Sam's v2 migration
 
----
+```jet
+#PublishedSchema
+struct UserRecord {
+    display_name: String,
+    price: Usd,
+    verified: Bool,
+}
+
+impl Int -> Usd {                                    // named converter (D-ERR-CONV surface)
+    fn convert(cents: Int) -> Usd { Usd(cents) }
+}
+
+migration UserRecord {
+    rename name -> display_name        // D-MIGRATE1 (ratified)
+    remove legacy_id                   // 1b
+    change price: Int -> Usd           // 1c + 2: resolved via impl Int -> Usd
+    add verified: Bool = false         // 1a
+}
+```
+
+| Sub-question | Recommendation |
+|---|---|
+| 1a add-field | `add f: T = val` |
+| 1b remove-field | `remove f` |
+| 1c type-change | `change f: Old -> New via <expr>` (inline) + `impl Old -> New` (named) |
+| 1d reorder | not a tracked breaking change |
+| 2 conversion supply | both; inline `via` wins, fall back to `impl` |
+| 3 squash flag | `--before <ver>` |
+| 3 CI gate | use `jet build`; no extra verb |
 
 ## Persona-gap decisions — board cards c83–c96 (2026-06-20 persona run)
 
@@ -978,429 +856,6 @@ A with the squash/baseline tooling named as part of the Build-tier versioning li
 user-facing call. Each board card (c83–c96) links its plan in `sidequests/`. House format,
 no effort column. `c95` is implement-only (no decision); `D-PUBLISH1` is a stub in the
 deferred list until M12.2 infra is verified.
-
-### D-DETACH1 — Marking a task as intentionally detached (silence L1101) (rec A)
-
-**User story.** Tariq spawns his HTTP server on a task so `main` can keep doing
-setup. Every server program he writes lights up **L1101** ("Task value dropped
-without `.join()`") — including the shipped `57_http_server.jet`. The warning is
-right for an accidental drop but wrong here: he *wants* the server task to outlive
-the spawn scope. He needs a one-word "I meant this."
-
-| Option | Surface | Capture safety enforced | Reads as intent | One verb |
-|---|---|---|---|---|
-| A — `task.detach()` | method on handle | yes (owned/`share` only) | yes — explicit verb | yes |
-| B — `#detach` marker on spawn | attribute (D-ATTR1) | yes | yes — leads the spawn | yes |
-| C — `detach { … }` block | parallel to `spawn { … }` | yes | yes — but two spawn forms | no (two verbs) |
-| D — `spawn(detached: true)` | named arg | yes | trailing flag, easy to miss | yes |
-
-- **Option A — `.detach()` on the task handle.** Spawn returns a handle; calling
-  `.detach()` consumes it and exempts it from L1101.
-
-```jet
-fn main() {
-    server :: spawn { http.serve(":8080", router) }
-    server.detach()        // "runs on its own; don't warn me"
-    log.info("server up")
-    // no L1101 — the drop was declared intentional
-}
-```
-
-- **Option B — `#detach` marker on the spawn.** The intent leads the statement.
-
-```jet
-fn main() {
-    #detach spawn { http.serve(":8080", router) }
-    log.info("server up")
-}
-```
-
-- **Option C — a dedicated `detach { … }` block.** A second spawn verb whose
-  result is never joinable.
-
-```jet
-fn main() {
-    detach { http.serve(":8080", router) }   // distinct from `spawn { … }`
-    log.info("server up")
-    // two spawn constructs to teach; which one do I reach for?
-}
-```
-
-- **Option D — a named arg on spawn.** A flag selects detached mode.
-
-```jet
-fn main() {
-    spawn(detached: true) { http.serve(":8080", router) }
-    // the intent is a trailing boolean; in review it's easy to miss.
-}
-```
-
-In every option, a detached task that captures a borrowed `view` of the caller's
-scope is a compile error (it would outlive the borrow):
-
-```jet
-fn run(cfg: view Config) {
-    spawn { serve(cfg) }.detach()
-    // error[Lxxxx]: a detached task may not capture the borrow `cfg` (view)
-    //   it can outlive the scope `cfg` is borrowed from
-    //   help: pass an owned copy — `spawn { serve(copy cfg) }` — or `share cfg`
-}
-```
-
-**Recommendation:** A — `.detach()` is a single explicit verb on the value, reads
-as a deliberate choice in review, and is the natural place to quote in the L1101
-fix-it ("if intentional, call `.detach()`"). It keeps one spawn verb (unlike C)
-and is leading-visible (unlike D).
-
----
-
-### D-REPRC1 — C-compatible struct layout annotation (rec A)
-
-**User story.** Yuki is writing ARM firmware. She needs a Jet struct that overlays
-a memory-mapped peripheral register block — exact field order, C padding, no
-reordering — so an `#Unsafe` volatile cast onto the MMIO address is sound. Today
-struct layout is opaque, so she can't reliably interop with C structs or hardware.
-
-| Option | Spelling | Family it joins | Modes | Beginner sees it's expert |
-|---|---|---|---|---|
-| A — `#repr(c)` | attribute (D-ATTR1) | markers; near `#Unsafe` | `c`, `packed`, `align(N)`, `transparent` | yes — clearly an annotation |
-| B — `#layout(c)` | attribute | same family as D-SOA1 `#layout(soa)` | layout kinds | yes |
-| C — `c struct Foo` | type modifier keyword | none | only `c` | medium |
-| D — `extern(c) struct` | extern modifier | FFI `extern` family | only `c` | yes — ties to FFI |
-
-- **Option A — `#repr(c)` attribute (+ `packed` / `align(N)`).** Pins layout;
-  codegen stamps `#[repr(C)]` on the generated Rust struct.
-
-```jet
-#repr(c)
-struct GpioRegs {
-    mode:   U32,
-    output: U32,
-    input:  U32,
-}
-
-fn read_input(base: U64) -> U32 {
-    #Audit("MMIO read of GPIO input register at a fixed peripheral address")
-    #Unsafe {
-        regs :: mem.cast<GpioRegs>(base)   // sound: layout is pinned
-        mem.volatile_read(regs.input)
-    }
-}
-
-// a growable field breaks the guarantee:
-#repr(c)
-struct Bad { tag: U32, items: [U32] }
-// error[E04xx]: field `items: [U32]` has no stable C layout
-//   help: use a fixed-size array `[U32#N]`, or remove `#repr(c)`
-```
-
-- **Option B — `#layout(c)`, unifying with SOA.** C-repr and SOA become one
-  `#layout(…)` family.
-
-```jet
-#layout(c)
-struct GpioRegs { mode: U32, output: U32, input: U32 }
-// one annotation family also spells #layout(soa) (D-SOA1) and #layout(packed).
-```
-
-- **Option C — `c struct` modifier keyword.** Layout is a struct-declaration
-  modifier.
-
-```jet
-c struct GpioRegs { mode: U32, output: U32, input: U32 }
-// terse, but adds a bare keyword in type position and has no room for
-// packed/align variants without more keywords.
-```
-
-- **Option D — `extern(c) struct`.** Ties layout to the FFI surface.
-
-```jet
-extern(c) struct GpioRegs { mode: U32, output: U32, input: U32 }
-// reads as "this struct crosses the C boundary"; conflates layout with FFI,
-// so a pure-Jet struct that just wants packed layout has nowhere to go.
-```
-
-**Recommendation:** A — `#repr(c)` matches the ratified attribute/marker family
-(D-ATTR1), sits visually next to the other expert markers (`#Unsafe`/`#Audit`),
-and has obvious room for `packed`/`align(N)` that firmware needs. B is a strong
-alternative *if* the owner wants one `#layout(…)` family shared with D-SOA1 —
-that cross-cutting choice (repr and SOA together vs separate) is the real fork
-and worth deciding alongside D-SOA1.
-
----
-
-### D-STDIN1 — Streaming line-by-line stdin (rec A)
-
-**User story.** Priya writes a grep-like filter: `cat huge.log | jet run filter.jet`.
-Today `io.read_all_input()` reads *all* of stdin into memory, then she splits it
-by hand. Files already stream (`reader.lines()` works), but stdin has no such
-path. She wants stdin to stream lines the same way files do, constant-memory.
-
-| Option | Spelling | Same type as files? | Convenience | One idiom |
-|---|---|---|---|---|
-| A — `io.stdin().lines()` | stdin handle mirrors `files.open` | yes — reuses `FileLines` | medium | yes (files+stdin interchangeable) |
-| B — bare `io.lines()` | top-level convenience | yes under the hood | high | a second spelling beside files |
-| C — `io.read_lines()` | returns an iterator value | maybe | high | a third verb |
-
-- **Option A — `io.stdin()` handle with `.lines()` / `.read_line()`.** Mirrors the
-  file reader exactly, so a function can take either source.
-
-```jet
-fn main() {
-    loop line in io.stdin().lines() {
-        if line.contains("ERROR") { print(line) }
-    }
-}
-// same .lines() the file reader uses (CheckerStdlib FileLines); a function
-// written against a file reader also accepts stdin.
-```
-
-- **Option B — bare `io.lines()`.** A direct convenience for the common case.
-
-```jet
-fn main() {
-    loop line in io.lines() {           // implicitly stdin
-        if line.contains("ERROR") { print(line) }
-    }
-}
-// terse, but "lines of what?" is implicit, and it's a separate spelling
-// from the file `reader.lines()` users already learned.
-```
-
-- **Option C — `io.read_lines()` returning an iterator.** A new verb alongside
-  `read_all_input`.
-
-```jet
-fn main() {
-    loop line in io.read_lines() {
-        print(line)
-    }
-}
-// pairs by name with read_all_input, but adds a third reading verb and
-// doesn't reuse the file streaming type.
-```
-
-A `pure fn` reading stdin stays rejected (stdin is impure, like `input`):
-
-```jet
-pure fn count() -> Int {
-    n :: 0
-    loop _ in io.stdin().lines() { n += 1 }   // error: pure fn reads stdin (impure)
-    n
-}
-```
-
-**Recommendation:** A — reusing the file reader's `.lines()`/`FileLines` gives
-*one* streaming idiom across files and stdin (a function written for one accepts
-the other), which is the strongest one-path outcome. `read_all_input` stays as a
-small-input convenience.
-
----
-
-### D-TERM1 — Terminal raw-mode + key input surface (rec A)
-
-**User story.** Kofi is building a terminal puzzle game — the one persona whose
-verdict is *blocked*, not just friction. He needs to read an arrow key without
-Enter, move the cursor, and print color, all from one file. `core.io` is
-line-based, so today he cannot write a game loop at all. He wants a small
-terminal API that puts the terminal in raw mode and restores it automatically.
-
-| Option | Surface | Auto-restore | Key model | Scope |
-|---|---|---|---|---|
-| A — `raw_mode { … }` scoped block | block guarantees restore | yes — on scope exit (incl. panic) | `Key` enum | minimal: raw + key + cursor + color |
-| B — `Terminal` handle value | methods on a handle | via scope-guard the user holds | `Key` enum | configurable |
-| C — `core.term` free functions | enter/exit + read funcs | manual `term.restore()` | `Key` enum or bytes | minimal |
-| D — full TUI module | screen/widget abstraction | yes | rich events | large (alt-screen, mouse, resize) |
-
-- **Option A — `raw_mode { … }` scoped block (rec).** Raw mode is entered for the
-  block and *guaranteed* restored on exit (built on the ratified scope-guard,
-  D-DEFER1).
-
-```jet
-fn main() {
-    raw_mode {
-        term.clear()
-        loop {
-            term.move_to(0, 0)
-            term.write("press a key (q to quit): ".green())
-            match term.read_key() {
-                Key.Char('q') -> break,
-                Key.Arrow(dir) -> term.write("arrow: {dir}"),
-                Key.Char(c)    -> term.write("you pressed {c}"),
-                else           -> {},
-            }
-        }
-    }
-    // terminal is back in cooked mode here, even if the loop panicked
-}
-```
-
-- **Option B — a `Terminal` handle with methods.** The user holds the handle and a
-  guard.
-
-```jet
-fn main() {
-    t :: term.enter_raw()           // returns a handle + restores via its guard
-    loop {
-        match t.read_key() { Key.Char('q') -> break, else -> {} }
-    }
-}
-// flexible, but the restore depends on the handle's guard surviving every path;
-// a beginner can drop it on an early return and wedge their terminal.
-```
-
-- **Option C — `core.term` free functions.** Explicit enter/exit.
-
-```jet
-fn main() {
-    term.enter_raw()
-    loop { match term.read_key() { Key.Char('q') -> break, else -> {} } }
-    term.restore()        // MUST be called on every exit path, by hand
-}
-// forgetting restore() (or a panic before it) leaves the terminal broken —
-// the exact footgun a beginner game author will hit.
-```
-
-- **Option D — a full TUI module.** Alt-screen, widgets, mouse, resize events.
-
-```jet
-fn main() {
-    app :: tui.App.new()
-    app.on_key(|k| if k == Key.Char('q') { app.quit() })
-    app.run()
-}
-// powerful, but far past what "a small terminal game" needs; large surface,
-// many decisions, slower to give Kofi anything playable.
-```
-
-**Recommendation:** A — the scoped `raw_mode { }` block makes auto-restore a
-*language guarantee*, not a discipline, which is exactly right for a beginner
-games persona who must not be able to wedge their terminal. `Key` as an enum makes
-input teachable. (The I6 question — native termios vs a bootstrap crate — is an
-implementation choice on top, flagged in the plan, not a user-facing fork.)
-
----
-
-### D-LSDIR1 — Directory listing: paths, not just names (rec A)
-
-**User story.** Priya writes her first Jet tool: scan a directory and rename
-files. `fs.list_dir(dir)` hands her bare names, so she rebuilds each full path
-with `"{dir}/{name}"` — fragile, and on the wrong OS the separator is wrong. She
-wants the scan to give her something she can act on directly.
-
-| Option | What `list_dir` gives | Path-join help | `is_dir` without re-stat | Behavior change |
-|---|---|---|---|---|
-| A — `DirEntry` values | `{name, path, is_dir}` | path built for you | yes | yes (return type changes) |
-| B — full-path strings | `[String]` full paths | implicit | no | yes (values change) |
-| C — names + `path.join` | `[String]` names + helper | explicit `path.join` | no | none (additive) |
-
-- **Option A — `list_dir` returns `[DirEntry]`.** Each entry carries name, full
-  path, and type.
-
-```jet
-fn main() ? {
-    loop entry in fs.list_dir("./logs")? {
-        if entry.is_dir { continue }
-        fs.rename(entry.path, "{entry.path}.bak")?   // full path, ready to use
-    }
-}
-```
-
-- **Option B — `list_dir` returns full-path strings.**
-
-```jet
-fn main() ? {
-    loop path in fs.list_dir("./logs")? {            // each is "./logs/app.log"
-        fs.rename(path, "{path}.bak")?
-    }
-}
-// no is_dir without a separate fs.is_dir(path) call.
-```
-
-- **Option C — keep names, add `path.join`.**
-
-```jet
-fn main() ? {
-    dir :: "./logs"
-    loop name in fs.list_dir(dir)? {                 // bare names, as today
-        path :: path.join(dir, name)                 // portable join
-        fs.rename(path, "{path}.bak")?
-    }
-}
-// additive (nothing existing changes), but the user still threads dir+name
-// by hand on every scan.
-```
-
-**Recommendation:** A — `DirEntry` gives a beginner the path *and* `is_dir` in one
-step, which is what nearly every scan actually needs (filter dirs, act on files),
-and removes a whole class of separator bugs. It is a return-type change to a
-shipped function — call that out — but the persona task (scan + act) is the
-canonical first tool, so getting it right beats source-compat. A `path.join`
-helper (C) is still worth shipping *alongside* for the cases A doesn't cover.
-
----
-
-### D-CSVROW1 — Typed CSV row decoding (rec A)
-
-**User story.** Elena runs a CSV→JSON ETL. `jet.csv` hands her each row as
-`[String]`, so she pulls fields by index (`row[2].to_int()`), guessing at columns
-and re-counting when the file changes. She wants to declare a row as a struct and
-decode records into it by header name, with a clean per-row error she can skip
-with `??`.
-
-| Option | How fields map | Needs S56 derives? | Robust to column reorder | Failure shape |
-|---|---|---|---|---|
-| A — comptime `decode<Row>` | by field name via comptime reflection | no (uses S57/S60 comptime) | yes (header mapping) | typed row error |
-| B — explicit mapping closure | user writes `Row{ id: r[0]… }` | no | no (positional) | user-chosen |
-| C — `#[CsvRow]` derive | derive generates decoder | **yes (blocked on S56)** | yes | typed |
-
-- **Option A — `csv.decode<Order>(record)` via comptime field reflection.** The
-  compiler walks `Order`'s fields (comptime is shipped, S57/S60) and maps columns
-  by header name, coercing types.
-
-```jet
-struct Order { id: Int, customer: String, total: Float }
-
-fn main() ? {
-    loop record in csv.rows("orders.csv")? {
-        order :: csv.decode<Order>(record) ?? continue   // skip malformed rows
-        emit(order)
-    }
-}
-// a bad cell:
-// row 14, column `total`: cannot read "N/A" as Float  → ?? skips this row
-```
-
-- **Option B — explicit mapping closure.** The user writes the field map; no
-  reflection.
-
-```jet
-fn main() ? {
-    loop r in csv.rows("orders.csv")? {
-        order :: Order{ id: r[0].to_int()?, customer: r[1], total: r[2].to_float()? } ?? continue
-        emit(order)
-    }
-}
-// total control, but indices are back and a column reorder silently corrupts.
-```
-
-- **Option C — `#[CsvRow]` derive.** A derive generates the decoder.
-
-```jet
-#[CsvRow]
-struct Order { id: Int, customer: String, total: Float }
-// order :: csv.decode<Order>(record)?
-// error: user-defined derives (S56) are not available until Epoch 3
-```
-
-**Recommendation:** A — comptime `decode<Row>` gives Elena typed, header-mapped
-rows *today* (comptime field walk is already shipped) without waiting on the S56
-derive system, and the typed per-row error composes with the ratified `??` skip
-idiom. C is the eventual ergonomic spelling once S56 lands; ship A now, and if A's
-comptime decode and a future `#[CsvRow]` derive both exist they should produce the
-*same* decoder (one path).
-
----
 
 ### D-JSONOUT1 — Serialize a typed struct to JSON (rec A)
 
@@ -1521,110 +976,6 @@ cli :: args.parse(io.args(), [
 and teaching errors *today* with no dependency on S56, and the spec value can later
 back a `#[Args]` struct form (B) once derives land — same parser underneath. The
 generated `--help` and error text are product copy and must be snapshot-tested.
-
----
-
-### D-LOGFMT1 — Human-readable log output for `jet.log` (rec A)
-
-**User story.** Amara runs her automation script in a terminal and reads the log
-live. `jet.log` emits JSON lines, so her console is a wall of `{"level":"info",…}`.
-She falls back to building strings by hand. She wants the same `log.info(…)` calls
-to print a readable line locally, while still emitting JSON when piped to a log
-aggregator.
-
-| Option | Default | Selection | Magic level | Risk |
-|---|---|---|---|---|
-| A — auto by TTY | text on a TTY, JSON when piped | auto + override | highest | surprise if expectation differs |
-| B — text default, JSON opt-in | text | `log.setup(format: json)` | medium | prod forgets to switch to JSON |
-| C — JSON default (today), text opt-in | JSON | `log.setup(format: text)` | low | beginner sees JSON first |
-
-- **Option A — auto-detect (text on a TTY, JSON when piped).** The logger picks
-  format by whether stderr is a terminal; an explicit setting overrides.
-
-```jet
-fn main() {
-    log.info("starting", port: 8080)
-    // interactive terminal:
-    //   12:01:03 INFO  starting  port=8080
-    // piped (`tool | jq`):
-    //   {"ts":"...","level":"info","msg":"starting","port":8080}
-}
-```
-
-- **Option B — text by default, JSON opt-in.**
-
-```jet
-fn main() {
-    log.info("starting", port: 8080)              // 12:01:03 INFO starting port=8080
-}
-// production:
-log.setup(format: json)                            // opt in to JSON lines
-```
-
-- **Option C — JSON by default (status quo), text opt-in.**
-
-```jet
-fn main() {
-    log.setup(format: text)                        // must opt in to readable output
-    log.info("starting", port: 8080)
-}
-// without setup, a beginner running locally sees raw JSON — today's friction.
-```
-
-**Recommendation:** A — auto-by-TTY is the modern logger behavior (Rust `tracing`,
-Go `slog` setups, Python `rich`) and gives a beginner a readable console *and* a
-production pipeline JSON *with no configuration*, which is the strongest
-beginner-experience + correctness combination. The explicit override stays for
-when detection guesses wrong. The text line layout is product copy — snapshot it.
-
----
-
-### D-FLOATW1 — Precision-correct math on sized floats (rec A)
-
-> Note: the `F32`/`F64` *type spellings* are already ratified (**D-SG9**); they are
-> merely unimplemented. This decision is only the **math/precision policy** on top.
-
-**User story.** Marcus runs a numerical simulation where memory and precision
-matter. He wants `F32` arrays for half the memory and wants `core.math.sqrt`,
-`sin`, etc. to work on them at `F32` precision — and he wants the compiler to stop
-him from silently dropping `F64` precision into an `F32` binding.
-
-| Option | Math over widths | Literal into `F32` | Mixed `f32`+`f64` |
-|---|---|---|---|
-| A — width-generic math, explicit conversion | `sqrt` works per-width, returns same width | explicit `.to_f32()` or exact-rep literal ok | error: convert explicitly (D-SG9) |
-| B — f64-only math, convert at call | `sqrt` always f64; convert in/out | implicit narrowing allowed | implicit widen to f64 |
-
-- **Option A — width-generic math + explicit conversions (rec).** `core.math`
-  functions accept and return the float width they're given; precision-losing
-  moves are explicit, consistent with D-SG9's "no implicit widening, named-method
-  conversions."
-
-```jet
-xs :: [F32]{ 1.0, 2.0, 3.0 }
-ys :: xs.map(|x| math.sqrt(x))     // sqrt(F32) -> F32, full F32 path
-
-a :: 1.0e40                        // a: Float (f64)
-b :: F32 = a                       // error: assigning f64 to F32 may lose precision
-                                   //   help: write `a.to_f32()` to convert explicitly
-c :: 2.0f32 + 3.0                  // error: cannot mix F32 and Float(f64)
-                                   //   help: `2.0f32 + (3.0).to_f32()`
-```
-
-- **Option B — f64-only math, convert at the boundary.** Math stays f64; sized
-  floats are storage only.
-
-```jet
-xs :: [F32]{ 1.0, 2.0, 3.0 }
-ys :: xs.map(|x| math.sqrt(x.to_f64()).to_f32())   // round-trip through f64
-b :: F32 = 1.0e40                                   // silently narrows
-// less ceremony, but the f64 round-trip defeats the F32 precision/perf intent
-// and silent narrowing is the footgun numerical code most fears.
-```
-
-**Recommendation:** A — width-generic math keeps `F32` a real first-class precision
-choice (not just storage), and explicit precision-losing conversions match the
-already-ratified D-SG9 stance (no implicit widening, named conversions). B
-reintroduces exactly the silent-narrowing footgun D-SG9 rejected for casts.
 
 ---
 
@@ -2151,121 +1502,128 @@ ships the "works in dev, breaks in prod" bug class.
 
 ## Cache-friendly layout (SOA, deferred) — board card c78
 
-### D-SOA1 — Cache-friendly data layout (SOA) (rec A, deferred to Later)
+### D-SOA2 — Naming the cache-friendly layout + remaining layout questions (rec: `columnar`)
 
-**Tier: Later / deferred.** This decision is ballot-ready but implementation is
-deferred until after v1. The owner's vote locks in the syntax now so the feature can
-be planned against a fixed spelling.
+**User story.** Maya is writing a particle system for a real-time renderer. She has 50 000 `Particle` structs, and her hot loop reads only `x`, `y`, `z`, and `alive` each frame. She annotates the struct once with a layout attribute, and the compiler arranges memory so those fields land in contiguous arrays — SIMD and prefetch work without her restructuring anything. She doesn't care what "SOA" stands for; she wants a word that makes the annotation self-explanatory the first time a teammate reads it.
 
-**User story.** Dev is writing a particle system that updates 100 000 `Particle`
-records per frame. Profiling shows cache misses dominate: the default array-of-structs
-(AOS) layout loads the `x`, `y`, `z`, and `color` fields of one particle into a cache
-line even when the update loop only touches `x`, `y`, `z`. He wants
-structure-of-arrays (SOA) layout — one contiguous array per field — without rewriting
-every access as `particles_x[i]`, `particles_y[i]`, `particles_z[i]`.
-
-| Option | Spelling | Annotation site | Field-access change? | Ceremony | Composability |
-|--------|----------|-----------------|----------------------|----------|----------------|
-| A | `#layout(soa) struct Particle { … }` | type definition | none — `p.x` still works | low | layout is part of the type; composable with `#Serialize` etc. |
-| B | `particles: soa [Particle]` | variable declaration | none — `p.x` still works | low | layout is per-container; same type can be AOS in one place, SOA in another |
-
-**How other languages do this**
-
-- **Jai (`#place` / `using`):** Jai lets you embed one struct inside another with
-  `#place` to force field co-location; SOA is built into the language's array
-  primitives. No single annotation; requires structural knowledge of the layout
-  system. Jet takeaway: a single annotation is the right UX; the compiler does the
-  structural transformation, not the user.
-- **Zig (`MultiArrayList`):** `std.MultiArrayList(T)` is a stdlib type that stores
-  fields in separate arrays; access is via `.items(.field_name)`, breaking normal
-  field syntax. Jet takeaway: field syntax must stay identical; a compile-time
-  transform that preserves `p.x` is the goal.
-- **Rust (`soa-derive` / `slotmap`):** The `soa-derive` crate generates a parallel
-  struct via a procedural macro; `slotmap` provides SOA slots. Both require
-  importing a crate and annotating the struct. Jet takeaway: the annotation-on-type
-  shape is familiar from Rust macros; a built-in transform avoids external crate
-  dependency (I6).
-- **ISPC / data-oriented design (manual):** ISPC's `soa<N> T` type declaration
-  generates SOA layout for SIMD; elsewhere, data-oriented design achieves SOA by
-  hand — splitting one `struct Particle` into multiple parallel arrays. Jet
-  takeaway: a compiler-managed transform is superior to manual splitting; the ISPC
-  `soa<N>` shape (annotation on the type) confirms the Option A position.
-- **Unity DOTS (`[StructLayout]` / `IComponentData`):** Unity's ECS requires
-  implementing `IComponentData` and relies on the runtime's archetype system;
-  the developer does not choose AOS vs SOA directly. Jet takeaway: the decision
-  should be explicit and developer-controlled, not hidden in a runtime framework.
-
-- **Option A — `#layout(soa)` on the struct.**
-
-```jet
-#layout(soa)
-struct Particle {
-    x: Float
-    y: Float
-    z: Float
-    color: U32
-}
-
-fn update(particles: mut [Particle]) {
-    loop p in particles {
-        p.x += p.velocity_x   // field access unchanged
-        p.y += p.velocity_y
-    }
-}
-```
-
-The type carries its layout. Any `[Particle]` collection is automatically SOA; the
-caller does not need to know. Mixing AOS and SOA `Particle` values in the same
-collection is a type error (they are the same nominal type, so sema must track the
-layout tag).
-
-*Partial-SOA variant (open question — recommend deferring):*
-
-```jet
-#layout(soa: x, y, z)   // only hot fields go SOA; color stays interleaved
-struct Particle { … }
-// Complexity: the field-access lowering for the cold fields differs.
-// Recommend: whole-struct only for v1.
-```
-
-- **Option B — `soa` keyword on the container.**
-
-```jet
-struct Particle {
-    x: Float
-    y: Float
-    z: Float
-    color: U32
-}
-
-fn update(particles: mut soa [Particle]) {
-    loop p in particles {
-        p.x += p.velocity_x   // field access unchanged
-        p.y += p.velocity_y
-    }
-}
-```
-
-The layout is per-collection. A `[Particle]` passed to a non-`soa` function is a
-type mismatch; the caller must decide the layout. This is more flexible (same type,
-two layouts) but surfaces the layout decision to every call site.
-
-**Recommendation:** A — `#layout(soa)` on the type is consistent with the `#`
-attribute system (D-ATTR1, ratified) and keeps the layout decision at the definition,
-not scattered across every call site. The tradeoff (one layout per type in v1) is
-acceptable for the common case; partial SOA and per-container layout are open
-questions for a later revision. Defer implementation until after v1; ratify the
-syntax now so plans can be written against a fixed spelling.
-
-**Open questions for the owner:**
-1. Whole-struct SOA only in v1 (recommended), or support `#layout(soa: field, …)`
-   partial annotation?
-2. Should `soa` [Particle] (Option B) be a future-reserved spelling even if A is
-   chosen, to enable per-container overrides later?
-3. Interaction with `#Serialize` and reflection: does SOA layout affect the
-   serialized representation?
+> **Context.** D-SOA1 ratified Option A — `#layout(soa) struct …`, whole-struct, field access `p.x` unchanged, layout part of the type. Syntax is locked; implementation is deferred post-v1. This card decides the remaining four questions the owner asked be carded: the **name**, partial vs whole, the reserved per-container spelling, and the serialization interaction.
 
 ---
+
+#### Sub-question 1 — What should `soa` be called inside `#layout(…)`?
+
+The word `soa` is an acronym for "structure-of-arrays," a data-oriented-design term opaque to most beginners. Nine candidates, each shown in context.
+
+```jet
+#layout(soa)        struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // baseline (acronym)
+#layout(lane)       struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // each field is a parallel lane
+#layout(columnar)   struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // each field becomes a column
+#layout(striped)    struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // fields split into parallel stripes
+#layout(slipstream) struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // aviation; parallel streams
+#layout(parallel)   struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // arrays run parallel
+#layout(split)      struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // struct split into per-field arrays
+#layout(fieldwise)  struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // arranged field-by-field
+#layout(wingspan)   struct Particle { x: Float, y: Float, z: Float, alive: Bool }  // aviation; wide flat spread
+```
+
+| Name | What it evokes | Beginner clarity | Collision / keyword risk | Prior-art familiarity |
+|---|---|---|---|---|
+| `soa` | DOD acronym | low — opaque initialism | none | high (C++/DOD) |
+| `lane` | parallel channel, SIMD lane | medium | low | low-medium (SIMD docs) |
+| `columnar` | database column store | high — maps to the memory picture | none | high (Arrow, Parquet) |
+| `striped` | RAID striping | medium | none | medium |
+| `slipstream` | aviation, parallel streams | medium-low — metaphorical | none | low |
+| `parallel` | parallel arrays | high | medium — overloaded w/ concurrency | very high |
+| `split` | the struct split apart | medium — implies destruction | none | low |
+| `fieldwise` | field-by-field | high | none | low |
+| `wingspan` | aviation spread | low — purely metaphorical | none | none |
+
+**Recommendation:** `columnar` — self-defining from the table picture, strong prior art (Arrow/Parquet/column stores), zero collision with concurrency vocabulary.
+
+---
+
+#### Sub-question 2 — Whole-struct only in v1, or also partial annotation?
+
+- **Option A — whole-struct only (recommended).** Every field is columnar; one unambiguous rule.
+
+```jet
+#layout(columnar)
+struct Particle { x: Float, y: Float, z: Float, alive: Bool, tag: U32 }  // all fields columnar
+```
+
+- **Option B — partial annotation.** Only the listed fields go columnar; the rest stay interleaved. Field access is still `p.x`, but the compiler now manages two memory regions.
+
+```jet
+#layout(columnar: x, y, z)
+struct Particle { x: Float, y: Float, z: Float, alive: Bool, tag: U32 }  // x,y,z columnar; alive,tag interleaved
+```
+
+| | Whole-struct | Partial |
+|---|---|---|
+| Safety | one memory region per struct | two regions; aliasing rules must extend |
+| Beginner clarity | one path: annotate, done | must know which fields are "hot" at annotation time |
+| Long-term correctness | layout fully captured by one attribute | partial layouts compose poorly with generics/trait bounds |
+
+**Recommendation:** whole-struct only in v1 — partial layout is a real case but needs new ownership/aliasing surface; defer to a future ballot on evidence.
+
+---
+
+#### Sub-question 3 — Reserve the per-container spelling for the future?
+
+D-SOA1 chose whole-struct (Option A) over per-container (`particles: columnar [Particle]`, old Option B). Should the per-container spelling be grammar-reserved so a future ballot can add per-container overrides without a syntax conflict?
+
+- **Option A — reserve (recommended).** The grammar reserves `columnar [T]` in type position; no surface today.
+
+```jet
+#layout(columnar) struct Particle { x: Float, y: Float, z: Float, alive: Bool }
+particles: [Particle] := []            // layout follows the struct annotation
+// future (if later ratified): particles: columnar [Particle] := []   // per-use override
+```
+
+- **Option B — do not reserve.** Only the `#layout(…)` form exists; any future per-container form designs its own spelling.
+
+```jet
+#layout(columnar) struct Particle { x: Float, y: Float, z: Float, alive: Bool }
+particles: [Particle] := []            // the only layout surface, permanently
+```
+
+| | Reserve | Do not reserve |
+|---|---|---|
+| Future flexibility | per-container override possible later, no conflict | future form needs a fresh design |
+| Beginner clarity | no visible difference today | one annotation surface |
+| Long-term correctness | prevents accidental reuse of `columnar` as an unrelated qualifier | nothing to track |
+
+**Recommendation:** reserve — a hot struct used in both layouts is a plausible future need; reserving costs nothing visible today and is a pure grammar note until a future ballot ratifies the form.
+
+---
+
+#### Sub-question 4 — Does `#layout(columnar)` affect the serialized representation?
+
+- **Option A — layout-transparent (recommended).** Serialization sees the logical struct; output is identical with or without the layout attribute.
+
+```jet
+#layout(columnar)
+#[Serialize]
+struct Particle { x: Float, y: Float, z: Float, alive: Bool }
+// JSON: { "x": 1.0, "y": 2.0, "z": 3.0, "alive": true } — unchanged by #layout
+```
+
+- **Option B — layout-visible.** The serializer exposes the columnar arrays; the serialized shape changes when the layout attribute is added or removed.
+
+```jet
+#layout(columnar)
+#[Serialize]
+struct Particle { x: Float, y: Float, z: Float, alive: Bool }
+// JSON becomes { "x": [1.0, 2.0, …], "y": [...], … } — a refactor of #layout breaks the wire format
+```
+
+| | Layout-transparent | Layout-visible |
+|---|---|---|
+| Safety | wire contract stable; adding `#layout` never breaks a format | layout change silently alters serialized shape |
+| Beginner clarity | `#layout` = memory, `#[Serialize]` = format; one model each | two annotations interact; reason about both at once |
+| Long-term correctness | layout and serialization stay independent | couples two concerns that should evolve separately |
+
+**Recommendation:** layout-transparent — `#layout(columnar)` is a memory concern only; a user wanting columnar serialization (e.g. Arrow IPC) reaches for a purpose-built serializer, not the default `#[Serialize]`.
 
 ## Testing ergonomics — board card c51
 
@@ -2736,6 +2094,39 @@ repo-wide `::`-binding → `$=` migration across examples/tests/docs/`jet fmt`
 emitter). Reopens S2/D-BIND1 explicitly; frees the `::` token again (S83 already
 moved external-defs to `~~`, so nothing reclaims it — it simply becomes available).
 
+**Owner Q (2026-06-22) — `$` is fine for me, but for people using Jet globally: is such a
+commonly needed symbol an issue? What if people don't have it on their keyboard? How likely
+is that — reasonable concern or not a big deal?**
+
+Not a big deal — and it's *strictly consistent* with choices Jet already made. Three facts:
+
+1. **`$` is plain ASCII (U+0024) and effectively universal.** Every physical keyboard layout
+   in common use can type it; it's one of the oldest printable ASCII symbols and ships on the
+   base plane of essentially every layout. The set of glyphs that is *truly* guaranteed on
+   every national keyboard is the ISO-646 *invariant* subset — and that subset already
+   excludes `$`, `#`, `@`, `` ` ``, `{`, `}`, `[`, `]`, `\`, `|`, `~`, `^`. Jet depends on
+   `{ } [ ]` for blocks/collections, `#` for the entire attribute system, and `@` for loop
+   labels. We left the invariant-subset constraint behind long ago; `$` adds nothing new to
+   that ledger. If `#` and `@` are acceptable (they're load-bearing and ratified), `$` is no
+   worse — by placement it's actually *more* uniformly available than `#`/`@`, which sit on
+   AltGr/Option layers on several European and Mac layouts.
+
+2. **Programmers type `$` constantly.** It's the variable sigil in shell, PHP, Perl; the
+   template-literal lead in JS/TS (`${…}`); jQuery's `$`; Scala/Kotlin interpolation. There's
+   no population of working programmers who lack muscle memory or a key for `$`. And because no
+   mainstream language uses `$` as a *binding/assignment* operator, it carries no conflicting
+   habit — a clean glyph for a clean meaning (the card's "no false analogy" point).
+
+3. **The honest residual.** On a few layouts `$` is a shifted or AltGr keypress rather than a
+   dedicated key — but so are `#`, `{`, `}` on those same layouts, and Jet already requires
+   those every few lines. A constant binding is *rarer* in a file than a block brace, so `$`'s
+   keystroke cost is bounded below the cost we've already accepted. The concern is reasonable
+   to raise; it resolves to "no blocker."
+
+Bottom line: ratifying `$=` introduces no new keyboard-accessibility burden beyond what Jet's
+ratified `# @ { } [ ]` already imply. Recommendation stands at **A (`$=`)**. (Decision stays
+open — owner's pick.)
+
 ---
 
 ## Expert numeric surface: overflow policy + values & ops — board card c103
@@ -2845,6 +2236,11 @@ no-implicit-narrowing rule and D-FLOATW1's float policy.
 > ballot so the *shape* is decided now and built when derives land.
 
 ### D-SERDE1 — A unified, format-agnostic Serialize/Deserialize model (rec A)
+
+> **Owner directive (2026-06-22, from D-CSVROW1=A):** **CSV must be one of the formats this
+> unified model handles** (alongside toml/yaml/json). The ratified `csv.decode<Row>(record)`
+> comptime path (D-CSVROW1) is the CSV arm of *this* model — it must share the same decoder
+> mechanism, not a parallel one. Fold CSV into the format list when this is decided.
 
 **User story.** Dmitri has a `Config` struct. He wants `Config.to_json()`,
 `Config.to_toml()`, and `Config.from_json(text)?` to all just work from **one**

@@ -88,6 +88,15 @@ pub(crate) fn run_publish(force: bool, mode: OutputMode) {
          In v1, this is checked by the registry on receipt. The local gate ensures build+tests pass."
     );
 
+    // D-MIGRATE1: snapshot `#PublishedSchema` structs at release time.
+    let snap_count = jet::Publish::write_schema_snapshots_for_entry(&root, &entry_str, version);
+    if snap_count > 0 {
+        println!(
+            "  schema: {} #PublishedSchema snapshot(s) updated in .jet/cache/schema/",
+            snap_count
+        );
+    }
+
     if !build_ok || !tests_ok {
         if force {
             eprintln!("warning [--force]: pre-publish gate failed but continuing anyway.");

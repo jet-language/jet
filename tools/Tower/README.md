@@ -1,67 +1,82 @@
-# `Tower` — task pipeline dashboard
+# `Tower` — task pipeline dashboard (v2)
 
-A tiny, dependency-free tool over the owner workflow:
+A dependency-free tool over the owner workflow:
 
 ```
-inbox  →  plan  →  ballot  →  ratified  →  implemented
+frozen → backlog → deciding → planning → ready → building → done
 ```
 
-It reads only the canonical docs and never invents state of its own, so it can
-never drift from the docs that are the source of truth.
+It reads the canonical docs (board.json, the ballot markdown, the plan/proposal/
+idea files) and records owner input back; it never invents state, so it can't
+drift from the docs that are the source of truth.
 
 ## Use
 
 ```sh
-# Dashboard + decision ballot in the browser (the main way to work):
+# Dashboard + decision Focus Mode in the browser (the main way to work):
 nix develop -c node tools/Tower/Tower.mjs serve --open
 
-# Same view in the console:
+# Console snapshot (board + worklist + decisions):
 nix develop -c node tools/Tower/Tower.mjs status
 
-# Scaffold a new sidequest plan:
+# Scaffold a new sidequest plan (with the v2 decision-card template):
 nix develop -c node tools/Tower/Tower.mjs new <slug> "Title"
 ```
 
-Opening `tools/Tower/docs/ballots/decision-ballots.html` is a shortcut: if the server is
-running it redirects to the dashboard; otherwise it shows the command above.
+## Layout
+
+The tool is split into modules; `Tower.mjs` is a slim entry point.
+
+```
+Tower.mjs            entry: dispatch status / serve / new
+app/
+  paths.mjs          paths + small shared utilities
+  markdown.mjs       markdown→HTML + multi-language highlighter
+  board.mjs          board store + the 7-stage model (normalizes legacy names on load)
+  ballot.mjs         ballot parser (rich card schema) + card↔decision linkage + results merge
+  state.mjs          per-card computed status, the "Ready for Claude" worklist, /api/state
+  writes.mjs         record-only write-backs (results, regen, questions, ingest)
+  server.mjs         http server + JSON API + static UI
+  cli.mjs            console status + scaffold
+  ui/                index.html · tower.css · tower.js  (served static; no build step)
+```
 
 ## The dashboard
 
-A dark mission-control surface. The hero is a **pipeline ribbon** — the seven
-workflow stages flow across the top with live counts; click a stage to jump to
-it. Sections start **collapsed** but stay informative: each header shows a count
-and a preview of what's inside, so you open only what you want.
+A dark mission-control surface. The hero is the **pipeline ribbon** — seven stages
+with live counts; click one to jump. Sections start collapsed but stay informative
+(count + preview).
 
-`serve` starts a local server (default `http://127.0.0.1:4173`) that:
+- **Board.** Cards (task / idea / bug) move down the pipeline with inline **◀ ▶**
+  buttons and a stage dropdown. Each card shows a **computed status** — `Frozen`,
+  `Needs plan`, `Blocked on N decisions` (with links into Focus Mode), `Plan ready`,
+  `Building`, `Done` — and whether the next move is **auto** (I proceed) or **gated**
+  (say "go"). `frozen` is the parking lane for ideas you want to consider without
+  going down the rabbit hole. Click any title / description / note to edit inline.
+  - **Ready for Claude** panel — the worklist: every card whose next move is mine,
+    split **auto** (build a plan, draft a decision — I proceed) vs **gated**
+    (implement code — wait for "go").
+  - **Ingest** panel — hand me a file path or pasted text; I read it, extract
+    candidate ideas / features / syntax, and file them as **frozen** cards for you to
+    triage. Queues to `ingest-queue.md`.
+- **Decisions.** A clean overview (progress meter + grouped one-line rows) and
+  **Focus Mode** — a full-screen, one-decision-at-a-time deck. Keyboard-driven
+  (←/→ move, 1–9 pick, Enter next, Esc close). Each decision shows a plain-language
+  **gist**, a **story** (a real person, American-traditional names), and facet tabs
+  for **In the wild** (real project code), **Other languages**, **Trade-offs**
+  (subagent-reviewed), and **Q&A** — kept out of the recommendation so nothing
+  clutters the choice. Tick an option, comment, **Sign & file**.
+- **Proposals.** Proposals and parked ideas; click to read/edit inline.
+- **Scratch.** A free pad; autosaves to board.json.
 
-- shows the whole pipeline at a glance in the ribbon, plus ratified count and
-  last submission in the status line;
-- **Board / Bugs:** each card moves down the pipeline with inline **◀ ▶**
-  buttons (no dropdown) and carries its plan link, notes, and delete;
-- **Decisions:** **renders the ballot from `tools/Tower/docs/ballots/decision-ballots.md`** —
-  cards are parsed out of the markdown, so there is one source of truth and no
-  duplicated card data. Every open decision is a full card with selectable
-  options, grouped by section. A sticky meter shows **how many are decided**,
-  each group header shows its **decided / total**, and **Next undecided** jumps
-  to the first unanswered one;
-- you **tick** an option, **undo** it (click again or "✕ clear"), and add a
-  per-decision comment;
-- on **Sign & file**, writes your decisions to `tools/Tower/docs/ballots/ballot-results.md` —
-  no copy/paste, and it **merges**: a new submission adds to or replaces by id,
-  never wiping earlier decisions. Then tell Claude **"go"** and it ratifies them
-  into `syntax-decisions.md`, strips the decided cards, and implements the plans;
-- **↻ improve examples** on a card appends a request to
-  `tools/Tower/regen-queue.md`; Claude reviews that card's examples against the
-  house criteria (human voice, plain language, a user-story scenario, inline
-  cross-language comparison) and improves it before you re-read.
+## The handoff (records, never acts)
 
-The boundary is deliberate: the server **records and queues**; it never edits
-code or ratifies. Ratifying and implementing stay Claude steps, gated on your
-word — so a stray submit can't change the language.
+The server **records and queues**; it never edits code or ratifies. On **Sign &
+file** it merges your picks into `ballots/ballot-results.md` (adds/replaces by id,
+never wipes earlier decisions). Then:
 
-## Why it's markdown-driven
+- **auto** moves (build a plan, draft a decision) — I proceed without waiting.
+- **gated** moves (implement code / unblocked plans) — I wait for your "go".
 
-The owner drops tasks in one inbox, agents lift them into reviewed plans,
-decisions surface to the ballot with worked examples, the owner decides on the
-dashboard, agents implement, and a reviewing agent verifies. The tool is a lens
-and an input surface over that flow — the docs remain the record.
+So a stray submit can't change the language. Ratifying and implementing stay Claude
+steps. See the **tower-sweep** skill for the full loop.

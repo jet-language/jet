@@ -860,6 +860,25 @@ pub const METHOD_DISTINCT_RAW: &str = "raw";
 /// before the distinct-type name (uses the `#` attribute prefix D-ATTR1).
 pub const ATTR_NUMERIC: &str = "Numeric";
 
+/// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
+/// field layout is snapshotted at release time. A breaking field change without
+/// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
+pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
+
+/// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
+/// a migration block that declares how a `#PublishedSchema` struct changed between
+/// releases. Used as `migration TypeName { rename old -> new }`.
+pub const KW_MIGRATION: &str = "migration"; // D-MIGRATE1
+
+/// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `rename` inside a
+/// `migration { }` block — declares that field `old` was renamed to `new`.
+pub const KW_RENAME: &str = "rename"; // D-MIGRATE1
+
+/// D-MIGRATE1 (ratified 2026-06-22): subdirectory under the project `.jet/`
+/// managed folder where schema snapshots are stored. Full path is
+/// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.
+pub const SCHEMA_CACHE_SUBDIR: &str = "cache/schema"; // D-MIGRATE1
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Canonical keyword/type/builtin tables (c44: single source of truth).
 //
@@ -888,6 +907,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_IF, KW_ELSE, KW_SWITCH, KW_LOOP, KW_IN, KW_BREAK, KW_CONTINUE, KW_RETURN,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
     KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
+    // Schema migrations (D-MIGRATE1)
+    KW_MIGRATION, KW_RENAME,
     // Ownership / borrow keywords (S10, M2)
     KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1)

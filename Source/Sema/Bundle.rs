@@ -384,6 +384,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     }
                 }
                 Item::ErrorConv(_) => {}
+                // D-MIGRATE1: migration decls are handled by the schema diff pass; no registration needed.
+                Item::Migration(_) => {}
             }
         }
         // S62 + D-LIB2: synthesis must happen before register_impl_methods
@@ -392,6 +394,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         st.m9.register_items(&module.items, &mut diags);
+        // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
+        diags.extend(check_schema_migrations(&module.items, &bundle.project_root));
     }
 
     // S62 E2401: delegation validation — check field exists and implements trait.
@@ -722,7 +726,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             | Item::Module(_)
             | Item::Distinct(_)
             | Item::CModule(_) | Item::CodeModule(_)
-            | Item::ErrorConv(_) => {}
+            | Item::ErrorConv(_)
+            | Item::Migration(_) => {} // D-MIGRATE1
             }
         }
         for item in &mut module.items {
@@ -896,7 +901,8 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                 | Item::Module(_)
                 | Item::Distinct(_)
                 | Item::CModule(_) | Item::CodeModule(_)
-                | Item::ErrorConv(_) => {}
+                | Item::ErrorConv(_)
+                | Item::Migration(_) => {} // D-MIGRATE1
             }
         }
     }

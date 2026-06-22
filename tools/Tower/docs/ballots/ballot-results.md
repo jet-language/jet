@@ -1,48 +1,64 @@
 # Owner ballot results
 
-Drop new owner decisions under `## Decisions` here; Claude processes them
-**first** (ballot requests take precedence over all other work), ratifies into
-`syntax-decisions.md`, strips the card, reconciles `board.json`, and implements
-unblocked ones end-to-end. Processed batches move to `## Processed`.
+_submitted 2026-06-22 11:11_ — **✅ PROCESSED 2026-06-22** (all 14 ratified into
+`syntax-decisions.md`, cards stripped, board reconciled). The first eight were processed in
+the prior pass; the six added in this batch:
+- **D-DETACH1=A** — `task.detach()` consumes the handle + silences L1101.
+- **D-REPRC1=B** (not rec A) — `#layout(c)` joins the unified `#layout(…)` family (with `soa`/`packed`/`align`).
+- **D-STDIN1=A** — `io.stdin().lines()` reuses the file `FileLines` streaming type.
+- **D-TERM1=A** — scoped `live { }` primitive (renamed from "raw mode"); full TUI is a separate `jet.tui` library.
+- **D-LSDIR1=A + path.join** — `fs.list_dir -> [DirEntry]`, plus the `path.join` helper per your comment.
+- **D-CSVROW1=A** — comptime `csv.decode<Row>`, folded into the unified serde model (D-SERDE1) per your comment.
+
+D-DBG2 stays as resolved live (A default + expert `--raw-frames`), regardless of the "C" line here.
+
+Decisions captured from Tower. Tell Claude **"go"** to ratify these
+into syntax-decisions.md, strip the cards, and implement the plans.
 
 ## Decisions
 
 **D-DBG2** — Policy for frames with no Jet source line
 Decision: **C**
-⚠️ **HELD — NOT ratified (conflicts with invariant I2).** Option C ("show the raw
-Rust frame: file + line") is flagged in the ballot card itself as a **direct I2
-violation** — I2 says rustc/Rust internals never speak to users. Ratifying C would
-require amending a hard invariant, which is above an agent's authority, so this one
-decision is deferred back to you. If you want raw Rust frames *anyway* (e.g. behind
-a `jet debug --raw`/expert flag so the default stays I2-clean), say so and I'll
-ratify that scoped form. Otherwise the recommended **A** (silent step-over) or **B**
-(synthetic `[jet runtime]` frame) keep I2 intact — pick one and I'll ratify it.
 
-## Processed
+**D-EFF1** — An effect system, expressed as tags on functions
+Decision: **B**
+Comment: Please crosscheck the new subquestions for B against existing ballots. Then create new non duplicate ballots as needed so we can proceed. We need to nail down syntax, which is correlated with another ballot
 
-### Batch 2026-06-22 00:11 — owner decisions (7 ratified, 1 held)
+**D-QUAL1** — Spelling the qualifier surfaces (Core D + Roles + Unified block) — rec 4 (Hybrid), 1 if D-ATTR2 stays
+Decision: **1**
 
-Ratified into `syntax-decisions.md`, cards stripped from `decision-ballots.md`,
-board reconciled:
+**D-TXN1** — Rollback semantics for `#transact { }`
+Decision: **A**
 
-- **D-STATE1** A (c71) — typestate via transitioning tags. D-QUAL2 (tag kind)
-  ratified 2026-06-21 → **unblocked**; implementable (sequence after `#SingleUse`).
-- **D-DET1** A (c99) — `pure` ⇒ reproducible; inject `Clock`/`Rng`;
-  `assume_deterministic { }` escape. *Implementation gated on D-EFF1* (the
-  effect-tracking pass is the enforcement engine).
-- **D-TXN2** A (c100) — reject irreversible effects inside `#transact { }`.
-  *Gated on D-EFF1* (effect classification) and ships with D-TXN1.
-- **D-EXT1** A (c101) — extensibility ceiling: Tier 1 open to all, Tier 2
-  stdlib-only, Tier 4 rejected; banks the local/global-footgun rule + the two
-  principles (mark library syntax; diagnostics are the ceiling). Standing policy.
-- **D-CTIO1** B (c-comptime-io) — ratify `embed_file`/`embed_bytes` + literal-path,
-  no-`..`-escape rules; no broad build-time I/O. **Directly implementable.** Owner
-  comment honored: option C (broad gated build I/O) recorded as a far-horizon idea
-  card (`tools/Tower/docs/ideas/build-time-io-far-horizon.md`).
-- **D-CTX1** G2 (c74) — Smart Context grammar `#context(field: value) { … }` (reuses
-  Jet's one `name: value` spelling). Q1=A2 / Q2=Cβ already owner-set. Implementable.
-- **D-ROUTE1** A (c83) — HTTP route registration & dispatch surface. Implementable.
+**D-MIGRATE1** — Compile-time enforcement of breaking data-shape changes
+Decision: **A**
 
-### Batch 2026-06-21 12:09 — D-REGION1 ratified (A & B together)
+**D-SOA1** — Cache-friendly data layout (SOA)
+Decision: **A**
+Comment: I want a better name than SOA. Please propose that & the other open questions from this decision to the owner as new ballots: "Open questions for the owner: 1. Whole-struct SOA only in v1 (recommended), or support #layout(soa: field, …) partial annotation? 2. Should soa [Particle] (Option B) be a future-reserved spelling even if A is chosen, to enable per-container overrides later? 3. Interaction with #Serialize and reflection: does SOA layout affect the serialized representation?"
 
-- **D-REGION1** A+B (c05) — allocation regions: **implicit scope-inferred default (A, beginner)** + **explicit `region r { … }` expert tier (B)**, both ratified per owner ("A & B together"). This **unblocks D-ALLOC2** (the scope-bound arena `view` now has its region mechanism). c05 → `implementation`; card stripped; count 16/12.
+**D-LOGFMT1** — Human-readable log output for `jet.log`
+Decision: **A**
+
+**D-FLOATW1** — Precision-correct math on sized floats
+Decision: **A**
+
+**D-DETACH1** — Marking a task as intentionally detached (silence L1101)
+Decision: **A**
+
+**D-REPRC1** — C-compatible struct layout annotation
+Decision: **B**
+
+**D-STDIN1** — Streaming line-by-line stdin
+Decision: **A**
+
+**D-TERM1** — Terminal direct-input control: the name + the low-level surface
+Decision: **A**
+
+**D-LSDIR1** — Directory listing: paths, not just names
+Decision: **A**
+Comment: Include a path.join helper (C) to be shipped also for experts who need finer control
+
+**D-CSVROW1** — Typed CSV row decoding
+Decision: **A**
+Comment: We are working on a serde equivalent in jet which handles serialization/deserialization for toml, yaml, json, etc. -> So CSV should be included in that plan
