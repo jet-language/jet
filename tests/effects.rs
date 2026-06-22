@@ -91,6 +91,19 @@ fn main() { print(calc()); }
     assert!(codes(src).contains(&"E0745"), "expected E0745, got {:?}", codes(src));
 }
 
+/// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
+/// call (here `Fs`) inside a `#Pure fn` is a purity violation (E3401) — even
+/// though the legacy purity list only knew about stdin/time/random.
+#[test]
+fn pure_fn_with_core_effect_is_e3401() {
+    let src = r#"
+use core.fs as fs
+#Pure fn readit(p: String) -> String { return fs.read(p) ?? ""; }
+fn main() { print(readit("x")); }
+"#;
+    assert!(codes(src).contains(&"E3401"), "Fs in #Pure fn should be E3401: {:?}", codes(src));
+}
+
 /// A `#Caps(…)` region whose body stays within the cap set compiles clean.
 #[test]
 fn caps_region_within_set_ok() {

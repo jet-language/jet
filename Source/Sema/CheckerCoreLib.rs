@@ -341,6 +341,18 @@ impl<'a> Checker<'a> {
             }
             return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
+        // D-EFF1: `#Pure` is the empty effect set, so any effectful Core call —
+        // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `#Pure fn`.
+        // (Time/Rand return early above via E3403; stdin via the E3401 check
+        // above, so this catches the remaining effect-carrying Core modules.)
+        if self.in_pure && core_effect(module, name).is_some() {
+            let api = format!("{}.{}", module_short_name(module), name);
+            self.diags.push(e3401(&self.fn_name.clone(), &api, &[], span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+        }
         let sig = core_fixed_sig(module, name);
         match (module, name) {
             ("core.mem", "volatile_read") => {
