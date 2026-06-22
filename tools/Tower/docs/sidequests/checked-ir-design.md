@@ -15,6 +15,19 @@ Introduce a **checked IR** (a TIR — typed intermediate representation) that
 carries only sema-approved facts. Sema lowers AST → TIR after type/ownership
 checking; codegen consumes TIR and is a pure, decision-free translator.
 
+## Latent AST-path bugs surfaced by this work (file as separate cards)
+
+The phased coverage keeps exposing pre-existing codegen bugs (the gate routes around
+them so they don't regress, but they should be fixed independently of c109):
+- **`mut self` mutation is broken.** `self.field = v` is E0003 (field-assign isn't a Jet
+  construct) and `self = v` emits `self = …` on `&mut user_T` → rustc E0308. So a `mut self`
+  method can today only read/return. (Phase 7.)
+- **Builtin-name method collision.** A user no-arg method named `get`/`len`/etc. is
+  mis-dispatched by `emit_builtin_method` (name-keyed, not receiver-typed) on the AST path.
+  (Phases 6–7.)
+- **`Read`-convention struct params** in some arithmetic/move shapes hit E0507/E0308 on both
+  paths (a sema convention-inference gap). (Phase 3.)
+
 ## Invariants this must preserve
 
 - **I2** — rustc must never reject generated code. Every phase ships with golden
