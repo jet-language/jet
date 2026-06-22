@@ -288,6 +288,22 @@ pub(crate) enum TExprKind {
         end: Box<TExpr>,
         line: usize,
     },
+    /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
+    /// or borrowed value. The AST path emits `(recv).clone()` unconditionally; the
+    /// TIR carries the lowered receiver and the result type (the receiver's type).
+    Clone(Box<TExpr>),
+    /// c109 Phase 6: a user-defined instance method call `recv.method(args)` on a
+    /// covered struct/enum. All dispatch facts are resolved at lowering (totality):
+    /// `recv` is the lowered receiver (emitted as the AST path emits it — autoref
+    /// handles `&self`/`&mut self`/`self`); `method_rust` is the already-resolved
+    /// Rust method name (mangled `user_<m>`, or the bare name for a trait-impl
+    /// method, decided here from `cx.trait_methods`); each arg carries its
+    /// borrow/clone decisions, mirroring `emit_call_args`.
+    MethodCall {
+        recv: Box<TExpr>,
+        method_rust: String,
+        args: Vec<TCallArg>,
+    },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
         cond: Box<TExpr>,
@@ -316,12 +332,22 @@ pub(crate) enum TEnumPayload {
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
 /// the emitter reproduces `emit_call_args` without consulting `cx.sigs`).
+///
+/// Emission order mirrors `emit_call_args` exactly: the clone wrapper (`.clone()`
+/// or `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper
+/// (`&(…)` for a `Read` non-scalar, `&mut (…)` for a `Mutate`).
 pub(crate) struct TCallArg {
     pub(crate) value: TExpr,
-    /// Emit `&(...)` around the value (a String passed by `Read` convention).
+    /// Emit `&(...)` around the value (a non-scalar passed by `Read` convention).
     pub(crate) borrow: bool,
-    /// Emit `(...).clone()` (a String passed by `Move` with an implicit clone).
+    /// Emit `&mut (...)` around the value (a `Mutate`-convention argument). c109
+    /// Phase 6: method args may be `Mutate`; the plain-call path never sets this.
+    pub(crate) mut_borrow: bool,
+    /// Emit `(...).clone()` (an implicit clone — a value passed by `Move`).
     pub(crate) clone: bool,
+    /// Emit `Arc::clone(&...)` (a `Shared` value auto-cloned at the call site).
+    /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
+    pub(crate) arc_clone: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,10 +1059,118 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && expr_in_subset(start, cx, locals)
                 && expr_in_subset(end, cx, locals)
         }
-        // Everything else (method calls, lambdas, ?/try, ??, fan-out, optionals,
+        // c109 Phase 6: a method call. Covered in exactly two shapes:
+        //   (a) the sema-inserted `.clone()` (an owning non-Copy field read /
+        //       borrowed value in owning position) — `(recv).clone()`;
+        //   (b) a user-defined instance method on a covered struct/enum type
+        //       (`recv_type` is `Some(T)`, `(T, method)` ∈ `method_sigs`, and the
+        //       method name is NOT one a core/stdlib/builtin lowering intercepts).
+        // Everything else (core/stdlib/collection/string/numeric methods, static
+        // calls — whose `recv_type` is `None` — fallible/optional, fan-out, …) stays
+        // on the AST path.
+        Expr::MethodCall { receiver, method, args, recv_type, .. } => {
+            method_call_in_subset(receiver, method, args, recv_type, cx, locals)
+        }
+        // Everything else (lambdas, ?/try, ??, fan-out, optionals,
         // opt-fields, tuples, …) is out.
         _ => false,
     }
+}
+
+/// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
+/// the synthetic `.clone()`, or a user-defined instance method on a covered type.
+fn method_call_in_subset(
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    recv_type: &Option<String>,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    // Shape (a): the sema-inserted `.clone()`. It takes no args; the receiver is an
+    // owning field read / borrowed value, which must itself be in-subset. The AST
+    // path emits `(recv).clone()` unconditionally (no `recv_type` needed) — match it.
+    if method == "clone" {
+        return args.is_empty() && expr_in_subset(receiver, cx, locals);
+    }
+    // Shape (b): a user-defined instance method. The `recv_type` is the TOTAL sema
+    // fact; a `None` means a static call / fallback-inference path the subset must
+    // NOT reproduce — exclude.
+    let Some(ty) = recv_type else {
+        return false;
+    };
+    // A name a core/stdlib/builtin/special lowering would intercept *before* the
+    // user-method dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/alloc
+    // special cases) is excluded — those have bespoke lowering keyed on the method
+    // name, not on `method_sigs`, so routing them through the user-method TIR would
+    // miscompile. Conservative: exclude any name the AST path special-cases.
+    if is_intercepted_method_name(method) {
+        return false;
+    }
+    // The receiver type must be a covered struct or enum (so the receiver place
+    // emits exactly as the AST path does, and the method is a plain user method).
+    let recv_ty = Type::Named(ty.clone());
+    if !is_covered_struct_ty(&recv_ty, cx) && !is_covered_enum_ty(&recv_ty, cx) {
+        return false;
+    }
+    // The method must be a user-defined method on that type (in `method_sigs`).
+    let Some(sig) = cx.method_sigs.get(&(ty.clone(), method.to_string())) else {
+        return false;
+    };
+    // The receiver expression must itself be in-subset (a covered local/param/field).
+    if !expr_in_subset(receiver, cx, locals) {
+        return false;
+    }
+    // Arity must match the resolved signature (sema guaranteed it, but be defensive).
+    if args.len() != sig.len() {
+        return false;
+    }
+    // Every argument must be in-subset and carry no call-site label. Unlike a plain
+    // call, a method arg MAY use any of `Read`/`Move`/`Mutate` with implicit/Arc
+    // clone — those are carried as total flags and emitted verbatim (mirroring
+    // `emit_call_args`). The arg *type* is restricted to what the emitter can wrap:
+    // a covered value type; a Fn-typed param would need the Box-coercion form, so
+    // exclude any method whose param at this position is a function type.
+    args.iter().zip(sig.iter()).all(|(a, (_, pty))| {
+        a.label.is_none()
+            && !matches!(pty, Type::Fn { .. })
+            && expr_in_subset(&a.expr, cx, locals)
+    })
+}
+
+/// Method names a core/stdlib/builtin/special lowering intercepts *before* the
+/// user-method dispatch (`emit_method_call` → `emit_builtin_method` and the
+/// `.raw()`/`.snapshot()`/`mem.*.new` special cases, Source/Codegen/Expression.rs).
+/// A user method sharing one of these names is emitted by that bespoke lowering on
+/// the AST path, not by `method_sigs`, so the TIR must NOT claim it — exclude.
+/// The list is intentionally a superset (every name those paths mention, guarded
+/// or not): an extra exclusion only keeps a function on the AST path (always safe).
+fn is_intercepted_method_name(method: &str) -> bool {
+    matches!(
+        method,
+        // Special-cased in `emit_method_call` / `emit_expr` (clone is the synthetic
+        // path, handled separately above; raw/snapshot/new have bespoke lowering).
+        "clone" | "raw" | "snapshot" | "new"
+        // String / list / map / collection builtins (`emit_builtin_method`).
+        | "parse" | "from_bytes" | "len" | "is_empty" | "push" | "pop" | "insert"
+        | "remove" | "get" | "post" | "put" | "delete" | "first" | "last"
+        | "contains" | "index_of" | "reverse" | "sort" | "join" | "detach"
+        | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "trim"
+        | "split" | "starts_with" | "ends_with" | "replace" | "to_upper"
+        | "to_lower" | "repeat" | "slice" | "keys" | "values" | "contains_key"
+        | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
+        | "sort_by" | "reduce"
+        // Numeric predicates / bit ops / width conversions (D-NUMOPS1).
+        | "is_nan" | "is_infinite" | "is_finite"
+        | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+        | "to_i8" | "to_i16" | "to_i32" | "to_i64" | "to_int" | "to_u8" | "to_u16"
+        | "to_u32" | "to_u64" | "to_f32" | "to_f64" | "to_float"
+        // Stopwatch / file / stdin / net / http / regex / alloc handle methods.
+        | "elapsed_millis" | "write_line" | "flush" | "read_line" | "lines"
+        | "alloc" | "reset" | "free" | "accept" | "local_addr" | "read" | "write"
+        | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
+        | "status" | "group"
+    )
 }
 
 /// A call argument is in-subset only if its convention is one the emitter
@@ -1647,12 +1781,16 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         &conv,
                         Some((AccessConvention::Read, t)) if !t.is_scalar()
                     );
-                    // An implicit clone (a String passed by value).
+                    // An implicit clone (a String passed by value). The plain-call
+                    // subset excludes Arc auto-clone and `Mutate` args (gate), so
+                    // those wrappers are always off here.
                     let clone = a.flags.implicit_clone;
                     TCallArg {
                         value,
                         borrow,
+                        mut_borrow: false,
                         clone,
+                        arc_clone: false,
                     }
                 })
                 .collect();
@@ -1664,6 +1802,12 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     args,
                 },
             }
+        }
+        // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
+        // exactly the synthetic `.clone()` or a user instance method on a covered
+        // type; lower accordingly. Every dispatch fact is resolved here (totality).
+        Expr::MethodCall { receiver, method, args, recv_type, .. } => {
+            lower_method_call(receiver, method, args, recv_type, cx, env)
         }
         Expr::If {
             cond,
@@ -1924,6 +2068,109 @@ fn call_return_type(cx: &Cx, name: &str) -> Type {
         Some(Type::Fn { ret: Some(r), .. }) => (**r).clone(),
         _ => unit_type(),
     }
+}
+
+/// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
+/// or a user instance method on a covered type; resolve every dispatch fact here.
+fn lower_method_call(
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    recv_type: &Option<String>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    // The sema-inserted `.clone()`: emit `(recv).clone()`, result is the receiver's
+    // type (a clone preserves it). Mirrors `emit_method_call`'s `clone` early return.
+    if method == "clone" {
+        let recv = lower_expr(receiver, cx, env);
+        let ty = recv.ty.clone();
+        return TExpr {
+            ty,
+            kind: TExprKind::Clone(Box::new(recv)),
+        };
+    }
+    // A user instance method on a covered type. `recv_type` is total (gate proved
+    // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
+    // name (trait-impl methods keep their bare name; others get the `user_` mangle).
+    let ty_name = recv_type.clone().expect("gate proved recv_type is Some");
+    let sig = cx
+        .method_sigs
+        .get(&(ty_name.clone(), method.to_string()))
+        .cloned()
+        .unwrap_or_default();
+    let recv = lower_expr(receiver, cx, env);
+    let targs = lower_method_args(args, &sig, env, cx);
+    // S62: a trait-impl method is called by its bare name (the trait impl owns it);
+    // a plain user method is `user_<method>`. This mirrors `emit_method_call`'s
+    // `trait_methods` check exactly — decided here, total, never re-derived in emit.
+    let method_rust = if cx
+        .trait_methods
+        .contains(&(ty_name.clone(), method.to_string()))
+    {
+        method.to_string()
+    } else {
+        mangle(method)
+    };
+    // The result type, read from the resolved method return (total fact). It is
+    // rarely load-bearing in emit (a binding carries sema's `b.ty`; arithmetic on a
+    // method result doesn't trap — matching the AST `expr_jet_ty`/`operand_is_integer`),
+    // but the TIR keeps it total per the design principle.
+    let ret_ty = cx
+        .method_rets
+        .get(&(ty_name.clone(), method.to_string()))
+        .cloned()
+        .flatten()
+        .unwrap_or_else(unit_type);
+    TExpr {
+        ty: ret_ty,
+        kind: TExprKind::MethodCall {
+            recv: Box::new(recv),
+            method_rust,
+            args: targs,
+        },
+    }
+}
+
+/// c109 Phase 6: lower method-call arguments, mirroring `emit_call_args`
+/// (Source/Codegen/Expression.rs). The clone/Arc wrappers and the borrow/mut-borrow
+/// wrappers are decided here from the total facts (`CallArg.flags` + the resolved
+/// param convention/type), never re-derived in emit. The gate excluded Fn-typed
+/// params, so no Box-coercion form arises.
+fn lower_method_args(
+    args: &[crate::AST::CallArg],
+    sig: &[(AccessConvention, Type)],
+    env: &mut LowerEnv,
+    cx: &Cx,
+) -> Vec<TCallArg> {
+    args.iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let value = lower_expr(&a.expr, cx, env);
+            let conv = sig.get(i).map(|(c, t)| (*c, t.clone()));
+            // Clone wrappers (applied to the raw value first, exactly as emit_call_args).
+            let clone = a.flags.implicit_clone;
+            let arc_clone = a.flags.shared_auto_clone;
+            // Borrow wrappers (applied after the clone wrapper). A `Read` non-scalar
+            // (non-Fn) is `&(…)`; a `Mutate` is `&mut (…)`.
+            let (borrow, mut_borrow) = match &conv {
+                Some((AccessConvention::Read, t))
+                    if !t.is_scalar() && !matches!(t, Type::Fn { .. }) =>
+                {
+                    (true, false)
+                }
+                Some((AccessConvention::Mutate, _)) => (false, true),
+                _ => (false, false),
+            };
+            TCallArg {
+                value,
+                borrow,
+                mut_borrow,
+                clone,
+                arc_clone,
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -2257,21 +2504,27 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("println!(\"{{}}\", ({}).jet_show())", emit_tir_expr(arg, cx))
         }
         TExprKind::Call { name, args } => {
-            let arg_str = args
-                .iter()
-                .map(|a| {
-                    let mut s = emit_tir_expr(&a.value, cx);
-                    if a.clone {
-                        s = format!("({}).clone()", s);
-                    }
-                    if a.borrow {
-                        s = format!("&({})", s);
-                    }
-                    s
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
+            let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
+        }
+        // c109 Phase 6: the synthetic `.clone()`. Mirrors `emit_method_call`'s
+        // `clone` early return: `(recv).clone()`, no deref/borrow decision (the
+        // receiver was already lowered to the place the AST path would clone).
+        TExprKind::Clone(recv) => {
+            format!("({}).clone()", emit_tir_expr(recv, cx))
+        }
+        // c109 Phase 6: a user instance method call. Mirrors `emit_method_call`'s
+        // final dispatch (`(recv).{method}({args})`): Rust's method autoref handles
+        // the `&self`/`&mut self`/`self` receiver convention, so codegen emits the
+        // receiver place as-is. The method name + arg wrappers were resolved at
+        // lowering — emit only formats.
+        TExprKind::MethodCall {
+            recv,
+            method_rust,
+            args,
+        } => {
+            let arg_str = emit_tir_call_args(args, cx);
+            format!("({}).{}({})", emit_tir_expr(recv, cx), method_rust, arg_str)
         }
         TExprKind::Binary {
             op,
@@ -2408,6 +2661,33 @@ fn emit_tir_value_block(stmts: &[TStmt], value: &TExpr, cx: &Cx) -> String {
     let mut inner = String::new();
     emit_tir_stmts(stmts, cx, &mut inner, 1);
     format!("{{ {} {} }}", inner, emit_tir_expr(value, cx))
+}
+
+/// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
+/// (Source/Codegen/Expression.rs) byte-for-byte. The clone wrapper (`.clone()` or
+/// `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper
+/// (`&(…)` for a `Read` non-scalar, `&mut (…)` for a `Mutate`). All four decisions
+/// are total TIR flags — emit makes no convention decision.
+fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
+    args.iter()
+        .map(|a| {
+            let mut s = emit_tir_expr(&a.value, cx);
+            // emit_call_args applies implicit_clone XOR shared_auto_clone (the AST
+            // path uses `if … else if …`); the gate/lowering never set both.
+            if a.clone {
+                s = format!("({}).clone()", s);
+            } else if a.arc_clone {
+                s = format!("std::sync::Arc::clone(&{})", s);
+            }
+            if a.borrow {
+                s = format!("&({})", s);
+            } else if a.mut_borrow {
+                s = format!("&mut ({})", s);
+            }
+            s
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
@@ -2694,5 +2974,42 @@ mod tests {
         // (optionals are Phase 8); the owning collection is excluded.
         let src = "fn f(xs: [Int?]) -> Int {\n return 0\n}\n";
         assert!(!covers(src, "f"));
+    }
+
+    // c109 Phase 6: methods + clones. (The gate paths that need a sema-resolved
+    // `recv_type` are proven by the byte-parity check + `tests/tir.rs`; `build_cx`
+    // alone does not fill `recv_type`. Here we gate the sema-independent facts:
+    // covered method *signatures* are registered, and a covered function bodyless
+    // of method calls is unaffected.)
+
+    #[test]
+    fn covers_struct_param_with_method_caller() {
+        // A struct with a user method: the method body (has `self`) is excluded,
+        // but a free function taking the struct and reading a scalar field is still
+        // covered (Phase 3 baseline — methods don't disturb the existing coverage).
+        let src = "struct Calc {\n base: Int\n fn add(self, x: Int) -> Int {\n return (self.base + x)\n }\n}\nfn peek(c: Calc) -> Int {\n return c.base\n}\n";
+        assert!(covers(src, "peek"));
+    }
+
+    #[test]
+    fn builtin_method_names_are_excluded() {
+        // A user method whose NAME collides with a collection/string builtin
+        // (`len`, `push`, `map`, …) is intercepted by `emit_builtin_method` on the
+        // AST path — the TIR must NOT claim it. `is_intercepted_method_name` is the
+        // guard; these names stay false regardless of the receiver being a user type.
+        for name in [
+            "len", "push", "pop", "get", "map", "filter", "each", "find", "sort",
+            "join", "to_string", "clone", "raw", "snapshot", "new", "to_i32",
+            "is_nan", "chars", "trim", "keys", "values",
+        ] {
+            assert!(
+                is_intercepted_method_name(name),
+                "{name} should be excluded (AST builtin/special lowering)"
+            );
+        }
+        // A plain user method name is not intercepted.
+        assert!(!is_intercepted_method_name("bumped"));
+        assert!(!is_intercepted_method_name("combine"));
+        assert!(!is_intercepted_method_name("code"));
     }
 }

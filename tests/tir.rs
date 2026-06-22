@@ -569,6 +569,159 @@ fn main() {
     assert_eq!(stdout, "5\napple=5\nbanana=3\n");
 }
 
+// --- c109 Phase 6: methods + clones -----------------------------------------
+
+/// The sema-inserted `.clone()` inside a COVERED function (no `self`): `p.name`
+/// is an owning non-`Copy` String field read, which sema rewrites to a
+/// `(p.name).clone()` MethodCall. Phases 3–5 excluded this (the getter that moves
+/// a field out); Phase 6 covers it, so `name_of` now routes through the TIR.
+#[test]
+fn covered_fn_returns_cloned_string_field() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Person {
+    name: String
+    age: Int
+}
+fn name_of(p: Person) -> String {
+    return p.name
+}
+fn main() {
+    p @= Person { name: \"Grace\", age: 40 }
+    print(name_of(p))
+}
+";
+    let (code, stdout) = build_and_run("tir_clone_getter", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Grace\n");
+}
+
+/// A user-defined instance method with scalar args on a covered struct. The
+/// caller `run` routes through the TIR; `(c).user_add(10i64, 20i64)` is emitted
+/// from the resolved `method_sigs` conventions (the method body, which has `self`,
+/// stays on the AST path — the gate excludes `self` functions).
+#[test]
+fn user_method_with_scalar_args() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Calc {
+    base: Int
+
+    fn add(self, x: Int, y: Int) -> Int {
+        return ((self.base + x) + y)
+    }
+}
+fn run(c: Calc) -> Int {
+    return c.add(10, 20)
+}
+fn main() {
+    c @= Calc { base: 1 }
+    print(run(c))
+}
+";
+    let (code, stdout) = build_and_run("tir_method_args", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "31\n");
+}
+
+/// A user method taking a String argument by value — the arg carries an implicit
+/// clone (`(name).clone()`), reproduced from the total `CallArg.flags` exactly as
+/// `emit_call_args` does. The caller `run` routes through the TIR.
+#[test]
+fn user_method_with_string_arg_implicit_clone() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Crate {
+    tag: String
+
+    fn combine(self, other: String) -> String {
+        return \"{self.tag}-{other}\"
+    }
+}
+fn run(b: Crate) -> String {
+    name @= \"x\"
+    return b.combine(name)
+}
+fn main() {
+    b @= Crate { tag: \"t\" }
+    print(run(b))
+}
+";
+    let (code, stdout) = build_and_run("tir_method_string_arg", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "t-x\n");
+}
+
+/// A trait-impl method call. `(d).label()` is emitted with the BARE method name
+/// (the trait impl owns it — no `user_` mangle), decided at lowering from
+/// `cx.trait_methods`. The caller `describe` routes through the TIR.
+#[test]
+fn trait_impl_method_call_no_mangle() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Named {
+    fn label(self) -> String
+}
+struct Dog {
+    sound: String
+}
+impl Dog: Named {
+    fn label(self) -> String {
+        return \"dog\"
+    }
+}
+fn describe(d: Dog) -> String {
+    return d.label()
+}
+fn main() {
+    d @= Dog { sound: \"woof\" }
+    print(describe(d))
+}
+";
+    let (code, stdout) = build_and_run("tir_trait_method", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "dog\n");
+}
+
+/// An instance method on a covered ENUM, called from a covered function. The
+/// enum-method dispatch and the enum-literal argument both route through the TIR.
+#[test]
+fn user_method_on_covered_enum() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Light {
+    Red
+    Green
+
+    fn code(self) -> Int {
+        if self {
+            Red -> { return 1 }
+            Green -> { return 2 }
+        }
+    }
+}
+fn run(l: Light) -> Int {
+    return l.code()
+}
+fn main() {
+    print(run(Light.Green))
+}
+";
+    let (code, stdout) = build_and_run("tir_enum_method", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\n");
+}
+
 /// A non-empty map literal `[k: v, …]` returned from a covered function, then
 /// indexed in `main` — the map-builder lowering plus map indexing.
 #[test]

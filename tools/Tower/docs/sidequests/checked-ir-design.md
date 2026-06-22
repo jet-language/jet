@@ -272,6 +272,66 @@ everything, the AST codegen path is deleted (final phase).
   single-binding iteration + map literal `[:]` + map index + map insert + two-binding
   map iteration — 248 lines, byte-for-byte identical, then the instrumentation removed.
 
+## Refinements learned in Phase 6 (methods + clones)
+
+- **The sema-inserted `.clone()` is the high-value unlock, and it is dead simple to
+  emit — but only because sema did the work.** `CheckerInfer::field_read_to_clone`
+  rewrites a non-`Copy` owning field read (`return p.name`, a struct-lit field value)
+  into an `Expr::MethodCall{method:"clone"}` *before* codegen (the Phase-3 finding).
+  So the TIR's clone shape is just `(recv).clone()` with the receiver lowered
+  in-subset — no deref/borrow decision, because the receiver is already the exact
+  place the AST path's `emit_method_call` clone early-return would emit. This is what
+  lets a covered function finally *return or store* a non-Copy field (the getter),
+  which Phases 3–5 had to exclude. The clone decision lives in sema's elaboration; the
+  TIR just carries the rewritten node.
+- **`emit_builtin_method` dispatches on the method NAME, not the receiver type — so the
+  gate must exclude by name.** A large set of arms (`len`/`push`/`get`/`map`/`filter`/
+  `to_string`/`trim`/`keys`/… and the D-NUMOPS1 width/predicate/bit methods) fire on the
+  method name alone, *before* the user-method dispatch at the bottom of `emit_method_call`.
+  A user method sharing one of those names is lowered by that bespoke path on the AST
+  side, never via `method_sigs`. The gate therefore carries an explicit
+  `is_intercepted_method_name` superset (every name those paths mention, guarded or not)
+  and excludes any match. Excluding extra is always safe (stays on the AST path); a
+  missed name would be a silent mis-dispatch. The same set excludes the special-cased
+  `clone`/`raw`/`snapshot`/`new`.
+- **`recv_type: None` is the total signal for "not a user instance method" — never
+  reproduce the AST fallback.** Sema sets `recv_type = Some(T)` only when the call
+  resolves to a user method on a concrete type `T` (CheckerInfer ~L2349). A **static**
+  call (`Type.m()`) returns from `check_static_method` *without* setting it, so its
+  `recv_type` is `None`; the AST path then has a fallback (`receiver_struct_type` /
+  `cx.type_names.contains`) the subset must not reproduce. Gating on `recv_type ==
+  Some(covered T)` cleanly admits instance calls and excludes static calls, trait-object
+  calls (a trait `recv_type` isn't a covered struct/enum type → excluded), and every
+  core/handle method (their `recv_type` is a prelude/foreign name, excluded by
+  `is_covered_*`). This is the Phase-5 `IndexKind::Unknown` lesson in a new dress: a
+  partial sema fact means *stay on the AST path*.
+- **The call-site receiver needs NO convention handling — Rust autoref does it.**
+  `emit_method_call`'s final dispatch emits `(recv).{method}({args})` with the receiver
+  emitted as-is (its place); Rust's method autoref supplies `&`/`&mut`/by-value to match
+  `&self`/`&mut self`/`self`. So a `mut self` call site is byte-identical to a `self`
+  one, and the TIR carries no `self` convention at all (the speculative `method_self_conv`
+  table was removed as dead — totality means carrying facts the emitter *reads*, not
+  facts that *might* matter). Only the **arguments** carry conventions, mirrored from
+  `method_sigs` + `CallArg.flags` exactly as `emit_call_args` (clone/Arc wrapper first,
+  then `&(…)`/`&mut (…)`).
+- **Trait-impl method names are bare, decided at lowering from `cx.trait_methods`.**
+  S62: a method from a trait impl (`(Type, m) ∈ trait_methods`) is called by its bare
+  Rust name (the impl owns it), not `user_<m>`. The TIR resolves `method_rust` once at
+  lowering off that set — the same check the AST path makes inline — so emit never
+  consults `trait_methods`.
+- **A method-call result type is rarely load-bearing, but kept total anyway.** A binding
+  carries sema's `b.ty` (so the emitted `let` is unaffected by the method result type),
+  and arithmetic on a method result doesn't trap in *either* path (the AST `expr_jet_ty`
+  resolves a MethodCall via its receiver → a Named struct → `is_integer()==false`; the
+  TIR's `ast_operand_is_integer` returns `None` for a MethodCall — both agree: no trap).
+  Still, the TIR reads the resolved return from a new `cx.method_rets` table for totality
+  per the design principle, never `unit_type()`-guessing when a real type exists.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass) on six programs: a covered-function owning-field clone (the getter unlock), a
+  getter method, a user method with scalar args, a method with a String arg (implicit
+  clone), a trait-impl method call (bare name), and an instance method on a covered enum
+  — all byte-for-byte identical, then the instrumentation removed.
+
 ## Phases
 
 | # | Scope | Status |
@@ -279,11 +339,11 @@ everything, the AST codegen path is deleted (final phase).
 | 0 | Inventory + TIR type-model design | ✅ done (4b89af5) |
 | 1 | Simple functions: literals, operators, bindings, returns, if/else, calls, print | ✅ done (398138b) — 54 fns routed |
 | 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels) | ✅ done (c109 Phase 2) — +3 example fns routed (e.g. fizzbuzz `main`). Excludes `loop x in <collection>` (ForKind::In, key/value map form) → Phase 5. |
-| 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → Phase 7), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only → Phase 7). |
+| 3 | Structs: struct literals, field reads, struct-typed params/locals/returns | ✅ done (c109 Phase 3) — 57→65 covered fns. Covers plain (non-generic, non-recursive) user struct literals, borrow-position field reads (incl. nested/chained), struct params/locals/returns. Excludes: owning field reads (sema rewrites them to a `.clone()` MethodCall → **landed Phase 6**), trait-coerced literals (`as_trait`), imported-namespace/prelude structs, generic & recursive (`Box<…>`) structs, and **field assignment** (not a Jet construct — `s.field = value` is E0003; struct mutation is method-only → Phase 7). |
 | 4 | Enums + `when`/match + patterns (incl. range/or patterns) | ✅ done (c109 Phase 4) — ~7 more example fns routed (`11_enums` `next`/`label`/`main`, `71_pattern_matching` `describe_conn`/`classify`/`score_grade`/`main`). Covers plain (non-generic, non-recursive, Clone-derivable) scalar/Char-payload user enums: unit/positional/named enum literals; exhaustive variant `match` (variant patterns, positional/named/wildcard/range payload slots, or-patterns, payload bindings); arm-head range switches (`lo..hi -> …` + `else`); enum params/locals/returns. Excludes: String/struct/collection-payload enums (clone/borrow at literal & binding site → Phase 7), recursive (`Box<…>`) enums, generic enums, JSON/foreign/prelude enums, fallible/optional patterns (`value`/`null`/`ok`/`err` → Phase 8), and mixed comparison/Bool switches (general `emit_mixed_switch`). |
 | 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | ✅ done (c109 Phase 5) — list/map literals (incl. empty `[]`/`[:]`), `coll[i]` indexing (List/Map via the total sema `IndexKind`), `coll[a..b]` slicing, `coll[i] = v` index-assignment, and collection iteration (`loop x in coll` single-binding + `loop k, v in map` two-binding). List/map-typed params/locals/returns now allowed; element/key/value types may be scalar/Char/String/covered-struct/covered-enum/nested-collection. Excludes: collection *methods* (`.push`/`.len`/`.map`/etc. → Phase 7), method-call collections in iteration (`.chars()`/`.lines()` → Phase 7), `[E#N]` fixed-size lists, list-of-option/trait/fn/tuple element types, and any `Index`/index-assign whose `IndexKind` sema left `Unknown`. |
-| 6 | Ownership facts: clone insertion, `take`/`mut`/`view`, Shared/Arc auto-clone | pending |
-| 7 | Methods + method calls (recv_type → resolved target), trait-impl methods | pending |
+| 6 | Methods + method calls (recv_type → resolved target), trait-impl methods, the sema-inserted `.clone()` | ✅ done (c109 Phase 6) — +3 example fns routed (58→61) **plus** the clone path unblocks getters that move a non-Copy field out (Phases 3–5 excluded these). Covers: the synthetic `.clone()` MethodCall (owning field read / borrowed value); user-defined **instance** methods (`recv.m(args)`) on a covered struct/enum whose `recv_type` is a covered type and whose name is not a builtin/core/special intercept; trait-impl methods (bare name, no `user_` mangle, via `cx.trait_methods`); method args with `implicit_clone`/`shared_auto_clone`/`Read`/`Mutate`/`Move` conventions (mirroring `emit_call_args`). Excludes: **static** calls (`Type.m()` — `recv_type` is `None`); any method whose name a core/stdlib/collection/string/numeric lowering intercepts (`emit_builtin_method` + `.raw()`/`.snapshot()`/alloc); Fn-typed method args (Box-coercion form); core/foreign/prelude-type receivers; fallible/optional methods (→ Phase 8). The method *body* (it has `self`) still routes via the AST path until `self`-functions are covered. |
+| 6b | Remaining ownership facts: `take`/`mut`/`view` access conventions on free-function args, general Shared/Arc auto-clone outside method args | pending — the Phase-6 method-arg path already emits `Arc::clone(&…)` and `&mut (…)` from the total flags; extend the same to free `Call` args + view returns. |
 | 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | pending |
 | 9 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | pending |

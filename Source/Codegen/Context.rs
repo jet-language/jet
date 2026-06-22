@@ -15,6 +15,10 @@ pub(crate) struct Cx {
     pub(crate) fn_types: HashMap<String, Type>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// c109 Phase 6 (TIR): `(TypeName, method)` -> resolved return type (or `None`
+    /// for a unit-returning method). Used by TIR lowering to give a method-call
+    /// expression its total result `Type` without re-inferring in codegen.
+    pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
     pub(crate) consts: HashMap<String, String>,
     pub(crate) type_names: HashSet<String>,
     pub(crate) trait_names: HashSet<String>,
@@ -364,6 +368,7 @@ pub(crate) fn build_cx_items(
         sigs: HashMap::new(),
         fn_types: HashMap::new(),
         method_sigs: HashMap::new(),
+        method_rets: HashMap::new(),
         consts: HashMap::new(),
         type_names: HashSet::new(),
         trait_names: HashSet::new(),
@@ -534,6 +539,8 @@ pub(crate) fn build_cx_items(
                 for m in &s.methods {
                     cx.method_sigs
                         .insert((s.name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_rets
+                        .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
             }
             Item::Enum(e) => {
@@ -547,12 +554,16 @@ pub(crate) fn build_cx_items(
                 for m in &e.methods {
                     cx.method_sigs
                         .insert((e.name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_rets
+                        .insert((e.name.clone(), m.name.clone()), m.return_type.clone());
                 }
             }
             Item::Impl(i) => {
                 for m in &i.methods {
                     cx.method_sigs
                         .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_rets
+                        .insert((i.type_name.clone(), m.name.clone()), m.return_type.clone());
                     // S62: track trait-impl methods so call sites know not to mangle.
                     if i.trait_name.is_some() {
                         cx.trait_methods.insert((i.type_name.clone(), m.name.clone()));
@@ -575,6 +586,7 @@ fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
         .map(|p| (p.convention, p.ty.clone()))
         .collect()
 }
+
 
 pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
     s.fields
