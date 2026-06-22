@@ -20,7 +20,7 @@ recommendation; expand one into a full card when it's time to decide it.
 
 ## Open decisions
 
-> **29 open decisions across 24 cards** (incl. testing ergonomics + the 13 persona-gap decisions from the 2026-06-20 run, board cards c83–c94), plus a deferred-ballots list and informational notes.
+> **26 open decisions across 21 cards** (incl. testing ergonomics + the remaining persona-gap decisions from the 2026-06-20 run, plus the owner-requested constant-binding spelling D-BIND2, board card c102), plus a deferred-ballots list and informational notes. **Note:** the 2026-06-22 owner batch (D-STATE1, D-DET1, D-TXN2, D-EXT1, D-CTIO1, D-CTX1, D-ROUTE1) has been ratified and those cards stripped; **D-DBG2 is held** — owner chose C, which the card itself flags as an I2 violation (raw Rust frames shown to users), so it is deferred back to the owner rather than ratified.
 > story (why it exists), a tradeoff table, and a worked example per option. Cards
 > **c25** (range sugar) and **c55** (REPL v2) turned out implement-only — every
 > choice they raised is already covered by ratified decisions — so nothing is
@@ -650,149 +650,6 @@ first, then decide these in any order."
 
 ---
 
-## Typestate — board card c71
-
-### D-STATE1 — Order-of-events types: typestate (rec A)
-
-**User story.** Fatima writes an e-commerce checkout. The invariant is: an `Order`
-must be *charged* before it can be *shipped*. Today she enforces this with a
-`require(order.is_charged)` at the top of `ship()` — a runtime check that fires in
-production, not at compile time. She wants `ship(order)` to be a compile error
-unless `order` has passed through `charge()`. She does not want to read a research
-paper to achieve this.
-
-Typestate = a tag that changes as a value moves through its lifecycle. A function
-consumes one tag-state and returns the next. The tag lives only in sema; it erases
-completely at runtime (no vtable, no enum discriminant, no overhead).
-
-| Option | Compile-time guarantee | Runtime cost | Author ceremony | Failure error |
-|--------|----------------------|-------------|-----------------|---------------|
-| A — transitioning tags (RECOMMENDED) | yes — wrong-state call is a compile error | zero — tags erase | declare states + transitions; write `#[State]` on return type | clear: "expected `#charged`, found `#pending`" |
-| B — runtime `require(…)` only | no — wrong-state call panics at runtime | `require` overhead | none | panic in production; message is a string |
-
-**How other languages do this.**
-
-- **Plaid** — the typestate research language; methods carry pre/post state annotations; the type checker verifies transitions; objects live in exactly one state at any time. The academic source for most of what Jet's D-STATE1 proposes; Jet simplifies by routing state through tags rather than separate type declarations.
-- **Rust typestate pattern (phantom types)** — a common Rust idiom: `struct Connection<S>(PhantomData<S>)`; `fn open(c: Connection<Closed>) -> Connection<Open>`; state changes force a new type. Correct, but phantom types are invisible boilerplate and the pattern requires careful hand-threading. Jet's tag approach achieves the same guarantee without any phantom-type machinery.
-- **Austral** — linear types enforce state protocols: a `Connection` value must be explicitly transitioned; the old state is consumed, the new one produced. Jet takeaway: consuming the old tag-state (`take`) and returning the new one is the right model; it maps directly onto Jet's `take` ownership keyword (S10).
-- **Session types (process calculi / Haskell `session-types`)** — encode communication protocols in the type system; a channel has a type that steps with each send/receive. Jet takeaway: the session-types insight is that protocols are sequences of typed operations — typestate is exactly that idea applied to values, not channels.
-- **TypeScript discriminated-union state machines** — `type Order = { status: "pending" } | { status: "charged" } | { status: "shipped" }`; a `ship` function takes only the `charged` variant. Works, but the state is a runtime enum discriminant (nonzero cost); the narrowing is done by the type checker reading the `status` field. Jet takeaway: the tag-based model achieves the same narrowing with zero runtime cost because the tag erases.
-- **Ada/SPARK (pre/post conditions)** — `Pre => Order.Status = Charged`; verified statically by SPARK's prover. Jet takeaway: SPARK proves preconditions but the precondition is still a runtime value (`Status`); Jet's tag is stronger because the state is the type itself — there is no runtime field to check.
-
-**Options.**
-
-- **Option A — typestate via transitioning tags (RECOMMENDED).** States are tags. A function that *transitions* a value from one state to another takes the old state (consuming the value via `take`) and returns the new state. The tag on a binding tracks which state it is currently in; a call that requires a different state is a compile error naming the mismatch.
-
-```jet
-// state tags — plain tags, no methods
-// (declared as tag constants; exact declaration syntax gated on D-QUAL2)
-#tag Pending
-#tag Charged
-#tag Shipped
-
-struct Order {
-    id:    OrderId
-    total: Float #unit(usd)
-}
-
-// transition: Pending → Charged
-fn charge(take order: Order #[Pending]) -> Order #[Charged] ? {
-    // ... call payment processor ...
-    ok(order)          // order is returned with the Charged tag
-}
-
-// transition: Charged → Shipped
-fn ship(take order: Order #[Charged]) -> Order #[Shipped] ? {
-    // ... dispatch courier ...
-    ok(order)
-}
-
-// correct lifecycle
-fn checkout(take order: Order #[Pending]) -> String ? {
-    charged  :: charge(order)?    // order: Order #[Charged]
-    shipped  :: ship(charged)?    // charged: Order #[Shipped]
-    ok("shipped: {shipped.id}")
-}
-
-// error — skipping charge
-fn bad_checkout(take order: Order #[Pending]) -> String ? {
-    ship(order)?
-    // error[E0150]: state mismatch
-    //  --> checkout.jet:23:5
-    //   |
-    // 23 |     ship(order)?
-    //    |          ^^^^^ expected `Order #[Charged]`, found `Order #[Pending]`
-    //    = note: `ship` requires the order to be in state `#[Charged]`
-    //    = note: `order` is currently in state `#[Pending]`
-    //    help: call `charge(order)` first to transition to `#[Charged]`
-    ok("done")
-}
-
-// error — using the old binding after transition
-fn stale(take order: Order #[Pending]) -> String ? {
-    charged :: charge(order)?
-    ship(order)?         // `order` was moved into `charge`; this is the old binding
-    // error[E0031]: use of moved value `order`
-    //  --> checkout.jet:35:10
-    //   |
-    // 33 |     charged :: charge(order)?
-    //    |                       ----- `order` moved here
-    // 35 |     ship(order)?
-    //    |          ^^^^^ value used after move
-    //    help: use `charged` (the transitioned value) instead
-    ok("done")
-}
-```
-
-- **Option B — runtime `require(…)` only.** No language change. The author adds a precondition check at the top of `ship`; the compiler does not enforce it.
-
-```jet
-struct Order {
-    id:      OrderId
-    total:   Float
-    charged: Bool     // runtime flag — the thing typestate replaces
-}
-
-fn ship(view order: Order) -> String ? {
-    require(order.charged, "order must be charged before shipping")
-    // ... dispatch courier ...
-    ok("shipped")
-}
-
-// compiles fine — crashes at runtime
-fn bad_checkout(take order: Order) -> String ? {
-    ship(view order)?    // order.charged is false — panic at runtime:
-    // thread 'main' panicked at checkout.jet:10:
-    // order must be charged before shipping
-    ok("done")
-}
-
-// the bug class is alive; the compiler never sees it
-```
-
-**Recommendation:** A — the whole value of typestate is moving the bug class from
-runtime to compile time; Option B is the status quo that typestate exists to
-replace. Option B is listed only to make explicit what "no decision" means in
-practice. Complexity sequencing: implement `#linear` (D-LIN1 Option A) first since
-it exercises the same "track a tag on a value across branches" machinery; typestate
-then adds the "tag changes on transition" layer on top. Both are gated on D-QUAL2.
-
-<!-- foundation+misc: D-QUAL2, D-TXN1, D-MIGRATE1 + deferred -->
-
-# Draft ballot cards — D-QUAL2, D-TXN1, D-MIGRATE1 + deferred stubs
-
-> Status: draft — not yet promoted to `decision-ballots.md`.
-> Date: 2026-06-20
->
-> **Read order for owner:** D-QUAL2 first (foundational taxonomy); D-QUAL1
-> (already in the open queue, board card c62) builds on whatever D-QUAL2
-> ratifies and should be re-read in that light. D-TXN1 and D-MIGRATE1 are
-> independent.
-
----
-
----
-
 ## Scoped transactions — board card c72
 
 ### D-TXN1 — Rollback semantics for `#transact { }` (rec A)
@@ -808,6 +665,11 @@ the ladder.
 > ratified** (S82 / D-ATTR1: `#Marker { }` is the scoped-effect form). This
 > decision is about **rollback semantics** — what `#transact { }` actually
 > does when a `?` propagates — not syntax. Do not re-open the surface.
+
+> **Companion decision: D-TXN2** (board card c100) — whether to *reject*
+> irreversible effects (sent emails, network POSTs) inside `#transact { }`,
+> since rollback reverts memory but can't un-send. D-TXN1 covers reversible
+> mutations; D-TXN2 covers what can't be rolled back. Ratify the two together.
 
 | Option | What rolls back | Who writes rollback logic | Honest about limits? | After D-EFF1? |
 |--------|----------------|--------------------------|----------------------|---------------|
@@ -1116,82 +978,6 @@ A with the squash/baseline tooling named as part of the Build-tier versioning li
 user-facing call. Each board card (c83–c96) links its plan in `sidequests/`. House format,
 no effort column. `c95` is implement-only (no decision); `D-PUBLISH1` is a stub in the
 deferred list until M12.2 infra is verified.
-
-### D-ROUTE1 — HTTP route registration & dispatch surface (rec A)
-
-**User story.** Tariq is porting a Go `net/http` service to Jet. He has ten
-endpoints — `GET /users/:id`, `POST /orders`, a health check. Today `jet.http`
-gives him one handler closure and he branches on `request.path` with a growing
-`if/match` ladder; `:id` extraction is manual string-splitting. He wants to
-register routes and have the right handler called with `:id` already parsed.
-
-| Option | Registration | Param access | Glance-readable route map | Beginner read |
-|---|---|---|---|---|
-| A — builder chain | `router.get(path, h)` | `req.param("id")` | yes — one place | clear |
-| B — route table value | a `[Route]` literal | `req.param("id")` | yes — declarative | clear |
-| C — handler attribute | `#route("GET","/u/:id")` on fn | typed handler args | scattered across fns | medium |
-| D — match block | `route req { GET "/u/:id" -> … }` | bound in pattern | yes — but new syntax | high (familiar `match`) |
-
-- **Option A — builder method chain.** A `Router` value collects routes; handlers
-  read params from the request.
-
-```jet
-fn main() {
-    router :: http.Router.new()
-    router.get("/users/:id", get_user)
-    router.post("/orders", create_order)
-    router.get("/health", |req| http.ok("ok"))
-    http.serve(":8080", router)
-}
-
-fn get_user(req: http.Request) -> http.Response {
-    id :: req.param("id")              // "42" — extracted from /users/:id
-    http.json(lookup(id))
-}
-```
-
-- **Option B — declarative route table.** Routes are a value, handlers referenced
-  by name.
-
-```jet
-routes :: [
-    http.route(GET,  "/users/:id", get_user),
-    http.route(POST, "/orders",    create_order),
-    http.route(GET,  "/health",    health),
-]
-http.serve(":8080", routes)
-```
-
-- **Option C — handler attribute.** Each handler declares its own route; the
-  framework collects them.
-
-```jet
-#route(GET, "/users/:id")
-fn get_user(req: http.Request, id: String) -> http.Response {
-    http.json(lookup(id))              // :id arrives as a typed arg
-}
-// routes live next to their handlers, but there is no one place
-// to read the whole route map.
-```
-
-- **Option D — match-style routing block.** A dedicated routing construct.
-
-```jet
-http.serve(":8080", |req| route req {
-    GET  "/users/:id" (id) -> http.json(lookup(id)),
-    POST "/orders"          -> create_order(req),
-    GET  "/health"          -> http.ok("ok"),
-    _                       -> http.not_found(),
-})
-// new grammar; reads like `match`, but adds routing syntax to the language (I8).
-```
-
-**Recommendation:** A — a `Router` builder keeps routing a *library* (no grammar
-change, honoring I8), gives one readable place for the route map, and the
-`req.param` access generalizes to query/header params. B is a fine declarative
-peer; D buys familiarity at the cost of new syntax the simplicity ratchet resists.
-
----
 
 ### D-DETACH1 — Marking a task as intentionally detached (silence L1101) (rec A)
 
@@ -2068,338 +1854,6 @@ concrete roadmap slot and owner sign-off. Board items #15/#17.
 
 ---
 
-## Smart Context — board card c74
-
-### D-CTX1 — Smart Context: pick the `#context` grammar (baseline A2 + Cβ, owner-set 2026-06-21)
-
-> **REFORMED 2026-06-21 per owner.** The two semantic questions below are **decided**:
-> **Q1 = A2 (Complement)** — explicit S58/D-ALLOC1 allocator-passing stays and *wins when
-> present*; the implicit context is only the swappable default. **Q2 = Cβ** — the per-block
-> swap is a `#context(…) { … }` marker block (rides the ratified `#` grammar). v1 bundle =
-> **allocator + logger only**. The original Q1/Q2 analysis is kept below for reference.
->
-> **The only open choice now is the grammar of the field list inside `#context(…)`** — the
-> owner wants to pick the exact spelling. Pick one of G1–G3 (and the two sub-points).
-
-#### Grammar options for `#context(<fields>) { … }` — pick one
-
-| Option | Field spelling | Consistent with | Risk |
-|---|---|---|---|
-| G1 — `=` assignment | `#context(allocator = arena, logger = silent)` | Jai's `context.x = v` | `=` is *reassignment* (S17) everywhere else in Jet — overloads it |
-| G2 — `:` colon (rec) | `#context(allocator: arena, logger: silent)` | named args S61, struct fields S29, manifest fields | none — `name: value` is Jet's one spelling |
-| G3 — type-inferred slots | `#context(arena, silent)` | inferred constructors U18 | ambiguous if two values share a slot type; adding a slot silently re-routes |
-
-- **Option G1 — `field = value`.** The literal Cβ draft; reads like Jai's `context.allocator = …`.
-
-```jet
-silent :: log.Silent.new()
-#context(allocator = arena, logger = silent) {
-    report :: build_report(rows)
-}                                              // both restored on exit
-```
-But every other `name value` pairing in Jet uses `:` (`f(timeout: 30)`, `Point{ x: 1 }`,
-`name: "x"` in `pkg.jet`); `=` already means "reassign an existing `:=` binding" (S17).
-G1 spends `=` on a second meaning.
-
-- **Option G2 — `field: value` (recommended).** The same colon Jet uses for named args,
-  struct literals, and manifest fields — one spelling, nothing new to learn.
-
-```jet
-silent :: log.Silent.new()
-#context(allocator: arena, logger: silent) {
-    report :: build_report(rows)               // arena + silent flow downstream
-}                                              // both restored here
-
-#context(allocator: arena) {                   // single field — no ceremony
-    big :: build_report(rows)
-}
-```
-
-- **Option G3 — bare values, slot inferred from type.** Terse; the compiler routes each
-  value to its slot by type (an `Arena` → `allocator`, a `Logger` → `logger`), U18-style.
-
-```jet
-#context(arena, silent) {                      // which is which? inferred from type
-    report :: build_report(rows)
-}
-// error[E08xx]: two values target the context slot `allocator`
-#context(arena, scratch) { … }                 // both are arenas — ambiguous
-```
-Con: ambiguous when two values map to one slot, and once the bundle grows (capabilities,
-effects later) a bare value can silently land in a new slot — it doesn't scale past 2 fields.
-
-#### Sub-point 1 — single-field shorthand
-With G2, a one-field swap is already clean (`#context(allocator: arena) { … }`). No special
-shorthand needed. (Recommend: **no shorthand** — one form.)
-
-#### Sub-point 2 — prebuilt bundle (optional, additive)
-Allow a named bundle to be swapped in whole, for the rare expert reusing one context across
-many blocks: `ctx :: context.with(allocator: arena, logger: silent)` then
-`#context(..ctx) { … }` (spread). **Recommend: defer** — not needed for v1; revisit if a real
-multi-block reuse case appears. v1 = inline fields only.
-
-**Recommendation: G2** (`#context(allocator: arena, logger: silent) { … }`) — it reuses
-Jet's single `name: value` spelling (S61/S29), keeps `=` meaning only "reassign" (S17),
-scales to more fields and to the future capability/effect carrier, and stays unambiguous.
-G1 overloads `=`; G3 is terse but breaks down past two fields.
-
----
-
-#### Original Q1/Q2 analysis (kept for reference — both now decided above)
-
-There are **two coupled questions** here. The owner must answer both:
-
-- **Q1 (the S58 question, dominant):** does an implicit context *replace*, *complement*,
-  or get *rejected* against the ratified explicit-allocator stance?
-- **Q2 (syntax):** if it ships, how is a per-block swap spelled?
-
-**User story.** Mia, four weeks into programming, writes a program that builds a big list
-of records and prints a report. She never types the word "allocator" — she has never
-heard it. Her code runs, is memory-safe, and frees everything at scope end. Later, Dev, an
-embedded engineer on the same team, needs that exact report-building function to run
-against a fixed 64 KB arena with no heap and a silent logger — *without editing the
-function*. He wraps the call in one block that swaps the context, and every allocation and
-log inside (including in library code he didn't write) reroutes. Mia's source is
-untouched and still reads like nothing happened. That "swap once at the top, everything
-downstream follows, restores on exit" is the whole feature — and it is exactly the power
-S58 deliberately made *explicit and visible* instead.
-
-#### The S58 tension (read this first)
-
-S58 ratified, verbatim: *"explicit Zig-style allocators — allocating APIs take an
-allocator parameter; a fixed arena works on embedded."* D-ALLOC1 then ratified the
-spelling `arena :: mem.Arena.new()` / `node :: arena.alloc(value)`. The whole point of
-that line was **the allocator is a visible parameter you pass**.
-
-Smart Context is the opposite move: the allocator becomes an **implicit, invisible**
-value threaded through the call graph, so `alloc` finds it without anyone passing it. That
-is genuinely useful (it is *why* beginners never see memory), but it **partly reverses
-S58's explicit stance**. The two designs answer the same question — "where does an
-allocating function get its allocator?" — with opposite answers. They cannot both be the
-default. So Q1 is not a nicety; it is the gate.
-
-| | Where `alloc` gets its allocator | Beginner sees | Expert control | S58 status |
-|---|---|---|---|---|
-| **S58 today (explicit)** | a parameter the caller passes | passes/sees the allocator (or a defaulted one) | total, local, visible | as ratified |
-| **Context replace** | the implicit context, always | nothing | swap a block | **reverses S58** |
-| **Context complement** | context **unless** an explicit allocator is passed | nothing | pass param *or* swap block | **extends S58, keeps it valid** |
-| **Reject** | a parameter the caller passes | the allocator | total, local, visible | unchanged |
-
-#### How other languages do this
-
-- **Jai — `context` + `push_context`.** A hidden `context` (allocator, logger, …) is
-  passed into every call; `push_context new_ctx { … }` swaps it for a block and restores
-  on exit; library code transparently picks up the new allocator. This is the direct
-  ancestor of the proposal. *Jet takeaway:* this is exactly the ergonomic we want — adopt
-  the block-scoped swap-and-restore shape.
-- **Odin — implicit `context`.** Every scope has an implicit `context` passed by pointer
-  on each Odin-convention call; `new(T)` uses `context.allocator` unless overridden;
-  **copy-on-write** so a callee can't back-propagate a bad context to the caller. Built for
-  *intercepting third-party code's* allocation/logging. *Jet takeaway:* steal the
-  copy-on-write / per-scope-local guarantee — a swap inside a block must never leak
-  outward, which also gives us the auto-restore for free.
-- **Go — `context.Context` (explicit, the contrast case).** Go threads context as an
-  *explicit first parameter* (`func F(ctx context.Context, …)`) and the community treats
-  invisible/implicit context as an anti-pattern. *Jet takeaway:* this is the cautionary
-  twin — Go chose visibility and ceremony on purpose; it shows the cost of *not* hiding it
-  (every signature grows a param) and the benefit (no magic). It is essentially "the
-  Reject option, productized."
-- **Scheme / Racket — `parameterize`.** Dynamic parameters (`make-parameter`) hold values
-  looked up dynamically; `(parameterize ([p v]) body)` rebinds for the dynamic extent of
-  `body` and restores after. *Jet takeaway:* the precise semantics we want are
-  *dynamic-extent* rebinding, not lexical — proves the swap-restore model is a 40-year-old,
-  well-understood construct, not a novelty.
-- **Thread-locals (C/C++/Rust `thread_local!`).** A per-thread global the callee reads
-  without a parameter. *Jet takeaway:* the likely **codegen** substrate for the implicit
-  value — but a leaky mental model for users, so it stays a backend detail and is *never*
-  surfaced (mirrors S58's "onboarding never mentions any of it").
-
-#### Q1 options — REPLACE vs COMPLEMENT vs REJECT (the S58 interaction)
-
-- **Option A1 — Replace.** Context becomes *the* way allocators are found; S58's
-  explicit-parameter line is superseded. Allocating APIs no longer take an allocator
-  parameter — they read the context.
-
-  ```jet
-  // Library function — note: NO allocator parameter anymore.
-  fn build_report(rows: [Row]) -> [Line] {
-      out :: []                 // allocates from the implicit context
-      loop r in rows { out.push(format(r)) }
-      out
-  }
-  ```
-
-  Pro: maximally beginner-clean, one mechanism. Con: **directly reverses S58 and
-  D-ALLOC1's "alloc is a visible method on a named arena"** — the embedded story
-  "a fixed arena works because you pass it" evaporates into invisible threading; experts
-  lose the local, visible control S58 promised. Violates the simplicity ratchet by
-  *removing* an already-shipped explicit path.
-
-- **Option A2 — Complement (recommended).** Explicit S58/D-ALLOC1 allocator-passing stays
-  exactly as ratified and **wins when present**; the implicit context is only the
-  **default used when no allocator is passed explicitly**. Nothing about S58 is reversed —
-  context fills the hole S58 already had (beginners weren't passing allocators anyway; the
-  default heap allocator simply *becomes nameable and swappable*).
-
-  ```jet
-  arena :: mem.Arena.new(capacity: 65536)   // S58 / D-ALLOC1, unchanged
-
-  // Explicit wins — exactly S58 today:
-  node :: arena.alloc(value)
-
-  // Implicit default — beginner path, fed by the context:
-  list :: []                                // uses context.allocator
-
-  // Expert swaps the *default* for a block; explicit calls still override locally:
-  using context.allocator = arena {
-      report :: build_report(rows)          // build_report's internal allocs -> arena
-  }                                         // context restored here
-  ```
-
-  Pro: **add-only** — S58 and D-ALLOC1 keep their exact meaning; the explicit parameter is
-  still the override and still the embedded story. Beginners get the magic; experts get
-  *both* knobs (pass a param for one call, swap the block for a subtree). Con: two ways to
-  pick an allocator coexist (mitigated: explicit always wins, one precedence rule, easy to
-  teach — "passed beats ambient").
-
-- **Option A3 — Reject.** No implicit context. Allocators stay strictly explicit (S58 as
-  is). Loggers, if wanted, are an ordinary passed value or a plain module-level function.
-
-  ```jet
-  fn build_report(rows: [Row], in: mem.Allocator) -> [Line] { … }   // S58 forever
-  ```
-
-  Pro: zero new magic, S58 fully intact, simplicity ratchet satisfied by *not* adding a
-  feature. Con: the beginner "never see an allocator" story still leans on a single hidden
-  default that nobody can swap; no clean seam to later carry capabilities/effects (c06 /
-  D-EFF1) — we'd reinvent this carrier when effects land.
-
-#### Q2 options — per-block swap syntax (only if A1 or A2 wins)
-
-- **Option Cα — `using context.allocator = arena { … }`.** Jai/`using`-flavored; reads as
-  prose, names the exact field being swapped.
-
-  ```jet
-  using context.allocator = arena {
-      report :: build_report(rows)          // arena is the ambient allocator in here
-      log.info("built {report.len()} lines") // still the outer logger
-  }                                          // allocator auto-restored on exit
-  ```
-
-  Con: `using` collides conceptually with S62's rejected "Jai-style `using` member
-  injection" — reusing the word the owner already declined elsewhere is a trap.
-
-- **Option Cβ — `#context(allocator = arena) { … }` (recommended).** A `#` marker block
-  (consistent with D-ATTR1's `#Unsafe`/`#Audit`), naming swapped fields as `field = value`;
-  multiple fields comma-separated (D-ATTR2 list feel). Auto-restores on block exit.
-
-  ```jet
-  silent :: log.Silent.new()
-  #context(allocator = arena, logger = silent) {
-      report :: build_report(rows)          // arena + silent logger flow downstream
-  }                                          // BOTH fields restored here
-  ```
-
-  Pro: rides the **already-ratified `#` marker grammar** — no new top-level keyword, no
-  collision with `using` (S62) or `use` (S16); the marker form signals "compiler-managed,
-  scoped" exactly like `#Unsafe`. Con: a `#(…)` block is a slightly heavier read than bare
-  `using`.
-
-- **Option Cγ — `push_context my_ctx { … }`.** Jai-literal: build a whole context value,
-  push it.
-
-  ```jet
-  my_ctx :: context.with(allocator = arena, logger = silent)
-  push_context my_ctx { report :: build_report(rows) }
-  ```
-
-  Pro: closest to the prior art, swaps the whole bundle at once. Con: a new top-level
-  keyword (`push_context`) for a niche expert op — fails the keyword-budget bar; forces
-  users to name a context value even for a one-field swap.
-
-#### Recommendation
-
-**A2 (Complement) + Cβ (`#context(…) { … }`).** A2 is the only option that **does not
-reverse a ratified call**: S58 and D-ALLOC1 keep their exact meaning, the explicit
-allocator parameter stays the override and the embedded story, and the implicit context
-merely makes the *already-hidden default* nameable and swappable — pure add. Precedence is
-one sentence: **a passed allocator always beats the ambient one.** Cβ reuses the ratified
-`#` marker grammar, dodges the `using` (S62) and `push_context` (keyword-budget) traps, and
-the scoped marker form reads as "compiler-managed, restores on exit." v1 holds the bundle
-to **allocator + logger only**; the context is the natural future carrier for c06
-capabilities and D-EFF1 effects, but that expansion is explicitly out of scope here and
-must come back as its own card. **Reject A1** — replacing S58 trades a shipped, visible,
-teachable expert path for invisible threading. If the owner wants zero new magic, **A3** is
-the clean no; everything beginner-facing still works, we just never get the swap seam.
-
-**Stop-work:** Smart Context implementation is blocked until D-CTX1 (Q1 at minimum) is
-decided.
-
----
-
-Sources (prior-art verification):
-- Jai context / `push_context`: [The Way to Jai — Context](https://github.com/Ivo-Balbaert/The_Way_to_Jai/blob/main/book/25A_Context.md), [Jai Community wiki — Context](https://jai.community/t/context/163)
-- Odin implicit `context`: [gingerBill — Odin's Most Misunderstood Feature: context](https://www.gingerbill.org/article/2025/12/15/odins-most-misunderstood-feature-context/), [Odin overview](https://odin-lang.org/docs/overview/)
-- Go `context.Context`, Racket `parameterize`, thread-locals: standard language docs.
-
----
-
-## Build-time I/O at comptime — board card c75
-
-### D-CTIO1 — Gated build-time I/O at comptime (rec B)
-
-> **Update (verified 2026-06-21): `embed_file` is already implemented and working** — `comptime x = embed_file("path")` reads the file at compile time and bakes it in (eval_embed_file, E0955, purity-allowed). So this decision is NARROWER than framed below: Option A’s “embed_file unimplemented” is moot. Live questions: (1) add `embed_bytes` for binary alongside the working `embed_file`? (2) harden path-escape rules (literal-path, no `..`)? (3) allow broader build-time I/O beyond embed_file (rec: **no**). Option B is largely shipped for text — ratify `embed_bytes` + the path rules.
-
-Jet's comptime engine is already ratified and partly shipped: S26 (the comptime law — value-only, no macros, no comptime types), S57 (`comptime x = …` bindings), S60 (Layer 2 — compile-time pure evaluation + data embedding), D-PURE2 (no ambient I/O; `embed_file` the one named exception), D-WHEN1/2 (`comptime if`, shipped). So this ballot does **not** re-decide comptime. The one unresolved question: **should Jet permit build-time I/O beyond `embed_file`?** Jai's `#run` allows full filesystem access at compile time — a supply-chain risk Jet's S26 law was written to refuse. This card settles the policy boundary.
-
-**User story.** Dana is shipping a graphics tool. She wants a WGSL shader (and a root cert, a JSON schema) baked into the binary as a constant at compile time — without a separate build script, and without opening `jet build` to arbitrary code execution from a dependency.
-
-| | A — pure-only forever | B — ratify `embed_file`/`embed_bytes` | C — broad gated build I/O |
-|---|---|---|---|
-| Supply-chain risk | none | minimal (read-only, path-checked) | high un-audited; moderate gated |
-| Power | lowest | covers ~90% of embed needs | full (env, network, codegen) |
-| Consistency w/ S26 law | perfect | good (S26 already names `embed_file`) | strained |
-| Ratchet (I8) cost | none | small (two builtins) | high (new gate, lockfile, sandbox) |
-| Prior-art twin | — | Zig `@embedFile`, Rust `include_str!` | Jai `#run`, Nim `staticExec` |
-
-**How other languages do this.**
-- **Zig** — `@embedFile("path")` bakes a file's bytes in; no general comptime I/O (a compile error). The cleanest precedent for B — takeaway: a dedicated embed builtin, not an I/O grant.
-- **Jai** — `#run fn()` runs *anything* at compile time, including filesystem/network/process spawn. A buggy dep can read `~/.ssh` during `jai build`. Takeaway: this is exactly the model S26 refuses.
-- **Rust** — `include_str!`/`include_bytes!` are embed-only; arbitrary build execution is isolated to a separate `build.rs`. Takeaway: safe embed built-in, dangerous execution quarantined to a distinct, visible mechanism.
-- **D** — CTFE over a pure subset; `import("file")` is the sole file-read intrinsic. Takeaway: even a powerful comptime keeps I/O to one named read.
-- **Nim** — `staticRead` (safe embed) *and* `staticExec` (shell at compile time). Takeaway: `staticExec` is the footgun that spreads through packages once it exists — the cautionary tale against C.
-
-- **Option A — keep pure-only forever.** No build-time I/O at all; `embed_file` stays unimplemented. Assets embed via a separate codegen step or are read at runtime.
-
-  ```jet
-  comptime shader :: read_file("shaders/main.wgsl")  // error: I/O not allowed in comptime; use a build step or core.fs at runtime
-  ```
-  Safest and simplest (I8 favors it), but forfeits an ergonomic win the spec already blessed and forces a separate build step for every embedded asset.
-
-- **Option B — ratify `embed_file` / `embed_bytes` (recommended).** Ship the read-only builtins S26/D-PURE2 already name: `embed_file(path) -> String`, `embed_bytes(path) -> [U8]`. Path must be a string literal, resolved relative to the source file, no `..`-escape past the project root. Not new I/O capability — it implements the blessed exception.
-
-  ```jet
-  comptime shader_src :: embed_file("shaders/main.wgsl")   // String, baked into the binary
-  comptime cert_der   :: embed_bytes("certs/root.der")     // [U8]
-
-  comptime bad :: embed_file(build_path())          // error: path must be a string literal
-  comptime esc :: embed_file("../../etc/passwd")    // error: path escapes the project root
-  ```
-
-- **Option C — broad gated build-time I/O.** Allow arbitrary comptime functions to do I/O when explicitly gated with a visible audit marker (mirroring the S58 `#Audit`/`#Unsafe` model).
-
-  ```jet
-  #Audit("reads the local package list at build time — no network, no secrets")
-  comptime pkgs :: #run(io) {
-      core.fs.read("local-packages.txt").lines().filter((l) => l.len() > 0)
-  }
-  ```
-  Sandboxed subprocess, an auditable `.jet/build-io.lock` of accessed paths, cache-invalidation on change. Powerful, but a new marker + lockfile + sandbox — heavy against the ratchet, and the Nim/Jai evidence shows un-auditable spread once shipped.
-
-**Recommendation:** **B** — it's the answer Zig and Rust already prove safe at scale, it's what S26/D-PURE2/S60 already committed to (so this is an implementation/surface ratification, not a policy change), and it closes the door on C's supply-chain class. Owner sign-off questions: (1) `embed_bytes` in scope or embed-as-`String` only? (2) does the path restriction get its own diagnostic code? (3) does `embed_file` ride S60 Layer 2's milestone or get its own slot?
-
----
-
 ## B6 `defer` — already decided, no ballot
 
 `defer` is solved; nothing to vote on. **D-DEFER1 (ratified + implemented 2026-06-20)** shipped `core.scope.guard(() => {…})` — a stdlib value whose `Drop` runs the stored lambda LIFO on every exit path including `?`. `defer`-as-primary stays rejected (S63); the `defer` keyword stays declined (D-SUGAR5).
@@ -3167,5 +2621,119 @@ to exclude a line from the report), that is a syntax decision requiring a ballot
 Until then, coverage is tooling-only and can land without owner ratification. The
 implementation milestone (exit criterion: `jet test --coverage` reports per-line /
 per-function coverage) can proceed independently of D-TEST1 and D-TEST4.
+
+---
+
+## Constant-binding spelling: `::` → `$=` — board card c102
+
+> Owner-requested 2026-06-22. **Reopens D-BIND1 / S2** (ratified 2026-06-18, which
+> deliberately "spent the `::` token" on immutable bindings). The owner wants the
+> binding family to be *consistent* — every binding/assignment operator should
+> contain `=` — while keeping the immutable form **visually distinct from the
+> mutable `:=`** so the two never blur at a glance or when zoomed out. This card
+> only re-decides the *immutable* spelling; `:=` (mutable) and `=` (reassignment,
+> S17) are unchanged.
+
+### D-BIND2 — Spelling of the immutable binding (rec A — `$=`)
+
+**User story.** Sam skims a 60-line function at editor-zoom-out (minimap) looking
+for which values are fixed and which can change. Today immutable is `name :: expr`
+and mutable is `name := expr` — two colon-led sigils that, shrunk down or read
+fast, differ only by the second glyph (`:` vs `=`) and are easy to misread. Worse,
+`::` is the one member of the binding family with no `=` in it, so it reads as a
+different *kind* of operator than `:=` and `=`. Sam wants the immutable form to (a)
+carry an `=` like the rest of the family and (b) have a distinct leading shape so a
+fixed binding is unmistakable from a changeable one at a glance.
+
+**The family today vs. the consistency goal.**
+
+| Role | Today | Contains `=`? | Leading glyph |
+|------|-------|---------------|---------------|
+| immutable binding | `name :: expr` | ✗ | `:` (same as mutable) |
+| mutable binding | `name := expr` | ✓ | `:` |
+| reassignment (S17) | `name = expr` | ✓ | `=` |
+
+The immutable form is the outlier on both axes the owner named: no `=`, and a
+leading glyph identical to the mutable form. (`=` alone can't be the immutable
+binding — it already means *reassign an existing `:=` binding*, S17.)
+
+| Option | Immutable spelling | Has `=` | Distinct from `:=` at a glance | Width vs `:=` | Sigil collision | Ratification cost |
+|--------|--------------------|---------|-------------------------------|---------------|-----------------|-------------------|
+| **A `$=` (rec)** | `name $= expr` | ✓ | **high** — different leading glyph (`$` vs `:`) | same (2 ch) | `$` is unused in Jet (verified) | reopen S2; mechanical token swap |
+| B `=:` (mirror) | `name =: expr` | ✓ | **low** — mirror of `:=`, blurs when fast/zoomed | same | none | reopen S2 |
+| C `::=` (BNF) | `name ::= expr` | ✓ | medium — shares colon family; `::=` vs `:=` differ by colon count | wider (3 ch) | none | reopen S2 |
+| D `::` (status quo) | `name :: expr` | ✗ | high (already) | same | n/a | none |
+
+- **Option A — `$=` (recommended).** Immutable becomes `name $= expr`; mutable
+  stays `name := expr`. `$` is a completely unused glyph in Jet's grammar (no
+  string-interpolation use — S8 uses `{…}` — no sigil, no operator; verified
+  against `Source/`), so adopting it introduces no collision. The leading glyph
+  differs entirely from `:=`, so the two are unmistakable shrunk down; and `$=`
+  carries the `=` that unifies the family.
+
+```jet
+// the family now reads consistently — every binder/assigner has `=`,
+// and the two binders are unmistakable at a glance:
+ratio: Float $= 3.14          // immutable: leading $, fixed
+count: Int   := 0             // mutable:   leading :, changeable
+count = count + 1             // reassign:  bare =, S17 (mutable only)
+
+name  $= "Ada"                // immutable
+limit := 10                   // mutable
+
+// zoomed-out / minimap distinctness — $ vs : is obvious where :: vs := blurs:
+//   $= …   $= …   := …   $= …   := …
+```
+
+```jet
+// item-level and distinct-type forms move with it (D-DIST1):
+UserId $= distinct Int        // was `UserId :: distinct Int`
+PI     $= 3.14159
+```
+
+- **Option B — `=:` (mirror of `:=`).** Symmetric and minimal, but it is the exact
+  visual inverse of the mutable sigil — precisely the confusion the owner asked to
+  avoid. At small sizes `=:` and `:=` are near-indistinguishable.
+
+```jet
+ratio: Float =: 3.14          // immutable
+count: Int   := 0             // mutable — one glyph swap away; blurs when zoomed out
+```
+
+- **Option C — `::=` (BNF "is defined as").** Semantically apt (a constant
+  *definition*) and keeps the `::`-immutability association while adding `=`. But
+  it stays in the colon family, so `::=` vs `:=` differ only by colon count — still
+  blurrable at a glance — and it is three characters, breaking the even width with
+  `:=`.
+
+```jet
+ratio: Float ::= 3.14         // immutable — reads "is defined as"
+count: Int    := 0            // mutable — colon-family neighbor; count the colons to tell them apart
+```
+
+- **Option D — status quo `::`.** No change. Keeps the just-ratified D-BIND1, but
+  leaves the immutable form as the family outlier with no `=` — the thing the owner
+  wants fixed. Listed as the honest baseline.
+
+```jet
+ratio: Float :: 3.14          // immutable — no `=`, leading `:` shared with `:=`
+count: Int   := 0             // mutable
+```
+
+**How others do it.** Odin/Go use `::` / `:=` (the colon family Jet shipped — the
+exact pair the owner finds blurry). Pascal/Ada/Go use `:=` for assignment with no
+distinct constant sigil. No mainstream language uses `$=` for binding, so it
+carries no conflicting muscle-memory — a clean glyph for a clean meaning. (`$` is
+"variable" in shell/PHP, but never an *assignment* operator, so no false analogy.)
+
+**Recommendation:** **A (`$=`)**. It is the only candidate that satisfies both
+owner constraints at once — contains `=` (family consistency) *and* leads with a
+distinct glyph that never blurs against `:=` (B and C both stay one-glyph or
+colon-count away). `$` is verified-free in the grammar, so the change is a
+contained, mechanical token swap (lexer two-char scan `$` `=`, `SIGIL_BIND_IMMUT`
+in `Source/Syntax.rs`, the `E0985` val/var teaching error target, and a
+repo-wide `::`-binding → `$=` migration across examples/tests/docs/`jet fmt`
+emitter). Reopens S2/D-BIND1 explicitly; frees the `::` token again (S83 already
+moved external-defs to `~~`, so nothing reclaims it — it simply becomes available).
 
 ---
