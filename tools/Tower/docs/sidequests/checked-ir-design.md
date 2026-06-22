@@ -136,13 +136,31 @@ everything, the AST codegen path is deleted (final phase).
   (`mangle_name`, `rust_type`, the `jet_add`/… helper names, interpolation) but takes all
   *decisions* from TIR fields.
 
+## Refinements learned in Phase 2 (control-flow loops)
+
+- **Loop labels carry only the name, not the span.** The AST stores `Option<(String, Span)>`
+  and emits via `loop_label_prefix`; the TIR resolves this to `Option<String>` at lowering and
+  the emitter has its own `tir_label_prefix` so it never reaches back into the AST-side helper.
+  Same `'jet_<name>:` rendering — parity holds.
+- **`break`/`continue` need no expression checking.** The parser only admits them inside a loop
+  body, so they are always valid where they appear; the gate accepts them unconditionally and
+  the label name reproduces verbatim. No loop-nesting validation in codegen (sema's job).
+- **Jet loop surface maps to three different AST nodes:** infinite `loop {}` → `Stmt::Loop`;
+  `loop cond {}` → `Stmt::While`; `loop i in a..b [step k]` → `Stmt::For{ForKind::Range}`.
+  The range form's inclusive `..` (S22/D-SG8) → Rust `..=`, and `step` → `.step_by((k) as usize)`,
+  reproduced byte-for-byte from `Statement.rs`. The two-binding `key, value` map form and
+  `ForKind::In` collection loops are explicitly excluded (Phase 5 — they need collections).
+- **Loop bodies are scopes.** Both the gate and lowering recurse into loop bodies on a *cloned*
+  locals/env so a `let` inside a loop (or the range loop's `i` var, bound as `Int`) does not leak
+  past it. This mirrors the existing `if`-branch scoping exactly.
+
 ## Phases
 
 | # | Scope | Status |
 |---|-------|--------|
 | 0 | Inventory + TIR type-model design | ✅ done (4b89af5) |
 | 1 | Simple functions: literals, operators, bindings, returns, if/else, calls, print | ✅ done (398138b) — 54 fns routed |
-| 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels), `when`-less | pending |
+| 2 | Control flow: `loop`{infinite/while/range}, break/continue (+labels) | ✅ done (c109 Phase 2) — +3 example fns routed (e.g. fizzbuzz `main`). Excludes `loop x in <collection>` (ForKind::In, key/value map form) → Phase 5. |
 | 3 | Structs: struct literals, field access/assign, struct-typed params/locals/returns | pending |
 | 4 | Enums + `when`/match + patterns (incl. range/or patterns) | pending |
 | 5 | Collections: list/map literals, indexing/slicing, `loop x in collection` | pending |

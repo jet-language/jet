@@ -34,9 +34,10 @@
 
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, ElseBranch, Expr, Func, IfStmt, LValue, Param, Stmt, StrPart, Type,
-    UnOp,
+    AccessConvention, BinOp, ElseBranch, Expr, ForKind, Func, IfStmt, LValue, Param, Stmt, StrPart,
+    Type, UnOp,
 };
+use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
@@ -91,6 +92,34 @@ pub(crate) enum TStmt {
         then_body: Vec<TStmt>,
         else_body: Option<Vec<TStmt>>,
     },
+    /// `loop { … }` — an infinite loop (`Stmt::Loop`). `label` is the optional
+    /// `@name` rendered as `'jet_<name>:` (resolved at lowering, never re-derived).
+    Loop {
+        label: Option<String>,
+        body: Vec<TStmt>,
+    },
+    /// `loop cond { … }` — the while form (`Stmt::While`). Lowers to Rust `while`.
+    While {
+        label: Option<String>,
+        cond: TExpr,
+        body: Vec<TStmt>,
+    },
+    /// `loop i in start..end [step k]` — a numeric range loop (`ForKind::Range`).
+    /// Jet's `..` is inclusive (S22 / D-SG8), so this lowers to `start..=end`,
+    /// optionally `.step_by((k) as usize)`. The loop variable `var` is an `Int`
+    /// local bound inside the body; its type is resolved here, not in emit.
+    Range {
+        label: Option<String>,
+        var: String,
+        start: TExpr,
+        end: TExpr,
+        step: Option<TExpr>,
+        body: Vec<TStmt>,
+    },
+    /// `break` / `break @name` (label resolved at lowering).
+    Break(Option<String>),
+    /// `continue` / `continue @name`.
+    Continue(Option<String>),
 }
 
 /// A lowered expression: a resolved `Type` plus its kind. `ty` is **total** — it
@@ -232,7 +261,46 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         Stmt::Return(None, _) => true,
         Stmt::Expr(e) => expr_in_subset(e, cx, locals),
         Stmt::If(ifs) => if_in_subset(ifs, cx, locals),
-        // Loops, switch, unsafe, region, caps, comptime-if, context — all out.
+        // c109 Phase 2: control-flow loops. Each loop body is its own scope; check
+        // it on a clone so a `let` inside the loop doesn't leak past it.
+        Stmt::Loop { body, .. } => {
+            let mut body_locals = locals.clone();
+            body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
+        }
+        Stmt::While { cond, body, .. } => {
+            if !expr_in_subset(cond, cx, locals) {
+                return false;
+            }
+            let mut body_locals = locals.clone();
+            body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
+        }
+        Stmt::For { var, var2, kind, body, .. } => match kind {
+            // `loop i in start..end [step k]` — start/end/step must be in-subset
+            // integer expressions; the loop var `i` is an Int local in the body.
+            // The two-binding `key, value` form is map iteration (a collection),
+            // outside this phase.
+            ForKind::Range { start, end, step } if var2.is_none() => {
+                if !expr_in_subset(start, cx, locals) || !expr_in_subset(end, cx, locals) {
+                    return false;
+                }
+                if let Some(st) = step {
+                    if !expr_in_subset(st, cx, locals) {
+                        return false;
+                    }
+                }
+                let mut body_locals = locals.clone();
+                body_locals.insert(var.clone());
+                body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
+            }
+            // `loop x in <collection>` (ForKind::In) and the `key, value` map form
+            // need collections — Phase 5. Stay on the AST path.
+            _ => false,
+        },
+        // `break`/`continue`, labeled or not, carry no sub-expressions to check.
+        // The parser only admits them inside a loop body, so they are always valid
+        // where they appear; the label name is reproduced verbatim at lowering.
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => true,
+        // switch, unsafe, region, caps, comptime-if, context — all still out.
         _ => false,
     }
 }
@@ -435,8 +503,58 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Return(None, _) => TStmt::Return(None),
         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
         Stmt::If(ifs) => lower_if(ifs, cx, env),
+        // c109 Phase 2: control-flow loops. Loop bodies are their own scope —
+        // lower on a cloned env so bindings inside don't leak out.
+        Stmt::Loop { body, label, .. } => {
+            let mut branch = clone_env(env);
+            TStmt::Loop {
+                label: label_name(label),
+                body: lower_stmts(body, cx, &mut branch),
+            }
+        }
+        Stmt::While { cond, body, label, .. } => {
+            let cond = lower_expr(cond, cx, env);
+            let mut branch = clone_env(env);
+            TStmt::While {
+                label: label_name(label),
+                cond,
+                body: lower_stmts(body, cx, &mut branch),
+            }
+        }
+        Stmt::For { var, kind, body, label, .. } => match kind {
+            ForKind::Range { start, end, step } => {
+                let start = lower_expr(start, cx, env);
+                let end = lower_expr(end, cx, env);
+                let step = step.as_ref().map(|s| lower_expr(s, cx, env));
+                // The loop var is an `Int` local for the body's scope only.
+                let mut branch = clone_env(env);
+                branch
+                    .locals
+                    .insert(var.clone(), (mangle(var), Type::Int));
+                TStmt::Range {
+                    label: label_name(label),
+                    var: var.clone(),
+                    start,
+                    end,
+                    step,
+                    body: lower_stmts(body, cx, &mut branch),
+                }
+            }
+            // ForKind::In is excluded by the gate; defensive.
+            ForKind::In { .. } => unreachable!("collection loop not in TIR subset"),
+        },
+        Stmt::Break(_) => TStmt::Break(None),
+        Stmt::Continue(_) => TStmt::Continue(None),
+        Stmt::BreakLabel(name, _) => TStmt::Break(Some(name.clone())),
+        Stmt::ContinueLabel(name, _) => TStmt::Continue(Some(name.clone())),
         _ => unreachable!("statement not in TIR subset"),
     }
+}
+
+/// Pull the bare label name out of an `@name` loop label, dropping the span. The
+/// emitter renders it as `'jet_<name>:` (mirroring `loop_label_prefix`).
+fn label_name(label: &Option<(String, Span)>) -> Option<String> {
+    label.as_ref().map(|(n, _)| n.clone())
 }
 
 fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
@@ -756,6 +874,80 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
                 }
             }
         }
+        // c109 Phase 2: control-flow loops. Each mirrors the AST emit path
+        // (Statement.rs) byte-for-byte; all decisions are read off the TIR.
+        TStmt::Loop { label, body } => {
+            out.push_str(&format!("{}{}loop {{\n", pad, tir_label_prefix(label)));
+            emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        TStmt::While { label, cond, body } => {
+            out.push_str(&format!(
+                "{}{}while {} {{\n",
+                pad,
+                tir_label_prefix(label),
+                emit_tir_expr(cond, cx)
+            ));
+            emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        TStmt::Range {
+            label,
+            var,
+            start,
+            end,
+            step,
+            body,
+        } => {
+            let lbl = tir_label_prefix(label);
+            let s = emit_tir_expr(start, cx);
+            let e = emit_tir_expr(end, cx);
+            // S22 (D-SG8): `..` is inclusive → `..=`; `step` becomes `.step_by`.
+            match step {
+                Some(step) => {
+                    let st = emit_tir_expr(step, cx);
+                    out.push_str(&format!(
+                        "{}{}for {} in (({})..=({})).step_by(({}) as usize) {{\n",
+                        pad,
+                        lbl,
+                        mangle(var),
+                        s,
+                        e,
+                        st
+                    ));
+                }
+                None => {
+                    out.push_str(&format!(
+                        "{}{}for {} in ({})..=({}) {{\n",
+                        pad,
+                        lbl,
+                        mangle(var),
+                        s,
+                        e
+                    ));
+                }
+            }
+            emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        TStmt::Break(label) => match label {
+            Some(name) => out.push_str(&format!("{}break 'jet_{};\n", pad, name)),
+            None => out.push_str(&format!("{}break;\n", pad)),
+        },
+        TStmt::Continue(label) => match label {
+            Some(name) => out.push_str(&format!("{}continue 'jet_{};\n", pad, name)),
+            None => out.push_str(&format!("{}continue;\n", pad)),
+        },
+    }
+}
+
+/// Mirror `loop_label_prefix` (Codegen/Utils.rs) for a resolved label name:
+/// `'jet_<name>: ` or empty. Kept here so the TIR emitter never reaches back
+/// into the AST-side helper with an `Option<(String, Span)>`.
+fn tir_label_prefix(label: &Option<String>) -> String {
+    match label {
+        Some(n) => format!("'jet_{}: ", n),
+        None => String::new(),
     }
 }
 
@@ -925,9 +1117,42 @@ mod tests {
         assert!(!covers(src, "caller"));
     }
 
+    // c109 Phase 2: control-flow loops are now covered.
+
     #[test]
-    fn rejects_loop_in_body() {
+    fn covers_range_loop() {
         let src = "fn f() {\n loop n in 1..3 {\n print(n)\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_range_loop_with_step() {
+        let src = "fn f() {\n loop n in 0..10 step 2 {\n print(n)\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_infinite_loop_with_break() {
+        let src = "fn f() {\n x @= 0\n loop {\n x = (x + 1)\n if (x > 3) {\n break\n }\n }\n print(x)\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_while_form() {
+        let src = "fn f() {\n x @= 0\n loop (x < 3) {\n x = (x + 1)\n }\n print(x)\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_labeled_loops() {
+        let src = "fn f() {\n @outer loop {\n loop n in 1..3 {\n if (n == 2) {\n break @outer\n }\n }\n break\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn rejects_collection_loop() {
+        // `loop x in <list>` (ForKind::In) needs collections — Phase 5, not covered.
+        let src = "fn f(xs: [Int]) {\n loop x in xs {\n print(x)\n }\n}\n";
         assert!(!covers(src, "f"));
     }
 }

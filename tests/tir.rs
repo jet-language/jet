@@ -170,3 +170,90 @@ fn main() {
     let (code, _stdout) = build_and_run("tir_overflow", src);
     assert_eq!(code, 70, "U8 overflow should trap (exit 70)");
 }
+
+// --- c109 Phase 2: control-flow loops ---------------------------------------
+
+/// Infinite `loop { … }` with a `break`, plus the `loop cond` while form. Both
+/// loop kinds, plus a compound assign and an if inside, route through the TIR.
+#[test]
+fn infinite_and_while_loops() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    x := 0
+    loop {
+        x = (x + 1)
+        if (x == 3) {
+            break
+        }
+    }
+    print(x)
+    fuel := 3
+    loop fuel > 0 {
+        print(\"t-minus {fuel}\")
+        fuel-= 1
+    }
+    print(\"liftoff\")
+}
+";
+    let (code, stdout) = build_and_run("tir_loops", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3\nt-minus 3\nt-minus 2\nt-minus 1\nliftoff\n");
+}
+
+/// Numeric range loops: inclusive `1..5` and a strided `0..10 step 2`. The
+/// inclusive semantics (`..=`) and the `.step_by` lowering are read off the TIR.
+#[test]
+fn range_loops_inclusive_and_step() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    total := 0
+    loop n in 1..5 {
+        total = (total + n)
+    }
+    print(total)
+    loop k in 0..10 step 2 {
+        print(k)
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_ranges", src);
+    assert_eq!(code, 0);
+    // 1+2+3+4+5 = 15, then 0,2,4,6,8,10 (inclusive end).
+    assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
+}
+
+/// Labeled loops: a `continue @outer` and a `break @outer` driving a nested
+/// range loop. The `'jet_<name>:` labels are resolved at lowering.
+#[test]
+fn labeled_break_and_continue() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    @outer loop i in 1..3 {
+        loop j in 1..3 {
+            if (j == 2) {
+                continue @outer
+            }
+            print(\"{i}-{j}\")
+            if (i == 2) {
+                break @outer
+            }
+        }
+    }
+    print(\"done\")
+}
+";
+    let (code, stdout) = build_and_run("tir_labeled", src);
+    assert_eq!(code, 0);
+    // i=1: j=1 prints 1-1, i!=2 so j=2 -> continue @outer.
+    // i=2: j=1 prints 2-1, i==2 -> break @outer.
+    assert_eq!(stdout, "1-1\n2-1\ndone\n");
+}
