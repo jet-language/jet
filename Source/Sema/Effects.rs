@@ -108,6 +108,31 @@ impl<'a> super::Checker<'a> {
             r.maximal = true;
         }
     }
+
+    /// D-EFF2 (transparent flow-through): a function value passed as an argument
+    /// to a function-typed parameter contributes its effects to *this* function
+    /// (the caller), so a callback's effects surface at the call site, not buried
+    /// inside the higher-order callee.
+    ///
+    /// - A **lambda** argument is already walked inline into this function's set,
+    ///   so it needs nothing here.
+    /// - A **directly-named top-level function** flows through precisely (edge).
+    /// - Any **other** function value — a local binding, a parameter passed
+    ///   onward, a returned/stored callback — has an origin that isn't statically
+    ///   known here, so it defaults to the maximal effect set (D-EFF2, sound).
+    ///   The expert levers `#(E) fn(…)` param types and `#(via f)` tighten this.
+    pub(crate) fn attribute_fn_arg(&mut self, arg: &crate::AST::Expr) {
+        use crate::AST::Expr;
+        match arg {
+            Expr::Lambda(_) => {}
+            Expr::Ident(name, _)
+                if self.lookup(name).is_none() && self.funcs.contains_key(name) =>
+            {
+                self.record_edge(name.clone());
+            }
+            _ => self.record_maximal(),
+        }
+    }
 }
 
 /// Render a set as `Net, Fs` (canonical order) for diagnostics.

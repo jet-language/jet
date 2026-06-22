@@ -976,6 +976,35 @@ A call inside the region that transitively touches `Net` would be E0741 even
 though no `Net` call appears literally in the block. Like every effect
 construct, `#Caps` is a plain lexical block in codegen — it erases.
 
+### Higher-order effects — transparent flow-through (D-EFF2)
+
+A higher-order function's effect set is **its own body plus, at each call, the
+effects of the function values passed to it** — so a callback's effects surface
+at the *call site*, not buried inside the higher-order callee. This is the
+zero-syntax default:
+
+```jet
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
+
+fn run() #(Io) {
+    apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {Io}
+}
+```
+
+- A **lambda** argument's body is walked inline, so its effects already belong
+  to the enclosing function.
+- A **directly-named function** argument flows its effects through precisely.
+- Any **other** function value (a local binding, a parameter passed onward, a
+  returned or stored callback) has an origin that isn't statically known at the
+  call, so it defaults to the **maximal** effect set — sound, conservative.
+
+Two expert levers refine this (ratified D-EFF2, additive to the default above):
+`#Pure fn(…)` / `#(Net) fn(…)` **parameter types** demand/bound a callback
+(passing one with effects outside the bound is **E0744**), and `#(via f)` on a
+signature publishes a tight pass-through that holds even when the value escapes.
+The conservative default is correct without them; they trade syntax for
+precision.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

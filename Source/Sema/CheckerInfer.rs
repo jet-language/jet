@@ -3295,6 +3295,11 @@ impl<'a> Checker<'a> {
             let Some((param_conv, param_ty)) = effective_params.get(i) else {
                 continue;
             };
+            // D-EFF2: a function value passed to a function-typed parameter flows
+            // its effects through to this caller (transparent flow-through).
+            if matches!(param_ty, Type::Fn { .. }) {
+                self.attribute_fn_arg(&arg.expr);
+            }
             if arg.convention == AccessConvention::Mutate && !matches!(arg.expr, Expr::Ident(_, _))
             {
                 self.diags.push(Diagnostic::error(

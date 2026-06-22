@@ -91,6 +91,49 @@ fn main() { print(calc()); }
     assert!(codes(src).contains(&"E0745"), "expected E0745, got {:?}", codes(src));
 }
 
+/// D-EFF2 (transparent flow-through): passing a named effectful function as a
+/// callback flows its effects to the caller, surfacing at the call site.
+#[test]
+fn named_callback_flows_through_to_caller() {
+    let src = r#"
+use core.fs as fs
+fn readit() -> String { return fs.read("x") ?? ""; }
+fn apply(f: fn() -> String) -> String { return f(); }
+fn caller() #(Net) -> String { return apply(readit); }
+fn main() { print(caller()); }
+"#;
+    assert!(codes(src).contains(&"E0740"), "callback Fs should flow to caller: {:?}", codes(src));
+}
+
+/// A lambda callback's effects flow into the enclosing function too (the lambda
+/// body is walked inline), so a `#Caps` region catches an effect inside it.
+#[test]
+fn lambda_callback_flows_into_region() {
+    let src = r#"
+use core.fs as fs
+fn apply(f: fn() -> String) -> String { return f(); }
+fn main() {
+    #Caps(Net) {
+        r @= apply(() => fs.read("x") ?? "");
+        print(r);
+    }
+}
+"#;
+    assert!(codes(src).contains(&"E0741"), "lambda Fs should surface in region: {:?}", codes(src));
+}
+
+/// A pure named callback flows nothing — a bounded caller stays clean.
+#[test]
+fn pure_callback_flows_nothing() {
+    let src = r#"
+fn inc(n: Int) -> Int { return n + 1; }
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
+fn caller() #(Io) { print("{apply(inc, 1)}"); }
+fn main() { caller(); }
+"#;
+    assert!(codes(src).is_empty(), "pure callback must not trip a bound: {:?}", codes(src));
+}
+
 /// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
 /// call (here `Fs`) inside a `#Pure fn` is a purity violation (E3401) — even
 /// though the legacy purity list only knew about stdin/time/random.
