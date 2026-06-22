@@ -28,6 +28,7 @@ mod Expression;
 mod Imports;
 mod Items;
 mod Statement;
+mod TIR;
 mod Tuples;
 mod Utils;
 

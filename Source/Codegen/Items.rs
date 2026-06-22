@@ -539,6 +539,15 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
 }
 
 pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
+    // c109 Phase 1: route fully-covered simple functions through the typed IR
+    // (TIR). The TIR path produces byte-identical Rust (golden parity) but makes
+    // no semantic decision in codegen — every fact is resolved at lowering (I3).
+    // Anything outside the subset stays on the AST path below, undisturbed.
+    if TIR::tir_covers(f, cx) {
+        let tir = TIR::lower_func(f, cx);
+        TIR::emit_tir_func(&tir, cx, out);
+        return;
+    }
     let extra = if f.type_params.is_empty() {
         HashMap::new()
     } else {
