@@ -984,6 +984,11 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RParen, "to close the parameter list")?;
 
+        // D-EFF1 / D-QUAL1: an optional `#(Net, Db)` effect bound, between the
+        // parameter list and the return arrow. Effect names are validated in
+        // sema, not here.
+        let declared_effects = self.parse_opt_effect_annotation()?;
+
         let mut return_type = None;
         let mut is_view_return = false;
         if matches!(self.peek().kind, TokKind::Arrow) {
@@ -1016,6 +1021,7 @@ impl<'a> Parser<'a> {
                 is_view_return,
                 is_unsafe,
                 is_pure,
+                declared_effects,
                 body,
             });
         }
@@ -1031,8 +1037,37 @@ impl<'a> Parser<'a> {
             is_view_return,
             is_unsafe,
             is_pure,
+            declared_effects,
             body,
         })
+    }
+
+    /// D-EFF1 / D-QUAL1: parse an optional `#(Net, Db)` effect bound. Returns
+    /// `None` when the cursor is not at `#(`. Effect names are bare idents here;
+    /// sema validates them against the known effect vocabulary.
+    fn parse_opt_effect_annotation(
+        &mut self,
+    ) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
+        if !(matches!(self.peek().kind, TokKind::Hash)
+            && matches!(self.peek2().kind, TokKind::LParen))
+        {
+            return Ok(None);
+        }
+        self.bump(); // `#`
+        self.expect(TokKind::LParen, "after `#` to start an effect list")?;
+        let mut effects = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, span) = self.expect_ident("for an effect name")?;
+                effects.push((name, span));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
+                self.expect(TokKind::Comma, "between effects in the list")?;
+            }
+        }
+        self.expect(TokKind::RParen, "to close the effect list")?;
+        Ok(Some(effects))
     }
 
     fn param(&mut self) -> Result<Param, Diagnostic> {

@@ -212,6 +212,18 @@ impl<'a> Fmt<'a> {
             self.fmt_param(p);
         }
         self.write(")");
+        // D-EFF1 / D-QUAL1: the `#(Net, Db)` effect bound, between the parameter
+        // list and the return arrow. A `#Pure fn` carries no `#(…)` list.
+        if let Some(effects) = &f.declared_effects {
+            self.write(" #(");
+            for (i, (name, _)) in effects.iter().enumerate() {
+                if i > 0 {
+                    self.write(", ");
+                }
+                self.write(name);
+            }
+            self.write(")");
+        }
         if let Some(ret) = &f.return_type {
             self.write(" -> ");
             if f.is_view_return {

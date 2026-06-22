@@ -2779,6 +2779,14 @@ impl<'a> Checker<'a> {
         {
             return Some(self.check_overflow_opt_in(call));
         }
+        // D-EFF1: an ambient builtin (`print`/`input`) contributes the `Io`
+        // effect, unless a user function of the same name shadows it (in which
+        // case the edge to that user function is recorded below).
+        if !self.funcs.contains_key(&call.name) {
+            if let Some(e) = builtin_effect(&call.name) {
+                self.fx_direct.insert(e);
+            }
+        }
         if call.name == Syntax::FOREIGN_PRINTLN || call.name == Syntax::FOREIGN_EPRINTLN {
             let target = if call.name == Syntax::FOREIGN_EPRINTLN {
                 "io.eprint"
@@ -3069,6 +3077,15 @@ impl<'a> Checker<'a> {
             }
             return None;
         };
+
+        // D-EFF1: record the call-graph edge for transitive effect inference.
+        // A foreign (`extern`) callee has an un-inspectable body, so it forces
+        // the maximal effect set; a Jet callee's effects flow in via its edge.
+        if sig.is_extern {
+            self.fx_maximal = true;
+        } else {
+            self.fx_edges.insert(call.name.clone());
+        }
 
         // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
         // must take responsibility inside their own `#Unsafe` block.

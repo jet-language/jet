@@ -209,6 +209,8 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E0740 | sema  | a function's inferred effects exceed its declared `#(…)` bound (D-EFF1) |
+| E0745 | sema  | a `#Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
 | E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
@@ -574,6 +576,20 @@ already-freed arena), these track the views themselves.
 |------|------|-----|-----|
 | E0631 | `{view}` can't {escape} — it's a view into `{arena}`. | A view borrows storage owned by the arena; if it left the region it would outlive the arena and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `.clone()` before it leaves. |
 | E0632 | `{arena}` was {reset/freed} here, so the value `{view}` points into is gone. | `reset`/`free` invalidate every value allocated in the arena; reading the view afterward would read freed memory. | Use the view before `reset`/`free`, or re-`alloc` after to get a fresh value. |
+
+## Effect system diagnostics (D-EFF1, D-QUAL1)
+
+Every function carries an inferred effect set (the ambient powers its body
+reaches — `Net`, `Fs`, `Io`, `Db`, `Time`, …). A `#(…)` list on the signature
+declares an upper bound; `#Pure` declares the empty set. The inferred set must
+be a subset of the declared one. Effects are erased in codegen (I3), so these
+are compile-time-only diagnostics. An unknown effect name in a `#(…)` list is
+reported as **E0119** (unknown name).
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `#(…)` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `#(…)` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
+| E0745 | `{fn}` is `#Pure` but also declares effects. | `#Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `#Pure` to allow the listed effects. |
 
 ## C FFI diagnostics (E2-M14, S59)
 

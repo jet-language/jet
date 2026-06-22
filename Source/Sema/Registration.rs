@@ -368,6 +368,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     let ct_base_dir = std::path::Path::new(".");
 
     // --- per-item body checks ---------------------------------------------
+    // D-EFF1: per-function effect summaries collected during body checks; the
+    // whole-program fixpoint + boundary checks run after the loop.
+    let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     for item in &mut prog.items {
         match item {
             Item::Func(f) => {
@@ -384,6 +387,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ct_base_dir,
                     &ct_globals,
                     false,
+                    &mut effect_summaries,
                 ));
             }
             Item::Impl(i) => {
@@ -401,6 +405,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         ct_base_dir,
                         &ct_globals,
                         false,
+                        &mut effect_summaries,
                     ));
                 }
             }
@@ -419,6 +424,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         ct_base_dir,
                         &ct_globals,
                         false,
+                        &mut effect_summaries,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -436,6 +442,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             ct_base_dir,
                             &ct_globals,
                             false,
+                            &mut effect_summaries,
                         ));
                     }
                 }
@@ -455,6 +462,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         ct_base_dir,
                         &ct_globals,
                         false,
+                        &mut effect_summaries,
                     ));
                 }
             }
@@ -469,6 +477,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
+                    declared_effects: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body(
@@ -484,6 +493,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ct_base_dir,
                     &ct_globals,
                     false,
+                    &mut effect_summaries,
                 ));
                 t.body = synthetic.body;
             }
@@ -513,7 +523,106 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         }
     }
 
+    // D-EFF1: whole-program effect fixpoint, then enforce every `#(…)` bound.
+    let solved = solve(&effect_summaries);
+    check_effect_boundaries(&prog.items, &solved, &mut diags);
+
     diags
+}
+
+/// D-EFF1: enforce declared `#(…)` effect bounds against inferred sets. For each
+/// function (and method) carrying a `#(…)` list, the inferred set must be a
+/// subset of the declared set — any extra effect is E0740. A `#Pure fn` with a
+/// non-empty `#(…)` list is the contradiction E0745 (the empty-set contract of
+/// `#Pure` is otherwise enforced by E3401). `#Pure` with no list needs no check
+/// here: its purity is the E3401 path.
+pub(crate) fn check_effect_boundaries(
+    items: &[Item],
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    fn check_one(
+        f: &Func,
+        owner: Option<&str>,
+        solved: &HashMap<String, EffectSet>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some(declared_list) = &f.declared_effects else {
+            return;
+        };
+        // E0745: `#Pure` already pins the empty set; a `#(…)` list contradicts it.
+        if f.is_pure && !declared_list.is_empty() {
+            diags.push(e0745(&f.name, f.name_span));
+            return;
+        }
+        // Validate names and build the declared set; an unknown name is E0119.
+        // A bad name leaves the declared set incomplete, so skip the subset
+        // check to avoid a misleading E0740 piled on top of the real problem.
+        let mut declared: EffectSet = EffectSet::new();
+        let mut bad_name = false;
+        for (name, span) in declared_list {
+            match Effect::parse(name) {
+                Some(e) => {
+                    declared.insert(e);
+                }
+                None => {
+                    diags.push(unknown_effect(name, *span));
+                    bad_name = true;
+                }
+            }
+        }
+        if bad_name {
+            return;
+        }
+        let inferred = solved
+            .get(&effect_key(owner, &f.name))
+            .cloned()
+            .unwrap_or_default();
+        let over: EffectSet = inferred.difference(&declared).copied().collect();
+        if !over.is_empty() {
+            // Point at the signature; name the offending effects.
+            let span = declared_list.first().map(|(_, s)| *s).unwrap_or(f.name_span);
+            diags.push(e0740(&f.name, &over, &declared, span));
+        }
+    }
+    for item in items {
+        match item {
+            Item::Func(f) => check_one(f, None, solved, diags),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    check_one(m, Some(&i.type_name), solved, diags);
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    check_one(m, Some(&s.name), solved, diags);
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        check_one(m, Some(&s.name), solved, diags);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    check_one(m, Some(&e.name), solved, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// E0119: a `#(…)` effect list names something that isn't a known effect.
+fn unknown_effect(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0119",
+        format!("`{}` isn't a known effect", name),
+        "an effect list names compiler-known effects like `Net`, `Fs`, `Io`, `Db`, or `Time`"
+            .to_string(),
+        "use one of the known effect names, or remove it from the list".to_string(),
+        Some(span),
+    )
 }
 
 pub(crate) fn name_defined(
@@ -1017,6 +1126,7 @@ pub(crate) fn check_func_body(
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
     freestanding: bool,
+    summaries: &mut HashMap<String, EffectSummary>,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_core_imports = HashMap::new();
@@ -1042,6 +1152,9 @@ pub(crate) fn check_func_body(
         moved: HashMap::new(),
         loop_depth: 0,
         loop_labels: Vec::new(),
+        fx_direct: std::collections::BTreeSet::new(),
+        fx_edges: std::collections::BTreeSet::new(),
+        fx_maximal: false,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
@@ -1080,7 +1193,27 @@ pub(crate) fn check_func_body(
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, funcs));
     }
+    // D-EFF1: record this function's effect summary for the whole-program
+    // inference fixpoint (keyed by `Type::method` for methods, bare name else).
+    summaries.insert(
+        effect_key(owner_type, &f.name),
+        EffectSummary {
+            direct: std::mem::take(&mut ck.fx_direct),
+            edges: std::mem::take(&mut ck.fx_edges),
+            maximal: ck.fx_maximal,
+        },
+    );
     ck.diags
+}
+
+/// D-EFF1: the key a function is recorded under in the effect-summary map.
+/// `Type::method` for methods (disambiguates same-named methods across types),
+/// the bare name for top-level functions (so bare-call edges resolve).
+pub(crate) fn effect_key(owner_type: Option<&str>, name: &str) -> String {
+    match owner_type {
+        Some(t) => format!("{t}::{name}"),
+        None => name.to_string(),
+    }
 }
 
 /// D-ERR-CONV: type-check an `impl Source -> Target { body }` conversion body.
@@ -1116,6 +1249,7 @@ pub(crate) fn check_error_conv_body(
         is_view_return: false,
         is_unsafe: false,
         is_pure: false,
+        declared_effects: None,
         body: std::mem::take(&mut ec.body),
     };
     let d = check_func_body(
@@ -1131,6 +1265,7 @@ pub(crate) fn check_error_conv_body(
         ct_base_dir,
         ct_globals,
         false,
+        &mut HashMap::new(),
     );
     ec.body = synthetic.body;
     d
@@ -1397,6 +1532,7 @@ pub(crate) fn synthesize_delegation_method(
         is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
+        declared_effects: None,
         body: vec![body_stmt],
     }
 }
@@ -1431,6 +1567,7 @@ pub(crate) fn synthesize_default_method(
         is_view_return: sig.is_view_return,
         is_unsafe: false,
         is_pure: false,
+        declared_effects: None,
         body: body.to_vec(),
     }
 }

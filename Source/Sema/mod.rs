@@ -13,7 +13,7 @@ use crate::AST::{
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::M9::M9Registry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct FuncSig {
@@ -433,6 +433,16 @@ pub(crate) struct Checker<'a> {
     loop_depth: usize,
     /// D-LABEL1: stack of `@name` loop labels in scope, innermost last.
     loop_labels: Vec<String>,
+    /// D-EFF1: effects this function body reaches directly (Core calls, impure
+    /// builtins). Accumulated during the walk; rolled into the per-function
+    /// `EffectSummary` after the body is checked.
+    fx_direct: EffectSet,
+    /// D-EFF1: user functions called in this body (call-graph edges for the
+    /// whole-program transitive fixpoint).
+    fx_edges: BTreeSet<String>,
+    /// D-EFF1: a foreign (`extern`) call was reached — the body's effects are
+    /// the maximal set (an un-inspectable body may do anything).
+    fx_maximal: bool,
     in_unsafe: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
@@ -518,6 +528,7 @@ mod CheckerItems;
 mod Diagnostics;
 mod Captures;
 mod Purity;
+mod Effects;
 mod SchemaMigration;
 
 pub(crate) use FFI::*;
@@ -527,6 +538,7 @@ pub(crate) use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Captures::*;
 pub(crate) use Purity::*;
+pub(crate) use Effects::*;
 pub(crate) use SchemaMigration::*;
 
 // Public entry points (preserve `jet::Sema::<item>` paths).

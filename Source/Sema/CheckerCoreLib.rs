@@ -304,6 +304,11 @@ impl<'a> Checker<'a> {
         span: Span,
         args: &mut [crate::AST::CallArg],
     ) -> Option<Type> {
+        // D-EFF1: record the effect this Core call contributes to the enclosing
+        // function's inferred set (erased in codegen; purely a sema fact).
+        if let Some(e) = core_effect(module, name) {
+            self.fx_direct.insert(e);
+        }
         // E2-M15 / E3301: reject OS-dependent APIs in freestanding builds.
         if self.freestanding && is_freestanding_forbidden(module) {
             let api = format!("{}.{}", module_short_name(module), name);

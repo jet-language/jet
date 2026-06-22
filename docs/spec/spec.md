@@ -889,6 +889,68 @@ val [a, b, c] = result;   // OK — 3 names for 3 elements
 - `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
   length information is erased at that point.
 
+## Effect system (D-EFF1, D-QUAL1, D-EFF2, D-EFF3)
+
+Every function carries an **effect set**: the categories of ambient power its
+body exercises — touching the network, the filesystem, the clock, and so on.
+The set is **inferred**, never declared by default, **propagated along calls**
+(a caller's set includes every callee's set), and **fully erased in codegen**
+(I3) — effects are a compile-time proof, with no runtime value, handler, or
+monad. A `#Pure fn` is exactly the function whose inferred set is empty.
+
+### The effect vocabulary
+
+Effects are a closed, compiler-known set of PascalCase tags (D-CASING1). Each
+primitive Core operation contributes one effect; an effect appears in a
+function's set when the function reaches an operation that carries it.
+
+| Effect  | Carried by |
+|---------|-----------|
+| `Io`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
+| `Fs`    | `core.fs.*`, `files.*` streaming handles |
+| `Net`   | `core.net.*`, `jet.http.*` |
+| `Time`  | `core.time.now`/`sleep`/`start`, `jet.time.now` |
+| `Rand`  | `core.random.*` |
+| `Env`   | `core.env.*` |
+| `Exec`  | `core.process.run`/`exit` |
+| `Db`    | `jet.db.*` |
+| `Log`   | `jet.log.*` |
+| `Gpu`   | (reserved; named in D-EFF3, no Core mapping yet) |
+
+A call to an `extern rust`/C foreign function, whose body the compiler can't
+inspect, contributes the **maximal** set (every effect) — it is assumed to do
+anything. This keeps inference sound without reading foreign code.
+
+### Declaring a boundary — `#(…)` on the signature
+
+A function may pin an **upper bound** on its effects by writing `#(E1, E2, …)`
+on its signature, between the parameter list and the return arrow:
+
+```ebnf
+fn_effects = "fn" ident "(" params ")" [ "#(" [ effect { "," effect } ] ")" ]
+             [ "->" type ] block ;
+```
+
+```jet
+fn load(path: String) #(Fs) -> String {
+    return core.fs.read(path)?;        // OK: Fs ⊆ {Fs}
+}
+```
+
+The compiler infers the body's real effect set and checks it is a **subset** of
+the declared bound. An effect the body uses that the bound omits is **E0740**,
+naming the effect, the call that introduced it, and the declared set. `#(…)` is
+an assertion the author makes a contract — the inferred set may be *smaller*
+than the bound (the bound is a ceiling, not an exact set), but never larger.
+
+`#Pure fn` is the same contract with an empty bound: any effect at all is a
+purity violation (reported as **E3401**, the established purity diagnostic).
+Writing `#Pure fn f() #(Fs)` — a non-empty bound on a `#Pure` function — is a
+contradiction, **E0745**.
+
+Effects are erased: `#(Fs)`, `#Pure`, and an unannotated function with the same
+body all generate byte-identical Rust.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

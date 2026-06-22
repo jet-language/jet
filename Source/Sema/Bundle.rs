@@ -810,8 +810,22 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         CompileMode::Test | CompileMode::Run | CompileMode::Check | CompileMode::Eval => {}
     }
 
+    // D-EFF1: collect effect summaries across every module, then run the
+    // whole-program fixpoint and enforce each `#(…)` bound once.
+    let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
-        diags.extend(check_module_bodies(module, idx, &states, mode, freestanding));
+        diags.extend(check_module_bodies(
+            module,
+            idx,
+            &states,
+            mode,
+            freestanding,
+            &mut effect_summaries,
+        ));
+    }
+    let solved = solve(&effect_summaries);
+    for module in &bundle.modules {
+        check_effect_boundaries(&module.items, &solved, &mut diags);
     }
     bundle.used_core = collect_used_core(bundle, &states);
     diags
@@ -1166,6 +1180,7 @@ pub(crate) fn check_module_bodies(
     states: &[ModuleState],
     mode: CompileMode,
     freestanding: bool,
+    summaries: &mut HashMap<String, EffectSummary>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -1188,6 +1203,7 @@ pub(crate) fn check_module_bodies(
                     &ct_base_dir,
                     &ct_globals,
                     freestanding,
+                    summaries,
                 ));
             }
             Item::Struct(s) => {
@@ -1202,6 +1218,7 @@ pub(crate) fn check_module_bodies(
                         &ct_base_dir,
                         &ct_globals,
                         freestanding,
+                        summaries,
                     ));
                 }
             }
@@ -1217,6 +1234,7 @@ pub(crate) fn check_module_bodies(
                         &ct_base_dir,
                         &ct_globals,
                         freestanding,
+                        summaries,
                     ));
                 }
             }
@@ -1232,6 +1250,7 @@ pub(crate) fn check_module_bodies(
                         &ct_base_dir,
                         &ct_globals,
                         freestanding,
+                        summaries,
                     ));
                 }
             }
@@ -1246,6 +1265,7 @@ pub(crate) fn check_module_bodies(
                     is_view_return: false,
                     is_unsafe: false,
                     is_pure: false,
+                    declared_effects: None,
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1258,6 +1278,7 @@ pub(crate) fn check_module_bodies(
                     &ct_base_dir,
                     &ct_globals,
                     freestanding,
+                    summaries,
                 ));
                 t.body = synthetic.body;
             }
@@ -1278,6 +1299,7 @@ pub(crate) fn check_module_bodies(
                                 &ct_base_dir,
                                 &ct_globals,
                                 freestanding,
+                                summaries,
                             ));
                         }
                     }
@@ -1316,6 +1338,7 @@ pub(crate) fn check_func_body_bundle(
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
     freestanding: bool,
+    summaries: &mut HashMap<String, EffectSummary>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -1336,6 +1359,9 @@ pub(crate) fn check_func_body_bundle(
         moved: HashMap::new(),
         loop_depth: 0,
         loop_labels: Vec::new(),
+        fx_direct: std::collections::BTreeSet::new(),
+        fx_edges: std::collections::BTreeSet::new(),
+        fx_maximal: false,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).
@@ -1374,6 +1400,18 @@ pub(crate) fn check_func_body_bundle(
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
+    // D-EFF1: record this function's effect summary for the whole-program
+    // fixpoint (keyed by bare name / `Type::method`; cross-module effect
+    // propagation is a later slice — intra-module + Core/builtin direct effects
+    // are inferred here).
+    summaries.insert(
+        effect_key(owner_type, &f.name),
+        EffectSummary {
+            direct: std::mem::take(&mut ck.fx_direct),
+            edges: std::mem::take(&mut ck.fx_edges),
+            maximal: ck.fx_maximal,
+        },
+    );
     ck.diags
 }
 

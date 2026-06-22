@@ -714,6 +714,12 @@ pub struct Func {
     pub is_unsafe: bool,
     /// S60 (E2-M16): `pure fn` — impure calls inside the body are E3401.
     pub is_pure: bool,
+    /// D-EFF1 / D-QUAL1: a `#(Net, Db)` effect bound on the signature, between
+    /// the parameter list and the return arrow. `None` = unannotated (effects
+    /// inferred). `Some(list)` = a declared upper bound; the inferred set must be
+    /// a subset (E0740). Names are validated in sema, not the parser. Erased in
+    /// codegen (I3).
+    pub declared_effects: Option<Vec<(String, Span)>>,
     pub body: Vec<Stmt>,
 }
 
