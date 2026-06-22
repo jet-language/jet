@@ -10,7 +10,7 @@
 //! It lives here so the generators, the greeting, and the typo-finder can never
 //! drift apart.
 
-use crate::Syntax::{BINARY_NAME, FILE_EXT};
+use crate::Syntax::BINARY_NAME;
 
 /// One global flag that applies across commands.
 pub struct FlagSpec {

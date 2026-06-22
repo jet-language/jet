@@ -271,7 +271,6 @@ pub(crate) fn find_forward_refs(
     all_param_names: &[String],
     default_param_idx: usize,
 ) -> Vec<(String, crate::Diagnostics::Span)> {
-    use crate::AST::Expr;
     let mut found = Vec::new();
     find_forward_refs_inner(expr, all_param_names, default_param_idx, &mut found);
     found

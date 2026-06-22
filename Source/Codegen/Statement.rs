@@ -486,7 +486,6 @@ fn emit_pattern_match_switch(
             }
         })
     });
-    use crate::AST::PatSlot;
     let subject_ty = expr_jet_ty_with_cx(cx, subject, env);
     out.push_str(&format!("{}match {} {{\n", pad, subj));
     for arm in arms {

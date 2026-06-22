@@ -1121,7 +1121,6 @@ pub(crate) fn alloc_method_return(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Type>> {
-    use Syntax::{MEM_ARENA, MEM_BUMP, MEM_POOL, MEM_FIXED};
     if !matches!(type_name, "Arena" | "Bump" | "Pool" | "Fixed") {
         return None;
     }
