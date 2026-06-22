@@ -65,7 +65,12 @@ impl<'a> Checker<'a> {
             if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                 self.borrow_ctx = true;
             }
-            if let Some(aty) = self.infer(&mut arg.expr) {
+            // D-SG9: a fixed-width literal argument adopts the parameter's width.
+            let saved = self.expected_type.clone();
+            self.expected_type = Some(pty.clone());
+            let aty = self.infer(&mut arg.expr);
+            self.expected_type = saved;
+            if let Some(aty) = aty {
                 let arg_span = arg.expr.span();
                 self.check_type_assignable(pty, &aty, arg_span);
             }
@@ -120,7 +125,12 @@ impl<'a> Checker<'a> {
                 if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                     self.borrow_ctx = true;
                 }
-                if let Some(aty) = self.infer(&mut arg.expr) {
+                // D-SG9: a fixed-width literal argument adopts the parameter's width.
+                let saved = self.expected_type.clone();
+                self.expected_type = Some(pty.clone());
+                let aty = self.infer(&mut arg.expr);
+                self.expected_type = saved;
+                if let Some(aty) = aty {
                     let span = arg.expr.span();
                     let reported = self.check_type_assignable(pty, &aty, span);
                     if !reported && aty != *pty {
@@ -889,16 +899,14 @@ impl<'a> Checker<'a> {
         if matches!(param_ty, Type::String | Type::List(_) | Type::Map { .. }) {
             self.borrow_ctx = true;
         }
+        // D-SG9: expose the parameter's type to `infer` so a fixed-width integer
+        // literal argument (`f(5)` where `f` takes a `U8`) adopts that width and
+        // is range-checked (E1003) at the literal. Restored after the argument.
+        let saved_expected = self.expected_type.clone();
+        self.expected_type = Some(param_ty.clone());
         let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_expected;
         if let Some(got) = got {
-            if is_u8_ty(param_ty) && got == Type::Int {
-                if let Expr::Int(n, span) = arg.expr {
-                    if !(0..=255).contains(&n) {
-                        self.diags.push(u8_range_error(span));
-                    }
-                }
-                return;
-            }
             let reported = self.check_type_assignable(param_ty, &got, arg.expr.span());
             if !reported && got != *param_ty {
                 self.diags.push(Diagnostic::error(
@@ -954,11 +962,11 @@ pub(crate) fn unit_ty() -> Type {
 }
 
 pub(crate) fn u8_ty() -> Type {
-    Type::Named("U8".to_string())
+    Type::IntN { signed: false, bits: 8 }
 }
 
 pub(crate) fn is_u8_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == "U8")
+    matches!(ty, Type::IntN { signed: false, bits: 8 })
 }
 
 pub(crate) fn json_ty() -> Type {
@@ -1745,12 +1753,23 @@ pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) 
     )
 }
 
-pub(crate) fn u8_range_error(span: Span) -> Diagnostic {
+/// D-SG9/D-NUMOPS1 (E1003): an integer literal doesn't fit its fixed-width type.
+/// `U8` keeps its byte-framed wording; other widths get the general range message.
+pub(crate) fn int_range_error(signed: bool, bits: u8, span: Span) -> Diagnostic {
+    let (lo, hi) = crate::AST::int_range(signed, bits);
+    let spelling = crate::AST::int_spelling(signed, bits);
+    // "an I8" (the letter I reads as a vowel) vs "a U8".
+    let article = if signed { "an" } else { "a" };
+    let why = if !signed && bits == 8 {
+        "binary APIs use one byte per value".to_string()
+    } else {
+        format!("{article} {spelling} is a fixed-width number — values outside its range can't fit")
+    };
     Diagnostic::error(
         "E1003",
-        "a U8 holds 0..255".to_string(),
-        "binary APIs use one byte per value".to_string(),
-        "use a number from 0 through 255".to_string(),
+        format!("{article} {spelling} holds {lo}..{hi}"),
+        why,
+        format!("use a number from {lo} through {hi}"),
         Some(span),
     )
 }

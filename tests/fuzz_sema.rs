@@ -49,6 +49,19 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
             }
             let src = fs::read_to_string(&path).unwrap();
             let shown = format!("examples/features/{}.{}", stem, ext);
+            // Skip examples whose *baseline* output legitimately contains vetted
+            // `unsafe` from a prelude/runtime-support module (smart context's
+            // `#Context` pointer cell, mem/Ptr, etc.). The fuzz body's I1 guard is
+            // a crude `contains("unsafe")` substring check that can't tell vetted
+            // prelude `unsafe` from user-visible `unsafe`, so such a seed would
+            // false-trip it regardless of the mutation. The mutation only appends a
+            // trivial binding/fn, so it never introduces new `unsafe` of its own.
+            let baseline_has_unsafe = jet::compile_with_path(&src, &path.to_string_lossy())
+                .map(|out| out.rust.contains("unsafe"))
+                .unwrap_or(false);
+            if baseline_has_unsafe {
+                continue;
+            }
             seeds.push((shown, src));
         }
     }

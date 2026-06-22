@@ -269,6 +269,8 @@ fn type_key(ty: &Type) -> String {
     match ty {
         Type::Int => "Int".into(),
         Type::Float => "Float".into(),
+        Type::IntN { signed, bits } => crate::AST::int_spelling(*signed, *bits),
+        Type::Float32 => "F32".into(),
         Type::Bool => "Bool".into(),
         Type::String => "String".into(),
         Type::Char => "Char".into(),
@@ -394,6 +396,8 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
     match ty {
         Type::Int => "i64".to_string(),
         Type::Float => "f64".to_string(),
+        Type::IntN { signed, bits } => format!("{}{}", if *signed { 'i' } else { 'u' }, bits),
+        Type::Float32 => "f32".to_string(),
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),
         Type::Char => "char".to_string(),

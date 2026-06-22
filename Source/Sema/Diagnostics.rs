@@ -161,6 +161,7 @@ pub(crate) fn is_cloneable(
 ) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             is_cloneable(inner, registry, structs)
         }
@@ -368,6 +369,7 @@ pub(crate) fn suggest_field(name: &str, candidates: &[String]) -> Option<String>
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::Option(inner) => is_printable(inner, registry),
         Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
         Type::List(inner) => is_printable(inner, registry),
@@ -383,6 +385,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
 pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::Option(inner) => types_comparable(inner, registry),
         Type::Result { ok, err } => {
             types_comparable(ok, registry) && types_comparable(err, registry)

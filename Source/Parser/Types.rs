@@ -338,6 +338,19 @@ impl<'a> Parser<'a> {
                 match name.as_str() {
                     Syntax::TYPE_INT => Type::Int,
                     Syntax::TYPE_FLOAT => Type::Float,
+                    // D-SG9/S42: explicit fixed-width numeric spellings. `I64`/`F64`
+                    // are the same types as `Int`/`Float` and canonicalise here so
+                    // they stay fully interchangeable; the rest are distinct widths.
+                    Syntax::TYPE_I64 => Type::Int,
+                    Syntax::TYPE_F64 => Type::Float,
+                    Syntax::TYPE_I8 => Type::IntN { signed: true, bits: 8 },
+                    Syntax::TYPE_I16 => Type::IntN { signed: true, bits: 16 },
+                    Syntax::TYPE_I32 => Type::IntN { signed: true, bits: 32 },
+                    Syntax::TYPE_U8 => Type::IntN { signed: false, bits: 8 },
+                    Syntax::TYPE_U16 => Type::IntN { signed: false, bits: 16 },
+                    Syntax::TYPE_U32 => Type::IntN { signed: false, bits: 32 },
+                    Syntax::TYPE_U64 => Type::IntN { signed: false, bits: 64 },
+                    Syntax::TYPE_F32 => Type::Float32,
                     Syntax::TYPE_BOOL => Type::Bool,
                     Syntax::TYPE_STRING => Type::String,
                     Syntax::FOREIGN_TEXT => {

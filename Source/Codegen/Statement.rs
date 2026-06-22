@@ -134,7 +134,7 @@ fn emit_stmt(
                 emit_expr(cx, &b.init, env)
             };
             if matches!(b.ty, Some(Type::Named(ref n)) if n == "U8")
-                && matches!(b.init, Expr::Int(_, _))
+                && matches!(b.init, Expr::Int(_, _, _))
             {
                 init = format!("({}) as u8", init);
             }

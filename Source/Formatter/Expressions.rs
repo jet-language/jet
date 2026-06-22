@@ -8,6 +8,10 @@ impl<'a> Fmt<'a> {
         match ty {
             Type::Int => self.write(Syntax::TYPE_INT),
             Type::Float => self.write(Syntax::TYPE_FLOAT),
+            Type::IntN { signed, bits } => {
+                self.write(&crate::AST::int_spelling(*signed, *bits))
+            }
+            Type::Float32 => self.write("F32"),
             Type::Bool => self.write(Syntax::TYPE_BOOL),
             Type::String => self.write(Syntax::TYPE_STRING),
             Type::Char => self.write(Syntax::TYPE_CHAR),
@@ -134,7 +138,7 @@ impl<'a> Fmt<'a> {
                     self.fmt_str(parts);
                 }
             }
-            Expr::Int(n, _) => self.write(&n.to_string()),
+            Expr::Int(n, _, _) => self.write(&n.to_string()),
             Expr::Float(v, _) => self.write(&fmt_float(*v)),
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),

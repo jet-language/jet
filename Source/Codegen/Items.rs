@@ -509,10 +509,15 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
         return;
     }
     let (val, ty) = match &c.value {
-        Expr::Int(n, _) => (format!("{}i64", n), "i64"),
-        Expr::Float(v, _) => (format!("{:?}f64", v), "f64"),
-        Expr::Bool(b, _) => (b.to_string(), "bool"),
-        _ => ("0i64".to_string(), "i64"),
+        // D-SG9: a const declared at a fixed width keeps that width.
+        Expr::Int(n, _, Some((signed, bits))) => {
+            let rust = format!("{}{}", if *signed { 'i' } else { 'u' }, bits);
+            (format!("{n}{rust}"), rust)
+        }
+        Expr::Int(n, _, None) => (format!("{}i64", n), "i64".to_string()),
+        Expr::Float(v, _) => (format!("{:?}f64", v), "f64".to_string()),
+        Expr::Bool(b, _) => (b.to_string(), "bool".to_string()),
+        _ => ("0i64".to_string(), "i64".to_string()),
     };
     let inline = if c.attrs.contains(&ConstAttr::ForceInline) {
         "#[inline]\n"

@@ -1,5 +1,14 @@
 trait JetShow { fn jet_show(&self) -> String; }
 impl JetShow for i64 { fn jet_show(&self) -> String { self.to_string() } }
+// D-SG9: fixed-width integers and the 32-bit float print like their defaults.
+impl JetShow for i8 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for i16 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for i32 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for u8 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for u16 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for u32 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for u64 { fn jet_show(&self) -> String { self.to_string() } }
+impl JetShow for f32 { fn jet_show(&self) -> String { format!("{:?}", self) } }
 impl JetShow for f64 { fn jet_show(&self) -> String { format!("{:?}", self) } }
 impl JetShow for bool { fn jet_show(&self) -> String { self.to_string() } }
 impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }

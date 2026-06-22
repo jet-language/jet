@@ -55,6 +55,33 @@ pub enum Type {
     /// S76 (2026-06-16): fixed-size list `[T#N]` — a compile-time refinement of
     /// `[T]` with a statically-known length. Erases to `Vec<T>` at codegen (I3).
     FixedList { elem: Box<Type>, len: u64 },
+    /// D-SG9/S42: explicit fixed-width integer. The default 64-bit *signed*
+    /// integer is spelled `Int` (and equivalently `I64`) and lives in
+    /// `Type::Int`, so it never appears here — `I64` canonicalises to
+    /// `Type::Int` at parse time. Every other width is an `IntN`: `bits` ∈
+    /// {8,16,32,64}, and `(signed: true, bits: 64)` is excluded by construction
+    /// because that *is* `Int`. So `U8` = `{signed:false, bits:8}`,
+    /// `U64` = `{signed:false, bits:64}`, `I32` = `{signed:true, bits:32}`.
+    IntN { signed: bool, bits: u8 },
+    /// D-SG9/S42: 32-bit float. The default 64-bit float is spelled `Float`
+    /// (and `F64`) and lives in `Type::Float`; only `F32` is a `Float32`.
+    Float32,
+}
+
+/// D-SG9: the spelling of a fixed-width integer (`U8`, `I32`, …).
+pub fn int_spelling(signed: bool, bits: u8) -> String {
+    format!("{}{}", if signed { 'I' } else { 'U' }, bits)
+}
+
+/// D-SG9: inclusive `(min, max)` value range of a fixed-width integer, used for
+/// literal-fits checks. `i128` holds every Jet integer width exactly.
+pub fn int_range(signed: bool, bits: u8) -> (i128, i128) {
+    if signed {
+        let max = (1i128 << (bits - 1)) - 1;
+        (-(max + 1), max)
+    } else {
+        ((0i128), (1i128 << bits) - 1)
+    }
 }
 
 /// S73: sort tuple fields by name so type identity ignores source order.
@@ -103,6 +130,19 @@ impl Type {
                 format!("({parts})")
             }
             Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
+            Type::IntN { signed, bits } => {
+                let (lo, hi) = int_range(*signed, *bits);
+                let article = if *bits == 8 { "an" } else { "a" };
+                format!(
+                    "{} ({} {}-bit whole number, {} to {})",
+                    int_spelling(*signed, *bits),
+                    article,
+                    bits,
+                    lo,
+                    hi
+                )
+            }
+            Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
         }
     }
 
@@ -145,6 +185,8 @@ impl Type {
                 format!("({parts})")
             }
             Type::FixedList { elem, len } => format!("[{}#{}]", elem.name(), len),
+            Type::IntN { signed, bits } => int_spelling(*signed, *bits),
+            Type::Float32 => "F32".to_string(),
         }
     }
 
@@ -159,7 +201,25 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
-        matches!(self, Type::Int | Type::Float | Type::Bool)
+        matches!(
+            self,
+            Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32
+        )
+    }
+
+    /// D-SG9: any integer type — the default `Int` or an explicit fixed width.
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Type::Int | Type::IntN { .. })
+    }
+
+    /// D-SG9/D-FLOATW1: any float type — the default `Float` or `F32`.
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::Float | Type::Float32)
+    }
+
+    /// D-SG9: any numeric type (integer or float).
+    pub fn is_numeric(&self) -> bool {
+        self.is_integer() || self.is_float()
     }
 
     pub fn unwrap_option(&self) -> Option<&Type> {
@@ -1218,7 +1278,11 @@ pub struct Lambda {
 pub enum Expr {
     /// String literal, possibly with interpolation parts.
     Str(Vec<StrPart>, Span),
-    Int(i64, Span),
+    /// Integer literal. The third field is the D-SG9 elaborated fixed width
+    /// `(signed, bits)`, filled by sema when the literal sits in a sized-integer
+    /// context; `None` means the default `Int` (i64). Codegen reads it to pick
+    /// the Rust literal suffix.
+    Int(i64, Span, Option<(bool, u8)>),
     Float(f64, Span),
     Bool(bool, Span),
     /// S41: single-quoted `'a'`.
@@ -1370,7 +1434,7 @@ impl Expr {
     pub fn span(&self) -> Span {
         match self {
             Expr::Str(_, s)
-            | Expr::Int(_, s)
+            | Expr::Int(_, s, _)
             | Expr::Float(_, s)
             | Expr::Bool(_, s)
             | Expr::Char(_, s)

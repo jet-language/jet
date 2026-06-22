@@ -154,6 +154,10 @@ impl Cx {
         match ty {
             Type::Int => "i64".to_string(),
             Type::Float => "f64".to_string(),
+            Type::IntN { signed, bits } => {
+                format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
+            }
+            Type::Float32 => "f32".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
             Type::Char => "char".to_string(),
@@ -590,6 +594,7 @@ pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bo
 fn field_type_cloneable(ty: &Type, types: &HashSet<String>) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             field_type_cloneable(inner, types)
         }
@@ -627,6 +632,7 @@ pub(crate) fn type_is_comparable_enum(e: &EnumDef, types: &HashSet<String>) -> b
 pub(crate) fn field_type_comparable(ty: &Type, types: &HashSet<String>) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::Option(inner) => field_type_comparable(inner, types),
         Type::Result { ok, err } => {
             field_type_comparable(ok, types) && field_type_comparable(err, types)

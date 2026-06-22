@@ -263,7 +263,7 @@ impl<'a> Parser<'a> {
             ty_span: Some(ty_span),
             // Harmless placeholder — never evaluated; sema/codegen branch on
             // `uninit` first and use `ty` for the binding's type.
-            init: Expr::Int(0, marker_span),
+            init: Expr::Int(0, marker_span, None),
             is_comptime: false,
             ct: None,
             uninit: true,

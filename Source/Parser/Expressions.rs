@@ -160,13 +160,13 @@ impl<'a> Parser<'a> {
         if self.after_lparen_is_positional_tuple() {
             self.emit_positional_tuple_error(open);
             self.sync_to_rparen();
-            return Ok(Expr::Int(0, open));
+            return Ok(Expr::Int(0, open, None));
         }
         let inner = self.expr()?;
         if matches!(self.peek().kind, TokKind::Comma) {
             self.emit_positional_tuple_error(open);
             self.sync_to_rparen();
-            return Ok(Expr::Int(0, open));
+            return Ok(Expr::Int(0, open, None));
         }
         self.expect(TokKind::RParen, "to close this `(`")?;
         Ok(inner)
@@ -939,7 +939,7 @@ impl<'a> Parser<'a> {
             }
             TokKind::Int(n) => {
                 let span = self.bump().span;
-                Ok(Expr::Int(n, span))
+                Ok(Expr::Int(n, span, None))
             }
             TokKind::Float(v) => {
                 let span = self.bump().span;

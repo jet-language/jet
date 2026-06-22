@@ -1,0 +1,32 @@
+// D-SG9/S42: fixed-width integer types for expert and FFI/binary work.
+// `Int` (= I64) and `Float` (= F64) stay the beginner defaults; the explicit
+// widths `I8 I16 I32 I64 U8 U16 U32 U64` and `F32` are opt-in.
+//
+// Each width is its own type: a literal adopts the width of the slot it lands
+// in and is range-checked at compile time, and widths never mix implicitly
+// (that would hide a narrowing bug). `I64`/`F64` are just aliases for the
+// 64-bit defaults, so they interchange freely with `Int`/`Float`.
+
+fn main() {
+    // A literal takes the width of its binding, checked to fit at compile time.
+    red: U8 @= 255
+    channel: I32 @= 100000
+    depth: I8 @= -120
+
+    print(red)
+    print(channel)
+    print(depth)
+
+    // `I64` is the same type as `Int`, so they combine without conversion.
+    total: I64 @= 9000000000
+    print(total + 1)
+
+    // Arithmetic stays within one width and keeps that width.
+    half: U8 @= 100
+    print(half + half)
+
+    // A list expected at a fixed width elaborates every element to it — this is
+    // what binary/byte APIs work in.
+    bytes: [U8] @= [104, 105, 33]
+    print(bytes)
+}

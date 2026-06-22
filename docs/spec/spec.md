@@ -612,9 +612,32 @@ alias.
 Fallible core functions return `T ? E` and must be handled with `?`,
 `??`, or pattern tests like any M4 result. File APIs use whole-file helpers
 only; file handles and streaming are out of scope. Paths are `String` in M10.
-Binary APIs use `U8` and `[U8]`; integer literals for `U8` must be in
-0..255 (**E1003**). Unknown items in a core module are **E1004** with a
-did-you-mean suggestion when possible.
+Binary APIs use `U8` and `[U8]`. Unknown items in a core module are **E1004**
+with a did-you-mean suggestion when possible.
+
+#### Sized numeric types (D-SG9/S42)
+
+`Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =
+`F64`). The explicit-width menu — `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` — is
+available for expert and FFI/binary work. `I64`/`F64` are aliases for the
+defaults and interchange with `Int`/`Float` freely; every other width is its
+own distinct type. Rules:
+
+- A bare integer literal is `Int` by default, but **adopts the width of the
+  slot it lands in** — a binding/parameter/return annotation or sized
+  arithmetic — and is range-checked at compile time. A literal that doesn't fit
+  the width is **E1003** (e.g. `b: I8 @= 200`). `-128` fits `I8` because the
+  negation is folded before the check; negating an unsigned type is **E0109**.
+- Widths never mix implicitly: arithmetic, comparison, and assignment require
+  the same width on both sides (**E0109**/**E0112**/**E0108**), with no silent
+  narrowing or widening. Same-width arithmetic keeps that width.
+- A float literal is `Float` by default and adopts `F32` where that width is
+  expected.
+
+The sized types erase to their Rust equivalents (`u8`…`i64`, `f32`) at codegen,
+so they cross the C ABI by value (S59). Overflow policy, the `wrapping`/
+`saturating`/`checked` opt-ins, per-type `MIN`/`MAX`, and the width-conversion
+methods are the D-NUMOPS1 expert numeric surface.
 
 Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and

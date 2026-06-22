@@ -86,6 +86,28 @@ pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
 pub const TYPE_ERROR: &str = "Error";
 
+/// D-SG9/S42 (ratified): explicit fixed-width numeric spellings for expert and
+/// FFI/binary code. `Int`/`Float` stay the beginner defaults (64-bit); `I64`
+/// and `F64` are the explicit-width aliases for the same two types and
+/// canonicalise to `Type::Int`/`Type::Float` at parse time. The other widths
+/// are distinct types (no implicit narrowing/mixing — D-NUMOPS1).
+pub const TYPE_I8: &str = "I8";
+pub const TYPE_I16: &str = "I16";
+pub const TYPE_I32: &str = "I32";
+pub const TYPE_I64: &str = "I64";
+pub const TYPE_U8: &str = "U8";
+pub const TYPE_U16: &str = "U16";
+pub const TYPE_U32: &str = "U32";
+pub const TYPE_U64: &str = "U64";
+pub const TYPE_F32: &str = "F32";
+pub const TYPE_F64: &str = "F64";
+
+/// D-SG9: every fixed-width numeric spelling, for keyword/reserved-name checks.
+pub const SIZED_NUMERIC_TYPES: &[&str] = &[
+    TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_F32,
+    TYPE_F64,
+];
+
 /// S10 (ratified M2): caller-site mutable borrow on a parameter or binding.
 pub const KW_MUTATE: &str = "mut";
 
@@ -949,6 +971,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
 /// `T ? E` is the current spelling.
 pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_STRING, TYPE_CHAR, TYPE_LIST, TYPE_MAP, TYPE_SHARED,
+    TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_F32, TYPE_F64,
 ];
 
 /// Canonical list of impure builtins (write stdout/stderr or read stdin).

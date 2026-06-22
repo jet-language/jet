@@ -375,6 +375,7 @@ impl<'a> Checker<'a> {
     ) -> Option<SendabilityProblem> {
         match ty {
             Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => None,
+            Type::IntN { .. } | Type::Float32 => None,
             Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
                 self.sendability_problem_inner(inner, true, seen)
             }

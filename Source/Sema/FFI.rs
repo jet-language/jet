@@ -92,6 +92,8 @@ pub(crate) fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mu
 pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
+        // D-SG9: fixed-width integers/floats have a stable C ABI (`u8` … `i64`, `f32`).
+        Type::IntN { .. } | Type::Float32 => true,
         Type::Named(name) => c_named_type_ok(name, registry),
         // No stable C ABI for these by value:
         Type::List(_)
@@ -253,6 +255,7 @@ pub(crate) fn ffi_type_error(what: &str, why: &str, fix: &str, span: Span) -> Di
 pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
         Type::Shared(_) => false,
         Type::List(inner) | Type::Option(inner) => is_ffi_type(inner, registry),
         Type::Map { key, value } => is_ffi_type(key, registry) && is_ffi_type(value, registry),

@@ -166,8 +166,33 @@ impl<'a> Checker<'a> {
                     (None, None) => None,
                 }
             }
-            Expr::Int(_, _) => Some(Type::Int),
-            Expr::Float(_, _) => Some(Type::Float),
+            // D-SG9: an untyped integer literal is `Int` by default, but adopts
+            // a fixed-width integer type when one is expected here (binding/param/
+            // return annotation, sized arithmetic). A literal that doesn't fit the
+            // width is rejected (E1003) — there is no silent truncation.
+            Expr::Int(n, span, width) => {
+                let (n, span) = (*n, *span);
+                if let Some(Type::IntN { signed, bits }) = self.expected_type.clone() {
+                    let (lo, hi) = crate::AST::int_range(signed, bits);
+                    if (n as i128) < lo || (n as i128) > hi {
+                        self.diags.push(int_range_error(signed, bits, span));
+                    }
+                    *width = Some((signed, bits));
+                    Some(Type::IntN { signed, bits })
+                } else {
+                    *width = None;
+                    Some(Type::Int)
+                }
+            }
+            // D-SG9/D-FLOATW1: a float literal is `Float` (f64) by default, but
+            // adopts `F32` when that width is expected here.
+            Expr::Float(_, _) => {
+                if matches!(self.expected_type, Some(Type::Float32)) {
+                    Some(Type::Float32)
+                } else {
+                    Some(Type::Float)
+                }
+            }
             Expr::Bool(_, _) => Some(Type::Bool),
             Expr::Str(parts, _) => {
                 for p in parts.iter_mut() {
@@ -288,11 +313,39 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::Unary(op, inner, span) => {
+                // D-SG9: fold `-<intliteral>` *before* inferring the operand, so the
+                // literal is range-checked at its negated value (`-128` fits `I8`)
+                // and the operand's own positive range check doesn't fire spuriously.
+                if let UnOp::Neg = op {
+                    if let (Expr::Int(n, ispan, width), Some(Type::IntN { signed: true, bits })) =
+                        (inner.as_mut(), self.expected_type.clone())
+                    {
+                        let v = -(*n as i128);
+                        let (lo, hi) = crate::AST::int_range(true, bits);
+                        if v < lo || v > hi {
+                            self.diags.push(int_range_error(true, bits, *ispan));
+                        }
+                        *width = Some((true, bits));
+                        return Some(Type::IntN { signed: true, bits });
+                    }
+                }
                 let t = self.infer(inner)?;
                 match op {
                     UnOp::Neg => {
-                        if matches!(t, Type::Int | Type::Float) {
+                        if t.is_float()
+                            || matches!(t, Type::Int | Type::IntN { signed: true, .. })
+                        {
                             Some(t)
+                        } else if let Type::IntN { bits, .. } = t {
+                            // D-SG9: unsigned widths have no negatives.
+                            self.diags.push(Diagnostic::error(
+                                "E0109",
+                                format!("`-` can't negate {}, which is unsigned", t.show()),
+                                "unsigned numbers have no negative values".to_string(),
+                                format!("use a signed type like `I{bits}` if you need negatives"),
+                                Some(*span),
+                            ));
+                            None
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0109",
@@ -1400,6 +1453,20 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::List(expected_inner));
             }
+            // D-SG9: a list expected at a fixed width (`[U8]`, `[I32]`) elaborates
+            // each element to that width and range-checks it, so `[1, 2, 255]` is a
+            // `[U8]`. This is what binary/byte APIs (and `embed_bytes`, c75) need.
+            if matches!(expected_inner.as_ref(), Type::IntN { .. } | Type::Float32) {
+                let saved = self.expected_type.clone();
+                self.expected_type = Some(expected_inner.as_ref().clone());
+                for e in elems.iter_mut() {
+                    if let Some(t) = self.infer(e) {
+                        self.check_type_assignable(&expected_inner, &t, e.span());
+                    }
+                }
+                self.expected_type = saved;
+                return Some(Type::List(expected_inner));
+            }
         }
         let mut elem_types = Vec::new();
         for e in elems.iter_mut() {
@@ -1691,7 +1758,7 @@ impl<'a> Checker<'a> {
                         "use an Int index, like `items[0]`".to_string(),
                         Some(index.span()),
                     ));
-                } else if let Expr::Int(n, _) = index.as_ref() {
+                } else if let Expr::Int(n, _, _) = index.as_ref() {
                     // E0965: compile-time out-of-bounds index.
                     if *n < 0 || *n as u64 >= *len {
                         self.diags.push(Diagnostic::error(
@@ -2041,7 +2108,7 @@ impl<'a> Checker<'a> {
                 if has_variant {
                     let saved: Vec<Expr> = args
                         .iter_mut()
-                        .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span)))
+                        .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None)))
                         .collect();
                     let mut enum_args: Vec<EnumLitArg> =
                         saved.into_iter().map(EnumLitArg::Positional).collect();
@@ -2517,7 +2584,9 @@ impl<'a> Checker<'a> {
 
         match op {
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                if lt == rt && matches!(lt, Type::Int | Type::Float) {
+                // D-SG9: arithmetic stays within one numeric type (any width) and
+                // keeps that width; widths never mix implicitly.
+                if lt == rt && lt.is_numeric() {
                     Some(lt)
                 } else if lt == Type::String && op == BinOp::Add {
                     self.diags.push(Diagnostic::error(
@@ -2551,8 +2620,10 @@ impl<'a> Checker<'a> {
                 }
             }
             BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                if lt == Type::Int && rt == Type::Int {
-                    Some(Type::Int)
+                // D-SG9: remainder and bit ops work on any integer width, both
+                // sides the same width, and keep it.
+                if lt == rt && lt.is_integer() {
+                    Some(lt)
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0109",
@@ -3130,6 +3201,10 @@ impl<'a> Checker<'a> {
                 if matches!(param_ty, Type::Fn { .. }) {
                     self.expected_type = Some(param_ty.clone());
                     self.lambda_escapes = matches!(param_conv, AccessConvention::Move);
+                } else if matches!(param_ty, Type::IntN { .. } | Type::Float32) {
+                    // D-SG9: let a fixed-width literal argument adopt the parameter's
+                    // width and be range-checked at the literal.
+                    self.expected_type = Some(param_ty.clone());
                 }
             }
             let arg_ty = if args_pre_inferred {

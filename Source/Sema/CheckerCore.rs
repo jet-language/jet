@@ -261,9 +261,6 @@ impl<'a> Checker<'a> {
         if want == got {
             return false;
         }
-        if is_u8_ty(want) && *got == Type::Int {
-            return false;
-        }
         if result_used_where_plain_expected(want, got) {
             self.diags.push(Diagnostic::error(
                 "E0401",
@@ -951,7 +948,7 @@ impl<'a> Checker<'a> {
                                 ));
                             }
                         }
-                        if let Expr::Int(n, sp) = step {
+                        if let Expr::Int(n, sp, _) = step {
                             if *n <= 0 {
                                 self.diags.push(Diagnostic::error(
                                     "E0123",
@@ -1844,13 +1841,11 @@ impl<'a> Checker<'a> {
             (Some(annot), Some(actual)) => {
                 let annot = self.resolve_type(annot.clone());
                 let actual = self.resolve_type(actual.clone());
-                if is_u8_ty(&annot) && actual == Type::Int {
-                    if let Expr::Int(n, span) = b.init {
-                        if !(0..=255).contains(&n) {
-                            self.diags.push(u8_range_error(span));
-                        }
-                    }
-                } else if annot != actual {
+                // D-SG9: a fixed-width literal is range-checked and re-typed in
+                // `infer` (E1003), so it arrives matching `annot`. A non-literal
+                // width mismatch falls to E0108 below — no implicit narrowing or
+                // widening between integer widths.
+                if annot != actual {
                     // D-DIST1/D-DIST3 (E0128): distinct-type coercion is never implicit.
                     let distinct_name = if let Type::Named(n) = &annot {
                         if self.registry.is_distinct(n) { Some(n.clone()) } else { None }

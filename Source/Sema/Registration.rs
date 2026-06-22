@@ -723,7 +723,7 @@ pub(crate) fn register_const(
         return;
     }
     let ty = match &c.value {
-        Expr::Int(_, _) => Some(Type::Int),
+        Expr::Int(_, _, _) => Some(Type::Int),
         Expr::Float(_, _) => Some(Type::Float),
         Expr::Bool(_, _) => Some(Type::Bool),
         _ => None,

@@ -117,6 +117,7 @@ pub fn free_type_params(ty: &Type) -> HashSet<String> {
 
 fn collect_free(ty: &Type, out: &mut HashSet<String>) {
     match ty {
+        Type::IntN { .. } | Type::Float32 => {}
         Type::Named(n) if is_type_var_name(n) => {
             out.insert(n.clone());
         }

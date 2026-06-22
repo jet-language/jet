@@ -124,7 +124,7 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
         Expr::PtrFromAddr { addr, .. } => rewrite_inline_calls_expr(addr, siblings, modname),
         Expr::Ident(_, _)
         | Expr::Char(_, _)
-        | Expr::Int(_, _)
+        | Expr::Int(_, _, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
         | Expr::Absent(_)
@@ -1150,7 +1150,7 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
                 collect_core_expr(item, imports, used);
             }
         }
-        Expr::Int(_, _)
+        Expr::Int(_, _, _)
         | Expr::Float(_, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)

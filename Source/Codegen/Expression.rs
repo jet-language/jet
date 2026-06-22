@@ -64,8 +64,16 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
             let cx_ty = cx.rust_type(elem);
             format!("(({}) as usize as *mut {})", emit_expr(cx, addr, env), cx_ty)
         }
-        Expr::Int(n, _) => format!("{}i64", n),
-        Expr::Float(v, _) => format!("{:?}f64", v),
+        // D-SG9: emit the suffix for the literal's elaborated width (`200u8`,
+        // `100000i32`); a default `Int` literal stays `i64`. Sema range-checked
+        // the value, so the suffix is always exact.
+        Expr::Int(n, _, width) => match width {
+            Some((signed, bits)) => format!("{}{}{}", n, if *signed { 'i' } else { 'u' }, bits),
+            None => format!("{}i64", n),
+        },
+        // Float literals carry no suffix: Rust defaults floats to `f64` (Jet's
+        // `Float`), and an `F32` context coerces the bare literal to `f32`.
+        Expr::Float(v, _) => format!("{:?}", v),
         Expr::Bool(b, _) => b.to_string(),
         Expr::Char(ch, _) => format!("{:?}", ch),
         Expr::ListLit(elems, _) => {

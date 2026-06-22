@@ -491,7 +491,7 @@ impl<'a> Interp<'a> {
     ) -> Result<CtValue, Diagnostic> {
         self.burn(e.span())?;
         match e {
-            Expr::Int(n, _) => Ok(CtValue::Int(*n)),
+            Expr::Int(n, _, _) => Ok(CtValue::Int(*n)),
             Expr::Float(f, _) => Ok(CtValue::Float(*f)),
             Expr::Bool(b, _) => Ok(CtValue::Bool(*b)),
             Expr::Char(c, _) => Ok(CtValue::Char(*c)),
