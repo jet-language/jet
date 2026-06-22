@@ -70,7 +70,38 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
-    /// Detect capabilities from the generated Rust source.
+    /// c110 (P0): derive capabilities from semantic facts, not from scanning
+    /// generated Rust text. `used_core` is the set of resolved Core calls
+    /// (`module::method`, alias-resolved in sema); `has_unsafe` is whether the
+    /// program contains an `#Unsafe` gate or a `core.mem` low-level op;
+    /// `has_ffi` is whether it declares `extern rust` or links a C library.
+    ///
+    /// This is the authoritative path (D-TOOL5 / audit card c110): capability
+    /// reporting for policy, sandboxing, and package builds must rest on what
+    /// sema resolved a program to do, never on the shape of the lowered Rust.
+    pub fn from_sema(
+        used_core: &std::collections::HashSet<String>,
+        has_unsafe: bool,
+        has_ffi: bool,
+    ) -> Self {
+        let any = |prefixes: &[&str]| {
+            used_core
+                .iter()
+                .any(|k| prefixes.iter().any(|p| k.starts_with(p)))
+        };
+        Capabilities {
+            uses_network: any(&["core.net", "jet.http"]),
+            uses_file_io: any(&["core.fs", "core.io", "core.files", "core.path"]),
+            uses_unsafe: has_unsafe || any(&["core.mem"]),
+            uses_ffi: has_ffi,
+            uses_crypto: any(&["jet.crypto"]),
+            uses_concurrency: any(&["core.tasks", "core.time", "jet.time"]),
+        }
+    }
+
+    /// Legacy capability detection by scanning generated Rust. Retained only as
+    /// a cross-check for the c110 transition (see `tests/effects.rs` agreement
+    /// test); `from_sema` is the path the compiler uses.
     pub fn from_rust(rust: &str) -> Self {
         Capabilities {
             uses_network: rust.contains("jet_net_") || rust.contains("jet_http_"),
@@ -110,6 +141,29 @@ impl Capabilities {
             self.uses_concurrency,
         )
     }
+}
+
+/// c110: true when the program contains an `#Unsafe fn` anywhere (top-level,
+/// method, or trait-impl method). An `#Unsafe { … }` *block* always contains a
+/// `core.mem` low-level op (that is what the gate is for), so it is detected via
+/// the resolved-Core set in `from_sema`; this catches the whole-function form.
+fn bundle_uses_unsafe(bundle: &AST::ProgramBundle) -> bool {
+    use AST::Item;
+    bundle.modules.iter().any(|m| {
+        m.items.iter().any(|it| match it {
+            Item::Func(f) => f.is_unsafe,
+            Item::Struct(s) => {
+                s.methods.iter().any(|x| x.is_unsafe)
+                    || s.trait_impls.iter().any(|b| b.methods.iter().any(|x| x.is_unsafe))
+            }
+            Item::Enum(e) => {
+                e.methods.iter().any(|x| x.is_unsafe)
+                    || e.trait_impls.iter().any(|b| b.methods.iter().any(|x| x.is_unsafe))
+            }
+            Item::Impl(i) => i.methods.iter().any(|x| x.is_unsafe),
+            _ => false,
+        })
+    })
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -217,7 +271,13 @@ fn compile_bundle_path_opts(
         Err(ffi_diags) => return Err(ffi_diags),
     };
     let rust = Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
-    let capabilities = Capabilities::from_rust(&rust);
+    // c110: capabilities are derived from semantic facts (resolved Core calls,
+    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
+    let capabilities = Capabilities::from_sema(
+        &bundle.used_core,
+        bundle_uses_unsafe(&bundle),
+        ffi.is_some() || bundle.cffi.links_c(),
+    );
     Ok(CompileOutput {
         rust,
         lints,
@@ -313,7 +373,13 @@ fn compile_with_mode(
         Err(ffi_diags) => return Err(ffi_diags),
     };
     let rust = Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
-    let capabilities = Capabilities::from_rust(&rust);
+    // c110: capabilities are derived from semantic facts (resolved Core calls,
+    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
+    let capabilities = Capabilities::from_sema(
+        &bundle.used_core,
+        bundle_uses_unsafe(&bundle),
+        ffi.is_some() || bundle.cffi.links_c(),
+    );
     Ok(CompileOutput {
         rust,
         lints,
