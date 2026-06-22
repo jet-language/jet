@@ -90,6 +90,13 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
                     rewrite_inline_calls_stmts(eb, siblings, modname);
                 }
             }
+            // D-CTX1: rewrite inline calls in field values and body.
+            Stmt::ContextBlock { fields, body, .. } => {
+                for (_, e, _) in fields.iter_mut() {
+                    rewrite_inline_calls_expr(e, siblings, modname);
+                }
+                rewrite_inline_calls_stmts(body, siblings, modname);
+            }
         }
     }
 }
@@ -954,6 +961,13 @@ pub(crate) fn collect_core_stmts(
                 if let Some(eb) = else_body {
                     collect_core_stmts(eb, imports, used);
                 }
+            }
+            // D-CTX1: collect Core usage from context block fields and body.
+            Stmt::ContextBlock { fields, body, .. } => {
+                for (_, e, _) in fields {
+                    collect_core_expr(e, imports, used);
+                }
+                collect_core_stmts(body, imports, used);
             }
         }
     }

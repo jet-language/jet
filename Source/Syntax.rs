@@ -195,6 +195,18 @@ pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 /// writes `region`.
 pub const KW_REGION: &str = "region";
 
+/// D-CTX1 (ratified 2026-06-22, G2): smart-context block marker.
+/// `#context(field: value) { … }` swaps named ambient fields (allocator,
+/// logger) for the lexical+dynamic extent of the block, then restores them.
+/// The marker is PascalCase (D-CASING1); the field names inside are lower.
+/// Expert-tier only (R1): never emitted in beginner-tier diagnostics or docs.
+pub const CTX_BLOCK: &str = "Context";
+
+/// D-CTX1 (ratified 2026-06-22): allowed field names inside `#context(…)`.
+pub const CTX_FIELD_ALLOCATOR: &str = "allocator";
+/// D-CTX1 (ratified 2026-06-22): logger field (v1 bundle).
+pub const CTX_FIELD_LOGGER: &str = "logger";
+
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
 pub const TYPE_LIST: &str = "List";
@@ -878,8 +890,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
     // Ownership / borrow keywords (S10, M2)
     KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
-    // Memory / expert tier (S58, D-REGION1)
-    KW_UNSAFE, KW_REGION,
+    // Memory / expert tier (S58, D-REGION1, D-CTX1)
+    KW_UNSAFE, KW_REGION, CTX_BLOCK,
     // Test / tooling (S43, S60, D-TOOL2)
     KW_TEST, KW_PURE, KW_TODO,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)

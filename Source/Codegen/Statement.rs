@@ -385,6 +385,40 @@ fn emit_stmt(
             emit_stmts(cx, body, env, out, indent + 1, view_return);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
+        // Codegen is dumb (I3): sema has already type-checked every field.
+        // Lower to a plain Rust block with a JetContextGuard RAII value per
+        // `allocator` field. Logger is a no-op in v1 (guard emitted, body runs,
+        // field is validated by sema — runtime logger swap deferred to v2).
+        // The guard's Drop restores the ambient value on all exit paths (Q2=Cβ).
+        Stmt::ContextBlock { fields, body, .. } => {
+            out.push_str(&format!("{}{{\n", pad));
+            let inner = indent + 1;
+            let inner_pad = "    ".repeat(inner);
+            // Emit one guard per field in declaration order.
+            for (i, (field_name, value_expr, _)) in fields.iter().enumerate() {
+                let val = emit_expr(cx, value_expr, env);
+                if field_name == Syntax::CTX_FIELD_ALLOCATOR {
+                    // Push this allocator as the new ambient; the guard restores.
+                    // `jet_ctx_push_alloc` is a safe fn (the unsafe cast is inside
+                    // the vetted jet_mem zone — D-LL1, I1 holds).
+                    out.push_str(&format!(
+                        "{}let _ctx_guard_{} = jet_mem::jet_ctx_push_alloc(&{});\n",
+                        inner_pad, i, val
+                    ));
+                } else {
+                    // logger: no runtime runtime v1 — bind the value so the expr
+                    // runs (observable side-effects, e.g. a function call that
+                    // builds the logger) and the variable is in scope.
+                    out.push_str(&format!(
+                        "{}let _ctx_logger_{} = {};\n",
+                        inner_pad, i, val
+                    ));
+                }
+            }
+            emit_stmts(cx, body, env, out, inner, view_return);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // D-WHEN1 (ratified 2026-06-19): emit only the selected arm. The
         // unselected arm never reaches here — it was name-resolved-only in sema
         // (D-WHEN2) and is intentionally absent from codegen output (I3).

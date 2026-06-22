@@ -60,6 +60,12 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
                     walk_stmts_for_const_refs(eb, const_names, taken);
                 }
             }
+            Stmt::ContextBlock { fields, body, .. } => {
+                for (_, e, _) in fields {
+                    walk_expr_for_const_refs(e, const_names, taken);
+                }
+                walk_stmts_for_const_refs(body, const_names, taken);
+            }
         }
     }
 }
@@ -339,6 +345,10 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
             expr_refs_name(cond, name)
                 || then_body.iter().any(|s| stmt_refs_name(s, name))
                 || else_body.as_ref().is_some_and(|eb| eb.iter().any(|s| stmt_refs_name(s, name)))
+        }
+        Stmt::ContextBlock { fields, body, .. } => {
+            fields.iter().any(|(_, e, _)| expr_refs_name(e, name))
+                || body.iter().any(|s| stmt_refs_name(s, name))
         }
     }
 }
@@ -704,6 +714,13 @@ pub(crate) fn stmt_collect_captures(
                 let mut else_bound = bound.clone();
                 block_collect_captures(eb, &mut else_bound, read, mut_cap);
             }
+        }
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, e, _) in fields {
+                expr_collect_captures(e, bound, read, mut_cap);
+            }
+            let mut body_bound = bound.clone();
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
     }
 }

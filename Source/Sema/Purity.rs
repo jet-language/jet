@@ -213,6 +213,20 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
+        // D-CTX1: check field values and body for purity violations.
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, e, _) in fields {
+                if let Some(d) = check_pure_expr(e, pure_fn, funcs) {
+                    return Some(d);
+                }
+            }
+            for st in body {
+                if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
+                    return Some(d);
+                }
+            }
+            None
+        }
     }
 }
 
@@ -543,6 +557,19 @@ fn check_pure_stmt_with_path(
                     if let Some(d) = rec_s!(st) {
                         return Some(d);
                     }
+                }
+            }
+            None
+        }
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, e, _) in fields {
+                if let Some(d) = rec!(e) {
+                    return Some(d);
+                }
+            }
+            for st in body {
+                if let Some(d) = rec_s!(st) {
+                    return Some(d);
                 }
             }
             None
@@ -901,6 +928,16 @@ fn walk_stmt_for_calls(
                         if !diags.is_empty() { return; }
                     }
                 }
+            }
+        }
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, e, _) in fields {
+                walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                if !diags.is_empty() { return; }
+            }
+            for st in body {
+                walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                if !diags.is_empty() { return; }
             }
         }
     }

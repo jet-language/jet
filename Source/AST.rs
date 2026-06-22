@@ -968,6 +968,19 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
+    /// D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
+    /// Swaps named ambient fields for the block's lexical+dynamic extent, then
+    /// restores them on all exit paths (return, break, ?, panic unwind) via
+    /// a RAII guard. Expert-tier; never surfaced in beginner diagnostics.
+    /// v1 fields: `allocator` (allocator handle), `logger` (logger handle).
+    /// Q1 = A2: an explicit allocator arg at a call site overrides the ambient.
+    /// Q2 = Cβ: restore is per-block (on guard Drop).
+    ContextBlock {
+        /// `(field_name, value_expr, field_span)` — one entry per `field: value`.
+        fields: Vec<(String, Expr, Span)>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 /// Assignment target: local name or indexed collection slot (M5).

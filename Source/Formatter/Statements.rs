@@ -168,6 +168,22 @@ impl<'a> Fmt<'a> {
                     self.end_block();
                 }
             }
+            // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
+            Stmt::ContextBlock { fields, body, .. } => {
+                self.write(&format!("#{}", Syntax::CTX_BLOCK));
+                self.write("(");
+                for (i, (name, val, _)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(&format!("{}: ", name));
+                    self.fmt_expr(val, Prec::OrFallback);
+                }
+                self.write(") {");
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
         }
     }
 

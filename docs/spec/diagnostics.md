@@ -208,6 +208,9 @@ before continuing.
 | E0703 | jet   | `cargo` not installed (needed for `extern rust` crates) |
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
+| E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
+| E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
+| E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `#Unsafe` block (S58) |

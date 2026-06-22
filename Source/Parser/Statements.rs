@@ -56,6 +56,73 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
+    /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
+    /// unknown fields.
+    fn at_context_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // `#`
+        self.bump(); // `Context`
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::CTX_BLOCK))?;
+        let mut fields: Vec<(String, Expr, Span)> = Vec::new();
+        // Parse comma-separated `ident : expr` pairs.
+        while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+            let field_start = self.peek().span;
+            let (field_name, field_name_span) =
+                self.expect_ident("for the context field name")?;
+            // E0760: `=` is reassignment (S17); context fields use `:`.
+            if matches!(self.peek().kind, TokKind::Eq) {
+                let eq_span = self.peek().span;
+                return Err(Diagnostic::error(
+                    "E0760",
+                    "context fields are set with `:`, not `=`".to_string(),
+                    "`=` is reassignment (S17); the `name: value` form sets a context field (D-CTX1)".to_string(),
+                    format!(
+                        "write `#{}({}: …) {{ … }}`",
+                        Syntax::CTX_BLOCK,
+                        field_name
+                    ),
+                    Some(eq_span),
+                ));
+            }
+            self.expect(TokKind::Colon, &format!("after the field name `{}`", field_name))?;
+            // E0761: unknown field name.
+            if field_name != Syntax::CTX_FIELD_ALLOCATOR
+                && field_name != Syntax::CTX_FIELD_LOGGER
+            {
+                return Err(Diagnostic::error(
+                    "E0761",
+                    format!("`{}` isn't a context field", field_name),
+                    "the context bundle holds `allocator` and `logger`".to_string(),
+                    format!(
+                        "write `#{}(allocator: …)` or `#{}(logger: …)`",
+                        Syntax::CTX_BLOCK,
+                        Syntax::CTX_BLOCK
+                    ),
+                    Some(Span::new(field_start.start, field_name_span.end)),
+                ));
+            }
+            let value = self.expr()?;
+            let field_end = self.toks[self.pos - 1].span.end;
+            fields.push((field_name, value, Span::new(field_start.start, field_end)));
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RParen, &format!("after `#{}(…`", Syntax::CTX_BLOCK))?;
+        self.expect(
+            TokKind::LBrace,
+            &format!("after `#{}(…)`", Syntax::CTX_BLOCK),
+        )?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ContextBlock {
+            fields,
+            body,
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// S19 + D-LABEL1: parse a `loop` statement (all three header forms), with an
     /// optional `@name` label already parsed by the caller. The cursor is on the
     /// `loop` keyword.
@@ -561,6 +628,10 @@ impl<'a> Parser<'a> {
                 // `uninit_binding` but NOT yet wired here — it stays unexposed until
                 // the sema write-before-read proof (E0420) and MaybeUninit codegen land,
                 // so no mis-compiling/unsafe path exists. See sidequests/visible-uninit.md.
+                // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
+                    return self.at_context_stmt();
+                }
                 // S58 (E2-M13): `#Audit("…")` / `#Unsafe { … }` — the audited gate.
                 self.at_unsafe_stmt()
             }

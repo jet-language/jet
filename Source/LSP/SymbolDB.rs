@@ -588,6 +588,12 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
                 collect_stmts(eb, mp, module, db);
             }
         }
+        AST::Stmt::ContextBlock { fields, body, .. } => {
+            for (_, e, _) in fields {
+                collect_expr(e, mp, db);
+            }
+            collect_stmts(body, mp, module, db);
+        }
     }
 }
 

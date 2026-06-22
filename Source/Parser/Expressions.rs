@@ -1495,6 +1495,7 @@ impl<'a> Parser<'a> {
                         Stmt::Unsafe { span, .. } => span.end,
                         Stmt::Region { span, .. } => span.end,
                         Stmt::ComptimeIf { span, .. } => span.end,
+                        Stmt::ContextBlock { span, .. } => span.end,
                     }
                 } else {
                     close_paren.end

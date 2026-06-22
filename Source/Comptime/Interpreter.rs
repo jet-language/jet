@@ -283,6 +283,9 @@ impl<'a> Interp<'a> {
             // D-REGION1: allocation regions are a runtime/codegen construct; the
             // comptime interpreter has no arenas, so a `region` block is declined.
             Stmt::Region { span, .. } => Err(unsupported("a `region` block", *span)),
+            // D-CTX1: the smart-context block is a runtime/codegen construct; the
+            // comptime interpreter declines it (no thread-local context at compile time).
+            Stmt::ContextBlock { span, .. } => Err(unsupported("a `#Context` block", *span)),
             // D-LABEL1: labeled `break @name`/`continue @name` need the compiled
             // backend's multi-level loop control; the interpreter declines them
             // honestly (like `@unsafe`) rather than approximate them.

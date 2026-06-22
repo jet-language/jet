@@ -259,6 +259,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
             .or_else(|| then_body.last())
             .map(stmt_end)
             .unwrap_or(span.end),
+        Stmt::ContextBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
     }
 }
 
@@ -430,6 +431,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Unsafe { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
         Stmt::ComptimeIf { span, .. } => span.start,
+        Stmt::ContextBlock { span, .. } => span.start,
     }
 }
 

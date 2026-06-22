@@ -143,4 +143,62 @@ mod jet_mem {
             drop(self);
         }
     }
+
+    // ── D-CTX1 (ratified 2026-06-22, G2): Smart Context runtime ──────────────
+    //
+    // `#Context(allocator: a) { … }` compiles to a `JetContextGuard` RAII value
+    // that saves the old ambient allocator pointer and restores it on Drop.
+    // Restore fires on all exit paths: normal exit, `return`, `break`, `?`,
+    // and panic unwind — satisfying Q2 = Cβ (per-block restore).
+    //
+    // The thread-local holds a raw `*const u8` (type-erased allocator pointer).
+    // Safety: Jet sema guarantees the allocator variable is declared before the
+    // `#Context` block and lives for at least the block's duration, so the
+    // pointer is always valid while the guard is live. This is the same
+    // lifetime-extension trust as the `alloc` helper above (D-LL1 vetted zone).
+    //
+    // I1: no `unsafe` leaks to user-visible generated Rust — this module is the
+    // one audited exception (stripped from the I1 golden-test check in golden.rs).
+
+    thread_local! {
+        // Raw pointer to the current ambient allocator (None = use default heap).
+        static JET_CTX_ALLOC: std::cell::Cell<Option<*const u8>> =
+            std::cell::Cell::new(None);
+    }
+
+    /// Query the ambient allocator.  `None` means use the default heap.
+    /// Called by generated ambient-allocating calls that sema marked "uses ambient".
+    pub fn jet_ctx_alloc_ptr() -> Option<*const u8> {
+        JET_CTX_ALLOC.with(|c| c.get())
+    }
+
+    /// RAII guard: pushes a new ambient allocator on construction, pops it on Drop.
+    /// Drop is called on all exit paths (return, break, ?, panic unwind).
+    pub struct JetContextGuard {
+        saved: Option<*const u8>,
+    }
+
+    impl Drop for JetContextGuard {
+        fn drop(&mut self) {
+            JET_CTX_ALLOC.with(|c| c.set(self.saved));
+        }
+    }
+
+    /// Push a new ambient allocator for the current block's dynamic extent.
+    /// Returns a guard whose Drop restores the previous value.
+    ///
+    /// Safe to call: the `&T` borrow ensures the allocator lives at least as long
+    /// as the borrow exists; Jet sema guarantees it lives for the whole block.
+    /// The unsafe pointer cast happens here (inside the vetted D-LL1 zone), never
+    /// in emitted user code (I1).
+    pub fn jet_ctx_push_alloc<T>(alloc: &T) -> JetContextGuard {
+        let saved = JET_CTX_ALLOC.with(|c| c.get());
+        // SAFETY: we store a *const u8 alias of `alloc`. Dereferencing it is only
+        // valid as long as `alloc` is live; the Jet sema ensures the arena variable
+        // is declared before the `#Context` block and lives for its duration.
+        // This is the same audited lifetime-extension trust as `JetArena::alloc`.
+        let ptr = alloc as *const T as *const u8;
+        JET_CTX_ALLOC.with(|c| c.set(Some(ptr)));
+        JetContextGuard { saved }
+    }
 }

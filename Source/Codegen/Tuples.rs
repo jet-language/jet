@@ -254,6 +254,15 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
             }
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Loop { .. } | Stmt::Unsafe { .. } => {}
+        // D-CTX1: collect tuple shapes from context block fields and body.
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, e, _) in fields {
+                collect_tuple_shapes_from_expr(e, out);
+            }
+            for s in body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+        }
         // D-WHEN1: collect tuple shapes from both arms (conservative).
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             collect_tuple_shapes_from_expr(cond, out);

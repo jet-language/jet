@@ -1135,6 +1135,48 @@ impl<'a> Checker<'a> {
             Stmt::Region { body, .. } => {
                 self.check_block(body, true);
             }
+            // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value) { … }`.
+            // Type-check each field value: `allocator` must be an allocator
+            // handle type; `logger` must be a logger value. E0762 on mismatch.
+            // Q1 = A2: explicit allocator args at call sites override the
+            // ambient — no static binding done here, only type validation and
+            // block body checking. Q2 = Cβ: restore is per-block (RAII guard).
+            Stmt::ContextBlock { fields, body, span } => {
+                for (field_name, value_expr, field_span) in fields.iter_mut() {
+                    let ty = self.infer(value_expr);
+                    match field_name.as_str() {
+                        crate::Syntax::CTX_FIELD_ALLOCATOR => {
+                            // Must be one of the known allocator handle types.
+                            let ok = match &ty {
+                                Some(Type::Named(n)) => {
+                                    crate::Codegen::alloc_handle_rust_type(n).is_some()
+                                }
+                                _ => false,
+                            };
+                            if !ok {
+                                let got = ty.as_ref().map(|t| t.show()).unwrap_or_else(|| "unknown".to_string());
+                                self.diags.push(Diagnostic::error(
+                                    "E0762",
+                                    format!("`allocator` needs an allocator, got {}", got),
+                                    "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value".to_string(),
+                                    "pass an allocator, e.g. `mem.Arena.new()`".to_string(),
+                                    Some(*field_span),
+                                ));
+                            }
+                        }
+                        crate::Syntax::CTX_FIELD_LOGGER => {
+                            // v1: any value accepted for logger; a future Logger
+                            // type will narrow this. No E0762 for logger yet.
+                            let _ = ty;
+                        }
+                        _ => {
+                            // Parser already rejected unknown fields (E0761);
+                            // this arm is unreachable in practice.
+                        }
+                    }
+                }
+                self.check_block(body, true);
+            }
         }
     }
 
