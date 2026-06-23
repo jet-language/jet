@@ -2512,7 +2512,7 @@ fn switch_in_subset(
     // `else`. (Range arms bind nothing.) The subject's type must resolve to an
     // integer/char local so the conditions type-check.
     if else_body.is_some()
-        && arms.iter().all(|a| arm_head_range(&a.cond, subject).is_some())
+        && arms.iter().all(|a| arm_head_range(cx, &a.cond, subject).is_some())
     {
         // The subject must be a plain in-subset scalar place (an Ident local/param)
         // so `_jet_switch_subject`/the conditions read it directly. Anything more
@@ -2546,10 +2546,10 @@ fn switch_in_subset(
     // subject already guarantees that here (its type came from a covered fn/local).
     if arms
         .iter()
-        .all(|a| arm_fallible_pattern(&a.cond, subject).is_some())
+        .all(|a| arm_fallible_pattern(cx, &a.cond, subject).is_some())
     {
         for a in arms {
-            let pat = arm_fallible_pattern(&a.cond, subject).expect("checked above");
+            let pat = arm_fallible_pattern(cx, &a.cond, subject).expect("checked above");
             let mut body_locals = locals.clone();
             // `ok(b)`/`err(b)`/`value(b)` bind one name; `null` binds nothing.
             if let Some(b) = fallible_pattern_binding(&pat) {
@@ -2614,7 +2614,7 @@ fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> bool {
         return false;
     }
     // An arm-head range → shape B / `emit_pattern_matches` Range (excluded here).
-    if arm_head_range(cond, subject).is_some() {
+    if arm_head_range(cx, cond, subject).is_some() {
         return false;
     }
     // Any other pattern test (`ok`/`err`/`value`/`null`/`present`/wildcard) → not a
@@ -2628,9 +2628,9 @@ fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> bool {
 /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
 /// subject — `subject == ok(b)` / `err(b)` / `value(b)` / `null`. Returns the
 /// `Pattern::{Ok,Err,Present,Absent}`, else `None` (a variant/range/comparison arm).
-fn arm_fallible_pattern(cond: &Expr, subject: &Expr) -> Option<Pattern> {
+fn arm_fallible_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
-        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(s, subject) => {
+        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(cx, s, subject) => {
             match pattern {
                 Pattern::Ok { .. }
                 | Pattern::Err { .. }
@@ -2661,7 +2661,7 @@ fn fallible_pattern_binding(pattern: &Pattern) -> Option<String> {
 /// `None` (they go through the mixed-switch path, shape B).
 fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
-        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(s, subject) => {
+        Expr::PatternTest { subject: s, pattern, .. } if pattern_subjects_match(cx, s, subject) => {
             if matches!(pattern, Pattern::Range { .. }) {
                 return None;
             }
@@ -2673,7 +2673,7 @@ fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> 
                 None
             }
         }
-        Expr::Binary(BinOp::Eq, lhs, rhs, _) if pattern_subjects_match(lhs, subject) => {
+        Expr::Binary(BinOp::Eq, lhs, rhs, _) if pattern_subjects_match(cx, lhs, subject) => {
             if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
                 if cx.variant_owner.contains_key(variant) {
                     return Some(Pattern::Variant {
@@ -2716,10 +2716,10 @@ fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String> {
 
 /// An arm-head range pattern (`lo..hi -> …`), as `(lo, hi)`. Mirrors the parser's
 /// arm-head range lowering: a `PatternTest` whose pattern is `Pattern::Range`.
-fn arm_head_range(cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
+fn arm_head_range(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
     match cond {
         Expr::PatternTest { subject: s, pattern: Pattern::Range { lo, hi, .. }, .. }
-            if pattern_subjects_match(s, subject) =>
+            if pattern_subjects_match(cx, s, subject) =>
         {
             Some((*lo, *hi))
         }
@@ -2728,12 +2728,20 @@ fn arm_head_range(cond: &Expr, subject: &Expr) -> Option<(i64, i64)> {
 }
 
 /// Mirror codegen's `pattern_subjects_match` (Statement.rs): an arm subject names
-/// the same ident as the switch subject, or is the implicit `it`.
-fn pattern_subjects_match(a: &Expr, b: &Expr) -> bool {
+/// the same ident as the switch subject, is the implicit `it`, or (B1) reads
+/// identically in source — a NON-IDENT subject (`h.val`, `pick()`, `xs[0]`) compared
+/// spanlessly via its source slice, matching the AST so a non-ident pattern switch
+/// routes through the SAME `lower_enum_match` / `lower_fallible_match` the AST's
+/// `emit_pattern_match_switch` uses.
+fn pattern_subjects_match(cx: &Cx, a: &Expr, b: &Expr) -> bool {
     match (a, b) {
         (Expr::Ident(na, _), Expr::Ident(nb, _)) => na == nb,
         (Expr::Ident(n, _), _) if n == Syntax::KW_IT => true,
-        _ => false,
+        _ => {
+            let sa = cx.src.get(a.span().start..a.span().end);
+            let sb = cx.src.get(b.span().start..b.span().end);
+            matches!((sa, sb), (Some(x), Some(y)) if x == y)
+        }
     }
 }
 
@@ -5360,14 +5368,14 @@ fn lower_switch(
     env: &mut LowerEnv,
 ) -> TStmt {
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
-    if else_body.is_some() && arms.iter().all(|a| arm_head_range(&a.cond, subject).is_some()) {
+    if else_body.is_some() && arms.iter().all(|a| arm_head_range(cx, &a.cond, subject).is_some()) {
         return lower_range_switch(subject, arms, else_body, cx, env);
     }
     // Shape C (c109 Phase 8): all arms are fallible/optional patterns → a Rust match
     // over the subject's Result/Option (`Ok(..)`/`Err(..)`/`Some(..)`/`None`).
     if arms
         .iter()
-        .all(|a| arm_fallible_pattern(&a.cond, subject).is_some())
+        .all(|a| arm_fallible_pattern(cx, &a.cond, subject).is_some())
     {
         return lower_fallible_match(subject, arms, else_body, cx, env);
     }
@@ -5445,7 +5453,7 @@ fn lower_fallible_match(
     };
     let mut tarms = Vec::new();
     for arm in arms {
-        let pattern = arm_fallible_pattern(&arm.cond, subject).expect("gate proved fallible arm");
+        let pattern = arm_fallible_pattern(cx, &arm.cond, subject).expect("gate proved fallible arm");
         let pat = tir_fallible_pattern(&pattern);
         // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
@@ -5572,7 +5580,7 @@ fn lower_range_switch(
     let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
     let mut tarms = Vec::new();
     for arm in arms {
-        let (lo, hi) = arm_head_range(&arm.cond, subject).expect("gate proved range arm");
+        let (lo, hi) = arm_head_range(cx, &arm.cond, subject).expect("gate proved range arm");
         let mut branch = clone_env(env);
         let body = lower_stmts(&arm.body, cx, &mut branch);
         tarms.push((lo, hi, body));
@@ -10122,6 +10130,18 @@ fn mk() {
         // An all-range arm-head scalar switch with an `else` (mixed-switch path).
         let src = "fn grade(score: Int) -> String {\n if score {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
         assert!(covers(src, "grade"));
+    }
+
+    #[test]
+    fn covers_mixed_switch_non_ident_subject() {
+        // c109 (B1): a pattern switch over a NON-IDENT subject routes through the
+        // exhaustive-match / fallible-match path (the subject is matched by source-text
+        // equality, not just an ident name). A call subject with unit-variant arms:
+        let variant = "enum Light { Red Green Yellow }\nfn pick() -> Light { return Light.Red }\nfn classify() -> Int {\n if pick() {\n Red -> { return 1 }\n Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
+        assert!(covers(variant, "classify"));
+        // A field-access subject with a payload-binding (optional) arm:
+        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) -> Int {\n if h.val {\n h.val == value(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+        assert!(covers(payload, "f"));
     }
 
     #[test]

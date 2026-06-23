@@ -4029,3 +4029,62 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "2\n4\n");
 }
+
+/// c109 (B1): a mixed-switch over a NON-IDENT subject (a field access) with a
+/// payload-binding arm head. Previously the AST path emitted `matches!(…, Some(c))`
+/// then used the unbound `c` (E0425); now it routes (both paths) through the Rust
+/// `match` that binds the payload. The subject is evaluated once.
+#[test]
+fn mixed_switch_non_ident_subject_binds_payload() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Holder { val: Int? }
+fn f(h: Holder) -> Int {
+    if h.val {
+        h.val == value(c) -> { return c }
+        else -> { return 0 }
+    }
+}
+fn main() {
+    hold @= Holder { val: value(5) }
+    print(f(hold))
+    empty @= Holder { val: null }
+    print(f(empty))
+}
+";
+    let (code, stdout) = build_and_run("tir_mixed_nonident_payload", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "5\n0\n");
+}
+
+/// c109 (B1): a mixed-switch over a NON-IDENT subject (a call) with unit-variant arm
+/// heads. Previously the AST emitted a bare unqualified `(subj == (user_Red))` and
+/// re-evaluated the call per arm (E0425); now it routes through the Rust `match` over
+/// the qualified variants, subject evaluated once.
+#[test]
+fn mixed_switch_non_ident_subject_qualifies_variants() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Light { Red Green Yellow }
+fn pick() -> Light {
+    return Light.Red
+}
+fn classify() -> Int {
+    if pick() {
+        Red -> { return 1 }
+        Green -> { return 2 }
+        else -> { return 0 }
+    }
+}
+fn main() {
+    print(classify())
+}
+";
+    let (code, stdout) = build_and_run("tir_mixed_nonident_variant", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n");
+}

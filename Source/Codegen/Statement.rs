@@ -468,7 +468,7 @@ fn switch_arm_pattern_owned(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Patt
             subject: s,
             pattern,
             ..
-        } if pattern_subjects_match(s, subject) => {
+        } if pattern_subjects_match(cx, s, subject) => {
             // D-PATR: range patterns at arm-head go through mixed-switch (if/else chains),
             // not the exhaustive Rust match path. Exclude them from "pattern arm" detection.
             if matches!(pattern, Pattern::Range { .. }) {
@@ -477,7 +477,7 @@ fn switch_arm_pattern_owned(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Patt
             Some(pattern.clone())
         }
         Expr::Binary(crate::AST::BinOp::Eq, lhs, rhs, _span)
-            if pattern_subjects_match(lhs, subject) =>
+            if pattern_subjects_match(cx, lhs, subject) =>
         {
             if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
                 if cx.variant_owner.contains_key(variant) {
@@ -501,11 +501,25 @@ fn is_exhaustive_pattern_switch(cx: &Cx, subject: &Expr, arms: &[crate::AST::Swi
             .all(|a| switch_arm_pattern_owned(cx, &a.cond, subject).is_some())
 }
 
-fn pattern_subjects_match(a: &Expr, b: &Expr) -> bool {
+fn pattern_subjects_match(cx: &Cx, a: &Expr, b: &Expr) -> bool {
     match (a, b) {
         (Expr::Ident(na, _), Expr::Ident(nb, _)) => na == nb,
         (Expr::Ident(n, _), _) if n == Syntax::KW_IT => true,
-        _ => false,
+        // B1: a NON-IDENT subject (`h.val`, `pick()`, `xs[0]`). The arm's subject is the
+        // switch subject, written either by the parser's `switch_pipe_cond` (a bare arm
+        // head, an injected `subject.clone()`) or explicitly in the source (`h.val ==
+        // value(c)`). Either way the two read identically; compare their source slices
+        // (spanless structural equality, as the formatter's `same_subject` does). A match
+        // lets an exhaustive pattern switch over a non-ident subject route to
+        // `emit_pattern_match_switch` (scrutinee evaluated ONCE, variants qualified,
+        // payloads bound) instead of mis-routing to `emit_mixed_switch` (per-arm
+        // re-evaluation, neither qualified nor bound — the E0425 holes). The two cases
+        // above keep the bare-ident / `it` fast paths byte-identical.
+        _ => {
+            let sa = cx.src.get(a.span().start..a.span().end);
+            let sb = cx.src.get(b.span().start..b.span().end);
+            matches!((sa, sb), (Some(x), Some(y)) if x == y)
+        }
     }
 }
 
