@@ -1,6 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-22 13:57_
+_submitted 2026-06-23 22:31_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -91,9 +91,15 @@ Decision: **A**
 **D-ITER1** — Standard lazy iterator-adapter set
 Decision: **A**
 
----
-
-_submitted 2026-06-23 (presented directly — owner could not access Tower)_
-
 **D-MUTSELF1** — self-mutation in `mut self` methods
-Decision: **A** (direct `self.field = v`; whole-`self` `self = New{}` → `*self =` confirmed). Q1: E0205 points at the assignment. Q2: no option B.
+Decision: ****
+
+**D-CAP8** — what does an unmarked parameter `T` mean?
+Decision: **C**
+
+**D-CAP9** — `&` / `*` in expression position, and `*T` vs `Ptr<T>`
+Decision: **D**
+Comment: Use your full recommendation
+
+**D-CAP10** — are capability-only overloads in scope at all?
+Decision: **A**

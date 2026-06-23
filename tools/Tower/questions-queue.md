@@ -19,3 +19,5 @@ Questions the owner asked from the dashboard. Claude answers each — either rep
 - [ ] **D-BIND2**: Please update the options to have a large number of sigils that include the = operator and are only two characters long. I want to see a wide array of options that may be more physically ergonomic & logical as an immutable operator before finalizing such a fundamental change  _(asked 2026-06-22 13:42, id cmqp9lvoh7fj)_
 - [ ] **D-BIND2**: I like the three @, #, $ prefixes. Clean up the rest of the card to just have these options, then give a thorough analysis of logic, psychology, & the tradeoffs associated with each option  _(asked 2026-06-22 13:48, id cmqp9ttj2w6)_
 - [ ] **D-SOA2**: Break this into multiple questions, I cant choose multiple answers to one question  _(asked 2026-06-22 14:04, id cmqpaenj97mn)_
+- [ ] **D-CAP10**: How is this handled in Jai & Odin?  _(asked 2026-06-23 22:18, id cmqr7hhqr5gc)_
+- [ ] **D-CAP9**: How is this handled in odin & jai?  _(asked 2026-06-23 22:19, id cmqr7iz9icy)_

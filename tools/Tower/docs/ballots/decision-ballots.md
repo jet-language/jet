@@ -25,6 +25,16 @@ it's time to decide it.
 
 ## Open decisions
 
+> **Memory-model gate CLOSED — ratified 2026-06-23.** The owner decided all three gate
+> cards: **D-CAP8 = C** (infer in bodies, freeze at `api: explicit`), **D-CAP9 = D** (`*x`
+> = raw-of, dereference becomes postfix `p.*`, `*T` replaces `Ptr<T>`), **D-CAP10 = A**
+> (overloads out of scope; call-site-sigil disambiguation on a single definition). Recorded
+> in `syntax-decisions.md`; cards stripped. The whole access-capability model
+> (`docs/prompt-memory-model-final.md`) is now unblocked — see
+> `docs/research/memory-model-implementation-plan.md` for the build order.
+
+---
+
 > **Drained 2026-06-22.** The owner's 2026-06-22 batch ratified every open full card —
 > D-UNSAFE2, D-FIXARR1, D-CAP2/3, D-EFF2/3, D-MIGRATE2A/B/C/D/E/F, D-JSONOUT1, D-ARGS1,
 > D-MATHLIB1, D-SIMD1, D-REACT1, D-FANOUT2, D-STRPARSE1, D-CTCORE1, D-JIT1, D-HOTSWAP1,
@@ -33,7 +43,8 @@ it's time to decide it.
 > in `syntax-decisions.md` and their cards stripped from this file. The effect-system
 > surface is now fully decided (D-EFF1+D-QUAL1+D-EFF2+D-EFF3). **D-MUTSELF1** (self-mutation
 > in `mut self` methods) was opened and ratified 2026-06-23 (option A) — recorded in
-> `syntax-decisions.md`, card stripped. **No full decision cards remain open.** What's left
+> `syntax-decisions.md`, card stripped. The memory-model gate (D-CAP8/9/10) was opened and
+> ratified 2026-06-23 — see the note above. **No full decision cards remain open.** What's left
 > below is informational only: the **deferred-ballots list**
 > (stubs to promote when their prerequisites land), the **B6 `defer`** note, and the
 > **Coverage / D-COV1** tooling note. Cards **c25** (range sugar) and **c55** (REPL v2) are

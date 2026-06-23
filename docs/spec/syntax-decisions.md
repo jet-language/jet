@@ -1852,14 +1852,17 @@ The call site mirrors the type — `damage(~player, 10)`, `close(^file)`, `cache
 - **D-MUTSELF1** — unchanged in substance: `~self` may mutate its receiver in place; the
   `mut self` semantics carry over to the new spelling.
 
-**Still open — do not ship expression-position sigils past these:**
-- **`&` / `*` collide with S58.** S58 already gives `&x` = *take a pointer (address-of)*
-  and `*p` = *dereference*. The new `&x` = share and `*x` = raw-pointer-of collide head-on.
-  The disambiguation — and whether `*T` replaces or aliases `Ptr<T>` — is deferred to
-  **D-CAP9 (c127)** and **c131**.
-- **Infer-and-elevate default** (unmarked `T` elevates by usage rather than being fixed
-  shared-read) is **D-CAP8 (c125)**; today's E0202/E0205 depend on the fixed-read default.
-- **Capability overloads** are **D-CAP10 (c128)** — may be out of scope under S14.
+**Downstream gate — RESOLVED 2026-06-23:**
+- **`*` / deref (D-CAP9 = D).** Prefix `*` means only raw-pointer-of (`#Unsafe`-only);
+  **dereference is now postfix `p.*`** (Jai precedent), retiring prefix `*p`; `*T` replaces
+  `Ptr<T>` (deprecated alias). `~x`/`^x`/`&x` are free position-disambiguated prefixes — the
+  earlier "S58 `&x` = address-of" claim never shipped (address-of is `mem.address_of(x)`), so
+  that S58 prose is amended, not collided with.
+- **Unmarked-`T` default (D-CAP8 = C).** `Infer` in bodies (elevates by usage), frozen into
+  the public signature at an `api: explicit` boundary. Repoints E0202/E0205 off the
+  fixed-read default.
+- **Capability overloads (D-CAP10 = A).** Out of scope under S14 — call-site-sigil
+  disambiguation on a single definition, not overload resolution.
 
 Rejected: keeping the word vocabulary (D-CAP1/2/3 as-was); a words-in-libraries /
 sigils-in-apps split; a sixth sigil for `copy`.
@@ -2391,7 +2394,10 @@ upgrade that must re-earn an owner crate sign-off.
 
 | Date       | ID  | Decision                                    | By    |
 | ---------- | --- | ------------------------------------------- | ----- |
-| 2026-06-23 | D-CAP7 | capability is a prefix sigil, not a keyword (owner mandate): `T` infer / `~T` edit / `^T` take / `&T` share / `*T` raw, on the type (`name: ~Type`) and mirrored at the call site (`~player`, `^file`, `&texture`) and on receivers (`~self`). Supersedes the word spelling of S10 (`mut`/`take`/`view`) and D-CAP1/2/3; the four capabilities are unchanged. `copy` stays a verb (no sigil). OPEN downstream: `&`/`*` vs S58 address-of/deref (D-CAP9, c127), infer-and-elevate default (D-CAP8, c125), overloads (D-CAP10, c128). Surface frozen in docs/prompt-memory-model-final.md. c124 | owner |
+| 2026-06-23 | D-CAP7 | capability is a prefix sigil, not a keyword (owner mandate): `T` infer / `~T` edit / `^T` take / `&T` share / `*T` raw, on the type (`name: ~Type`) and mirrored at the call site (`~player`, `^file`, `&texture`) and on receivers (`~self`). Supersedes the word spelling of S10 (`mut`/`take`/`view`) and D-CAP1/2/3; the four capabilities are unchanged. `copy` stays a verb (no sigil). DOWNSTREAM RESOLVED 2026-06-23: D-CAP8=C, D-CAP9=D, D-CAP10=A (rows below). Surface frozen in docs/prompt-memory-model-final.md. c124 | owner |
+| 2026-06-23 | D-CAP8 | unmarked `T` = infer-in-bodies, freeze-at-API (C): inside executables and private/package code an unmarked param starts as `Infer` and elevates to Read/Write/Move/Share from body usage via a deterministic fixed point (raw never inferred); at a `library { api: explicit }` boundary the resolved capability is frozen into interface metadata (D-CAP4/5/6) and a later read→`~`/`^`/`&` drift is a breaking-change error, not a silent flip. Repoints today's fixed-read default (`parse_access_prefix` Source/Parser/Expressions.rs:1631) and the E0202/E0205 triggers. Owner Qs settled with recs: call-site sigil still required for inferred params (moves/edits stay visible); overgrant warns (never auto-downgrade); inferred `&`-share freezes like `~`/`^`. c125 | owner |
+| 2026-06-23 | D-CAP9 | `*x`=raw-of, dereference becomes postfix `p.*`, `*T` replaces `Ptr<T>` (D, "use full recommendation"): prefix `*` has exactly one meaning — raw-pointer-of, legal only in `#Unsafe`; dereference moves from prefix `*p` to **postfix `p.*`** (Jai precedent; composes with `.field`, honors the clean-`.` field-access rule); E0208 reworded to teach `p.*`. `*T` is the canonical raw pointer type and `Ptr<T>` becomes a deprecated alias that teaches `*T`. `~x`/`^x`/`&x` are free position-disambiguated prefixes (`~` was unlexed; `&x`/`^x` were parse errors). **Amends S58 prose** (was `&x`=address-of, never shipped — address-of is `mem.address_of(x)`) and scrubs the retired `#Audit` refs in S58/c131. `.read()`/`.write()` remain for explicit/volatile ops. c127 | owner |
+| 2026-06-23 | D-CAP10 | capability overloads out of scope (A): Jet keeps one definition per name (S14, E0105). A single `fn` declares/infers one capability; a call-site sigil (`process(~data)`) requests stronger access against that one signature and type-checks or errors — no overload resolution, no perf-driven selection (the doc's "perf flag" is dropped). Prior art backs this: Odin forbids implicit overloading (explicit `proc{…}` groups only); neither Odin nor Jai treats capability/mutability as an overload axis. Future escape hatch if multiple capability bodies are ever wanted: Odin-style explicit groups, owner-only. c128 | owner |
 | 2026-06-22 | D-UNSAFE2 | merge audit text into unsafe (B): the safety reason becomes the argument to the gate — `#Unsafe("reason") { … }` / `#Unsafe("reason") fn` — and the separate `#Audit("…")` marker is retired (the unsafe description IS the review artifact). Amends D-LL1/E2-M13; `#Audit` → teaching error pointing at `#Unsafe("…")`. UNBLOCKED. c09 | owner |
 | 2026-06-22 | D-FIXARR1 | `[T#N]` lowers to a real fixed stack array (B): the ratified S76 type becomes a real fixed-size stack array in codegen (no `Vec`); copies when `T` copyable, moves otherwise; widens to `[T]` by copy into a growable list when passed to a `[T]` slot; `var x := [1,2,3]` keeps S76 (widens to `[Int]`). Unlocks `#Uninit` (D-UNINIT1) soundness, no new syntax. UNBLOCKED. c82 | owner |
 | 2026-06-22 | D-CAP2 | `copy`/`share` are prefix keywords (A): duplicate-vs-share after a `take` is a leading call-site verb (`add(copy player)` / `add(share player)`), never inferred (kills implicit clone L0201). UNBLOCKED. c06 | owner |
