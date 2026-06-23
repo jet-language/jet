@@ -37,6 +37,15 @@ them so they don't regress, but they should be fixed independently of c109):
 - **No-arg `.join()` is dead.** `emit_builtin_method` has a `"join" if args.is_empty()` arm,
   but sema requires `join(sep)` (E0311 on no-arg), so that arm never reaches codegen. (Phase 9
   excludes the no-arg form for the same reason.)
+- **L0201 hardcodes `JSON.<call>` for ANY core call.** `expect_core_arg`
+  (Source/Sema/CheckerCoreLib.rs ~L959) is the generic core-arg checker, but its
+  D-L0201 "wasteful implicit clone" lint message text is hardcoded to
+  `"…copied into the JSON value"` / `"`JSON.<call>` stores its own copy…"`. So
+  `path.join(a, b)` with borrowed-dead `a`/`b` warns "`JSON.join` stores its own
+  copy", naming the wrong type. A diagnostic-text bug only (codegen unaffected,
+  parity holds) — surfaced while testing Phase 10's `path.join`. Fix: parameterise
+  the message on the real receiver type/module, or scope the lint to JSON
+  constructors. (Phase 10.)
 
 ## Invariants this must preserve
 
@@ -533,6 +542,76 @@ everything, the AST codegen path is deleted (final phase).
   `is_empty` E0308 (latent bug) reproduces identically on both paths, confirming the gate's
   exclusion of it is conservative (it would miscompile on either path).
 
+## Refinements learned in Phase 10 (core/stdlib calls)
+
+- **A core call is a `MethodCall` whose receiver is a module-alias `Ident`, with
+  `recv_type == None` — that triad is the total routing signal.** `infer_core_call`
+  (CheckerInfer) returns WITHOUT setting `recv_type`, so a core call shares
+  `recv_type == None` with the Phase-9 builtin shape and the Phase-7 static shape.
+  It's separated by the receiver: `cx.core_imports.get(alias).is_some()` (a module
+  alias, NOT a local, NOT a covered type-name). The core shape MUST be tried FIRST
+  in both the gate and `lower_method_call` — a core method named `get`/`split`/
+  `parse`/… would otherwise be claimed by the builtin shape's `return` (which then
+  rejects it, since a module alias fails `expr_in_subset`), wrongly excluding the
+  call. Disjointness holds: builtin needs a *value* receiver, static needs a
+  *type-name* receiver, core needs a *module-alias* receiver.
+- **`Sema::core_fixed_sig` is the authoritative total source — gate on it, type from
+  it.** Gating coverage on `core_fixed_sig(module, method).is_some()` cleanly admits
+  exactly the **type-monomorphic** calls and excludes every deferred one for free:
+  the closure-takers (`spawn`/`serve`/`guard`) and handle-constructor specials
+  (`tasks.channel`/`http.router`/`parse`/`dispatch`) aren't in the table (or map to
+  `None`); the polymorphic math/random/io specials (`abs`/`min`/`max`/`clamp`/
+  `pick`/`shuffle`/`input`/`eprint`) are typed by bespoke `check_core_call` logic,
+  not the fixed table, so their return type isn't total without re-inference (I3) —
+  correctly excluded. The table's return type is the node's total `ty` (a `None`
+  return → `Unit`), which is what makes a fallible core call (`fs.read` →
+  `Result<String, IOError>`) compose with Phase-8 `?`/`??`: the `?`/`??` unwrap
+  reads the Ok payload off this `ty`.
+- **Core-call args are emitted PLAINLY — the per-arm wrapper is baked into the emit
+  match, not a TIR field.** `emit_core_call`'s `arg(i)` is a raw `emit_expr`; it
+  ignores `CallArg.flags` (implicit_clone/Arc) AND the param convention. The `&(…)`/
+  `&mut (…)`/by-move (`tcp_reply`) wrappers are hardcoded per `(module, method)` arm
+  (e.g. `fs.write` → `(&(a0), &(a1))`, `net.tcp_read` → `(&mut (a0))`). So `CoreCall`
+  carries args as a plain `Vec<TExpr>` (like Phase-9 `BuiltinMethod`, NOT
+  `Vec<TCallArg>`), and `emit_tir_core_call` reproduces the `emit_core_call` match
+  verbatim. Carrying conventions here would add spurious wrappers and break parity.
+- **The `(module, method)` dispatch is decision-free in the I3 sense.** Unlike
+  Phase-9's Map-vs-List branch (which needed `expr_jet_ty` → resolved into a
+  `TBuiltinOp` enum), the core dispatch is a pure syntactic match on two
+  already-resolved strings — no type inference — so the TIR carries `module`/`method`
+  as strings and the emitter matches them directly. `cx.root_prefix`/`cx.ffi_crate`
+  are program-level (read at emit, like Phase-9's `cx.file`), never a per-node
+  decision. A regex call's `<ffi_crate>::jet_regex_*` form reproduces `regex_fn`
+  (reading `cx.ffi_crate`) exactly.
+- **A handle-PRODUCING call is coverable; a handle-USING method is not.** `files.open`
+  → `Result<FileReader, IOError>`, `net.tcp_connect` → `TcpStream`, `time.start` →
+  `Stopwatch` all emit a plain helper call (parity-exact) and are covered. Binding the
+  result (`let f = files.open(p)?`) is fine; the moment a METHOD on the handle is
+  called (`f.read_line()`), that method is itself out of subset (a handle `recv_type`,
+  intercepted name) → excludes the enclosing fn. So covering the CALL never reaches an
+  uncovered handle surface. This is the recurring seam: cover the node you can make
+  total, let the next uncovered node exclude its function.
+- **`fs.read(p)?` does NOT route through the TIR — but `fs.read(p) ?? fb` does.** A
+  bare `?` on a core fallible (`IOError`/`JsonError` err) requires the enclosing fn to
+  return `… ? IOError` (the err types match → `TryConvert::None`); but the gate's
+  `is_covered_fallible_ty` excludes `… ? IOError` returns (only `Error`→String and
+  covered value-type payloads are admitted), so the whole fn stays on the AST path. A
+  `… ? Error` return would need `impl IOError: Fallible`, which sema rejects (IOError
+  isn't user-definable). So core fallible composition through the TIR happens via the
+  `??` value/return fallback (Phase 8), whose enclosing fn returns the unwrapped value
+  type. Verified `fs.read(p) ?? "missing"` byte-identical.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass on both `emit_func`/`emit_method`) on three programs covering 24 core calls —
+  fs (write/append/copy/rename/remove/create_dir/read/read_bytes/list_dir/exists/
+  is_dir), math (sqrt/pow/floor/ceil/round), env (set/get/home_dir/current_dir), path
+  (join/parent/extension/normalize), time (now/start), random (int/float/seed), json
+  (parse/render/render_pretty), crypto (sha256/sha256_bytes), csv (parse/render), regex
+  (is_match/find_all/replace_all, incl. the `cx.ffi_crate`-qualified form), log
+  (info/warn/error/debug/set_level/setup), jet.time (now/format), and `fs.read ?? fb`
+  composition — all byte-for-byte identical, then the instrumentation removed. A
+  sentinel-injection probe confirmed the covered fns actually take the TIR path (24
+  `CoreCall` nodes emitted across the programs).
+
 ## Phases
 
 | # | Scope | Status |
@@ -549,7 +628,7 @@ everything, the AST codegen path is deleted (final phase).
 | 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | ✅ done (c109 Phase 8) — ~5 example fns routed (`13_errors` `parse_age`/`load`/`main`, `12_option` `find_even`/`main`). Covers: **optional** `T?` (`Type::Option`) and **fallible** `T ? E` (`Type::Result`) params/locals/returns whose payloads are covered value types (incl. default `Error`→`String`); the `value(x)`/`null` and `ok(x)`/`err(e)` constructors; the `?` propagation operator carrying the total `TryConvert` (`None`/`Fallible`/`Typed(fn)` → bare / `.map_err(\|e\| e.to_error())` / `.map_err(<fn>)`, all wrapped in `jet_trace_err(…)?` with the trace-frame `file`/`line`/`fn_name` resolved at lowering); the `??` fallback (`OrFallback::{Value,Return}`, `is_option` total → `match` over Result/Option); `?.` optional chaining (the total `flatten` fact → `.and_then`/`.map`); and `when ok/err/value/null` matches (Shape C, reusing `EnumMatch`). Excludes: the `??` **panic** fallback form (`safe_locals_expr` reproduction deferred); String/struct/collection-payload error *enums* (non-covered enum → excluded); list/map *of* options; core/stdlib fallible calls (`fs.read` → Phase 10, but a USER fallible call is covered); nested `T??` (sema-rejected anyway). |
 | 9 | Built-in collection/string methods (`emit_builtin_method`: list/map/string surface) | ✅ done (c109 Phase 9) — +6 example fns routed (`15_lists`/`20_list_remove_bounds`/`38_method_chain` `main`, `28_comptime_table` `make_table`, `34_parallel_scan` `copy_paths`/`main`). Covers the NON-closure list/map/string builtins (`len`/`push`/`pop`/`insert`/`remove`/`get`/`first`/`last`/`contains`/`index_of`/`reverse`/`sort`/`clear`/`join(sep)`/`keys`/`values`/`contains_key`/`chars`/`bytes`/`trim`/`split`/`starts_with`/`ends_with`/`replace`/`to_upper`/`to_lower`/`repeat`/`slice`/`to_string`) on a list/map/string receiver. The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is resolved at lowering into a total `TBuiltinOp` (`TExprKind::BuiltinMethod`), reproducing the AST's `expr_jet_ty` partiality (incl. its `None` → default branch) exactly. Excludes: **closure-taking** methods (`map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` → Phase 11); the **numeric** width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`/… → Phase 12, already carry `Some(recv_type)`); **handle** methods (FileWriter/TcpStream/HttpRequest/Router/Arena/… → Phase 10, also `Some(recv_type)`); `clone`/`raw`/`snapshot`/`new` (Phase 6 special cases); `Int.parse`/`Float.parse`/`String.from_bytes` (type-name-receiver statics); and **`is_empty`** + no-arg `join()` (both unusable today — see latent bugs). |
 | 11 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
-| 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | pending |
+| 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | ✅ done (c109 Phase 10) — the **type-monomorphic** core/stdlib calls now route through the TIR (`TExprKind::CoreCall`). Covered: every `(module, method)` whose full signature is fixed by `Sema::core_fixed_sig` — `core.fs` (read/read_bytes/write/append/exists/is_dir/remove/create_dir/list_dir/copy/rename), `core.io` (args/read_all_input/stdin), `core.env` (get/set/current_dir/home_dir), `core.process` (exit/run), `core.math` (sqrt/pow/floor/ceil/round), `core.random` (int/float/seed), `core.time` (now/sleep/start), `core.json` + `jet.json` (parse/decode/render/render_pretty), `core.files` (open/create/append), `core.path` (join/parent/extension/normalize), `core.net` (all tcp_*), `jet.csv`/`jet.toml`/`jet.yaml` (parse/render), `jet.log` (info/warn/error/debug/set_level/set_trace_id/setup), `jet.time` (now/format), `jet.crypto` (sha256/sha256_bytes), `jet.http` (get/post), `jet.regex` (is_match/match/find/find_all/split/replace/replace_all). The `(module, method)` dispatch + per-arm `&(…)`/`&mut (…)`/move wrappers reproduce `emit_core_call` byte-for-byte; the return type comes from `core_fixed_sig` (totality), so a fallible core call composes with Phase-8 `?`/`??`. ~10 example fns route (across crafted programs exercising 24 covered core calls). Excludes (stay on AST path): closure-taking (`tasks.spawn`/`http.serve`/`scope.guard` → Phase 11); polymorphic math/random/io specials (`abs`/`min`/`max`/`clamp`/`pick`/`shuffle`/`io.input`/`io.eprint` — return type depends on arg type, not in the fixed table); handle-constructor specials not in the table (`tasks.channel`, `http.router`/`parse`/`dispatch`); `core.mem` ptr/alloc (`@unsafe`); and any use of a returned handle's METHOD surface (excludes the enclosing fn). Imports/modules (re-export, `import_mods`, inline code modules), FFI extern, comptime-if, arena/unsafe blocks are NOT yet covered (deferred within this phase). |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

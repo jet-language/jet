@@ -1179,3 +1179,75 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "15\nbad\n");
 }
+
+/// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
+/// `path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
+/// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms
+/// (`jet_std_math_*`, `jet_std_path_join`, `jet_ring_crypto_sha256`) reproduce
+/// `emit_core_call` byte-for-byte; here we prove they compile (I2) and run.
+#[test]
+fn core_math_path_crypto_calls() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.math as math
+use core.path as path
+use jet.crypto as crypto
+fn calc(a: Float) -> Float {
+    r @= math.sqrt(a)
+    f @= math.floor(r)
+    c @= math.ceil(r)
+    return (f + c)
+}
+fn make_path(a: String, b: String) -> String {
+    return path.join(a, b)
+}
+fn hash(s: String) -> String {
+    return crypto.sha256(s)
+}
+fn main() {
+    print(calc(16.0))
+    print(make_path(\"/usr\", \"bin\"))
+    print(hash(\"hello\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_core_math_path_crypto", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "8.0\n/usr/bin\n\
+         2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\n"
+    );
+}
+
+/// c109 Phase 10: a fallible core call composed with `??` (Phase 8). `fs.read`
+/// returns `Result<String, IOError>`; the `??` value fallback unwraps it, so
+/// `read_or` is covered and the `jet_std_fs_read(&(…))` form composes with the
+/// `match { Ok(v) => v, Err(_) => fb }` fallback. The missing file takes the
+/// fallback branch — proving the composition runs.
+#[test]
+fn core_fs_read_with_fallback() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.fs as fs
+fn read_or(p: String) -> String {
+    return (fs.read(p) ?? \"missing\")
+}
+fn main() {
+    print(read_or(\"/no/such/file/at/all/xyzzy\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_core_fs_fallback", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "missing\n");
+}
+
+// NOTE: a regex call (`re.is_match(…)?? …`) also routes through the TIR — the
+// emitted `<ffi_crate>::jet_regex_is_match(…)` is byte-identical to the AST path
+// (verified via the forced-AST-path diff). It is NOT given a `build_and_run` test
+// here because the call references the external FFI bridge crate (`cx.ffi_crate`),
+// which the bare-`rustc` harness can't resolve standalone — the same reason the
+// example suite drives the regex example through the project build, not this file.

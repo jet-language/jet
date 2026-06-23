@@ -341,6 +341,21 @@ pub(crate) enum TExprKind {
         op: TBuiltinOp,
         args: Vec<TExpr>,
     },
+    /// c109 Phase 10: a core/stdlib module call `alias.method(args)` where `alias`
+    /// is a core import (`cx.core_imports`). The `(module, method)` dispatch in
+    /// `emit_core_call` (Source/Codegen/Expression.rs) is a pure syntactic match on
+    /// two already-resolved strings — NO type inference (I3) — so the TIR carries
+    /// `module`/`method` as resolved strings and the emitter reproduces the match
+    /// byte-for-byte. The args are lowered as PLAIN expressions: `emit_core_call`'s
+    /// `arg(i)` is a raw `emit_expr`, ignoring `CallArg.flags` and the param
+    /// convention; the per-arm `&(…)`/`&mut (…)`/move wrappers are baked into each
+    /// emit arm, not a TIR field. `cx.root_prefix`/`cx.ffi_crate` are program-level
+    /// (read at emit, like Phase 9's `cx.file`), never a per-node decision.
+    CoreCall {
+        module: String,
+        method: String,
+        args: Vec<TExpr>,
+    },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
         cond: Box<TExpr>,
@@ -1509,6 +1524,29 @@ fn method_call_in_subset(
     if method == "clone" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
+    // `alias` is a core import. Sema leaves `recv_type == None` for core calls
+    // (`infer_core_call` returns without setting it). A core call is uniquely a
+    // `MethodCall` whose receiver is an `Ident(alias)` with `alias ∈ cx.core_imports`
+    // — disjoint from the builtin shape (which needs a *value* receiver) and the
+    // static shape (a covered *type-name* receiver). Tried BEFORE the builtin shape:
+    // a core method named `get`/`split`/… would otherwise be claimed (and rejected,
+    // since a module alias is not a local) by the builtin shape's `return`. The
+    // covered set is the type-monomorphic core calls (`core_call_covered`); the
+    // polymorphic math/random/io specials + every closure-taking / handle-constructor
+    // call stay on the AST path.
+    if recv_type.is_none() {
+        if let Expr::Ident(alias, _) = receiver {
+            if !locals.contains(alias) {
+                if let Some(module) = cx.core_imports.get(alias) {
+                    return core_call_covered(module, method)
+                        && args.iter().all(|a| {
+                            a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+                        });
+                }
+            }
+        }
+    }
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
     // list/map/string receiver. Sema resolves these via `Collections::
@@ -1729,6 +1767,39 @@ fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // the design doc's latent-bug list. `join()` (no separator) is likewise excluded:
     // sema requires `join(sep)` (E0311 on no-arg), so the no-arg form never reaches
     // codegen — its AST arm is dead.
+}
+
+/// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
+/// covered set is exactly the **type-monomorphic** core calls — those whose full
+/// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.
+/// That table is the authoritative total source: its return type gives the node's
+/// total `ty` (for `?`-unwrap and binding inference), and `emit_core_call`
+/// (Source/Codegen/Expression.rs) has a matching emit arm for every one of these.
+///
+/// Gating on `core_fixed_sig(...).is_some()` cleanly EXCLUDES the deferred calls:
+///   - **closure-taking** (`tasks.spawn`, `http.serve`, `scope.guard`) — not in the
+///     table / typed `None` → Phase 11 lambdas;
+///   - **polymorphic** math/random/io specials (`math.abs`/`min`/`max`/`clamp`,
+///     `random.pick`/`shuffle`, `io.input`/`io.eprint`) — return type depends on the
+///     arg type, resolved by bespoke `check_core_call` logic, not the fixed table, so
+///     a total `ty` would need re-inference (I3) → deferred;
+///   - **handle-constructor** specials NOT in the table (`tasks.channel`,
+///     `http.router`/`parse`/`dispatch`) and `core.mem` ptr/alloc (`@unsafe`).
+/// A handle-PRODUCING call that IS in the table (`files.open` → `FileReader`,
+/// `net.tcp_connect` → `TcpStream`, `time.start` → `Stopwatch`, …) is covered: the
+/// CALL emits a plain helper call (parity-exact), and any later METHOD on the
+/// returned handle is itself out of subset → excludes the enclosing function.
+fn core_call_covered(module: &str, method: &str) -> bool {
+    crate::Sema::core_fixed_sig(module, method).is_some()
+}
+
+/// c109 Phase 10: the resolved return type of a covered core call, read from the
+/// authoritative `Sema::core_fixed_sig` table (totality). A `None` return (a
+/// void-effect call like `fs.write`/`env.set`/`process.exit`) lowers to `Unit`.
+fn core_call_return_ty(module: &str, method: &str) -> Type {
+    crate::Sema::core_fixed_sig(module, method)
+        .and_then(|(_, ret)| ret)
+        .unwrap_or_else(unit_type)
 }
 
 // ---------------------------------------------------------------------------
@@ -2912,6 +2983,30 @@ fn lower_method_call(
             kind: TExprKind::Clone(Box::new(recv)),
         };
     }
+    // c109 Phase 10: a core/stdlib module call `alias.method(args)`. The gate proved
+    // `recv_type == None` + receiver is a core-import alias + `core_call_covered`.
+    // Mirror `emit_core_call` (Source/Codegen/Expression.rs): resolve the module here
+    // (total), lower args PLAINLY (no clone/borrow wrappers — `emit_core_call`'s
+    // `arg(i)` is a raw `emit_expr`), and carry the return type from the authoritative
+    // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
+    // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).
+    if recv_type.is_none() {
+        if let Expr::Ident(alias, _) = receiver {
+            if !env.locals.contains_key(alias) {
+                if let Some(module) = cx.core_imports.get(alias).cloned() {
+                    let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                    return TExpr {
+                        ty: core_call_return_ty(&module, method),
+                        kind: TExprKind::CoreCall {
+                            module,
+                            method: method.to_string(),
+                            args: targs,
+                        },
+                    };
+                }
+            }
+        }
+    }
     // c109 Phase 9: a built-in collection/string method (`emit_builtin_method`). The
     // gate proved `recv_type == None` + a covered builtin name + an in-subset value
     // receiver. Resolve the Map-vs-List-vs-String emit branch HERE from the
@@ -3653,6 +3748,15 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::ToString => format!("({}).jet_show()", recv),
             }
         }
+        // c109 Phase 10: a core/stdlib module call. Reproduces `emit_core_call`
+        // (Source/Codegen/Expression.rs) byte-for-byte. `module`/`method` were
+        // resolved at lowering; `cx.root_prefix`/`cx.ffi_crate` are program-level
+        // (read here, like Phase 9's `cx.file`). Args were lowered PLAINLY — the
+        // per-arm `&(…)`/`&mut (…)`/move wrappers are baked into each arm, exactly
+        // as `emit_core_call` does (it ignores `CallArg.flags`).
+        TExprKind::CoreCall { module, method, args } => {
+            emit_tir_core_call(module, method, args, cx)
+        }
         TExprKind::Binary {
             op,
             overflow,
@@ -3855,6 +3959,172 @@ fn emit_tir_value_block(stmts: &[TStmt], value: &TExpr, cx: &Cx) -> String {
     let mut inner = String::new();
     emit_tir_stmts(stmts, cx, &mut inner, 1);
     format!("{{ {} {} }}", inner, emit_tir_expr(value, cx))
+}
+
+/// c109 Phase 10: emit a core/stdlib module call, reproducing `emit_core_call`
+/// (Source/Codegen/Expression.rs) byte-for-byte. The `(module, method)` dispatch is
+/// a pure syntactic match on the two resolved strings — no type inference (I3). Args
+/// were lowered PLAINLY; the per-arm `&(…)`/`&mut (…)`/move wrappers are applied here
+/// exactly as the AST path applies them around its `arg(i)` = raw `emit_expr`.
+/// `cx.root_prefix`/`cx.ffi_crate` are program-level. The gate only ever admits a
+/// `(module, method)` with a matching arm here, so the `/* unknown std call */`
+/// fallthrough is unreachable for a covered call (kept for parity with the AST path).
+fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> String {
+    let arg = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+    let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
+    let regex_fn = |name: &str| {
+        let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+        format!("{}::{}", crate_name, name)
+    };
+    match (module, method) {
+        ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
+        ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
+        ("core.fs", "write") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_write"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.fs", "append") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_append"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
+        ("core.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
+        ("core.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
+        ("core.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
+        ("core.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
+        ("core.fs", "copy") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_copy"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.fs", "rename") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_fs_rename"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.io", "args") => format!("{}()", helper("jet_std_io_args")),
+        ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
+        // D-STDIN1=A: io.stdin() → JetStdinReader handle.
+        ("core.io", "stdin") => format!("{}()", helper("jet_std_io_stdin")),
+        ("core.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
+        ("core.env", "set") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_env_set"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
+        ("core.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
+        ("core.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
+        ("core.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
+        ("core.math", "sqrt") => format!("{}({})", helper("jet_std_math_sqrt"), arg(0)),
+        ("core.math", "pow") => format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)),
+        ("core.math", "floor") => format!("{}({})", helper("jet_std_math_floor"), arg(0)),
+        ("core.math", "ceil") => format!("{}({})", helper("jet_std_math_ceil"), arg(0)),
+        ("core.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
+        ("core.random", "int") => {
+            format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1))
+        }
+        ("core.random", "float") => format!("{}()", helper("jet_std_random_float")),
+        ("core.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
+        ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),
+        ("core.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
+        ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
+        ("core.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        ("core.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
+        ("core.json", "render_pretty") => {
+            format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0))
+        }
+        // E2-M7: streaming file handles (D-IO2).
+        ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
+        ("core.files", "create") => format!("{}(&({}))", helper("jet_std_files_create"), arg(0)),
+        ("core.files", "append") => format!("{}(&({}))", helper("jet_std_files_append"), arg(0)),
+        // E2-M7: std.path helpers (D-IO1).
+        ("core.path", "join") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_path_join"), arg(0), arg(1)
+        ),
+        ("core.path", "parent") => format!("{}(&({}))", helper("jet_std_path_parent"), arg(0)),
+        ("core.path", "extension") => format!("{}(&({}))", helper("jet_std_path_extension"), arg(0)),
+        ("core.path", "normalize") => format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0)),
+        // E2-M9: first-party ring packages.
+        ("jet.csv", "parse") => format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0)),
+        ("jet.csv", "render") => format!("{}(&({}))", helper("jet_ring_csv_render"), arg(0)),
+        ("jet.toml", "parse") => format!("{}(&({}))", helper("jet_ring_toml_parse"), arg(0)),
+        ("jet.toml", "render") => format!("{}(&({}))", helper("jet_ring_toml_render"), arg(0)),
+        ("jet.yaml", "parse") => format!("{}(&({}))", helper("jet_ring_yaml_parse"), arg(0)),
+        ("jet.yaml", "render") => format!("{}(&({}))", helper("jet_ring_yaml_render"), arg(0)),
+        ("jet.log", "info") => format!("{}(&({}))", helper("jet_ring_log_info"), arg(0)),
+        ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),
+        ("jet.log", "error") => format!("{}(&({}))", helper("jet_ring_log_error"), arg(0)),
+        ("jet.log", "debug") => format!("{}(&({}))", helper("jet_ring_log_debug"), arg(0)),
+        ("jet.log", "set_level") => format!("{}(&({}))", helper("jet_ring_log_set_level"), arg(0)),
+        // E2-M12 D-OBS3: trace context for structured log records.
+        ("jet.log", "set_trace_id") => format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0)),
+        // D-LOGFMT1=A: explicit log format override.
+        ("jet.log", "setup") => format!("{}(&({}))", helper("jet_ring_log_setup"), arg(0)),
+        ("jet.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        // D-JSON3=B: lenient decode emits one log line per coercion; decoded value is plain.
+        ("jet.json", "decode") => format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0)),
+        ("jet.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
+        ("jet.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
+        ("jet.time", "now") => format!("{}()", helper("jet_std_time_now")),
+        ("jet.time", "format") => format!("{}({}, &({}))", helper("jet_ring_time_format"), arg(0), arg(1)),
+        ("jet.crypto", "sha256") => format!("{}(&({}))", helper("jet_ring_crypto_sha256"), arg(0)),
+        ("jet.crypto", "sha256_bytes") => format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0)),
+        // E2-M10: core.net — blocking TCP sockets.
+        ("core.net", "tcp_listen") => format!("{}(&({}))", helper("jet_net_tcp_listen"), arg(0)),
+        ("core.net", "tcp_accept") => format!("{}(&({}))", helper("jet_net_tcp_accept"), arg(0)),
+        ("core.net", "tcp_connect") => format!("{}(&({}))", helper("jet_net_tcp_connect"), arg(0)),
+        ("core.net", "tcp_read") => format!("{}(&mut ({}))", helper("jet_net_tcp_read"), arg(0)),
+        ("core.net", "tcp_write") => {
+            format!("{}(&mut ({}), &({}))", helper("jet_net_tcp_write"), arg(0), arg(1))
+        }
+        ("core.net", "tcp_local_addr") => format!("{}(&({}))", helper("jet_net_tcp_local_addr"), arg(0)),
+        ("core.net", "tcp_peer_addr") => format!("{}(&({}))", helper("jet_net_tcp_peer_addr"), arg(0)),
+        ("core.net", "set_timeout") => {
+            format!("{}(&mut ({}), {})", helper("jet_net_set_timeout"), arg(0), arg(1))
+        }
+        ("core.net", "tcp_reply") => {
+            format!("{}({}, &({}), &({}))", helper("jet_net_tcp_reply"), arg(0), arg(1), arg(2))
+        }
+        // E2-M10: jet.http — HTTP client.
+        ("jet.http", "get") => format!("{}(&({}))", helper("jet_http_get"), arg(0)),
+        ("jet.http", "post") => {
+            format!("{}(&({}), &({}))", helper("jet_http_post"), arg(0), arg(1))
+        }
+        // D-REGEX1: jet.regex — calls land in the FFI bridge crate.
+        ("jet.regex", "is_match") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_regex_is_match"), arg(0), arg(1))
+        }
+        ("jet.regex", "match") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_regex_match"), arg(0), arg(1))
+        }
+        ("jet.regex", "find") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_regex_find"), arg(0), arg(1))
+        }
+        ("jet.regex", "find_all") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_regex_find_all"), arg(0), arg(1))
+        }
+        ("jet.regex", "split") => {
+            format!("{}(&({}), &({}))", regex_fn("jet_regex_split"), arg(0), arg(1))
+        }
+        ("jet.regex", "replace") => format!(
+            "{}(&({}), &({}), &({}))",
+            regex_fn("jet_regex_replace"), arg(0), arg(1), arg(2)
+        ),
+        ("jet.regex", "replace_all") => format!(
+            "{}(&({}), &({}), &({}))",
+            regex_fn("jet_regex_replace_all"), arg(0), arg(1), arg(2)
+        ),
+        _ => "/* unknown std call */".to_string(),
+    }
 }
 
 /// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
