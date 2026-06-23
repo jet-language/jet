@@ -315,6 +315,58 @@ pub(crate) fn import_sig_map(
     map
 }
 
+/// c109 Phase 14: build a map from `(import alias, function)` → the function's return
+/// type, mirroring `import_sig_map`. The TIR carries this as the total result type of
+/// a cross-module call. Covers file-module pub funcs, C-boundary funcs, and `pub use`
+/// re-exports (the same shapes `import_sig_map` covers).
+pub(crate) fn import_ret_map(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) -> HashMap<(String, String), Option<Type>> {
+    let mut map = HashMap::new();
+    let module = &bundle.modules[module_idx];
+    for imp in &module.imports {
+        let alias = Loader::import_alias(imp);
+        let target = if crate::CFFI::is_c_import(imp) {
+            match bundle.cffi.target_for(module_idx, &alias) {
+                Some(t) => t,
+                None => continue,
+            }
+        } else {
+            match Loader::resolve_import_target(bundle, module_idx, imp) {
+                Ok(t) => t,
+                Err(_) => continue,
+            }
+        };
+        for item in &bundle.modules[target].items {
+            match item {
+                Item::Func(f) if f.is_pub => {
+                    map.insert((alias.clone(), f.name.clone()), f.return_type.clone());
+                }
+                Item::CModule(cm) => {
+                    for ef in &cm.functions {
+                        map.insert((alias.clone(), ef.name.clone()), ef.return_type.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
+        let stem = real_mod.strip_prefix("user_").unwrap_or(&real_mod);
+        if let Some(real) = bundle.modules.iter().find(|m| m.alias == stem) {
+            for it in &real.items {
+                if let Item::Func(f) = it {
+                    if f.is_pub && f.name == real_fn {
+                        map.insert((alias.clone(), item.clone()), f.return_type.clone());
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
 pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, include_main: bool) {
     let tuple_shapes = collect_tuple_shapes(items);
     emit_tuple_structs(cx, &tuple_shapes, out);

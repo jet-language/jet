@@ -45,6 +45,9 @@ pub(crate) struct Cx {
     pub(crate) reexport_calls: HashMap<(String, String), (String, String)>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     pub(crate) import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
+    /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
+    pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
     /// Import alias -> compiler-known core module (`core.fs`, `core.json`, ...).
     pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
@@ -386,6 +389,7 @@ pub(crate) fn build_cx_items(
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
+        import_rets: HashMap::new(),
         core_imports: HashMap::new(),
         used_core: HashSet::new(),
         root_prefix: String::new(),

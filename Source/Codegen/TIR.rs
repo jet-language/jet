@@ -497,6 +497,53 @@ pub(crate) enum TExprKind {
     FnValue {
         kind: TFnValueKind,
     },
+    /// c109 Phase 14: a cross-module function call. The various module-call forms
+    /// (qualified `mod.fn()` via `import_mods`, `pub use` re-exports via
+    /// `reexport_calls`, inline code modules via `code_modules`, and the unqualified
+    /// inline/file imports in `emit_call`) all resolve at LOWERING to a fully-decided
+    /// `TModuleCallForm` — emit makes no table lookup or decision (I3). `args` carry
+    /// their borrow/clone wrappers, resolved exactly as `emit_call_args` does from the
+    /// callee's import signature. `cx.root_prefix` is the only program-level value the
+    /// emitter reads (like Phase 9/10's `cx.file`/`cx.root_prefix`), placed exactly
+    /// where the AST path prepends it.
+    ModuleCall {
+        form: TModuleCallForm,
+        args: Vec<TCallArg>,
+    },
+    /// c109 Phase 14: an FFI extern call (`extern rust`/`extern C`). `emit_call`'s
+    /// `extern_funcs` arm emits `{ffi_crate}::{wrapper}(args)` with args lowered via
+    /// `emit_extern_call_args` (a DISTINCT arg form — a non-scalar `Read` param is
+    /// `(…).clone()`, NOT `&(…)`). `wrapper` is the resolved FFI symbol; `args` carry
+    /// the resolved per-arg clone decision. `cx.ffi_crate` is program-level (read at
+    /// emit, like Phase 10's regex form). I1: an extern call introduces no Rust
+    /// `unsafe` by itself — this reproduces the AST emit byte-for-byte, which emits no
+    /// `unsafe`.
+    ExternCall {
+        wrapper: String,
+        args: Vec<TExternArg>,
+    },
+}
+
+/// c109 Phase 14: a resolved cross-module call form. Each variant pre-resolves the
+/// path pieces of one `emit_call`/`emit_method_call` module-call arm; emit prepends
+/// `cx.root_prefix` exactly where the AST path does (or omits it where the AST does).
+pub(crate) enum TModuleCallForm {
+    /// `import_mods` qualified call (`mod.fn()`) and `reexport_calls` (`pub use`) —
+    /// both emit `{root}{rust_mod}::{rust_fn}(args)`. `rust_mod` is the resolved Rust
+    /// module name (`user_<stem>`); `rust_fn` is the mangled function name.
+    Qualified { rust_mod: String, rust_fn: String },
+    /// `code_modules` qualified call (`alias.method()`) and unqualified inline import —
+    /// both emit `{root}user_{mangled}(args)` where `mangled` is `alias__method`.
+    InlineMangled { mangled: String },
+}
+
+/// c109 Phase 14: a resolved FFI extern call argument (see `TExprKind::ExternCall`).
+/// `emit_extern_call_args` wraps the value in `(…).clone()` when the arg has an
+/// `implicit_clone` flag OR its param is a non-scalar `Read` (resolved here into one
+/// total `clone` bool; the `shared_auto_clone`/Arc form is excluded from the subset).
+pub(crate) struct TExternArg {
+    pub(crate) value: TExpr,
+    pub(crate) clone: bool,
 }
 
 /// c109 Phase 13: the three closure-taking core-call shapes (see
@@ -1625,19 +1672,35 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && c.args.len() == 1;
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
-            // unqualified module import (those lower to different call forms the
-            // subset does not emit).
+            // unqualified module import (those lower to different call forms — covered
+            // separately below in c109 Phase 14).
             let is_plain_fn = !locals.contains(&c.name)
                 && cx.sigs.contains_key(&c.name)
                 && !cx.extern_funcs.contains_key(&c.name)
                 && !cx.unqualified_inline.contains_key(&c.name)
                 && !cx.unqualified_file.contains_key(&c.name);
+            // c109 Phase 14: FFI extern + unqualified module-import calls are now
+            // covered. Each lowers to its own resolved call form (`emit_call`'s
+            // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
+            // priority MUST match `emit_call`: extern is checked before the unqualified
+            // arms, and a LOCAL/print/plain-fn callee was already claimed above. These
+            // are all top-level (non-local) names, so they are disjoint from the
+            // local-call branch. The extern arg form uses `emit_extern_call_args`
+            // (a non-scalar `Read` arg is `(…).clone()`, not `&(…)`) — reproduced in
+            // lowering; the Arc (`shared_auto_clone`) form stays excluded.
+            let is_extern = !locals.contains(&c.name) && cx.extern_funcs.contains_key(&c.name);
+            let is_unqual_inline = !locals.contains(&c.name)
+                && !cx.extern_funcs.contains_key(&c.name)
+                && cx.unqualified_inline.contains_key(&c.name);
+            let is_unqual_file = !locals.contains(&c.name)
+                && !cx.extern_funcs.contains_key(&c.name)
+                && cx.unqualified_file.contains_key(&c.name);
             // c109 Phase 13: a callee with a **Fn-typed parameter** is now covered.
             // The arg routes through `emit_call_args`'s `Box::new(…) as <fn-type>`
             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
             // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
             // local). No special exclusion remains — the Box-coercion is total.
-            (is_print || is_plain_fn)
+            (is_print || is_plain_fn || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
                     // No labels, no shared-auto-clone (Arc) in the subset.
                     a.label.is_none()
@@ -1958,6 +2021,27 @@ fn method_call_in_subset(
                         && args.iter().all(|a| {
                             a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
                         });
+                }
+                // Shape (i) [c109 Phase 14]: a qualified cross-module call
+                // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
+                // file/dir-module import (`import_mods`), or an inline code module
+                // (`code_modules`). The AST `emit_method_call` checks these in this
+                // exact order (after `core_imports`, already handled above). Each
+                // lowers to its resolved `{root}{mod}::{fn}` / `{root}user_{a}__{m}`
+                // form. Args carry their import-signature conventions, reproduced via
+                // `lower_one_call_arg`; the Arc form stays excluded.
+                let is_module_alias = cx
+                    .reexport_calls
+                    .contains_key(&(alias.clone(), method.to_string()))
+                    || cx.import_mods.contains_key(alias)
+                    || cx.code_modules.contains(alias.as_str());
+                if is_module_alias {
+                    return args.iter().all(|a| {
+                        a.label.is_none()
+                            && !a.flags.shared_auto_clone
+                            && arg_conv_in_subset(a)
+                            && expr_in_subset(&a.expr, cx, locals)
+                    });
                 }
             }
         }
@@ -3415,6 +3499,86 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::Print(Box::new(arg)),
                 };
             }
+            // c109 Phase 14: an FFI extern call (`emit_call`'s `extern_funcs` arm).
+            // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
+            // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
+            if !env.locals.contains_key(&call.name) {
+                if let Some(wrapper) = cx.extern_funcs.get(&call.name).cloned() {
+                    let sig = cx.sigs.get(&call.name).cloned();
+                    let eargs = call
+                        .args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| {
+                            let conv = sig.as_ref().and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
+                            lower_extern_call_arg(a, conv, env, cx)
+                        })
+                        .collect();
+                    // The extern fn's return type lives in `cx.fn_types` only if the
+                    // function is also a normal sig; extern fns are not in `fn_types`,
+                    // so fall back to Unit (the binding carries the real type — the call
+                    // result type is rarely load-bearing, like every covered call).
+                    return TExpr {
+                        ty: call_return_type(cx, &call.name),
+                        kind: TExprKind::ExternCall { wrapper, args: eargs },
+                    };
+                }
+                // c109 Phase 14: unqualified inline-module import (`emit_call`'s
+                // `unqualified_inline` arm) → `{root}user_{mangled}(args)`.
+                if let Some(mangled_key) = cx.unqualified_inline.get(&call.name).cloned() {
+                    let sig = cx.sigs.get(&mangled_key).cloned();
+                    let args = call
+                        .args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| {
+                            let conv = sig.as_ref().and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
+                            lower_one_call_arg(a, conv, env, cx)
+                        })
+                        .collect();
+                    return TExpr {
+                        ty: call_return_type(cx, &mangled_key),
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::InlineMangled { mangled: mangled_key },
+                            args,
+                        },
+                    };
+                }
+                // c109 Phase 14: unqualified file-module import (`emit_call`'s
+                // `unqualified_file` arm) → `{root}{rust_mod}::{mangle(fn)}(args)`. The
+                // AST looks up the sig under `(call.name, fn_name)`.
+                if let Some((rust_mod, fn_name)) = cx.unqualified_file.get(&call.name).cloned() {
+                    let sig = cx
+                        .import_sigs
+                        .get(&(call.name.clone(), fn_name.clone()))
+                        .cloned();
+                    let args = call
+                        .args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| {
+                            let conv = sig.as_ref().and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
+                            lower_one_call_arg(a, conv, env, cx)
+                        })
+                        .collect();
+                    let ret = cx
+                        .import_rets
+                        .get(&(call.name.clone(), fn_name.clone()))
+                        .cloned()
+                        .flatten()
+                        .unwrap_or_else(unit_type);
+                    return TExpr {
+                        ty: ret,
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::Qualified {
+                                rust_mod,
+                                rust_fn: mangle(&fn_name).to_string(),
+                            },
+                            args,
+                        },
+                    };
+                }
+            }
             // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
             // decided here, totally — via the shared `lower_one_call_arg` (the single
             // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
@@ -3928,6 +4092,70 @@ fn lower_method_call(
                         },
                     };
                 }
+                // c109 Phase 14: a qualified cross-module call `alias.method(args)`.
+                // The gate proved the alias is a re-export / import_mod / code_module.
+                // Mirror `emit_method_call`'s arms IN ORDER (reexport, import_mods,
+                // code_modules) — resolving the path pieces here so emit decides nothing.
+                if let Some((real_mod, real_fn)) =
+                    cx.reexport_calls.get(&(alias.clone(), method.to_string())).cloned()
+                {
+                    let sig = cx
+                        .import_sigs
+                        .get(&(alias.clone(), method.to_string()))
+                        .cloned();
+                    let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                    let ret = cx
+                        .import_rets
+                        .get(&(alias.clone(), method.to_string()))
+                        .cloned()
+                        .flatten()
+                        .unwrap_or_else(unit_type);
+                    return TExpr {
+                        ty: ret,
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::Qualified {
+                                rust_mod: real_mod,
+                                rust_fn: mangle(&real_fn).to_string(),
+                            },
+                            args: targs,
+                        },
+                    };
+                }
+                if let Some(mod_name) = cx.import_mods.get(alias).cloned() {
+                    let sig = cx
+                        .import_sigs
+                        .get(&(alias.clone(), method.to_string()))
+                        .cloned();
+                    let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                    let ret = cx
+                        .import_rets
+                        .get(&(alias.clone(), method.to_string()))
+                        .cloned()
+                        .flatten()
+                        .unwrap_or_else(unit_type);
+                    return TExpr {
+                        ty: ret,
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::Qualified {
+                                rust_mod: mod_name,
+                                rust_fn: mangle(method).to_string(),
+                            },
+                            args: targs,
+                        },
+                    };
+                }
+                if cx.code_modules.contains(alias.as_str()) {
+                    let mangled_key = format!("{}__{}", alias, method);
+                    let sig = cx.sigs.get(&mangled_key).cloned();
+                    let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                    return TExpr {
+                        ty: call_return_type(cx, &mangled_key),
+                        kind: TExprKind::ModuleCall {
+                            form: TModuleCallForm::InlineMangled { mangled: mangled_key },
+                            args: targs,
+                        },
+                    };
+                }
             }
         }
     }
@@ -4241,6 +4469,50 @@ fn lower_one_call_arg(
         arc_clone,
         fn_coerce,
     }
+}
+
+/// c109 Phase 14: lower a cross-module call's arguments against the callee's import
+/// signature, reproducing `emit_call_args`. Each arg's borrow/clone/fn-coercion is
+/// resolved from the sig param convention (the same `lower_one_call_arg` used by the
+/// plain-call path).
+fn lower_module_args(
+    args: &[crate::AST::CallArg],
+    sig: Option<&[(AccessConvention, Type)]>,
+    env: &mut LowerEnv,
+    cx: &Cx,
+) -> Vec<TCallArg> {
+    args.iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let conv = sig.and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
+            lower_one_call_arg(a, conv, env, cx)
+        })
+        .collect()
+}
+
+/// c109 Phase 14: lower one FFI extern-call argument, reproducing
+/// `emit_extern_call_args` (Source/Codegen/Expression.rs). The value is wrapped in
+/// `(…).clone()` when the arg carries `implicit_clone`, OR when its param is a
+/// non-scalar `Read`-convention type and `implicit_clone` is NOT already set (the AST
+/// `if a.flags.implicit_clone { … } else if … } if let Some((_, ty)) = sig … if
+/// !ty.is_scalar() && !implicit_clone`). The Arc (`shared_auto_clone`) form is excluded
+/// from the subset, so it never reaches here.
+fn lower_extern_call_arg(
+    a: &crate::AST::CallArg,
+    conv: Option<(AccessConvention, Type)>,
+    env: &mut LowerEnv,
+    cx: &Cx,
+) -> TExternArg {
+    let value = lower_expr(&a.expr, cx, env);
+    let non_scalar_param = conv
+        .as_ref()
+        .map(|(_, ty)| !ty.is_scalar())
+        .unwrap_or(false);
+    // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or the
+    // non-scalar-param clone (when implicit_clone is false). The two never stack — the
+    // AST applies the param clone only `&& !a.flags.implicit_clone`.
+    let clone = a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone);
+    TExternArg { value, clone }
 }
 
 /// c109 Phase 13: does this AST arg expression emit as a `Box::new(…)` (a bare
@@ -5419,6 +5691,42 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 )
             }
         },
+        // c109 Phase 14: a cross-module call. The path form was resolved at lowering;
+        // emit prepends `cx.root_prefix` exactly where the AST path does (both the
+        // qualified `{root}{mod}::{fn}` form and the inline `{root}user_{mangled}` form
+        // prefix with root). Args were resolved into `TCallArg`s (`emit_tir_call_args`).
+        TExprKind::ModuleCall { form, args } => {
+            let arg_str = emit_tir_call_args(args, cx);
+            match form {
+                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    format!("{}{}::{}({})", cx.root_prefix, rust_mod, rust_fn, arg_str)
+                }
+                TModuleCallForm::InlineMangled { mangled } => {
+                    format!("{}user_{}({})", cx.root_prefix, mangled, arg_str)
+                }
+            }
+        }
+        // c109 Phase 14: an FFI extern call. Reproduces `emit_call`'s `extern_funcs`
+        // arm: `{ffi_crate}::{wrapper}(args)`. `cx.ffi_crate` is program-level (read
+        // here, like Phase 10's regex form); the AST falls back to "jet_ffi" when it is
+        // `None` (always `Some` when an extern call is present, but mirror it exactly).
+        // Args use the extern arg form (`(…).clone()` for a non-scalar Read).
+        TExprKind::ExternCall { wrapper, args } => {
+            let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+            let arg_str = args
+                .iter()
+                .map(|a| {
+                    let s = emit_tir_expr(&a.value, cx);
+                    if a.clone {
+                        format!("({}).clone()", s)
+                    } else {
+                        s
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}::{}({})", crate_name, wrapper, arg_str)
+        }
     }
 }
 

@@ -814,6 +814,61 @@ everything, the AST codegen path is deleted (final phase).
   A routing sentinel confirmed the covered fns take the TIR path (`apply_twice`,
   `scope_guard` `with_guards`/`question_path`/`main`, `serve`, `write_one` route).
 
+## Refinements learned in Phase 14 (cross-module calls + FFI extern)
+
+- **The module-call surface is FIVE forms across `emit_call` + `emit_method_call`,
+  separated purely by which `cx` table holds the name — resolve the whole emitted path
+  at lowering into a total `TModuleCallForm`, emit does NO table lookup (I3).** The
+  forms: (1) qualified `mod.fn()` via `import_mods` → `{root}{user_mod}::user_{fn}`; (2)
+  `pub use` re-export via `reexport_calls` → `{root}{real_mod}::user_{real_fn}`; (3)
+  inline code module `alias.method()` via `code_modules` → `{root}user_{alias}__{method}`;
+  (4) unqualified inline import via `unqualified_inline` → `{root}user_{alias__method}`;
+  (5) unqualified file import via `unqualified_file` → `{root}{user_mod}::user_{fn}`.
+  (1)/(2)/(5) collapse to `TModuleCallForm::Qualified{rust_mod, rust_fn}`; (3)/(4) to
+  `InlineMangled{mangled}`. The ONLY program-level value emit reads is `cx.root_prefix`
+  (prepended exactly where the AST path prepends it — the recurring Phase-9/10 lesson:
+  `root_prefix`/`file`/`ffi_crate` stay emit-time program reads, never per-node decisions).
+- **The dispatch ORDER inside `emit_call`/`emit_method_call` is load-bearing and the
+  TIR must reproduce it.** `emit_call`: local-call → `extern_funcs` → `unqualified_inline`
+  → `unqualified_file` → plain mangle. `emit_method_call` (Ident-receiver alias arms):
+  `core_imports` (Phase 10) → `reexport_calls` → `import_mods` → `code_modules`. Both the
+  gate and the lowering check in that exact order; a name in two tables (none overlap in
+  practice, but the order is reproduced regardless) routes to the first.
+- **Module-call args reuse `lower_one_call_arg` against the callee's IMPORT signature,
+  not `cx.sigs`.** The conventions come from `cx.import_sigs[(alias, fn)]` (file/reexport
+  forms) or `cx.sigs[mangled_key]` (inline forms) or `cx.import_sigs[(name, fn)]`
+  (unqualified-file — the AST keys it on `(call.name, fn_name)`, which is often empty →
+  `None` sig → plain args; reproduced verbatim). A non-scalar `Read` arg becomes `&(…)`
+  exactly as `emit_call_args` does (verified: a String module-call arg emits `&("x".to_string())`).
+- **FFI extern args are a DISTINCT form (`emit_extern_call_args`) — a non-scalar `Read`
+  arg is `(…).clone()`, NOT `&(…)`.** `emit_call`'s `extern_funcs` arm uses
+  `emit_extern_call_args`, which wraps a value in `(…).clone()` when `implicit_clone`
+  OR (a non-scalar param AND not already implicit-cloned) — a by-value clone, never a
+  borrow. Carried as a total `TExternArg{value, clone: bool}` resolved at lowering; the
+  Arc (`shared_auto_clone`) form is excluded. The emitted call is `{ffi_crate}::{wrapper}(args)`
+  with `cx.ffi_crate` read at emit (like Phase-10's regex form, falling back to `"jet_ffi"`
+  exactly as the AST does). **I1 holds:** an extern call introduces no Rust `unsafe` by
+  itself — the AST path emits none, and the TIR reproduces it byte-for-byte; the `@unsafe`
+  gate surface (where `unsafe` *can* appear) is the separate, deferred Phase-17 work.
+- **A cross-module call's result type needed a NEW total table: `cx.import_rets`.** The
+  module-call RETURN type wasn't in `cx` (only the param conventions, in `import_sigs`).
+  Added `import_ret_map` (mirroring `import_sig_map`: file-module pub funcs, C-boundary
+  funcs, `pub use` re-exports) and wired it at every per-module + entry cx build. Inline
+  code-module funcs already carry their type in `cx.fn_types` (under the mangled key). The
+  call's `ty` is rarely load-bearing (a binding reads `b.ty`), but the design principle
+  is to carry a real type when one exists, never `unit_type()`-guess — so the table feeds
+  totality and lets a fallible module call compose with Phase-8 `?`/`??` if reached.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass
+  on `emit_func`/`emit_method`/`emit_trait_method`) across the **entire example suite** —
+  120 emittable (incl. 2 crafted module probes), 0 differ — exercising every module form:
+  inline qualified (`42`/`46`), file-module qualified (`43`/`44`), unqualified inline
+  (`45`/`46`), unqualified file (`48`), `pub use` re-export (`47`), and FFI extern (`22`,
+  incl. a multi-call String-arg probe — `(…).clone()` extern args). A routing sentinel
+  confirmed the covered fns take the TIR path: all 8 module/FFI example `main`s route,
+  plus the imported submodule fns (`47` `wrap`/`decorate`, the `42`/`45`/`46` module
+  bodies). `22_ffi` runs end-to-end (`aGk=`). tests/tir.rs adds 5 cases (inline qualified,
+  unqualified inline, file qualified + String arg, unqualified file, `pub use` re-export).
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
 After Phase 13 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
@@ -871,16 +926,6 @@ owns it, and the total fact still missing to cover it.
   sorted Slot dump byte-exact (the `LowerEnv.locals` map lacks the deref/jet_ty trio in
   sorted form). NOT lifted this phase — byte-exactness wasn't provable, and the gate
   (`orfallback_rhs_in_subset → Panic => false`) stays conservative.
-- **Imports/modules** (qualified `mod.fn()` via `import_mods`/`import_sigs`, `pub use`
-  re-exports via `reexport_calls`, inline code modules via `code_modules`,
-  unqualified-module-import calls) — `emit_method_call`'s `Expr::Ident` alias arms +
-  `emit_call`'s unqualified arms. The `Call` gate excludes `extern_funcs` +
-  `unqualified_inline`/`unqualified_file`; module-alias method calls fall through (only
-  `core_imports` aliases are covered). Missing: TIR call nodes for each module call
-  form (`{root}{mod}::{fn}(args)`).
-- **FFI extern (`extern rust`/`extern C`)** — `emit_call`'s `extern_funcs` arm + the
-  `cx.ffi_crate`-qualified call form. The `Call` gate excludes `extern_funcs`. Missing:
-  an extern-call TIR node reproducing the extern call emit.
 - **comptime-if (resolved branch)** — `emit_stmts` reads `Stmt::ComptimeIf.selected_then`
   to emit only the chosen branch. The gate's `stmt_in_subset` `_ => false` excludes it.
   Missing: a TIR lowering that emits only the `selected_then` branch's statements.
@@ -915,6 +960,7 @@ owns it, and the total fact still missing to cover it.
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | ✅ done (c109 Phase 10) — the **type-monomorphic** core/stdlib calls now route through the TIR (`TExprKind::CoreCall`). Covered: every `(module, method)` whose full signature is fixed by `Sema::core_fixed_sig` — `core.fs` (read/read_bytes/write/append/exists/is_dir/remove/create_dir/list_dir/copy/rename), `core.io` (args/read_all_input/stdin), `core.env` (get/set/current_dir/home_dir), `core.process` (exit/run), `core.math` (sqrt/pow/floor/ceil/round), `core.random` (int/float/seed), `core.time` (now/sleep/start), `core.json` + `jet.json` (parse/decode/render/render_pretty), `core.files` (open/create/append), `core.path` (join/parent/extension/normalize), `core.net` (all tcp_*), `jet.csv`/`jet.toml`/`jet.yaml` (parse/render), `jet.log` (info/warn/error/debug/set_level/set_trace_id/setup), `jet.time` (now/format), `jet.crypto` (sha256/sha256_bytes), `jet.http` (get/post), `jet.regex` (is_match/match/find/find_all/split/replace/replace_all). The `(module, method)` dispatch + per-arm `&(…)`/`&mut (…)`/move wrappers reproduce `emit_core_call` byte-for-byte; the return type comes from `core_fixed_sig` (totality), so a fallible core call composes with Phase-8 `?`/`??`. ~10 example fns route (across crafted programs exercising 24 covered core calls). Excludes (stay on AST path): closure-taking (`tasks.spawn`/`http.serve`/`scope.guard` → Phase 11); polymorphic math/random/io specials (`abs`/`min`/`max`/`clamp`/`pick`/`shuffle`/`io.input`/`io.eprint` — return type depends on arg type, not in the fixed table); handle-constructor specials not in the table (`tasks.channel`, `http.router`/`parse`/`dispatch`); `core.mem` ptr/alloc (`@unsafe`); and any use of a returned handle's METHOD surface (excludes the enclosing fn). Imports/modules (re-export, `import_mods`, inline code modules), FFI extern, comptime-if, arena/unsafe blocks are NOT yet covered (deferred within this phase). |
 | 12 | The tail: trait-impl method bodies, numeric-conversion methods, + a parity fix | ✅ done (c109 Phase 12, partial) — +7 unique trait-method bodies routed (`Circle`/`Square` `area`/`name`, `Person` `announce`/`greeting`, `ConsoleLogger` `log`). Covers: **trait-impl method bodies** (`emit_trait_method`, both the inline `impl Trait {}` and `impl T: Trait` and external-trait-impl forms — hooked via the shared `emit_trait_method`), as a new `TFuncKind::TraitMethod` — bare name (the trait owns it, no `user_` mangle), no `pub`, always-`&self` receiver, self slot `jet_ty: Some(Type::Named(T))` (NOT `None` as for inherent methods); the **numeric** predicate/bit/width-conversion methods (D-NUMOPS1: `is_nan`/`is_infinite`/`is_finite`, `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`, `to_i8`…`to_u64`/`to_int`/`to_f32`/`to_f64`/`to_float`, and numeric `to_string`) on a numeric receiver (`recv_type == Some(<numeric>)`) — a new `TExprKind::NumericMethod`/`TNumericOp`, the widening-vs-narrowing branch (`numeric_conversion`/`conv_rust_target`) resolved at lowering from the total `recv_type` width. Also fixes a **latent TIR-path parity bug**: an explicit `else { if … }` block was being flattened to `} else if …` (the AST keys solely on `ElseBranch`, never the else-body shape) — `TStmt::If` now carries `else_is_elseif` so only a real `ElseBranch::ElseIf` flattens. Excludes (stay on AST path): **delegation** (`emit_delegation_method`, `using field`), **generic-type** & **`view`-returning** & **`@unsafe fn`** trait methods; **fn-typed values** (Box-coercion); **closure-taking core calls** (`tasks.spawn`/`http.serve`/`scope.guard`); polymorphic math/random/io core specials; the `??` **panic** fallback; modules/imports, FFI extern, comptime-if, arena/`core.mem`/`#Unsafe` (see the AST-path inventory below). |
 | 13 | The call & method surfaces: fn-typed values, closure-core-calls, handle methods | ✅ done (c109 Phase 13, partial) — `24_callbacks.jet` `apply_twice` routes; `67_scope_guard.jet` `with_guards`/`question_path`/`main` route. Covers: **fn-typed values** — a `Type::Fn` param/return (now a covered subset type, `is_covered_fn_ty`); a bare top-level-fn name as a value (`Box::new(move \|…\| user_<name>(…)) as <fn-type>` via `emit_named_fn_value`, `TFnValueKind::NamedFn`); a call through a fn-value (`(f)(args)` as `Expr::CallValue`, and `f(args)` for a local-`f` as `Expr::Call`, both → `TFnValueKind::Call`); the `emit_call_args` `Box::new(…) as <fn-type>` arg-coercion (the shared `lower_one_call_arg` carries a total `TFnCoerce{fn_type_rust, already_boxed}`). The Phase-11 `no_fn_param`/`!Type::Fn` exclusions are lifted. The **closure-taking core calls** `tasks.spawn` (distinct `render_spawn_lambda` `move \|…\|` form), `http.serve` (lambda-handler branch), `scope.guard` (`TExprKind::CoreClosureCall`/`TCoreClosureKind`) with a literal in-subset lambda. The **handle methods** carrying `recv_type == Some(<handle>)` on FileReader/FileWriter/StdinHandle/TcpStream/TcpListener (`read_line`/`write_line`/`flush`/`accept`/`local_addr`/`read`/`write`/`peer_addr`/`close` — `TExprKind::HandleMethod`/`THandleOp`, the `&mut`/`&` handle arms of `emit_builtin_method`). Also fixes a **latent TIR-path parity bug**: a handle binding (FileReader/FileWriter/TcpStream/HttpRouter/Arena/…) wasn't forced to `let mut` (it must be, as its methods take `&mut self`); the TIR `Let` now resolves `kw`+`ty_clause` (+ the escaping-FnMut `as <fn-trait>` coercion) at lowering, reproducing `emit_let` exactly. Excludes (stay on AST path, with reason): **polymorphic core specials** (`math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint` — return type NOT a total fact, never written onto the node → I3); **`recv_type == None` handle methods** (`Stopwatch.elapsed_millis`, Task/Channel/Sender — a Phase-9 builtin gap, not the `Some` shape); **HttpRequest/HttpResponse accessors** (serve-lambda-param slot may be `None` → AST `rty` arm wouldn't fire → divergence); **`Match.group`**, **Arena/Bump/Pool/Fixed** methods (producer not covered); bare **`?? return`** (an upstream `??` gate gap); the `??` **panic** fallback. |
+| 14 | Cross-module calls + FFI extern | ✅ done (c109 Phase 14) — all 8 module/FFI example `main`s route (`22_ffi`, `42`–`48` module forms), plus imported submodule bodies (`47` `wrap`/`decorate`, the inline-module fns in `42`/`45`/`46`). Covers the FIVE cross-module call forms — qualified `mod.fn()` (`import_mods`), `pub use` re-export (`reexport_calls`), inline code module `alias.method()` (`code_modules`), unqualified inline import (`unqualified_inline`), unqualified file import (`unqualified_file`) — each resolved at lowering into a total `TExprKind::ModuleCall`/`TModuleCallForm` (`Qualified{rust_mod, rust_fn}` or `InlineMangled{mangled}`); emit only prepends `cx.root_prefix` (program-level) where the AST does. Also covers **FFI extern** (`extern rust`/`extern C`) — `emit_call`'s `extern_funcs` arm as a total `TExprKind::ExternCall{wrapper, args}` reproducing `emit_extern_call_args` (a non-scalar `Read` arg is `(…).clone()`, NOT `&(…)`); the call is `{ffi_crate}::{wrapper}(args)` with `cx.ffi_crate` read at emit. Module-call args resolve their conventions from `cx.import_sigs`/`cx.sigs`; a new `cx.import_rets` table (`import_ret_map`) supplies the call's total return type. The gate widens the `Call` arm (extern/unqualified) and `method_call_in_subset` (reexport/import_mods/code_modules), reproducing `emit_call`/`emit_method_call`'s dispatch ORDER exactly. **I1:** an extern call introduces no Rust `unsafe` by itself — reproduced byte-for-byte (no `unsafe` emitted); the audited `@unsafe` gate surface is the separate, deferred Phase-17 work. Excludes (stay on AST path): the `@unsafe`/`#Unsafe`/`core.mem` ptr+alloc surface, comptime-if, and the other AST-path inventory entries (mixed switches, payload/boxed/generic types, latent-bug-gated constructs). |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

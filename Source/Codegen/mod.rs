@@ -357,6 +357,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
+        cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
         cx.root_prefix = "super::".to_string();
@@ -380,6 +381,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
     cx.used_core = bundle.used_core.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
@@ -445,6 +447,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
         update_cloneability_with_foreign_types(&mut cx, &module.items);
         cx.reexport_calls = reexport_call_map(bundle, i);
         cx.import_sigs = import_sig_map(bundle, i);
+        cx.import_rets = import_ret_map(bundle, i);
         cx.core_imports = core_import_map(bundle, i);
         cx.used_core = bundle.used_core.clone();
         cx.root_prefix = "super::".to_string();
@@ -469,6 +472,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     update_cloneability_with_foreign_types(&mut cx, &entry.items);
     cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
     cx.import_sigs = import_sig_map(bundle, bundle.entry);
+    cx.import_rets = import_ret_map(bundle, bundle.entry);
     cx.core_imports = core_import_map(bundle, bundle.entry);
     cx.used_core = bundle.used_core.clone();
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);

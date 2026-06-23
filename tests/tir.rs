@@ -1682,3 +1682,213 @@ fn main() {{
     // write_file returns 1 (success); the file contains the written line + newline.
     assert_eq!(stdout, "1\nhello handle\n\n");
 }
+
+/// Build + run a multi-file program: write each `(relative path, source)` pair into a
+/// fresh temp dir, compile the entry, then rustc + run. Used by the Phase-14
+/// cross-module tests, which need sibling module files on disk.
+fn build_and_run_multi(name: &str, entry: &str, files: &[(&str, &str)]) -> (i32, String) {
+    let dir = std::env::temp_dir().join(format!("jet_tir_multi_{}_{}", name, std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for (rel, src) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, src).unwrap();
+    }
+    let entry_path = dir.join(entry);
+    let shown = entry_path.to_string_lossy().into_owned();
+    let entry_src = fs::read_to_string(&entry_path).unwrap();
+    let out = jet::compile_with_path(&entry_src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, &entry_src, &diags)
+        )
+    });
+    let rs = dir.join(format!("{name}.rs"));
+    let bin = dir.join(name);
+    fs::write(&rs, &out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected generated code (I2 violation):\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    (run.status.code().unwrap_or(0), String::from_utf8_lossy(&run.stdout).into_owned())
+}
+
+/// c109 Phase 14: a qualified inline code-module call `math.double(5)` (D-MOD2).
+/// `main` routes through the TIR (`ModuleCall::InlineMangled` → `user_math__double`),
+/// as do the module's own functions. rustc accepting proves byte-parity.
+#[test]
+fn inline_code_module_qualified_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+module math {
+    pub fn double(n: Int) -> Int {
+        return (n * 2)
+    }
+    pub fn add(a: Int, b: Int) -> Int {
+        return (a + b)
+    }
+}
+fn main() {
+    print(math.double(5))
+    print(math.add(3, 4))
+}
+";
+    let (code, stdout) = build_and_run("tir_inline_mod", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\n7\n");
+}
+
+/// c109 Phase 14: an unqualified inline-module import `use math.double` (D-MOD3).
+/// The bare `double(7)` lowers via `emit_call`'s `unqualified_inline` arm
+/// (`ModuleCall::InlineMangled`). `main` routes through the TIR.
+#[test]
+fn unqualified_inline_module_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use math.double
+module math {
+    pub fn double(n: Int) -> Int {
+        return (n * 2)
+    }
+}
+fn main() {
+    print(double(7))
+}
+";
+    let (code, stdout) = build_and_run("tir_unqual_inline", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "14\n");
+}
+
+/// c109 Phase 14: a qualified file-module call `math.clamp(...)` (D-MOD1). `main`
+/// routes through the TIR (`ModuleCall::Qualified` → `user_math::user_clamp`); the
+/// imported module's `clamp` routes too. A String-arg module call also exercises the
+/// `&(...)` Read-borrow arg form.
+#[test]
+fn file_module_qualified_call() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+module math
+fn main() {
+    print(math.clamp(15, 0, 10))
+    print(math.tag(\"x\", 5))
+}
+";
+    let math_src = "\
+pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if (x < lo) {
+        return lo
+    }
+    if (x > hi) {
+        return hi
+    }
+    return x
+}
+pub fn tag(prefix: String, n: Int) -> String {
+    return \"{prefix}:{n}\"
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_file_mod",
+        "main.jet",
+        &[("main.jet", main_src), ("math.jet", math_src)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\nx:5\n");
+}
+
+/// c109 Phase 14: an unqualified file-module import `use mathlib.{clamp, lo, hi}`
+/// (D-MOD3). The bare calls lower via `emit_call`'s `unqualified_file` arm
+/// (`ModuleCall::Qualified` → `user_mathlib::user_*`). `main` routes through the TIR.
+#[test]
+fn unqualified_file_module_call() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+use mathlib.clamp
+use mathlib.{lo, hi}
+module mathlib
+fn main() {
+    print(clamp(200, lo(), hi()))
+}
+";
+    let mathlib_src = "\
+pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
+    if (n < lo) {
+        return lo
+    }
+    if (n > hi) {
+        return hi
+    }
+    return n
+}
+pub fn lo() -> Int {
+    return 0
+}
+pub fn hi() -> Int {
+    return 100
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_unqual_file",
+        "main.jet",
+        &[("main.jet", main_src), ("mathlib.jet", mathlib_src)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "100\n");
+}
+
+/// c109 Phase 14: a `pub use` re-export (D-MOD4). `text.wrap(...)` resolves through
+/// the directory module's `pub use wrap.wrap` and lowers via `reexport_calls`
+/// (`ModuleCall::Qualified` → `user_wrap::user_wrap`). The String arg exercises the
+/// Read-borrow form (`&(...)`). `main` + the submodule fns route through the TIR.
+#[test]
+fn reexport_module_call() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+module text
+fn main() {
+    print(text.wrap(\"hi\"))
+}
+";
+    let module_src = "\
+pub use wrap.wrap
+module wrap
+";
+    let wrap_src = "\
+pub fn wrap(s: String) -> String {
+    return \"[{decorate(s)}]\"
+}
+fn decorate(s: String) -> String {
+    return \"{s}\"
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_reexport",
+        "main.jet",
+        &[
+            ("main.jet", main_src),
+            ("text/module.jet", module_src),
+            ("text/wrap.jet", wrap_src),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "[hi]\n");
+}
