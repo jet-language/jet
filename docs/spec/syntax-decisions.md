@@ -70,7 +70,8 @@ block hollows out private-by-default, and positional grouping dictates
 how users must structure their files. Per-item `pub` stands; revisit
 only with post-v1 evidence of real boilerplate pain.
 
-**S10 — Ownership keywords (M2)** *(ratified 2026-06-11)*: `**mut`**
+**S10 — Ownership keywords (M2)** *(ratified 2026-06-11; **spelling superseded 2026-06-23
+by D-CAP7** — `mut`→`~`, `take`→`^`, `view`→`&`, default-read→bare `T`)*: `**mut`**
 (mutable borrow), `**take**` (move), `**view**` (borrow return type),
 `**ref**` (stored field, tier 2). Default parameter access has no keyword
 (shared read). Rejected: `read` / `write` / `owned` as canonical forms.
@@ -667,7 +668,11 @@ marks a whole-function contract; calling one requires an enclosing `#Unsafe`
 block. Taking a pointer (`&x`) is legal outside a block (a pointer is inert
 data); *using* one (`*p`, `.offset`) requires the block. `&`/`*` are **core
 grammar, sema-gated**: outside the gates they keep producing E0208-family
-teaching errors. Codegen lowers blocks to Rust `unsafe`; **I1 is amended** —
+teaching errors. **Collision flagged (D-CAP7, 2026-06-23):** D-CAP7 reuses `&`/`*` as
+the share/raw access sigils, where `&x`=share and `*x`=raw-pointer-of clash with this
+tier's `&x`=address-of / `*p`=deref. Reconciliation (and whether `*T` replaces or aliases
+`Ptr<T>`) is **deferred to D-CAP9 (c127) + c131** — expression-position sigils don't ship
+until it's decided. Codegen lowers blocks to Rust `unsafe`; **I1 is amended** —
 generated `unsafe` appears only inside user-gated regions plus vetted std/mem
 internals. Onboarding materials never mention any of it.
 Rejected: bare `unsafe { }` / `unsafe fn` (former S58 spelling), `trust`
@@ -1734,6 +1739,11 @@ model (D-CAP1/4/5/6). D-CAP2 (copy/share form) and D-CAP3 (annotation order) sta
 **open** — until they ratify, the capability words below are reserved spellings only;
 their parameter-position syntax is not yet finalized.
 
+> **Spelling superseded 2026-06-23 — see D-CAP7.** D-CAP2/D-CAP3 later ratified
+> (2026-06-22), then the owner replaced the whole word vocabulary with prefix sigils
+> (`T`/`~T`/`^T`/`&T`/`*T`). The four capabilities are unchanged; only the spelling moved
+> from words to sigils. D-CAP4/5/6 (metadata) are unaffected.
+
 **D-TGT1 — `targets:` replaces `kind:`** *(ratified 2026-06-21, option B; owner:
 "fully remove kind, we are still greenfield"; supersedes U10 / D-ILE1 on the kind
 field)*: a package declares a **`targets:` list**, not a `kind:`. `kind:` is **removed
@@ -1767,7 +1777,8 @@ in the package; a **`test { entry: … }`** target is optional, for an out-of-tr
 integration file. Both run. Rejected: an explicit `test` target carrying everything,
 `#test` not auto-run (option A); implicit-only with no out-of-tree slot (option B).
 
-**D-CAP1 — capability keyword spellings** *(ratified 2026-06-21, option A)*: the
+**D-CAP1 — capability keyword spellings** *(ratified 2026-06-21, option A; **spelling
+superseded 2026-06-23 by D-CAP7** — the four capabilities survive, now sigils `T`/`~`/`^`/`&`)*: the
 four-capability vocabulary is **`view` / `edit` / `take` / `share`**. `view` and `take`
 are already ratified ownership keywords (S10); **`edit`** and **`share`** are new
 reserved capability words. Parameter-position placement is still **open (D-CAP3)** and
@@ -1795,6 +1806,63 @@ Inference already guarantees capability *safety*, so explicitness buys documenta
 not correctness — keeping it opt-in honors the simplicity ratchet (I8). Rejected:
 flipping to mandatory-explicit at 1.0 (option B — silent future break); explicit from
 day one (option C — taxes the beginner for what inference provides).
+
+**D-CAP7 — capability is a prefix sigil, not a keyword** *(ratified 2026-06-23, owner
+mandate)*: the four value-access capabilities are spelled as **prefix sigils on the
+type**, replacing the word vocabulary of D-CAP1/2/3. The surface is owner-frozen
+(`docs/prompt-memory-model-final.md`) — do not re-spell it:
+
+```jet
+T     // infer: starts at read/view, elevates only as the body requires
+~T    // edit:  exclusive write/mutate access
+^T    // take:  ownership moved/consumed
+&T    // share: may escape the scope, be retained, cached, spawned, stored
+*T    // raw:   unsafe pointer/address (gated; see S58 collision below)
+```
+
+The same signature in the retired words vs the ratified sigils:
+
+```jet
+// D-CAP1/3 (retired spelling)
+fn write(file: edit File, data: view Bytes)
+fn equip(player: edit Player, item: take Item)
+
+// D-CAP7 (ratified)
+fn write(file: ~File, data: Bytes)        // view is the inferred default → no sigil
+fn equip(player: ~Player, item: ^Item)
+```
+
+The call site mirrors the type — `damage(~player, 10)`, `close(^file)`, `cache(&texture)`
+— and method receivers carry the sigil on `self`: `fn damage(~self)`, `fn destroy(^self)`,
+`fn share(&self)`; plain `self` is infer/read.
+
+**Supersedes / amends:**
+- **S10** — `mut` → `~`, `take` → `^`, `view` (borrow-return) → `&`, default-read → bare
+  `T`. The retired keywords (`mut`, `view`) become S14 teaching errors pointing at the
+  sigils.
+- **D-CAP1** — the words `view`/`edit`/`take`/`share` are retired *as the spelling*; the
+  four capabilities they named are preserved unchanged, now written `T`/`~`/`^`/`&`.
+- **D-CAP2** — the call-site `share x` verb becomes `&x`. `copy x` has **no sigil** (the
+  five-sigil set is closed); duplication is a value op, not an access capability, so it
+  stays a verb/method — a residual to settle, not a sixth sigil.
+- **D-CAP3** — type-side placement is **kept** (`name: ~Type`, exactly like `name: Type`);
+  only the marker changes from word to sigil.
+- **D-CAP4/5/6** — unchanged: the `api: stable | explicit` mechanism still records resolved
+  public capabilities; it now records sigils.
+- **D-MUTSELF1** — unchanged in substance: `~self` may mutate its receiver in place; the
+  `mut self` semantics carry over to the new spelling.
+
+**Still open — do not ship expression-position sigils past these:**
+- **`&` / `*` collide with S58.** S58 already gives `&x` = *take a pointer (address-of)*
+  and `*p` = *dereference*. The new `&x` = share and `*x` = raw-pointer-of collide head-on.
+  The disambiguation — and whether `*T` replaces or aliases `Ptr<T>` — is deferred to
+  **D-CAP9 (c127)** and **c131**.
+- **Infer-and-elevate default** (unmarked `T` elevates by usage rather than being fixed
+  shared-read) is **D-CAP8 (c125)**; today's E0202/E0205 depend on the fixed-read default.
+- **Capability overloads** are **D-CAP10 (c128)** — may be out of scope under S14.
+
+Rejected: keeping the word vocabulary (D-CAP1/2/3 as-was); a words-in-libraries /
+sigils-in-apps split; a sixth sigil for `copy`.
 
 ### Safety tiers — scoped capabilities, units, single-use (ratified 2026-06-21)
 
@@ -1999,12 +2067,14 @@ by copying into a growable list when passed to a `[T]` slot; `var x := [1,2,3]` 
 S76's beginner rule (widens to `[Int]`). Unlocks `#Uninit` (D-UNINIT1) soundness with no
 new syntax. UNBLOCKED. (c82)
 
-**D-CAP2 — `copy` / `share` are prefix keywords** *(ratified 2026-06-22, option A)*:
+**D-CAP2 — `copy` / `share` are prefix keywords** *(ratified 2026-06-22, option A;
+**amended 2026-06-23 by D-CAP7** — `share x`→`&x`; `copy` stays a verb, has no sigil)*:
 duplicate-vs-share after a `take` is spelled with a leading verb at the call site —
 `party.add(copy player)` / `party.add(share player)` — never inferred (the plan kills
 implicit clone, L0201). UNBLOCKED. (c06)
 
-**D-CAP3 — capability sits on the type side** *(ratified 2026-06-22, option A)*: parameter
+**D-CAP3 — capability sits on the type side** *(ratified 2026-06-22, option A; **kept by
+D-CAP7** — placement unchanged, only word→sigil)*: parameter
 capability attaches to the type, not the binding: `fn write(file: edit File, data: view
 Bytes)`. Consistent with `name: Type` everywhere; no type written ⇒ capability inferred
 too (one location for both). UNBLOCKED. (c06)
@@ -2321,6 +2391,7 @@ upgrade that must re-earn an owner crate sign-off.
 
 | Date       | ID  | Decision                                    | By    |
 | ---------- | --- | ------------------------------------------- | ----- |
+| 2026-06-23 | D-CAP7 | capability is a prefix sigil, not a keyword (owner mandate): `T` infer / `~T` edit / `^T` take / `&T` share / `*T` raw, on the type (`name: ~Type`) and mirrored at the call site (`~player`, `^file`, `&texture`) and on receivers (`~self`). Supersedes the word spelling of S10 (`mut`/`take`/`view`) and D-CAP1/2/3; the four capabilities are unchanged. `copy` stays a verb (no sigil). OPEN downstream: `&`/`*` vs S58 address-of/deref (D-CAP9, c127), infer-and-elevate default (D-CAP8, c125), overloads (D-CAP10, c128). Surface frozen in docs/prompt-memory-model-final.md. c124 | owner |
 | 2026-06-22 | D-UNSAFE2 | merge audit text into unsafe (B): the safety reason becomes the argument to the gate — `#Unsafe("reason") { … }` / `#Unsafe("reason") fn` — and the separate `#Audit("…")` marker is retired (the unsafe description IS the review artifact). Amends D-LL1/E2-M13; `#Audit` → teaching error pointing at `#Unsafe("…")`. UNBLOCKED. c09 | owner |
 | 2026-06-22 | D-FIXARR1 | `[T#N]` lowers to a real fixed stack array (B): the ratified S76 type becomes a real fixed-size stack array in codegen (no `Vec`); copies when `T` copyable, moves otherwise; widens to `[T]` by copy into a growable list when passed to a `[T]` slot; `var x := [1,2,3]` keeps S76 (widens to `[Int]`). Unlocks `#Uninit` (D-UNINIT1) soundness, no new syntax. UNBLOCKED. c82 | owner |
 | 2026-06-22 | D-CAP2 | `copy`/`share` are prefix keywords (A): duplicate-vs-share after a `take` is a leading call-site verb (`add(copy player)` / `add(share player)`), never inferred (kills implicit clone L0201). UNBLOCKED. c06 | owner |

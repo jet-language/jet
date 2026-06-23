@@ -1,5 +1,5 @@
 {
-  "scratch": "",
+  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better",
   "cards": [
     {
       "id": "c06",
@@ -1328,7 +1328,7 @@
       "type": "task",
       "title": "Introduce a checked IR boundary before codegen",
       "body": "Audit finding: parser, sema, and codegen share the AST plus side registries; codegen still contains semantic-ish lowering and placeholders. Add a HIR/TIR/MIR-style checked representation so codegen consumes mechanically validated facts. Evidence: docs/spec/architecture.md describes checked AST; Source/Sema/Bundle.rs mutates/checks ProgramBundle; Source/Codegen/Context.rs performs type lowering; Source/Codegen/Expression.rs has FileReader.lines placeholder; Source/Codegen/Statement.rs adds unreachable fallback arms.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P0",
       "workOrder": 4,
       "plan": "checked-ir-boundary",
@@ -1340,10 +1340,14 @@
         {
           "t": "Plan added 2026-06-22: checked-ir-boundary. No open owner decision blocks the plan; next step is implementation on go.",
           "at": "2026-06-22"
+        },
+        {
+          "t": "DONE 2026-06-23. The typed IR (Source/Codegen/TIR.rs) is now the only codegen seam (R7): every emitted body (free fns, methods, trait methods, #Test blocks, error-conversion impl bodies) lowers through it with zero inference; a construct outside the TIR subset is a clean ICE, never an AST fallback or miscompile. Built incrementally over phases 1-30 + a fix-first stage (13 latent I2 holes fixed incl. D-MUTSELF1 self-mutation) + whole-test-suite gate-miss coverage; the legacy AST emit machinery was deleted (~3200 lines: Expression.rs removed, emit_expr/emit_stmt/expr_jet_ty/operand_is_integer/numeric_conversion gone). Full suite 866/0, golden byte-identical, 0 gate-miss across the corpus. Working docs removed; durable notes archived in docs/spec/architecture.md (TIR codegen-seam subsection).",
+          "at": "2026-06-23"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-22"
+      "updated": "2026-06-23"
     },
     {
       "id": "c110",
@@ -1580,6 +1584,188 @@
       ],
       "created": "2026-06-22T00:00:00Z",
       "updated": "2026-06-22T00:00:00Z"
+    },
+    {
+      "id": "c124",
+      "type": "task",
+      "title": "Sigil access model: adopt ~ ^ & * (supersede mut/take/view + D-CAP1 words)",
+      "body": "Owner mandate (2026-06-23): the prefix capability sigils in docs/prompt-memory-model-final.md are FINAL and must not change — T=infer, ~T=write/edit, ^T=move/take, &T=share/escape, *T=raw. This supersedes the ratified word vocabulary: mut/take/view/ref (S10) and the D-CAP1 view/edit/take/share terms. Action: log a new ratified entry (proposed D-CAP7), amend S10 + D-CAP1 + S58 in docs/spec/syntax-decisions.md, then migrate parser+sema to sigils. No dual vocabulary. Umbrella for c125-c131.",
+      "stage": "deciding",
+      "priority": "P2",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "D-CAP7 ratified entry written to docs/spec/syntax-decisions.md 2026-06-23 (spelling fixed; S10 + D-CAP1/2/3 amended, S58 collision flagged). Remaining work GATED on the P1 cards c125/c127/c128 before any src change.",
+          "at": "2026-06-23"
+        },
+        {
+          "t": "Surfaced from review of the rewritten prompt (proc->fn, #Unsafe, struct literals all corrected). Sigils + philosophy preserved verbatim; this card group tracks the deltas to implement them.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": [
+        "D-CAP7"
+      ]
+    },
+    {
+      "id": "c125",
+      "type": "task",
+      "title": "Unmarked T = infer-and-elevate (not fixed shared-read)",
+      "body": "The new model makes an unmarked param start as Infer and elevate to Read/Write/Move/Share from body usage. Today an unmarked param is FIXED shared-read and mutating it is an error (E0202 needs mut, E0205 needs mut self). Adopting infer-and-elevate removes or repoints those triggers and changes the meaning of existing programs. Needs an owner decision (proposed D-CAP8) plus a differential check that resolution is deterministic.",
+      "stage": "deciding",
+      "priority": "P1",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "GATING FACTOR (D-CAP8) — D-CAP7 says do not build past this. Raised to P1 2026-06-23.",
+          "at": "2026-06-23"
+        },
+        {
+          "t": "Biggest semantic delta: deletes/repoints existing ownership diagnostics; verify against examples corpus.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": [
+        "D-CAP8"
+      ]
+    },
+    {
+      "id": "c126",
+      "type": "task",
+      "title": "Capability inference engine: AccessCapability enum + constraint solver",
+      "body": "Extend the internal AccessConvention {Read,Mutate,Move} into {Infer,Read,Write,Move,Share,Raw} and build deterministic constraint solving with a stable fixed point (sorted iteration order; no optimizer feedback into semantic resolution). Maps to Phases 3-5 of docs/prompt-memory-model-final.md. Gated on D-CAP7 (c124) and D-CAP8 (c125).",
+      "stage": "deciding",
+      "priority": "P2",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "Pure build but blocked until the sigil adoption + default-param semantics are ratified.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": []
+    },
+    {
+      "id": "c127",
+      "type": "task",
+      "title": "Parser: prefix sigil disambiguation (~ ^ & *) vs existing operators",
+      "body": "Lex/parse ~T ^T &T *T in type position and ~x ^x &x *x in expression position. Resolve collisions: ~ vs ~~ trait-attach (S83); ^ vs ^/^= bitwise xor; & vs &&/&=; * vs * multiply AND the current * dereference. Critically, pin the *x address-of vs dereference rule: bare *x outside #Unsafe is a deref today (E0208). Needs a decision on *x meaning (proposed D-CAP9).",
+      "stage": "deciding",
+      "priority": "P1",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "GATING FACTOR (D-CAP9) — the &/* collision with S58 must resolve before any expression-position sigil parsing. Raised to P1 2026-06-23.",
+          "at": "2026-06-23"
+        },
+        {
+          "t": "Prefix-vs-infix is position-disambiguated; the deref/address-of split is the one that needs an explicit rule.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": [
+        "D-CAP9"
+      ]
+    },
+    {
+      "id": "c128",
+      "type": "task",
+      "title": "Capability-only overloads vs Jet's no-overload policy - scope call",
+      "body": "The prompt's process(Data)/process(~Data) overload-by-capability section conflicts with Jet's one-canonical-spelling (S14) + traits-only polymorphism stance (no general function overloading). Decide whether capability overloads are in scope at all, or whether this collapses to call-site sigil disambiguation on a single definition (proposed D-CAP10).",
+      "stage": "deciding",
+      "priority": "P1",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "GATING FACTOR (D-CAP10) — D-CAP7 says do not build past this; scope must be settled (may be out of scope under S14). Raised to P1 2026-06-23.",
+          "at": "2026-06-23"
+        },
+        {
+          "t": "May be out of scope entirely; flag before building the overload-resolution section.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": [
+        "D-CAP10"
+      ]
+    },
+    {
+      "id": "c129",
+      "type": "task",
+      "title": "Freeze resolved capability signatures into api=stable|explicit metadata",
+      "body": "Public functions' resolved capabilities become part of the API contract; a read -> ~/^/& change is a breaking change. Wire through the existing api = stable | explicit manifest mode (D-CAP4/D-CAP6) and include capability signatures in package pinning/hash. Aligned with ratified work, so this is build, not a fresh decision.",
+      "stage": "deciding",
+      "priority": "P3",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "Aligns with already-ratified D-CAP4/D-CAP6; no new owner decision needed, just implementation once the model lands.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": [
+        "D-CAP4",
+        "D-CAP6"
+      ]
+    },
+    {
+      "id": "c130",
+      "type": "task",
+      "title": "&T share composes with region/arena/view (not a new mechanism)",
+      "body": "&T (share/escape) must reuse the existing region {} blocks, arena allocators, and scope-bound arena views (D-ALLOC2/D-REGION1) plus task sendability - never silently infer & for performance, only on real escape/retention. Map escape/lifetime errors onto the existing E0631/E0632/E1102 vocabulary instead of adding a parallel set.",
+      "stage": "deciding",
+      "priority": "P3",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "Alignment item: the share capability is the surface for machinery that already exists.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": [
+        "D-ALLOC2",
+        "D-REGION1"
+      ]
+    },
+    {
+      "id": "c131",
+      "type": "task",
+      "title": "*T raw reconcile with Ptr<T> + core.mem + #Audit (S58)",
+      "body": "*T is the surface form for today's Ptr<T> behind the core.mem gate. Reconcile the two spellings; require an enclosing #Unsafe context plus an #Audit(\"...\") justification on memory-unsafe ops; keep raw uninferable in safe code. Decide whether *T replaces or aliases Ptr<T> - ties into the *x deref/address-of rule (D-CAP9, c127).",
+      "stage": "deciding",
+      "priority": "P3",
+      "workOrder": null,
+      "plan": "memory-capability-model",
+      "notes": [
+        {
+          "t": "Couples to c127's deref/address-of decision; resolve together.",
+          "at": "2026-06-23"
+        }
+      ],
+      "created": "2026-06-23T00:00:00Z",
+      "updated": "2026-06-23T00:00:00Z",
+      "decisions": []
     }
   ],
   "questions": [
