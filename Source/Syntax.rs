@@ -491,6 +491,14 @@ pub const BUILTIN_REQUIRE: &str = "require";
 /// S43 (ratified M6): equality assertion in test blocks.
 pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
 
+/// D-CTIO1 (ratified 2026-06-22): the two sanctioned build-time I/O builtins.
+/// `embed_file("path") -> String` bakes a file's UTF-8 text into the binary;
+/// `embed_bytes("path") -> [U8]` bakes its raw bytes (binary-safe). The path
+/// must be a string literal, resolved relative to the source file, with no
+/// `..`-escape past the project root. Only valid in a `comptime` binding.
+pub const BUILTIN_EMBED_FILE: &str = "embed_file";
+pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
+
 /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
 /// top-level test-declaration block, written as the marker `#Test "name" { … }`.
 /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,

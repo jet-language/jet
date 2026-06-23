@@ -14,6 +14,10 @@ pub enum CtValue {
     Bool(bool),
     Char(char),
     Str(String),
+    /// A `[U8]` byte buffer (D-CTIO1 `embed_bytes`). Kept distinct from `List`
+    /// so it recovers `[U8]` (not `[Int]`) and serializes to `vec![..u8]` —
+    /// binary-safe, with no UTF-8 requirement.
+    Bytes(Vec<u8>),
     List(Vec<CtValue>),
     Map(BTreeMap<CtKey, CtValue>),
     Struct {
@@ -80,6 +84,8 @@ impl CtValue {
             CtValue::Bool(_) => Type::Bool,
             CtValue::Char(_) => Type::Char,
             CtValue::Str(_) => Type::String,
+            // D-SG9: `embed_bytes` yields `[U8]` — a list of unsigned 8-bit ints.
+            CtValue::Bytes(_) => Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
             CtValue::List(xs) => {
                 let inner = xs.first().map(|x| x.jet_type()).unwrap_or(Type::Int);
                 Type::List(Box::new(inner))
@@ -113,6 +119,10 @@ impl CtValue {
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => c.to_string(),
             CtValue::Str(s) => s.clone(),
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                format!("[{}]", parts.join(", "))
+            }
             CtValue::List(xs) => {
                 let parts: Vec<String> = xs.iter().map(|x| x.jet_show()).collect();
                 format!("[{}]", parts.join(", "))
@@ -166,6 +176,12 @@ impl CtValue {
                 out.push('"');
                 out.push_str(s);
                 out.push('"');
+            }
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                out.push('[');
+                out.push_str(&parts.join(", "));
+                out.push(']');
             }
             CtValue::List(xs) => {
                 if xs.is_empty() {
@@ -276,6 +292,10 @@ impl CtValue {
                 out.push('"');
                 out
             }
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                format!("[{}]", parts.join(","))
+            }
             CtValue::List(xs) => {
                 let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();
                 format!("[{}]", parts.join(","))
@@ -331,6 +351,11 @@ impl CtValue {
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("{:?}", c),
             CtValue::Str(s) => format!("{:?}.to_string()", s),
+            // `[U8]` lowers to `Vec<u8>` (I3); inline the bytes as `u8` literals.
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| format!("{}u8", b)).collect();
+                format!("vec![{}]", parts.join(", "))
+            }
             CtValue::List(xs) => {
                 let parts: Vec<String> = xs.iter().map(|x| x.serialize()).collect();
                 format!("vec![{}]", parts.join(", "))

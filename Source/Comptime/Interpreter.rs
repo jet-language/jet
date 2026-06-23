@@ -378,6 +378,18 @@ impl<'a> Interp<'a> {
                         }
                         Ok(Flow::Normal)
                     }
+                    CtValue::Bytes(bs) => {
+                        for byte in bs {
+                            self.burn(span)?;
+                            scope.insert(var.to_string(), CtValue::Int(byte as i64));
+                            match self.exec_block(body, scope)? {
+                                Flow::Break => break,
+                                Flow::Continue | Flow::Normal => {}
+                                ret @ Flow::Return(_) => return Ok(ret),
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
                     CtValue::Map(m) => {
                         for (k, v) in m {
                             self.burn(span)?;
@@ -569,6 +581,11 @@ impl<'a> Interp<'a> {
                 let i = self.eval(index, scope)?;
                 match b {
                     CtValue::List(xs) => list_get(&xs, as_int(&i, index.span())?, *span),
+                    CtValue::Bytes(bs) => {
+                        let xs: Vec<CtValue> =
+                            bs.iter().map(|byte| CtValue::Int(*byte as i64)).collect();
+                        list_get(&xs, as_int(&i, index.span())?, *span)
+                    }
                     CtValue::Map(m) => {
                         let k = CtKey::from_value(i)
                             .ok_or_else(|| unsupported("this map key type", index.span()))?;

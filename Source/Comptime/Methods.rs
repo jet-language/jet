@@ -130,9 +130,12 @@ impl<'a> Interp<'a> {
             // Pure comptime mode: unreachable in practice, but stay honest.
             return Err(unsupported(&format!("`{}`", name), span));
         }
-        // The two sanctioned comptime builtins.
-        if name == "embed_file" {
+        // The sanctioned comptime build-time I/O builtins (D-CTIO1).
+        if name == crate::Syntax::BUILTIN_EMBED_FILE {
             return self.eval_embed_file(args, span);
+        }
+        if name == crate::Syntax::BUILTIN_EMBED_BYTES {
+            return self.eval_embed_bytes(args, span);
         }
         if name == "panic" {
             let msg = match args.first() {
@@ -206,26 +209,52 @@ impl<'a> Interp<'a> {
         args: &[CallArg],
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
+        let builtin = crate::Syntax::BUILTIN_EMBED_FILE;
+        let (rel, bytes) = self.read_embed(builtin, args, span)?;
+        match String::from_utf8(bytes) {
+            Ok(text) => Ok(CtValue::Str(text)),
+            Err(_) => Err(Diagnostic::error(
+                "E0955",
+                format!("`{builtin}` can't read `{rel}` as text"),
+                format!("the file isn't valid UTF-8; `{builtin}` returns a String"),
+                "embed it with `embed_bytes(\"path\")` instead — it returns raw `[U8]`".to_string(),
+                Some(span),
+            )),
+        }
+    }
+
+    /// D-CTIO1: `embed_bytes("path") -> [U8]` — the binary-safe sibling of
+    /// `embed_file`. Same path-safety (E0957) and missing/unreadable (E0955)
+    /// checks, but no UTF-8 requirement: any file embeds as raw bytes.
+    fn eval_embed_bytes(
+        &mut self,
+        args: &[CallArg],
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let builtin = crate::Syntax::BUILTIN_EMBED_BYTES;
+        let (_rel, bytes) = self.read_embed(builtin, args, span)?;
+        Ok(CtValue::Bytes(bytes))
+    }
+
+    /// Shared `embed_file`/`embed_bytes` front half: validate the path (E0957)
+    /// and read the file (E0955 missing/unreadable). Returns the relative path
+    /// (for messages) and the raw bytes; the UTF-8 decision is the caller's.
+    fn read_embed(
+        &self,
+        builtin: &str,
+        args: &[CallArg],
+        span: Span,
+    ) -> Result<(String, Vec<u8>), Diagnostic> {
         let arg = args
             .first()
-            .ok_or_else(|| unsupported("embed_file with no path", span))?;
-        let rel = check_embed_path("embed_file", arg, span)?;
+            .ok_or_else(|| unsupported(&format!("{builtin} with no path"), span))?;
+        let rel = check_embed_path(builtin, arg, span)?;
         let full = self.base_dir.join(&rel);
         match std::fs::read(&full) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => Ok(CtValue::Str(text)),
-                Err(_) => Err(Diagnostic::error(
-                    "E0955",
-                    format!("`embed_file` can't read `{}` as text", rel),
-                    "the file isn't valid UTF-8; comptime `embed_file` returns a String in v1"
-                        .to_string(),
-                    "embed a text file, or wait for the byte-buffer version (M10)".to_string(),
-                    Some(span),
-                )),
-            },
+            Ok(bytes) => Ok((rel, bytes)),
             Err(e) => Err(Diagnostic::error(
                 "E0955",
-                format!("`embed_file` can't open `{}`", rel),
+                format!("`{builtin}` can't open `{rel}`"),
                 format!("{} (looked next to the file doing the embedding)", e),
                 "check the path — it is relative to the file's own directory".to_string(),
                 Some(span),

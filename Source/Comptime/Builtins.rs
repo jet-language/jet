@@ -177,6 +177,17 @@ pub(super) fn apply_method(
             let parts: Vec<String> = xs.iter().map(|x| x.jet_show()).collect();
             Ok(CtValue::Str(parts.join(&sep)))
         }
+        // Bytes (`[U8]` from `embed_bytes`) — same surface as List, u8 elements.
+        (CtValue::Bytes(bs), "len") => Ok(CtValue::Int(bs.len() as i64)),
+        (CtValue::Bytes(bs), "is_empty") => Ok(CtValue::Bool(bs.is_empty())),
+        (CtValue::Bytes(bs), "get") => {
+            let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            Ok(if i < 0 || i as usize >= bs.len() {
+                CtValue::None(Type::IntN { signed: false, bits: 8 })
+            } else {
+                CtValue::Some(Box::new(CtValue::Int(bs[i as usize] as i64)))
+            })
+        }
         // Map
         (CtValue::Map(m), "len") => Ok(CtValue::Int(m.len() as i64)),
         (CtValue::Map(m), "is_empty") => Ok(CtValue::Bool(m.is_empty())),

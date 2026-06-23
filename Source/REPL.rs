@@ -225,6 +225,7 @@ impl Session {
             CtValue::Bool(_) => "Bool @= false",
             CtValue::Char(_) => "Char @= 'a'",
             CtValue::Str(_) => "String @= \"\"",
+            CtValue::Bytes(_) => "[U8] @= []",
             CtValue::List(_) => "List<Int> @= []",
             CtValue::Map(_) => "Map<String, Int> @= [:]",
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
@@ -956,6 +957,7 @@ fn type_name(v: &CtValue) -> &'static str {
         CtValue::Bool(_) => "Bool",
         CtValue::Char(_) => "Char",
         CtValue::Str(_) => "String",
+        CtValue::Bytes(_) => "[U8]",
         CtValue::List(_) => "List",
         CtValue::Map(_) => "Map",
         CtValue::Struct { .. } => "Struct",

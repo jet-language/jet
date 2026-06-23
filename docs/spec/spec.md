@@ -236,6 +236,15 @@ impl Circle {
   declaration; `@Marker { … }` for scoped effects (`@transact`, `#Unsafe`) or
   in-body config (`@Serialize { rename …; }`). **`#Pure fn`** is a prefix marker
   (D-CASING1 follow-on); **`comptime`** stays a prefix keyword.
+- **Build-time embedding (D-CTIO1):** inside a `comptime` binding,
+  **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
+  and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no
+  UTF-8 requirement — images, fonts, any blob). These are the *only* sanctioned
+  build-time I/O; comptime is otherwise pure (**E0951**). The path must be a
+  string literal resolved relative to the embedding file's directory, never
+  absolute and never escaping the project via `..` (**E0957**). A missing or
+  unreadable file is **E0955**; for `embed_file`, a non-UTF-8 file is also
+  **E0955**, with a fix pointing at `embed_bytes`.
 - **Published schema migrations (D-MIGRATE1):** `#PublishedSchema struct Name { ... }`
   marks a public record whose field layout is snapshotted at release under
   `.jet/cache/schema/`. On later project builds, sema compares the current shape

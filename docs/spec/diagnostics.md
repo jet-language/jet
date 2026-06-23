@@ -260,7 +260,7 @@ before continuing.
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
 | E0954 | parse | teaching: `comptime val`/`comptime var`/`const` → `comptime x = …` |
-| E0955 | sema  | `embed_file`: missing / unreadable / not UTF-8 |
+| E0955 | sema  | `embed_file`/`embed_bytes`: missing / unreadable file (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
 | E0957 | sema  | `embed_file`/`embed_bytes` path not a literal, absolute, or escaping via `..` |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
