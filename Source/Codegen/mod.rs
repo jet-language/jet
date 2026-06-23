@@ -23,7 +23,6 @@ use crate::Syntax;
 
 mod CModule;
 mod Context;
-mod Expression;
 mod Imports;
 mod Items;
 mod Statement;
@@ -33,7 +32,6 @@ mod Utils;
 
 pub(crate) use CModule::*;
 pub(crate) use Context::*;
-pub(crate) use Expression::*;
 pub(crate) use Imports::*;
 pub(crate) use Items::*;
 pub(crate) use Statement::*;

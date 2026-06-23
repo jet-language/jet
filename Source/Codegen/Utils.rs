@@ -1,5 +1,4 @@
 use super::*;
-use crate::Diagnostics::Span;
 
 pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
     cx.variant_owner
@@ -37,14 +36,4 @@ pub(crate) fn variant_rust_name(variant: &str) -> String {
 
 pub(crate) fn escape_rust_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// D-LABEL1: render the Rust loop-label prefix for a `@name` loop label, e.g.
-/// `'jet_outer: `, or empty when the loop is unlabeled. The `jet_` namespace
-/// keeps user labels clear of Rust's own lifetime/label names.
-pub(crate) fn loop_label_prefix(label: &Option<(String, Span)>) -> String {
-    match label {
-        Some((n, _)) => format!("'jet_{}: ", n),
-        None => String::new(),
-    }
 }

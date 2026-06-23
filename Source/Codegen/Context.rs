@@ -332,15 +332,6 @@ pub(crate) fn rust_return_type(cx: &Cx, ty: &Type, is_view: bool) -> String {
     }
 }
 
-/// What a Jet name looks like in Rust expression position.
-#[derive(Clone)]
-pub(crate) struct Slot {
-    pub(crate) rust_name: String,
-    /// The Rust binding is a reference; emit `(*name)` to get the value.
-    pub(crate) deref: bool,
-    pub(crate) jet_ty: Option<Type>,
-}
-
 pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
     let extern_funcs = extern_func_map(&prog.items);
     build_cx_items(&prog.items, src, file, None, &extern_funcs)
