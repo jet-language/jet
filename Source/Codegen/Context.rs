@@ -21,6 +21,12 @@ pub(crate) struct Cx {
     pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
     pub(crate) consts: HashMap<String, String>,
     pub(crate) type_names: HashSet<String>,
+    /// D-DIST1 (c109 Phase 23): distinct-type name -> (base type, is_numeric). A
+    /// distinct type renders to a `#[repr(transparent)]` newtype `user_<Name>(pub
+    /// Base)`; the TIR reads the base type to give `.raw()` (`(recv).0`) its total
+    /// result type, and `is_numeric` is informational (the arithmetic operator is
+    /// chosen by `ast_operand_is_integer`, which returns `None` for a distinct).
+    pub(crate) distinct_types: HashMap<String, (Type, bool)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
     pub(crate) enum_variants: HashMap<String, Vec<(String, VariantPayload)>>,
@@ -374,6 +380,7 @@ pub(crate) fn build_cx_items(
         method_rets: HashMap::new(),
         consts: HashMap::new(),
         type_names: HashSet::new(),
+        distinct_types: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
         enum_variants: HashMap::new(),
@@ -498,6 +505,8 @@ pub(crate) fn build_cx_items(
             | Item::Migration(_) => {} // D-MIGRATE1
             Item::Distinct(d) => {
                 cx.type_names.insert(d.name.clone());
+                cx.distinct_types
+                    .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
             }
             Item::CodeModule(cm) => {
                 // D-MOD2: register inline module alias and add mangled function sigs.

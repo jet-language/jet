@@ -2818,3 +2818,160 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "got 7\nnothing\n3\n");
 }
+
+// ===========================================================================
+// c109 Phase 23: #Pure / #Todo / default params / named args / distinct / tuples
+// ===========================================================================
+
+/// c109 Phase 23: a `#Pure fn` (S60) routes through the TIR — purity is a sema-only
+/// check (E3401), erased at codegen, so the fn lowers byte-identically to a plain fn.
+#[test]
+fn pure_fn() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+#Pure fn double(n: Int) -> Int {
+    return (n * 2)
+}
+#Pure fn greeting(name: String) -> String {
+    return \"hi, {name}\"
+}
+fn main() {
+    print(double(21))
+    print(greeting(\"jet\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_pure", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\nhi, jet\n");
+}
+
+/// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`) emits a diverging
+/// `todo!("#Todo at … — expected <ty>")`. The fn compiles + routes; the hole is never
+/// reached at runtime here (only the implemented fn is called).
+#[test]
+fn todo_hole() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn double(n: Int) -> Int {
+    return (n * 2)
+}
+fn not_yet(n: Int) -> Int {
+    return #Todo
+}
+fn main() {
+    print(double(21))
+}
+";
+    let (code, stdout) = build_and_run("tir_todo", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n");
+}
+
+/// c109 Phase 23: default parameter values (S61/D-NARG-D2). Sema fills omitted trailing
+/// args at the call site (substituting earlier-param refs), so the defaulted fn lowers
+/// byte-identically and the call routes through the TIR.
+#[test]
+fn default_param_values() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn box_dims(w: Int, h: Int = w, d: Int = h) -> String {
+    return \"{w}x{h}x{d}\"
+}
+fn main() {
+    print(box_dims(4))
+    print(box_dims(4, 2))
+    print(box_dims(4, 2, 1))
+}
+";
+    let (code, stdout) = build_and_run("tir_defaults", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "4x4x4\n4x2x2\n4x2x1\n");
+}
+
+/// c109 Phase 23: call-site labels (D-NARG1) on a free function. Labels are checked
+/// documentation that never reorder (D-NARG-D4); codegen ignores them, so a labeled
+/// call routes through the TIR identically to an unlabeled one.
+#[test]
+fn named_args() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn area(width: Int, height: Int) -> Int {
+    return (width * height)
+}
+fn main() {
+    print(area(width: 4, height: 3))
+    print(area(4, height: 3))
+}
+";
+    let (code, stdout) = build_and_run("tir_named_args", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "12\n12\n");
+}
+
+/// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Construction `Name(x)` → newtype
+/// `user_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
+/// operator. A distinct value type passes/returns/binds byte-identically.
+#[test]
+fn distinct_types() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+UserId @= distinct Int;
+#Numeric Meters @= distinct Float;
+
+fn greet(id: UserId) -> String {
+    return \"user {(id.raw())}\"
+}
+fn main() {
+    uid @= UserId(42)
+    print(greet(uid))
+    a @= Meters(3.0)
+    b @= Meters(1.5)
+    c @= a + b
+    print(\"{(c.raw())} m\")
+    x @= UserId(7)
+    y @= UserId(7)
+    print(\"{(x == y)}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_distinct", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "user 42\n4.5 m\ntrue\n");
+}
+
+/// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
+/// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).user_x`;
+/// destructure `(a, b) @= p.clone()` → the borrow-temp + per-field `.clone()` form;
+/// equality is native. The tuple type passes/returns byte-identically.
+#[test]
+fn named_tuples() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn bounds() -> (max: Int, min: Int) {
+    return (min: 0, max: 10)
+}
+fn main() {
+    p @= (x: 1, y: 2)
+    q @= (y: 3, x: 4)
+    same_shape @= (p == q)
+    (a, b) @= p.clone()
+    print(\"{p.x} {p.y} {a} {b} {same_shape}\")
+    pair @= bounds()
+    print(\"{pair.min} {pair.max}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_tuples", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1 2 1 2 false\n0 10\n");
+}

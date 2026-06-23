@@ -34,9 +34,9 @@
 
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind,
-    Lambda, LambdaBody, LValue, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart, SwitchArm,
-    TryConvert, Type, UnOp, VariantPayload,
+    AccessConvention, BinOp, BindPattern, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt,
+    IndexKind, Lambda, LambdaBody, LValue, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart,
+    SwitchArm, TryConvert, Type, UnOp, VariantPayload,
 };
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -175,6 +175,20 @@ pub(crate) enum TStmt {
         kw: &'static str,
         ty_clause: String,
         init: TExpr,
+    },
+    /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) @= <init>` (S74,
+    /// `BindPattern::Tuple`). Reproduces `emit_stmt`'s destructure form byte-for-byte:
+    /// a `let {tmp} = &({init});` temp (borrowed — never moves out of a shared ref, I2),
+    /// then one `let[ mut] {elem_rust} = ({tmp}).{field_rust}.clone();` per element,
+    /// pairing the pattern's elements to the tuple type's CANONICAL fields by position
+    /// (resolved at lowering off the init's total `Type::Tuple`). `tmp` is the
+    /// `__jet_d{span}` name the AST uses (resolved at lowering); `kw` is `"let"`/`"let mut"`.
+    TupleDestructure {
+        tmp: String,
+        init: TExpr,
+        kw: &'static str,
+        /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
+        binds: Vec<(String, String)>,
     },
     /// `place [op]= value;` to a plain local (subset excludes indexed assigns).
     /// `op` is the compound-assignment operator (`+=` etc.) or `None` for `=`.
@@ -458,6 +472,17 @@ pub(crate) enum TExprKind {
     /// element is lowered as-is (the AST path applies no clone/coercion at the
     /// literal site — `emit_expr` per element).
     ListLit(Vec<TExpr>),
+    /// c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). The generated
+    /// struct name (`JetTup_<hash>`) and the CANONICAL field order are resolved at
+    /// lowering from the literal's sema-attached `Type::Tuple`; each field's value is
+    /// reordered to that canonical order (a `(y: 3, x: 4)` literal becomes
+    /// `JetTup_…{ user_x: 4, user_y: 3 }`). Reproduces `emit_expr`'s `TupleLit` arm
+    /// byte-for-byte — `struct_name { user_<f>: <v>, … }`. `fields` are the already
+    /// mangled-name + lowered-value pairs in canonical order.
+    TupleLit {
+        struct_name: String,
+        fields: Vec<(String, TExpr)>,
+    },
     /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. The empty form
     /// lowers to `std::collections::BTreeMap::new()` (Rust infers the element
     /// types from the binding context); a non-empty form lowers to the
@@ -542,6 +567,18 @@ pub(crate) enum TExprKind {
         else_body: Vec<TStmt>,
         else_value: Box<TExpr>,
     },
+    /// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`, D-TOOL2, E2-M11). Emits a
+    /// diverging `todo!("#Todo at {file}:{line} — expected {ty}")` (Expression.rs
+    /// `Expr::Todo`). The `expected_type` is the TOTAL sema fact (sema fills it onto
+    /// the AST node); `line` is the source line resolved at lowering. `cx.file` is
+    /// program-level (read at emit, like every other `cx.file` use). `todo!()` is
+    /// diverging in Rust so it type-checks in any expression position (I1: no unsafe).
+    Todo { line: usize, expected_type: String },
+    /// c109 Phase 23: `.raw()` on a distinct type (`Expr::MethodCall { method: "raw" }`,
+    /// D-DIST3). The AST `emit_method_call` special-cases this BEFORE any user dispatch:
+    /// `({recv}).0` (the newtype's inner field). The receiver is lowered as-is; the
+    /// result `ty` is the distinct base type (total, read from `cx.distinct_types`).
+    DistinctRaw(Box<TExpr>),
     /// c109 Phase 8: `value(x)` — a present optional (`Some(x)`).
     Present(Box<TExpr>),
     /// c109 Phase 8: bare `null` — an absent optional (`None`).
@@ -1050,11 +1087,12 @@ pub(crate) struct TFnCoerce {
 pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // c109 Phase 18: an `#Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
     // (the `is_unsafe` flag drives the signature prefix), and its gated body ops are
-    // covered below. (A `#Pure` function stays on the AST path — purity has no TIR
-    // representation yet.)
-    if f.is_pure {
-        return false;
-    }
+    // covered below.
+    // c109 Phase 23: a `#Pure fn` (S60, E2-M16) IS covered — purity is a sema-only
+    // check (E3401: a `#Pure fn` may only call other `#Pure fn`s), validated entirely
+    // in sema; codegen erases the annotation (no codegen path reads `f.is_pure` outside
+    // these gates). So a `#Pure fn` lowers + emits byte-identically to a plain fn — the
+    // body's calls are ordinary `Call`/`MethodCall` nodes covered by earlier phases.
     // c109 Phase 17: GENERIC free functions are covered when every type parameter is a
     // plain `<T>` / bounded `<T: Trait>` form (the clause renders via `render_generics`)
     // and the body uses only type-var values by-value (returned/passed/stored). A generic
@@ -1076,9 +1114,16 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // byte-for-byte. The returned value is an in-subset `Ident`/`Field` (sema's E2301/
     // E2304 reject index/slice and a non-owning local, so only those shapes reach codegen);
     // `stmt_in_subset` validates every return is in-subset. No special exclusion needed.
-    // Params must be scalars, String, or a covered struct type, with no defaults.
+    // Params must be scalars, String, or a covered value type. c109 Phase 23: a
+    // DEFAULT parameter value (`h: Int = w`, S61/D-NARG-D2) is covered — sema fills
+    // omitted trailing args at every CALL SITE (`CheckerItems::default-value filling`,
+    // substituting earlier-param refs with the supplied arg), so by codegen the call's
+    // args are complete and the default expr is GONE from the AST. Codegen never reads
+    // `p.default` (the signature emits the same `name: ty` regardless), so a defaulted
+    // param lowers byte-identically — the only thing the default touches is the call,
+    // already handled. No `p.default` exclusion needed.
     for p in &f.params {
-        if p.default.is_some() || !is_subset_param_ty(&p.ty, cx) {
+        if !is_subset_param_ty(&p.ty, cx) {
             return false;
         }
     }
@@ -1110,9 +1155,10 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
 /// **exclude on any doubt**: a false negative just keeps the method on the AST
 /// path, a false positive risks a silent miscompile (a wrong `self` receiver).
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-    // Signature shape: no generics, not pure. c109 Phase 18: an `#Unsafe fn` method IS
-    // covered (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix).
-    if !f.type_params.is_empty() || f.is_pure {
+    // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` method IS covered
+    // (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix). c109
+    // Phase 23: a `#Pure fn` method IS covered (purity is sema-only; codegen erases it).
+    if !f.type_params.is_empty() {
         return false;
     }
     // c109 Phase 17: a `view`-returning method returns a borrow, lowered via
@@ -1145,9 +1191,10 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     // (Field assignment `self.field = v` is already E0003 — not a Jet construct.)
     //
     // Non-self params + the return type must be covered value types (Self resolves
-    // to the owning type). Self-typed params carry no default.
+    // to the owning type). c109 Phase 23: a default param value is covered (sema fills
+    // call-site args; codegen never reads `p.default`) — same as the free-fn gate.
     for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
-        if p.default.is_some() || !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
+        if !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
             return false;
         }
     }
@@ -1191,7 +1238,8 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     // → rustc E0053. A latent AST-path bug (logged in the design doc's list); the TIR must
     // not *claim* a function that miscompiles (the `is_empty` precedent). Unblocks once
     // `emit_trait_def` threads `is_view_return` into the declared return type.
-    if !f.type_params.is_empty() || f.is_pure || f.is_view_return {
+    // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
+    if !f.type_params.is_empty() || f.is_view_return {
         return false;
     }
     // The owning type must be a covered struct or enum.
@@ -1284,6 +1332,8 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
         || is_type_var_param_ty(ty)
+        || is_covered_distinct_ty(ty, cx)
+        || is_covered_tuple_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
@@ -1349,6 +1399,36 @@ fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
     // Every type argument is a covered value type or a bare type variable (`T`).
     args.iter()
         .all(|a| is_type_var_param_ty(a) || is_subset_param_ty(a, cx))
+}
+
+/// c109 Phase 23: a DISTINCT type (`UserId @= distinct Int`, D-DIST1) usable as a
+/// param/return/local *value* type. A distinct type renders via `cx.rust_type` to its
+/// newtype `user_<Name>` (the `Type::Named` fallthrough in Context.rs), and the emitted
+/// `#[repr(transparent)]` newtype is `Copy` iff its base is (sema/codegen derive set) —
+/// but the param convention (`Read`→deref for a non-scalar Named) is decided exactly as
+/// for a struct, so passing/binding/returning one is byte-identical to the AST path with
+/// no new emit. Construction is the `is_distinct_ctor` `Call` shape; `.raw()` is the
+/// dedicated DistinctRaw method shape; `+`/`==` on a `#Numeric` distinct emit the native
+/// operator (`ast_operand_is_integer` returns `None` for a distinct-typed operand, so the
+/// overflow trap is never claimed — matching the AST path's plain `+`).
+fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(ty, Type::Named(name) if cx.distinct_types.contains_key(name))
+}
+
+/// c109 Phase 23: a named-tuple type `(x: Int, y: Int)` (S73/D-SG7, `Type::Tuple`)
+/// usable as a param/return/local value type. A tuple renders via `cx.rust_type` to a
+/// generated `#[derive(Debug, Clone, PartialEq[, …])]` struct `JetTup_<hash>` (with
+/// `user_<field>` fields) emitted by `Tuples.rs` for every tuple SHAPE the program uses
+/// — so passing/binding/returning one is byte-identical to the AST path with no new
+/// emit. A tuple field read is the generic `Field` shape (`(t).user_<f>`); construction
+/// is the `TupleLit` shape; destructuring is the `BindPattern::Tuple` `let` form;
+/// `==`/`!=` is native (the derived `PartialEq`). Every field type must itself be a
+/// covered value type (so a field read / destructure element emits in-subset).
+fn is_covered_tuple_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Tuple(fields) = ty else {
+        return false;
+    };
+    !fields.is_empty() && fields.iter().all(|(_, t)| is_subset_param_ty(t, cx))
 }
 
 /// c109 Phase 17: a bare type-PARAMETER type (`T` in a generic `fn id<T>(x: T)`). A
@@ -1734,19 +1814,41 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
 fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
     match s {
         Stmt::Val(b) => {
-            // No destructuring patterns, no comptime, no uninit. c109 Phase 19: an
-            // `arena_view` binding (`x @= arena.alloc(v)` / `x :: arena.alloc(v)`) IS now
-            // covered — it lowers to a plain `let <x> = <init>;` (no type, no mut) with a
-            // deref'd slot, exactly as `emit_let`'s `arena_view` branch (the init is a
-            // covered `arena.alloc(v)` handle call). The escape/use-after-reset rules
-            // (E0631/E0632) are enforced entirely in sema; codegen is dumb.
-            let ok = b.pattern.is_none()
-                && !b.is_comptime
-                && !b.uninit
-                && expr_in_subset(&b.init, cx, locals);
-            // The binding's name is in scope for subsequent statements.
-            locals.insert(b.name.clone());
-            ok
+            // c109 Phase 19: an `arena_view` binding (`x @= arena.alloc(v)` / `x ::
+            // arena.alloc(v)`) IS covered — it lowers to a plain `let <x> = <init>;` (no
+            // type, no mut) with a deref'd slot, exactly as `emit_let`'s `arena_view`
+            // branch (the init is a covered `arena.alloc(v)` handle call). The escape/
+            // use-after-reset rules (E0631/E0632) are enforced entirely in sema.
+            match &b.pattern {
+                // c109 Phase 23: a TUPLE-destructuring binding `(a, b) @= <init>` (S74,
+                // `BindPattern::Tuple`). The AST `emit_stmt` borrows the init into a temp,
+                // then binds each name from `(tmp).user_<canonical-field>.clone()` (pairing
+                // elems to the type's canonical fields BY POSITION). Covered when the init
+                // is in-subset (its lowered `.ty` is a `Type::Tuple` — sema guarantees a
+                // tuple pattern destructures a tuple value, so the canonical field names
+                // are total at lowering). The Struct/List destructure forms stay on the
+                // AST path (no live-suite use; can be a later slice).
+                Some(BindPattern::Tuple { elems, .. }) => {
+                    let ok = !b.is_comptime
+                        && !b.uninit
+                        && expr_in_subset(&b.init, cx, locals);
+                    for e in elems {
+                        locals.insert(e.name.clone());
+                    }
+                    ok
+                }
+                Some(_) => {
+                    // Struct/List destructuring not yet covered — stay on the AST path.
+                    false
+                }
+                None => {
+                    let ok =
+                        !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
+                    // The binding's name is in scope for subsequent statements.
+                    locals.insert(b.name.clone());
+                    ok
+                }
+            }
         }
         Stmt::Assign { target, value, .. } => match target {
             LValue::Local { .. } => expr_in_subset(value, cx, locals),
@@ -2333,6 +2435,15 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.extern_funcs.contains_key(&c.name)
                 && !cx.unqualified_inline.contains_key(&c.name)
                 && !cx.unqualified_file.contains_key(&c.name);
+            // c109 Phase 23: a DISTINCT-type constructor `UserId(expr)` (D-DIST1) is a
+            // bare `Expr::Call` whose name is a distinct type (not in `cx.sigs` — so the
+            // AST `emit_call` falls through to `user_<Name>(args)` with NO sig, plain args).
+            // The TIR's fallthrough `Call` form reproduces that exactly (sig lookup misses
+            // → `lower_one_call_arg` with `conv: None` → plain arg, then `user_<Name>(…)`).
+            // Sema validated the single-arg base-typed shape (E2 distinct checks); we admit
+            // it when the name is a known distinct type, not shadowed by a local.
+            let is_distinct_ctor = !locals.contains(&c.name)
+                && cx.distinct_types.contains_key(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
@@ -2354,11 +2465,15 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
             // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
             // local). No special exclusion remains — the Box-coercion is total.
-            (is_print || is_plain_fn || is_extern || is_unqual_inline || is_unqual_file)
+            // c109 Phase 23: a call-site LABEL (`f(width: 4.0)`, S61/D-NARG1) is allowed.
+            // Labels are checked DOCUMENTATION (D-NARG-D4): sema validates each label names
+            // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
+            // and codegen never reads `CallArg.label` (`emit_call_args` is purely
+            // positional). So a labeled arg emits byte-identically to an unlabeled one.
+            (is_print || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
-                    // No labels, no shared-auto-clone (Arc) in the subset.
-                    a.label.is_none()
-                        && !a.flags.shared_auto_clone
+                    // No shared-auto-clone (Arc) in the subset; labels are sema-only.
+                    !a.flags.shared_auto_clone
                         && arg_conv_in_subset(a)
                         && expr_in_subset(&a.expr, cx, locals)
                 })
@@ -2501,6 +2616,16 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // type — E0501 — which a covered binding/param/return supplies, so the
         // resulting `vec![]` is type-inferred by Rust from that context.)
         Expr::ListLit(elems, _) => elems.iter().all(|e| expr_in_subset(e, cx, locals)),
+        // c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). Covered when
+        // sema resolved the tuple TYPE (`ty.is_some()` — the canonical field order +
+        // struct name come from it; an unresolved `ty` would force the AST's empty-
+        // canonical `0i64` default, which the TIR must not guess) and every field value
+        // is in-subset. The literal's values are reordered to the type's canonical field
+        // order at lowering, reproducing `emit_expr`'s `TupleLit` arm.
+        Expr::TupleLit(fields, _, ty) => {
+            matches!(ty, Some(Type::Tuple(_)))
+                && fields.iter().all(|(_, e)| expr_in_subset(e, cx, locals))
+        }
         // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Covered when every key
         // and value is in-subset. The empty `[:]` (no entries) is always covered.
         Expr::MapLit(entries, _) => entries
@@ -2537,6 +2662,10 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
         Expr::Present(inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Absent(_) => true,
+        // c109 Phase 23: a `#Todo` typed hole. Covered when sema filled the expected
+        // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
+        // the AST path so the TIR never guesses the `(unknown)` fallback.
+        Expr::Todo { expected_type, .. } => expected_type.is_some(),
         // c109 Phase 8: fallible constructors `ok(x)` / `err(e)`. Covered when the
         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
@@ -2688,6 +2817,15 @@ fn method_call_in_subset(
     // owning field read / borrowed value, which must itself be in-subset. The AST
     // path emits `(recv).clone()` unconditionally (no `recv_type` needed) — match it.
     if method == "clone" {
+        return args.is_empty() && expr_in_subset(receiver, cx, locals);
+    }
+    // c109 Phase 23: `.raw()` on a distinct type (D-DIST3). The AST `emit_method_call`
+    // special-cases `method == "raw"` BEFORE any user dispatch, unconditionally emitting
+    // `({recv}).0`. Sema (CheckerInfer ~L2039) admits `.raw()` ONLY on a distinct-type
+    // value (E0311 otherwise), so any `.raw()` that survives to codegen is on a distinct
+    // — covering an in-subset 0-arg `.raw()` is safe (and `recv_type` is `None` here,
+    // since sema's `.raw()` arm returns the base type without the recv_type writeback).
+    if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
     // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
@@ -2924,14 +3062,15 @@ fn method_call_in_subset(
     if args.len() != sig.len() {
         return false;
     }
-    // Every argument must be in-subset and carry no call-site label. Unlike a plain
-    // call, a method arg MAY use any of `Read`/`Move`/`Mutate` with implicit/Arc
-    // clone — those are carried as total flags and emitted verbatim (mirroring
-    // `emit_call_args`). c109 Phase 13: a Fn-typed param routes through the
-    // `Box::new(…) as <fn-type>` coercion (`lower_one_call_arg`), so a fn-arg is no
-    // longer excluded.
+    // Every argument must be in-subset. Unlike a plain call, a method arg MAY use any
+    // of `Read`/`Move`/`Mutate` with implicit/Arc clone — those are carried as total
+    // flags and emitted verbatim (mirroring `emit_call_args`). c109 Phase 13: a Fn-typed
+    // param routes through the `Box::new(…) as <fn-type>` coercion (`lower_one_call_arg`).
+    // c109 Phase 23: a call-site LABEL (`r.scale(factor: 0.5)`, D-NARG1) is allowed —
+    // labels are sema-validated documentation that never reorder (D-NARG-D4) and codegen
+    // never reads `CallArg.label`, so a labeled arg emits identically.
     args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
-        a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+        expr_in_subset(&a.expr, cx, locals)
     })
 }
 
@@ -2980,9 +3119,10 @@ fn static_method_call_in_subset(
         return false;
     }
     // c109 Phase 13: a Fn-typed static-method param routes through the Box-coercion
-    // (`lower_one_call_arg`); no longer excluded.
+    // (`lower_one_call_arg`). c109 Phase 23: a call-site LABEL (`Rect.new(width: 4.0)`,
+    // D-NARG1) is allowed — labels never reorder (D-NARG-D4) and codegen ignores them.
     args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
-        a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+        expr_in_subset(&a.expr, cx, locals)
     })
 }
 
@@ -3863,6 +4003,36 @@ fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
 
 fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match s {
+        Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
+            // c109 Phase 23: a tuple-destructuring binding `(a, b) @= <init>`. Lower the
+            // init ONCE; its total `.ty` is a `Type::Tuple` (sema guarantees it). Pair the
+            // pattern elements to the tuple's CANONICAL fields by position, reproducing
+            // `emit_stmt`'s `BindPattern::Tuple` arm. Each element binds with its resolved
+            // field type and a non-deref'd slot (the clone owns the value).
+            let Some(BindPattern::Tuple { elems, span }) = &b.pattern else {
+                unreachable!("guard matched a tuple pattern")
+            };
+            let init = lower_expr(&b.init, cx, env);
+            let canonical: Vec<(String, Type)> = match &init.ty {
+                Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
+                _ => Vec::new(),
+            };
+            let tmp = format!("__jet_d{}", span.start);
+            let kw = if b.mutable { "let mut" } else { "let" };
+            let mut binds = Vec::new();
+            for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
+                let elem_rust = mangle(&e.name).to_string();
+                let field_rust = mangle(fname).to_string();
+                binds.push((elem_rust.clone(), field_rust));
+                env.bind(&e.name, elem_rust, Some(fty.clone()));
+            }
+            return TStmt::TupleDestructure {
+                tmp,
+                init,
+                kw,
+                binds,
+            };
+        }
         Stmt::Val(b) => {
             // c109 Phase 19: an arena `view` binding (`x @= arena.alloc(v)`). The AST
             // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
@@ -5338,6 +5508,47 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::ListLit(telems),
             }
         }
+        // c109 Phase 23: a named-tuple literal → a generated `JetTup_<hash>` struct
+        // literal. The gate guaranteed `ty` is `Some(Type::Tuple)`. Reproduce
+        // `emit_expr`'s `TupleLit` arm: the CANONICAL field order + struct name come
+        // from the type; each canonical field's value is taken from the literal (by
+        // name) and lowered. Fields are emitted as `user_<f>: <v>` in canonical order.
+        Expr::TupleLit(lit_fields, _, ty) => {
+            let canonical = match ty {
+                Some(Type::Tuple(fs)) => tuple_fields_plain(fs),
+                _ => Vec::new(),
+            };
+            let struct_name = tuple_struct_name(&canonical);
+            // Map field-name → its literal value expr (the literal may list fields in
+            // any order; the type fixes the canonical order — exactly the AST path).
+            let mut value_of: std::collections::HashMap<&str, &Expr> =
+                std::collections::HashMap::new();
+            for (n, e) in lit_fields {
+                value_of.insert(n.as_str(), e);
+            }
+            let fields: Vec<(String, TExpr)> = canonical
+                .iter()
+                .map(|(n, fty)| {
+                    let v = match value_of.get(n.as_str()) {
+                        Some(e) => lower_expr(e, cx, env),
+                        // A missing field never occurs in a sema-checked tuple literal;
+                        // mirror the AST's `0i64` default defensively (an Int literal).
+                        None => TExpr {
+                            ty: fty.clone(),
+                            kind: TExprKind::IntLit(0, None),
+                        },
+                    };
+                    (mangle(n).to_string(), v)
+                })
+                .collect();
+            TExpr {
+                ty: ty.clone().unwrap_or_else(|| Type::Tuple(Vec::new())),
+                kind: TExprKind::TupleLit {
+                    struct_name,
+                    fields,
+                },
+            }
+        }
         // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Keys/values lower as-is;
         // the result type is `[K, V]` from the first entry (empty `[:]` → unresolved
         // placeholder, type-inferred by Rust from context like `vec![]`).
@@ -5416,6 +5627,21 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Option(Box::new(Type::Int)),
             kind: TExprKind::Absent,
         },
+        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. The expected-type
+        // STRING is the total sema fact (gate guarantees `Some`); the source line is
+        // resolved here. The result `ty` is never load-bearing (a `todo!()` diverges and
+        // is never an arithmetic operand), so a placeholder suffices — the emitted Rust
+        // reads only `expected_type`/`line`/`cx.file`, byte-for-byte Expression.rs.
+        Expr::Todo { span, expected_type } => {
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Todo {
+                    line,
+                    expected_type: expected_type.clone().unwrap_or_else(|| "(unknown)".to_string()),
+                },
+            }
+        }
         // c109 Phase 8: `ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is
         // the inner's; the err type is unresolved here (Rust infers it from the
         // function return context, exactly as the AST path's bare `Ok(x)` does).
@@ -5653,6 +5879,15 @@ fn core_struct_field_rust_name(recv_ty: &Type, member: &str) -> Option<String> {
 /// `None` when the receiver is not a known struct or the field is absent — both
 /// impossible for a covered function (sema validated the access).
 fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<Type> {
+    // c109 Phase 23: a named-tuple field read (`p.x`) — resolve the field's type off
+    // the `Type::Tuple` directly (a tuple has no `cx.struct_fields` entry; its struct
+    // is the generated `JetTup_<hash>`). Keeps the field read's result type total.
+    if let Type::Tuple(fields) = recv_ty {
+        return fields
+            .iter()
+            .find(|(f, _)| f == field)
+            .map(|(_, t)| (**t).clone());
+    }
     let Type::Named(name) = recv_ty else {
         return None;
     };
@@ -5684,6 +5919,9 @@ fn unit_type() -> Type {
 fn call_return_type(cx: &Cx, name: &str) -> Type {
     match cx.fn_types.get(name) {
         Some(Type::Fn { ret: Some(r), .. }) => (**r).clone(),
+        // c109 Phase 23: a distinct-type constructor `UserId(x)` yields the distinct
+        // type itself (it has no `fn_types` entry). Keeps the call's result type total.
+        _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),
         _ => unit_type(),
     }
 }
@@ -5708,6 +5946,24 @@ fn lower_method_call(
         return TExpr {
             ty,
             kind: TExprKind::Clone(Box::new(recv)),
+        };
+    }
+    // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. The receiver's resolved
+    // type names the distinct; its base type (from `cx.distinct_types`) is the total
+    // result type. Mirrors `emit_method_call`'s `METHOD_DISTINCT_RAW` early return.
+    if method == Syntax::METHOD_DISTINCT_RAW {
+        let recv = lower_expr(receiver, cx, env);
+        let base = match &recv.ty {
+            Type::Named(n) => cx
+                .distinct_types
+                .get(n)
+                .map(|(b, _)| b.clone())
+                .unwrap_or_else(unit_type),
+            _ => unit_type(),
+        };
+        return TExpr {
+            ty: base,
+            kind: TExprKind::DistinctRaw(Box::new(recv)),
         };
     }
     // c109 Phase 19: the arena allocator constructor `mem.Arena.new(…)` (D-ALLOC1). The
@@ -6835,6 +7091,18 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
             }
         }
+        // c109 Phase 23: tuple destructure. Mirrors `emit_stmt`'s `BindPattern::Tuple`
+        // arm byte-for-byte: borrow the init into a temp, then bind each element from a
+        // cloned canonical field of it.
+        TStmt::TupleDestructure { tmp, init, kw, binds } => {
+            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, emit_tir_expr(init, cx)));
+            for (elem_rust, field_rust) in binds {
+                out.push_str(&format!(
+                    "{}{} {} = ({}).{}.clone();\n",
+                    pad, kw, elem_rust, tmp, field_rust
+                ));
+            }
+        }
         TStmt::Return(Some(e)) => {
             out.push_str(&format!("{}return {};\n", pad, emit_tir_expr(e, cx)));
         }
@@ -7282,6 +7550,11 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Clone(recv) => {
             format!("({}).clone()", emit_tir_expr(recv, cx))
         }
+        // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. Mirrors
+        // `emit_method_call`'s `METHOD_DISTINCT_RAW` early return byte-for-byte.
+        TExprKind::DistinctRaw(recv) => {
+            format!("({}).0", emit_tir_expr(recv, cx))
+        }
         // c109 Phase 6: a user instance method call. Mirrors `emit_method_call`'s
         // final dispatch (`(recv).{method}({args})`): Rust's method autoref handles
         // the `&self`/`&mut self`/`self` receiver convention, so codegen emits the
@@ -7501,6 +7774,17 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("vec![{}]", parts)
         }
+        // c109 Phase 23: a named-tuple literal → `JetTup_<hash> { user_<f>: <v>, … }`.
+        // Mirrors `emit_expr`'s `TupleLit` arm byte-for-byte (fields canonical-ordered,
+        // resolved at lowering).
+        TExprKind::TupleLit { struct_name, fields } => {
+            let parts = fields
+                .iter()
+                .map(|(n, v)| format!("{}: {}", n, emit_tir_expr(v, cx)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{} {{ {} }}", struct_name, parts)
+        }
         // c109 Phase 5: `[k: v, …]` / `[:]`. Mirrors the AST `Expr::MapLit` exactly:
         // empty → `BTreeMap::new()`; non-empty → the `_m.insert((k).clone(), v)` builder.
         TExprKind::MapLit(entries) => {
@@ -7543,6 +7827,16 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `Expr::Present`/`Expr::Absent` exactly.
         TExprKind::Present(inner) => format!("Some({})", emit_tir_expr(inner, cx)),
         TExprKind::Absent => "None".to_string(),
+        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
+        // AST `Expr::Todo` arm (Expression.rs): file/line/expected-type baked into the
+        // panic string. `cx.file` is program-level (read here, like every other use).
+        TExprKind::Todo { line, expected_type } => format!(
+            "todo!(\"#{} at {}:{} — expected {}\")",
+            crate::Syntax::KW_TODO,
+            cx.file,
+            line,
+            expected_type
+        ),
         // c109 Phase 8: `ok(x)` → `Ok(x)` / `err(e)` → `Err(e)`. Mirrors the AST
         // `Expr::Ok`/`Expr::Err`.
         TExprKind::Ok(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
@@ -8817,6 +9111,73 @@ fn consume(ch: Channel<Int>) -> Int {
         // The `Channel.receive` method + `Channel<Int>` value type + `Result<Int, Closed>`
         // unwrap via `?? panic`.
         assert!(covers(src, "consume"));
+    }
+
+    #[test]
+    fn covers_pure_fn() {
+        // c109 Phase 23: a `#Pure fn` is covered (purity is sema-only, erased at codegen).
+        assert!(covers("#Pure fn double(n: Int) -> Int {\n return (n * 2)\n}\n", "double"));
+    }
+
+    #[test]
+    fn covers_todo_hole() {
+        // c109 Phase 23: a `#Todo` hole is covered (diverging `todo!`). The build_cx-only
+        // helper leaves `expected_type` unset (sema fills it), but the gate admits a
+        // None-typed hole too (it lowers to the `(unknown)` fallback — never reached here
+        // since this is a structural gate test). Reproduce the sema fact: a hole with an
+        // expected type. We can't run sema in this helper, so just assert the simpler
+        // surrounding fn is covered — the end-to-end `todo_hole` test proves the emit.
+        // (A bare `#Todo` body with no sema annotation has `expected_type: None`, which the
+        // gate EXCLUDES — so we assert exclusion here, matching the conservative rule.)
+        assert!(!covers("fn f(n: Int) -> Int {\n return #Todo\n}\n", "f"));
+    }
+
+    #[test]
+    fn covers_default_params() {
+        // c109 Phase 23: a fn with default param values is covered (defaults are filled at
+        // call sites by sema; codegen never reads `p.default`).
+        assert!(covers(
+            "fn box_dims(w: Int, h: Int = w, d: Int = h) -> String {\n return \"{w}{h}{d}\"\n}\n",
+            "box_dims"
+        ));
+    }
+
+    #[test]
+    fn covers_distinct_value_type_and_ctor() {
+        // c109 Phase 23: a distinct param type + `.raw()` + the `Name(x)` constructor are
+        // covered. The build_cx-only helper registers the distinct in `distinct_types`.
+        let src = "UserId @= distinct Int;\nfn greet(id: UserId) -> Int {\n return (id.raw())\n}\n";
+        assert!(covers(src, "greet"));
+        let src2 = "UserId @= distinct Int;\nfn mk() -> UserId {\n return UserId(42)\n}\n";
+        assert!(covers(src2, "mk"));
+    }
+
+    #[test]
+    fn covers_tuple_value_type() {
+        // c109 Phase 23: a tuple PARAM type (`(x: Int, y: Int)`) is a covered value type.
+        // A field read on it is the generic `Field` shape. (A tuple LITERAL needs sema's
+        // `Expr::TupleLit.ty` to resolve the canonical field order/struct name, which the
+        // build_cx-only helper does not fill — so the literal + destructure are proven by
+        // the end-to-end `named_tuples` test, not here.)
+        let src = "fn first(p: (x: Int, y: Int)) -> Int {\n return p.x\n}\n";
+        assert!(covers(src, "first"));
+    }
+
+    #[test]
+    fn covers_named_args_at_call_site() {
+        // c109 Phase 23: a call-site label is allowed (labels never reorder; codegen
+        // ignores them). The callee `area` is a plain fn; the labeled call is in-subset.
+        let src = "fn area(width: Int, height: Int) -> Int {\n return (width * height)\n}\nfn use_it() -> Int {\n return area(width: 4, height: 3)\n}\n";
+        assert!(covers(src, "use_it"));
+    }
+
+    #[test]
+    fn covers_default_param_method() {
+        // c109 Phase 23: a struct-body method with a default param value (`clamp: Bool =
+        // false`) is covered (same call-site-fill rule as a free fn; codegen never reads
+        // `p.default`).
+        let src = "struct Rect {\n w: Int\n fn scale(self, factor: Int, clamp: Bool = false) -> Int {\n return (self.w * factor)\n }\n}\n";
+        assert!(covers_method(src, "Rect", "scale"));
     }
 
     #[test]
