@@ -4003,3 +4003,29 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "7\n-1\n");
 }
+
+/// c109 (B2): a fixed-size-list type `[E#N]` as a param (fed a fan-out result) and
+/// as a struct field routes through the TIR (rendered `Vec<E>`, byte-for-byte the AST).
+#[test]
+fn fixed_size_list_param_and_field() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn double(n: Int) -> Int {
+    return (n * 2)
+}
+struct Grid { row: [Int#3] }
+fn firstof(xs: [Int#3]) -> Int {
+    return xs[0]
+}
+fn main() {
+    print(firstof(double.[1, 2, 3]))
+    g @= Grid { row: double.[1, 2, 3] }
+    print(g.row[1])
+}
+";
+    let (code, stdout) = build_and_run("tir_fixed_list", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\n4\n");
+}

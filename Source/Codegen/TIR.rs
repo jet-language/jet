@@ -1708,12 +1708,15 @@ fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
 /// element/key/value types must themselves be covered *value* types — scalar,
 /// Char, String, a covered struct/enum, or a nested covered collection — so the
 /// literal/index/iteration lowerings reproduce the AST path without any clone/box
-/// decision the subset can't make from total facts. A `FixedList` (`[E#N]`) is
-/// excluded: its element-typed param/return uses `Vec<E>` like a list, but the
-/// fixed-size construction/indexing semantics differ enough to defer (Phase 7).
+/// decision the subset can't make from total facts. A `FixedList` (`[E#N]`, B2) is
+/// covered exactly like a `List`: `cx.rust_type` renders it to `Vec<E>` (identical
+/// to a list), indexing reads the element type off the base, and a fan-out
+/// expression already produces a `[T#N]` value — so a `[E#N]` param/return/element
+/// is byte-identical to the list case once its element type is covered.
 fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
         Type::List(inner) => collection_elem_covered(inner, cx),
+        Type::FixedList { elem, .. } => collection_elem_covered(elem, cx),
         Type::Map { key, value } => {
             collection_elem_covered(key, cx) && collection_elem_covered(value, cx)
         }
@@ -2066,6 +2069,10 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
         // that is itself a covered struct/enum/collection is admitted (the Phase-5
         // collection coverage), so no clone/box decision arises at the field site.
         Type::List(inner) => field_ty_covered(inner, cx, seen),
+        // c109 (B2): a fixed-size-list field (`row: [Int#3]`). It renders to `Vec<E>`
+        // like a list field (`cx.rust_type`), so a struct-lit field value / field read
+        // is byte-identical to the list case once its element type is covered.
+        Type::FixedList { elem, .. } => field_ty_covered(elem, cx, seen),
         Type::Map { key, value } => {
             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
         }
@@ -9955,6 +9962,28 @@ fn mk() {
         // c109 Phase 5: a list parameter is now inside the subset (was excluded
         // through Phase 4).
         assert!(covers("fn sum(xs: [Int]) -> Int {\n return 0\n}\n", "sum"));
+    }
+
+    #[test]
+    fn covers_fixed_list_param_and_field() {
+        // c109 (B2): a fixed-size-list type `[E#N]` is covered like a list (`Vec<E>`)
+        // as a param/return type and as a struct field, once its element type is
+        // covered. (Indexing a `[E#N]` is in-subset only once sema resolves the
+        // `IndexKind` — exercised end-to-end by tests/tir.rs; here we gate the
+        // sema-independent type-coverage facts the four helpers decide.)
+        let mk = |src: &str| {
+            let (toks, _) = crate::Lexer::lex(src);
+            let prog = crate::Parser::parse(&toks).expect("parse");
+            build_cx(&prog, src, "test.jet")
+        };
+        let fl = Type::FixedList { elem: Box::new(Type::Int), len: 3 };
+        // param/return helper coverage:
+        assert!(is_subset_param_ty(&fl, &mk("fn f(){}")));
+        assert!(is_covered_collection_ty(&fl, &mk("fn f(){}")));
+        assert!(collection_elem_covered(&fl, &mk("fn f(){}")));
+        // struct-field coverage: a `[Int#3]` field keeps its owning struct covered.
+        let src = "struct Grid { row: [Int#3] }\nfn f(){}";
+        assert!(is_covered_struct_ty(&Type::Named("Grid".to_string()), &mk(src)));
     }
 
     #[test]
