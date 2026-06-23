@@ -4286,3 +4286,56 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "0\n");
 }
+
+/// c109: a field read off a comptime-const STRUCT value (`comptime P = Pair{…}`;
+/// `P.left`) and an `==` against a comptime-const ENUM value (`comptime L =
+/// Light.Green`; `L == Light.Green`). Each const inlines to its pre-rendered
+/// Rust value; the field read / comparison is byte-identical to the AST path.
+/// `main` routes through the TIR; runs to the round-trip output.
+#[test]
+fn field_read_and_eq_on_inlined_comptime_values() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Pair {
+    left: Int
+    right: String
+}
+
+enum Light {
+    Red
+    Green
+}
+
+comptime P = Pair {left: 7, right: \"seven\"}
+comptime L = Light.Green
+
+fn main() {
+    p @= Pair {left: 7, right: \"seven\"}
+    l @= Light.Green
+    print(\"{P.left}\")
+    print(\"{p.left}\")
+    print(\"{P.right}\")
+    print(\"{p.right}\")
+    print(\"{L == Light.Green}\")
+    print(\"{l == Light.Green}\")
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    // Byte-exact: `P.left` reads a field off the inlined struct literal.
+    assert!(
+        out.rust.contains("(user_Pair { user_left: 7i64, user_right: \"seven\".to_string() }).user_left"),
+        "comptime struct field read not byte-exact:\n{}",
+        out.rust
+    );
+    // Byte-exact: `L == Light.Green` compares the inlined enum value.
+    assert!(
+        out.rust.contains("(user_Light::user_Green) == (user_Light::user_Green)"),
+        "comptime enum `==` not byte-exact:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_comptime_struct_enum_values", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "7\n7\nseven\nseven\ntrue\ntrue\n");
+}

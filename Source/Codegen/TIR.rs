@@ -3118,9 +3118,21 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 {
                     return true;
                 }
-                // A non-local ident receiver that is NOT a covered enum (a core/json/
-                // numeric path, an imported namespace, a module alias) is excluded —
-                // those use Rust heads/spellings the subset does not emit.
+                // c109: a comptime-CONST receiver (`comptime P = Pair{…}`; then `P.left`).
+                // The const inlines to its pre-rendered Rust value string (`cx.consts[P]`
+                // = `user_Pair { … }`) at the use site, and reading a field off it is a
+                // plain place read — the AST `emit_expr` Field arm routes the const-ident
+                // `inner` through `boxed_field_read`, which calls `emit_expr(Ident)` →
+                // `cx.consts[P]`, yielding `((user_Pair { … }).user_<field>)`. The TIR
+                // reproduces this exactly (`lower_expr`'s Ident arm already inlines the
+                // const string; the Field arm wraps it). A comptime const can hold a
+                // struct or enum value; either way the field read is byte-identical.
+                if !locals.contains(enum_name) && cx.consts.contains_key(enum_name) {
+                    return true;
+                }
+                // A non-local ident receiver that is NOT a covered enum / comptime const
+                // (a core/json/numeric path, an imported namespace, a module alias) is
+                // excluded — those use Rust heads/spellings the subset does not emit.
                 if !locals.contains(enum_name) {
                     return false;
                 }
@@ -11519,5 +11531,39 @@ fn main() {
 }
 "#;
         assert!(covers_after_sema(src, "main"), "map builtin on field receiver not covered");
+    }
+
+    #[test]
+    fn covers_field_read_and_eq_on_inlined_comptime_values() {
+        // c109: a FIELD READ off a comptime-const struct value (`comptime P =
+        // Pair{…}`; then `P.left`) and an `==` against a comptime-const enum value
+        // (`comptime L = Light.Green`; then `L == Light.Green`). The const inlines to
+        // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
+        // inlined struct / comparing the inlined enum is byte-identical to the AST path.
+        // The Field gate now admits a non-local comptime-const receiver.
+        let src = r#"
+struct Pair {
+    left: Int
+    right: String
+}
+
+enum Light {
+    Red
+    Green
+}
+
+comptime P = Pair {left: 7, right: "seven"}
+comptime L = Light.Green
+
+fn main() {
+    print("{P.left}")
+    print("{P.right}")
+    print("{L == Light.Green}")
+}
+"#;
+        assert!(
+            covers_after_sema(src, "main"),
+            "field-read/== on inlined comptime values not covered"
+        );
     }
 }
