@@ -3727,3 +3727,36 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "2\n");
 }
+
+/// c109 (recursive struct): a self-referential struct field has Rust type
+/// `Box<…>` (`cx.boxed_edges`), so its construction value must be wrapped
+/// `Box::new(…)` (E0308 otherwise — the AST `emit_struct_lit` was not wrapping).
+/// A nested inline `Tree { value, child: value(Tree { … }) }` exercises the boxed
+/// wrap at multiple levels; the boxed field READ stays on the AST path (deref), so
+/// `main` reads only the non-boxed scalar `value`. Both construction levels and
+/// `main` route through the TIR.
+#[test]
+fn recursive_struct_construction() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Tree {
+    value: Int
+    child: Tree?
+}
+fn main() {
+    root @= Tree {
+        value: 3,
+        child: value(Tree {
+            value: 2,
+            child: value(Tree { value: 1, child: null })
+        })
+    }
+    print(root.value)
+}
+";
+    let (code, stdout) = build_and_run("tir_recursive_struct", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3\n");
+}

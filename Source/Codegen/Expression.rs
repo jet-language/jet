@@ -331,7 +331,20 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
                 } else {
                     mangle(n)
                 };
-                parts.push(format!("{}: {}", field_name, emit_expr(cx, e, env)));
+                let mut value = emit_expr(cx, e, env);
+                // A self-referential struct field has Rust type `Box<…>`
+                // (`struct_field_rust`/`boxed_edges`), so its construction value must
+                // be wrapped in `Box::new(…)` (E0308 otherwise). Recursive ENUM
+                // construction already wraps via `emit_boxed_enum_arg`; struct literals
+                // need the same. Prelude structs have no boxed edges.
+                if !is_prelude_struct
+                    && cx
+                        .boxed_edges
+                        .contains(&(type_name.to_string(), n.to_string()))
+                {
+                    value = format!("Box::new({})", value);
+                }
+                parts.push(format!("{}: {}", field_name, value));
             }
             // D-ROUTE1=A: HttpRequest has a `params` field (set by dispatch) that
             // users never provide; always initialize it to an empty BTreeMap.

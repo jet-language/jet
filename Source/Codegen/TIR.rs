@@ -466,7 +466,12 @@ pub(crate) enum TExprKind {
     /// the value's own move/clone facts already live in its sub-expression).
     StructLit {
         rust_type: String,
-        fields: Vec<(String, TExpr)>,
+        /// Each field carries its mangled Rust name, its value expression, and a
+        /// `boxed` flag. c109: a self-referential struct field has Rust type `Box<…>`
+        /// (`cx.boxed_edges`), so its construction value must be wrapped `Box::new(…)`
+        /// (E0308 otherwise) — exactly as `emit_struct_lit` does on the AST path. The
+        /// flag is resolved at lowering (a total fact), never re-derived in emit.
+        fields: Vec<(String, TExpr, bool)>,
         /// c109 Phase 17: an extra raw field line appended verbatim after the user fields
         /// (e.g. HttpRequest's injected `params: std::collections::BTreeMap::new()`).
         /// `None` for a plain user struct.
@@ -1865,6 +1870,65 @@ fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
     struct_is_covered(name, cx, &mut HashSet::new())
 }
 
+/// c109: is `name` a user struct the subset can CONSTRUCT (a struct literal)? Like
+/// `struct_is_covered`, but ADMITS self-referential (boxed) fields — a recursive struct
+/// such as `Tree { value: Int, child: Tree? }`. Construction is byte-identical to the AST
+/// path once the `Box::new(…)` field wrap is reproduced at lowering (a total `boxed` flag
+/// from `cx.boxed_edges`); only *reading* a boxed field needs deref handling (kept on the
+/// AST path — the `Field` gate arm excludes a boxed-edge read via `field_is_boxed_edge`).
+/// A boxed-edge field's value is checked separately by `expr_in_subset` at the gate site;
+/// here we only verify the struct's field TYPES are admissible. Generic/foreign/prelude
+/// structs are out (same as `struct_is_covered`). The visited set terminates the recursion
+/// at a boxed cycle (which IS admitted here, unlike `struct_is_covered`).
+fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    if cx.trait_names.contains(name)
+        || cx.enum_variants.contains_key(name)
+        || cx.foreign_types.contains_key(name)
+        || net_handle_rust_type(name).is_some()
+        || crate::Generics::is_type_var_name(name)
+        || struct_is_generic(name, cx)
+    {
+        return false;
+    }
+    let Some(fields) = cx.struct_fields.get(name) else {
+        return false;
+    };
+    if !seen.insert(name.to_string()) {
+        // A cycle through a boxed edge — admitted (the field below proved boxed).
+        return true;
+    }
+    let ok = fields.iter().all(|(fname, fty)| {
+        // A boxed (recursive) edge: its payload struct must itself be constructible.
+        // The boxed-payload type unwraps Option/the bare Named to the struct name.
+        if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
+            return boxed_field_payload_constructible(fty, cx, seen);
+        }
+        // A non-boxed field: the ordinary covered-field rule.
+        field_ty_covered(fty, cx, seen)
+    });
+    seen.remove(name);
+    ok
+}
+
+/// The payload of a boxed (recursive) struct field — `Tree` in `child: Tree?`
+/// (`Option<Tree>`) or a bare `Tree`. The payload struct must be constructible.
+fn boxed_field_payload_constructible(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    match ty {
+        Type::Option(inner) => boxed_field_payload_constructible(inner, cx, seen),
+        Type::Named(n) => struct_lit_constructible(n, cx, seen),
+        _ => false,
+    }
+}
+
+/// Is `member` a boxed (recursive) struct field name on ANY struct? A boxed field READ
+/// (`t.child` where the field is `Box<…>`) needs a deref the subset deliberately avoids,
+/// so the `Field` gate arm excludes it. Over-conservative (a non-boxed field sharing the
+/// name elsewhere is also excluded) but safe per I2 — a false negative stays on the AST
+/// path. (Construction of a boxed field IS covered — see `struct_lit_constructible`.)
+fn field_is_boxed_edge(member: &str, cx: &Cx) -> bool {
+    cx.boxed_edges.iter().any(|(_, f)| f == member)
+}
+
 /// c109 Phase 19: is `name` a GENERIC user struct (one with a type-var field)? A generic
 /// struct's fields reference type vars (`first: T`); `struct_is_covered` now admits those
 /// (so a generic struct is a covered VALUE type — Phase 19 covers turbofish construction +
@@ -2869,8 +2933,12 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // field names, and an auto `params: BTreeMap::new()` for HttpRequest).
             // Reproduced in `lower_expr`'s StructLit arm. Otherwise the named type must be a
             // covered user struct (`user_<name>` head, mangled fields).
+            // c109: a recursive (boxed) struct is CONSTRUCTIBLE (the boxed field value is
+            // wrapped `Box::new(…)`, a total fact at lowering) even though it is not a
+            // covered VALUE type (a boxed field READ needs deref, kept on the AST path).
             if !is_prelude_struct_name(type_name)
                 && !is_covered_struct_ty(&Type::Named(type_name.clone()), cx)
+                && !struct_lit_constructible(type_name, cx, &mut HashSet::new())
             {
                 return false;
             }
@@ -2933,6 +3001,13 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 if !locals.contains(enum_name) {
                     return false;
                 }
+            }
+            // c109: a boxed (recursive) struct field READ (`t.child` where the field is
+            // `Box<…>`) needs a deref the subset deliberately avoids — exclude it (stays
+            // on the AST path). Construction of a boxed field IS covered. Over-conservative
+            // (excludes a non-boxed field sharing the name) but safe per I2.
+            if field_is_boxed_edge(member, cx) {
+                return false;
             }
             // Otherwise this is a struct field *read* — in-subset iff the receiver is.
             expr_in_subset(receiver, cx, locals)
@@ -6183,9 +6258,11 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             .join(", ")
                     )
                 };
+                // A foreign struct's fields are never local boxed edges (boxed_edges
+                // hold this module's recursive structs), so no field is boxed here.
                 let tfields = fields
                     .iter()
-                    .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
+                    .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env), false))
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
@@ -6202,9 +6279,10 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // PLAIN (unmangled) field names, and — for HttpRequest — an injected
             // `params: std::collections::BTreeMap::new()` field. Reproduce it byte-for-byte.
             if let Some(rust) = net_handle_rust_type(type_name) {
-                let mut tfields: Vec<(String, TExpr)> = fields
+                // A prelude struct has no boxed (recursive) edges.
+                let mut tfields: Vec<(String, TExpr, bool)> = fields
                     .iter()
-                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env)))
+                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
                 let extra = if type_name == "HttpRequest" {
                     Some("params: std::collections::BTreeMap::new()".to_string())
@@ -6237,9 +6315,17 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .join(", ")
                 )
             };
+            // c109: a self-referential field (`child: Tree?` on `Tree`) has Rust type
+            // `Box<…>` (`cx.boxed_edges`); resolve the `boxed` flag here (a total fact)
+            // so emit can wrap the value in `Box::new(…)`, exactly as `emit_struct_lit`.
             let tfields = fields
                 .iter()
-                .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
+                .map(|(n, _, fe)| {
+                    let boxed = cx
+                        .boxed_edges
+                        .contains(&(type_name.clone(), n.clone()));
+                    (mangle(n), lower_expr(fe, cx, env), boxed)
+                })
                 .collect();
             // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
             // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
@@ -8781,7 +8867,14 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::StructLit { rust_type, fields, extra, as_trait } => {
             let mut parts = fields
                 .iter()
-                .map(|(field_rust, v)| format!("{}: {}", field_rust, emit_tir_expr(v, cx)))
+                .map(|(field_rust, v, boxed)| {
+                    let value = emit_tir_expr(v, cx);
+                    // c109: a boxed (self-referential) field is wrapped `Box::new(…)`,
+                    // exactly as `emit_struct_lit`. The `boxed` flag is total (resolved
+                    // at lowering from `cx.boxed_edges`).
+                    let value = if *boxed { format!("Box::new({})", value) } else { value };
+                    format!("{}: {}", field_rust, value)
+                })
                 .collect::<Vec<_>>();
             // c109 Phase 17: a prelude struct's injected field (HttpRequest's `params`),
             // appended verbatim after the user fields, exactly as `emit_struct_lit` does.
@@ -10798,5 +10891,41 @@ fn bad(s: Nonexistent) {
 }
 ";
         assert!(!covers(src, "bad"));
+    }
+
+    #[test]
+    fn covers_recursive_struct_construction() {
+        // c109 (recursive struct): constructing a self-referential (boxed) struct is now
+        // covered — `struct_lit_constructible` admits the boxed edge and lowering wraps the
+        // field value `Box::new(…)`. A fn building a nested `Tree { value, child: value(…) }`
+        // routes. (The boxed-field READ stays on the AST path — see the rejecting test.)
+        let src = "\
+struct Tree {
+    value: Int
+    child: Tree?
+}
+fn build() {
+    root @= Tree { value: 1, child: value(Tree { value: 2, child: null }) }
+    print(root.value)
+}
+";
+        assert!(covers(src, "build"));
+    }
+
+    #[test]
+    fn rejects_recursive_struct_boxed_field_read() {
+        // c109 (recursive struct): a boxed (recursive) field READ (`t.child`) needs a deref
+        // the subset avoids, so `field_is_boxed_edge` excludes a fn that reads it (it stays
+        // on the AST path). Construction is covered; only the boxed read is rejected.
+        let src = "\
+struct Tree {
+    value: Int
+    child: Tree?
+}
+fn kid(t: Tree) -> (Tree?) {
+    return t.child
+}
+";
+        assert!(!covers(src, "kid"));
     }
 }

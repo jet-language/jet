@@ -53,17 +53,25 @@ them so they don't regress, but they should be fixed independently of c109):
   parity holds) — surfaced while testing Phase 10's `path.join`. Fix: parameterise
   the message on the real receiver type/module, or scope the lint to JSON
   constructors. (Phase 10.)
-- **Recursive (`Box<…>`) STRUCT construction is broken (I2 hole on the AST path).**
-  `emit_struct_lit` (Expression.rs `Expr::StructLit`) emits `field: <expr>` with NO
+- **Recursive (`Box<…>`) STRUCT construction is broken (I2 hole on the AST path). FIXED.**
+  Was: `emit_struct_lit` (Expression.rs `Expr::StructLit`) emitted `field: <expr>` with NO
   `Box::new(…)` wrapper, but a self-referential struct field has Rust type `Box<…>`
   (`struct_field_rust`/`field_rust_type`). So `Tree { value: 2, child: value(leaf) }`
-  emits `user_child: Some(user_leaf)` where the field is `Box<Option<user_Tree>>` →
-  rustc E0308 ("expected `Box<…>`, found `Option<…>`"). Recursive ENUM construction is
-  fine (`emit_boxed_enum_arg` DOES wrap in `Box::new`), but struct literals don't.
-  Masked because no example/test constructs a recursive struct. Phase 16 EXCLUDES
-  recursive structs (the struct gate's visited set already did). Fix: wrap a boxed
-  struct-lit field value in `Box::new(…)` in `emit_struct_lit`, keyed on
-  `cx.boxed_edges`. (Surfaced in Phase 16.)
+  emitted `user_child: Some(user_leaf)` where the field is `Box<Option<user_Tree>>` →
+  rustc E0308. Recursive ENUM construction was fine (`emit_boxed_enum_arg` wraps in
+  `Box::new`), struct literals didn't. **Fix:** `emit_struct_lit`'s unqualified plain-struct
+  branch now wraps a field value in `Box::new(…)` when `(type_name, field) ∈ cx.boxed_edges`.
+  With construction fixed, recursive struct CONSTRUCTION now routes through the TIR: a new
+  `struct_lit_constructible` predicate admits a recursive struct in the StructLit gate arm
+  (the boxed-edge/visited-set exclusion is no longer total there), and the struct-lit lowering
+  carries a total `boxed` flag per field (from `cx.boxed_edges`) that emit reproduces as the
+  `Box::new(…)` wrap. Reading a boxed field still needs deref, so the `Field` gate arm
+  excludes a boxed-edge READ (`field_is_boxed_edge`) — that stays on the AST path (a separate,
+  deeper deref bug, not part of this effort). Covered by tests/tir.rs
+  `recursive_struct_construction` (build+run) and the `covers_recursive_struct_construction` /
+  `rejects_recursive_struct_boxed_field_read` unit tests; byte-parity holds across the example
+  suite (no example constructs a recursive struct, so nothing changed). (Surfaced in Phase 16;
+  fixed in the c109 fix-first effort.)
 - **A borrowed non-Copy struct-lit field value isn't cloned (E0507, AST path).** A
   struct literal whose field value is a borrowed-in-env ident (`Person { name: n }`
   where `n: String` is a `Read` param → `&String`) emits `user_name: (*user_n)` →
