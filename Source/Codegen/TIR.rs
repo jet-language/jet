@@ -2141,6 +2141,9 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                     }
                     ok
                 }
+                // Forward-safety default: a future BindPattern variant defaults to the
+                // safe exclusion. Currently unreachable — Tuple/List/Struct are all matched.
+                #[allow(unreachable_patterns)]
                 Some(_) => false,
                 None => {
                     let ok =
