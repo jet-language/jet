@@ -1383,6 +1383,13 @@ pub enum Expr {
         /// Filled by sema when the method resolves to a user-defined type,
         /// so codegen can apply the parameter conventions (`&`/`&mut`).
         recv_type: Option<String>,
+        /// Filled by sema (c109 Phase 20) with the call's resolved return type
+        /// for the polymorphic core specials (`math.abs/min/max/clamp`,
+        /// `random.pick/shuffle`, `io.eprint`) whose return type is arg-type
+        /// dependent and not in `core_fixed_sig`. Total fact read by TIR
+        /// lowering so codegen never re-infers it (I3). `None` for every other
+        /// call shape (their type comes from a `cx` table or is unused).
+        resolved_ret: Option<Type>,
     },
     /// S29: `Type { field: expr, ... }` or `Type<Args> { ... }` or `alias.Type { ... }`.
     StructLit {

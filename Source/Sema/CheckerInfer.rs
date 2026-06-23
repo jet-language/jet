@@ -53,6 +53,7 @@ impl<'a> Checker<'a> {
                         method_span: span,
                         args: Vec::new(),
                         recv_type: None,
+                            resolved_ret: None,
                     };
                 }
             }
@@ -439,10 +440,11 @@ impl<'a> Checker<'a> {
                 method_span,
                 args,
                 recv_type,
+                resolved_ret,
             } => {
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
                 self.clear_uninit_mut_args(args);
-                self.infer_method_call(receiver, method, *method_span, args, recv_type)
+                self.infer_method_call(receiver, method, *method_span, args, recv_type, resolved_ret)
             }
             Expr::StructLit {
                 type_name,
@@ -2027,6 +2029,7 @@ impl<'a> Checker<'a> {
         span: Span,
         args: &mut Vec<crate::AST::CallArg>,
         recv_type_out: &mut Option<String>,
+        resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
         if method == "clone" {
             self.borrow_ctx = true;
@@ -2096,7 +2099,16 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
             if let Some(module) = self.core_imports.get(alias).cloned() {
-                return self.infer_core_call(&module, method, *alias_span, span, args);
+                let ret = self.infer_core_call(&module, method, *alias_span, span, args);
+                // c109 Phase 20: write the resolved return type back onto the node
+                // for the polymorphic core specials whose type is arg-dependent and
+                // NOT in `core_fixed_sig` (so the TIR can read it totally — I3). The
+                // monomorphic calls (in `core_fixed_sig`) get their type from that
+                // table at lowering, so leave `resolved_ret = None` for them.
+                if is_polymorphic_core_special(&module, method) {
+                    *resolved_ret_out = ret.clone();
+                }
+                return ret;
             }
             if let Some(&mod_idx) = self.imports.get(alias) {
                 return self.infer_import_call(mod_idx, method, *alias_span, span, args);

@@ -272,6 +272,7 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
             method_span,
             args,
             recv_type,
+            ..
         } => emit_method_call(cx, receiver, method, *method_span, args, recv_type.as_deref(), env),
         Expr::StructLit {
             type_name,

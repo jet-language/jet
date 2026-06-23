@@ -1374,6 +1374,25 @@ pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// c109 Phase 20: the polymorphic core specials whose return type is resolved by
+/// `infer_core_call`'s bespoke arg-type logic (NOT the fixed `core_fixed_sig`
+/// table). Sema writes the resolved return back onto the `Expr::MethodCall`
+/// `resolved_ret` field for exactly these, so the TIR reads it totally (I3).
+/// `io.input` is excluded — it IS in `core_fixed_sig` (`String?`), covered by
+/// Phase 10. `core.mem` ptr ops have their own Phase-18 lowering.
+pub(crate) fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
+    matches!(
+        (module, name),
+        ("core.math", "abs")
+            | ("core.math", "min")
+            | ("core.math", "max")
+            | ("core.math", "clamp")
+            | ("core.random", "pick")
+            | ("core.random", "shuffle")
+            | ("core.io", "eprint")
+    )
+}
+
 pub(crate) fn core_fixed_sig(
     module: &str,
     name: &str,

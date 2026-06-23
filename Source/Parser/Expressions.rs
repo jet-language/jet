@@ -558,6 +558,7 @@ impl<'a> Parser<'a> {
                             method_span: member_span,
                             args,
                             recv_type: None,
+                            resolved_ret: None,
                         };
                     } else {
                         expr = Expr::Field(Box::new(expr), member, member_span);
@@ -1126,6 +1127,7 @@ impl<'a> Parser<'a> {
                             method_span: member_span,
                             args,
                             recv_type: None,
+                            resolved_ret: None,
                         });
                     }
                     return Ok(Expr::Field(

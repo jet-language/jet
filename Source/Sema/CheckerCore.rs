@@ -1810,6 +1810,7 @@ impl<'a> Checker<'a> {
                             method_span: span,
                             args: Vec::new(),
                             recv_type: None,
+                            resolved_ret: None,
                         };
                     } else if matches!(
                         info.param_conv,

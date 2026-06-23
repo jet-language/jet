@@ -926,6 +926,16 @@ pub(crate) enum THandleOp {
     AllocReset,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `free()` → `drop(recv)`.
     AllocFree,
+    /// c109 Phase 20: HttpRequest `method()`/`path()`/`body()` → `(recv).<field>.clone()`.
+    HttpReqField(&'static str),
+    /// c109 Phase 20: HttpRequest `header(name)` → `(recv).headers.get(&a0).cloned()`.
+    HttpReqHeader,
+    /// c109 Phase 20: HttpRequest `param(name)` → `{root}jet_http_request_param(&(recv), &(a0))`.
+    HttpReqParam,
+    /// c109 Phase 20: HttpResponse `status()`/`body()` → `(recv).<field>.clone()`.
+    HttpRespField(&'static str),
+    /// c109 Phase 20: HttpResponse `header(name)` → `(recv).headers.get(&a0).cloned()`.
+    HttpRespHeader,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -2630,9 +2640,10 @@ fn method_call_in_subset(
     // handle-producing core call (`files.open`/`time.start`/`net.tcp_connect`/…) or
     // another covered handle method (`listener.accept()`), so its slot type is total
     // (`Some(<handle>)`) — `rty == recv_type` always, and the rty-keyed branch fires
-    // identically. (HttpRequest/HttpResponse are EXCLUDED: they only arise as a
-    // `http.serve` lambda param, which may be unannotated → slot type `None` → the
-    // AST handle arm would NOT fire, so covering them would diverge.) Disjoint from
+    // identically. (c109 Phase 20: HttpRequest/HttpResponse accessors are NOW covered —
+    // sema writes the `http.serve` lambda-param type back onto `p.ty`, so the slot type
+    // is total even for an unannotated `(req)` param; the AST `rty`-keyed handle arm then
+    // fires identically. They join `handle_method_op`.) Disjoint from
     // the numeric shape (a handle name isn't numeric) and the instance/static shapes
     // (a handle name isn't a covered struct/enum).
     if let Some(handle) = recv_type {
@@ -3046,6 +3057,16 @@ fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.mem" && matches!(method, "address_of" | "volatile_read") {
         return true;
     }
+    // c109 Phase 20: the polymorphic core specials (`math.abs/min/max/clamp`,
+    // `random.pick/shuffle`, `io.eprint`). NOT in `core_fixed_sig` — their return
+    // type is arg-type dependent, resolved by sema's bespoke `infer_core_call` and
+    // written onto the node's `resolved_ret` field (read at lowering, so it's total —
+    // I3). The EMITTED form is a fixed per-`(module, method)` string (reproduced in
+    // `emit_tir_core_call`), args emitted plainly, byte-for-byte `emit_core_call`.
+    // (`io.input` is NOT here — it IS in `core_fixed_sig`, covered by Phase 10.)
+    if crate::Sema::is_polymorphic_core_special(module, method) {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
@@ -3150,6 +3171,19 @@ fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleO
         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
         ("Arena" | "Bump" | "Pool" | "Fixed", "free", 0) => THandleOp::AllocFree,
+        // c109 Phase 20: HttpRequest/HttpResponse accessors (E2-M10, D-ROUTE1=A).
+        // Now reachable because the `http.serve` lambda param type is written back
+        // onto `p.ty` (sema), so the slot type is total. The AST `emit_builtin_method`
+        // arms key on the same `rty == Some(HttpRequest|HttpResponse)`. Reproduced
+        // byte-for-byte in `emit_tir_handle_method`.
+        ("HttpRequest", "method", 0) => THandleOp::HttpReqField("method"),
+        ("HttpRequest", "path", 0) => THandleOp::HttpReqField("path"),
+        ("HttpRequest", "body", 0) => THandleOp::HttpReqField("body"),
+        ("HttpRequest", "header", 1) => THandleOp::HttpReqHeader,
+        ("HttpRequest", "param", 1) => THandleOp::HttpReqParam,
+        ("HttpResponse", "status", 0) => THandleOp::HttpRespField("status"),
+        ("HttpResponse", "body", 0) => THandleOp::HttpRespField("body"),
+        ("HttpResponse", "header", 1) => THandleOp::HttpRespHeader,
         _ => return None,
     })
 }
@@ -4700,8 +4734,8 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
         // exactly the synthetic `.clone()` or a user instance method on a covered
         // type; lower accordingly. Every dispatch fact is resolved here (totality).
-        Expr::MethodCall { receiver, method, method_span, args, recv_type } => {
-            lower_method_call(receiver, method, *method_span, args, recv_type, cx, env)
+        Expr::MethodCall { receiver, method, method_span, args, recv_type, resolved_ret } => {
+            lower_method_call(receiver, method, *method_span, args, recv_type, resolved_ret.as_ref(), cx, env)
         }
         Expr::If {
             cond,
@@ -5294,6 +5328,7 @@ fn lower_method_call(
     method_span: Span,
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
+    resolved_ret: Option<&Type>,
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
@@ -5403,6 +5438,12 @@ fn lower_method_call(
                                 .unwrap_or_else(unit_type),
                             _ => core_call_return_ty(&module, method),
                         }
+                    } else if crate::Sema::is_polymorphic_core_special(&module, method) {
+                        // c109 Phase 20: the polymorphic special's return type is NOT in
+                        // `core_fixed_sig` — sema resolved it (arg-type dependent) and wrote
+                        // it onto the node's `resolved_ret`. Read it totally (I3); a unit
+                        // fallback (eprint/shuffle return nothing) keeps the fact total.
+                        resolved_ret.cloned().unwrap_or_else(unit_type)
                     } else {
                         core_call_return_ty(&module, method)
                     };
@@ -7167,6 +7208,18 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::AllocReset => format!("({}).reset()", recv),
                 THandleOp::AllocFree => format!("drop({})", recv),
+                // c109 Phase 20: HttpRequest/HttpResponse accessors, byte-for-byte the
+                // `emit_builtin_method` arms. The plain field accessors clone the field;
+                // `header` does a map lookup; `param` calls the prelude helper.
+                THandleOp::HttpReqField(field) | THandleOp::HttpRespField(field) => {
+                    format!("({}).{}.clone()", recv, field)
+                }
+                THandleOp::HttpReqHeader | THandleOp::HttpRespHeader => {
+                    format!("({}).headers.get(&{}).cloned()", recv, a(0))
+                }
+                THandleOp::HttpReqParam => {
+                    format!("{}jet_http_request_param(&({}), &({}))", root, recv, a(0))
+                }
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -7426,6 +7479,20 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
             "{}(&({}), &({}), &({}))",
             regex_fn("jet_regex_replace_all"), arg(0), arg(1), arg(2)
         ),
+        // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.
+        // Their return type is arg-type dependent (resolved by sema's bespoke
+        // `infer_core_call` and written onto the node's `resolved_ret`, read at
+        // lowering), but the EMITTED form is a fixed per-`(module, method)` string —
+        // no type decision here (I3). Args are emitted PLAINLY, exactly `emit_core_call`.
+        ("core.math", "abs") => format!("({}).abs()", arg(0)),
+        ("core.math", "min") => format!("({}).min({})", arg(0), arg(1)),
+        ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),
+        ("core.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
+        ("core.random", "pick") => format!("{}(&({}))", helper("jet_std_random_pick"), arg(0)),
+        ("core.random", "shuffle") => {
+            format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
+        }
+        ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
         _ => "/* unknown std call */".to_string(),
     }
 }
@@ -8135,12 +8202,37 @@ mod tests {
         assert!(handle_method_op("Arena", "alloc", 1).is_some());
         assert!(handle_method_op("Bump", "reset", 0).is_some());
         assert!(handle_method_op("Pool", "free", 0).is_some());
-        // Excluded: dead `lines` (E2502), HttpRequest accessors (serve-lambda-param
-        // slot may be unresolved).
+        // c109 Phase 20: HttpRequest/HttpResponse accessors are now covered (the
+        // `http.serve` lambda-param type is written back onto `p.ty`, so the slot
+        // type is total and the AST `rty`-keyed handle arm fires identically).
+        assert!(handle_method_op("HttpRequest", "method", 0).is_some());
+        assert!(handle_method_op("HttpRequest", "path", 0).is_some());
+        assert!(handle_method_op("HttpRequest", "header", 1).is_some());
+        assert!(handle_method_op("HttpRequest", "param", 1).is_some());
+        assert!(handle_method_op("HttpResponse", "status", 0).is_some());
+        assert!(handle_method_op("HttpResponse", "body", 0).is_some());
+        // Excluded: dead `lines` (E2502).
         assert!(handle_method_op("FileReader", "lines", 0).is_none());
-        assert!(handle_method_op("HttpRequest", "method", 0).is_none());
         // Wrong arity declines.
         assert!(handle_method_op("FileWriter", "write_line", 0).is_none());
+    }
+
+    #[test]
+    fn polymorphic_core_specials_covered() {
+        // c109 Phase 20: the polymorphic core specials route through the core-call
+        // shape (`core_call_covered`), their return type read from the node's
+        // `resolved_ret` (written by sema). `io.input` is NOT a special — it is in
+        // `core_fixed_sig` (covered by Phase 10), so it routes via the table return.
+        assert!(core_call_covered("core.math", "abs"));
+        assert!(core_call_covered("core.math", "min"));
+        assert!(core_call_covered("core.math", "max"));
+        assert!(core_call_covered("core.math", "clamp"));
+        assert!(core_call_covered("core.random", "pick"));
+        assert!(core_call_covered("core.random", "shuffle"));
+        assert!(core_call_covered("core.io", "eprint"));
+        // The closure-taking / handle-constructor specials stay OUT of the core-call
+        // shape (each has its own bespoke shape or is unreachable in subset).
+        assert!(!core_call_covered("core.tasks", "channel"));
     }
 
     #[test]

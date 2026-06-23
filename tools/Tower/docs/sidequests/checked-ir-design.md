@@ -89,6 +89,29 @@ them so they don't regress, but they should be fixed independently of c109):
   borrow shape is otherwise the same total `TStmt::ViewReturn { wrap }` Phase 17 used for
   inherent/free view methods, so the lift is trivial once `emit_trait_def` threads
   `is_view_return` into the declared return type. (Surfaced in Phase 19.)
+- **A method on a GENERIC struct doesn't type-check (sema gap).** A struct-body
+  method on `struct Stack<T> { … fn size(self) -> Int { … } }` is NOT bound to the
+  type — sema reports E0311 ("`size` isn't a method on this value") at the call site,
+  and any method body that references the type var `T` additionally hits E0119 ("no
+  type called `T`" — the impl-level type params aren't in scope in the method body).
+  So there is NO valid Jet program with a generic-struct method today; the construct
+  is unreachable on BOTH paths. (Phase 19's "probe showed byte-identical emit" built
+  the AST directly in a `build_cx`-only unit test, bypassing sema's method binding.)
+  Consequence: covering "generic-type methods" in the TIR is moot until sema binds
+  type params into struct-body method scopes + registers the methods on the generic
+  type. Logged in Phase 20 (the gate's `struct_is_generic` exclusion stays, correctly
+  conservative). Fix lives in sema's method registration/scope, independent of c109.
+- **`http.serve(addr, handler)` doesn't propagate the handler's `Fn(HttpRequest)->
+  HttpResponse` type to a lambda arg (sema gap).** `infer_core_call`'s serve arm
+  (CheckerCoreLib ~L741) `self.infer(&mut args[1].expr)` with NO expected type, so an
+  UNANNOTATED serve lambda `(req) => …` hits E0801 ("tell me the type of `req`") and
+  its body's `return HttpResponse{…}` is mis-attributed to the enclosing fn (E0113).
+  So a serve handler lambda MUST annotate its param (`(req: HttpRequest) => …`). The
+  HttpRequest/HttpResponse accessors therefore reach codegen only on a TYPED param
+  (a free fn or annotated lambda), where the slot type is already total — which is how
+  Phase 20 covers them (no lambda-param writeback needed). Fix: set the serve arm's
+  expected type to `Fn(HttpRequest)->HttpResponse` before inferring the handler.
+  (Surfaced in Phase 20.)
 - **A bare `?? return` (no value) is unusable (sema/codegen mismatch).** `x ?? return`
   (no fallback value) emits `match … { None => return }`. Sema E0405 REQUIRES the enclosing
   fn to have a return type ("a bare return needs a function with a return type"); but rustc
@@ -129,7 +152,9 @@ in the commit message / session; the load-bearing conclusions:
 **A. Sema already annotates most per-node facts onto the AST.** These fields exist
 specifically to carry checked results into codegen:
 - `Expr::Int` width `Option<(bool,u8)>`; `Expr::Index`/`LValue::Index` `kind: IndexKind`;
-  `Expr::MethodCall.recv_type: Option<String>`; `Expr::OptField.flatten: bool`;
+  `Expr::MethodCall.recv_type: Option<String>` (+ `resolved_ret: Option<Type>`, c109
+  Phase 20 — the arg-dependent return type of a polymorphic core special);
+  `Expr::OptField.flatten: bool`;
   `Expr::Try` `TryConvert::{None,Fallible,Typed(fn)}`; `Expr::StructLit.as_trait`;
   `Expr::Todo.expected_type`.
 - `CallArg.flags.{implicit_clone, shared_auto_clone}`.
@@ -1283,56 +1308,108 @@ everything, the AST codegen path is deleted (final phase).
   `covers_*` and update `rejects_generic_method` (now excluded by `struct_is_generic`, not the
   bare-name check) + `handle_method_op_table` (arena ops now covered).
 
+## Refinements learned in Phase 20 (polymorphic core specials, http accessors)
+
+- **The polymorphic core specials' return type IS now a total fact — sema writes it
+  onto a NEW `Expr::MethodCall.resolved_ret` field.** Phases 10/13 deferred
+  `math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint` because their return
+  type is arg-type dependent (resolved by `infer_core_call`'s bespoke `check_core_call`
+  logic, NOT `core_fixed_sig`) and was thrown away — the node carried only `recv_type`.
+  The c109-spirit fix is to WRITE THE FACT BACK: a new `resolved_ret: Option<Type>` on
+  `MethodCall`, populated in `infer_method_call` right after `infer_core_call` returns,
+  gated on `is_polymorphic_core_special(module, method)` (a new `CheckerCoreLib` helper).
+  Lowering reads it totally (I3) into the node's `ty`; emit makes no type decision. The
+  EMITTED form is a fixed per-`(module, method)` string (`(x).abs()`, `(a).min(b)`,
+  `jet_std_random_pick(&(xs))`, `eprintln!("{}", (x).jet_show())`), added to
+  `emit_tir_core_call` byte-for-byte from `emit_core_call`, args emitted plainly. The
+  specials join `core_call_covered` + the Phase-10 `CoreCall` shape (no new node kind).
+  Adding the field touched only 5 construct sites (the rest match with `..`); existing
+  behavior is unchanged (only the new path reads it). `random.pick` → `Int?` proves the
+  writeback (the binding emits `let user_p: Option<i64>` from `resolved_ret`).
+- **HttpRequest/HttpResponse accessors were unblocked by ONE table addition, not a sema
+  change.** Phase 13 excluded them claiming the `http.serve` lambda param is unresolved
+  (`p.ty == None`). That turned out to be a RED HERRING: `http.serve` REQUIRES an
+  annotated handler param (the serve arm sets no expected type, so an unannotated
+  `(req) =>` lambda is E0801 — a separate sema gap, logged). So the accessors reach
+  codegen only on a TYPED param (a free fn `handle(req: HttpRequest)` or annotated
+  lambda), where `recv_type == Some(HttpRequest|HttpResponse)` AND the slot type is
+  already total — the AST `rty`-keyed `emit_builtin_method` arm fires identically. The
+  fix is purely adding the eight accessor ops to `handle_method_op` (`method`/`path`/
+  `body`/`header`/`param` on HttpRequest; `status`/`body`/`header` on HttpResponse) +
+  the `THandleOp::Http{Req,Resp}{Field,Header,Param}` emit arms, byte-for-byte the AST
+  arms (`(recv).<field>.clone()`, `(recv).headers.get(&a0).cloned()`,
+  `jet_http_request_param(&(recv), &(a0))`). The handle-shape gate already keyed on
+  `recv_type == Some(handle)` → `handle_method_op`, so the gate widened for free. The
+  return types come from `net_method_return` via `handle_method_return_ty` (total).
+  `57_http_server` `handle` now routes byte-identically.
+- **A speculative lambda-param-type WRITEBACK was tried and REVERTED — it changes emit
+  for trait-object closures.** Writing the inferred param type back onto `LambdaParam.ty`
+  (the "make the slot total" idea from the phase brief) is UNSAFE: a `[Shape]`-list
+  `.each((s) => …)` lambda whose param `s` was untyped would gain `s: Box<dyn Shape>`,
+  and `emit_lambda` then declares `move |user_s: Box<dyn user_Shape>|` → a closure-arg
+  type mismatch with `jet_list_each_ref`'s `&T` (rustc E0631). Caught by
+  `tests/tir.rs::trait_impl_method_bodies`. The writeback isn't needed anyway (the http
+  accessors work on typed params), so it was dropped — the http coverage stands on the
+  `handle_method_op` addition alone. Lesson: a "more total" sema fact written onto a node
+  that the AST emit path ALSO reads can diverge — only safe when the field is read by the
+  TIR path exclusively (as `resolved_ret` is). The `resolved_ret` writeback is safe
+  precisely because no existing emit/diagnostic reads it.
+- **Generic-type METHODS are UNREACHABLE — a sema gap, not a TIR gap (DEFERRED).** A
+  struct-body method on a generic struct (`struct Stack<T> { … fn size(self) … }`) is
+  NOT bound to the type (E0311 at the call site) and a `T`-referencing body hits E0119
+  ("no type called `T`"). So NO valid Jet program has a generic-struct method; the
+  construct can't route on either path. Phase 19's "byte-identical probe" was a
+  `build_cx`-only unit-test AST, bypassing sema's method binding — it does not reflect a
+  real program. The `struct_is_generic` exclusion STAYS (correctly conservative); the
+  fix is in sema's method registration/scope (logged in the latent-bug list), not c109.
+- **Task/Channel/Sender methods stay DEFERRED — the producers aren't coverable as a
+  small slice.** `Task.join/detach`, `Channel.receive/sender`, `Sender.send` carry
+  `recv_type == None` (a Phase-9 builtin gap). They are reachable ONLY if their handle
+  binds in a covered fn — which requires covering `Channel<T>`/`Task<T>`/`Sender<T>` as
+  covered `Type::Apply` VALUE types AND the `Closed` error type (for `receive`'s Result)
+  AND a return-type writeback for the `tasks.channel` producer (not in `core_fixed_sig`).
+  Covering only the producer leaves the methods unreachable; covering partially risks
+  parity divergence on the channel examples (`57_http_server`). This is a coherent
+  coupled follow-up, not safely landable piecemeal — DEFERRED with this reason.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass
+  on `emit_func`/`emit_method`/`emit_trait_method` + the delegation hook) across the
+  **entire example suite** — 118 emittable, 0 differ — plus crafted probes exercising:
+  the polymorphic specials (`math.abs/min/max/clamp` + `random.pick/shuffle` + `io.eprint`,
+  with `random.pick` → `Int?` proving the `resolved_ret` writeback) and HttpRequest/
+  HttpResponse accessors (`method`/`path`/`header`/`param`/`status`/`body` on a typed
+  param via `http.parse`). `57_http_server` `handle` (`req.method()`/`req.path()`) routes
+  byte-identically. Instrumentation + temp files removed before commit. tests/tir.rs adds
+  `polymorphic_core_specials` + `http_request_response_accessors`; the TIR unit tests add
+  `polymorphic_core_specials_covered` and flip `handle_method_op_table` (HttpRequest/
+  HttpResponse accessors now covered).
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 19 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
-reached for these constructs. Each entry: the construct, the AST emit function that
-owns it, and the total fact still missing to cover it. **After Phase 19 the inventory is
-down to: generic-type METHODS, polymorphic core specials, the `recv_type == None`
-Task/Channel/Sender handle methods, HttpRequest/HttpResponse accessors, recursive structs,
-and the latent-bug-gated constructs.** The big surfaces (generic structs, foreign types,
-arena/region, Stopwatch) are now COVERED.
+After Phase 20 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are reached
+ONLY for constructs that MISCOMPILE on both paths today (latent codegen/sema bugs the
+TIR must not *claim*) or are genuinely UNREACHABLE in any valid Jet program. The two
+remaining *coverable* surfaces — polymorphic core specials and HttpRequest/HttpResponse
+accessors — are now COVERED. **Precisely, the residue is: the latent-bug-gated constructs
+(`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs,
+view-returning TRAIT methods); generic-type METHODS (unreachable — a sema binding gap);
+the Task/Channel/Sender `recv_type == None` methods (deferred — need the coupled
+`Type::Apply` value-type + `tasks.channel` producer slice); and the bare `?? return`
+(dead — a sema/codegen mismatch).** Each:
 
-- **Generic-type METHODS** (residue after Phase 19) — `emit_method`/`emit_trait_method` for a
-  method inside an `impl<T> user_<T>` block. Phase 19 covered generic STRUCT free functions
-  (turbofish StructLit, `Type::Apply` params/returns, `[T]`-field builtins — `26_generic_types`
-  `make_pair`/`empty_stack`/`push`) and admits a generic struct as a covered VALUE type, but
-  a METHOD on a generic struct stays excluded by `struct_is_generic` (the `impl<T>` clause +
-  turbofish receiver aren't validated across every method shape). A probe showed such a method
-  emits byte-identically; lifting it needs validating the generic method gate end-to-end
-  (view returns, generic-struct method args). `view`-returning **trait** methods are ALSO
-  excluded, but for a DIFFERENT reason — they MISCOMPILE on both paths (`emit_trait_def`
-  drops `is_view_return` from the declared return → rustc E0053; see the latent-bug list),
-  so the trait-method gate keeps the `is_view_return` exclusion until that bug is fixed.
-- **Polymorphic core specials** `math.abs/min/max/clamp`, `random.pick/shuffle`,
-  `io.input/io.eprint` — `emit_core_call` (their bespoke arms). Their return type
-  depends on the ARG type, resolved by `infer_core_call`'s bespoke `check_core_call`
-  logic, NOT the fixed `core_fixed_sig` table — and that resolved return type is
-  **never written back onto the AST node** (`Expr::MethodCall` carries only
-  `recv_type: Option<String>`; there is no return-type field or side table). So
-  recovering it at lowering would require re-running sema's arg-type inference
-  (`self.infer(&arg.expr)` → element/arg type), which violates I3. **Confirmed
-  DEFERRED in Phase 13** — the return type is not a total sema fact. (Note `io.input`
-  IS in `core_fixed_sig` → `String?`, so it's covered by Phase 10 already; only
-  `io.eprint` and the math/random specials remain here.)
-- **Handle-using methods that carry `recv_type == None`** (`Task.join/detach`,
-  `Channel.receive/sender`, `Sender.send`) — these resolve via
-  `Collections::builtin_method_return` (`task_method_return`/`channel_method_return`/…),
-  which leaves `recv_type == None` (NOT `Some`). They are a Phase-9-style builtin gap, not
-  the `recv_type == Some` handle shape Phase 13 covered. **`Stopwatch.elapsed_millis` is now
-  COVERED (Phase 19)** via a dedicated gate shape (d2). The remaining Task/Channel/Sender
-  methods are NOT reachable in subset (their producers — `tasks.channel`/`tasks.spawn`'s
-  Task result — aren't covered calls), so covering them needs the producer first. A clean
-  follow-up.
-- **HttpRequest/HttpResponse method accessors** (`req.method()`/`req.path()`/`.body()`/
-  `.header()`/`.param()`/`resp.status()`/…) — these DO carry `recv_type == Some`, but
-  arise ONLY as a `http.serve` lambda PARAMETER (`(req) => …`), whose slot type is
-  often unresolved (`p.ty == None` — sema doesn't write the inferred param type back
-  onto the lambda param). The AST `emit_builtin_method` keys these on `rty =
-  expr_jet_ty(receiver)`, which is then `None`, so the handle arm does NOT fire — the
-  call falls through. Covering them (selecting the op from `recv_type`) would DIVERGE.
-  Excluded by `handle_method_op` (Phase 13). Unblocks once the serve-lambda param type
-  is total, or by routing these via `recv_type` only when the slot type matches.
+- **Generic-type METHODS** — UNREACHABLE, not a TIR gap. A method on a generic struct
+  doesn't type-check in current Jet (E0311 at the call site; E0119 if the body uses `T`).
+  See the latent-bug list. The `struct_is_generic` exclusion stays; the fix is in sema's
+  method registration/scope, independent of c109. (`view`-returning **trait** methods are
+  also excluded, for a different reason — they MISCOMPILE on both paths: `emit_trait_def`
+  drops `is_view_return` from the declared return → rustc E0053; latent-bug list.)
+- **Task/Channel/Sender `recv_type == None` methods** (`Task.join/detach`,
+  `Channel.receive/sender`, `Sender.send`) — a Phase-9-style builtin gap. Reachable only
+  once `Channel<T>`/`Task<T>`/`Sender<T>` (`Type::Apply`) are covered VALUE types + the
+  `Closed` err type + the `tasks.channel` producer's return-type writeback land together
+  (the producer isn't in `core_fixed_sig`; `tasks.spawn`'s Task result needs the value
+  type too). DEFERRED in Phase 20 as a coupled follow-up (covering the producer alone
+  leaves the methods unreachable; partial coverage risks parity divergence on the channel
+  examples). **`Stopwatch.elapsed_millis` is COVERED (Phase 19).**
 - **Recursive (boxed) STRUCTS** — the struct gate (`struct_is_covered`) still excludes
   recursive structs (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)`
   field wrap → rustc E0308; see the latent-bug list; the TIR must not claim a miscompiling
@@ -1374,6 +1451,7 @@ arena/region, Stopwatch) are now COVERED.
 | 17 | Generics, foreign/prelude types, view-returning methods | ✅ done (c109 Phase 17, partial) — covers three independent surfaces. **`view`-returning functions/methods** (`-> view T` borrow): `emit_view_return` reproduced as a total `TStmt::ViewReturn { value, wrap }` (`wrap ∈ {Addr, Bare}` resolved at lowering from the AST node shape), `TFunc.is_view` drives `rust_return_type → &T`, the `view_return` flag rides `LowerEnv` (threaded through `clone_env`/`fork_panic`). `35_zerocopy` `name_of` routes. **Generic FREE functions** whose params/return are type vars (`<T: Clone>` clause rendered at lowering into `TFunc.generics` via `Generics::rust_type_param_list` + `rust_extra_clone_bounds`; a type-var param admitted by `is_subset_param_ty`, forced `Move` for the slot deref via `param_place_generic` — EXACTLY `emit_func`'s `is_type_param`) or `[T]` lists (`collection_elem_covered` admits a type var). **Constructable PRELUDE structs** (HttpRequest/HttpResponse): `emit_struct_lit`'s `is_prelude_struct` branch (`Jet…` head, PLAIN fields, HttpRequest's injected `params` field) reproduced via a total `StructLit { …, extra: Option<String> }`; the core/prelude/handle types (ProcessResult/Json/Stopwatch/FileReader/TcpStream/Arena/…) admitted as covered VALUE types (`is_covered_foreign_value_ty`). Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (view field accessor, `id`/`pick`/`firstof`/`wrap` generics, `build_resp`/`build_req` prelude construction). 206 free fns route through `emit_func`. tests/tir.rs adds `generic_free_fns`/`view_return_fn`/`prelude_struct_construction`; unit tests flip `rejects_generic_fn` → `covers_generic_fn` + add `rejects_generic_struct_fn`. Excludes (stay on AST path, with reason): **generic STRUCT types/methods** (`Pair<T>` `Type::Apply` value type, turbofish `user_Pair::<T> { … }`, `[T]`-field builtins, generic-type methods — `26_generic_types` `make_pair`/`empty_stack`/`push`); **FOREIGN (imported user) structs/enums** (cross-module `import_ns` construction — Phase 14 surface); **`view`-returning trait methods** (gate keeps the exclusion — conservative); recursive STRUCTS, latent-bug-gated constructs, and the remaining inventory entries (polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse method accessors, `@unsafe`/`#Unsafe`/`core.mem`). |
 | 18 | @unsafe / #Unsafe / core.mem pointer tier | ✅ done (c109 Phase 18) — covers the audited expert low-level tier. **`#Unsafe fn`** (S58, E2-M13/D-LL1): a function-level `unsafe` — the `unsafe ` keyword prefixes the signature (`{vis}{unsafe_kw}fn` / `pub {unsafe_kw}fn` / trait-method `{unsafe_kw}fn`), body unchanged — carried as `TFunc.is_unsafe` (the three gates' `f.is_unsafe` exclusion LIFTED; `TFuncKind::TraitMethod` already carried it since Phase 12). **`#Unsafe { … }`** audited region (`Stmt::Unsafe`): lowers to `unsafe { … }` (`TStmt::Unsafe`), the `#Audit("…")` annotation emits NOTHING; body `let`s leak into the outer scope (lowered/gated on the SAME env/locals, like comptime-if). **`core.mem` POINTER ops**: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr` → `TExprKind::PtrFromAddr`, total `elem`, safe cast `(({addr}) as usize as *mut {T})`, no `unsafe`); `mem.address_of(x)` → `Int` (`(&(x) as *const _ as usize as i64)`); `mem.volatile_read(p)` → `ptr_elem(p.ty)` (`std::ptr::read_volatile(p)`) — both NOT in `core_fixed_sig` but deterministic, admitted by `core_call_covered` with the return type special-cased at lowering. **I1 holds:** every emitted `unsafe` is a gated form (`unsafe fn` / `unsafe {`) tied 1:1 to a source `#Unsafe`/`#Unsafe fn` gate — verified by grepping the TIR-path Rust (drop the vetted `jet_mem` prelude). Byte-identical across the whole example suite (118 emittable, 0 differ) incl. both `#Unsafe`-tier examples (`48_lowlevel` + `showcase/lowlevel`), which run end-to-end. +4 example fns route (`read_reg`/`main`, `read_int`/`main`). tests/tir.rs adds `unsafe_fn_block_and_ptr_ops` + `unsafe_tier_emit_is_byte_exact`; unit tests add `covers_unsafe_fn_with_ptr_ops` / `covers_unsafe_block_and_address_of`. Excludes (stay on AST path, with reason): **`core.mem` ARENA allocators** (`Arena`/`Bump`/`Pool`/`Fixed` — `mem.<A>.new()` producer + `.alloc`/`.reset`/`.free` handle methods + `arena_view` bindings; their `unsafe` is vetted-`jet_mem`-only) and **`#Context(allocator:)`** / **`region r { … }`** (plain-block + RAII-guard emit) — a clean follow-up; plus the prior inventory residue (generic structs, polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse accessors, recursive/foreign structs, latent-bug-gated constructs). |
 | 19 | Generic structs, foreign types, arena/region, Stopwatch | ✅ done (c109 Phase 19) — covers the UNBLOCKED inventory residue. **Generic STRUCTS** (free functions): a type-var struct field admitted by `field_ty_covered`; a `Type::Apply` (`Pair<T>`/`Stack<Int>`) param/return/local admitted by `is_covered_generic_struct_ty`; the turbofish StructLit (`user_Pair::<T> { … }`) + foreign `import_ns` head resolved at lowering into the total `StructLit.rust_type`; the `[T]`-field builtin routes via the Phase-9 shape unchanged. `26_generic_types` `make_pair`/`empty_stack`/`push` route. **FOREIGN (imported user) structs** as covered value types (`cx.foreign_types` → `{root}{mod}::user_<Name>` via `cx.rust_type`) + `alias.Note { … }` construction (`emit_struct_lit`'s `import_ns` branch reproduced); foreign enums covered as value types (construction has no reachable literal syntax). **`Stopwatch.elapsed_millis()`** — a `recv_type == None` builtin gap (gate shape d2 → `THandleOp::StopwatchElapsedMillis`). **Arena/region/context**: the `mem.<Alloc>.new()` producer (`TExprKind::AllocNew`, ctor tail rendered at lowering, claimed FIRST mirroring `emit_method_call`); `alloc`/`reset`/`free` handle methods (`THandleOp::{AllocAlloc,AllocReset,AllocFree}`); the `arena_view` binding (`let <x> = …;` no-type/no-mut + deref'd slot); `region r { … }` (`TStmt::Region`, leaky block); `#Context(allocator:) { … }` (`TStmt::ContextBlock`, RAII guard + leaky body). `70_arena`/`75_arena_regions`/`77_smart_context` route. **I1 holds:** the arena `unsafe` lives entirely in the vetted `jet_mem` prelude — the TIR-path `main`s emit ZERO `unsafe`. Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (2-file foreign module, Stopwatch, generic-struct method that emits byte-identically but stays excluded). ~240 fn-routes (was ~218). tests/tir.rs adds `generic_struct_fns`/`foreign_struct_construction`/`stopwatch_elapsed_millis`/`arena_alloc_reset_free`/`arena_region_block`/`smart_context_block`; unit tests flip `rejects_generic_struct_fn`/`rejects_generic_struct_literal` → `covers_*`, update `rejects_generic_method` (now via `struct_is_generic`) + `handle_method_op_table`. Excludes (stay on AST path, with reason): **generic-type METHODS** (`impl<T> user_<T>` — `struct_is_generic` excludes; conservative until validated end-to-end); **`view`-returning trait methods** (MISCOMPILE on both paths — `emit_trait_def` drops `is_view_return` → rustc E0053, a NEW latent bug); polymorphic core specials; Task/Channel/Sender `recv_type == None` methods (producers not covered); HttpRequest/HttpResponse accessors; recursive STRUCTS; latent-bug-gated constructs. |
+| 20 | Polymorphic core specials, http accessors, generic methods (assessed) | ✅ done (c109 Phase 20) — covers the two remaining COVERABLE residue surfaces. **Polymorphic core specials** (`math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint`): their arg-type-dependent return type is now a TOTAL fact — a new `Expr::MethodCall.resolved_ret: Option<Type>` field, written by sema (`infer_method_call` after `infer_core_call`, gated on the new `is_polymorphic_core_special`), read at lowering into the node's `ty`. The specials join `core_call_covered` + the Phase-10 `CoreCall` shape; the fixed emit strings (`(x).abs()`, `(a).min(b)`, `jet_std_random_pick(&(xs))`, `eprintln!`) are added to `emit_tir_core_call` byte-for-byte (`random.pick` → `Int?` proves the writeback). Adding the field touched 5 construct sites (rest `..`); no existing emit/diagnostic reads it, so behavior is unchanged. **HttpRequest/HttpResponse accessors** (`method`/`path`/`body`/`header`/`param`/`status`): the Phase-13 "serve-lambda-param unresolved" exclusion was a RED HERRING — `http.serve` REQUIRES an annotated handler param (an unannotated `(req) =>` is E0801, a sema gap, logged), so the accessors reach codegen only on a TYPED param where `recv_type == Some` AND the slot type is already total. Covered purely by adding the eight ops to `handle_method_op` + the `THandleOp::Http{Req,Resp}{Field,Header,Param}` emit arms (byte-for-byte `emit_builtin_method`); the handle-shape gate widened for free. `57_http_server` `handle` routes byte-identically. A speculative lambda-param-type writeback was tried + REVERTED (it changes emit for `[Shape]`-list `.each((s)=>…)` trait-object closures → rustc E0631, caught by `trait_impl_method_bodies`; the http coverage doesn't need it). Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes. tests/tir.rs adds `polymorphic_core_specials` + `http_request_response_accessors`; unit tests add `polymorphic_core_specials_covered` + flip `handle_method_op_table`. **Assessed + DEFERRED (with reason):** **generic-type METHODS** are UNREACHABLE — a method on a generic struct doesn't type-check in current Jet (E0311 at the call site; E0119 if the body uses `T`); Phase 19's "byte-identical probe" was a `build_cx`-only AST bypassing sema's method binding. The `struct_is_generic` exclusion stays; the fix is in sema (logged in the latent-bug list). **Task/Channel/Sender `recv_type == None` methods** need a coupled slice (cover `Channel<T>`/`Task<T>`/`Sender<T>` `Type::Apply` value types + the `Closed` err type + the `tasks.channel` producer return-type writeback together) — covering the producer alone leaves the methods unreachable; DEFERRED. After Phase 20 the AST-path residue is ONLY the latent-bug-gated constructs (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning TRAIT methods), the unreachable generic-type methods, the deferred Task/Channel/Sender slice, and the dead bare `?? return`. |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

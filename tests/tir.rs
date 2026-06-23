@@ -2583,3 +2583,81 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "10\n20\n");
 }
+
+/// c109 Phase 20: the polymorphic core specials (`math.abs/min/max/clamp`,
+/// `random.pick/shuffle`, `io.eprint`). Their return type is arg-type dependent
+/// (resolved by sema's bespoke `infer_core_call`) and written onto the
+/// `Expr::MethodCall.resolved_ret` field, read at lowering so the TIR is total
+/// (I3). The emit forms (`(x).abs()`, `(a).min(b)`, `jet_std_random_pick(&(xs))`,
+/// `eprintln!`) reproduce `emit_core_call` byte-for-byte. `random.pick` returns
+/// `Int?` (the element type wrapped in Option), proving the resolved_ret writeback.
+#[test]
+fn polymorphic_core_specials() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.math as math
+use core.random as random
+use core.io as io
+fn run() -> Int {
+    a @= math.abs((-5))
+    b @= math.min(3, 7)
+    c @= math.max(3, 7)
+    d @= math.clamp(15, 0, 10)
+    io.eprint(\"trace: {a} {b} {c} {d}\")
+    xs := [1, 2, 3]
+    random.shuffle(mut xs)
+    p @= random.pick(xs)
+    return ((((a + b) + c) + d) + (p ?? 0))
+}
+fn main() {
+    print(run())
+}
+";
+    let (code, _stdout) = build_and_run("tir_poly_specials", src);
+    assert_eq!(code, 0);
+    // a=5, b=3, c=7, d=10, p ∈ {1,2,3}; sum = 25 + p ∈ {26,27,28}.
+}
+
+/// c109 Phase 20: HttpRequest/HttpResponse method accessors (`req.method()`/
+/// `req.path()`/`req.body()`/`req.header(n)`/`req.param(n)`/`resp.status()`/
+/// `resp.body()`/`resp.header(n)`). These carry `recv_type == Some(HttpRequest|
+/// HttpResponse)`; now that the lambda-param type is written back onto `p.ty`
+/// (sema), the slot type is total and the handle-op shape selects correctly. The
+/// emit (`(recv).<field>.clone()`, `(recv).headers.get(&a0).cloned()`,
+/// `jet_http_request_param(&(recv), &(a0))`) reproduces `emit_builtin_method`
+/// byte-for-byte. `handle` is a typed free function (the example form); it routes.
+#[test]
+fn http_request_response_accessors() {
+    if !have_rustc() {
+        return;
+    }
+    // `http.parse` triggers the http prelude (so `JetHttpRequest`/the accessor
+    // helpers are in scope) and yields an HttpRequest without networking; a
+    // single-line request keeps the lexer happy (Jet has no `\r` escape).
+    let src = "\
+use jet.http as http
+fn handle(req: HttpRequest) -> HttpResponse {
+    m @= req.method()
+    p @= req.path()
+    h @= req.header(\"host\")
+    q @= req.param(\"id\")
+    body @= \"m={m} p={p}\"
+    return HttpResponse {status: \"200 OK\", body: body, headers: [:]}
+}
+fn describe(resp: HttpResponse) -> String {
+    s @= resp.status()
+    b @= resp.body()
+    return \"{s}: {b}\"
+}
+fn main() {
+    req @= http.parse(\"GET /x HTTP/1.1\\nHost: localhost\")
+    resp @= handle(req)
+    print(describe(resp))
+}
+";
+    let (code, stdout) = build_and_run("tir_http_accessors", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "200 OK: m=GET p=/x\n");
+}
