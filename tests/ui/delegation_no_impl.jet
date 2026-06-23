@@ -1,0 +1,19 @@
+trait Greeter {
+    fn greet(self) -> String
+}
+
+struct Inner {
+    name: String
+}
+
+struct Wrapper {
+    inner: Inner
+}
+
+// Inner doesn't implement Greeter, so delegation fails
+impl Wrapper: Greeter using inner
+
+fn main() {
+    w @= Wrapper { inner: Inner { name: "world" } }
+    print(w.greet())
+}
