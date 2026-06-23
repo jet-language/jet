@@ -1251,3 +1251,141 @@ fn main() {
 // here because the call references the external FFI bridge crate (`cx.ffi_crate`),
 // which the bare-`rustc` harness can't resolve standalone — the same reason the
 // example suite drives the regex example through the project build, not this file.
+
+// ===================================================================
+// c109 Phase 11: lambdas/closures, fan-out, closure-taking collection
+// methods. Each program lives entirely inside the covered subset, so the
+// covered function(s) route through the TIR; the assert proves rustc
+// accepts the output (I2) and it runs correctly. Byte-parity to the AST
+// path is verified separately (forced-AST diff across the example suite).
+// ===================================================================
+
+/// A list `map`/`filter`/`reduce`/`find`/`any`/`all` with expression-body
+/// lambdas, plus a captured (Copy) outer local. The closure methods compose a
+/// lambda with the builtin method — the whole `run` routes through the TIR.
+#[test]
+fn closure_collection_methods() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() -> Int {
+    base := 10
+    nums := [1, 2, 3, 4, 5]
+    squares := nums.map((n: Int) => (n * n))
+    big := squares.filter((n: Int) => (n > 5))
+    shifted := nums.map((n: Int) => (n + base))
+    total := nums.reduce(0, (acc: Int, n: Int) => (acc + n))
+    has := nums.any((n: Int) => (n > 4))
+    every := nums.all((n: Int) => (n > 0))
+    print(big)
+    print(shifted)
+    print(has)
+    print(every)
+    return total
+}
+fn main() {
+    print(run())
+}
+";
+    let (code, stdout) = build_and_run("tir_closure_methods", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "[9, 16, 25]\n[11, 12, 13, 14, 15]\ntrue\ntrue\n15\n"
+    );
+}
+
+/// A FnMut closure (mutates a captured mutable local) routes through the
+/// FnMut branch (`jet_list_each_mut`, no `move` keyword) — the Fn-vs-FnMut
+/// decision read off the lambda's `needs_fn_mut` meta.
+#[test]
+fn fnmut_each_closure() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() -> Int {
+    nums := [1, 2, 3, 4]
+    total := 0
+    nums.each((n: Int) => { total = (total + n) })
+    return total
+}
+fn main() {
+    print(run())
+}
+";
+    let (code, stdout) = build_and_run("tir_fnmut_each", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\n");
+}
+
+/// `sort_by` with a key lambda (a list mutated in place). Routes through the
+/// `SortBy` op (`{ jet_list_sort_by(&mut recv, f); }`).
+#[test]
+fn sort_by_closure() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() -> Int {
+    nums := [3, 1, 2]
+    nums.sort_by((n: Int) => n)
+    return nums[0]
+}
+fn main() {
+    print(run())
+}
+";
+    let (code, stdout) = build_and_run("tir_sort_by", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n");
+}
+
+/// The fan-out operator `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]` (S75/S76) over a
+/// plain top-level function. Routes through `TExprKind::FanOut` (each item a
+/// synthetic single-arg call, wrapped in `vec![…]`).
+#[test]
+fn fan_out_operator() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn double(n: Int) -> Int {
+    return (n * 2)
+}
+fn run() -> Int {
+    doubled := double.[1, 2, 3]
+    print(doubled)
+    return doubled[1]
+}
+fn main() {
+    print(run())
+}
+";
+    let (code, stdout) = build_and_run("tir_fan_out", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "[2, 4, 6]\n4\n");
+}
+
+/// A call whose callee has a Fn-typed parameter (`apply(f, x)`) is EXCLUDED
+/// from the TIR (the fn-value arg needs the `Box::new(…) as …` coercion the
+/// plain-call lowering does not emit). It stays on the AST path and still
+/// compiles + runs — proving the gate's exclusion is conservative, not lossy.
+#[test]
+fn fn_typed_param_call_stays_on_ast_path() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(x)
+}
+fn main() {
+    print(apply((n: Int) => (n + 1), 41))
+}
+";
+    let (code, stdout) = build_and_run("tir_fn_param_excluded", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n");
+}

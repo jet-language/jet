@@ -35,8 +35,8 @@
 use super::*;
 use crate::AST::{
     AccessConvention, BinOp, ElseBranch, EnumLitArg, Expr, ForKind, Func, IfStmt, IndexKind,
-    LValue, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart, SwitchArm, TryConvert, Type, UnOp,
-    VariantPayload,
+    Lambda, LambdaBody, LValue, OrFallback, Param, PatSlot, Pattern, Stmt, StrPart, SwitchArm,
+    TryConvert, Type, UnOp, VariantPayload,
 };
 use crate::Diagnostics::Span;
 use crate::Syntax;
@@ -407,6 +407,80 @@ pub(crate) enum TExprKind {
         member_rust: String,
         flatten: bool,
     },
+    /// c109 Phase 11: a lambda/closure literal (`Expr::Lambda`). Every capture/
+    /// escape/Fn-vs-FnMut decision is the TOTAL sema fact (`Lambda.meta`), resolved
+    /// at lowering — emit reads them, never recomputes capture analysis (I3). The
+    /// `prep` holds the per-`cloned_capture` `let _jet_cap_<n> = (place).clone();`
+    /// prelude (resolved from the *outer* env at lowering, since the cap's source
+    /// place is an outer local); `params` is the already-rendered `name[: ty]` list;
+    /// `body` is the lowered closure body; `is_move`/`boxed` reproduce the AST path's
+    /// `move ` keyword (off `needs_fn_mut`/`escapes`) and `Box::new(…)` (off `escapes`)
+    /// wrappers. The whole thing is wrapped in `{ <prep> <closure> }` when `prep` is
+    /// non-empty — byte-for-byte `emit_lambda` (Source/Codegen/Expression.rs).
+    Lambda(Box<TLambda>),
+    /// c109 Phase 11: the fan-out operator `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]`
+    /// (S75/S76 — result `[T#N]`, erased to `Vec`). `calls` are the already-lowered
+    /// per-item call expressions (a `Call`/`Print`/`CallValue` form, resolved at
+    /// lowering exactly as the AST path routes an `Ident` callee through `emit_call`
+    /// and any other callee through `(f)(item)`). Emit just wraps them in `vec![…]`.
+    FanOut { calls: Vec<TExpr> },
+    /// c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/
+    /// `find`/`any`/`all`/`sort_by`/`reduce`). The receiver-type + Fn-vs-FnMut
+    /// dispatch (`emit_builtin_method`'s closure arms) is resolved at lowering into a
+    /// concrete `op`; emit only formats. `recv` is the lowered receiver, `args` the
+    /// lowered closure arg(s) (a `reduce` carries the seed first, then the lambda) —
+    /// emitted PLAINLY, exactly as `emit_builtin_method`'s `arg(i)`.
+    ClosureMethod {
+        recv: Box<TExpr>,
+        op: TClosureOp,
+        args: Vec<TExpr>,
+    },
+}
+
+/// c109 Phase 11: a resolved closure-taking collection-method op, one per
+/// `emit_builtin_method` closure arm (Source/Codegen/Expression.rs). The
+/// receiver-type branch (Map vs list vs trait-object list) and the Fn-vs-FnMut
+/// branch (off the lambda arg's `needs_fn_mut` meta) are decided ONCE at lowering;
+/// the variant encodes the chosen form so emit only formats.
+pub(crate) enum TClosureOp {
+    /// `map` on a list — `jet_list_map((recv).clone(), f)`.
+    Map,
+    /// `map` on a list whose lambda is FnMut — `jet_list_map_mut((recv).clone(), f)`.
+    MapMut,
+    /// `filter` — `jet_list_filter((recv).clone(), f)`.
+    Filter,
+    /// `each` on a list — `jet_list_each((recv).clone(), f)`.
+    Each,
+    /// `each` on a list whose lambda is FnMut — `jet_list_each_mut((recv).clone(), f)`.
+    EachMut,
+    /// `each` on a list of trait objects — `jet_list_each_ref(&(recv), f)`.
+    EachRef,
+    /// `each` on a map — `jet_map_each((recv).clone(), f)`.
+    EachMap,
+    /// `find` — `jet_list_find((recv).clone(), f)`.
+    Find,
+    /// `any` — `jet_list_any((recv).clone(), f)`.
+    Any,
+    /// `all` — `jet_list_all((recv).clone(), f)`.
+    All,
+    /// `sort_by` — `{ jet_list_sort_by(&mut recv, f); }`.
+    SortBy,
+    /// `reduce` — `jet_list_reduce((recv).clone(), seed, f)`.
+    Reduce,
+}
+
+/// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
+/// `Lambda.meta`. `prep` is the rendered clone-capture prelude (`let _jet_cap_<n> =
+/// (place).clone();\n    ` per cloned capture); `params` the rendered `name[: ty]`
+/// param list; `body` the rendered closure body string (an expression body, or a
+/// `{ … }` block) — rendered at lowering from the lowered body so emit stays a pure
+/// wrapper; `is_move`/`boxed` reproduce the AST wrappers.
+pub(crate) struct TLambda {
+    pub(crate) prep: String,
+    pub(crate) params: Vec<String>,
+    pub(crate) body: String,
+    pub(crate) is_move: bool,
+    pub(crate) boxed: bool,
 }
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`
@@ -1314,7 +1388,21 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.extern_funcs.contains_key(&c.name)
                 && !cx.unqualified_inline.contains_key(&c.name)
                 && !cx.unqualified_file.contains_key(&c.name);
+            // c109 Phase 11: a callee with a **Fn-typed parameter** routes its arg
+            // through `emit_call_args`'s `Box::new(…) as <fn-type>` coercion (the
+            // fn-value path), which the plain-`Call` lowering does NOT emit. Before
+            // Phase 11 no fn-value could appear in-subset as an arg (lambdas + bare
+            // fn-name idents were both excluded), so this never arose; now that
+            // lambdas are covered, a lambda/fn-value passed to such a callee would
+            // miscompile (missing Box coercion). Exclude any call whose callee has a
+            // Fn-typed param — conservative, stays on the AST path.
+            let no_fn_param = cx
+                .sigs
+                .get(&c.name)
+                .map(|ps| !ps.iter().any(|(_, t)| matches!(t, Type::Fn { .. })))
+                .unwrap_or(true);
             (is_print || is_plain_fn)
+                && no_fn_param
                 && c.args.iter().all(|a| {
                     // No labels, no shared-auto-clone (Arc) in the subset.
                     a.label.is_none()
@@ -1490,7 +1578,18 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // (from sema). The base must be in-subset; the member read lowers to a plain
         // `.map`/`.and_then` closure access (no further dispatch).
         Expr::OptField { base, .. } => expr_in_subset(base, cx, locals),
-        // Everything else (lambdas, fan-out, tuples, deref, …) is out.
+        // c109 Phase 11: a lambda/closure literal. Covered when its body is in-subset
+        // (lowered on the outer scope extended with the lambda's params + cloned
+        // captures) and every capture/escape decision is a total `Lambda.meta` fact.
+        Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
+        // c109 Phase 11: fan-out `f.[a, b, c]` (S75/S76). Covered when the callee is
+        // in-subset (a plain top-level fn ident, or any in-subset callee value) and
+        // every item is in-subset.
+        Expr::FanOut { callee, items, .. } => {
+            fan_out_callee_in_subset(callee, cx, locals)
+                && items.iter().all(|i| expr_in_subset(i, cx, locals))
+        }
+        // Everything else (tuples, deref, …) is out.
         _ => false,
     }
 }
@@ -1506,6 +1605,59 @@ fn orfallback_rhs_in_subset(fallback: &OrFallback, cx: &Cx, locals: &HashSet<Str
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         OrFallback::Panic { .. } => false,
     }
+}
+
+/// c109 Phase 11: is a lambda/closure literal in-subset? The body must be entirely
+/// in-subset when classified against the outer scope extended with the lambda's
+/// params (new locals) and its captures. The capture/escape/Fn-vs-FnMut facts are
+/// all total (`Lambda.meta`), so nothing is re-derived; the gate only proves the
+/// body lowers. A `take_names` capture is an outer local (already in `locals`); a
+/// param shadows. The body sees: outer locals (captures resolve via them — the AST
+/// rebinds a cloned capture to `_jet_cap_<n>` but the *name* stays in scope) plus
+/// the params.
+fn lambda_in_subset(lam: &Lambda, cx: &Cx, locals: &HashSet<String>) -> bool {
+    let mut body_locals = locals.clone();
+    for p in &lam.params {
+        body_locals.insert(p.name.clone());
+    }
+    match &lam.body {
+        LambdaBody::Expr(e) => expr_in_subset(e, cx, &body_locals),
+        LambdaBody::Block(stmts) => stmts
+            .iter()
+            .all(|s| stmt_in_subset(s, cx, &mut body_locals)),
+    }
+}
+
+/// c109 Phase 11: is a fan-out callee (`f` in `f.[a, b, c]`) in-subset? The AST
+/// path routes an `Ident` callee through `emit_call` (handling builtins) and any
+/// other callee through `(f)(item)` (a fn-value call). We cover ONLY the cleanest,
+/// byte-reproducible case: an `Ident` that resolves to a *plain top-level function*
+/// (in `cx.sigs`, not a local, not an extern/FFI or unqualified-module-import call,
+/// not a builtin like `print`/`panic`). Those lower exactly as the Phase-1 `Call`
+/// arm does (a synthetic single-arg call). A fn-value callee (`(f)(item)`) needs the
+/// deferred Fn-typed-value emit, so it stays on the AST path.
+fn fan_out_callee_in_subset(callee: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
+    let Expr::Ident(name, _) = callee else {
+        return false;
+    };
+    !locals.contains(name)
+        && cx.sigs.contains_key(name)
+        && !cx.extern_funcs.contains_key(name)
+        && !cx.unqualified_inline.contains_key(name)
+        && !cx.unqualified_file.contains_key(name)
+        // Exclude the ambient builtins `emit_call` special-cases before the plain
+        // dispatch (a user-defined fn of the same name is in `cx.sigs`, so the
+        // `contains_key` above already admits it — but a bare builtin name with no
+        // user sig would have failed `contains_key`; guard anyway for clarity).
+        && name != Syntax::BUILTIN_PRINT
+        && name != Syntax::BUILTIN_PANIC
+        && name != Syntax::BUILTIN_INPUT
+        && name != Syntax::BUILTIN_REQUIRE
+        && name != Syntax::BUILTIN_REQUIRE_EQ
+        && name != Syntax::BUILTIN_EXPECT
+        && name != Syntax::BUILTIN_WRAPPING
+        && name != Syntax::BUILTIN_SATURATING
+        && name != Syntax::BUILTIN_CHECKED
 }
 
 /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
@@ -1569,6 +1721,16 @@ fn method_call_in_subset(
             && args.iter().all(|a| {
                 a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
             });
+    }
+    // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
+    // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
+    // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
+    // emit branch reads the lambda arg's `needs_fn_mut` meta, so the closure-arg
+    // position MUST be a literal `Expr::Lambda` (a fn-value there defaults to the
+    // non-mut form on the AST side, but covering that needs the deferred fn-value
+    // emit — exclude). `reduce` takes (seed, lambda); the rest take (lambda).
+    if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
+        return expr_in_subset(receiver, cx, locals);
     }
     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
     // this (its `recv_type` is `None`). The AST path emits `user_<T>::user_<method>(…)`
@@ -1720,6 +1882,41 @@ fn is_intercepted_method_name(method: &str) -> bool {
 /// clone). `Mutate` args would need `&mut place` handling we don't yet emit.
 fn arg_conv_in_subset(a: &crate::AST::CallArg) -> bool {
     !matches!(a.convention, AccessConvention::Mutate)
+}
+
+/// c109 Phase 11: is `method` a closure-taking collection method the TIR lowers,
+/// with in-subset args? Covers `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`
+/// (1 arg: a lambda) and `reduce` (2 args: a seed value + a lambda). The closure-arg
+/// position MUST be a literal `Expr::Lambda` (the Fn-vs-FnMut emit branch reads its
+/// `needs_fn_mut` meta; a fn-value there defaults to the non-mut form on the AST
+/// side, but covering it needs the deferred fn-value emit). The seed (`reduce`) and
+/// the lambda body must be in-subset. No labels.
+fn closure_method_in_subset(
+    method: &str,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    if !crate::Collections::is_closure_method(method) {
+        return false;
+    }
+    if args.iter().any(|a| a.label.is_some()) {
+        return false;
+    }
+    match method {
+        "reduce" => {
+            // (seed, lambda). The seed is any in-subset value; the lambda must be a
+            // literal in-subset closure.
+            args.len() == 2
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+        }
+        // (lambda). map/filter/each/find/any/all/sort_by.
+        _ => {
+            args.len() == 1
+                && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
+        }
+    }
 }
 
 /// c109 Phase 9: is `method` (with `nargs` arguments) a built-in collection/string
@@ -2897,6 +3094,65 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        // c109 Phase 11: a lambda/closure literal. The gate proved the body is
+        // in-subset; lower it via `lower_lambda` (capture/escape facts total from
+        // `Lambda.meta`). The result type is the closure's fn type — rarely
+        // load-bearing in emit (a closure is consumed in arg position), so carry a
+        // placeholder `Fn` type; the binding/arg context supplies the real Rust type.
+        Expr::Lambda(lam) => {
+            let tl = lower_lambda(lam, cx, env);
+            TExpr {
+                ty: Type::Fn {
+                    params: Vec::new(),
+                    ret: None,
+                },
+                kind: TExprKind::Lambda(Box::new(tl)),
+            }
+        }
+        // c109 Phase 11: fan-out `f.[a, b, c]` (S75/S76). The gate proved the callee
+        // is a plain top-level fn ident and every item is in-subset. The AST path
+        // routes the Ident callee through `emit_call` with a SYNTHETIC single-arg
+        // `Call` (`convention: Read`, default flags) per item; reproduce that exactly
+        // as a `TExprKind::Call` per item, then `vec![…]`. The result type is `[T#N]`
+        // (S76), erased to a list of the callee's return type.
+        Expr::FanOut { callee, items, .. } => {
+            let Expr::Ident(name, _) = callee.as_ref() else {
+                unreachable!("gate proved fan-out callee is a plain fn ident");
+            };
+            // The callee's signature drives each synthetic arg's borrow wrapper,
+            // exactly as `emit_call_args` does for the synthetic `Read` arg (whose
+            // `implicit_clone` is false — the synthetic CallArg carries default flags).
+            let sig = cx.sigs.get(name);
+            let borrow = matches!(
+                sig.and_then(|ps| ps.first()),
+                Some((AccessConvention::Read, t)) if !t.is_scalar()
+            );
+            let calls: Vec<TExpr> = items
+                .iter()
+                .map(|item| {
+                    let value = lower_expr(item, cx, env);
+                    TExpr {
+                        ty: call_return_type(cx, name),
+                        kind: TExprKind::Call {
+                            name: name.clone(),
+                            args: vec![TCallArg {
+                                value,
+                                borrow,
+                                mut_borrow: false,
+                                clone: false,
+                                arc_clone: false,
+                            }],
+                        },
+                    }
+                })
+                .collect();
+            // S76: result is `[T#N]` (a fixed-size list), erased to `Vec<T>`.
+            let elem_ty = call_return_type(cx, name);
+            TExpr {
+                ty: Type::List(Box::new(elem_ty)),
+                kind: TExprKind::FanOut { calls },
+            }
+        }
         _ => unreachable!("expression not in TIR subset"),
     }
 }
@@ -3030,6 +3286,28 @@ fn lower_method_call(
                 },
             };
         }
+    }
+    // c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/…).
+    // The gate proved `recv_type == None` + a closure-method name + a literal lambda
+    // arg. Resolve the receiver-type + Fn-vs-FnMut dispatch HERE into a total
+    // `TClosureOp` (reproducing `emit_builtin_method`'s closure arms, incl. its
+    // `expr_jet_ty(receiver)` Map/trait-object branches), so emit makes no decision.
+    if recv_type.is_none() && crate::Collections::is_closure_method(method) {
+        let op = resolve_closure_op(receiver, method, args, env, cx);
+        let recv_t = lower_expr(receiver, cx, env);
+        let recv_ast_ty = tir_recv_jet_ty(receiver, env);
+        let result_ty = builtin_result_ty(method, args.len(), recv_ast_ty.as_ref());
+        // Args lowered PLAINLY (the lambda + any seed) — `emit_builtin_method`'s
+        // `arg(i)` is a raw `emit_expr`, no clone/borrow wrappers.
+        let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::ClosureMethod {
+                recv: Box::new(recv_t),
+                op,
+                args: targs,
+            },
+        };
     }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
@@ -3270,6 +3548,128 @@ fn builtin_result_ty(method: &str, nargs: usize, recv_ty: Option<&Type>) -> Type
     match recv_ty.and_then(|rt| crate::Collections::builtin_method_return(rt, method, nargs, false)) {
         Some(Some(t)) => t,
         _ => unit_type(),
+    }
+}
+
+/// c109 Phase 11: resolve a closure-taking collection method into a total
+/// `TClosureOp`, reproducing `emit_builtin_method`'s closure arms
+/// (Source/Codegen/Expression.rs) exactly. The receiver-type branch
+/// (`rty = expr_jet_ty(receiver)`) picks Map (`EachMap`) vs trait-object list
+/// (`EachRef`) vs plain list; the Fn-vs-FnMut branch reads the lambda arg's
+/// `needs_fn_mut` meta. All decisions made HERE, never in emit (I3). The gate
+/// proved a literal lambda arg, so `needs_fn_mut` is always readable; a non-lambda
+/// arg defaults to the non-mut form, matching the AST `else` branch.
+fn resolve_closure_op(
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    env: &LowerEnv,
+    cx: &Cx,
+) -> TClosureOp {
+    let rty = tir_recv_jet_ty(receiver, env);
+    // The lambda arg's FnMut fact (the AST checks `args[0]` for map/each).
+    let fn_mut = matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
+    match method {
+        "map" => {
+            if fn_mut {
+                TClosureOp::MapMut
+            } else {
+                TClosureOp::Map
+            }
+        }
+        "filter" => TClosureOp::Filter,
+        "each" => {
+            // The AST: `match rty { Map => jet_map_each, _ => list_each }`, where
+            // `list_each` checks trait-object-list FIRST, then lambda FnMut.
+            match &rty {
+                Some(Type::Map { .. }) => TClosureOp::EachMap,
+                Some(Type::List(inner)) if list_carries_trait(cx, inner) => TClosureOp::EachRef,
+                _ if fn_mut => TClosureOp::EachMut,
+                _ => TClosureOp::Each,
+            }
+        }
+        "find" => TClosureOp::Find,
+        "any" => TClosureOp::Any,
+        "all" => TClosureOp::All,
+        "sort_by" => TClosureOp::SortBy,
+        "reduce" => TClosureOp::Reduce,
+        // The gate (`is_closure_method`) admits only the names above.
+        _ => unreachable!("non-closure method in resolve_closure_op (gate)"),
+    }
+}
+
+/// c109 Phase 11: TIR-local reproduction of codegen's `list_carries_trait`
+/// (Source/Codegen/Expression.rs) — a list element type that is a trait object or a
+/// named trait. Used by the `each`-on-trait-object-list emit branch (`jet_list_each_ref`).
+/// In the covered collection subset a trait-object element type is excluded, so this
+/// is always false for a covered receiver; reproduced for exactness regardless.
+fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
+    matches!(inner, Type::TraitObject(_))
+        || matches!(inner, Type::Named(n) if cx.trait_names.contains(n))
+}
+
+/// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`,
+/// reproducing `emit_lambda` (Source/Codegen/Expression.rs) byte-for-byte. Every
+/// capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
+/// analysis here. The body is lowered on a CLONED env extended with: the cloned
+/// captures (rebound to `_jet_cap_<n>`, place = that name, type `None` — matching the
+/// AST slot) and the params (place = mangled name, type from the annotation). The
+/// rendered closure body string is produced now so emit is a pure wrapper.
+fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
+    let mut lam_env = clone_env(env);
+    // The clone-capture prelude: `let _jet_cap_<n> = (<outer place>).clone();`. The
+    // outer place comes from the *outer* env (the capture is an outer local). The cap
+    // rebinds the name with place `_jet_cap_<n>`, no deref, type `None` (matching the
+    // AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
+    let mut prep = String::new();
+    for name in &lam.meta.cloned_captures {
+        let cap = format!("_jet_cap_{}", mangle(name));
+        prep.push_str(&format!(
+            "let {} = ({}).clone();\n    ",
+            cap,
+            env.place_of(name)
+        ));
+        lam_env.locals.insert(name.clone(), (cap, None));
+    }
+    // Params bind as `mangle(name)` (no deref), typed from the annotation (or `None`).
+    for p in &lam.params {
+        lam_env
+            .locals
+            .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
+    }
+    // The rendered param list: `name[: ty]`, exactly as `emit_lambda`.
+    let params: Vec<String> = lam
+        .params
+        .iter()
+        .map(|p| {
+            let ty = p
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", cx.rust_type(t)))
+                .unwrap_or_default();
+            format!("{}{}", mangle(&p.name), ty)
+        })
+        .collect();
+    // The body: an expression body lowers + emits directly; a block body lowers its
+    // statements (on the lambda env) and emits a `{ … }` at indent 1 — byte-for-byte
+    // `emit_lambda`'s `emit_stmts(…, 1, false)` then `format!("{{ {} }}", inner)`.
+    let body = match &lam.body {
+        LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
+        LambdaBody::Block(stmts) => {
+            let lowered = lower_stmts(stmts, cx, &mut lam_env);
+            let mut inner = String::new();
+            emit_tir_stmts(&lowered, cx, &mut inner, 1);
+            format!("{{ {} }}", inner)
+        }
+    };
+    // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
+    let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
+    TLambda {
+        prep,
+        params,
+        body,
+        is_move,
+        boxed: lam.meta.escapes,
     }
 }
 
@@ -3940,6 +4340,59 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 combinator,
                 member_rust
             )
+        }
+        // c109 Phase 11: a lambda/closure literal. All decisions (prep/move/box) were
+        // resolved at lowering off `Lambda.meta`; emit only assembles, byte-for-byte
+        // `emit_lambda`: `{move }|params| body`, wrapped `Box::new(…)` when it escapes,
+        // and prefixed with the `{ <prep> … }` block when there are cloned captures.
+        TExprKind::Lambda(lam) => {
+            let move_kw = if lam.is_move { "move " } else { "" };
+            let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
+            let wrapped = if lam.boxed {
+                format!("Box::new({})", closure)
+            } else {
+                closure
+            };
+            if lam.prep.is_empty() {
+                wrapped
+            } else {
+                format!("{{ {} {} }}", lam.prep, wrapped)
+            }
+        }
+        // c109 Phase 11: fan-out `f.[a, b, c]` → `vec![f(a), f(b), f(c)]`. The
+        // per-item calls were lowered at lowering; emit only wraps them in `vec![…]`,
+        // byte-for-byte the AST `Expr::FanOut` Ident-callee form.
+        TExprKind::FanOut { calls } => {
+            let elems = calls
+                .iter()
+                .map(|c| emit_tir_expr(c, cx))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("vec![{}]", elems)
+        }
+        // c109 Phase 11: a closure-taking collection method. The receiver-type +
+        // Fn-vs-FnMut dispatch was resolved into `op` at lowering; emit only formats,
+        // reproducing `emit_builtin_method`'s closure arms byte-for-byte. Args (the
+        // lambda + any seed) are emitted PLAINLY (raw `arg(i)`).
+        TExprKind::ClosureMethod { recv, op, args } => {
+            let recv = emit_tir_expr(recv, cx);
+            let a = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+            match op {
+                TClosureOp::Map => format!("jet_list_map(({}).clone(), {})", recv, a(0)),
+                TClosureOp::MapMut => format!("jet_list_map_mut(({}).clone(), {})", recv, a(0)),
+                TClosureOp::Filter => format!("jet_list_filter(({}).clone(), {})", recv, a(0)),
+                TClosureOp::Each => format!("jet_list_each(({}).clone(), {})", recv, a(0)),
+                TClosureOp::EachMut => format!("jet_list_each_mut(({}).clone(), {})", recv, a(0)),
+                TClosureOp::EachRef => format!("jet_list_each_ref(&({}), {})", recv, a(0)),
+                TClosureOp::EachMap => format!("jet_map_each(({}).clone(), {})", recv, a(0)),
+                TClosureOp::Find => format!("jet_list_find(({}).clone(), {})", recv, a(0)),
+                TClosureOp::Any => format!("jet_list_any(({}).clone(), {})", recv, a(0)),
+                TClosureOp::All => format!("jet_list_all(({}).clone(), {})", recv, a(0)),
+                TClosureOp::SortBy => format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, a(0)),
+                TClosureOp::Reduce => {
+                    format!("jet_list_reduce(({}).clone(), {}, {})", recv, a(0), a(1))
+                }
+            }
         }
     }
 }

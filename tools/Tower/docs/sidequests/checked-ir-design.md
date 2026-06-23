@@ -612,6 +612,76 @@ everything, the AST codegen path is deleted (final phase).
   sentinel-injection probe confirmed the covered fns actually take the TIR path (24
   `CoreCall` nodes emitted across the programs).
 
+## Refinements learned in Phase 11 (lambdas/closures + fan-out)
+
+- **`Lambda.meta` is the whole capture/escape model — codegen lowers, never
+  re-derives (I3).** Sema fills `escapes`/`needs_fn_mut`/`mut_captures`/
+  `cloned_captures`; `lower_lambda` reads exactly those four facts and reproduces
+  `emit_lambda` byte-for-byte: `move ` keyword iff `needs_fn_mut && !escapes` is
+  *false* (i.e. emit `move ` unless it's a non-escaping FnMut), `Box::new(…)` iff
+  `escapes`, and a `let _jet_cap_<n> = (place).clone();` prelude per cloned capture.
+  No capture analysis runs in codegen — the TIR carries the rendered prelude/params/
+  body and emit is a pure wrapper. The capture's *source place* comes from the
+  **outer** env (it's an outer local); the cloned-capture name rebinds to
+  `_jet_cap_<n>` with `deref:false, jet_ty:None` inside the lambda body, matching the
+  AST slot exactly.
+- **A lambda body is a scope; lower it on a cloned env extended with params +
+  captures.** Same in-subset recursion as if-branches/loop-bodies (Phases 2–5). An
+  expression body lowers + emits directly; a block body lowers its statements and
+  emits `{ … }` at indent 1 — byte-for-byte `emit_lambda`'s `emit_stmts(…, 1, false)`.
+- **The load-bearing NEW exclusion: a callee with a Fn-typed parameter.** Before
+  Phase 11 no fn-value could appear in-subset as a call arg (lambdas + bare fn-name
+  idents were both excluded), so `emit_call_args`'s `Box::new(…) as <fn-type>`
+  coercion path was never reached on the TIR side. Now that lambdas are covered, a
+  call like `apply((n)=>n+1, x)` or `twice(bump, 10)` would route through the plain
+  `Call` lowering and MISCOMPILE (missing the Box coercion). The fix: the `Call` gate
+  now excludes any callee whose signature has a `Type::Fn` param (`no_fn_param`).
+  Conservative — the whole enclosing fn stays on the AST path. (Covering fn-typed
+  values + the Box coercion is the deferred slice of this phase.)
+- **Closure methods compose a lambda with `emit_builtin_method`'s closure arms.**
+  Each arm (`map`/`map_mut`/`filter`/`each`/`each_mut`/`each_ref`/`map_each`/`find`/
+  `any`/`all`/`sort_by`/`reduce`) became a `TClosureOp` resolved at lowering. The
+  Map-vs-trait-object-list branch reads `tir_recv_jet_ty(receiver)` (the same
+  `expr_jet_ty` the Phase-9 builtins use); the Fn-vs-FnMut branch reads the lambda
+  arg's `needs_fn_mut` — both decided once, emit only formats. The gate requires the
+  closure-arg position to be a **literal `Expr::Lambda`** (a fn-value there defaults
+  to the non-mut form on the AST side, which needs the deferred fn-value emit). The
+  args are emitted PLAINLY (raw `arg(i)`), like every builtin — the receiver is
+  `.clone()`d inside the helper-call form, not a per-arg decision.
+- **Fan-out's Ident-callee path is a synthetic single-arg call per item.** The AST
+  `Expr::FanOut` routes an `Ident` callee through `emit_call` with a synthetic
+  `CallArg { convention: Read, flags: Default }` per item, then `vec![…]`. Reproduced
+  as a `TExprKind::Call` per item (the borrow wrapper comes from the callee's param-0
+  convention; `implicit_clone` is false on the synthetic arg), wrapped in `FanOut`.
+  Only the **plain-top-level-fn Ident** callee is covered — a fn-value callee
+  (`(f)(item)`) needs the deferred fn-value emit. The result is `[T#N]` (S76), erased
+  to `Vec<T>`; it doesn't unify with a plain `[T]` return (sema E0113), so fan-out is
+  bound/indexed/destructured, not returned-as-`[T]`.
+- **Deferred (stay on the AST path), with reason:**
+  - **fn-typed values** — a fn stored in a binding, passed as an arg, or returned;
+    the `Box::new(…) as <fn-type>` coercion (`emit_call_args` fn-arg path) +
+    `CallValue` `(f)(args)` emit. Gated out via the new Fn-param `Call` exclusion and
+    by `CallValue`/fn-value-ident never being in-subset.
+  - **`tasks.spawn`/`http.serve`/`scope.guard`** — `spawn` uses a *distinct*
+    `emit_spawn_lambda` form (`move |…|` with no `Box::new`); `serve` branches on
+    router-vs-lambda and wraps a router in a fresh closure; `scope.guard` is not in
+    `core_fixed_sig` (so excluded by `core_call_covered`). Each is a small bespoke
+    emit shape; covering them is a clean follow-up now that lambdas are in subset.
+  - **the `??` panic fallback** — still deferred (Phase 8's note): `emit_panic_stop`/
+    `safe_locals_expr` dump the *full Slot env* (rust_name/deref/jet_ty, sorted), a
+    per-function state the TIR's `LowerEnv` does not model 1:1. NOT lifted this phase
+    — reproducing it byte-exact needs a richer TIR locals snapshot, and the
+    `LowerEnv.locals` (name → place + `Option<Type>`) lacks the sorted Slot dump the
+    panic frame embeds. Exclusion (`orfallback_rhs_in_subset` → `Panic => false`)
+    stays; lifting it is the next follow-up.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass on both `emit_func`/`emit_method`) across the **entire 89-file example
+  suite** — 0 differ — plus crafted probes exercising: list `map`/`filter`/`reduce`/
+  `find`/`any`/`all` with expr-body lambdas, a Copy capture (`n + base`), a String
+  list, a FnMut `each` (`jet_list_each_mut`, no `move`), `sort_by`, and fan-out over
+  a plain fn. A routing sentinel confirmed the covered fns actually take the TIR path
+  (`23_closures` `main`, `41_fan_out` `double`; ~86 example fns total route now).
+
 ## Phases
 
 | # | Scope | Status |
@@ -627,7 +697,7 @@ everything, the AST codegen path is deleted (final phase).
 | 7 | Method bodies + static methods | ✅ done (c109 Phase 7) — ~4 example methods routed (`10_structs` `Point::dist_sq`/`Point::unit`, `63_named_args` `Rect::new`/`Rect::area`). Covers: **inherent** method *bodies* (instance + static) on a covered struct/enum, hooked into `emit_method`. The `self` slot reproduces `emit_method` exactly (place `self`, no deref, type `None`); the receiver form is `&self`/`&mut self`/`self` per the resolved convention (`TFuncKind::Method`). **Static** (associated) methods are covered on both sides — the body (no self) and the call site (`Type.make(x)` → `user_<T>::user_<m>(x)`, a new `TExprKind::StaticCall`, which Phase 6 deferred). `Self` params/returns resolve to the owning type. Excludes: **trait-impl** method bodies (distinct signature — bare name, no `pub`, always `&self`, self `jet_ty: Some(T)`; a separate provable-parity hook); **delegation** (`using field`), **generic-type**, and **`view`-returning** methods; any `mut self`/`view self` method that **reassigns `self`** (`self = …` is a pre-existing AST-path I2 hole, gated out via `stmt_assigns_self`); methods whose body uses any not-yet-covered construct (core/stdlib calls, `?`/optionals, lambdas → Phases 8–10). |
 | 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | ✅ done (c109 Phase 8) — ~5 example fns routed (`13_errors` `parse_age`/`load`/`main`, `12_option` `find_even`/`main`). Covers: **optional** `T?` (`Type::Option`) and **fallible** `T ? E` (`Type::Result`) params/locals/returns whose payloads are covered value types (incl. default `Error`→`String`); the `value(x)`/`null` and `ok(x)`/`err(e)` constructors; the `?` propagation operator carrying the total `TryConvert` (`None`/`Fallible`/`Typed(fn)` → bare / `.map_err(\|e\| e.to_error())` / `.map_err(<fn>)`, all wrapped in `jet_trace_err(…)?` with the trace-frame `file`/`line`/`fn_name` resolved at lowering); the `??` fallback (`OrFallback::{Value,Return}`, `is_option` total → `match` over Result/Option); `?.` optional chaining (the total `flatten` fact → `.and_then`/`.map`); and `when ok/err/value/null` matches (Shape C, reusing `EnumMatch`). Excludes: the `??` **panic** fallback form (`safe_locals_expr` reproduction deferred); String/struct/collection-payload error *enums* (non-covered enum → excluded); list/map *of* options; core/stdlib fallible calls (`fs.read` → Phase 10, but a USER fallible call is covered); nested `T??` (sema-rejected anyway). |
 | 9 | Built-in collection/string methods (`emit_builtin_method`: list/map/string surface) | ✅ done (c109 Phase 9) — +6 example fns routed (`15_lists`/`20_list_remove_bounds`/`38_method_chain` `main`, `28_comptime_table` `make_table`, `34_parallel_scan` `copy_paths`/`main`). Covers the NON-closure list/map/string builtins (`len`/`push`/`pop`/`insert`/`remove`/`get`/`first`/`last`/`contains`/`index_of`/`reverse`/`sort`/`clear`/`join(sep)`/`keys`/`values`/`contains_key`/`chars`/`bytes`/`trim`/`split`/`starts_with`/`ends_with`/`replace`/`to_upper`/`to_lower`/`repeat`/`slice`/`to_string`) on a list/map/string receiver. The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is resolved at lowering into a total `TBuiltinOp` (`TExprKind::BuiltinMethod`), reproducing the AST's `expr_jet_ty` partiality (incl. its `None` → default branch) exactly. Excludes: **closure-taking** methods (`map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` → Phase 11); the **numeric** width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`/… → Phase 12, already carry `Some(recv_type)`); **handle** methods (FileWriter/TcpStream/HttpRequest/Router/Arena/… → Phase 10, also `Some(recv_type)`); `clone`/`raw`/`snapshot`/`new` (Phase 6 special cases); `Int.parse`/`Float.parse`/`String.from_bytes` (type-name-receiver statics); and **`is_empty`** + no-arg `join()` (both unusable today — see latent bugs). |
-| 11 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
+| 11 | Lambdas/closures (capture meta), fn-typed values, fan-out | ✅ done (c109 Phase 11, partial) — `23_closures` `main` now routes (map/filter/reduce/sort_by/each), `41_fan_out` `double` routes; ~86 example fns route through the TIR. Covers: **lambda/closure literals** (`Expr::Lambda`) reading `Lambda.meta.{escapes, needs_fn_mut, mut_captures, cloned_captures}` as TOTAL facts — the `move ` keyword (off `needs_fn_mut && !escapes`), `Box::new(…)` (off `escapes`), and the per-`cloned_capture` `let _jet_cap_<n> = (place).clone();` prelude all resolved at lowering, body lowered on a cloned env extended with params + captures (`TExprKind::Lambda`/`TLambda`); the **fan-out** operator `f.[a, b, c]` (S75/S76) for a plain top-level-fn callee, each item a synthetic single-arg call wrapped in `vec![…]` (`TExprKind::FanOut`); the **closure-taking collection methods** `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` (`TExprKind::ClosureMethod`/`TClosureOp`), the Map-vs-list-vs-trait-object and Fn-vs-FnMut emit branches resolved at lowering from `tir_recv_jet_ty` + the lambda's `needs_fn_mut`. Excludes (deferred): **fn-typed values** (a fn stored/passed/returned — the `Box::new(…) as <fn-type>` coercion in `emit_call_args`; the gate now excludes any plain call whose callee has a Fn-typed param so a lambda/fn-value never reaches the un-coerced path); the **closure-taking core calls** `tasks.spawn` (distinct `emit_spawn_lambda` form), `http.serve` (router-vs-lambda branch), `scope.guard` (not in `core_fixed_sig`); the `??` **panic** fallback (still needs the `safe_locals_expr` reproduction). |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | ✅ done (c109 Phase 10) — the **type-monomorphic** core/stdlib calls now route through the TIR (`TExprKind::CoreCall`). Covered: every `(module, method)` whose full signature is fixed by `Sema::core_fixed_sig` — `core.fs` (read/read_bytes/write/append/exists/is_dir/remove/create_dir/list_dir/copy/rename), `core.io` (args/read_all_input/stdin), `core.env` (get/set/current_dir/home_dir), `core.process` (exit/run), `core.math` (sqrt/pow/floor/ceil/round), `core.random` (int/float/seed), `core.time` (now/sleep/start), `core.json` + `jet.json` (parse/decode/render/render_pretty), `core.files` (open/create/append), `core.path` (join/parent/extension/normalize), `core.net` (all tcp_*), `jet.csv`/`jet.toml`/`jet.yaml` (parse/render), `jet.log` (info/warn/error/debug/set_level/set_trace_id/setup), `jet.time` (now/format), `jet.crypto` (sha256/sha256_bytes), `jet.http` (get/post), `jet.regex` (is_match/match/find/find_all/split/replace/replace_all). The `(module, method)` dispatch + per-arm `&(…)`/`&mut (…)`/move wrappers reproduce `emit_core_call` byte-for-byte; the return type comes from `core_fixed_sig` (totality), so a fallible core call composes with Phase-8 `?`/`??`. ~10 example fns route (across crafted programs exercising 24 covered core calls). Excludes (stay on AST path): closure-taking (`tasks.spawn`/`http.serve`/`scope.guard` → Phase 11); polymorphic math/random/io specials (`abs`/`min`/`max`/`clamp`/`pick`/`shuffle`/`io.input`/`io.eprint` — return type depends on arg type, not in the fixed table); handle-constructor specials not in the table (`tasks.channel`, `http.router`/`parse`/`dispatch`); `core.mem` ptr/alloc (`@unsafe`); and any use of a returned handle's METHOD surface (excludes the enclosing fn). Imports/modules (re-export, `import_mods`, inline code modules), FFI extern, comptime-if, arena/unsafe blocks are NOT yet covered (deferred within this phase). |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
