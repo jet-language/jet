@@ -1389,3 +1389,150 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "42\n");
 }
+
+/// c109 Phase 12: numeric width conversions (D-NUMOPS1) — widening (`to_i64`,
+/// infallible `as`), narrowing (`to_u8`, fallible `try_from` unwrapped with `??`),
+/// and int→float (`to_float`, `as`). Each fully-covered function routes through the
+/// TIR (`NumericMethod`). rustc accepting + the right runtime values prove parity.
+#[test]
+fn numeric_width_conversions() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn widen(red: U8) -> I64 {
+    return red.to_i64()
+}
+fn narrow(channel: I32) -> U8 {
+    return channel.to_u8() ?? 255
+}
+fn to_real(x: Int) -> Float {
+    return x.to_float()
+}
+fn main() {
+    print(widen(255))
+    print(narrow(100))
+    print(narrow(100000))
+    print(to_real(3))
+}
+";
+    let (code, stdout) = build_and_run("tir_numeric_conv", src);
+    assert_eq!(code, 0);
+    // 255 (widen), 100 (fits), 255 (overflow → fallback), 3.0 (int→float).
+    assert_eq!(stdout, "255\n100\n255\n3.0\n");
+}
+
+/// c109 Phase 12: numeric predicates (`is_nan`/`is_finite`), bit-population queries
+/// (`count_ones`), and a numeric `to_string`. Each routes through the TIR's
+/// `NumericMethod` op; the source widths come from sema's `recv_type` (total).
+#[test]
+fn numeric_predicates_and_bits() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn bits(flags: U8) -> Int {
+    return flags.count_ones()
+}
+fn finite(f: Float) -> Bool {
+    return f.is_finite()
+}
+fn show(n: I32) -> String {
+    return n.to_string()
+}
+fn main() {
+    print(bits(13))
+    print(finite(1.5))
+    print(show(42))
+}
+";
+    let (code, stdout) = build_and_run("tir_numeric_pred", src);
+    assert_eq!(code, 0);
+    // 13 = 0b1101 → 3 set bits; 1.5 is finite; 42 as String.
+    assert_eq!(stdout, "3\ntrue\n42\n");
+}
+
+/// c109 Phase 12: TRAIT-IMPL method bodies. A covered struct implementing a trait
+/// (both the inline `impl Trait {}` and the `impl T: Trait` forms) routes its
+/// trait-method bodies through the TIR via the `emit_trait_method` hook — bare name,
+/// no `pub`, `&self`. rustc accepting + the right output prove byte parity.
+#[test]
+fn trait_impl_method_bodies() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Shape {
+    fn area(self) -> Float
+    fn name(self) -> String
+}
+struct Circle {
+    radius: Float
+    impl Shape {
+        fn area(self) -> Float {
+            return ((3.0 * self.radius) * self.radius)
+        }
+        fn name(self) -> String {
+            return \"circle\"
+        }
+    }
+}
+struct Square {
+    side: Float
+}
+impl Square: Shape {
+    fn area(self) -> Float {
+        return (self.side * self.side)
+    }
+    fn name(self) -> String {
+        return \"square\"
+    }
+}
+fn describe(s: Shape) -> String {
+    return \"{s.name()}: {s.area()}\"
+}
+fn main() {
+    shapes: [Shape] @= [Circle {radius: 2.0}, Square {side: 3.0}]
+    shapes.each((s) => {
+        print(describe(s))
+    })
+}
+";
+    let (code, stdout) = build_and_run("tir_trait_methods", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "circle: 12.0\nsquare: 9.0\n");
+}
+
+/// c109 Phase 12: an explicit `else { if … }` block must stay `} else { if … }`,
+/// NOT collapse to `} else if …` (the AST path keys solely on the source
+/// `ElseBranch`, never on the else-body shape). This guards the parity fix to the
+/// TIR `If` emit. The function routes through the TIR; rustc accepting proves it
+/// compiles, and the value proves the branch is taken correctly.
+#[test]
+fn explicit_else_block_with_inner_if_not_flattened() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn pick(a: Int, b: Int) -> Int {
+    if a > b {
+        return a
+    } else {
+        if b > 0 {
+            return b
+        }
+    }
+    return 0
+}
+fn main() {
+    print(pick(5, 3))
+    print(pick(2, 7))
+    print(pick(0, 0))
+}
+";
+    let (code, stdout) = build_and_run("tir_else_block_if", src);
+    assert_eq!(code, 0);
+    // pick(5,3)=5 (then); pick(2,7)=7 (else→inner-if true); pick(0,0)=0
+    // (else→inner-if false → falls through to the trailing `return 0`).
+    assert_eq!(stdout, "5\n7\n0\n");
+}

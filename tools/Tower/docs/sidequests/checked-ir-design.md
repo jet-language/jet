@@ -682,6 +682,132 @@ everything, the AST codegen path is deleted (final phase).
   a plain fn. A routing sentinel confirmed the covered fns actually take the TIR path
   (`23_closures` `main`, `41_fan_out` `double`; ~86 example fns total route now).
 
+## Refinements learned in Phase 12 (the tail)
+
+- **A trait-impl method body needs its OWN hook + kind — `emit_trait_method` is a
+  genuinely distinct signature, not `emit_method` with a flag.** The differences are
+  all load-bearing for parity: a BARE method name (the trait owns it in Rust — no
+  `user_` mangle), NO `pub`, an always-`&self` receiver (`emit_trait_method` ignores
+  the source convention entirely), and a self slot typed `Some(Type::Named(T))` (NOT
+  `None` like `emit_method`). So Phase 12 added `TFuncKind::TraitMethod { is_unsafe }`
+  + `tir_covers_trait_method` + `lower_trait_method` + `emit_tir_trait_method`, hooked
+  at the top of `emit_trait_method` (Source/Codegen/Items.rs) — which both
+  `emit_trait_impl` (inline `impl Trait {}` / `impl T: Trait`) and
+  `emit_external_trait_impl` (non-delegation) route through, so one hook unblocks all
+  three trait-impl surfaces. Verified byte-identical on `25_traits.jet` (`Circle`/
+  `Square` `area`/`name`).
+- **The numeric methods are the ONE builtin slice keyed on `recv_type == Some` — the
+  total routing signal is "a numeric type name."** Sema sets `recv_type =
+  Some(recv_ty.name())` for a numeric receiver (CheckerInfer ~L2248), so a numeric
+  predicate/bit/conversion method is uniquely a `MethodCall` whose `recv_type` parses
+  via `AST::numeric_type_from_name` AND whose method is a covered nullary numeric op.
+  This is disjoint from every other shape: Phase-9 builtins / Phase-10 core / Phase-7
+  statics all need `recv_type == None`; user instance methods need a covered
+  struct/enum `recv_type`. The width SOURCE for the widening-vs-narrowing decision is
+  the total `recv_type` (the AST's `src = recv_type.or_else(rty.name())`, where
+  `recv_type` is always `Some` here), so `numeric_conversion`/`conv_rust_target` are
+  reproduced at lowering into a total `TNumericOp` (`Predicate`/`BitCount`/`CastAs`/
+  `TryFrom`/`ToShow`) — emit makes no width decision (I3). A numeric `to_string`
+  routes here too (it also sets `recv_type == Some`, so the Phase-9 `recv_type.is_none()`
+  gate never claims it).
+- **The `is_intercepted_method_name` set stays whole — the numeric gate is a separate
+  shape tried BEFORE the instance-method `is_intercepted_method_name` exclusion.** The
+  numeric names (`to_i32`/`is_nan`/…) are in the intercept superset (correct: a user
+  method of that name on a covered struct must stay on the AST path, where the builtin-
+  name collision would mis-dispatch it). Routing the numeric shape first, gated on a
+  *numeric* `recv_type`, is disjoint from a user method (whose `recv_type` is a covered
+  struct/enum), so the two never collide — the Phase-9 "keep the intercept set whole,
+  add a disjoint receiver-typed shape" lesson, again.
+- **Surfaced + FIXED a latent TIR-path parity bug: explicit `else { if … }` was being
+  flattened to `} else if …`.** The AST `emit_if` (Statement.rs) renders `} else if`
+  ONLY for `ElseBranch::ElseIf` — an explicit `else { … }` block stays `} else { … }`
+  even when its body is a single `if`. The TIR `If` emit had been keying on the
+  *else-body shape* (`if body == [If]`), which conflated the two and produced divergent
+  (but still valid) Rust for an explicit `else { if … }`. Caught by the full-suite diff
+  on `examples/showcase/jetgrep.jet` (`grep_dir`, an already-covered fn). Fixed by
+  carrying the source distinction as `TStmt::If.else_is_elseif` (true only for
+  `ElseBranch::ElseIf`); emit flattens iff that flag is set. This was a *false positive*
+  in the parity sense (valid Rust, but not byte-identical) — exactly the drift the
+  full-suite diff exists to catch.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass on `emit_func`/`emit_method`/`emit_trait_method`) across the **entire example
+  suite** — 141 files, 0 differ (the `jetgrep` diff resolved by the `else`-block fix) —
+  plus crafted probes exercising numeric widening (`to_i64` → `as`), narrowing (`to_u8`
+  → `try_from`, unwrapped with `??`), int→float (`to_float`), float predicates
+  (`is_nan`/`is_finite`), bit-pop (`count_ones`), numeric `to_string`, and both
+  trait-impl forms (`impl Shape {}` inline + `impl Square: Shape`). A routing sentinel
+  confirmed the covered methods take the TIR path (7 unique trait-method bodies route;
+  53 free fns, 5 inherent methods route across the suite).
+
+## What still routes via the AST path (for Phase N — delete the AST path)
+
+After Phase 12 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
+reached for these constructs. Each entry: the construct, the AST emit function that
+owns it, and the total fact still missing to cover it.
+
+- **Delegation trait methods** (`using field`) — `emit_delegation_method`
+  (Items.rs). Forwards `self.<field>.<method>(args)` with the bare trait method name.
+  Missing: a `TFuncKind` carrying the delegation field + the forward shape. (No deep
+  blocker; a clean follow-up.)
+- **`@unsafe fn` trait methods / `@unsafe` blocks / `#Unsafe` regions / `core.mem`
+  ptr+alloc** — `emit_trait_method`/`emit_method`/`emit_func` + `emit_stmts`/`emit_expr`
+  unsafe-block lowering. Missing: TIR nodes for the audited `unsafe { … }` gate region
+  and the pointer/alloc ops, preserving the gate exactly (I1 — never emit `unsafe`
+  without a source `@unsafe`). Genuinely hard; deferred.
+- **Generic-type methods + `view`-returning methods** — `emit_method`/`emit_func`
+  (generics) / the `is_view_return` borrow lowering. Missing: generic-param lowering
+  (`Generics::*`) as total TIR facts, and the view-return borrow shape.
+- **fn-typed values** (a fn stored/passed/returned) — `emit_call_args`' `Box::new(…)
+  as <fn-type>` coercion + a `CallValue` `(f)(args)` emit. The `Call`/method gates
+  exclude any callee with a `Type::Fn` param. Missing: a `CallValue` TIR node + the
+  Box-coercion arg form.
+- **Closure-taking core calls** `tasks.spawn`/`http.serve`/`scope.guard` —
+  `emit_core_call` + `emit_spawn_lambda` / the router-vs-lambda `serve` branch.
+  `spawn` uses a distinct `move |…|` form (no `Box::new`); `serve` wraps a router in a
+  fresh closure; `scope.guard` isn't in `core_fixed_sig`. Missing: bespoke spawn/serve
+  emit shapes (lambdas are now in subset, so this is a clean follow-up).
+- **Polymorphic core specials** `math.abs/min/max/clamp`, `random.pick/shuffle`,
+  `io.input/eprint` — `emit_core_call` (their bespoke arms). Their return type depends
+  on the ARG type, resolved by `check_core_call`, not the fixed `core_fixed_sig`
+  table. Missing: a total return-type fact for these (re-inferring it in lowering would
+  need the sema arg-type machinery, not just the table).
+- **Handle-using methods** (FileWriter/TcpStream/HttpRequest/Router/Stopwatch/Arena/
+  Task/Channel/Sender `.read_line`/`.write_line`/`.accept`/`.elapsed_millis`/…) —
+  `emit_builtin_method`'s handle arms. These carry `recv_type == Some(<handle>)`.
+  Missing: handle-receiver dispatch as total `TBuiltinOp`-style ops (covering the CALL
+  that produces a handle is done — Phase 10 — but a method ON the handle still excludes
+  its enclosing fn).
+- **The `??` panic fallback** (`a ?? panic(…)`) — `emit_or_fallback_rhs` →
+  `emit_panic_stop`/`safe_locals_expr`, which dump the FULL sorted Slot env
+  (`rust_name`/`deref`/`jet_ty`). Missing: a richer TIR locals snapshot reproducing the
+  sorted Slot dump byte-exact (the `LowerEnv.locals` map lacks the deref/jet_ty trio in
+  sorted form). NOT lifted this phase — byte-exactness wasn't provable, and the gate
+  (`orfallback_rhs_in_subset → Panic => false`) stays conservative.
+- **Imports/modules** (qualified `mod.fn()` via `import_mods`/`import_sigs`, `pub use`
+  re-exports via `reexport_calls`, inline code modules via `code_modules`,
+  unqualified-module-import calls) — `emit_method_call`'s `Expr::Ident` alias arms +
+  `emit_call`'s unqualified arms. The `Call` gate excludes `extern_funcs` +
+  `unqualified_inline`/`unqualified_file`; module-alias method calls fall through (only
+  `core_imports` aliases are covered). Missing: TIR call nodes for each module call
+  form (`{root}{mod}::{fn}(args)`).
+- **FFI extern (`extern rust`/`extern C`)** — `emit_call`'s `extern_funcs` arm + the
+  `cx.ffi_crate`-qualified call form. The `Call` gate excludes `extern_funcs`. Missing:
+  an extern-call TIR node reproducing the extern call emit.
+- **comptime-if (resolved branch)** — `emit_stmts` reads `Stmt::ComptimeIf.selected_then`
+  to emit only the chosen branch. The gate's `stmt_in_subset` `_ => false` excludes it.
+  Missing: a TIR lowering that emits only the `selected_then` branch's statements.
+- **Mixed comparison/Bool `when` switches** — `emit_mixed_switch` (Statement.rs) for an
+  arm-head comparison/Bool chain (not all-range, not all-variant, not all-fallible).
+  Missing: a mixed-arm switch TIR shape.
+- **String/struct/collection-payload enums, recursive (boxed) enums/structs, generic
+  & foreign/prelude types** — the struct/enum gate (`struct_is_covered`/
+  `enum_is_covered`) excludes these; their literal/field/pattern emit needs box/deref +
+  borrowed-payload-clone decisions (`emit_boxed_enum_arg`) the subset can't make total.
+- **Latent-bug-gated constructs** (`is_empty`, no-arg `join()`, `mut self`/`view self`
+  reassignment) — excluded because they MISCOMPILE on both paths today (see the
+  latent-bug list); the TIR must not *claim* a function that miscompiles. These unblock
+  only once the underlying codegen bug is fixed.
+
 ## Phases
 
 | # | Scope | Status |
@@ -699,6 +825,7 @@ everything, the AST codegen path is deleted (final phase).
 | 9 | Built-in collection/string methods (`emit_builtin_method`: list/map/string surface) | ✅ done (c109 Phase 9) — +6 example fns routed (`15_lists`/`20_list_remove_bounds`/`38_method_chain` `main`, `28_comptime_table` `make_table`, `34_parallel_scan` `copy_paths`/`main`). Covers the NON-closure list/map/string builtins (`len`/`push`/`pop`/`insert`/`remove`/`get`/`first`/`last`/`contains`/`index_of`/`reverse`/`sort`/`clear`/`join(sep)`/`keys`/`values`/`contains_key`/`chars`/`bytes`/`trim`/`split`/`starts_with`/`ends_with`/`replace`/`to_upper`/`to_lower`/`repeat`/`slice`/`to_string`) on a list/map/string receiver. The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is resolved at lowering into a total `TBuiltinOp` (`TExprKind::BuiltinMethod`), reproducing the AST's `expr_jet_ty` partiality (incl. its `None` → default branch) exactly. Excludes: **closure-taking** methods (`map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` → Phase 11); the **numeric** width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`/… → Phase 12, already carry `Some(recv_type)`); **handle** methods (FileWriter/TcpStream/HttpRequest/Router/Arena/… → Phase 10, also `Some(recv_type)`); `clone`/`raw`/`snapshot`/`new` (Phase 6 special cases); `Int.parse`/`Float.parse`/`String.from_bytes` (type-name-receiver statics); and **`is_empty`** + no-arg `join()` (both unusable today — see latent bugs). |
 | 11 | Lambdas/closures (capture meta), fn-typed values, fan-out | ✅ done (c109 Phase 11, partial) — `23_closures` `main` now routes (map/filter/reduce/sort_by/each), `41_fan_out` `double` routes; ~86 example fns route through the TIR. Covers: **lambda/closure literals** (`Expr::Lambda`) reading `Lambda.meta.{escapes, needs_fn_mut, mut_captures, cloned_captures}` as TOTAL facts — the `move ` keyword (off `needs_fn_mut && !escapes`), `Box::new(…)` (off `escapes`), and the per-`cloned_capture` `let _jet_cap_<n> = (place).clone();` prelude all resolved at lowering, body lowered on a cloned env extended with params + captures (`TExprKind::Lambda`/`TLambda`); the **fan-out** operator `f.[a, b, c]` (S75/S76) for a plain top-level-fn callee, each item a synthetic single-arg call wrapped in `vec![…]` (`TExprKind::FanOut`); the **closure-taking collection methods** `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` (`TExprKind::ClosureMethod`/`TClosureOp`), the Map-vs-list-vs-trait-object and Fn-vs-FnMut emit branches resolved at lowering from `tir_recv_jet_ty` + the lambda's `needs_fn_mut`. Excludes (deferred): **fn-typed values** (a fn stored/passed/returned — the `Box::new(…) as <fn-type>` coercion in `emit_call_args`; the gate now excludes any plain call whose callee has a Fn-typed param so a lambda/fn-value never reaches the un-coerced path); the **closure-taking core calls** `tasks.spawn` (distinct `emit_spawn_lambda` form), `http.serve` (router-vs-lambda branch), `scope.guard` (not in `core_fixed_sig`); the `??` **panic** fallback (still needs the `safe_locals_expr` reproduction). |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | ✅ done (c109 Phase 10) — the **type-monomorphic** core/stdlib calls now route through the TIR (`TExprKind::CoreCall`). Covered: every `(module, method)` whose full signature is fixed by `Sema::core_fixed_sig` — `core.fs` (read/read_bytes/write/append/exists/is_dir/remove/create_dir/list_dir/copy/rename), `core.io` (args/read_all_input/stdin), `core.env` (get/set/current_dir/home_dir), `core.process` (exit/run), `core.math` (sqrt/pow/floor/ceil/round), `core.random` (int/float/seed), `core.time` (now/sleep/start), `core.json` + `jet.json` (parse/decode/render/render_pretty), `core.files` (open/create/append), `core.path` (join/parent/extension/normalize), `core.net` (all tcp_*), `jet.csv`/`jet.toml`/`jet.yaml` (parse/render), `jet.log` (info/warn/error/debug/set_level/set_trace_id/setup), `jet.time` (now/format), `jet.crypto` (sha256/sha256_bytes), `jet.http` (get/post), `jet.regex` (is_match/match/find/find_all/split/replace/replace_all). The `(module, method)` dispatch + per-arm `&(…)`/`&mut (…)`/move wrappers reproduce `emit_core_call` byte-for-byte; the return type comes from `core_fixed_sig` (totality), so a fallible core call composes with Phase-8 `?`/`??`. ~10 example fns route (across crafted programs exercising 24 covered core calls). Excludes (stay on AST path): closure-taking (`tasks.spawn`/`http.serve`/`scope.guard` → Phase 11); polymorphic math/random/io specials (`abs`/`min`/`max`/`clamp`/`pick`/`shuffle`/`io.input`/`io.eprint` — return type depends on arg type, not in the fixed table); handle-constructor specials not in the table (`tasks.channel`, `http.router`/`parse`/`dispatch`); `core.mem` ptr/alloc (`@unsafe`); and any use of a returned handle's METHOD surface (excludes the enclosing fn). Imports/modules (re-export, `import_mods`, inline code modules), FFI extern, comptime-if, arena/unsafe blocks are NOT yet covered (deferred within this phase). |
+| 12 | The tail: trait-impl method bodies, numeric-conversion methods, + a parity fix | ✅ done (c109 Phase 12, partial) — +7 unique trait-method bodies routed (`Circle`/`Square` `area`/`name`, `Person` `announce`/`greeting`, `ConsoleLogger` `log`). Covers: **trait-impl method bodies** (`emit_trait_method`, both the inline `impl Trait {}` and `impl T: Trait` and external-trait-impl forms — hooked via the shared `emit_trait_method`), as a new `TFuncKind::TraitMethod` — bare name (the trait owns it, no `user_` mangle), no `pub`, always-`&self` receiver, self slot `jet_ty: Some(Type::Named(T))` (NOT `None` as for inherent methods); the **numeric** predicate/bit/width-conversion methods (D-NUMOPS1: `is_nan`/`is_infinite`/`is_finite`, `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`, `to_i8`…`to_u64`/`to_int`/`to_f32`/`to_f64`/`to_float`, and numeric `to_string`) on a numeric receiver (`recv_type == Some(<numeric>)`) — a new `TExprKind::NumericMethod`/`TNumericOp`, the widening-vs-narrowing branch (`numeric_conversion`/`conv_rust_target`) resolved at lowering from the total `recv_type` width. Also fixes a **latent TIR-path parity bug**: an explicit `else { if … }` block was being flattened to `} else if …` (the AST keys solely on `ElseBranch`, never the else-body shape) — `TStmt::If` now carries `else_is_elseif` so only a real `ElseBranch::ElseIf` flattens. Excludes (stay on AST path): **delegation** (`emit_delegation_method`, `using field`), **generic-type** & **`view`-returning** & **`@unsafe fn`** trait methods; **fn-typed values** (Box-coercion); **closure-taking core calls** (`tasks.spawn`/`http.serve`/`scope.guard`); polymorphic math/random/io core specials; the `??` **panic** fallback; modules/imports, FFI extern, comptime-if, arena/`core.mem`/`#Unsafe` (see the AST-path inventory below). |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

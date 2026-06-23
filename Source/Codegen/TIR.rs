@@ -75,6 +75,14 @@ pub(crate) enum TFuncKind {
     /// `Move`→`self`), or `None` for a STATIC (associated) method (no `self`
     /// parameter). The method name is mangled (`user_<name>`) and emitted with `pub`.
     Method { self_conv: Option<AccessConvention> },
+    /// c109 Phase 12: a trait-impl method inside `impl Trait for user_<T> { … }` (the
+    /// caller `emit_trait_impl`/`emit_external_trait_impl` opened the block). Distinct
+    /// from an inherent `Method`: the method name is BARE (the trait owns it — no
+    /// `user_` mangle), there is NO `pub`, and the receiver is ALWAYS `&self`
+    /// (`emit_trait_method` ignores the source convention). `is_unsafe` reproduces the
+    /// `unsafe fn` prefix for an `@unsafe fn` trait method (S58/D-LL1 — the body may
+    /// use gated ops; calling it is already gated to an `@unsafe` block in sema).
+    TraitMethod { is_unsafe: bool },
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
@@ -104,10 +112,17 @@ pub(crate) enum TStmt {
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
+    /// `else_is_elseif` distinguishes the source `ElseBranch`: `true` for a real
+    /// `else if` chain (`ElseBranch::ElseIf` — the else-body is the synthesised nested
+    /// `If`, emitted as `} else if …`), `false` for an explicit `else { … }` block
+    /// (`ElseBranch::Else`, emitted as `} else { … }` even when the block holds a
+    /// single `if`). The AST path keys solely on the `ElseBranch` variant; the TIR
+    /// must NOT flatten an explicit `else { if … }` into `else if` (a parity drift).
     If {
         cond: TExpr,
         then_body: Vec<TStmt>,
         else_body: Option<Vec<TStmt>>,
+        else_is_elseif: bool,
     },
     /// `loop { … }` — an infinite loop (`Stmt::Loop`). `label` is the optional
     /// `@name` rendered as `'jet_<name>:` (resolved at lowering, never re-derived).
@@ -435,6 +450,38 @@ pub(crate) enum TExprKind {
         op: TClosureOp,
         args: Vec<TExpr>,
     },
+    /// c109 Phase 12: a numeric predicate / bit-population / width-conversion method
+    /// (D-NUMOPS1: `is_nan`/`count_ones`/`to_i32`/…) on a numeric receiver. These
+    /// carry `recv_type == Some(<numeric name>)` (sema sets it for numeric receivers
+    /// — CheckerInfer ~L2248). The receiver width source/target and the
+    /// widening-vs-narrowing decision are resolved at lowering into a total
+    /// `TNumericOp` (reproducing `numeric_conversion`/`conv_rust_target` exactly), so
+    /// emit makes no type decision (I3). No args (all numeric methods are nullary).
+    NumericMethod {
+        recv: Box<TExpr>,
+        op: TNumericOp,
+    },
+}
+
+/// c109 Phase 12: a resolved numeric method form, one per `emit_builtin_method`
+/// numeric arm (Source/Codegen/Expression.rs). The width source/target and the
+/// widening-vs-narrowing branch (which `numeric_conversion` decides from the source
+/// width name) are decided ONCE at lowering — the variant encodes the chosen form so
+/// emit only formats.
+pub(crate) enum TNumericOp {
+    /// `is_nan`/`is_infinite`/`is_finite` → `({recv}).{method}()` (bool).
+    Predicate(String),
+    /// `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros` →
+    /// `(({recv}).{method}() as i64)` (Rust returns u32 → widen to Int).
+    BitCount(String),
+    /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
+    CastAs { dst_rust: String },
+    /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form
+    /// returning `Result<T, String>`. Both strings resolved at lowering.
+    TryFrom { dst_rust: String, dst_spelling: String },
+    /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
+    /// arm of `emit_builtin_method`, which fires for any receiver type).
+    ToShow,
 }
 
 /// c109 Phase 11: a resolved closure-taking collection-method op, one per
@@ -723,6 +770,59 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     f.body.iter().all(|s| {
         !stmt_assigns_self(s) && stmt_in_subset(s, cx, &mut locals)
     })
+}
+
+/// c109 Phase 12: is this TRAIT-IMPL method (a method of `impl Trait for type_name`)
+/// fully inside the TIR subset? Distinct from `tir_covers_method` because the trait
+/// method emits via a different function (`emit_trait_method`): bare name, no `pub`,
+/// always `&self`, self slot `jet_ty: Some(Type::Named(type_name))`. Same rule —
+/// **exclude on any doubt**. The owning type must be a covered struct/enum; the body
+/// must be in-subset and never reassign `self`.
+///
+/// Conservative exclusions beyond the inherent-method gate:
+///  - `is_unsafe` (`@unsafe fn`) is excluded — its body may use gated pointer ops the
+///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
+///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
+///    static trait method, rare; exclude it — the receiver form is fixed at `&self`).
+pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
+    // Signature shape: no generics, not unsafe/pure, not view-returning.
+    if !f.type_params.is_empty() || f.is_unsafe || f.is_pure || f.is_view_return {
+        return false;
+    }
+    // The owning type must be a covered struct or enum.
+    let owner_ty = Type::Named(type_name.to_string());
+    if !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx) {
+        return false;
+    }
+    // A trait method must have `self` as its FIRST parameter (the receiver `&self`).
+    // A trait method with no `self` (static trait fn) emits no receiver — exclude it
+    // (the emit hook always renders `&self`).
+    let Some(first) = f.params.first() else {
+        return false;
+    };
+    if first.name != Syntax::KW_SELF {
+        return false;
+    }
+    // No further `self` parameters (malformed — sema rejects, but be defensive).
+    if f.params.iter().skip(1).any(|p| p.name == Syntax::KW_SELF) {
+        return false;
+    }
+    // Non-self params + the return type must be covered value types (Self resolves
+    // to the owning type). No defaults on a trait method (sema enforces it).
+    for p in f.params.iter().filter(|p| p.name != Syntax::KW_SELF) {
+        if p.default.is_some() || !is_subset_param_ty(&resolve_self_ty(&p.ty, type_name), cx) {
+            return false;
+        }
+    }
+    if let Some(rt) = &f.return_type {
+        if !is_subset_param_ty(&resolve_self_ty(rt, type_name), cx) {
+            return false;
+        }
+    }
+    let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
+    f.body
+        .iter()
+        .all(|s| !stmt_assigns_self(s) && stmt_in_subset(s, cx, &mut locals))
 }
 
 /// Resolve a `Self` type reference to the owning concrete type. Other types pass
@@ -1732,6 +1832,20 @@ fn method_call_in_subset(
     if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
         return expr_in_subset(receiver, cx, locals);
     }
+    // Shape (g) [c109 Phase 12]: a numeric predicate / bit-population / width
+    // conversion (`is_nan`/`count_ones`/`to_i32`/… — D-NUMOPS1). Sema sets
+    // `recv_type == Some(<numeric name>)` for a numeric receiver (CheckerInfer
+    // ~L2248), so a numeric method is uniquely a `MethodCall` whose `recv_type` parses
+    // as a numeric type name (`Int`/`Float`/`F32`/`I8..U64`) and whose `method` is a
+    // covered numeric op. All numeric ops are nullary (no args). The width source is
+    // the total `recv_type`, so the widening/narrowing decision is total at lowering.
+    if let Some(numeric_name) = recv_type {
+        if crate::AST::numeric_type_from_name(numeric_name).is_some()
+            && is_covered_numeric_method(method, args.len())
+        {
+            return expr_in_subset(receiver, cx, locals);
+        }
+    }
     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
     // this (its `recv_type` is `None`). The AST path emits `user_<T>::user_<method>(…)`
     // when the receiver is a type name in `cx.type_names` (Expression.rs ~L1644). We
@@ -1966,6 +2080,121 @@ fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // codegen — its AST arm is dead.
 }
 
+/// c109 Phase 12: resolve a numeric method (`is_nan`/`count_ones`/`to_i32`/…) into a
+/// total `TNumericOp`, reproducing `emit_builtin_method`'s numeric arms +
+/// `numeric_conversion`/`conv_rust_target` (Source/Codegen/Expression.rs) EXACTLY.
+/// `src_name` is the receiver's numeric type name (the AST path's `src =
+/// recv_type.or_else(rty.name())`, where `recv_type` is always `Some` for a numeric
+/// method — so the source width is total here). The widening-vs-narrowing decision
+/// (which `numeric_conversion` makes from the source/target int ranges) is decided
+/// HERE, never in emit. Returns `None` for a name this doesn't own (defensive — the
+/// gate already restricted to the covered set).
+fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumericOp> {
+    // Float predicates → `(recv).{method}()`.
+    if let "is_nan" | "is_infinite" | "is_finite" = method {
+        return Some(TNumericOp::Predicate(method.to_string()));
+    }
+    // Integer bit-population queries → `((recv).{method}() as i64)`.
+    if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
+        return Some(TNumericOp::BitCount(method.to_string()));
+    }
+    // `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string` arm).
+    if method == "to_string" {
+        return Some(TNumericOp::ToShow);
+    }
+    // Width conversion. Mirror `conv_rust_target` + `numeric_conversion`.
+    let (dst_rust, dst_spelling, dst_int) = conv_rust_target_tir(method)?;
+    let Some((dsigned, dbits)) = dst_int else {
+        // Float target (int→float / float→float): always representable — `as`.
+        return Some(TNumericOp::CastAs {
+            dst_rust: dst_rust.to_string(),
+        });
+    };
+    // The AST path's `src = recv_type.or_else(rty.name())`; here `recv_type` is the
+    // total numeric name, so `parse_int_name(src_name)` is the source int width.
+    match parse_int_name_tir(src_name) {
+        Some((ssigned, sbits)) => {
+            let (slo, shi) = crate::AST::int_range(ssigned, sbits);
+            let (dlo, dhi) = crate::AST::int_range(dsigned, dbits);
+            if dlo <= slo && shi <= dhi {
+                // Widening — infallible `as`.
+                Some(TNumericOp::CastAs {
+                    dst_rust: dst_rust.to_string(),
+                })
+            } else {
+                // Narrowing — checked `try_from` returning `Result<T, String>`.
+                Some(TNumericOp::TryFrom {
+                    dst_rust: dst_rust.to_string(),
+                    dst_spelling: dst_spelling.to_string(),
+                })
+            }
+        }
+        // Float (or unknown) source → integer target: a saturating `as` cast.
+        None => Some(TNumericOp::CastAs {
+            dst_rust: dst_rust.to_string(),
+        }),
+    }
+}
+
+/// c109 Phase 12: TIR-local copy of `conv_rust_target` (Source/Codegen/Expression.rs)
+/// — the Rust type, spelling, and integer `(signed, bits)` (or `None` for a float) a
+/// `to_*` width-conversion method targets. Kept in sync with the AST path.
+fn conv_rust_target_tir(method: &str) -> Option<(&'static str, &'static str, Option<(bool, u8)>)> {
+    Some(match method {
+        "to_i8" => ("i8", "I8", Some((true, 8))),
+        "to_i16" => ("i16", "I16", Some((true, 16))),
+        "to_i32" => ("i32", "I32", Some((true, 32))),
+        "to_i64" | "to_int" => ("i64", "Int", Some((true, 64))),
+        "to_u8" => ("u8", "U8", Some((false, 8))),
+        "to_u16" => ("u16", "U16", Some((false, 16))),
+        "to_u32" => ("u32", "U32", Some((false, 32))),
+        "to_u64" => ("u64", "U64", Some((false, 64))),
+        "to_f32" => ("f32", "F32", None),
+        "to_f64" | "to_float" => ("f64", "Float", None),
+        _ => return None,
+    })
+}
+
+/// c109 Phase 12: TIR-local copy of `parse_int_name` (Source/Codegen/Expression.rs) —
+/// parse a numeric type name to `(signed, bits)`, `None` for floats/non-numeric.
+fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
+    match name {
+        "Int" => Some((true, 64)),
+        "Float" | "F32" | "F64" => None,
+        _ => {
+            let signed = name.starts_with('I');
+            if (signed || name.starts_with('U')) && name.len() > 1 {
+                name[1..].parse::<u8>().ok().map(|b| (signed, b))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// c109 Phase 12: is `method` (with `nargs` args) a numeric predicate / bit-op /
+/// width-conversion method the TIR lowers? This is the D-NUMOPS1 slice of
+/// `emit_builtin_method` keyed on a numeric receiver (`recv_type == Some(numeric)`):
+/// the float predicates (`is_nan`/`is_infinite`/`is_finite`), the integer bit-pop
+/// queries (`count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`), and the
+/// width conversions (`to_i8`…`to_u64`/`to_int`/`to_f32`/`to_f64`/`to_float`). All
+/// are nullary. `to_string` on a numeric receiver is NOT here — it sets
+/// `recv_type == Some(numeric)` too, but the AST routes it through the plain
+/// `to_string` arm (`(recv).jet_show()`), which is the Phase-9 `BuiltinMethod` shape;
+/// a numeric `to_string` carries `recv_type == Some`, so it never reaches the Phase-9
+/// `recv_type.is_none()` gate — it must be covered here as a distinct op.
+fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
+    nargs == 0
+        && matches!(
+            method,
+            "is_nan" | "is_infinite" | "is_finite"
+                | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+                | "to_i8" | "to_i16" | "to_i32" | "to_i64" | "to_int" | "to_u8"
+                | "to_u16" | "to_u32" | "to_u64" | "to_f32" | "to_f64" | "to_float"
+                | "to_string"
+        )
+}
+
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
 /// covered set is exactly the **type-monomorphic** core calls — those whose full
 /// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.
@@ -2129,6 +2358,52 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     }
 }
 
+/// c109 Phase 12: lower a TRAIT-IMPL method of `type_name` to a `TFunc`. Mirrors
+/// `emit_trait_method`'s slot construction (Source/Codegen/Items.rs) EXACTLY — which
+/// differs from `emit_method`:
+///  - the `self` slot's type is `Some(Type::Named(type_name))` (NOT `None` as in
+///    `emit_method`); place `self`, no deref. This is load-bearing for overflow-trap
+///    decisions that consult the self slot — though in the covered subset `self` is a
+///    struct/enum (never a bare arithmetic operand), so the decision never differs.
+///  - non-self params use the same deref logic, but `emit_trait_method` has no
+///    `Read if scalar` short-circuit branch — it computes `deref = !p.ty.is_scalar()`
+///    for `Read`, which is identical to `param_place` for `Read` (scalar → false).
+/// The `TraitMethod` kind drives a bare name, no `pub`, always-`&self` signature.
+pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
+    let mut env = LowerEnv {
+        locals: HashMap::new(),
+        fn_name: f.name.clone(),
+    };
+    let mut params = Vec::new();
+    for p in &f.params {
+        if p.name == Syntax::KW_SELF {
+            // The self slot: place `self`, no deref, type `Some(Named(type_name))` —
+            // EXACTLY `emit_trait_method`'s slot (NOT `None` like `emit_method`).
+            env.locals.insert(
+                Syntax::KW_SELF.to_string(),
+                ("self".to_string(), Some(Type::Named(type_name.to_string()))),
+            );
+            continue;
+        }
+        let rust_name = cx.mangle_name(&p.name);
+        let place = param_place(&rust_name, p);
+        let pty = resolve_self_ty(&p.ty, type_name);
+        env.locals.insert(p.name.clone(), (place, Some(pty.clone())));
+        params.push((rust_name, pty, p.convention));
+    }
+    let body = lower_stmts(&f.body, cx, &mut env);
+    TFunc {
+        name: f.name.clone(),
+        params,
+        ret: f.return_type.as_ref().map(|t| resolve_self_ty(t, type_name)),
+        is_main: false,
+        body,
+        kind: TFuncKind::TraitMethod {
+            is_unsafe: f.is_unsafe,
+        },
+    }
+}
+
 /// The Rust place a parameter reads as, mirroring `emit_func`'s `deref` logic:
 /// a `Read` parameter of non-scalar type (String/Char) is a `&T` and must be
 /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
@@ -2286,22 +2561,24 @@ fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         let mut branch = clone_env(env);
         lower_stmts(&ifs.then_body, cx, &mut branch)
     };
-    let else_body = match &ifs.else_branch {
-        None => None,
+    let (else_body, else_is_elseif) = match &ifs.else_branch {
+        None => (None, false),
         Some(ElseBranch::Else(body)) => {
             let mut branch = clone_env(env);
-            Some(lower_stmts(body, cx, &mut branch))
+            (Some(lower_stmts(body, cx, &mut branch)), false)
         }
-        // `else if` nests as an else-body holding a single `If`.
+        // `else if` nests as an else-body holding a single `If`; the flag marks it so
+        // emit renders `} else if …` (an explicit `else { if … }` block does NOT).
         Some(ElseBranch::ElseIf(next)) => {
             let mut branch = clone_env(env);
-            Some(vec![lower_if(next, cx, &mut branch)])
+            (Some(vec![lower_if(next, cx, &mut branch)]), true)
         }
     };
     TStmt::If {
         cond,
         then_body,
         else_body,
+        else_is_elseif,
     }
 }
 
@@ -3309,6 +3586,30 @@ fn lower_method_call(
             },
         };
     }
+    // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method
+    // (`is_nan`/`count_ones`/`to_i32`/…). The gate proved `recv_type ==
+    // Some(<numeric name>)` + a covered nullary numeric op. Resolve the receiver
+    // width source/target + the widening-vs-narrowing branch HERE (reproducing
+    // `numeric_conversion`/`conv_rust_target` from Expression.rs) into a total
+    // `TNumericOp`, so emit makes no decision (I3). The result type comes from
+    // `numeric_method_return` (the sema table), keyed on the receiver type recovered
+    // from `recv_type` (the total width source — `src = recv_type.or_else(rty.name())`
+    // on the AST side, where `recv_type` is always `Some` for these).
+    if let Some(numeric_name) = recv_type {
+        if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
+            if let Some(op) = resolve_numeric_op(method, numeric_name) {
+                let recv_t = lower_expr(receiver, cx, env);
+                let result_ty = builtin_result_ty(method, args.len(), Some(&recv_ty));
+                return TExpr {
+                    ty: result_ty,
+                    kind: TExprKind::NumericMethod {
+                        recv: Box::new(recv_t),
+                        op,
+                    },
+                };
+            }
+        }
+    }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
@@ -3685,6 +3986,7 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
     match &tir.kind {
         TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
         TFuncKind::Method { self_conv } => emit_tir_method(tir, *self_conv, cx, out),
+        TFuncKind::TraitMethod { is_unsafe } => emit_tir_trait_method(tir, *is_unsafe, cx, out),
     }
 }
 
@@ -3755,6 +4057,45 @@ fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, ou
     out.push_str(&format!("{pad}}}\n"));
 }
 
+/// c109 Phase 12: a trait-impl method, emitted INSIDE an `impl Trait for user_<T> { … }`
+/// block (the caller `emit_trait_impl`/`emit_external_trait_impl` opened it).
+/// Byte-identical to `emit_trait_method` (Source/Codegen/Items.rs): a BARE method name
+/// (no `user_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
+/// an `unsafe ` prefix iff the source was an `@unsafe fn`.
+fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, cx: &Cx, out: &mut String) {
+    let indent = 1;
+    let pad = "    ".repeat(indent);
+    let ret_clause = match &tir.ret {
+        // `emit_trait_method` computes `ret = rust_return_type(...)` then, if non-empty,
+        // ` -> ret`. A unit return yields the empty clause.
+        Some(t) => {
+            let ret = rust_return_type(cx, t, false);
+            if ret.is_empty() {
+                String::new()
+            } else {
+                format!(" -> {}", ret)
+            }
+        }
+        None => String::new(),
+    };
+    // The receiver is ALWAYS `&self` (the trait method ignores the source convention).
+    let mut params: Vec<String> = vec!["&self".to_string()];
+    for (rust_name, ty, conv) in &tir.params {
+        params.push(format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)));
+    }
+    let unsafe_kw = if is_unsafe { "unsafe " } else { "" };
+    // E2-M12 D-OBS1: track the current function name for rich panic reports.
+    *cx.current_fn.borrow_mut() = tir.name.clone();
+    out.push_str(&format!(
+        "{pad}{unsafe_kw}fn {name}({params}){ret} {{\n",
+        name = tir.name,
+        params = params.join(", "),
+        ret = ret_clause,
+    ));
+    emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    out.push_str(&format!("{pad}}}\n"));
+}
+
 fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     for s in stmts {
         emit_tir_stmt(s, cx, out, indent);
@@ -3806,15 +4147,18 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             cond,
             then_body,
             else_body,
+            else_is_elseif,
         } => {
             out.push_str(&format!("{}if {} {{\n", pad, emit_tir_expr(cond, cx)));
             emit_tir_stmts(then_body, cx, out, indent + 1);
             match else_body {
                 None => out.push_str(&format!("{}}}\n", pad)),
                 Some(body) => {
-                    // Match the AST path's `else if` flattening: a one-statement
-                    // else-body holding a single `If` is emitted as `} else if …`.
-                    if let [TStmt::If { .. }] = body.as_slice() {
+                    // Match the AST path EXACTLY: it renders `} else if …` ONLY for a
+                    // real `else if` chain (`ElseBranch::ElseIf` → `else_is_elseif`), and
+                    // `} else { … }` for an explicit `else` block — even when the block
+                    // holds a single `if` (do NOT flatten that, or parity drifts).
+                    if *else_is_elseif {
                         out.push_str(&format!("{}}} else ", pad));
                         let mut nested = String::new();
                         emit_tir_stmt(&body[0], cx, &mut nested, indent);
@@ -4146,6 +4490,23 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::ContainsKey => format!("({}).contains_key(&{})", recv, a(0)),
                 TBuiltinOp::ToString => format!("({}).jet_show()", recv),
+            }
+        }
+        // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method. The
+        // width source/target + widening-vs-narrowing branch were resolved into `op` at
+        // lowering; emit only formats, reproducing `emit_builtin_method`'s numeric arms
+        // + `numeric_conversion` (Source/Codegen/Expression.rs) byte-for-byte.
+        TExprKind::NumericMethod { recv, op } => {
+            let recv = emit_tir_expr(recv, cx);
+            match op {
+                TNumericOp::Predicate(m) => format!("({}).{}()", recv, m),
+                TNumericOp::BitCount(m) => format!("(({}).{}() as i64)", recv, m),
+                TNumericOp::ToShow => format!("({}).jet_show()", recv),
+                TNumericOp::CastAs { dst_rust } => format!("(({}) as {})", recv, dst_rust),
+                TNumericOp::TryFrom { dst_rust, dst_spelling } => format!(
+                    "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
+                     \"value doesn't fit in {dst_spelling}\".to_string())"
+                ),
             }
         }
         // c109 Phase 10: a core/stdlib module call. Reproduces `emit_core_call`
