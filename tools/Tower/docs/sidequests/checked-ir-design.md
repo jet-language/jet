@@ -100,12 +100,16 @@ them so they don't regress, but they should be fixed independently of c109):
   recurses) ROUTES THROUGH THE TIR. Covered by tests/tir.rs `boxed_recursive_struct_field_read`
   (build+run, prints `6`) and the `covers_recursive_struct_boxed_field_read` unit test;
   byte-parity holds across the example suite. NOTE: a *direct* match on a boxed field with a
-  payload binding via the mixed-switch form (`if t.child { … == value(c) -> … else -> … }`) hits
-  a SEPARATE pre-existing bug — the mixed `matches!(…, Some(c))` path discards the payload
+  payload binding via the mixed-switch form (`if t.child { … == value(c) -> … else -> … }`) hit
+  a SEPARATE pre-existing bug — the mixed `matches!(…, Some(c))` path discarded the payload
   binding (E0425), reproduced identically with a NON-boxed `Int?` field-access scrutinee, so it
-  is unrelated to boxing and out of scope here. The canonical traversal (bind the child to a
-  local, then exhaustive-match) works. (Surfaced while fixing construction in commit 46d301c;
-  fixed in the c109 fix-first effort.)
+  is unrelated to boxing. **FIXED (B1, commit 669a3de):** a mixed-switch over a NON-IDENT
+  subject (`h.val`, `pick()`, `xs[0]`) is now bound once and routes through the exhaustive
+  Rust `match` — `pattern_subjects_match` compares a non-ident subject by source slice
+  (spanless), so a non-ident pattern switch reaches `emit_pattern_match_switch` (scrutinee
+  evaluated once, variants qualified, payloads bound) instead of mis-routing to
+  `emit_mixed_switch`. Covered in the TIR byte-for-byte. (Surfaced while fixing construction
+  in commit 46d301c; mis-scoped here as "out of scope" until the deletion-blocker audit.)
 - **A borrowed non-Copy struct-lit field value isn't cloned (E0507, AST path). FIXED.**
   Was: a struct literal whose field value is a borrowed-in-env ident (`Person { name: n }`
   where `n: String` is a `read` param → `&String`) emitted `user_name: (*user_n)` →
@@ -1887,8 +1891,22 @@ everything, the AST codegen path is deleted (final phase).
   free-call arg conventions, (E) fan-out result-list destructure (Phase 26); (D) fn-typed-value-
   stored + struct fn-fields (Phase 27); (F) sized-integer types + literal width-elaboration
   (Phase 28); (H) qualified `io.input(prompt)` + `?? return <value>` (Phase 29); (G) generic fns +
-  trait-object (dyn) dispatch (Phase 30)** — so NO uncovered AST-path FEATURE residue remains. The
-  AST path can be deleted once the latent-bug fixes land (the only other residue is
+  trait-object (dyn) dispatch (Phase 30)** — so no uncovered AST-path FEATURE residue remains
+  *in the example suite*.
+
+- **CORRECTION (deletion-blocker audit): "no uncovered feature surface remains" was suite-scoped,
+  not exhaustive.** The Phase 25–30 sweeps proved coverage only over constructs the example suite
+  exercises. An exhaustive gate-exclusion audit (read every `*_in_subset` exclusion, not just what
+  the suite hits) found FOUR coverable surfaces that NO example uses, so the routing sweep never
+  saw them: **B1** mixed-switch over a non-ident subject (also a real I2 hole — E0425 — in the AST
+  emit; FIXED + covered, commit 669a3de), **B2** fixed-size-list `[E#N]` param/return/field/element
+  (commit 946e93e), **B3** struct-destructuring bindings `Type { x, y } @= p` (commit a9cb91e),
+  **B4** user-enum variant if-let conditions `if m == Ping(n)` (commit 9bcc2a3). All four are now
+  covered + byte-parity-verified. The lesson (a third time): **the suite-only routing sweep is
+  necessary but NOT sufficient** — it proves the covered constructs route, but cannot prove the
+  ABSENCE of an uncovered construct; only an exhaustive read of the gate's exclusions can. With
+  B1–B4 covered, every remaining gate exclusion is provably sema-unreachable or latent-bug-gated.
+  The AST path can be deleted once the latent-bug fixes land (the only other residue is
   sema-unreachable/dead constructs — no action).
 
 ## Refinements learned in Phase 26 (require/panic, #Caps, free-arg conventions, list-destructure)
