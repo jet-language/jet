@@ -11476,4 +11476,26 @@ fn main() {
 "#;
         assert!(covers_after_sema(src, "main"), "owning field-read clone not covered");
     }
+
+    #[test]
+    fn covers_indexed_map_assign_through_field() {
+        // c109: an indexed map-assign whose base is a FIELD read (`s.scores["a"] = 1`,
+        // `scores: Map<String, Int>`). The `LValue::Index` gate already admits a
+        // field-read base + sema-resolved `IndexKind`; the only blocker was the
+        // single-uppercase-letter struct name `S` (covered by the type-var-heuristic
+        // guard). The whole `main` routes through the TIR; the assign emits
+        // `{ let __jet_v = 1i64; jet_map_insert(&mut ((user_s).user_scores), …); }`.
+        let src = r#"
+struct S {
+    scores: Map<String, Int>
+}
+
+fn main() {
+    s := S { scores: [:] }
+    s.scores["a"] = 1
+    print(s.scores["a"])
+}
+"#;
+        assert!(covers_after_sema(src, "main"), "map-assign through field not covered");
+    }
 }

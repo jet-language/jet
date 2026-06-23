@@ -4223,3 +4223,35 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "x\nx\n");
 }
+
+/// c109: an indexed map-assign whose index BASE is a struct field read
+/// (`s.scores["a"] = 1`, `scores: Map<String, Int>`). The `LValue::Index` gate
+/// admits a field-read base + the sema-resolved `IndexKind::Map`; `main` routes
+/// through the TIR and the assign emits the `jet_map_insert` helper form
+/// byte-for-byte. Runs (insert then index-read prints the value).
+#[test]
+fn indexed_map_assign_through_field() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct S {
+    scores: Map<String, Int>
+}
+
+fn main() {
+    s := S { scores: [:] }
+    s.scores[\"a\"] = 1
+    print(s.scores[\"a\"])
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.rust.contains("jet_map_insert(&mut ((user_s).user_scores),"),
+        "map-assign through field not byte-exact:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_map_assign_field", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n");
+}
