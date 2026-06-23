@@ -3390,3 +3390,56 @@ fn main() {
     // double(double(3)) = 12; apply_twice(x+1, 5) = ((5+1)+1) = 7; w.step(4) = 4*4 = 16.
     assert_eq!(stdout, "12\n7\n16\n");
 }
+
+/// c109 Phase 28: the full sized-integer surface (82_sized_integers, D-SG9/S42/D-NUMOPS1).
+/// Literal width-elaboration (`U8`/`I32`/`I8`/`I64`), per-element list widening (`[U8]`),
+/// width-preserving overflow-trapping arithmetic, width conversions (`to_i64`/`to_u8() ??`),
+/// per-type bounds constants (`U8.MAX`/`I32.MIN`/`Float.INFINITY`), bit/float queries
+/// (`count_ones`/`is_infinite`), and the overflow opt-outs (`wrapping`/`saturating`/
+/// `checked`). The whole `main` routes through the TIR.
+#[test]
+fn sized_integers() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    red: U8 @= 255
+    channel: I32 @= 100000
+    depth: I8 @= -120
+    print(red)
+    print(channel)
+    print(depth)
+    total: I64 @= 9000000000
+    print(total + 1)
+    half: U8 @= 100
+    print(half + half)
+    bytes: [U8] @= [104, 105, 33]
+    print(bytes)
+    wide: I64 @= red.to_i64()
+    print(wide)
+    clamped: U8 @= channel.to_u8() ?? 255
+    print(clamped)
+    print(U8.MAX)
+    print(I32.MIN)
+    flags: U8 @= 13
+    print(flags.count_ones())
+    print(Float.INFINITY.is_infinite())
+    hi: U8 @= 200
+    lo: U8 @= 100
+    print(wrapping(hi + lo))
+    print(saturating(hi + lo))
+    fallback: U8 @= 0
+    print(checked(hi + lo) ?? fallback)
+}
+";
+    let (code, stdout) = build_and_run("tir_sized_integers", src);
+    assert_eq!(code, 0);
+    // 255; 100000; -120; total+1=9000000001; half+half=200; [104,105,33]; red.to_i64()=255;
+    // channel.to_u8()=None ?? 255 = 255; U8.MAX=255; I32.MIN=-2147483648; 13.count_ones()=3;
+    // INFINITY.is_infinite()=true; wrapping 200+100=44; saturating=255; checked=None ?? 0 = 0.
+    assert_eq!(
+        stdout,
+        "255\n100000\n-120\n9000000001\n200\n[104, 105, 33]\n255\n255\n255\n-2147483648\n3\ntrue\n44\n255\n0\n"
+    );
+}

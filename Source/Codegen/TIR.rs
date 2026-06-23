@@ -725,6 +725,18 @@ pub(crate) enum TExprKind {
         recv: Box<TExpr>,
         op: TNumericOp,
     },
+    /// c109 Phase 28: an overflow opt-out builtin `wrapping(e)`/`saturating(e)`/
+    /// `checked(e)` (D-NUMOPS1). The AST `emit_call` (Source/Codegen/Expression.rs
+    /// ~L1756) lowers the single integer `Expr::Binary` argument to Rust's matching
+    /// method: `(lhs).{prefix}_{op}(rhs)` where `prefix ∈ {wrapping, saturating,
+    /// checked}` and `op ∈ {add, sub, mul, div}`. PLAIN operands (no overflow trap).
+    /// `prefix` + `op` are resolved at lowering (total facts), emit only assembles.
+    OverflowOpt {
+        prefix: String,
+        op: &'static str,
+        lhs: Box<TExpr>,
+        rhs: Box<TExpr>,
+    },
     /// c109 Phase 13: a method ON a handle (FileReader/FileWriter/StdinHandle/
     /// Stopwatch/TcpListener/TcpStream/HttpRequest/HttpResponse) — the handle arms of
     /// `emit_builtin_method` (Source/Codegen/Expression.rs). The handle-receiver
@@ -2683,6 +2695,31 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() <= 1;
+            // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
+            // `checked(e)` (D-NUMOPS1). The AST `emit_call` (Expression.rs ~L1756) claims
+            // them when the name is one of the three AND not shadowed by a user fn
+            // (`!cx.sigs`); the sole argument is one integer `Expr::Binary` (`+`/`-`/`*`/`/`),
+            // lowered to `(ls).{name}_{add|sub|mul|div}(rs)` with PLAIN operands (no trap).
+            // Sema validated the shape. The operands must be in-subset; `checked` yields
+            // `T?`, the others `T`. Handled by a bespoke `TExprKind::OverflowOpt` — return
+            // early here so the generic-call arg machinery below doesn't also claim it.
+            if matches!(
+                c.name.as_str(),
+                Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+            ) && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+            {
+                return matches!(
+                    c.args.first().map(|a| &a.expr),
+                    Some(Expr::Binary(
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div,
+                        ..
+                    ))
+                ) && c.args.len() == 1
+                    && c.args.iter().all(|a| {
+                        a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+                    });
+            }
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
             // unqualified module import (those lower to different call forms — covered
@@ -2847,6 +2884,19 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 if !locals.contains(enum_name)
                     && is_json_type_name(enum_name)
                     && member == "Null"
+                {
+                    return true;
+                }
+                // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
+                // `Float.INFINITY`/… — D-NUMOPS1) reaches codegen as a `Field` whose
+                // receiver is a numeric type NAME and `member` is one of the per-type
+                // const names. The AST `emit_expr` Field arm (Expression.rs ~L224) emits
+                // `{rust_type}::{member}` (e.g. `u8::MAX`, `f64::INFINITY`). Cover it: a
+                // non-local numeric type name + a known const member. The rendered value
+                // + result type are resolved at lowering (`numeric_type_from_name`).
+                if !locals.contains(enum_name)
+                    && crate::AST::numeric_type_from_name(enum_name).is_some()
+                    && is_numeric_bounds_const(member)
                 {
                     return true;
                 }
@@ -3761,6 +3811,16 @@ fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
                 | "to_u16" | "to_u32" | "to_u64" | "to_f32" | "to_f64" | "to_float"
                 | "to_string"
         )
+}
+
+/// c109 Phase 28: is `member` a per-type numeric bounds constant (`U8.MAX`,
+/// `I32.MIN`, `Float.INFINITY`, …)? Mirrors the AST `emit_expr` Field arm's filter
+/// (Source/Codegen/Expression.rs ~L226) exactly.
+fn is_numeric_bounds_const(member: &str) -> bool {
+    matches!(
+        member,
+        "MIN" | "MAX" | "INFINITY" | "NEG_INFINITY" | "NAN" | "EPSILON"
+    )
 }
 
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
@@ -5802,6 +5862,46 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::AmbientInput { prompt },
                 };
             }
+            // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
+            // `checked(e)` (D-NUMOPS1). The gate proved the name is one of the three (not
+            // shadowed) and the sole arg is an integer `Expr::Binary`. Reproduce
+            // `emit_call`'s arm (Expression.rs ~L1756): `(lhs).{name}_{op}(rhs)` with PLAIN
+            // operands (no trap helper). `checked_*` returns `Option<T>`; the others return
+            // `T` — set the result type accordingly so a `checked(...) ?? x` composes.
+            if matches!(
+                call.name.as_str(),
+                Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+            ) && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+            {
+                if let Some(Expr::Binary(op, l, r, _)) = call.args.first().map(|a| &a.expr) {
+                    let op_suffix = match op {
+                        BinOp::Add => "add",
+                        BinOp::Sub => "sub",
+                        BinOp::Mul => "mul",
+                        BinOp::Div => "div",
+                        // Sema validated an arithmetic op; mirror the AST default.
+                        _ => "add",
+                    };
+                    let lhs = lower_expr(l, cx, env);
+                    let rhs = lower_expr(r, cx, env);
+                    let val_ty = lhs.ty.clone();
+                    let result_ty = if call.name == Syntax::BUILTIN_CHECKED {
+                        Type::Option(Box::new(val_ty))
+                    } else {
+                        val_ty
+                    };
+                    return TExpr {
+                        ty: result_ty,
+                        kind: TExprKind::OverflowOpt {
+                            prefix: call.name.clone(),
+                            op: op_suffix,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                    };
+                }
+            }
             // c109 Phase 14: an FFI extern call (`emit_call`'s `extern_funcs` arm).
             // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
             // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
@@ -6093,6 +6193,26 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             arg: None,
                         },
                     };
+                }
+                // c109 Phase 28: a numeric BOUNDS constant (`U8.MAX`/`I32.MIN`/
+                // `Float.INFINITY`/…). The gate proved the receiver is a numeric type
+                // name and `member` a bounds-const name. Reproduce the AST `emit_expr`
+                // Field arm (Expression.rs ~L224): `{rust_type(nt)}::{member}`. The
+                // rendered Rust string is total here; the result type is the numeric
+                // type itself (`U8` for `U8.MAX`, `Float` for `Float.INFINITY`).
+                if env.ty_of(enum_name).is_none() {
+                    if let Some(nt) = crate::AST::numeric_type_from_name(enum_name) {
+                        if is_numeric_bounds_const(member) {
+                            return TExpr {
+                                ty: nt.clone(),
+                                kind: TExprKind::ConstInline(format!(
+                                    "{}::{}",
+                                    cx.rust_type(&nt),
+                                    member
+                                )),
+                            };
+                        }
+                    }
                 }
             }
             let recv = lower_expr(receiver, cx, env);
@@ -8459,6 +8579,13 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
             }
         }
+        // c109 Phase 28: an overflow opt-out builtin. `prefix`/`op` were resolved at
+        // lowering; reproduce `emit_call`'s `(ls).{name}_{suffix}(rs)` byte-for-byte.
+        TExprKind::OverflowOpt { prefix, op, lhs, rhs } => {
+            let ls = emit_tir_expr(lhs, cx);
+            let rs = emit_tir_expr(rhs, cx);
+            format!("({}).{}_{}({})", ls, prefix, op, rs)
+        }
         // c109 Phase 10: a core/stdlib module call. Reproduces `emit_core_call`
         // (Source/Codegen/Expression.rs) byte-for-byte. `module`/`method` were
         // resolved at lowering; `cx.root_prefix`/`cx.ffi_crate` are program-level
@@ -10297,5 +10424,60 @@ fn mk(p: String) -> PR {
 }
 ";
         assert!(covers(src, "mk"));
+    }
+
+    #[test]
+    fn covers_numeric_bounds_const() {
+        // c109 Phase 28: per-type bounds constants reach codegen as a `Field` whose
+        // receiver is a numeric type NAME (`U8.MAX`, `I32.MIN`, `Float.INFINITY`).
+        // Gated structurally (numeric type name + a known const member), no sema fact.
+        let src = "\
+fn bounds() {
+    print(U8.MAX)
+    print(I32.MIN)
+    print(Float.INFINITY)
+}
+";
+        assert!(covers(src, "bounds"));
+    }
+
+    #[test]
+    fn rejects_unknown_numeric_member() {
+        // A numeric type name with a NON-bounds member is NOT a bounds const — it
+        // stays excluded (a non-local non-enum ident receiver), so the fn stays on
+        // the AST path. (Sema would reject it too; the gate is conservative.)
+        let src = "\
+fn bad() {
+    print(U8.NOPE)
+}
+";
+        assert!(!covers(src, "bad"));
+    }
+
+    #[test]
+    fn covers_overflow_opt_builtins() {
+        // c109 Phase 28: the overflow opt-outs `wrapping(e)`/`saturating(e)`/
+        // `checked(e)` over an integer `Expr::Binary`. Gated structurally (the
+        // builtin name + a `+`/`-`/`*`/`/` Binary arg), no sema fact required.
+        let src = "\
+fn ops(a: U8, b: U8) {
+    print(wrapping(a + b))
+    print(saturating(a * b))
+}
+";
+        assert!(covers(src, "ops"));
+    }
+
+    #[test]
+    fn rejects_overflow_opt_nonbinary() {
+        // `wrapping(x)` whose argument is NOT an integer `Expr::Binary` is not the
+        // covered shape — the gate excludes it (sema never produces it, but the gate
+        // stays strict).
+        let src = "\
+fn nope(x: U8) {
+    print(wrapping(x))
+}
+";
+        assert!(!covers(src, "nope"));
     }
 }

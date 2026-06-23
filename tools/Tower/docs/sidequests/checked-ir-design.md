@@ -1810,13 +1810,13 @@ everything, the AST codegen path is deleted (final phase).
   before commit (no `JET_NO_TIR`/`JET_RS` left in Source/).
 - **Phase-N readiness state: NOT every emittable live fn routes through the TIR.** Phase 25
   cleared the LAST *handle* surface + the input/new over-exclusions, and the routing sweep proved
-  8 uncovered FEATURE-surface classes (A)–(H) keep live functions on the AST path. **Phases 26–27
-  covered five of them — (A) `require`/`require_eq`/`panic`, (B) `#Caps(Io){}`, (C) `mut`/`take`
+  8 uncovered FEATURE-surface classes (A)–(H) keep live functions on the AST path. **Phases 26–28
+  covered six of them — (A) `require`/`require_eq`/`panic`, (B) `#Caps(Io){}`, (C) `mut`/`take`
   free-call arg conventions, (E) fan-out result-list destructure (Phase 26); (D) fn-typed-value-
-  stored + struct fn-fields (Phase 27)** — so the remaining AST-path FEATURE residue is (F)
-  sized-integer literal width-elaboration, (G) generic fns + trait-object dispatch, (H)
-  `io.input(prompt)`+`?? return`. The AST path cannot be deleted until (F)/(G)/(H) are covered
-  (or proven sema-unreachable) and the latent-bug fixes land.
+  stored + struct fn-fields (Phase 27); (F) sized-integer types + literal width-elaboration
+  (Phase 28)** — so the remaining AST-path FEATURE residue is (G) generic fns + trait-object
+  dispatch and (H) `io.input(prompt)`+`?? return`. The AST path cannot be deleted until (G)/(H) are
+  covered (or proven sema-unreachable) and the latent-bug fixes land.
 
 ## Refinements learned in Phase 26 (require/panic, #Caps, free-arg conventions, list-destructure)
 
@@ -1878,6 +1878,51 @@ everything, the AST codegen path is deleted (final phase).
   field's Fn type from `struct_fields`. (Watch the type-var heuristic: a single-uppercase struct
   name like `W` is read as a type VARIABLE by `is_type_var_name` and excluded — name test structs
   with a full word, e.g. `Worker`.)
+
+## Refinements learned in Phase 28 (sized-integer types + literal width-elaboration)
+
+- **Most of (F) was ALREADY lowered — only two leaf forms blocked routing.** Literal
+  width-elaboration (`red: U8 @= 255` → `255u8`) and per-element list widening (`[U8] @= [104, …]`)
+  were never the gap: sema annotates each `Expr::Int` with its `(signed, bits)` width, which the
+  TIR `IntLit(n, width)` already carried (Phase 1) and emits via the same suffix match as the AST
+  `Expr::Int` arm. Width-preserving overflow-trapping arithmetic (`half + half` U8, `total + 1`
+  I64) was also already total — `ast_operand_is_integer` replays `operand_is_integer`'s left-spine
+  walk over the AST operands (an `Ident`'s slot type decides; a field is `None`, never traps), so a
+  sized-int operand traps identically. The width-conversion methods (`to_i64`/`to_u8() ??`), bit
+  queries (`count_ones`), and float predicates (`is_infinite`) were the Phase-12 `NumericMethod`
+  shape (`recv_type == Some(<numeric>)`). The two missing forms were the bounds constants and the
+  overflow opt-outs.
+- **Numeric BOUNDS constants are a `Field` whose receiver is a TYPE NAME, not a value — gated on
+  `numeric_type_from_name` + a fixed member set, lowered to a pre-rendered `ConstInline`.** `U8.MAX`/
+  `I32.MIN`/`Float.INFINITY` reach codegen as `Expr::Field(Ident(<NumType>), <CONST>)`. The Field
+  gate previously EXCLUDED any non-local non-enum ident receiver (a blanket "numeric/module path"
+  reject); Phase 28 carves the bounds case out BEFORE that reject: a `numeric_type_from_name(name)`
+  receiver + a member in `{MIN, MAX, INFINITY, NEG_INFINITY, NAN, EPSILON}` (the exact AST
+  `emit_expr` filter). Lowering renders `{cx.rust_type(nt)}::{member}` (`u8::MAX`, `f64::INFINITY`)
+  into a `ConstInline` string — a total fact — and sets the result type to the numeric type itself
+  (`U8` for `U8.MAX`), so `Float.INFINITY.is_infinite()` composes (the numeric-method receiver type
+  is total). No new emit node; `ConstInline` already emits a verbatim string.
+- **The overflow opt-outs (`wrapping`/`saturating`/`checked`) are a bare `Expr::Call` over ONE
+  integer `Expr::Binary` — a new total `OverflowOpt` node, NOT the trapping `Binary`.** The AST
+  `emit_call` claims them when the name is one of the three and unshadowed (`!cx.sigs`), then lowers
+  the sole `Binary(op, l, r)` arg to `(ls).{name}_{add|sub|mul|div}(rs)` with PLAIN operands (no
+  trap helper — this is the whole point of opting out). The gate returns EARLY for these (before the
+  generic-call arg machinery, which would mis-handle the Binary as a normal arg), keyed on the name +
+  an arithmetic-Binary first arg. Lowering resolves `prefix` (the builtin name) + `op` (the suffix)
+  as total facts and lowers the two operands; `checked` yields `Option<T>` (so `checked(…) ?? x`
+  composes via the Phase-8 `OrFallback`), the others yield `T`. Emit only assembles
+  `(lhs).{prefix}_{op}(rhs)`.
+- **The opt-out builtins re-bind on the name + arg SHAPE, disjoint from a user fn.** A user fn
+  named `wrapping` lands in `cx.sigs` → the gate declines (the plain-fn arm claims it); a
+  `wrapping(x)` whose arg is not an arithmetic Binary is not the covered shape. Both stay strict
+  (sema validates the real shape; the gate never over-claims).
+- **Unit tests cover the sema-INDEPENDENT halves; the e2e + parity sweep prove routing.** The
+  bounds-const + overflow-opt gates are purely structural (a type name, a member set, a call name, a
+  Binary shape — no `recv_type`/width sema fact), so `covers(src, "fn")` proves them directly
+  (`covers_numeric_bounds_const`, `covers_overflow_opt_builtins`, + the two `rejects_*` negatives).
+  The numeric-method + typed-binding halves of `82_sized_integers` need sema, so `main`'s full
+  `ROUTE TIR` is proven by tests/tir.rs `sized_integers` + the byte-parity sweep (87 emittable, 0
+  diffs). Suite 810 → 815.
 
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
@@ -1998,10 +2043,16 @@ shape (m) + `TExprKind::FnFieldCall` reproduce the AST `emit_method_call` fn-fie
 args were already lowered (the Phase-13 `NamedFn`/`TFnCoerce` machinery); `main` only failed
 to route because the same fn used the uncovered struct fn-field + fn-field call.
 
-**(F) sized-integer LITERAL width-elaboration** (`82_sized_integers` `main` — `red: U8 @= 255`,
-`[U8] @= [104, …]`). A literal taking a fixed width from its binding context (the
-`U8`/`I32`/`I8` elaboration + the per-element list widening). Uncovered literal-elaboration
-form.
+**(F) ✅ COVERED (Phase 28) — sized-integer types + literal width-elaboration** (`82_sized_integers`
+`main`). The full D-SG9/S42/D-NUMOPS1 sized-int surface now routes: literal width-elaboration
+(`red: U8 @= 255` → `255u8`) + per-element list widening (`[U8] @= [104, …]`) were already total
+(`IntLit`'s sema width annotation, Phase 1); width-preserving overflow-trapping arithmetic
+(`half + half`/`total + 1`) replays `ast_operand_is_integer`; width conversions (`to_i64`/`to_u8()
+??`), bit/float queries (`count_ones`/`is_infinite`) are the Phase-12 `NumericMethod` shape. Phase
+28 added the two missing forms: the per-type bounds constants (`U8.MAX`/`I32.MIN`/`Float.INFINITY`
+— a `Field` over a numeric type name, lowered to a `ConstInline` `{rust_type}::{member}`) and the
+overflow opt-outs (`wrapping`/`saturating`/`checked` over an integer `Expr::Binary` → a total
+`OverflowOpt` node, `(lhs).{prefix}_{op}(rhs)`, PLAIN operands; `checked` yields `T?`).
 
 **(G) generic fn + trait-OBJECT params** (`25_traits` `largest` — `<T: Comparable>`;
 `print_area` — a trait-object `Shape` param; `main` — a `[Shape]` trait-object list +
@@ -2016,10 +2067,10 @@ alias); the `?? return` is the dead bare-return form. Stays.
 None of (A)–(H) is the HttpRouter surface, the ambient `input()`, or the static `new` — those
 three are now fully covered. None is a "parity-safe construct form already flagged as
 coverable" (that category remains EMPTY). **Phase 26 covered (A)/(B)/(C)/(E); Phase 27 covered
-(D)**; the remaining work toward deleting the AST path is: the uncovered FEATURE surfaces
-(F)/(G)/(H) above (future coverage phases), the latent-bug FIXES (separate cards), and the
-sema-unreachable constructs (generic-type methods, trait-object dispatch sema, bare `?? return`
-— no action).
+(D); Phase 28 covered (F)**; the remaining work toward deleting the AST path is: the uncovered
+FEATURE surfaces (G)/(H) above (future coverage phases), the latent-bug FIXES (separate cards),
+and the sema-unreachable constructs (generic-type methods, trait-object dispatch sema, bare
+`?? return` — no action).
 
 ## Phases
 
@@ -2054,7 +2105,8 @@ sema-unreachable constructs (generic-type methods, trait-object dispatch sema, b
 | 25 | HttpRouter handle surface + ambient `input()` + static-`new` | ✅ done (c109 Phase 25) — the LAST coverable handle surface + two over-exclusions, all byte-identical. **HttpRouter** (D-ROUTE1=A): `http.router()`/`http.parse(raw)`/`http.dispatch(router, req)` are now covered CoreCalls (NOT in `core_fixed_sig` — their fixed return types `HttpRouter`/`HttpRequest`/`HttpResponse` live in sema's `infer_core_call`, carried total in `core_call_return_ty`; emitted byte-for-byte `{root}jet_http_router_new()`/`jet_http_parse_request(&(raw))`/`jet_http_router_dispatch(&(router), req)`). `router.get/post/put/delete(path, handler)` is a new `THandleOp::HttpRouterRegister { verb, handler }` gated FIRST among HttpRouter methods (a dedicated shape h2, `recv_type == Some("HttpRouter")` + 2 args), the boxed handler closure RENDERED at lowering (`render_router_handler` reproduces `emit_router_handler`: a bare top-level-fn name → `Box::new(move |__req| user_<fn>(&__req)) as Box<dyn Fn(JetHttpRequest)->JetHttpResponse + Send + Sync>`, a literal lambda → `Box::new(<lambda>) as …`). HttpRouter is already a covered value type (`net_handle_rust_type`) + forced `let mut`. **Ambient `input()`** (D-PRELUDE1 = B): bare `Expr::Call { name: "input" }` with no user `input`/local → `TExprKind::AmbientInput { prompt }` → `{root}jet_std_io_input(None|Some(&(prompt)))`, `Result<String, IOError>` (composes with `??`). DISTINCT from `io.input(prompt)` (the qualified polymorphic MethodCall — still Phase-20-deferred). **Static `new`**: `is_intercepted_method_name("new")` is kept WHOLE (the INSTANCE intercept stays); `static_method_call_in_subset` now admits `new` (`method != MEM_ALLOC_NEW && intercepted`) because a `Type.new(args)` static call (`recv_type == None`, type-name receiver, `(Type,"new") ∈ method_sigs`) is the Phase-7 `user_<Type>::user_new(args)` form — NOT a builtin (`emit_builtin_method` has no `new` arm; `MEM_ALLOC_NEW` fires only for a `Field(mem)` receiver). `63_named_args`/`65_io_prelude`/`76_http_routes` `main` (+ `greet`) all route. Byte-identical across the whole example suite (90 emittable targets, 0 differ). 12 live fns remain on the AST path — all uncovered FEATURE surfaces a routing sweep newly exposed (`require`, `#Caps`, `mut`/`take` args, fn-value-stored, fan-out destructure, sized-int literals, generic/trait-object dispatch, `io.input`+`?? return`); NONE is the HttpRouter/input/new surface, none latent-bug-gated *for these three*. tests/tir.rs adds `static_new_constructor`/`ambient_input`/`http_router_dispatch`; unit tests add `covers_static_new_constructor`/`covers_ambient_input` + extend `polymorphic_core_specials_covered` with the http calls. Suite 793 → 798. |
 | 26 | `require`/`require_eq`/`panic` builtins + `#Caps(Io){}` + free-call `mut`/`take` arg conventions + fan-out list-destructure | ✅ done (c109 Phase 26) — covers FOUR of the eight (A)–(H) feature surfaces the Phase-25 routing sweep exposed, all byte-identical (89 emittable targets, 0 differ; every target fn routes `ROUTE TIR`). **(A) `require(cond[, msg])`/`require_eq(l, r)`/`panic(msg)`** (S36, `14_panic`/`29_embed`/`59_debug`): a new `TExprKind::RequireStop(rendered)` whose ENTIRE emit string — `{ if !(cond) { jet_panic_rich(…); } }` (default) or the `test_mode` `{ if !(cond) { return Err(…); } }` — is rendered at lowering (`render_require`/`render_require_eq` + the existing `render_panic_stop`); every source-line/col/caret/escaped-file/fn-name/sorted-scalar-locals fact is total there, emit reads nothing from `cx` (I3). Gated on the builtin name + arity, excluded when a user fn / local shadows it. **(B) `#Caps(Io){}`** (D-EFF1, `effect_caps`): erases byte-for-byte to `Stmt::Region` — a plain block, body lowered on the SAME `env` (its `let`s leak); reused `TStmt::Region`. **(C) free-call `mut`/`take` arg conventions** (`08_ownership` — `bump(mut score)`, `archive(take "vault")`): `arg_conv_in_subset` now admits ALL three (`Read`→`&(…)`, `Mutate`→`&mut (…)`, `Move`/`take`→plain); `lower_one_call_arg` already resolved the wrapper from the sig convention. **(E) fan-out result-list destructure** (S74, `41_fan_out` — `[a,b,c] @= doubled`): a new `TStmt::ListDestructure` reproducing `emit_stmt`'s `BindPattern::List` arm (`let tmp = &(init);` + one `jet_unpack_vec(tmp, want, i, file, line)` per element); the element-type partiality (`expr_jet_ty`'s `Some(List(inner))`-only match → a non-`List` `[T#N]` fan-out result yields `None`) reproduced from the lowered init's `.ty`. tests/tir.rs adds `require_builtins`/`caps_block`/`free_call_arg_conventions`/`list_destructure` (build+run); unit tests add `covers_require_builtins`/`covers_caps_block`/`covers_free_call_arg_conventions`/`covers_list_destructure`. Suite 798 → 806. The instrumentation was removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (D) fn-typed-value-stored + struct fn-fields, (F) sized-integer literal width-elaboration, (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
 | 27 | fn-typed VALUE stored in a local + struct fn-FIELD method | ✅ done (c109 Phase 27) — surface (D), all byte-identical (89 emittable targets, 0 differ; `24_callbacks` `main`/`apply_twice`/`double` all `ROUTE TIR`). **Struct fn-FIELD** (`struct Worker { step: fn(Int) -> Int }`): `field_ty_covered` now admits a `Type::Fn` field — it renders via `cx.rust_type` to `Box<dyn Fn(...) -> ...>` (the AST `struct_field_rust`), so a struct with a fn-typed field is a covered VALUE type and `Worker { step: <lambda> }` constructs it (the lambda field value is in-subset and emitted as-is — NO ` as <fn-type>` coercion at the literal site, mirroring `emit_struct_lit`'s plain `emit_expr` field value). **fn-field CALL** (`w.step(4)`): sema (CheckerInfer fn-field arm) sets `recv_type == Some("Worker")` and re-routes through `infer_call_value`, but registers NO `method_sigs` entry — so the user-instance-method shape excluded it. A new gate shape (m) + `TExprKind::FnFieldCall` reproduce the AST `emit_method_call` fn-field branch (`(({recv}).{user_<field>})({args})`, PLAIN args — `emit_call_args(.., None, ..)`), tried BEFORE the user-method/static shapes (the AST checks the fn-field FIRST). **fn-NAME value binding** (`double_fn @= double`): already wired in lowering (`Stmt::Val` lowers the init via `lower_expr`, which classifies a bare top-level-fn `Ident` as a `NamedFn` value — `emit_named_fn_value`'s `Box::new(move |…| name(…)) as <fn-type>`, with the `: <fn-type>` annotation rendered via `rust_fn_trait`); the fn-value ARG + lambda ARG were Phase-13 (`TFnCoerce`/`lower_one_call_arg`). The binding only failed to route because the same `main` used the uncovered struct fn-field + fn-field call. tests/tir.rs adds `fn_value_and_struct_fn_field` (build+run, prints `12`/`7`/`16`); unit tests add `covers_named_fn_value_binding`/`covers_fn_field_struct_value_type`/`covers_fn_field_type_covered`. Suite 806 → 810. The instrumentation was removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (F) sized-integer literal width-elaboration, (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
-| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25), (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema, bare `?? return` — no action), and (3) **uncovered FEATURE surfaces a Phase-25 routing sweep exposed** — Phases 26–27 covered (A) `require`, (B) `#Caps(Io){}`, (C) `mut`/`take` arg conventions, (E) fan-out list-destructure, (D) fn-typed-value-stored + struct fn-fields; the REMAINING three are (F) sized-integer literal width-elaboration, (G) generic fns + trait-object params, and (H) `io.input(prompt)`+`?? return` — each a future coverage phase. The HttpRouter surface, ambient `input()`, and static `new` are fully covered (Phase 25). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
+| 28 | sized-integer types + literal width-elaboration | ✅ done (c109 Phase 28) — surface (F), all byte-identical (87 emittable targets, 0 differ; `82_sized_integers` `main` `ROUTE TIR`). Most of (F) was ALREADY total: literal width-elaboration (`red: U8 @= 255` → `255u8`) + per-element list widening (`[U8] @= [104, …]`) ride the sema `Expr::Int` width annotation the `IntLit` node carries (Phase 1); width-preserving overflow-trapping arithmetic (`half + half`/`total + 1`) replays `ast_operand_is_integer`; width conversions (`to_i64`/`to_u8() ??`), bit/float queries (`count_ones`/`is_infinite`) are the Phase-12 `NumericMethod` shape. Phase 28 added the two missing leaf forms. **Numeric BOUNDS constants** (`U8.MAX`/`I32.MIN`/`Float.INFINITY`): a `Expr::Field` over a numeric type NAME — the Field gate previously blanket-excluded a non-local non-enum ident receiver, so Phase 28 carves the bounds case out FIRST (`numeric_type_from_name(name)` + a member ∈ `{MIN,MAX,INFINITY,NEG_INFINITY,NAN,EPSILON}`, the exact AST `emit_expr` filter); lowered to a `ConstInline` `{cx.rust_type(nt)}::{member}` string with result type the numeric type itself (so `Float.INFINITY.is_infinite()` composes). **Overflow opt-outs** (`wrapping`/`saturating`/`checked` over one integer `Expr::Binary`): a bare `Expr::Call` claimed when the name is one of the three and unshadowed (`!cx.sigs`); a new `TExprKind::OverflowOpt{prefix, op, lhs, rhs}` emits `(lhs).{prefix}_{add|sub|mul|div}(rhs)` with PLAIN operands (no trap); `checked` yields `T?` (composes with the Phase-8 `??`), the others `T`. Gate returns EARLY for the three (before the generic-call arg machinery). tests/tir.rs adds `sized_integers` (build+run, the full 15-line output); unit tests add `covers_numeric_bounds_const`/`covers_overflow_opt_builtins` + the `rejects_unknown_numeric_member`/`rejects_overflow_opt_nonbinary` negatives. Suite 810 → 815. Instrumentation removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25), (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema, bare `?? return` — no action), and (3) **uncovered FEATURE surfaces a Phase-25 routing sweep exposed** — Phases 26–28 covered (A) `require`, (B) `#Caps(Io){}`, (C) `mut`/`take` arg conventions, (E) fan-out list-destructure, (D) fn-typed-value-stored + struct fn-fields, (F) sized-integer types + literal width-elaboration; the REMAINING two are (G) generic fns + trait-object params and (H) `io.input(prompt)`+`?? return` — each a future coverage phase. The HttpRouter surface, ambient `input()`, and static `new` are fully covered (Phase 25). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
 regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep
