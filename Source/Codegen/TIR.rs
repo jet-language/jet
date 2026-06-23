@@ -705,15 +705,29 @@ pub(crate) enum TStrPart {
     Interp(TExpr),
 }
 
-/// c109 Phase 4: the resolved payload shape of an enum literal.
+/// c109 Phase 4/16: the resolved payload shape of an enum literal.
 pub(crate) enum TEnumPayload {
     /// `Enum.Variant` — no payload, emits just the prefix.
     Unit,
     /// `Variant(a, b, …)` — positional payload values, emitted as `prefix(a, b)`.
-    Positional(Vec<TExpr>),
+    Positional(Vec<TEnumArg>),
     /// `Variant { f: v, … }` — named payload, emitted as `prefix { f: v, … }`.
     /// Each field's Rust name is already mangled at lowering.
-    Named(Vec<(String, TExpr)>),
+    Named(Vec<(String, TEnumArg)>),
+}
+
+/// c109 Phase 16: one enum-literal payload argument with its resolved
+/// borrow/box decisions. Reproduces `emit_boxed_enum_arg` (Expression.rs) as a
+/// TOTAL fact decided at lowering: a non-scalar payload field whose value is a
+/// borrowed-in-env ident gets `(…).clone()`; a recursive (`boxed_edge`) payload
+/// gets `Box::new(…)`. For a scalar payload from a non-borrowed value both are
+/// false (the Phase-4 no-op case), so emit is byte-identical.
+pub(crate) struct TEnumArg {
+    pub(crate) value: TExpr,
+    /// Wrap the value in `(…).clone()` (non-scalar payload, borrowed-in-env arg).
+    pub(crate) clone: bool,
+    /// Wrap (after the clone) in `Box::new(…)` — a recursive boxed edge.
+    pub(crate) boxed: bool,
 }
 
 /// c109 Phase 9: a resolved built-in collection/string method op. Each variant is
@@ -1183,7 +1197,18 @@ fn is_covered_enum_ty(ty: &Type, cx: &Cx) -> bool {
 }
 
 fn enum_is_covered(name: &str, cx: &Cx) -> bool {
-    // Foreign/core/JSON enums (different Rust head/variant spelling) are out.
+    enum_is_covered_inner(name, cx, &mut HashSet::new())
+}
+
+/// c109 Phase 16: an enum is covered when every variant payload field is a covered
+/// VALUE type — scalar/Char/String, a covered struct, a covered collection, or
+/// (recursively) another covered enum (the recursion may go through a `boxed_edge`,
+/// reproduced as a `Box::new(…)` at the literal site via `TEnumArg.boxed`). The
+/// `seen` set terminates on a recursive (boxed) edge: a self-reference admits the
+/// enum (it's already being checked), so a linked-list / expr-AST enum is covered.
+/// String/struct/collection payloads route through `emit_boxed_enum_arg`'s borrowed
+/// `.clone()` (reproduced at lowering), so they are byte-parity safe.
+fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     if cx.foreign_types.contains_key(name)
         || crate::Generics::is_type_var_name(name)
         || is_json_type_name(name)
@@ -1194,36 +1219,52 @@ fn enum_is_covered(name: &str, cx: &Cx) -> bool {
     let Some(variants) = cx.enum_variants.get(name) else {
         return false;
     };
-    // A by-reference subject is cloned in the match lowering — require Clone.
     if !cx.cloneable.contains(name) {
         return false;
     }
-    variants.iter().all(|(vname, payload)| {
-        // Any boxed (recursive) edge is excluded — payload box/deref handling.
+    // A recursive edge back to this enum admits it (already under check) — the box
+    // decision is total. Insert before recursing so a self-reference terminates here.
+    if !seen.insert(name.to_string()) {
+        return true;
+    }
+    let ok = variants.iter().all(|(_vname, payload)| {
         let payload_tys: Vec<&Type> = match payload {
             VariantPayload::Unit => Vec::new(),
-            VariantPayload::Single(t, _) => {
-                if cx.boxed_edges.contains(&(name.to_string(), vname.clone())) {
-                    return false;
-                }
-                vec![t]
-            }
-            VariantPayload::Named(fs) => {
-                for f in fs {
-                    let key = format!("{}.{}", vname, f.name);
-                    if cx.boxed_edges.contains(&(name.to_string(), key)) {
-                        return false;
-                    }
-                }
-                fs.iter().map(|f| &f.ty).collect()
-            }
+            VariantPayload::Single(t, _) => vec![t],
+            VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
         };
-        // Every payload field must be a plain scalar or Char — no String/struct/
-        // collection/option payloads (they bring clone/box decisions).
-        payload_tys
-            .iter()
-            .all(|t| t.is_scalar() || matches!(t, Type::Char))
-    })
+        payload_tys.iter().all(|t| enum_payload_ty_covered(t, cx, seen))
+    });
+    seen.remove(name);
+    ok
+}
+
+/// c109 Phase 16: an enum-variant payload field type the subset can lower —
+/// scalar/Char/String, a covered struct, a covered collection, or another covered
+/// enum (recursion permitted; the boxed edge is reproduced at the literal site).
+/// The `seen` set is threaded through every enum reference (including ones reached
+/// via a nested collection element) so a `[Self]` / recursive-through-collection
+/// payload terminates instead of looping.
+fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
+        return true;
+    }
+    match ty {
+        Type::Named(n) => {
+            if cx.enum_variants.contains_key(n) {
+                enum_is_covered_inner(n, cx, seen)
+            } else {
+                is_covered_struct_ty(ty, cx)
+            }
+        }
+        // A collection payload: its element/key/value types must each be a covered
+        // value type, with enum references re-checked under the SAME `seen` guard.
+        Type::List(inner) => enum_payload_ty_covered(inner, cx, seen),
+        Type::Map { key, value } => {
+            enum_payload_ty_covered(key, cx, seen) && enum_payload_ty_covered(value, cx, seen)
+        }
+        _ => false,
+    }
 }
 
 /// A name that resolves to a compiler/core/prelude enum or opaque type rather
@@ -1286,6 +1327,15 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     }
     match ty {
         Type::Named(n) => struct_is_covered(n, cx, seen),
+        // c109 Phase 16: a collection field (`[E]` / `[K, V]`) whose element/key/value
+        // types are covered value types. The struct-literal emit is plain
+        // (`field: vec![…]`), byte-identical to the AST path. A list/map *element*
+        // that is itself a covered struct/enum/collection is admitted (the Phase-5
+        // collection coverage), so no clone/box decision arises at the field site.
+        Type::List(inner) => field_ty_covered(inner, cx, seen),
+        Type::Map { key, value } => {
+            field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
+        }
         _ => false,
     }
 }
@@ -2232,6 +2282,31 @@ fn method_call_in_subset(
                 && args
                     .iter()
                     .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+        }
+    }
+    // Shape (j) [c109 Phase 16]: an enum-variant CONSTRUCTION `Enum.Variant(args)`.
+    // The parser/sema never produce an `Expr::EnumLit` node for a payload variant —
+    // a `Type.Variant(args)` stays a `MethodCall` (sema type-checks it via
+    // `check_enum_lit` in place but does NOT rewrite the node). The AST `emit_method_call`
+    // (Expression.rs ~L1635) routes such a call to `emit_enum_lit` when the receiver is
+    // a known enum and `method` is a variant. This is THE shape that constructs
+    // string/struct/collection-payload and recursive (boxed) enum values. We cover it
+    // when the enum is covered and every (positional) arg is in-subset; the
+    // borrowed-clone/`Box::new` decisions are resolved at lowering (`lower_enum_arg`),
+    // reproducing `emit_boxed_enum_arg` byte-for-byte. Tried BEFORE the static shape
+    // (which excludes variants), matching the AST dispatch order.
+    if recv_type.is_none() {
+        if let Expr::Ident(type_name, _) = receiver {
+            if !locals.contains(type_name) {
+                if let Some(variants) = cx.enum_variants.get(type_name) {
+                    if variants.iter().any(|(v, _)| v == method) {
+                        return enum_is_covered(type_name, cx)
+                            && args.iter().all(|a| {
+                                a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+                            });
+                    }
+                }
+            }
         }
     }
     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
@@ -3607,6 +3682,48 @@ fn variant_payload_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     }
 }
 
+/// c109 Phase 16: the single-payload type of `(type_name, edge)`, mirroring the AST
+/// `enum_variant_payload_type` (Expression.rs). `edge` is the VARIANT name for a
+/// positional arg, or `"Variant.label"` for a named arg — the latter never matches a
+/// variant name, so it returns `None` (the AST never clones a named-payload arg), as
+/// `enum_variant_payload_type` does. Only `Single(t)` / single-field `Named` resolve.
+fn enum_variant_payload_type<'a>(cx: &'a Cx, type_name: &str, edge: &str) -> Option<&'a Type> {
+    let variants = cx.enum_variants.get(type_name)?;
+    let (_, payload) = variants.iter().find(|(v, _)| v == edge)?;
+    match payload {
+        VariantPayload::Single(t, _) => Some(t),
+        VariantPayload::Named(fs) if fs.len() == 1 => Some(&fs[0].ty),
+        _ => None,
+    }
+}
+
+/// c109 Phase 16: lower one enum-literal payload arg, resolving the `clone`/`boxed`
+/// decisions as TOTAL facts, reproducing `emit_boxed_enum_arg` (Expression.rs)
+/// byte-for-byte. `edge` is the variant name (positional) or `"Variant.label"`
+/// (named). A non-scalar single-payload type whose arg is a borrowed-in-env ident
+/// gets `(…).clone()`; a recursive (`boxed_edge`) edge gets `Box::new(…)`.
+fn lower_enum_arg(
+    type_name: &str,
+    variant: &str,
+    edge: &str,
+    e: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TEnumArg {
+    let payload_ty = enum_variant_payload_type(cx, type_name, edge);
+    let borrowed = matches!(e, Expr::Ident(name, _) if env.is_borrowed(name));
+    let clone = payload_ty.is_some_and(|t| !t.is_scalar()) && borrowed;
+    let boxed = cx
+        .boxed_edges
+        .contains(&(type_name.to_string(), edge.to_string()));
+    let _ = variant;
+    TEnumArg {
+        value: lower_expr(e, cx, env),
+        clone,
+        boxed,
+    }
+}
+
 /// Resolve the subject's Jet type for binding payloads, mirroring `expr_jet_ty`'s
 /// reach (only an Ident resolves via its slot). Enough for the covered subset (the
 /// subject is an enum-typed local/param). Other forms resolve to `None` (the
@@ -4100,10 +4217,12 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // c109 Phase 4: an enum literal. The gate proved the enum is covered (all
-        // payloads scalar/Char), so no arg is ever borrowed-in-env or a boxed edge
-        // — the AST path's `emit_boxed_enum_arg` is a no-op for these, so each arg
-        // lowers as-is with no clone/box (decision-free, byte-parity).
+        // c109 Phase 4/16: an enum literal. Each payload arg carries its resolved
+        // `clone`/`boxed` decisions (`emit_boxed_enum_arg`): a non-scalar payload from
+        // a borrowed-in-env ident → `(…).clone()`; a recursive boxed edge →
+        // `Box::new(…)`. For a scalar payload from a non-borrowed value both are false
+        // (the Phase-4 no-op), so emit is byte-identical. Positional edges key on the
+        // variant name; named edges on `"Variant.label"` (never a clone — matches AST).
         Expr::EnumLit { type_name, variant, args, .. } => {
             let prefix = format!("user_{}::{}", type_name, mangle(variant));
             let payload = if args.is_empty() {
@@ -4112,7 +4231,9 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let pos = args
                     .iter()
                     .map(|a| match a {
-                        EnumLitArg::Positional(e) => lower_expr(e, cx, env),
+                        EnumLitArg::Positional(e) => {
+                            lower_enum_arg(type_name, variant, variant, e, cx, env)
+                        }
                         _ => unreachable!("all positional in this branch"),
                     })
                     .collect();
@@ -4123,13 +4244,18 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|a| match a {
                         EnumLitArg::Named { label, expr } => {
-                            (mangle(label), lower_expr(expr, cx, env))
+                            let edge = format!("{}.{}", variant, label);
+                            (
+                                mangle(label),
+                                lower_enum_arg(type_name, variant, &edge, expr, cx, env),
+                            )
                         }
                         // A positional arg mixed with named is a sema error that
                         // never reaches a covered function; default to a field.
-                        EnumLitArg::Positional(e) => {
-                            (String::new(), lower_expr(e, cx, env))
-                        }
+                        EnumLitArg::Positional(e) => (
+                            String::new(),
+                            lower_enum_arg(type_name, variant, variant, e, cx, env),
+                        ),
                     })
                     .collect();
                 TEnumPayload::Named(named)
@@ -4507,6 +4633,38 @@ fn lower_method_call(
             ty,
             kind: TExprKind::Clone(Box::new(recv)),
         };
+    }
+    // c109 Phase 16: an enum-variant CONSTRUCTION `Enum.Variant(args)` reaching codegen
+    // as a `MethodCall` (sema never rewrites a payload variant to `Expr::EnumLit`). The
+    // AST `emit_method_call` routes it to `emit_enum_lit` with all-positional args; we
+    // reproduce that, resolving each arg's `clone`/`boxed` decisions via `lower_enum_arg`
+    // (`emit_boxed_enum_arg` byte-for-byte). This is the construction half of the
+    // string/struct/collection-payload + recursive (boxed) enum coverage.
+    if recv_type.is_none() {
+        if let Expr::Ident(type_name, _) = receiver {
+            if !env.locals.contains_key(type_name) {
+                if let Some(variants) = cx.enum_variants.get(type_name) {
+                    if variants.iter().any(|(v, _)| v == method) {
+                        let prefix = format!("user_{}::{}", type_name, mangle(method));
+                        let payload = if args.is_empty() {
+                            TEnumPayload::Unit
+                        } else {
+                            let pos = args
+                                .iter()
+                                .map(|a| {
+                                    lower_enum_arg(type_name, method, method, &a.expr, cx, env)
+                                })
+                                .collect();
+                            TEnumPayload::Positional(pos)
+                        };
+                        return TExpr {
+                            ty: Type::Named(type_name.clone()),
+                            kind: TExprKind::EnumLit { prefix, payload },
+                        };
+                    }
+                }
+            }
+        }
     }
     // c109 Phase 10: a core/stdlib module call `alias.method(args)`. The gate proved
     // `recv_type == None` + receiver is a core-import alias + `core_call_covered`.
@@ -5749,6 +5907,20 @@ fn tir_label_prefix(label: &Option<String>) -> String {
     }
 }
 
+/// c109 Phase 16: emit one enum-literal payload arg, applying its resolved
+/// `clone`/`boxed` wrappers — `(…).clone()` first, then `Box::new(…)`, exactly as
+/// `emit_boxed_enum_arg` (Expression.rs) does.
+fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
+    let mut s = emit_tir_expr(&a.value, cx);
+    if a.clone {
+        s = format!("({}).clone()", s);
+    }
+    if a.boxed {
+        s = format!("Box::new({})", s);
+    }
+    s
+}
+
 fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     match &e.kind {
         // D-SG9: width suffix is read straight off the literal — no re-inference.
@@ -5936,14 +6108,15 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Field { recv, field_rust } => {
             format!("({}).{}", emit_tir_expr(recv, cx), field_rust)
         }
-        // c109 Phase 4: an enum literal. Prefix + payload were resolved at lowering;
-        // emit only formats. Mirrors `emit_enum_lit` for the scalar-payload subset.
+        // c109 Phase 4/16: an enum literal. Prefix + payload were resolved at lowering;
+        // emit applies each arg's resolved `clone`/`boxed` wrappers (mirroring
+        // `emit_boxed_enum_arg`: `(…).clone()` first, then `Box::new(…)`).
         TExprKind::EnumLit { prefix, payload } => match payload {
             TEnumPayload::Unit => prefix.clone(),
             TEnumPayload::Positional(vals) => {
                 let pos = vals
                     .iter()
-                    .map(|v| emit_tir_expr(v, cx))
+                    .map(|a| emit_tir_enum_arg(a, cx))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}({})", prefix, pos)
@@ -5951,7 +6124,7 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             TEnumPayload::Named(fields) => {
                 let parts = fields
                     .iter()
-                    .map(|(name, v)| format!("{}: {}", name, emit_tir_expr(v, cx)))
+                    .map(|(name, a)| format!("{}: {}", name, emit_tir_enum_arg(a, cx)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{} {{ {} }}", prefix, parts)
@@ -6611,11 +6784,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_struct_with_list_field() {
-        // A non-scalar/non-struct field type (a list) is outside the subset, so
-        // the owning struct is not covered as a param.
+    fn covers_struct_with_list_field() {
+        // c109 Phase 16: a struct with a covered collection field (`[Int]`). The
+        // struct-literal emit is plain (`items: vec![…]`), byte-identical to the AST
+        // path, so the owning struct is covered as a param/return.
         let src = "struct Bag { items: [Int] }\nfn first_tag(b: Bag) -> Int {\n return 0\n}\n";
-        assert!(!covers(src, "first_tag"));
+        assert!(covers(src, "first_tag"));
     }
 
     #[test]
@@ -6705,19 +6879,52 @@ mod tests {
     }
 
     #[test]
-    fn rejects_string_payload_enum() {
-        // A String payload would need clone/borrow decisions at the literal site and
-        // in pattern bindings the subset can't reproduce — excluded.
+    fn covers_string_payload_enum() {
+        // c109 Phase 16: a String-payload enum. The literal's borrowed-payload
+        // `.clone()` and pattern bindings are reproduced as total facts
+        // (`emit_boxed_enum_arg`), so the match + getter route through the TIR.
         let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) -> String {\n if m {\n m == Text(s) -> { return s }\n m == Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
-        assert!(!covers(src, "show"));
+        assert!(covers(src, "show"));
     }
 
     #[test]
-    fn rejects_recursive_enum() {
-        // A self-referential enum needs a boxed payload — pattern/literal lowering
-        // would need box/deref handling the subset avoids.
+    fn covers_recursive_enum() {
+        // c109 Phase 16: a self-referential (boxed) enum. The `Box::new(…)` at
+        // construction and the auto-deref at pattern/field sites are total facts
+        // (`TEnumArg.boxed`), so a covered traversal routes through the TIR.
         let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) -> Int {\n if t {\n t == Leaf(n) -> { return n }\n t == Node(inner) -> { return 1 }\n }\n return 0\n}\n";
-        assert!(!covers(src, "depth"));
+        assert!(covers(src, "depth"));
+    }
+
+    #[test]
+    fn covers_recursive_enum_construction_with_clone_box() {
+        // c109 Phase 16: constructing a recursive enum from a BORROWED payload —
+        // `Tree.Node(inner)` where `inner: Tree` is a `Read` (borrowed) param. The
+        // arg gets `Box::new(((*inner)).clone())` (non-scalar payload → borrowed
+        // `.clone()`, then the recursive boxed edge → `Box::new`), reproducing
+        // `emit_boxed_enum_arg` exactly. The construction reaches codegen as a
+        // `MethodCall` (sema never emits an `Expr::EnumLit` for a payload variant).
+        let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn wrap(inner: Tree) -> Tree {\n return Tree.Node(inner)\n}\n";
+        assert!(covers(src, "wrap"));
+    }
+
+    #[test]
+    fn covers_struct_payload_enum() {
+        // c109 Phase 16: an enum variant carrying a covered struct payload. The
+        // struct value flows through the variant construction + pattern binding
+        // without a clone/box decision the subset can't make (the value's own move/
+        // clone facts live in its sub-expression).
+        let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) -> Int {\n if s {\n s == Dot(p) -> { return p.x }\n s == Line(n) -> { return n }\n }\n return 0\n}\n";
+        assert!(covers(src, "area"));
+    }
+
+    #[test]
+    fn covers_collection_payload_enum() {
+        // c109 Phase 16: an enum variant carrying a covered collection payload
+        // (`[Int]`). Construction (`Data.Nums(xs)`) routes through the variant
+        // MethodCall shape; the borrowed-list `.clone()` is total.
+        let src = "enum Data {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) -> Data {\n return Data.Nums(xs)\n}\n";
+        assert!(covers(src, "mk"));
     }
 
     #[test]
@@ -6995,12 +7202,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_string_payload_error_enum() {
-        // A `T ? E` whose error enum has a String payload is excluded — the error
-        // enum is not a covered (scalar-payload) enum, so its construction/binding
-        // would need clone decisions the subset can't make.
+    fn covers_string_payload_error_enum() {
+        // c109 Phase 16: a `T ? E` whose error enum has a String payload is now
+        // covered — the error enum is a covered (String-payload) enum, and its
+        // construction (`err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
+        // (a String literal arg, no borrowed clone) byte-for-byte.
         let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return err(Oops.Msg(\"bad\"))\n }\n return ok(x)\n}\n";
-        assert!(!covers(src, "f"));
+        assert!(covers(src, "f"));
     }
 
     #[test]

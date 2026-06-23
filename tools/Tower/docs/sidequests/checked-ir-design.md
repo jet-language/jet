@@ -46,6 +46,38 @@ them so they don't regress, but they should be fixed independently of c109):
   parity holds) — surfaced while testing Phase 10's `path.join`. Fix: parameterise
   the message on the real receiver type/module, or scope the lint to JSON
   constructors. (Phase 10.)
+- **Recursive (`Box<…>`) STRUCT construction is broken (I2 hole on the AST path).**
+  `emit_struct_lit` (Expression.rs `Expr::StructLit`) emits `field: <expr>` with NO
+  `Box::new(…)` wrapper, but a self-referential struct field has Rust type `Box<…>`
+  (`struct_field_rust`/`field_rust_type`). So `Tree { value: 2, child: value(leaf) }`
+  emits `user_child: Some(user_leaf)` where the field is `Box<Option<user_Tree>>` →
+  rustc E0308 ("expected `Box<…>`, found `Option<…>`"). Recursive ENUM construction is
+  fine (`emit_boxed_enum_arg` DOES wrap in `Box::new`), but struct literals don't.
+  Masked because no example/test constructs a recursive struct. Phase 16 EXCLUDES
+  recursive structs (the struct gate's visited set already did). Fix: wrap a boxed
+  struct-lit field value in `Box::new(…)` in `emit_struct_lit`, keyed on
+  `cx.boxed_edges`. (Surfaced in Phase 16.)
+- **A borrowed non-Copy struct-lit field value isn't cloned (E0507, AST path).** A
+  struct literal whose field value is a borrowed-in-env ident (`Person { name: n }`
+  where `n: String` is a `Read` param → `&String`) emits `user_name: (*user_n)` →
+  rustc E0507 ("cannot move out of `*user_n`"). `field_read_to_clone` rewrites owning
+  *field reads* but not a bare borrowed ident used as a struct-lit value. This is the
+  pre-existing `Read`-convention struct-param bug (Phase 3 latent list) in a new dress.
+  Both paths miscompile identically (parity holds); NOT separately gated — the
+  construction is the same broken Rust on both paths. Fix lives in sema's elaboration
+  (clone a borrowed non-Copy struct-lit value), where the field-read clone already
+  lives. (Surfaced in Phase 16.)
+- **A payload/named enum-variant literal NEVER becomes an `Expr::EnumLit` node.** The
+  parser produces `Expr::Field` for a unit variant (`Light.Red`) and `Expr::MethodCall`
+  for a payload variant (`Expr.Wrap(x)`); sema type-checks the payload form via
+  `check_enum_lit` *in place* but does NOT rewrite the node (CheckerInfer ~L2118). So
+  `Expr::EnumLit` is constructed by neither the parser nor sema — it is only ever
+  *matched*. Every payload/recursive enum CONSTRUCTION reaches codegen as a `MethodCall`
+  routed to `emit_enum_lit` by `emit_method_call` (Expression.rs ~L1635). Not a bug per
+  se, but a load-bearing fact: Phase 16 covers construction via a new variant-
+  construction MethodCall shape, not the (effectively dead) `Expr::EnumLit` lowering.
+  (Surfaced in Phase 16; consistent with the Phase-4/8 "the AST node that reaches
+  codegen is what the gate must recognise" finding.)
 
 ## Invariants this must preserve
 
@@ -946,6 +978,71 @@ everything, the AST codegen path is deleted (final phase).
   adds 4 cases (comptime-if, mixed switch, delegation, `?? panic`); the TIR unit tests
   add `covers_comptime_if`/`covers_mixed_bool_switch`/`covers_or_fallback_panic_form`.
 
+## Refinements learned in Phase 16 (payload-carrying & recursive types)
+
+- **`emit_boxed_enum_arg` is the whole payload-clone/box decision, and it is now a
+  TOTAL fact per arg.** Each enum-literal payload arg carries `TEnumArg { value, clone,
+  boxed }` resolved at lowering, reproducing `emit_boxed_enum_arg` byte-for-byte: a
+  non-scalar *single*-payload type (`enum_variant_payload_type` → `Single(t)` /
+  single-field `Named`, NOT a multi-field named variant — those resolve to `None`,
+  matching the AST) whose arg is a borrowed-in-env ident → `(…).clone()`; a recursive
+  (`boxed_edge`) edge → `Box::new(…)`, applied in that order. For a scalar payload from
+  a non-borrowed value both flags are false (the Phase-4 no-op), so emit is byte-
+  identical. The borrowed test is exactly `expr_borrowed_in_env`: only an `Expr::Ident`
+  with a deref'd slot (`LowerEnv::is_borrowed`) — every other arg form is false.
+- **A payload/recursive enum is CONSTRUCTED via a `MethodCall`, not `Expr::EnumLit` —
+  so the construction needed a NEW gate/lowering shape.** `Expr::EnumLit` is constructed
+  by neither the parser nor sema (only matched); `Enum.Variant(args)` parses as a
+  `MethodCall` that sema type-checks in place (`check_enum_lit`) without rewriting, and
+  the AST `emit_method_call` routes it to `emit_enum_lit` (all-positional args). Phase 16
+  adds shape (j) to `method_call_in_subset`/`lower_method_call`: `recv_type == None` +
+  a type-name-ident receiver that is a covered enum + a method that names a variant →
+  an `EnumLit` TIR node with the per-arg `TEnumArg`. Tried BEFORE the static shape
+  (which excludes variants), matching the AST dispatch order. This is THE shape that
+  makes string/struct/collection-payload + recursive (boxed) enum *construction* route.
+- **Recursive (boxed) enums need NO deref in the function body — `Box` auto-derefs.**
+  The only box-related emit decision is the `Box::new(…)` at construction (now total via
+  `TEnumArg.boxed`). A bound payload binds the boxed value with `deref: false` (exactly
+  the AST `add_pattern_bindings` slot), and Rust's `Box` auto-deref handles every field
+  read / method call / arithmetic on it. The gate's enum `seen` set now ADMITS a
+  self-reference (it's already under check) instead of excluding it, so a linked-list /
+  expr-AST enum is covered; the `seen` set is threaded through nested collection element
+  types so a `[Self]` payload terminates instead of looping.
+- **Recursive STRUCTS stay EXCLUDED — broken on the AST path (latent I2 hole).**
+  `emit_struct_lit` does not wrap a boxed struct-lit field value in `Box::new(…)`, so a
+  recursive struct literal is rustc-rejected (E0308). Per the `is_empty` precedent (the
+  TIR must not *claim* a function that miscompiles), the struct gate's visited set keeps
+  excluding recursion. A borrowed non-Copy struct-lit field value (`Person { name: n }`,
+  `n: &String`) is also broken (E0507) on both paths — same miscompile, parity holds, so
+  it isn't separately gated, but it's logged in the latent-bug list. Both fixes live in
+  `emit_struct_lit` / sema elaboration, independent of c109.
+- **Struct/collection field + payload coverage is a pure GATE widening — no emit change.**
+  `field_ty_covered` now admits a covered collection field (`[E]`/`[K, V]`); the struct-
+  literal emit (`field: vec![…]`) is plain, byte-identical. Likewise an enum payload may
+  be a covered struct / covered collection / another covered enum
+  (`enum_payload_ty_covered`). The value's own move/clone facts live in its sub-expression
+  (the recurring Phase-3/5 lesson), so no new clone/box decision arises at the field site.
+- **Named (multi-field) variant payloads are unreachable, so the `Named` arg-clone never
+  fires.** `Enum.Variant(label: v, …)` construction is REJECTED by sema (E0303 "requires
+  labeled fields") before codegen — the labeled MethodCall form never reaches
+  `emit_enum_lit`. The `TEnumPayload::Named` lowering (with its `"Variant.label"` edge,
+  which never matches a variant name → `enum_variant_payload_type` returns `None` → no
+  clone, exactly as the AST) is retained for the `Expr::EnumLit` path but is effectively
+  dead, since that node is never constructed.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass
+  on `emit_func`/`emit_method`/`emit_trait_method`/delegation) across the **entire example
+  suite** — 118 emittable, 0 differ — plus crafted probes exercising: a String-payload
+  enum (match-binding + borrowed-`.clone()` construction `Msg.Text(s)` → `((*s)).clone()`),
+  a recursive (boxed) enum (`Tree.Node(inner)` → `Box::new(((*inner)).clone())`, the
+  borrowed-clone + boxed edge together; a nested-literal `Expr.Wrap(Expr.Num(1))`), a
+  struct-payload enum (`Shape.Dot(p)` + a `p.x` field read from the bound struct), a
+  collection-payload enum (`Data.Nums(xs)`), a struct-with-collection field, and a
+  String-payload error enum in `T ? Oops` (`err(Oops.Msg("bad"))`) — all byte-for-byte
+  identical and rustc-clean, then the instrumentation removed. ~17 more example fns route
+  (201 → 218). tests/tir.rs adds 4 build+run cases; the TIR unit tests flip 4 `rejects_*`
+  to `covers_*` and add `covers_recursive_enum_construction_with_clone_box` /
+  `covers_struct_payload_enum` / `covers_collection_payload_enum`.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
 After Phase 15 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
@@ -993,10 +1090,14 @@ owns it, and the total fact still missing to cover it.
   <value>` and `?? <value>` do. The exclusion is upstream of the `??` lowering (a
   bare-return `OrFallback` apparently fails an earlier in-subset check); not chased.
   Conservative — stays on the AST path. (NB: the `?? panic(…)` form IS covered — Phase 15.)
-- **String/struct/collection-payload enums, recursive (boxed) enums/structs, generic
-  & foreign/prelude types** — the struct/enum gate (`struct_is_covered`/
-  `enum_is_covered`) excludes these; their literal/field/pattern emit needs box/deref +
-  borrowed-payload-clone decisions (`emit_boxed_enum_arg`) the subset can't make total.
+- **Recursive (boxed) STRUCTS, generic & foreign/prelude types** — the struct gate
+  (`struct_is_covered`) still excludes recursive structs (broken on the AST path — see
+  the latent-bug list; the TIR must not claim a miscompiling fn) and generic/foreign
+  types. (c109 Phase 16 covered string/struct/collection-payload enums + recursive
+  *enums* + collection struct fields; the per-arg box/borrowed-clone decision
+  `emit_boxed_enum_arg` is now a total `TEnumArg` fact.) Missing for the residue:
+  the `Box::new(…)` struct-lit-field wrap (an AST-path bug to fix first), and generic-
+  param lowering (`Generics::*`) as total TIR facts.
 - **Latent-bug-gated constructs** (`is_empty`, no-arg `join()`, `mut self`/`view self`
   reassignment) — excluded because they MISCOMPILE on both paths today (see the
   latent-bug list); the TIR must not *claim* a function that miscompiles. These unblock
@@ -1023,6 +1124,7 @@ owns it, and the total fact still missing to cover it.
 | 13 | The call & method surfaces: fn-typed values, closure-core-calls, handle methods | ✅ done (c109 Phase 13, partial) — `24_callbacks.jet` `apply_twice` routes; `67_scope_guard.jet` `with_guards`/`question_path`/`main` route. Covers: **fn-typed values** — a `Type::Fn` param/return (now a covered subset type, `is_covered_fn_ty`); a bare top-level-fn name as a value (`Box::new(move \|…\| user_<name>(…)) as <fn-type>` via `emit_named_fn_value`, `TFnValueKind::NamedFn`); a call through a fn-value (`(f)(args)` as `Expr::CallValue`, and `f(args)` for a local-`f` as `Expr::Call`, both → `TFnValueKind::Call`); the `emit_call_args` `Box::new(…) as <fn-type>` arg-coercion (the shared `lower_one_call_arg` carries a total `TFnCoerce{fn_type_rust, already_boxed}`). The Phase-11 `no_fn_param`/`!Type::Fn` exclusions are lifted. The **closure-taking core calls** `tasks.spawn` (distinct `render_spawn_lambda` `move \|…\|` form), `http.serve` (lambda-handler branch), `scope.guard` (`TExprKind::CoreClosureCall`/`TCoreClosureKind`) with a literal in-subset lambda. The **handle methods** carrying `recv_type == Some(<handle>)` on FileReader/FileWriter/StdinHandle/TcpStream/TcpListener (`read_line`/`write_line`/`flush`/`accept`/`local_addr`/`read`/`write`/`peer_addr`/`close` — `TExprKind::HandleMethod`/`THandleOp`, the `&mut`/`&` handle arms of `emit_builtin_method`). Also fixes a **latent TIR-path parity bug**: a handle binding (FileReader/FileWriter/TcpStream/HttpRouter/Arena/…) wasn't forced to `let mut` (it must be, as its methods take `&mut self`); the TIR `Let` now resolves `kw`+`ty_clause` (+ the escaping-FnMut `as <fn-trait>` coercion) at lowering, reproducing `emit_let` exactly. Excludes (stay on AST path, with reason): **polymorphic core specials** (`math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint` — return type NOT a total fact, never written onto the node → I3); **`recv_type == None` handle methods** (`Stopwatch.elapsed_millis`, Task/Channel/Sender — a Phase-9 builtin gap, not the `Some` shape); **HttpRequest/HttpResponse accessors** (serve-lambda-param slot may be `None` → AST `rty` arm wouldn't fire → divergence); **`Match.group`**, **Arena/Bump/Pool/Fixed** methods (producer not covered); bare **`?? return`** (an upstream `??` gate gap); the `??` **panic** fallback. |
 | 14 | Cross-module calls + FFI extern | ✅ done (c109 Phase 14) — all 8 module/FFI example `main`s route (`22_ffi`, `42`–`48` module forms), plus imported submodule bodies (`47` `wrap`/`decorate`, the inline-module fns in `42`/`45`/`46`). Covers the FIVE cross-module call forms — qualified `mod.fn()` (`import_mods`), `pub use` re-export (`reexport_calls`), inline code module `alias.method()` (`code_modules`), unqualified inline import (`unqualified_inline`), unqualified file import (`unqualified_file`) — each resolved at lowering into a total `TExprKind::ModuleCall`/`TModuleCallForm` (`Qualified{rust_mod, rust_fn}` or `InlineMangled{mangled}`); emit only prepends `cx.root_prefix` (program-level) where the AST does. Also covers **FFI extern** (`extern rust`/`extern C`) — `emit_call`'s `extern_funcs` arm as a total `TExprKind::ExternCall{wrapper, args}` reproducing `emit_extern_call_args` (a non-scalar `Read` arg is `(…).clone()`, NOT `&(…)`); the call is `{ffi_crate}::{wrapper}(args)` with `cx.ffi_crate` read at emit. Module-call args resolve their conventions from `cx.import_sigs`/`cx.sigs`; a new `cx.import_rets` table (`import_ret_map`) supplies the call's total return type. The gate widens the `Call` arm (extern/unqualified) and `method_call_in_subset` (reexport/import_mods/code_modules), reproducing `emit_call`/`emit_method_call`'s dispatch ORDER exactly. **I1:** an extern call introduces no Rust `unsafe` by itself — reproduced byte-for-byte (no `unsafe` emitted); the audited `@unsafe` gate surface is the separate, deferred Phase-17 work. Excludes (stay on AST path): the `@unsafe`/`#Unsafe`/`core.mem` ptr+alloc surface, comptime-if, and the other AST-path inventory entries (mixed switches, payload/boxed/generic types, latent-bug-gated constructs). |
 | 15 | Remaining control flow + delegation: comptime-if, mixed switches, delegation, `?? panic` | ✅ done (c109 Phase 15) — covers the FOUR remaining inventory entries. **comptime-if** (`Stmt::ComptimeIf`): the selected branch (sema's `selected_then`) emits inline at the same indent with no `if`, its `let`s leaking into the outer scope (`TStmt::Inline`). **Mixed comparison/Bool switches** (shape D — the general `emit_mixed_switch` `if/else if … else` chain, used when arms are NOT all-variant/range/fallible): each plain comparison arm head resolves to an `emit_expr` string, wrapped in the `_jet_switch_subject` block (`TStmt::MixedSwitch`); a switch with any pattern-test arm stays on the AST path (conservative). **Delegation trait methods** (`impl T: Trait using field`, `emit_delegation_method`): a structural forward `(self).<field>.<method>(args)` with the bare trait name (`TFuncKind::Delegation`, hooked in `emit_external_trait_impl`). **The `?? panic(…)` fallback** (Phase-8/11 deferral now LIFTED): `emit_panic_stop`/`safe_locals_expr` reproduced from a leak-faithful `panic_locals` Rc-replica that mirrors the AST codegen env's branch-leak semantics (shared across leaky branches, deep-copied at the two `emit_pattern_match_switch` arm bodies + lambda bodies, range-loop var save/restored); the whole `{ jet_panic_rich(…); }` statement string (message + sorted scalar-locals dump) is rendered at lowering (`TOrFallback::Panic`). Also fixes a **latent TIR-path divergence** the panic lift exposed: a CORE-struct field read (`result.code` on a `ProcessResult`) was mangled to `user_code` instead of the plain `code` (B2) — fixed by reproducing `core_struct_field_rust_name` in the `Field` lowering off the resolved `recv.ty`. Byte-identical across the entire example suite (118 emittable, 0 differ) + crafted probes (incl. a `?? panic` with leaked scalar locals from a plain-if and a loop body). The delegation example `47_library` (`App: Logger using logger`) routes. Excludes (stay on AST path): bare `?? return` (an upstream `??` gate gap); `@unsafe`/`#Unsafe`/`core.mem`; generic & `view`-returning methods; polymorphic core specials; `recv_type == None` handle methods; HttpRequest/HttpResponse method accessors; payload/boxed/generic types; latent-bug-gated constructs. |
+| 16 | Payload-carrying & recursive types: string/struct/collection-payload enums, recursive (boxed) enums, collection struct fields | ✅ done (c109 Phase 16) — +17 example fns route (201 → 218). Covers: **string/struct/collection-payload enums** (a variant payload may be String, a covered struct, a covered collection, or another covered enum) — the per-arg borrowed-`.clone()` + `Box::new(…)` decisions of `emit_boxed_enum_arg` are now a TOTAL fact (`TEnumArg { value, clone, boxed }`) resolved at lowering, byte-for-byte. **Recursive (boxed) enums** (linked-list / expr-AST) — the enum gate's `seen` set now ADMITS a self-reference, and the only box-related emit decision is the `Box::new(…)` at construction (Rust auto-derefs the `Box` at every read/match site, so no deref node is needed). **Collection struct fields** (`field_ty_covered` admits `[E]`/`[K, V]`) and **collection enum payloads**. The construction routes through a NEW variant-construction `MethodCall` shape (shape (j)) — a payload variant never becomes an `Expr::EnumLit` node (parser → `Field`/`MethodCall`; sema type-checks in place without rewriting), so the AST `emit_method_call`→`emit_enum_lit` path is reproduced. Excludes (stay on AST path, with reason): **recursive STRUCTS** (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)` field wrap → rustc E0308; a latent I2 hole logged in the bug list; the TIR must not claim a miscompiling fn); **generic** & **foreign/prelude** types; **`view`-returning** methods (borrow lowering) — all deferred to a later phase. |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

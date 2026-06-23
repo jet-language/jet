@@ -2013,3 +2013,140 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "11\n");
 }
+
+/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(s)` (a borrowed
+/// String param) inserts `((*s)).clone()` at the literal site (`emit_boxed_enum_arg`);
+/// the match binds the payload value and returns it (owning).
+#[test]
+fn string_payload_enum() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Msg {
+    Text(String)
+    Code(Int)
+}
+fn wrap(s: String) -> Msg {
+    return Msg.Text(s)
+}
+fn render(m: Msg) -> String {
+    if m {
+        m == Text(s) -> { return s }
+        m == Code(n) -> { return \"code\" }
+    }
+    return \"?\"
+}
+fn main() {
+    m @= wrap(\"hi\")
+    print(render(m))
+}
+";
+    let (code, stdout) = build_and_run("tir_string_payload_enum", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "hi\n");
+}
+
+/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(inner)` from a
+/// borrowed `inner: Tree` emits `Box::new(((*inner)).clone())` — the non-scalar
+/// payload borrowed-clone, then the recursive boxed edge. The match traverses it
+/// (Rust auto-derefs the `Box`).
+#[test]
+fn recursive_boxed_enum() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Tree {
+    Leaf(Int)
+    Node(Tree)
+}
+fn wrap(inner: Tree) -> Tree {
+    return Tree.Node(inner)
+}
+fn leaf_val(t: Tree) -> Int {
+    if t {
+        t == Leaf(n) -> { return n }
+        t == Node(inner) -> { return 0 }
+    }
+    return 0
+}
+fn main() {
+    a @= Tree.Leaf(7)
+    b @= wrap(a)
+    print(\"{leaf_val(b)}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_recursive_boxed_enum", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "0\n");
+}
+
+/// c109 Phase 16: an enum variant carrying a covered struct payload. The struct flows
+/// through the variant construction and the pattern binding; reading `p.x` from the
+/// bound struct is an owning field read (sema rewrites it to `.clone()`).
+#[test]
+fn struct_payload_enum() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Point {
+    x: Int
+    y: Int
+}
+enum Shape {
+    Dot(Point)
+    Line(Int)
+}
+fn mk(p: Point) -> Shape {
+    return Shape.Dot(p)
+}
+fn first(s: Shape) -> Int {
+    if s {
+        s == Dot(p) -> { return p.x }
+        s == Line(n) -> { return n }
+    }
+    return 0
+}
+fn main() {
+    pt @= Point { x: 3, y: 4 }
+    sh @= mk(pt)
+    print(\"{first(sh)}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_struct_payload_enum", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3\n");
+}
+
+/// c109 Phase 16: a struct with a covered collection field, and an enum variant
+/// carrying a covered collection payload. Both emit the field/payload value plainly
+/// (`items: vec![…]`, `Data.Nums(xs)`), byte-identical to the AST path.
+#[test]
+fn collection_field_and_payload() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Bag {
+    items: [Int]
+    label: String
+}
+enum Data {
+    Nums([Int])
+    One(Int)
+}
+fn mk(xs: [Int]) -> Data {
+    return Data.Nums(xs)
+}
+fn main() {
+    b @= Bag { items: [1, 2, 3], label: \"x\" }
+    d @= mk([4, 5])
+    print(b.label)
+}
+";
+    let (code, stdout) = build_and_run("tir_collection_field_payload", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "x\n");
+}
