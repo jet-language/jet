@@ -3257,3 +3257,103 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "welcome\n");
 }
+
+/// c109 Phase 26: the `require(cond[, msg])` / `require_eq` rich-report builtins (S36,
+/// 14_panic). A satisfied `require` is a no-op; the program continues. (The failing
+/// branch's rich panic is exercised by the AST-path golden suite; here we prove the TIR
+/// renders + runs the guard byte-for-byte.)
+#[test]
+fn require_builtins() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    require(((1 + 1) == 2))
+    require(true, \"unreachable\")
+    require_eq(6, (2 * 3))
+    print(\"ok\")
+}
+";
+    let (code, stdout) = build_and_run("tir_require", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "ok\n");
+}
+
+/// c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1, effect_caps)
+/// erases to a plain block in codegen; the body runs unchanged.
+#[test]
+fn caps_block() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn announce(label: String, n: Int) #(Io) {
+    print(\"{label}: {n}\")
+}
+fn main() {
+    #Caps(Io) {
+        announce(\"answer\", 42)
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_caps", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "answer: 42\n");
+}
+
+/// c109 Phase 26: the three free-call argument conventions (08_ownership) — `mut place`
+/// (`&mut (…)`), `take value` (move), and a plain shared `Read` borrow.
+#[test]
+fn free_call_arg_conventions() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn show(msg: String) {
+    print(msg)
+}
+fn bump(mut n: Int) {
+    n += 1
+}
+fn archive(take name: String) -> String {
+    return name
+}
+fn main() {
+    score: Int := 41
+    bump(mut score)
+    print(score)
+    greeting: String @= \"hello\"
+    show(greeting)
+    saved: String @= archive(take \"vault\")
+    print(saved)
+}
+";
+    let (code, stdout) = build_and_run("tir_arg_conv", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\nhello\nvault\n");
+}
+
+/// c109 Phase 26: a fan-out result-list DESTRUCTURE `[a, b, c] @= <init>` (S74, 41_fan_out).
+/// Binds each element via the runtime bounds-checked `jet_unpack_vec`.
+#[test]
+fn list_destructure() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn double(n: Int) -> Int {
+    return (n * 2)
+}
+fn main() {
+    doubled @= double.[1, 2, 3]
+    [a, b, c] @= doubled
+    print(a)
+    print(b)
+    print(c)
+}
+";
+    let (code, stdout) = build_and_run("tir_list_destructure", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\n4\n6\n");
+}

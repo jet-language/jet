@@ -190,6 +190,25 @@ pub(crate) enum TStmt {
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },
+    /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] @= <init>` (S74,
+    /// `BindPattern::List`). Reproduces `emit_stmt`'s `BindPattern::List` arm
+    /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
+    /// `let[ mut] {elem_rust} = jet_unpack_vec({tmp}, {want}, {i}, {file:?}, {line});`
+    /// per element. `want` is the element count, `i` the position, and `file`/`line`
+    /// the destructure span's source location (resolved at lowering for the
+    /// bounds-mismatch panic). Each element binds a non-deref slot whose type
+    /// reproduces `expr_jet_ty(init)`'s `Some(List(inner))` partiality (a non-`List`
+    /// init — e.g. a `[T#N]` fan-out result — yields `None`, matching the AST).
+    ListDestructure {
+        tmp: String,
+        init: TExpr,
+        kw: &'static str,
+        want: usize,
+        file: String,
+        line: usize,
+        /// `elem_rust_name` per bound element, source order.
+        elems: Vec<String>,
+    },
     /// `place [op]= value;` to a plain local (subset excludes indexed assigns).
     /// `op` is the compound-assignment operator (`+=` etc.) or `None` for `=`.
     Assign {
@@ -416,6 +435,15 @@ pub(crate) enum TExprKind {
     /// byte-for-byte the `emit_call` ambient-input branch (Source/Codegen/Expression.rs
     /// ~L1778). `prompt` is `Some` when a String prompt arg is given, else `None`.
     AmbientInput { prompt: Option<Box<TExpr>> },
+    /// c109 Phase 26: a `require(cond[, msg])` / `require_eq(a, b)` / `panic(msg)`
+    /// rich-runtime-report builtin (S36). The ENTIRE emit string (`{ if !(cond) {
+    /// jet_panic_rich(…); } }` in the default build, or the `test_mode` `{ if !(cond) {
+    /// return Err(…); } }` form) is rendered at lowering — byte-for-byte
+    /// `emit_require`/`emit_require_eq`/`emit_panic_stop` (Source/Codegen/Statement.rs).
+    /// Every input (the source line / col / caret, the escaped file + fn name, the
+    /// sorted scalar-locals snapshot via `render_safe_locals`, the test-mode flag) is
+    /// total at lowering, so emit reads nothing from `cx.src`/`cx.current_fn` (I3).
+    RequireStop(String),
     /// Binary op. `overflow` is the *computed* decision (true → emit the
     /// trapping `jet_add`/… helper). It mirrors today's `operand_is_integer`
     /// logic but is decided here, at lowering, from the total operand types.
@@ -1947,8 +1975,24 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                     }
                     ok
                 }
+                // c109 Phase 26: a LIST-destructuring binding `[a, b, c] @= <init>` (S74,
+                // `BindPattern::List`). The AST `emit_stmt` borrows the init into a temp,
+                // then binds each name via `jet_unpack_vec(tmp, want, i, file, line)`
+                // (a runtime bounds-checked element move). Covered when the init is
+                // in-subset; the element type partiality (`expr_jet_ty`'s
+                // `Some(List(inner))`-only match) is reproduced at lowering. The
+                // fan-out result-list destructure (`41_fan_out` `main`) is exactly this.
+                Some(BindPattern::List { elems, .. }) => {
+                    let ok = !b.is_comptime
+                        && !b.uninit
+                        && expr_in_subset(&b.init, cx, locals);
+                    for e in elems {
+                        locals.insert(e.name.clone());
+                    }
+                    ok
+                }
                 Some(_) => {
-                    // Struct/List destructuring not yet covered — stay on the AST path.
+                    // Struct destructuring not yet covered — stay on the AST path.
                     false
                 }
                 None => {
@@ -2101,7 +2145,17 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
                 && body.iter().all(|s| stmt_in_subset(s, cx, locals))
         }
-        // caps — still out.
+        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1/D-QUAL1)
+        // erases to a plain Rust block — `emit_stmt`'s `Stmt::Caps` arm is byte-for-byte
+        // identical to `Stmt::Region` (`{ <body> }` on the SAME `&mut env`, so the body's
+        // `let`s LEAK into the outer scope). The cap set is enforced entirely in sema
+        // (E0741); codegen is dumb (I3). Check the body on the SAME `locals` (it leaks
+        // like a region), reusing the covered `TStmt::Region` lowering.
+        Stmt::Caps { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // Forward-safety default: a future Stmt variant defaults to the safe AST path
+        // (I2 — a false negative keeps a fn off the TIR; a false positive would be unsafe).
+        // Currently unreachable because every variant above is matched.
+        #[allow(unreachable_patterns)]
         _ => false,
     }
 }
@@ -2575,6 +2629,27 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
+            // c109 Phase 26: the rich-runtime-report builtins `require(cond[, msg])`,
+            // `require_eq(left, right)`, and `panic(msg)` (S36). Each is a bare
+            // `Expr::Call` whose name is the builtin (not in `cx.sigs`, not shadowed by a
+            // local) and whose argument count matches the AST `emit_require`/
+            // `emit_require_eq`/`emit_panic_stop` shape. The whole statement string is
+            // rendered at lowering (`TExprKind::RequireStop`). Every arg expr (cond/msg/
+            // operands) must be in-subset (they are lowered + emitted via the TIR). Sema
+            // validated the shape (arg count, `panic`'s 1 message arg). Excluded if a
+            // user fn / local shadows the name (then the plain-call branch claims it).
+            let is_require = c.name == Syntax::BUILTIN_REQUIRE
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && (c.args.len() == 1 || c.args.len() == 2);
+            let is_require_eq = c.name == Syntax::BUILTIN_REQUIRE_EQ
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() == 2;
+            let is_panic = c.name == Syntax::BUILTIN_PANIC
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() == 1;
             // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare
             // `Expr::Call { name: "input" }` with NO user `input` fn (`!cx.sigs`) and no
             // local shadow lowers to the SAME `jet_std_io_input(None|Some(&(arg)))` form
@@ -2631,7 +2706,7 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
             // and codegen never reads `CallArg.label` (`emit_call_args` is purely
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
-            (is_print || is_ambient_input || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
+            (is_print || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
                     // No shared-auto-clone (Arc) in the subset; labels are sema-only.
                     !a.flags.shared_auto_clone
@@ -3393,8 +3468,15 @@ fn is_intercepted_method_name(method: &str) -> bool {
 /// A call argument is in-subset only if its convention is one the emitter
 /// reproduces: a `Read` borrow or a by-`Move` value (with an optional implicit
 /// clone). `Mutate` args would need `&mut place` handling we don't yet emit.
-fn arg_conv_in_subset(a: &crate::AST::CallArg) -> bool {
-    !matches!(a.convention, AccessConvention::Mutate)
+fn arg_conv_in_subset(_a: &crate::AST::CallArg) -> bool {
+    // c109 Phase 26: ALL three call-arg conventions are now in-subset. `Read` (`&(…)`
+    // for a non-scalar) and `Move` (plain value — `take`-marked args, `08_ownership`'s
+    // `archive(take "vault")`) were already admitted; `Mutate` (`&mut (…)`,
+    // `bump(mut score)`) is the lift. `lower_one_call_arg` already resolves all three
+    // borrow wrappers from the sig convention (`emit_call_args`' `match conv` —
+    // `Read`/non-scalar → `&(…)`, `Mutate` → `&mut (…)`, else plain), reproduced
+    // byte-for-byte in `emit_tir_call_args`. No convention is excluded.
+    true
 }
 
 /// c109 Phase 11: is `method` a closure-taking collection method the TIR lowers,
@@ -4344,6 +4426,41 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 binds,
             };
         }
+        Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::List { .. })) => {
+            // c109 Phase 26: a list-destructuring binding `[a, b, c] @= <init>`. Lower
+            // the init ONCE, then bind each element via `jet_unpack_vec(tmp, want, i,
+            // file, line)`, reproducing `emit_stmt`'s `BindPattern::List` arm. The
+            // element slot type reproduces `expr_jet_ty(init)`'s `Some(List(inner))`-only
+            // match: the LOWERED init's `.ty` is exactly what `expr_jet_ty(&b.init)`
+            // resolves (an Ident → its slot type), so a non-`List` init (e.g. a `[T#N]`
+            // fan-out result) yields a `None` element type — byte-identical partiality.
+            let Some(BindPattern::List { elems, span }) = &b.pattern else {
+                unreachable!("guard matched a list pattern")
+            };
+            let init = lower_expr(&b.init, cx, env);
+            let elem_ty = match &init.ty {
+                Type::List(inner) => Some((**inner).clone()),
+                _ => None,
+            };
+            let tmp = format!("__jet_d{}", span.start);
+            let kw = if b.mutable { "let mut" } else { "let" };
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            let mut elem_names = Vec::new();
+            for e in elems {
+                let m = mangle(&e.name).to_string();
+                elem_names.push(m.clone());
+                env.bind(&e.name, m, elem_ty.clone());
+            }
+            return TStmt::ListDestructure {
+                tmp,
+                init,
+                kw,
+                want: elems.len(),
+                file: cx.file.clone(),
+                line,
+                elems: elem_names,
+            };
+        }
         Stmt::Val(b) => {
             // c109 Phase 19: an arena `view` binding (`x @= arena.alloc(v)`). The AST
             // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
@@ -4572,6 +4689,11 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
         // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.
         Stmt::Region { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
+        // `Stmt::Caps` arm is byte-for-byte `Stmt::Region` — a plain block with the body lowered
+        // on the SAME `&mut env` (its `let`s leak). Effects erase at codegen (I3); reuse the
+        // `TStmt::Region` shape.
+        Stmt::Caps { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1). Resolve each
         // field into an `(is_allocator, value)` guard at lowering, then lower the body on
         // the SAME `env` (it leaks like a region). Emit reproduces `emit_stmts`'s
@@ -4589,6 +4711,10 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lower_stmts(body, cx, env),
             }
         }
+        // Forward-safety default: a Stmt variant not in the subset never reaches
+        // lowering (`stmt_in_subset` returns false for it). Kept as a guard against a
+        // future variant; currently unreachable because every covered variant is matched.
+        #[allow(unreachable_patterns)]
         _ => unreachable!("statement not in TIR subset"),
     }
 }
@@ -5243,6 +5369,79 @@ fn render_panic_stop(
     )
 }
 
+/// c109 Phase 26: render `require(cond[, msg])` (S36), byte-for-byte `emit_require`
+/// (Source/Codegen/Statement.rs). The default build emits a guarded `jet_panic_rich`;
+/// `cx.test_mode` emits a `return Err(<msg>)` form. The condition + message are lowered
+/// via the TIR; every source-position/locals fact is resolved here (I3).
+fn render_require(call: &crate::AST::Call, cx: &Cx, env: &mut LowerEnv) -> String {
+    let cond = emit_tir_expr(&lower_expr(&call.args[0].expr, cx, env), cx);
+    let msg = if call.args.len() == 2 {
+        render_panic_message(&call.args[1].expr, cx, env)
+    } else {
+        "\"condition failed\"".to_string()
+    };
+    if cx.test_mode {
+        let msg_expr = if call.args.len() == 2 {
+            msg
+        } else {
+            "\"condition failed\".to_string()".to_string()
+        };
+        return format!("{{ if !({}) {{ return Err({}); }} }}", cond, msg_expr);
+    }
+    let (src_line, line, col) = tir_src_line_at(&cx.src, call.name_span.start);
+    let caret_len = (call.name_span.end - call.name_span.start) as u32;
+    let fn_name = env.fn_name.clone();
+    let locals_expr = render_safe_locals(env);
+    let msg_used = if call.args.len() == 2 {
+        msg
+    } else {
+        "\"condition failed\".to_string()".to_string()
+    };
+    format!(
+        "{{ if !({cond}) {{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        cond = cond,
+        file = escape_rust_str(&cx.file),
+        line = line,
+        fn_name_esc = escape_rust_str(&fn_name),
+        src_line_esc = escape_rust_str(src_line.trim_end()),
+        col = col,
+        caret = caret_len,
+        msg = msg_used,
+        locals = locals_expr,
+    )
+}
+
+/// c109 Phase 26: render `require_eq(left, right)` (S36), byte-for-byte
+/// `emit_require_eq` (Source/Codegen/Statement.rs). Binds the two operands into temps,
+/// then compares; on inequality emits the test-mode `return Err(…)` or the default
+/// `jet_panic_rich` with a `left: {}, right: {}` message.
+fn render_require_eq(call: &crate::AST::Call, cx: &Cx, env: &mut LowerEnv) -> String {
+    let left = emit_tir_expr(&lower_expr(&call.args[0].expr, cx, env), cx);
+    let right = emit_tir_expr(&lower_expr(&call.args[1].expr, cx, env), cx);
+    if cx.test_mode {
+        return format!(
+            "{{ let _jet_left = ({}); let _jet_right = ({}); if !(_jet_left == _jet_right) {{ return Err(format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show())); }} }}",
+            left, right
+        );
+    }
+    let (src_line, line, col) = tir_src_line_at(&cx.src, call.name_span.start);
+    let caret_len = (call.name_span.end - call.name_span.start) as u32;
+    let fn_name = env.fn_name.clone();
+    let locals_expr = render_safe_locals(env);
+    format!(
+        "{{ let _jet_left = ({left}); let _jet_right = ({right}); if !(_jet_left == _jet_right) {{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        left = left,
+        right = right,
+        file = escape_rust_str(&cx.file),
+        line = line,
+        fn_name_esc = escape_rust_str(&fn_name),
+        src_line_esc = escape_rust_str(src_line.trim_end()),
+        col = col,
+        caret = caret_len,
+        locals = locals_expr,
+    )
+}
+
 /// c109 Phase 15: reproduce `emit_panic_message` (Statement.rs): a `Str` literal emits
 /// its interpolated form directly; any other expression is `({…}).jet_show()`. The
 /// message expression is lowered + emitted via the TIR (= `emit_expr`).
@@ -5479,6 +5678,36 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ty: unit_type(),
                     kind: TExprKind::Print(Box::new(arg)),
                 };
+            }
+            // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
+            // emit string at lowering, byte-for-byte the AST helper. `require`/`panic`
+            // are statement-position calls (a `()` result); the string is the `{ … }`
+            // block emit emits as an expr-statement. Disjoint from a user fn of the same
+            // name (`cx.sigs.contains_key` would be true then).
+            if !cx.sigs.contains_key(&call.name) && !env.locals.contains_key(&call.name) {
+                if call.name == Syntax::BUILTIN_REQUIRE {
+                    return TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::RequireStop(render_require(call, cx, env)),
+                    };
+                }
+                if call.name == Syntax::BUILTIN_REQUIRE_EQ {
+                    return TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::RequireStop(render_require_eq(call, cx, env)),
+                    };
+                }
+                if call.name == Syntax::BUILTIN_PANIC {
+                    return TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::RequireStop(render_panic_stop(
+                            &call.name_span,
+                            &call.args,
+                            cx,
+                            env,
+                        )),
+                    };
+                }
             }
             // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
             // lowering as `io.input(...)` (CoreCall would also work, but the bare-call
@@ -7530,6 +7759,20 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
                 ));
             }
         }
+        // c109 Phase 26: list destructure. Mirrors `emit_stmt`'s `BindPattern::List`
+        // arm byte-for-byte: borrow the init into a temp, then bind each element via
+        // the runtime bounds-checked `jet_unpack_vec(tmp, want, i, file, line)` move.
+        // `{file:?}` reproduces the AST's debug-formatted path; `kw`/`want`/`line` were
+        // all resolved at lowering.
+        TStmt::ListDestructure { tmp, init, kw, want, file, line, elems } => {
+            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, emit_tir_expr(init, cx)));
+            for (i, elem_rust) in elems.iter().enumerate() {
+                out.push_str(&format!(
+                    "{}{} {} = jet_unpack_vec({}, {}, {}, {:?}, {});\n",
+                    pad, kw, elem_rust, tmp, want, i, file, line
+                ));
+            }
+        }
         TStmt::Return(Some(e)) => {
             out.push_str(&format!("{}return {};\n", pad, emit_tir_expr(e, cx)));
         }
@@ -7979,6 +8222,11 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Some(p) => format!("{}(Some(&({})))", helper, emit_tir_expr(p, cx)),
             }
         }
+        // c109 Phase 26: a `require`/`require_eq`/`panic` rich-report builtin. The whole
+        // `{ … }` block emit string was rendered at lowering (byte-for-byte the AST
+        // helper); emit reads it verbatim. As a statement-position call it is wrapped
+        // `{ … };` by `TStmt::ExprStmt`, matching the AST `Stmt::Expr` `{ … };`.
+        TExprKind::RequireStop(rendered) => rendered.clone(),
         TExprKind::Call { name, args } => {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
@@ -9568,6 +9816,61 @@ fn input() -> String { return \"x\" }
 fn greet() -> String { return input() }
 ";
         assert!(covers(shadowed, "greet"));
+    }
+
+    #[test]
+    fn covers_require_builtins() {
+        // c109 Phase 26: the rich-runtime-report builtins `require`/`require_eq`/`panic`
+        // (S36) route. Each is a bare `Expr::Call` whose name is the builtin (not a user
+        // fn / local) with the right arity; the whole emit string is rendered at lowering.
+        assert!(covers("fn f() { require((1 + 1) == 2) }", "f"));
+        assert!(covers("fn f() { require(false, \"nope\") }", "f"));
+        assert!(covers("fn f() { require_eq(2, 2) }", "f"));
+        assert!(covers("fn f() { panic(\"stop\") }", "f"));
+        // A user fn / local named `require` shadows the builtin — it then routes via the
+        // plain-fn shape, NOT the builtin (still covered, different path).
+        assert!(covers(
+            "fn require(x: Int) -> Int { return x }\nfn f() -> Int { return require(3) }",
+            "f"
+        ));
+    }
+
+    #[test]
+    fn covers_caps_block() {
+        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region erases to a plain
+        // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
+        // an out-of-subset body keeps the whole fn off the TIR path.
+        assert!(covers("fn f() { #Caps(Io) { print(\"x\") } }", "f"));
+        // A struct-destructure binding inside the body is NOT covered (only LIST
+        // destructure landed in Phase 26), so the fn stays on the AST path.
+        assert!(!covers(
+            "struct P { x: Int }\nfn f() { p @= P{x: 1}\n#Caps(Io) { P{x} @= p\nprint(x) } }",
+            "f"
+        ));
+    }
+
+    #[test]
+    fn covers_free_call_arg_conventions() {
+        // c109 Phase 26: ALL three free-call arg conventions route — `Read` (`&(…)`),
+        // `Move` (`take`-marked), and `Mutate` (`mut place` → `&mut (…)`).
+        assert!(covers(
+            "fn bump(mut n: Int) { n += 1 }\nfn f() { s: Int := 1\nbump(mut s) }",
+            "f"
+        ));
+        assert!(covers(
+            "fn keep(take s: String) -> String { return s }\nfn f() -> String { return keep(take \"v\") }",
+            "f"
+        ));
+    }
+
+    #[test]
+    fn covers_list_destructure() {
+        // c109 Phase 26: a list-destructuring binding `[a, b, c] @= <init>` (S74) routes
+        // when the init is in-subset — the fan-out result destructure (`41_fan_out`).
+        assert!(covers(
+            "fn f() { xs @= [1, 2, 3]\n[a, b, c] @= xs\nprint(a) }",
+            "f"
+        ));
     }
 
     #[test]
