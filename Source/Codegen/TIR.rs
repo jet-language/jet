@@ -9690,6 +9690,15 @@ mod tests {
     }
 
     #[test]
+    fn covers_bare_or_return_in_unit_fn() {
+        // c109 (bare `?? return` fix): a bare `?? return` in a UNIT fn is in-subset
+        // (`orfallback_rhs_in_subset → Return(None) => true`) and emits `None => return`.
+        // Sema now accepts it only in a unit fn (rustc accepts `return;`).
+        let src = "fn f(xs: [Int]) {\n x := xs.first() ?? return\n print(x)\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
     fn covers_is_empty_bool() {
         // c109 (`is_empty` Bool fix): `is_empty` on a list/map/string is now covered
         // (`TBuiltinOp::IsEmpty`, Bool result) — it was excluded while sema mistyped it

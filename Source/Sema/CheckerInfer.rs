@@ -834,6 +834,7 @@ impl<'a> Checker<'a> {
             OrFallback::Return(ret_expr, ret_span) => {
                 let ret = self.ret.clone();
                 match (&ret, ret_expr) {
+                    // `?? return value` in a value-returning fn — the value must match.
                     (Some(rt), Some(e)) => {
                         let saved = self.expected_type.clone();
                         self.expected_type = Some(rt.clone());
@@ -844,20 +845,42 @@ impl<'a> Checker<'a> {
                             self.check_type_assignable(rt, &et, espan);
                         }
                     }
-                    (Some(_), None) => {}
-                    (None, _) => {
+                    // Bare `?? return` in a value-returning fn — rustc would reject the
+                    // emitted `return;` (E0069). Reject cleanly: the fn owes a value.
+                    (Some(rt), None) => {
                         self.diags.push(Diagnostic::error(
                             "E0405",
                             format!(
-                                "`{} return` can't leave this function early",
+                                "`{} return` here needs a value",
                                 Syntax::OP_FALLBACK
                             ),
-                            "a bare return needs a function with a return type".to_string(),
-                            "add `-> Type` to the function, or give a fallback value instead"
-                                .to_string(),
+                            format!(
+                                "a bare `return` needs a value here because the function returns {}",
+                                rt.show()
+                            ),
+                            format!(
+                                "give a fallback value: `{} return <value>`",
+                                Syntax::OP_FALLBACK
+                            ),
                             Some(*ret_span),
                         ));
                     }
+                    // `?? return value` in a unit fn — there's nothing to return.
+                    (None, Some(e)) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0405",
+                            format!(
+                                "`{} return` can't return a value here",
+                                Syntax::OP_FALLBACK
+                            ),
+                            "this function returns nothing, so `return` can't carry a value"
+                                .to_string(),
+                            "drop the value, or add `-> Type` to the function".to_string(),
+                            Some(e.span()),
+                        ));
+                    }
+                    // Bare `?? return` in a unit fn — rustc accepts the emitted `return;`.
+                    (None, None) => {}
                 }
                 Some(payload)
             }

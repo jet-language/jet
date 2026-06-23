@@ -149,16 +149,19 @@ them so they don't regress, but they should be fixed independently of c109):
   Phase 20 covers them (no lambda-param writeback needed). Fix: set the serve arm's
   expected type to `Fn(HttpRequest)->HttpResponse` before inferring the handler.
   (Surfaced in Phase 20.)
-- **A bare `?? return` (no value) is unusable (sema/codegen mismatch).** `x ?? return`
-  (no fallback value) emits `match … { None => return }`. Sema E0405 REQUIRES the enclosing
-  fn to have a return type ("a bare return needs a function with a return type"); but rustc
-  then rejects `return;` in a non-unit function (E0069). So a bare `?? return` cannot appear
-  in any program that passes BOTH sema and rustc. Phase 19 confirms the shape ALREADY routes
-  through the TIR (the gate's `orfallback_rhs_in_subset → Return(None) => true`, an earlier
-  phase) and is byte-identical on both paths — the inventory note claiming it doesn't route
-  was stale. The construct is just dead. Fix: make sema admit a bare `?? return` only in a
-  unit-returning fn (then rustc accepts `return;`), OR make codegen emit `return ()` /
-  diverge appropriately. (Surfaced in Phase 19.)
+- **A bare `?? return` (no value) is unusable (sema/codegen mismatch). FIXED.** Was:
+  `x ?? return` (no value) emits `match … { None => return }`, but `infer_or_fallback`'s
+  logic was INVERTED — it sema-rejected the bare form in a UNIT fn (E0405) and accepted it
+  in a NON-unit fn, where rustc then rejected the emitted `return;` (E0069). **Fix:**
+  `infer_or_fallback` (CheckerInfer.rs) now accepts a bare `?? return` ONLY in a unit-returning
+  fn (`self.ret == None` → rustc accepts `return;`) and rejects it in a value-returning fn
+  with a clean E0405 ("a bare `return` needs a value here because the function returns <T>");
+  the symmetric `?? return value` in a unit fn is also rejected. The unit-fn form routes through
+  the TIR (`orfallback_rhs_in_subset → Return(None) => true`, emitting `None => return`).
+  Covered by tests/tir.rs `bare_or_return_in_unit_fn` (build+run), the `covers_bare_or_return_in_unit_fn`
+  unit test, and the tests/ui/bare_return_needs_value snapshot (the non-unit reject); byte-parity
+  holds across the example suite (the sema change only governs acceptance, not emit). (Surfaced
+  in Phase 19; fixed in the c109 fix-first effort.)
 - **An UNQUALIFIED cross-module foreign struct literal miscompiles (I2 hole, both paths). FIXED.**
   Was: `Note { … }` written unqualified in an importing module (no `import_ns`) emitted
   `user_Note { … }` via `user_type_apply_rust` (Expression.rs) with NO foreign-module prefix

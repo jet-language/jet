@@ -3858,3 +3858,31 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "false\nfalse\nfalse\nempty\nnot empty\n");
 }
+
+/// c109 (bare `?? return` fix): `infer_or_fallback`'s logic was inverted — a bare
+/// `?? return` (no value) was sema-rejected in a UNIT fn (E0405) and accepted in a
+/// NON-unit fn (where rustc then rejected the emitted `return;` → E0069). The fix
+/// accepts a bare `?? return` ONLY in a unit fn (`return;` is valid) and rejects it
+/// in a value-returning fn. The unit-fn form routes through the TIR
+/// (`orfallback_rhs_in_subset → Return(None)`, emitting `None => return`).
+#[test]
+fn bare_or_return_in_unit_fn() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn f(xs: [Int]) {
+    x := xs.first() ?? return
+    print(x)
+}
+fn main() {
+    f([10, 20])
+    empty: [Int] @= []
+    f(empty)
+    print(99)
+}
+";
+    let (code, stdout) = build_and_run("tir_bare_or_return", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\n99\n");
+}

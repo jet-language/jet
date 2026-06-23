@@ -182,7 +182,7 @@ before continuing.
 | E0402 | sema  | fallible call ignored as a statement      |
 | E0403 | sema  | `?` error type / return context mismatch  |
 | E0404 | sema  | `ok`/`err` need a fallible context        |
-| E0405 | sema  | `??` fallback type mismatch               |
+| E0405 | sema  | `??` fallback type/`return` mismatch       |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
 | E0501 | sema  | empty `[]` / `[:]` needs a context type   |
 | E0502 | sema  | type can't be a map key                   |
