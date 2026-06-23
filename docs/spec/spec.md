@@ -612,7 +612,7 @@ Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
 **`|x|`** pipes → `(x) => …` (**E0033**).
 
 Examples: `examples/features/23_closures.jet`, `examples/features/24_callbacks.jet`,
-`examples/features/36_iter_adapters.jet`. Ui:
+`examples/features/89_iter_adapters.jet`. Ui:
 `tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
 E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 `tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`
@@ -662,7 +662,7 @@ directly; use `entry.name` for the bare filename check (e.g. `entry.name.ends_wi
 `path.join(dir, name) -> String` (D-LSDIR1 option C) constructs a portable
 OS-native path from two pieces, for cases where experts need to compose paths
 independently of `DirEntry`. `core.path` also provides `.parent()`, `.extension()`,
-and `.normalize()`. Example: `examples/features/86_dir_entry.jet`.
+and `.normalize()`. Example: `examples/features/87_dir_entry.jet`.
 
 #### `core.args` — declarative CLI parsing (D-ARGS1, ratified 2026-06-22)
 
