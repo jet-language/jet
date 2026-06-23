@@ -11498,4 +11498,26 @@ fn main() {
 "#;
         assert!(covers_after_sema(src, "main"), "map-assign through field not covered");
     }
+
+    #[test]
+    fn covers_map_builtin_on_struct_field_receiver() {
+        // c109: a map builtin (`.len()`) on a struct-FIELD-read receiver
+        // (`s.scores.len()`), where the field was initialized from an empty-map
+        // struct-literal field (`scores: [:]` takes its type from the struct field).
+        // The builtin gate already admits a field-read receiver + the struct-literal
+        // empty-map field is in-subset; the single-uppercase-letter struct name `S` was
+        // the only blocker (now a concrete declared type). The whole `main` routes
+        // through the TIR.
+        let src = r#"
+struct S {
+    scores: Map<String, Int>
+}
+
+fn main() {
+    s := S { scores: [:] }
+    print(s.scores.len())
+}
+"#;
+        assert!(covers_after_sema(src, "main"), "map builtin on field receiver not covered");
+    }
 }

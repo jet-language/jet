@@ -4255,3 +4255,34 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n");
 }
+
+/// c109: a map builtin (`.len()`) on a struct-FIELD-read receiver
+/// (`s.scores.len()`), where the field came from an empty-map struct-literal
+/// field (`scores: [:]` takes its type from the struct field). The builtin gate
+/// admits a field-read receiver; `main` routes through the TIR and emits
+/// `((user_s).user_scores).len() as i64` byte-for-byte. Runs (empty map → 0).
+#[test]
+fn map_builtin_on_struct_field_receiver() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct S {
+    scores: Map<String, Int>
+}
+
+fn main() {
+    s := S { scores: [:] }
+    print(s.scores.len())
+}
+";
+    let out = jet::compile(src).expect("empty map literal in field position should typecheck");
+    assert!(
+        out.rust.contains("((user_s).user_scores).len() as i64"),
+        "map builtin on field receiver not byte-exact:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_map_builtin_field", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "0\n");
+}
