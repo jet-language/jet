@@ -78,7 +78,7 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
     name == Syntax::TYPE_JSON || name == "Json"
 }
 
-fn core_rust_type_name(name: &str) -> Option<&'static str> {
+pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
         n if is_json_type_name(n) => Some("Json"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
@@ -92,7 +92,7 @@ fn core_rust_type_name(name: &str) -> Option<&'static str> {
 }
 
 /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
-fn file_handle_rust_type(name: &str) -> Option<&'static str> {
+pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "FileReader" => Some("JetFileReader"),
         "FileWriter" => Some("JetFileWriter"),

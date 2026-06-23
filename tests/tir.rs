@@ -2150,3 +2150,115 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "x\n");
 }
+
+/// c109 Phase 17: a GENERIC free function. The `<T: Clone>` clause renders at lowering
+/// (every type param carries an extra `Clone` bound, exactly `emit_func`), a type-var
+/// param/return is by-value (`user_x: T`), and the body returns the type-var value. A
+/// generic `[T]` list param/return is covered too (`Vec<T>`).
+#[test]
+fn generic_free_fns() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn id<T>(take x: T) -> T {
+    return x
+}
+fn pick<T>(take a: T, take b: T, first: Bool) -> T {
+    if first {
+        return a
+    }
+    return b
+}
+fn firstof<T>(take xs: [T]) -> T {
+    return xs[0]
+}
+fn wrap<T>(take x: T) -> [T] {
+    return [x]
+}
+fn main() {
+    print(\"{id(5)}\")
+    print(\"{pick(1, 2, true)}\")
+    print(\"{firstof([10, 20, 30])}\")
+    ys @= wrap(7)
+    print(\"{ys[0]}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_generic_free_fns", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "5\n1\n10\n7\n");
+}
+
+/// c109 Phase 17: a `-> view T` function returns a borrow. The signature renders `&T`
+/// and the body's `return field.name` lowers via `emit_view_return` to `&((*field)).name`
+/// (a field read of an owned param, address taken). A `view` ident param returns the bare
+/// borrow.
+#[test]
+fn view_return_fn() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Rec {
+    name: String
+    value: String
+}
+fn name_of(rec: Rec) -> view String {
+    return rec.name
+}
+fn main() {
+    r @= Rec { name: \"alpha\", value: \"beta\" }
+    print(\"{name_of(r)}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_view_return_fn", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "alpha\n");
+}
+
+/// c109 Phase 17: a PRELUDE struct (HttpResponse/HttpRequest) constructed via a struct
+/// literal. The `is_prelude_struct` emit branch renders a `Jet…` Rust head with PLAIN
+/// (unmangled) fields, and HttpRequest injects a `params: BTreeMap::new()` field. The
+/// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so this
+/// asserts the EMITTED Rust contains the byte-exact construction (the example suite +
+/// the JET_NO_TIR full-suite diff prove it compiles & runs). The type is a covered value
+/// type as a param/return.
+#[test]
+fn prelude_struct_construction() {
+    let src = "\
+fn build_resp(body: String) -> HttpResponse {
+    return HttpResponse {status: \"200 OK\", body: body, headers: [:]}
+}
+fn build_req() -> HttpRequest {
+    return HttpRequest {method: \"GET\", path: \"/\", body: \"\", headers: [:]}
+}
+fn main() {
+    r @= build_resp(\"hi\")
+    q @= build_req()
+    print(\"built\")
+}
+";
+    // `compile_with_path` loads the entry from disk, so write the .jet first.
+    let dir = std::env::temp_dir().join(format!("jet_tir_prelude_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("prelude.jet");
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+    });
+    // HttpResponse: prelude head (`…JetHttpResponse`), PLAIN field names, no injected
+    // `params`. The `…` root prefix varies by emit layout — assert the prefix-independent
+    // construction body.
+    assert!(
+        out.rust.contains("JetHttpResponse { status: \"200 OK\".to_string(), body: (*user_body), headers: std::collections::BTreeMap::new() }"),
+        "HttpResponse construction not byte-exact:\n{}",
+        out.rust
+    );
+    // HttpRequest: prelude head, plain fields, injected `params` field appended verbatim.
+    assert!(
+        out.rust.contains("JetHttpRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new() }"),
+        "HttpRequest construction not byte-exact:\n{}",
+        out.rust
+    );
+}

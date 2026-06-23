@@ -1043,9 +1043,75 @@ everything, the AST codegen path is deleted (final phase).
   to `covers_*` and add `covers_recursive_enum_construction_with_clone_box` /
   `covers_struct_payload_enum` / `covers_collection_payload_enum`.
 
+## Refinements learned in Phase 17 (generics, foreign types, view methods)
+
+- **`view`-returning functions/methods are a tiny, fully-total slice — the borrow shape is
+  a two-case `ViewWrap` resolved at lowering.** `emit_view_return` (Source/Codegen/Statement.rs)
+  branches on the *AST node shape*: an `Ident` to a deref'd (by-reference) slot returns the
+  BARE borrow `name` (the `(*…)` stripped); an `Ident` to a non-deref slot or a const returns
+  `&name`/`&<const>`; a `Field` read returns `&(<place>)`; anything else passes to `emit_expr`
+  unwrapped. `lower_view_return` reproduces this into a `TStmt::ViewReturn { value, wrap }`
+  where `wrap ∈ {Addr, Bare}` is decided at lowering off the same node shape — emit only
+  prefixes `&` (Addr) or emits the value as-is (Bare). The `view_return` flag rides on
+  `LowerEnv` (threaded through `clone_env`/`fork_panic` so nested scopes keep it) and on the
+  `TFunc.is_view` field (drives `rust_return_type(cx, ret, is_view)` → `&T`). Sema's E2301/E2304
+  restrict a view return to an owned `Ident`/`Field` place, so only those shapes reach codegen
+  — the gate needs no special view-return body check beyond the existing `stmt_in_subset`. The
+  field read in a view return is NOT rewritten to `.clone()` by sema (only owning returns are),
+  so the `Expr::Field` survives — exactly what `emit_view_return` wants. Inherent + free `view`
+  fns are covered; a `view`-returning **trait** method keeps its gate exclusion (conservative —
+  no example needs it, and the trait-method signature is fixed by the trait).
+- **Generic FREE functions are a clean gate-widening + a rendered-clause TIR field — no new
+  emit logic beyond printing the clause.** The `<T: Clone>` clause renders at lowering via
+  `Generics::rust_type_param_list(&f.type_params, rust_extra_clone_bounds)` (every type param
+  carries the extra `Clone` bound, EXACTLY `emit_func`), carried as a total `TFunc.generics`
+  string emit prints verbatim after the name. A type-var param/return (`Type::Named(T)` where
+  `Generics::is_type_var_name` holds — a single uppercase letter) is admitted by
+  `is_subset_param_ty` and renders by value via `cx.rust_type`/`rust_param_type` (bare `T`, no
+  `&`). The ONE load-bearing parity detail: a param TYPED as a bare type var (`item: T`) is
+  forced to the `Move` convention for the slot DEREF (`param_place_generic` — by-value, no
+  `(*…)`), mirroring `emit_func`'s `is_type_param` branch; a param typed `Stack<T>` is NOT a
+  type-var param and keeps its source convention (`Read` → `&user_Stack<T>`, deref'd place).
+  A `[T]` list element is admitted (`collection_elem_covered`), so a generic `[T]`-param/return
+  fn routes too. Verified byte-identical: `id`/`pick`/`firstof`/`wrap`.
+- **Generic STRUCT types are DEFERRED — the `Type::Apply` value type + turbofish stay on the
+  AST path.** A function whose param/return is `Pair<T>` (a `Type::Apply`) exits the gate at
+  the param/return-type check (`is_subset_param_ty` admits a bare type var but NOT an `Apply`),
+  so `26_generic_types` `make_pair`/`empty_stack`/`push` stay on the AST path — byte-identical.
+  Covering them needs the `user_Pair::<T> { … }` turbofish StructLit form, a generic-struct
+  field type (`struct_is_covered` excludes type-var fields), and (`push`) a `[T]`-field builtin
+  + the generic-value clone — a coherent follow-up slice, deferred to keep the most
+  parity-sensitive surface I2-safe.
+- **PRELUDE structs (HttpRequest/HttpResponse) construct via a distinct emit branch — a
+  total `extra` field carries the injected member.** `emit_struct_lit`'s `is_prelude_struct`
+  branch renders a `<root>Jet…` Rust head (via `net_handle_rust_type`) with PLAIN (unmangled)
+  field names, and — for HttpRequest — appends an injected `params: BTreeMap::new()` field. The
+  TIR `StructLit` node gained an `extra: Option<String>` (the injected line, resolved at
+  lowering) and the field names are kept plain for the prelude case. The constructable prelude
+  structs + the core/prelude/handle types (`core_rust_type_name`/`file_handle_rust_type`/
+  `net_handle_rust_type`/`alloc_handle_rust_type` — ProcessResult/Json/Stopwatch/FileReader/
+  TcpStream/Arena/…) are admitted as covered VALUE types (`is_covered_foreign_value_ty`), so a
+  function passing/binding/returning one routes. A METHOD on any of them is still out of subset,
+  so a function that *calls* one is excluded by that call — covering the value type never reaches
+  an uncovered handle/accessor form (the recurring "cover the node you can make total, let the
+  next uncovered node exclude its fn" seam). FOREIGN (imported user) structs/enums stay excluded
+  (their construction needs the cross-module `import_ns` path — Phase 14 territory). Verified
+  byte-identical: `build_resp` (HttpResponse) + `build_req` (HttpRequest, with the injected
+  `params`).
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass on
+  `emit_func`/`emit_method`/`emit_trait_method`/delegation) across the **entire example suite** —
+  118 emittable, 0 differ — plus crafted probes exercising: a `view`-returning field accessor
+  (`name_of` → `&((*user_field)).user_name`); generic free functions (`id`/`pick` type-var
+  by-value, `firstof`/`wrap` over `[T]`); and prelude struct construction (`HttpResponse {…}` →
+  `JetHttpResponse { …, headers: …::BTreeMap::new() }`, `HttpRequest {…}` with the injected
+  `params`). A routing sentinel confirmed the covered fns take the TIR path (zerocopy `name_of`
+  + `name_copy`; the crafted generic + prelude fns). 206 free fns route through `emit_func` now.
+  tests/tir.rs adds `generic_free_fns`/`view_return_fn`/`prelude_struct_construction`; the TIR
+  unit tests flip `rejects_generic_fn` → `covers_generic_fn` and add `rejects_generic_struct_fn`.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 15 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
+After Phase 17 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
 reached for these constructs. Each entry: the construct, the AST emit function that
 owns it, and the total fact still missing to cover it.
 
@@ -1054,9 +1120,18 @@ owns it, and the total fact still missing to cover it.
   unsafe-block lowering. Missing: TIR nodes for the audited `unsafe { … }` gate region
   and the pointer/alloc ops, preserving the gate exactly (I1 — never emit `unsafe`
   without a source `@unsafe`). Genuinely hard; deferred.
-- **Generic-type methods + `view`-returning methods** — `emit_method`/`emit_func`
-  (generics) / the `is_view_return` borrow lowering. Missing: generic-param lowering
-  (`Generics::*`) as total TIR facts, and the view-return borrow shape.
+- **Generic STRUCT types/methods** (residue after Phase 17) — `emit_func`/`emit_method`
+  + `emit_struct_lit`'s turbofish branch. Phase 17 covered generic FREE functions whose
+  params/return are type vars or `[T]` lists (the `<T: Clone>` clause + by-value type-var
+  params are total TIR facts). Still on the AST path: a function whose param/return is a
+  generic STRUCT type (`Pair<T>` — a `Type::Apply`), a turbofish struct literal
+  (`user_Pair::<T> { … }`), a `[T]`-field builtin (`copy.items.push(item)` in `26`'s
+  `push`), and a generic-type *method* inside an `impl<T> user_<T>` block. Missing: covering
+  the `Type::Apply` generic-struct value type, the turbofish StructLit form, and the
+  generic-struct field-read/clone shape. (Example `26_generic_types` `make_pair`/
+  `empty_stack`/`push` stay on the AST path.) `view`-returning **trait** methods are also
+  still excluded (the trait-method gate keeps the `is_view_return` exclusion — conservative,
+  no example needs it).
 - **Polymorphic core specials** `math.abs/min/max/clamp`, `random.pick/shuffle`,
   `io.input/io.eprint` — `emit_core_call` (their bespoke arms). Their return type
   depends on the ARG type, resolved by `infer_core_call`'s bespoke `check_core_call`
@@ -1090,14 +1165,16 @@ owns it, and the total fact still missing to cover it.
   <value>` and `?? <value>` do. The exclusion is upstream of the `??` lowering (a
   bare-return `OrFallback` apparently fails an earlier in-subset check); not chased.
   Conservative — stays on the AST path. (NB: the `?? panic(…)` form IS covered — Phase 15.)
-- **Recursive (boxed) STRUCTS, generic & foreign/prelude types** — the struct gate
+- **Recursive (boxed) STRUCTS + FOREIGN (imported user) structs/enums** — the struct gate
   (`struct_is_covered`) still excludes recursive structs (broken on the AST path — see
-  the latent-bug list; the TIR must not claim a miscompiling fn) and generic/foreign
-  types. (c109 Phase 16 covered string/struct/collection-payload enums + recursive
-  *enums* + collection struct fields; the per-arg box/borrowed-clone decision
-  `emit_boxed_enum_arg` is now a total `TEnumArg` fact.) Missing for the residue:
-  the `Box::new(…)` struct-lit-field wrap (an AST-path bug to fix first), and generic-
-  param lowering (`Generics::*`) as total TIR facts.
+  the latent-bug list; the TIR must not claim a miscompiling fn), and a foreign struct/enum
+  imported from another file-module (`cx.foreign_types` — a `user_<alias>::user_<Name>` head
+  whose construction needs the `import_ns` turbofish/namespace path, a Phase-14 surface).
+  (c109 Phase 16 covered string/struct/collection-payload enums + recursive *enums* +
+  collection struct fields; Phase 17 covered the constructable PRELUDE structs
+  HttpRequest/HttpResponse + core/prelude/handle types as value param/return/local types.)
+  Missing for the residue: the `Box::new(…)` struct-lit-field wrap (an AST-path bug to fix
+  first), and foreign (cross-module) struct/enum construction (`import_ns`).
 - **Latent-bug-gated constructs** (`is_empty`, no-arg `join()`, `mut self`/`view self`
   reassignment) — excluded because they MISCOMPILE on both paths today (see the
   latent-bug list); the TIR must not *claim* a function that miscompiles. These unblock
@@ -1125,6 +1202,7 @@ owns it, and the total fact still missing to cover it.
 | 14 | Cross-module calls + FFI extern | ✅ done (c109 Phase 14) — all 8 module/FFI example `main`s route (`22_ffi`, `42`–`48` module forms), plus imported submodule bodies (`47` `wrap`/`decorate`, the inline-module fns in `42`/`45`/`46`). Covers the FIVE cross-module call forms — qualified `mod.fn()` (`import_mods`), `pub use` re-export (`reexport_calls`), inline code module `alias.method()` (`code_modules`), unqualified inline import (`unqualified_inline`), unqualified file import (`unqualified_file`) — each resolved at lowering into a total `TExprKind::ModuleCall`/`TModuleCallForm` (`Qualified{rust_mod, rust_fn}` or `InlineMangled{mangled}`); emit only prepends `cx.root_prefix` (program-level) where the AST does. Also covers **FFI extern** (`extern rust`/`extern C`) — `emit_call`'s `extern_funcs` arm as a total `TExprKind::ExternCall{wrapper, args}` reproducing `emit_extern_call_args` (a non-scalar `Read` arg is `(…).clone()`, NOT `&(…)`); the call is `{ffi_crate}::{wrapper}(args)` with `cx.ffi_crate` read at emit. Module-call args resolve their conventions from `cx.import_sigs`/`cx.sigs`; a new `cx.import_rets` table (`import_ret_map`) supplies the call's total return type. The gate widens the `Call` arm (extern/unqualified) and `method_call_in_subset` (reexport/import_mods/code_modules), reproducing `emit_call`/`emit_method_call`'s dispatch ORDER exactly. **I1:** an extern call introduces no Rust `unsafe` by itself — reproduced byte-for-byte (no `unsafe` emitted); the audited `@unsafe` gate surface is the separate, deferred Phase-17 work. Excludes (stay on AST path): the `@unsafe`/`#Unsafe`/`core.mem` ptr+alloc surface, comptime-if, and the other AST-path inventory entries (mixed switches, payload/boxed/generic types, latent-bug-gated constructs). |
 | 15 | Remaining control flow + delegation: comptime-if, mixed switches, delegation, `?? panic` | ✅ done (c109 Phase 15) — covers the FOUR remaining inventory entries. **comptime-if** (`Stmt::ComptimeIf`): the selected branch (sema's `selected_then`) emits inline at the same indent with no `if`, its `let`s leaking into the outer scope (`TStmt::Inline`). **Mixed comparison/Bool switches** (shape D — the general `emit_mixed_switch` `if/else if … else` chain, used when arms are NOT all-variant/range/fallible): each plain comparison arm head resolves to an `emit_expr` string, wrapped in the `_jet_switch_subject` block (`TStmt::MixedSwitch`); a switch with any pattern-test arm stays on the AST path (conservative). **Delegation trait methods** (`impl T: Trait using field`, `emit_delegation_method`): a structural forward `(self).<field>.<method>(args)` with the bare trait name (`TFuncKind::Delegation`, hooked in `emit_external_trait_impl`). **The `?? panic(…)` fallback** (Phase-8/11 deferral now LIFTED): `emit_panic_stop`/`safe_locals_expr` reproduced from a leak-faithful `panic_locals` Rc-replica that mirrors the AST codegen env's branch-leak semantics (shared across leaky branches, deep-copied at the two `emit_pattern_match_switch` arm bodies + lambda bodies, range-loop var save/restored); the whole `{ jet_panic_rich(…); }` statement string (message + sorted scalar-locals dump) is rendered at lowering (`TOrFallback::Panic`). Also fixes a **latent TIR-path divergence** the panic lift exposed: a CORE-struct field read (`result.code` on a `ProcessResult`) was mangled to `user_code` instead of the plain `code` (B2) — fixed by reproducing `core_struct_field_rust_name` in the `Field` lowering off the resolved `recv.ty`. Byte-identical across the entire example suite (118 emittable, 0 differ) + crafted probes (incl. a `?? panic` with leaked scalar locals from a plain-if and a loop body). The delegation example `47_library` (`App: Logger using logger`) routes. Excludes (stay on AST path): bare `?? return` (an upstream `??` gate gap); `@unsafe`/`#Unsafe`/`core.mem`; generic & `view`-returning methods; polymorphic core specials; `recv_type == None` handle methods; HttpRequest/HttpResponse method accessors; payload/boxed/generic types; latent-bug-gated constructs. |
 | 16 | Payload-carrying & recursive types: string/struct/collection-payload enums, recursive (boxed) enums, collection struct fields | ✅ done (c109 Phase 16) — +17 example fns route (201 → 218). Covers: **string/struct/collection-payload enums** (a variant payload may be String, a covered struct, a covered collection, or another covered enum) — the per-arg borrowed-`.clone()` + `Box::new(…)` decisions of `emit_boxed_enum_arg` are now a TOTAL fact (`TEnumArg { value, clone, boxed }`) resolved at lowering, byte-for-byte. **Recursive (boxed) enums** (linked-list / expr-AST) — the enum gate's `seen` set now ADMITS a self-reference, and the only box-related emit decision is the `Box::new(…)` at construction (Rust auto-derefs the `Box` at every read/match site, so no deref node is needed). **Collection struct fields** (`field_ty_covered` admits `[E]`/`[K, V]`) and **collection enum payloads**. The construction routes through a NEW variant-construction `MethodCall` shape (shape (j)) — a payload variant never becomes an `Expr::EnumLit` node (parser → `Field`/`MethodCall`; sema type-checks in place without rewriting), so the AST `emit_method_call`→`emit_enum_lit` path is reproduced. Excludes (stay on AST path, with reason): **recursive STRUCTS** (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)` field wrap → rustc E0308; a latent I2 hole logged in the bug list; the TIR must not claim a miscompiling fn); **generic** & **foreign/prelude** types; **`view`-returning** methods (borrow lowering) — all deferred to a later phase. |
+| 17 | Generics, foreign/prelude types, view-returning methods | ✅ done (c109 Phase 17, partial) — covers three independent surfaces. **`view`-returning functions/methods** (`-> view T` borrow): `emit_view_return` reproduced as a total `TStmt::ViewReturn { value, wrap }` (`wrap ∈ {Addr, Bare}` resolved at lowering from the AST node shape), `TFunc.is_view` drives `rust_return_type → &T`, the `view_return` flag rides `LowerEnv` (threaded through `clone_env`/`fork_panic`). `35_zerocopy` `name_of` routes. **Generic FREE functions** whose params/return are type vars (`<T: Clone>` clause rendered at lowering into `TFunc.generics` via `Generics::rust_type_param_list` + `rust_extra_clone_bounds`; a type-var param admitted by `is_subset_param_ty`, forced `Move` for the slot deref via `param_place_generic` — EXACTLY `emit_func`'s `is_type_param`) or `[T]` lists (`collection_elem_covered` admits a type var). **Constructable PRELUDE structs** (HttpRequest/HttpResponse): `emit_struct_lit`'s `is_prelude_struct` branch (`Jet…` head, PLAIN fields, HttpRequest's injected `params` field) reproduced via a total `StructLit { …, extra: Option<String> }`; the core/prelude/handle types (ProcessResult/Json/Stopwatch/FileReader/TcpStream/Arena/…) admitted as covered VALUE types (`is_covered_foreign_value_ty`). Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (view field accessor, `id`/`pick`/`firstof`/`wrap` generics, `build_resp`/`build_req` prelude construction). 206 free fns route through `emit_func`. tests/tir.rs adds `generic_free_fns`/`view_return_fn`/`prelude_struct_construction`; unit tests flip `rejects_generic_fn` → `covers_generic_fn` + add `rejects_generic_struct_fn`. Excludes (stay on AST path, with reason): **generic STRUCT types/methods** (`Pair<T>` `Type::Apply` value type, turbofish `user_Pair::<T> { … }`, `[T]`-field builtins, generic-type methods — `26_generic_types` `make_pair`/`empty_stack`/`push`); **FOREIGN (imported user) structs/enums** (cross-module `import_ns` construction — Phase 14 surface); **`view`-returning trait methods** (gate keeps the exclusion — conservative); recursive STRUCTS, latent-bug-gated constructs, and the remaining inventory entries (polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse method accessors, `@unsafe`/`#Unsafe`/`core.mem`). |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

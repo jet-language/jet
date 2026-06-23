@@ -59,6 +59,15 @@ pub(crate) struct TFunc {
     pub(crate) params: Vec<(String, Type, AccessConvention)>,
     /// Resolved return type, or `None` for a unit-returning function.
     pub(crate) ret: Option<Type>,
+    /// c109 Phase 17: the function returns `-> view T` (a borrow). Drives
+    /// `rust_return_type(cx, ret, is_view)` so the signature renders `&T`, and the body's
+    /// returns lowered via `lower_view_return` (`TStmt::ViewReturn`).
+    pub(crate) is_view: bool,
+    /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
+    /// resolved at lowering via `Generics::rust_type_param_list(&f.type_params, …)` exactly
+    /// as `emit_func` does (with the `rust_extra_clone_bounds` every type param carries).
+    /// Emitted verbatim after the function name; empty for a non-generic function.
+    pub(crate) generics: String,
     pub(crate) is_main: bool,
     pub(crate) body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
@@ -97,6 +106,18 @@ pub(crate) enum TFuncKind {
     Delegation { sig: String, fwd: String, has_return: bool },
 }
 
+/// c109 Phase 17: how a `-> view T` return wraps its value, resolved at lowering from
+/// the AST node shape (`emit_view_return`, Source/Codegen/Statement.rs):
+///  - `Addr` — prefix `&` (an owned place whose address is taken: a non-deref ident, a
+///    const, or a field read `&(<place>)`);
+///  - `Bare` — emit the value as-is (an already-borrowed ident reads `name`, the deref'd
+///    place stripped at lowering, OR a non-ident/field expr that `emit_view_return` passes
+///    straight to `emit_expr`).
+pub(crate) enum ViewWrap {
+    Addr,
+    Bare,
+}
+
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub(crate) enum TStmt {
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
@@ -124,6 +145,12 @@ pub(crate) enum TStmt {
         value: TExpr,
     },
     Return(Option<TExpr>),
+    /// c109 Phase 17: a `return <e>` from a `-> view T` function (a borrow). Reproduces
+    /// `emit_view_return` (Source/Codegen/Statement.rs) byte-for-byte: the returned value
+    /// is the lowered expression `value`, wrapped per `wrap` (resolved at lowering from the
+    /// AST node shape) — `&value` for a place that needs its address taken, the bare deref'd
+    /// place for an already-borrowed ident, or `value` unwrapped. `emit` reads `wrap` only.
+    ViewReturn { value: TExpr, wrap: ViewWrap },
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
@@ -309,6 +336,10 @@ pub(crate) enum TExprKind {
     StructLit {
         rust_type: String,
         fields: Vec<(String, TExpr)>,
+        /// c109 Phase 17: an extra raw field line appended verbatim after the user fields
+        /// (e.g. HttpRequest's injected `params: std::collections::BTreeMap::new()`).
+        /// `None` for a plain user struct.
+        extra: Option<String>,
     },
     /// c109 Phase 3: a struct field *read* `recv.field` in borrow position. The
     /// AST path never derefs/clones a plain field read (Rust reads the place;
@@ -892,19 +923,31 @@ pub(crate) struct TFnCoerce {
 /// subset does not lower — a comptime `const` (inlined at use) or a bare
 /// function-as-value ident. Those use sites need codegen the TIR omits in Phase 1.
 pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
-    // Signature shape: no generics, not an unsafe/pure-special function.
-    if !f.type_params.is_empty() || f.is_unsafe || f.is_pure {
+    // Not an unsafe/pure-special function.
+    if f.is_unsafe || f.is_pure {
         return false;
+    }
+    // c109 Phase 17: GENERIC free functions are covered when every type parameter is a
+    // plain `<T>` / bounded `<T: Trait>` form (the clause renders via `render_generics`)
+    // and the body uses only type-var values by-value (returned/passed/stored). A generic
+    // STRUCT instantiation/method (`make_pair`/`push` — turbofish struct lits, `[T]`-field
+    // builtins) is deferred: exclude any function whose param/return mentions a generic
+    // struct type or whose body constructs one. The type-var param/return types are
+    // admitted by `is_subset_param_ty` (`is_type_var_name`); a generic struct `Apply` type
+    // is NOT covered (stays excluded), so such a function exits at the param/return check.
+    if f.type_params.is_empty() {
+        // Non-generic: no type-var should appear (defensive — sema wouldn't allow it).
     }
     // A method always has a `self` first parameter; the subset is top-level
     // functions only. (Top-level funcs never have `self`, but check anyway.)
     if f.params.iter().any(|p| p.name == Syntax::KW_SELF) {
         return false;
     }
-    // `is_view_return` returns a borrow — outside the subset.
-    if f.is_view_return {
-        return false;
-    }
+    // c109 Phase 17: a `-> view T` function returns a borrow. The body's returns lower
+    // via `lower_view_return` (`TStmt::ViewReturn`), reproducing `emit_view_return`
+    // byte-for-byte. The returned value is an in-subset `Ident`/`Field` (sema's E2301/
+    // E2304 reject index/slice and a non-owning local, so only those shapes reach codegen);
+    // `stmt_in_subset` validates every return is in-subset. No special exclusion needed.
     // Params must be scalars, String, or a covered struct type, with no defaults.
     for p in &f.params {
         if p.default.is_some() || !is_subset_param_ty(&p.ty, cx) {
@@ -943,10 +986,9 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     if !f.type_params.is_empty() || f.is_unsafe || f.is_pure {
         return false;
     }
-    // A `view`-returning method returns a borrow whose lowering is subtle — defer.
-    if f.is_view_return {
-        return false;
-    }
+    // c109 Phase 17: a `view`-returning method returns a borrow, lowered via
+    // `lower_view_return` (`TStmt::ViewReturn`) — covered (the body's returns are
+    // validated in-subset below, and `emit_view_return` is reproduced byte-for-byte).
     // The owning type must be a covered struct or enum (the receiver place and
     // every `self.field` read then emit exactly as `emit_method` produces them).
     let owner_ty = Type::Named(type_name.to_string());
@@ -1088,11 +1130,58 @@ fn stmt_assigns_self(s: &Stmt) -> bool {
 fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
+        || is_type_var_param_ty(ty)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
         || is_covered_fallible_ty(ty, cx)
         || is_covered_fn_ty(ty, cx)
+        || is_covered_foreign_value_ty(ty, cx)
+}
+
+/// c109 Phase 17: a bare type-PARAMETER type (`T` in a generic `fn id<T>(x: T)`). A
+/// single-uppercase `Type::Named` reads as a type var (`Generics::is_type_var_name`),
+/// rendered by `cx.rust_type`/`rust_param_type` as the bare letter (by-value, no `&`).
+/// Admitting it lets a generic free function whose params/return are type-vars (or covered
+/// concrete types) route through the TIR. A generic STRUCT type (`Pair<T>`, `Type::Apply`)
+/// is NOT admitted here — that surface (turbofish construction, `[T]`-field builtins) is
+/// deferred, so such a function exits the gate at the param/return type check.
+fn is_type_var_param_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Named(n) if crate::Generics::is_type_var_name(n))
+}
+
+/// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
+/// These all render through `cx.rust_type` already (a prelude handle/core struct → its
+/// `Jet…`/`jet_std::…` Rust name), so passing/binding/returning one is byte-identical to
+/// the AST path with no new emit. Only the constructable PRELUDE STRUCTS
+/// (HttpRequest/HttpResponse — `net_handle_rust_type` + a struct-literal form) and the
+/// CORE structs (ProcessResult/Stopwatch/Json/…) are admitted as value types here; a
+/// foreign *imported user* struct/enum needs cross-module `import_ns` construction (a
+/// Phase-14 surface) and stays excluded. A METHOD on any of these is still out of subset
+/// (handle/prelude methods → Phase 13's residue), so a function that *calls* a method on
+/// one is excluded by that call — covering the value type never reaches an uncovered
+/// method form.
+fn is_covered_foreign_value_ty(ty: &Type, _cx: &Cx) -> bool {
+    let Type::Named(name) = ty else {
+        return false;
+    };
+    // A prelude struct constructable via a struct literal, or a core/prelude struct that
+    // renders to its own Rust name. (FileReader/TcpStream/Arena/… are opaque handles — no
+    // literal form — but are valid value types; admit the constructable + core ones, plus
+    // the opaque handles, all of which `cx.rust_type` renders.)
+    is_prelude_struct_name(name)
+        || core_rust_type_name(name).is_some()
+        || file_handle_rust_type(name).is_some()
+        || net_handle_rust_type(name).is_some()
+        || alloc_handle_rust_type(name).is_some()
+}
+
+/// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the
+/// HTTP request/response types (`net_handle_rust_type` + the `is_prelude_struct` branch in
+/// `emit_struct_lit`). These get a Rust head `<root>Jet…` with PLAIN (unmangled) fields,
+/// and HttpRequest additionally an injected `params: BTreeMap::new()` field.
+fn is_prelude_struct_name(name: &str) -> bool {
+    matches!(name, "HttpRequest" | "HttpResponse")
 }
 
 /// c109 Phase 13: a `fn(…) -> …` parameter/return type the subset lowers. The fn-type
@@ -1172,6 +1261,10 @@ fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
 fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
+        // c109 Phase 17: a type-variable element (`[T]` in a generic fn). A type var only
+        // appears where a type param is in scope (sema guarantees), and renders by value
+        // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.
+        || is_type_var_param_ty(ty)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
@@ -1911,13 +2004,18 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             if as_trait.is_some() || import_ns.is_some() {
                 return false;
             }
-            // The named type must be a covered user struct (this also rejects the
-            // prelude structs like HttpRequest, whose fields are spelled plainly).
-            if !is_covered_struct_ty(&Type::Named(type_name.clone()), cx) {
-                return false;
-            }
             // Generic struct instantiation is out (the subset has no generics).
             if !type_args.is_empty() {
+                return false;
+            }
+            // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) — the
+            // `is_prelude_struct` branch of `emit_struct_lit` (a `<root>Jet…` head, PLAIN
+            // field names, and an auto `params: BTreeMap::new()` for HttpRequest).
+            // Reproduced in `lower_expr`'s StructLit arm. Otherwise the named type must be a
+            // covered user struct (`user_<name>` head, mangled fields).
+            if !is_prelude_struct_name(type_name)
+                && !is_covered_struct_ty(&Type::Named(type_name.clone()), cx)
+            {
                 return false;
             }
             fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals))
@@ -2823,6 +2921,13 @@ struct LowerEnv {
     /// across leaky branches via `clone_env`, and DEEP-COPIED via `fork_panic` at the
     /// non-leaky boundaries. It is updated in lock-step with `locals` through `bind`.
     panic_locals: Rc<RefCell<HashMap<String, (String, Option<Type>)>>>,
+    /// c109 Phase 17: the enclosing function returns `-> view T` (a borrow). When set,
+    /// a `return <e>` lowers via the view-return shape (`emit_view_return`): an `Ident`
+    /// becomes `&name`/`name` (deref) / `&<const>`, a field read `&(<place>)`, anything
+    /// else a plain expr — resolved at lowering into a `TStmt::ViewReturn`. The AST path
+    /// reads this off `view_return` threaded through `emit_stmts`; the TIR carries it on
+    /// the env so the `Return` lowering reproduces it byte-for-byte.
+    view_return: bool,
 }
 
 impl LowerEnv {
@@ -2832,6 +2937,7 @@ impl LowerEnv {
             locals: HashMap::new(),
             fn_name,
             panic_locals: Rc::new(RefCell::new(HashMap::new())),
+            view_return: false,
         }
     }
     /// Bind `name` to its resolved Rust place + type, updating BOTH `locals` (used for
@@ -2873,14 +2979,78 @@ impl LowerEnv {
     }
 }
 
+/// c109 Phase 17: lower a `return <e>` from a `-> view T` function, reproducing
+/// `emit_view_return` (Source/Codegen/Statement.rs) byte-for-byte. The view-return
+/// subset only admits an `Ident` (a parameter/const borrowed back) or a `Field` read
+/// (`field.name` — a borrow into a field of an owned root); sema's E2301/E2304 reject
+/// index/slice and a non-owning local, so those never reach here.
+///  - an `Ident` resolving to a deref'd slot (`(*name)`) returns the BARE borrow `name`
+///    (the deref stripped) — `ViewWrap::Bare` over a `Local(rust_name)`;
+///  - an `Ident` resolving to a non-deref slot returns `&name` — `ViewWrap::Addr`;
+///  - an `Ident` that is a const returns `&<const>` — `ViewWrap::Addr` over the inlined
+///    const value (the same `Local` path the AST takes via `cx.consts`);
+///  - an `Ident` not in scope returns `place_of(name)` with no `&` — `ViewWrap::Bare`;
+///  - a `Field` read returns `&(<place>)` — `ViewWrap::Addr` over the lowered field;
+///  - anything else passes straight to `emit_expr` — `ViewWrap::Bare`.
+fn lower_view_return(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
+    match e {
+        Expr::Ident(name, _) => {
+            // A comptime const inlines at the use site (the AST reads `cx.consts`); take
+            // its address. Lower as a normal expr (which inlines the const) wrapped in `&`.
+            if cx.consts.contains_key(name) {
+                return TStmt::ViewReturn {
+                    value: lower_expr(e, cx, env),
+                    wrap: ViewWrap::Addr,
+                };
+            }
+            match env.locals.get(name) {
+                Some((place, ty)) if place.starts_with("(*") && place.ends_with(')') => {
+                    // Deref'd (by-reference) slot: return the bare borrow `name`.
+                    let bare = place[2..place.len() - 1].to_string();
+                    TStmt::ViewReturn {
+                        value: TExpr {
+                            ty: ty.clone().unwrap_or(Type::Int),
+                            kind: TExprKind::Local(bare),
+                        },
+                        wrap: ViewWrap::Bare,
+                    }
+                }
+                Some(_) => TStmt::ViewReturn {
+                    value: lower_expr(e, cx, env),
+                    wrap: ViewWrap::Addr,
+                },
+                // Not in env: `place_of` returns the mangled name with no `&` (Bare).
+                None => TStmt::ViewReturn {
+                    value: lower_expr(e, cx, env),
+                    wrap: ViewWrap::Bare,
+                },
+            }
+        }
+        Expr::Field(..) => TStmt::ViewReturn {
+            value: lower_expr(e, cx, env),
+            wrap: ViewWrap::Addr,
+        },
+        _ => TStmt::ViewReturn {
+            value: lower_expr(e, cx, env),
+            wrap: ViewWrap::Bare,
+        },
+    }
+}
+
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.view_return = f.is_view_return;
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
-        let place = param_place(&rust_name, p);
+        // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
+        // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
+        // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
+        // `is_type_param` param. A param typed `Stack<T>` is NOT a type-var param — it keeps
+        // its source convention (`Read` → `&user_Stack<T>`, deref'd place `(*user_s)`).
+        let place = param_place_generic(&rust_name, p, &f.type_params);
         env.bind(&p.name, place, Some(p.ty.clone()));
         params.push((rust_name, p.ty.clone(), p.convention));
     }
@@ -2889,9 +3059,38 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         name: f.name.clone(),
         params,
         ret: f.return_type.clone(),
+        is_view: f.is_view_return,
+        generics: render_generics(&f.type_params),
         is_main: f.name == "main",
         body,
         kind: TFuncKind::TopLevel,
+    }
+}
+
+/// c109 Phase 17: render the Rust generic clause exactly as `emit_func` does — every type
+/// param carries an extra `Clone` bound (`rust_extra_clone_bounds`), so `<T>` → `<T: Clone>`
+/// and `<T: Comparable>` → `<T: PartialOrd + Clone>`. Empty for a non-generic function.
+fn render_generics(type_params: &[crate::AST::TypeParam]) -> String {
+    if type_params.is_empty() {
+        return String::new();
+    }
+    let extra = crate::Generics::rust_extra_clone_bounds(type_params);
+    crate::Generics::rust_type_param_list(type_params, &extra)
+}
+
+/// c109 Phase 17: `param_place` for a (possibly generic) free function. A param whose type
+/// is a bare type-parameter name (`Type::Named(T)` where `T` is one of `type_params`) is
+/// forced to `Move` for the deref decision (it is by-value), mirroring `emit_func`'s
+/// `is_type_param` branch; any other param uses `param_place`'s convention-based deref.
+fn param_place_generic(rust_name: &str, p: &Param, type_params: &[crate::AST::TypeParam]) -> String {
+    let is_type_param = type_params
+        .iter()
+        .any(|tp| matches!(&p.ty, Type::Named(n) if n == &tp.name));
+    if is_type_param {
+        // Forced `Move` → no deref (by-value), exactly `emit_func`.
+        rust_name.to_string()
+    } else {
+        param_place(rust_name, p)
     }
 }
 
@@ -2907,6 +3106,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.view_return = f.is_view_return;
     let mut params = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
     let mut is_static = true;
@@ -2934,6 +3134,10 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         name: f.name.clone(),
         params,
         ret: f.return_type.as_ref().map(|t| resolve_self_ty(t, type_name)),
+        is_view: f.is_view_return,
+        // A method's generic params live on the enclosing `impl<T> user_<T>` block (the
+        // caller opened it); `emit_method` renders no per-method clause.
+        generics: String::new(),
         is_main: false,
         body,
         kind,
@@ -2953,6 +3157,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
 /// The `TraitMethod` kind drives a bare name, no `pub`, always-`&self` signature.
 pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
+    env.view_return = f.is_view_return;
     let mut params = Vec::new();
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
@@ -2976,6 +3181,8 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         name: f.name.clone(),
         params,
         ret: f.return_type.as_ref().map(|t| resolve_self_ty(t, type_name)),
+        is_view: f.is_view_return,
+        generics: String::new(),
         is_main: false,
         body,
         kind: TFuncKind::TraitMethod {
@@ -3046,6 +3253,9 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         name: f.name.clone(),
         params: Vec::new(),
         ret: f.return_type.clone(),
+        // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
+        is_view: f.is_view_return,
+        generics: String::new(),
         is_main: false,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
@@ -3165,6 +3375,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 }
             }
         },
+        Stmt::Return(Some(e), _) if env.view_return => lower_view_return(e, cx, env),
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_expr(e, cx, env))),
         Stmt::Return(None, _) => TStmt::Return(None),
         Stmt::Expr(e) => TStmt::ExprStmt(lower_expr(e, cx, env)),
@@ -3745,6 +3956,7 @@ fn clone_env(env: &LowerEnv) -> LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::clone(&env.panic_locals),
+        view_return: env.view_return,
     }
 }
 
@@ -3758,6 +3970,7 @@ fn fork_panic(env: &LowerEnv) -> LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
         panic_locals: Rc::new(RefCell::new(env.panic_locals.borrow().clone())),
+        view_return: env.view_return,
     }
 }
 
@@ -4165,6 +4378,29 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::StructLit {
             type_name, fields, ..
         } => {
+            // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) uses the
+            // `is_prelude_struct` branch of `emit_struct_lit`: a `<root>Jet…` Rust head,
+            // PLAIN (unmangled) field names, and — for HttpRequest — an injected
+            // `params: std::collections::BTreeMap::new()` field. Reproduce it byte-for-byte.
+            if let Some(rust) = net_handle_rust_type(type_name) {
+                let mut tfields: Vec<(String, TExpr)> = fields
+                    .iter()
+                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env)))
+                    .collect();
+                let extra = if type_name == "HttpRequest" {
+                    Some("params: std::collections::BTreeMap::new()".to_string())
+                } else {
+                    None
+                };
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}{}", cx.root_prefix, rust),
+                        fields: tfields.drain(..).collect(),
+                        extra,
+                    },
+                };
+            }
             let tfields = fields
                 .iter()
                 .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
@@ -4174,6 +4410,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::StructLit {
                     rust_type: format!("user_{}", type_name),
                     fields: tfields,
+                    extra: None,
                 },
             }
         }
@@ -5467,7 +5704,7 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
 /// Byte-identical to `emit_func`'s output.
 fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     let ret_clause = match &tir.ret {
-        Some(t) => format!(" -> {}", rust_return_type(cx, t, false)),
+        Some(t) => format!(" -> {}", rust_return_type(cx, t, tir.is_view)),
         None => String::new(),
     };
     let params = tir
@@ -5483,8 +5720,9 @@ fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{vis}fn {name}({params}){ret} {{\n",
+        "{vis}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
+        gen = tir.generics,
         params = params,
         ret = ret_clause,
     ));
@@ -5501,7 +5739,7 @@ fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, ou
     let indent = 1;
     let pad = "    ".repeat(indent);
     let ret_clause = match &tir.ret {
-        Some(t) => format!(" -> {}", rust_return_type(cx, t, false)),
+        Some(t) => format!(" -> {}", rust_return_type(cx, t, tir.is_view)),
         None => String::new(),
     };
     let mut params: Vec<String> = Vec::new();
@@ -5542,7 +5780,7 @@ fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, cx: &Cx, out: &mut String
         // `emit_trait_method` computes `ret = rust_return_type(...)` then, if non-empty,
         // ` -> ret`. A unit return yields the empty clause.
         Some(t) => {
-            let ret = rust_return_type(cx, t, false);
+            let ret = rust_return_type(cx, t, tir.is_view);
             if ret.is_empty() {
                 String::new()
             } else {
@@ -5623,6 +5861,14 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
         }
         TStmt::Return(None) => {
             out.push_str(&format!("{}return;\n", pad));
+        }
+        TStmt::ViewReturn { value, wrap } => {
+            let v = emit_tir_expr(value, cx);
+            let rendered = match wrap {
+                ViewWrap::Addr => format!("&{}", v),
+                ViewWrap::Bare => v,
+            };
+            out.push_str(&format!("{}return {};\n", pad, rendered));
         }
         TStmt::ExprStmt(e) => {
             out.push_str(&format!("{}{};\n", pad, emit_tir_expr(e, cx)));
@@ -6094,13 +6340,17 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 3: `user_S { f: v, … }`. The Rust head and mangled field
         // names were resolved at lowering; values format like any other node.
-        TExprKind::StructLit { rust_type, fields } => {
-            let parts = fields
+        TExprKind::StructLit { rust_type, fields, extra } => {
+            let mut parts = fields
                 .iter()
                 .map(|(field_rust, v)| format!("{}: {}", field_rust, emit_tir_expr(v, cx)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{} {{ {} }}", rust_type, parts)
+                .collect::<Vec<_>>();
+            // c109 Phase 17: a prelude struct's injected field (HttpRequest's `params`),
+            // appended verbatim after the user fields, exactly as `emit_struct_lit` does.
+            if let Some(extra) = extra {
+                parts.push(extra.clone());
+            }
+            format!("{} {{ {} }}", rust_type, parts.join(", "))
         }
         // c109 Phase 3: `(recv).field`. Mirrors the AST `Expr::Field` emit form
         // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
@@ -6723,8 +6973,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_generic_fn() {
-        assert!(!covers("fn id<T>(x: T) -> T {\n return x\n}\n", "id"));
+    fn covers_generic_fn() {
+        // c109 Phase 17: a generic free function whose params/return are type vars is
+        // covered — the `<T: Clone>` clause renders at lowering; the body uses the
+        // type-var value by-value. (The `covers` helper is build_cx-only, so it sees
+        // `x: T` as a Read param; sema would require `take x: T`, but the gate shape is
+        // identical either way — a type-var param/return is in-subset.)
+        assert!(covers("fn id<T>(x: T) -> T {\n return x\n}\n", "id"));
+    }
+
+    #[test]
+    fn rejects_generic_struct_fn() {
+        // c109 Phase 17: a GENERIC STRUCT (`Pair<T>`) — its `Type::Apply` param/return
+        // type and the turbofish construction (`user_Pair::<T> { … }`) are deferred, so a
+        // function that constructs/returns one stays on the AST path.
+        let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) -> Pair<T> {\n return Pair<T> {first: a, second: b}\n}\n";
+        assert!(!covers(src, "mk"));
     }
 
     #[test]
