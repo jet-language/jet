@@ -69,6 +69,13 @@ pub(crate) struct TFunc {
     /// Emitted verbatim after the function name; empty for a non-generic function.
     pub(crate) generics: String,
     pub(crate) is_main: bool,
+    /// c109 Phase 18: an `#Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
+    /// (the `unsafe ` keyword prefixes the signature), so the body may use gated pointer
+    /// ops directly — calling it is already gated to an `#Unsafe` block in sema (E3103).
+    /// I1: this is true ONLY when the source function was `#Unsafe fn`; no `unsafe` is
+    /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
+    /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
+    pub(crate) is_unsafe: bool,
     pub(crate) body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
@@ -277,6 +284,14 @@ pub(crate) enum TStmt {
         arms: Vec<(String, Vec<TStmt>)>,
         else_body: Option<Vec<TStmt>>,
     },
+    /// c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`, S58,
+    /// E2-M13/D-LL1). The AST `emit_stmts` lowers it straight to a Rust `unsafe { … }`
+    /// block; the `#Audit("…")` annotation (the `audit` field) emits NOTHING (codegen is
+    /// dumb — sema validated the audit). I1: this TIR node exists ONLY for a source
+    /// `#Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
+    /// The body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the
+    /// body is lowered on the SAME `LowerEnv` (not a cloned scope).
+    Unsafe(Vec<TStmt>),
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -348,6 +363,16 @@ pub(crate) enum TExprKind {
     Field {
         recv: Box<TExpr>,
         field_rust: String,
+    },
+    /// c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58, E2-M13).
+    /// Builds a raw `*mut T` from an integer address. The cast itself is safe in Rust
+    /// (only *using* the pointer needs `unsafe`, supplied by the surrounding `#Unsafe`
+    /// region/fn), so this introduces no `unsafe` by itself. `elem_rust` is the already
+    /// resolved Rust element type (`cx.rust_type(elem)`); `addr` is the address expr.
+    /// Reproduces `emit_expr`'s `PtrFromAddr` arm: `(({addr}) as usize as *mut {elem})`.
+    PtrFromAddr {
+        elem_rust: String,
+        addr: Box<TExpr>,
     },
     /// c109 Phase 4: an enum literal `Enum.Variant`, `Variant(args)`, or a
     /// named-payload `Variant { f: v, … }`. The Rust head (`user_Enum::user_Variant`)
@@ -923,8 +948,11 @@ pub(crate) struct TFnCoerce {
 /// subset does not lower — a comptime `const` (inlined at use) or a bare
 /// function-as-value ident. Those use sites need codegen the TIR omits in Phase 1.
 pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
-    // Not an unsafe/pure-special function.
-    if f.is_unsafe || f.is_pure {
+    // c109 Phase 18: an `#Unsafe fn` (S58) IS covered — it lowers to a Rust `unsafe fn`
+    // (the `is_unsafe` flag drives the signature prefix), and its gated body ops are
+    // covered below. (A `#Pure` function stays on the AST path — purity has no TIR
+    // representation yet.)
+    if f.is_pure {
         return false;
     }
     // c109 Phase 17: GENERIC free functions are covered when every type parameter is a
@@ -982,8 +1010,9 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
 /// **exclude on any doubt**: a false negative just keeps the method on the AST
 /// path, a false positive risks a silent miscompile (a wrong `self` receiver).
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-    // Signature shape: no generics, not unsafe/pure.
-    if !f.type_params.is_empty() || f.is_unsafe || f.is_pure {
+    // Signature shape: no generics, not pure. c109 Phase 18: an `#Unsafe fn` method IS
+    // covered (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix).
+    if !f.type_params.is_empty() || f.is_pure {
         return false;
     }
     // c109 Phase 17: a `view`-returning method returns a borrow, lowered via
@@ -1042,8 +1071,10 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
 ///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
 ///    static trait method, rare; exclude it — the receiver form is fixed at `&self`).
 pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-    // Signature shape: no generics, not unsafe/pure, not view-returning.
-    if !f.type_params.is_empty() || f.is_unsafe || f.is_pure || f.is_view_return {
+    // Signature shape: no generics, not pure, not view-returning. c109 Phase 18: an
+    // `#Unsafe fn` trait method IS covered (`TFuncKind::TraitMethod.is_unsafe` already
+    // drives the `unsafe ` prefix in `emit_tir_trait_method`).
+    if !f.type_params.is_empty() || f.is_pure || f.is_view_return {
         return false;
     }
     // The owning type must be a covered struct or enum.
@@ -1556,7 +1587,14 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
             };
             chosen.iter().all(|s| stmt_in_subset(s, cx, locals))
         }
-        // unsafe, region, caps, context — all still out.
+        // c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`). The AST
+        // `emit_stmts` lowers it to `unsafe { … }` and emits the body on the SAME `&mut
+        // env` (so the body's `let`s LEAK into the outer scope). The gate checks the body
+        // on the same `locals` (matching that leak). The `#Audit("…")` annotation emits
+        // nothing. I1: this is the source gate — the only place a Rust `unsafe` block is
+        // produced — so admitting it here cannot introduce an ungated `unsafe`.
+        Stmt::Unsafe { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // region, caps, context — all still out.
         _ => false,
     }
 }
@@ -2160,6 +2198,12 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     .iter()
                     .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
         }
+        // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58). The
+        // address expr must be in-subset. The cast itself is safe Rust (no `unsafe`); it
+        // is only constructible inside `use core.mem` + an `#Unsafe` region (sema
+        // E3101/E3102), so it never appears in a non-unsafe context. `elem` is a total
+        // type on the node — emit needs no inference.
+        Expr::PtrFromAddr { addr, .. } => expr_in_subset(addr, cx, locals),
         // Everything else (tuples, deref, …) is out.
         _ => false,
     }
@@ -2775,6 +2819,16 @@ fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
 /// returned handle is itself out of subset → excludes the enclosing function.
 fn core_call_covered(module: &str, method: &str) -> bool {
+    // c109 Phase 18: the low-level `core.mem` pointer ops (`address_of`/`volatile_read`,
+    // S58). NOT in `core_fixed_sig` (their types come from bespoke sema logic), but both
+    // are deterministic and reproducible from total facts: `address_of(x) -> Int` is an
+    // inert address cast (no `unsafe`); `volatile_read(p) -> ptr_elem(p)` reads through a
+    // typed pointer (the `read_volatile` is valid because it is only reachable inside an
+    // `#Unsafe` region/fn — sema E3101 — already lowered to a Rust `unsafe` context). The
+    // return type is resolved at lowering (see `lower_method_call`), so it is total.
+    if module == "core.mem" && matches!(method, "address_of" | "volatile_read") {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
@@ -3062,6 +3116,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         is_view: f.is_view_return,
         generics: render_generics(&f.type_params),
         is_main: f.name == "main",
+        is_unsafe: f.is_unsafe,
         body,
         kind: TFuncKind::TopLevel,
     }
@@ -3139,6 +3194,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         // caller opened it); `emit_method` renders no per-method clause.
         generics: String::new(),
         is_main: false,
+        is_unsafe: f.is_unsafe,
         body,
         kind,
     }
@@ -3184,6 +3240,10 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         is_view: f.is_view_return,
         generics: String::new(),
         is_main: false,
+        // The trait-method `unsafe` prefix rides on `TFuncKind::TraitMethod.is_unsafe`
+        // (the dedicated trait-method emit reads it there); the top-level flag is unused
+        // for this kind, but keep it consistent.
+        is_unsafe: f.is_unsafe,
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -3257,6 +3317,8 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_view: f.is_view_return,
         generics: String::new(),
         is_main: false,
+        // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
+        is_unsafe: false,
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,
@@ -3485,6 +3547,14 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
             TStmt::Inline(lower_stmts(chosen, cx, env))
         }
+        // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). The AST
+        // `emit_stmts` emits `unsafe { … }` and lowers the body on the SAME `&mut env`
+        // (the body's `let`s leak into the outer scope). Reproduce: lower the body on the
+        // SAME `env` (so bindings leak) and wrap in `TStmt::Unsafe`. The `#Audit("…")`
+        // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
+        // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
+        // Rust `unsafe` block.
+        Stmt::Unsafe { body, .. } => TStmt::Unsafe(lower_stmts(body, cx, env)),
         _ => unreachable!("statement not in TIR subset"),
     }
 }
@@ -4757,9 +4827,24 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::FanOut { calls },
             }
         }
+        // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (S58). The result type is
+        // `Ptr<elem>` (`ptr_type`), total from the node's `elem`. The element's Rust type
+        // is resolved here (`cx.rust_type`) so emit makes no decision (I3). The cast is
+        // safe Rust (no `unsafe`).
+        Expr::PtrFromAddr { elem, addr, .. } => {
+            let taddr = lower_expr(addr, cx, env);
+            TExpr {
+                ty: crate::Sema::ptr_type(elem.clone()),
+                kind: TExprKind::PtrFromAddr {
+                    elem_rust: cx.rust_type(elem),
+                    addr: Box::new(taddr),
+                },
+            }
+        }
         _ => unreachable!("expression not in TIR subset"),
     }
 }
+
 
 /// Replay codegen's `operand_is_integer` (Codegen/Expression.rs) on an AST
 /// operand, using the lowering env for identifier types. The result MUST match
@@ -4920,9 +5005,28 @@ fn lower_method_call(
                     if let Some(t) = lower_core_closure_call(&module, method, args, cx, env) {
                         return t;
                     }
-                    let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                    let targs: Vec<TExpr> =
+                        args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                    // c109 Phase 18: the `core.mem` pointer ops carry a non-fixed return
+                    // type. `address_of` is always `Int`; `volatile_read(p)` reads through
+                    // the typed pointer, so its result is `ptr_elem(p.ty)` — the `T` of the
+                    // `Ptr<T>` arg, recovered from the LOWERED arg's total `ty` (no emit-time
+                    // inference, I3). A defensive `Unit` fallback (an ill-typed arg sema
+                    // would already have rejected) keeps the fact total.
+                    let ty = if module == "core.mem" {
+                        match method {
+                            "address_of" => Type::Int,
+                            "volatile_read" => targs
+                                .first()
+                                .and_then(|a| crate::Sema::ptr_elem(&a.ty))
+                                .unwrap_or_else(unit_type),
+                            _ => core_call_return_ty(&module, method),
+                        }
+                    } else {
+                        core_call_return_ty(&module, method)
+                    };
                     return TExpr {
-                        ty: core_call_return_ty(&module, method),
+                        ty,
                         kind: TExprKind::CoreCall {
                             module,
                             method: method.to_string(),
@@ -5716,11 +5820,15 @@ fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         .collect::<Vec<_>>()
         .join(", ");
     let vis = if tir.is_main { "" } else { "pub " };
+    // c109 Phase 18: an `#Unsafe fn` lowers to `unsafe fn` — the prefix sits right after
+    // `vis`, exactly as `emit_func` (`{vis}{unsafe_kw}fn …`). I1: emitted ONLY when the
+    // source was `#Unsafe fn` (`tir.is_unsafe`).
+    let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
     // E2-M12 D-OBS1: track the current function name for rich panic reports —
     // matches `emit_func` so panic output is identical.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{vis}fn {name}{gen}({params}){ret} {{\n",
+        "{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
         gen = tir.generics,
         params = params,
@@ -5756,10 +5864,14 @@ fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, ou
     for (rust_name, ty, conv) in &tir.params {
         params.push(format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)));
     }
+    // c109 Phase 18: an `#Unsafe fn` inherent method lowers to `pub unsafe fn` — the
+    // prefix sits between `pub ` and `fn`, exactly as `emit_method` (`pub {unsafe_kw}fn`).
+    // I1: emitted ONLY for a source `#Unsafe fn` (`tir.is_unsafe`).
+    let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{pad}pub fn {name}({params}){ret} {{\n",
+        "{pad}pub {unsafe_kw}fn {name}({params}){ret} {{\n",
         name = mangle(&tir.name),
         params = params.join(", "),
         ret = ret_clause,
@@ -6102,6 +6214,14 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
         TStmt::Inline(stmts) => {
             emit_tir_stmts(stmts, cx, out, indent);
         }
+        // c109 Phase 18: an audited `#Unsafe { … }` region — `unsafe { … }`, byte-for-byte
+        // `emit_stmts`'s `Stmt::Unsafe` arm (the `#Audit` annotation emits nothing). I1:
+        // emitted ONLY for a source `#Unsafe` gate.
+        TStmt::Unsafe(body) => {
+            out.push_str(&format!("{}unsafe {{\n", pad));
+            emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // c109 Phase 15: a mixed comparison/Bool switch — the general `emit_mixed_switch`
         // (Statement.rs) `if/else if … else` chain inside a block that binds
         // `_jet_switch_subject = &(subject)` (emitted for parity even when unused).
@@ -6357,6 +6477,12 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // MethodCall in sema and excluded from the subset).
         TExprKind::Field { recv, field_rust } => {
             format!("({}).{}", emit_tir_expr(recv, cx), field_rust)
+        }
+        // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` — `(({addr}) as usize as *mut {T})`,
+        // byte-for-byte `emit_expr`'s `PtrFromAddr` arm. The cast is safe Rust (no
+        // `unsafe`); `elem_rust` was resolved at lowering.
+        TExprKind::PtrFromAddr { elem_rust, addr } => {
+            format!("(({}) as usize as *mut {})", emit_tir_expr(addr, cx), elem_rust)
         }
         // c109 Phase 4/16: an enum literal. Prefix + payload were resolved at lowering;
         // emit applies each arg's resolved `clone`/`boxed` wrappers (mirroring
@@ -6694,6 +6820,13 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
         format!("{}::{}", crate_name, name)
     };
     match (module, method) {
+        // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
+        // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
+        // `volatile_read` reads through a `Ptr<T>` — `read_volatile` is valid because the
+        // call only reaches codegen inside an `#Unsafe` region/fn (sema E3101), already
+        // lowered to a Rust `unsafe` context.
+        ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
+        ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
         ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
         ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
         ("core.fs", "write") => format!(
@@ -6989,6 +7122,45 @@ mod tests {
         // function that constructs/returns one stays on the AST path.
         let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) -> Pair<T> {\n return Pair<T> {first: a, second: b}\n}\n";
         assert!(!covers(src, "mk"));
+    }
+
+    /// c109 Phase 18: like `covers`, but injects the `mem` → `core.mem` import (the
+    /// `build_cx`-only path leaves `core_imports` empty — it is populated from the bundle
+    /// at real codegen; mirror that here so the core-`mem` gate paths are exercised). The
+    /// end-to-end build+run + the full-suite byte-parity diff are the authoritative proof
+    /// (see `tests/tir.rs::unsafe_fn_block_and_ptr_ops`); this exercises the gate shape.
+    fn covers_with_mem(src: &str, fn_name: &str) -> bool {
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        let mut cx = build_cx(&prog, src, "test.jet");
+        cx.core_imports.insert("mem".to_string(), "core.mem".to_string());
+        let f = prog
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Func(f) if f.name == fn_name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        tir_covers(f, &cx)
+    }
+
+    #[test]
+    fn covers_unsafe_fn_with_ptr_ops() {
+        // c109 Phase 18: a `#Unsafe fn` (S58) is covered — it lowers to `unsafe fn`, and
+        // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
+        let src = "use core.mem\n#Unsafe\nfn read_reg(addr: Int) -> Int {\n p @= mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+        assert!(covers_with_mem(src, "read_reg"));
+    }
+
+    #[test]
+    fn covers_unsafe_block_and_address_of() {
+        // c109 Phase 18: a `#Unsafe { … }` audited region + `mem.address_of` (the inert
+        // address cast, legal outside unsafe) are covered. The `#Audit("…")` annotation
+        // emits nothing.
+        let src = "use core.mem\nfn main() {\n cell: Int @= 7\n addr @= mem.address_of(cell)\n #Audit(\"live\")\n #Unsafe {\n p @= mem.Ptr<Int>.from_addr(addr)\n seen @= mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        assert!(covers_with_mem(src, "main"));
     }
 
     #[test]

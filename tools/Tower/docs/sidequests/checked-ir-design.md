@@ -1109,17 +1109,97 @@ everything, the AST codegen path is deleted (final phase).
   tests/tir.rs adds `generic_free_fns`/`view_return_fn`/`prelude_struct_construction`; the TIR
   unit tests flip `rejects_generic_fn` → `covers_generic_fn` and add `rejects_generic_struct_fn`.
 
+## Refinements learned in Phase 18 (@unsafe / #Unsafe / core.mem)
+
+- **The `#Unsafe fn` keyword is the ONLY signature change — a function-level `unsafe`,
+  NOT a body wrap.** `emit_func`/`emit_method`/`emit_trait_method` prepend `unsafe ` to
+  the signature (`{vis}{unsafe_kw}fn …` / `pub {unsafe_kw}fn …` / `{pad}{unsafe_kw}fn …`)
+  when `f.is_unsafe`; the body is emitted unchanged (the whole fn being `unsafe` is what
+  lets its gated ops compile). So covering it was a `TFunc.is_unsafe` field (top-level +
+  inherent method) — `TFuncKind::TraitMethod` already carried its own `is_unsafe` since
+  Phase 12 — plus LIFTING the three gates' `f.is_unsafe` exclusion. `#Pure` stays excluded
+  (no TIR representation). I1: the `unsafe ` prefix is emitted iff the source was
+  `#Unsafe fn` — 1:1 with the source gate.
+- **The `#Unsafe { … }` block is the ONLY producer of a Rust `unsafe { … }`, and its
+  `#Audit("…")` annotation emits NOTHING.** `emit_stmts`'s `Stmt::Unsafe` arm is a dumb
+  `unsafe { <body> }` — the `audit` field (the `#Audit("…")` reason) is dropped by codegen
+  (sema validated it). Reproduced as `TStmt::Unsafe(Vec<TStmt>)`; emit is byte-for-byte
+  `unsafe {\n … \n}`. The body's `let`s LEAK into the outer scope (the AST shares
+  `&mut env`), so the gate checks + the lowering walk the body on the SAME `locals`/`env`
+  (NOT a cloned scope) — like comptime-if/region (Phase 15). I1: this TIR node exists ONLY
+  for a source `#Unsafe` region, so an `unsafe` block is never produced without its gate.
+- **The `core.mem` POINTER ops are total despite NOT being in `core_fixed_sig`.**
+  `address_of`/`volatile_read` route through the Phase-10 core-call shape (a `MethodCall`,
+  `recv_type == None`, receiver `mem ∈ core_imports`), but Phase 10 gated on
+  `core_fixed_sig(...).is_some()` — which excludes them (their types come from bespoke
+  `infer_core_call` logic). Both ARE deterministic and resolved at lowering: `address_of`
+  → `Int` (an inert `(&(x) as *const _ as usize as i64)` cast — no `unsafe`);
+  `volatile_read(p)` → `ptr_elem(p.ty)` (the `T` of the `Ptr<T>` arg, recovered from the
+  LOWERED arg's total `ty` — never `expr_jet_ty` in emit, I3) → `std::ptr::read_volatile(p)`
+  (valid because the call only reaches codegen inside an `#Unsafe` region/fn, sema E3101 →
+  already a Rust `unsafe` context). `core_call_covered` now admits the two `core.mem` ops
+  explicitly, with the return type special-cased in `lower_method_call` from the lowered
+  args. The emit arms reproduce `emit_core_call` byte-for-byte.
+- **`mem.Ptr<T>.from_addr(addr)` is a DISTINCT AST node (`Expr::PtrFromAddr`), not a
+  MethodCall.** It carries `elem: Type` on the node (total — the `<T>`), so the result
+  type is `Ptr<elem>` and the Rust element type is `cx.rust_type(elem)`, both resolved at
+  lowering (`TExprKind::PtrFromAddr { elem_rust, addr }`). Emit is byte-for-byte
+  `emit_expr`'s arm: `(({addr}) as usize as *mut {elem})`. The cast itself is SAFE Rust
+  (no `unsafe`) — only *using* the pointer (`volatile_read`) needs the surrounding gate —
+  so a function with only `from_addr`/`address_of` (no `#Unsafe`) emits zero `unsafe`. The
+  gate needed `expr_in_subset` + `lower_expr` arms (the gate/emit alone weren't enough — a
+  missing `lower_expr` arm hit the `unreachable!` for a gate-admitted node, the recurring
+  "wire all three: gate, lower, emit" lesson).
+- **An inferred `p @= mem.Ptr<Int>.from_addr(addr)` still emits a type annotation
+  (`let user_p: *mut i64 = …`)** — sema writes the resolved `Ptr<Int>` onto the binding's
+  `b.ty` even for `@=`, so `emit_let`/the TIR `Let` render `: *mut i64`. Reproduced
+  identically (the `ty_clause` reads `b.ty`), so parity holds.
+- **The ARENA allocators stay deferred (not the pointer tier).** `mem.Arena.new()` /
+  `.alloc` / `.reset` / `.free` and `#Context(allocator:)` are a separate, handle-shaped
+  surface (a producer not in `core_fixed_sig` + `recv_type == Some(<allocator>)` methods +
+  an `arena_view` binding the gate already excludes) — covering them is a clean follow-up,
+  NOT part of the `#Unsafe`/pointer slice. Their only `unsafe` is the vetted `jet_mem`
+  prelude (excluded from the I1 scan).
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass
+  on `emit_func`/`emit_method`/`emit_trait_method` + the delegation hook) across the
+  **entire example suite** — 118 emittable, 0 differ — incl. both `#Unsafe`-tier examples
+  (`examples/features/48_lowlevel.jet` + `examples/showcase/lowlevel.jet`: `#Unsafe fn`,
+  `#Unsafe { }`, `Ptr<Int>.from_addr`, `address_of`, `volatile_read`, and a call to an
+  `#Unsafe fn` from inside the block). The I1 self-check (grep the TIR-path generated Rust,
+  drop the `jet_mem` prelude, assert every `unsafe` is `unsafe {` or `unsafe fn`) passes:
+  the only `unsafe` forms are `pub unsafe fn user_read_reg/read_int` (← `#Unsafe fn`) and
+  `unsafe {` (← `#Unsafe { }`) — both trace 1:1 to a source gate; zero ungated `unsafe`.
+  Both examples run end-to-end (`1337`/`1337`; `low-level read: 42`). +4 example fns route
+  (`read_reg`/`main` in `48_lowlevel`, `read_int`/`main` in `showcase/lowlevel`). The
+  existing `tests/golden.rs` I1 guard (every example's user code is `unsafe`-free except
+  `48_lowlevel`, whose every `unsafe` must be gated) stays green on the TIR path.
+  tests/tir.rs adds `unsafe_fn_block_and_ptr_ops` (build+run) + `unsafe_tier_emit_is_byte_exact`
+  (byte-exact emit + I1 self-check); the TIR unit tests add `covers_unsafe_fn_with_ptr_ops`
+  / `covers_unsafe_block_and_address_of`.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 17 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
+After Phase 18 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
 reached for these constructs. Each entry: the construct, the AST emit function that
 owns it, and the total fact still missing to cover it.
 
-- **`@unsafe fn` trait methods / `@unsafe` blocks / `#Unsafe` regions / `core.mem`
-  ptr+alloc** — `emit_trait_method`/`emit_method`/`emit_func` + `emit_stmts`/`emit_expr`
-  unsafe-block lowering. Missing: TIR nodes for the audited `unsafe { … }` gate region
-  and the pointer/alloc ops, preserving the gate exactly (I1 — never emit `unsafe`
-  without a source `@unsafe`). Genuinely hard; deferred.
+- **`core.mem` arena/alloc + `mem.set_allocator` + `#Context(allocator:)`** (residue
+  after Phase 18) — `emit_method_call`'s `alloc`/`reset`/`free` arms + `emit_method_call`'s
+  `mem.Arena.new()`/`mem.Bump.new()`/… constructor + `Stmt::ContextBlock`. Phase 18
+  covered the `#Unsafe`/`#Unsafe fn` gate surface and the `core.mem` POINTER ops
+  (`Ptr<T>.from_addr`/`address_of`/`volatile_read`). Still on the AST path: the four
+  ARENA allocators (`Arena`/`Bump`/`Pool`/`Fixed`) — their `mem.<A>.new()` constructor
+  is a bespoke `emit_method_call` shape (not in `core_fixed_sig`), and their handle
+  methods (`.alloc`/`.reset`/`.free`) carry `recv_type == Some(<allocator>)` but the
+  PRODUCER isn't a covered call (so they never bind in a covered fn — the Phase-13
+  `handle_method_op` already excludes them, and `is_subset_param_ty` does not admit an
+  `Arena`/`Bump`/`Pool`/`Fixed` value type). An `arena.alloc(v)` *view* binding
+  (`x :: …`, `arena_view`) is excluded by `stmt_in_subset`. `#Context(allocator: …)`
+  (`Stmt::ContextBlock`) and `region r { … }` (`Stmt::Region`) emit plain Rust blocks +
+  RAII guards — small bespoke shapes, deferred. (`70_arena`/`75_arena_regions`/
+  `77_smart_context` stay on the AST path — byte-identical, no regression.) The arena
+  `unsafe` lives entirely in the vetted `jet_mem` prelude (excluded from the I1 scan), so
+  none of these emit user `unsafe`.
 - **Generic STRUCT types/methods** (residue after Phase 17) — `emit_func`/`emit_method`
   + `emit_struct_lit`'s turbofish branch. Phase 17 covered generic FREE functions whose
   params/return are type vars or `[T]` lists (the `<T: Clone>` clause + by-value type-var
@@ -1203,6 +1283,7 @@ owns it, and the total fact still missing to cover it.
 | 15 | Remaining control flow + delegation: comptime-if, mixed switches, delegation, `?? panic` | ✅ done (c109 Phase 15) — covers the FOUR remaining inventory entries. **comptime-if** (`Stmt::ComptimeIf`): the selected branch (sema's `selected_then`) emits inline at the same indent with no `if`, its `let`s leaking into the outer scope (`TStmt::Inline`). **Mixed comparison/Bool switches** (shape D — the general `emit_mixed_switch` `if/else if … else` chain, used when arms are NOT all-variant/range/fallible): each plain comparison arm head resolves to an `emit_expr` string, wrapped in the `_jet_switch_subject` block (`TStmt::MixedSwitch`); a switch with any pattern-test arm stays on the AST path (conservative). **Delegation trait methods** (`impl T: Trait using field`, `emit_delegation_method`): a structural forward `(self).<field>.<method>(args)` with the bare trait name (`TFuncKind::Delegation`, hooked in `emit_external_trait_impl`). **The `?? panic(…)` fallback** (Phase-8/11 deferral now LIFTED): `emit_panic_stop`/`safe_locals_expr` reproduced from a leak-faithful `panic_locals` Rc-replica that mirrors the AST codegen env's branch-leak semantics (shared across leaky branches, deep-copied at the two `emit_pattern_match_switch` arm bodies + lambda bodies, range-loop var save/restored); the whole `{ jet_panic_rich(…); }` statement string (message + sorted scalar-locals dump) is rendered at lowering (`TOrFallback::Panic`). Also fixes a **latent TIR-path divergence** the panic lift exposed: a CORE-struct field read (`result.code` on a `ProcessResult`) was mangled to `user_code` instead of the plain `code` (B2) — fixed by reproducing `core_struct_field_rust_name` in the `Field` lowering off the resolved `recv.ty`. Byte-identical across the entire example suite (118 emittable, 0 differ) + crafted probes (incl. a `?? panic` with leaked scalar locals from a plain-if and a loop body). The delegation example `47_library` (`App: Logger using logger`) routes. Excludes (stay on AST path): bare `?? return` (an upstream `??` gate gap); `@unsafe`/`#Unsafe`/`core.mem`; generic & `view`-returning methods; polymorphic core specials; `recv_type == None` handle methods; HttpRequest/HttpResponse method accessors; payload/boxed/generic types; latent-bug-gated constructs. |
 | 16 | Payload-carrying & recursive types: string/struct/collection-payload enums, recursive (boxed) enums, collection struct fields | ✅ done (c109 Phase 16) — +17 example fns route (201 → 218). Covers: **string/struct/collection-payload enums** (a variant payload may be String, a covered struct, a covered collection, or another covered enum) — the per-arg borrowed-`.clone()` + `Box::new(…)` decisions of `emit_boxed_enum_arg` are now a TOTAL fact (`TEnumArg { value, clone, boxed }`) resolved at lowering, byte-for-byte. **Recursive (boxed) enums** (linked-list / expr-AST) — the enum gate's `seen` set now ADMITS a self-reference, and the only box-related emit decision is the `Box::new(…)` at construction (Rust auto-derefs the `Box` at every read/match site, so no deref node is needed). **Collection struct fields** (`field_ty_covered` admits `[E]`/`[K, V]`) and **collection enum payloads**. The construction routes through a NEW variant-construction `MethodCall` shape (shape (j)) — a payload variant never becomes an `Expr::EnumLit` node (parser → `Field`/`MethodCall`; sema type-checks in place without rewriting), so the AST `emit_method_call`→`emit_enum_lit` path is reproduced. Excludes (stay on AST path, with reason): **recursive STRUCTS** (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)` field wrap → rustc E0308; a latent I2 hole logged in the bug list; the TIR must not claim a miscompiling fn); **generic** & **foreign/prelude** types; **`view`-returning** methods (borrow lowering) — all deferred to a later phase. |
 | 17 | Generics, foreign/prelude types, view-returning methods | ✅ done (c109 Phase 17, partial) — covers three independent surfaces. **`view`-returning functions/methods** (`-> view T` borrow): `emit_view_return` reproduced as a total `TStmt::ViewReturn { value, wrap }` (`wrap ∈ {Addr, Bare}` resolved at lowering from the AST node shape), `TFunc.is_view` drives `rust_return_type → &T`, the `view_return` flag rides `LowerEnv` (threaded through `clone_env`/`fork_panic`). `35_zerocopy` `name_of` routes. **Generic FREE functions** whose params/return are type vars (`<T: Clone>` clause rendered at lowering into `TFunc.generics` via `Generics::rust_type_param_list` + `rust_extra_clone_bounds`; a type-var param admitted by `is_subset_param_ty`, forced `Move` for the slot deref via `param_place_generic` — EXACTLY `emit_func`'s `is_type_param`) or `[T]` lists (`collection_elem_covered` admits a type var). **Constructable PRELUDE structs** (HttpRequest/HttpResponse): `emit_struct_lit`'s `is_prelude_struct` branch (`Jet…` head, PLAIN fields, HttpRequest's injected `params` field) reproduced via a total `StructLit { …, extra: Option<String> }`; the core/prelude/handle types (ProcessResult/Json/Stopwatch/FileReader/TcpStream/Arena/…) admitted as covered VALUE types (`is_covered_foreign_value_ty`). Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (view field accessor, `id`/`pick`/`firstof`/`wrap` generics, `build_resp`/`build_req` prelude construction). 206 free fns route through `emit_func`. tests/tir.rs adds `generic_free_fns`/`view_return_fn`/`prelude_struct_construction`; unit tests flip `rejects_generic_fn` → `covers_generic_fn` + add `rejects_generic_struct_fn`. Excludes (stay on AST path, with reason): **generic STRUCT types/methods** (`Pair<T>` `Type::Apply` value type, turbofish `user_Pair::<T> { … }`, `[T]`-field builtins, generic-type methods — `26_generic_types` `make_pair`/`empty_stack`/`push`); **FOREIGN (imported user) structs/enums** (cross-module `import_ns` construction — Phase 14 surface); **`view`-returning trait methods** (gate keeps the exclusion — conservative); recursive STRUCTS, latent-bug-gated constructs, and the remaining inventory entries (polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse method accessors, `@unsafe`/`#Unsafe`/`core.mem`). |
+| 18 | @unsafe / #Unsafe / core.mem pointer tier | ✅ done (c109 Phase 18) — covers the audited expert low-level tier. **`#Unsafe fn`** (S58, E2-M13/D-LL1): a function-level `unsafe` — the `unsafe ` keyword prefixes the signature (`{vis}{unsafe_kw}fn` / `pub {unsafe_kw}fn` / trait-method `{unsafe_kw}fn`), body unchanged — carried as `TFunc.is_unsafe` (the three gates' `f.is_unsafe` exclusion LIFTED; `TFuncKind::TraitMethod` already carried it since Phase 12). **`#Unsafe { … }`** audited region (`Stmt::Unsafe`): lowers to `unsafe { … }` (`TStmt::Unsafe`), the `#Audit("…")` annotation emits NOTHING; body `let`s leak into the outer scope (lowered/gated on the SAME env/locals, like comptime-if). **`core.mem` POINTER ops**: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr` → `TExprKind::PtrFromAddr`, total `elem`, safe cast `(({addr}) as usize as *mut {T})`, no `unsafe`); `mem.address_of(x)` → `Int` (`(&(x) as *const _ as usize as i64)`); `mem.volatile_read(p)` → `ptr_elem(p.ty)` (`std::ptr::read_volatile(p)`) — both NOT in `core_fixed_sig` but deterministic, admitted by `core_call_covered` with the return type special-cased at lowering. **I1 holds:** every emitted `unsafe` is a gated form (`unsafe fn` / `unsafe {`) tied 1:1 to a source `#Unsafe`/`#Unsafe fn` gate — verified by grepping the TIR-path Rust (drop the vetted `jet_mem` prelude). Byte-identical across the whole example suite (118 emittable, 0 differ) incl. both `#Unsafe`-tier examples (`48_lowlevel` + `showcase/lowlevel`), which run end-to-end. +4 example fns route (`read_reg`/`main`, `read_int`/`main`). tests/tir.rs adds `unsafe_fn_block_and_ptr_ops` + `unsafe_tier_emit_is_byte_exact`; unit tests add `covers_unsafe_fn_with_ptr_ops` / `covers_unsafe_block_and_address_of`. Excludes (stay on AST path, with reason): **`core.mem` ARENA allocators** (`Arena`/`Bump`/`Pool`/`Fixed` — `mem.<A>.new()` producer + `.alloc`/`.reset`/`.free` handle methods + `arena_view` bindings; their `unsafe` is vetted-`jet_mem`-only) and **`#Context(allocator:)`** / **`region r { … }`** (plain-block + RAII-guard emit) — a clean follow-up; plus the prior inventory residue (generic structs, polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse accessors, recursive/foreign structs, latent-bug-gated constructs). |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

@@ -2262,3 +2262,129 @@ fn main() {
         out.rust
     );
 }
+
+/// c109 Phase 18: the expert low-level tier (S58, E2-M13/D-LL1). A `#Unsafe fn` lowers
+/// to a Rust `unsafe fn`; a `#Unsafe { … }` audited region lowers to `unsafe { … }`
+/// (the `#Audit("…")` annotation emits nothing); `mem.Ptr<T>.from_addr(addr)`,
+/// `mem.address_of(x)`, and `mem.volatile_read(p)` lower to the raw-pointer ops. The
+/// pointer cast + `read_volatile` use std only (no `jet_std`), so this compiles & runs
+/// standalone. I1: every emitted `unsafe` is a gated form tied 1:1 to a source gate.
+#[test]
+fn unsafe_fn_block_and_ptr_ops() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.mem
+#Unsafe
+fn read_reg(addr: Int) -> Int {
+    p @= mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}
+fn main() {
+    cell: Int @= 1337
+    addr @= mem.address_of(cell)
+    #Audit(\"addr is the address of `cell`, a live Int on this stack frame\")
+    #Unsafe {
+        p @= mem.Ptr<Int>.from_addr(addr)
+        seen @= mem.volatile_read(p)
+        print(seen)
+        again @= read_reg(addr)
+        print(again)
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_unsafe_lowlevel", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1337\n1337\n");
+}
+
+/// c109 Phase 18: assert the EMITTED Rust for the unsafe tier is byte-exact (the gate
+/// forms + ptr ops), and that EVERY `unsafe` is a gated form (`unsafe fn` / `unsafe {`)
+/// — the I1 self-check. The `#Audit` annotation must produce no comment/marker.
+#[test]
+fn unsafe_tier_emit_is_byte_exact() {
+    let src = "\
+use core.mem
+#Unsafe
+fn read_reg(addr: Int) -> Int {
+    p @= mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}
+fn main() {
+    cell: Int @= 1337
+    addr @= mem.address_of(cell)
+    #Audit(\"safe: cell is live\")
+    #Unsafe {
+        seen @= read_reg(addr)
+        print(\"{seen}\")
+    }
+}
+";
+    let dir = std::env::temp_dir().join(format!("jet_tir_unsafe_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("unsafe.jet");
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+    });
+    // `#Unsafe fn` → `pub unsafe fn …`.
+    assert!(
+        out.rust.contains("pub unsafe fn user_read_reg(user_addr: i64) -> i64 {"),
+        "unsafe fn signature not byte-exact:\n{}",
+        out.rust
+    );
+    // `mem.Ptr<Int>.from_addr(addr)` and `mem.volatile_read(p)` in the fn body (sema
+    // annotates the inferred `p` binding with its resolved `*mut i64` type).
+    assert!(
+        out.rust.contains("let user_p: *mut i64 = ((user_addr) as usize as *mut i64);"),
+        "PtrFromAddr not byte-exact:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("return std::ptr::read_volatile(user_p);"),
+        "volatile_read not byte-exact:\n{}",
+        out.rust
+    );
+    // `mem.address_of(cell)` → the inert address cast (no `unsafe`).
+    assert!(
+        out.rust.contains("let user_addr: i64 = (&(user_cell) as *const _ as usize as i64);"),
+        "address_of not byte-exact:\n{}",
+        out.rust
+    );
+    // `#Unsafe { … }` → `unsafe {` (and the `#Audit` annotation emits NOTHING).
+    assert!(out.rust.contains("    unsafe {\n"), "unsafe block not emitted:\n{}", out.rust);
+    assert!(!out.rust.contains("Audit"), "#Audit must emit nothing:\n{}", out.rust);
+    // I1 self-check: drop the vetted `jet_mem` prelude, then every remaining `unsafe`
+    // must be a gated form (`unsafe {` or `unsafe fn`).
+    let user = if let Some(s) = out.rust.find("mod jet_mem") {
+        let b = out.rust.as_bytes();
+        let (mut d, mut i, mut end, mut seen) = (0usize, s, out.rust.len(), false);
+        while i < b.len() {
+            match b[i] {
+                b'{' => { d += 1; seen = true; }
+                b'}' => { d -= 1; if seen && d == 0 { end = i + 1; break; } }
+                _ => {}
+            }
+            i += 1;
+        }
+        format!("{}{}", &out.rust[..s], &out.rust[end..])
+    } else {
+        out.rust.clone()
+    };
+    for line in user.lines() {
+        // Skip comment lines (the source-map path comment can contain the word).
+        if line.trim_start().starts_with("//") {
+            continue;
+        }
+        if let Some(col) = line.find("unsafe") {
+            let after = line[col..].trim_start_matches("unsafe").trim_start();
+            assert!(
+                after.starts_with('{') || after.starts_with("fn "),
+                "I1: ungated `unsafe` in generated code: {}",
+                line.trim()
+            );
+        }
+    }
+}
