@@ -3604,3 +3604,38 @@ fn main() {
     // circle/square areas via dynamic dispatch; largest([3,1,4,1,5]) = 5; scores[0].points = 10.
     assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
 }
+
+/// c109 (view-trait fix): a `view`-returning TRAIT method `fn label(self) -> view String`
+/// implemented in an `impl Dog: Named` block. This was a latent I2 hole on BOTH paths:
+/// `emit_trait_def` rendered the trait DECLARATION's return as `-> String` (ignoring
+/// `is_view_return`) while the impl emitted `-> &String`, so rustc rejected the generated
+/// Rust with E0053 ("incompatible type for trait"). The fix threads `is_view_return` into
+/// the declared return type so the trait says `-> &String` to match the impl. The method
+/// now compiles AND routes through the TIR (the gate's view-trait exclusion is dropped; the
+/// borrow shape is the existing total `TStmt::ViewReturn { wrap }` from Phase 17).
+#[test]
+fn view_returning_trait_method() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Named {
+    fn label(self) -> view String
+}
+struct Dog {
+    name: String
+}
+impl Dog: Named {
+    fn label(self) -> view String {
+        return self.name
+    }
+}
+fn main() {
+    d @= Dog { name: \"Rex\" }
+    print(d.label())
+}
+";
+    let (code, stdout) = build_and_run("tir_view_trait_method", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Rex\n");
+}

@@ -451,10 +451,21 @@ pub fn rust_type_name(ty: &Type) -> String {
 pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
     out.push_str(&format!("pub trait user_{} {{\n", t.name));
     for m in &t.methods {
+        // Thread is_view_return into the declared return type so the trait
+        // declaration renders `-> &T`, matching the impl side's
+        // rust_return_type(cx, t, is_view). Without this the trait decl emits
+        // `-> T` while the impl emits `-> &T` → rustc E0053.
         let ret = m
             .return_type
             .as_ref()
-            .map(rust_type_name)
+            .map(|t| {
+                let base = rust_type_name(t);
+                if m.is_view_return {
+                    format!("&{base}")
+                } else {
+                    base
+                }
+            })
             .unwrap_or_else(|| "()".to_string());
         let params: Vec<String> = m
             .params

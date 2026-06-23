@@ -78,17 +78,22 @@ them so they don't regress, but they should be fixed independently of c109):
   construction MethodCall shape, not the (effectively dead) `Expr::EnumLit` lowering.
   (Surfaced in Phase 16; consistent with the Phase-4/8 "the AST node that reaches
   codegen is what the gate must recognise" finding.)
-- **A `view`-returning TRAIT method miscompiles (I2 hole on both paths).** `emit_trait_def`
-  (Source/M9.rs ~L454) renders a trait method's DECLARATION return type via
+- **A `view`-returning TRAIT method miscompiled (I2 hole on both paths). FIXED.**
+  `emit_trait_def` (Source/M9.rs) rendered a trait method's DECLARATION return type via
   `rust_type_name(m.return_type)` WITHOUT consulting `m.is_view_return`, so the trait
-  declaration emits `fn label(&self) -> String` while the impl (`emit_trait_method` /
-  the TIR `emit_tir_trait_method`) emits `fn label(&self) -> &String` → rustc E0053
-  ("incompatible type for trait"). Both paths produce identical (broken) Rust, so parity
-  holds, but the construct is unusable. Phase 19 EXCLUDES view-returning trait methods for
-  this reason (the TIR must not *claim* a miscompiling fn — the `is_empty` precedent); the
-  borrow shape is otherwise the same total `TStmt::ViewReturn { wrap }` Phase 17 used for
-  inherent/free view methods, so the lift is trivial once `emit_trait_def` threads
-  `is_view_return` into the declared return type. (Surfaced in Phase 19.)
+  declaration emitted `fn label(&self) -> String` while the impl (`emit_trait_method` /
+  the TIR `emit_tir_trait_method`) emitted `fn label(&self) -> &String` → rustc E0053
+  ("incompatible type for trait"). Both paths produced identical (broken) Rust, so parity
+  held, but the construct was unusable. **Fix:** `emit_trait_def` now threads
+  `m.is_view_return` into the declared return type (`&{base}` when set), so the trait says
+  `-> &String` to match the impl. With the decl fixed, view-returning trait methods now
+  ROUTE THROUGH THE TIR — `tir_covers_trait_method`'s `f.is_view_return` exclusion is
+  dropped; the borrow shape is the existing total `TStmt::ViewReturn { wrap }` Phase 17 used
+  for inherent/free view methods (`lower_trait_method` already sets `env.view_return` and
+  `TFunc.is_view`). Covered by tests/tir.rs `view_returning_trait_method` (build+run) and
+  the `covers_view_returning_trait_method` unit test; byte-parity holds (the fix changes the
+  trait DECL line identically on both paths). (Surfaced in Phase 19; fixed in the view-trait
+  c109 phase.)
 - **A method on a GENERIC struct doesn't type-check (sema gap).** A struct-body
   method on `struct Stack<T> { … fn size(self) -> Int { … } }` is NOT bound to the
   type — sema reports E0311 ("`size` isn't a method on this value") at the call site,

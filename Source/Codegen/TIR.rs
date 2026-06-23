@@ -1316,21 +1316,20 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
 ///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
 ///    static trait method, rare; exclude it — the receiver form is fixed at `&self`).
 pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-    // Signature shape: no generics, not pure, not view-returning. c109 Phase 18: an
-    // `#Unsafe fn` trait method IS covered (`TFuncKind::TraitMethod.is_unsafe` already
-    // drives the `unsafe ` prefix in `emit_tir_trait_method`).
+    // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` trait method IS
+    // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
+    // in `emit_tir_trait_method`).
     //
-    // c109 Phase 19: a `view`-returning trait method STAYS EXCLUDED — NOT for a TIR
-    // limitation (the borrow shape is the same total `TStmt::ViewReturn { wrap }` Phase 17
-    // used for inherent/free view methods; lowering + emit already render `&T`), but
-    // because it MISCOMPILES on both paths today: `emit_trait_def` (Source/M9.rs ~L454)
-    // renders the trait DECLARATION's return via `rust_type_name(m.return_type)` WITHOUT
-    // `m.is_view_return`, so the trait says `-> String` while the impl says `-> &String`
-    // → rustc E0053. A latent AST-path bug (logged in the design doc's list); the TIR must
-    // not *claim* a function that miscompiles (the `is_empty` precedent). Unblocks once
-    // `emit_trait_def` threads `is_view_return` into the declared return type.
+    // c109 (this phase): a `view`-returning trait method is NOW COVERED. The latent
+    // AST-path I2 hole it depended on is fixed — `emit_trait_def` (Source/M9.rs) now
+    // threads `m.is_view_return` into the declared return type, so the trait says
+    // `-> &String` to match the impl's `-> &String` (was E0053). The borrow shape is
+    // the existing total `TStmt::ViewReturn { wrap }` Phase 17 used for inherent/free
+    // view methods: `lower_trait_method` sets `env.view_return = f.is_view_return` and
+    // `TFunc.is_view`, so lowering routes returns through `lower_view_return` and the
+    // emit renders `-> &T`.
     // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
-    if !f.type_params.is_empty() || f.is_view_return {
+    if !f.type_params.is_empty() {
         return false;
     }
     // The owning type must be a covered struct or enum.
@@ -9517,6 +9516,30 @@ mod tests {
         tir_covers_method(f, type_name, &cx)
     }
 
+    /// Coverage of a TRAIT method implemented in a top-level `impl Type: Trait`
+    /// block — routes through `tir_covers_trait_method` (the trait-impl gate).
+    fn covers_trait_method(src: &str, type_name: &str, method: &str) -> bool {
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        let cx = build_cx(&prog, src, "test.jet");
+        let methods: &[Func] = prog
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Impl(im) if im.type_name == type_name && im.trait_name.is_some() => {
+                    Some(im.methods.as_slice())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no `impl {type_name}: Trait` block"));
+        let f = methods
+            .iter()
+            .find(|m| m.name == method)
+            .unwrap_or_else(|| panic!("no trait method {type_name}.{method}"));
+        tir_covers_trait_method(f, type_name, &cx)
+    }
+
     #[test]
     fn covers_simple_arithmetic_fn() {
         assert!(covers("fn add(a: Int, b: Int) -> Int {\n return (a + b)\n}\n", "add"));
@@ -10714,6 +10737,29 @@ fn takes_shapes(xs: [Shape]) {
 }
 ";
         assert!(covers(src, "takes_shapes"));
+    }
+
+    #[test]
+    fn covers_view_returning_trait_method() {
+        // c109 (view-trait fix): a `view`-returning trait method `fn label(self) ->
+        // view String` is now COVERED. It was excluded while `emit_trait_def` rendered
+        // the trait DECLARATION return as `-> String` (ignoring `is_view_return`) against
+        // the impl's `-> &String` → rustc E0053; that's now fixed, so the gate admits it.
+        // The borrow shape is the existing total `TStmt::ViewReturn { wrap }` (Phase 17).
+        let src = "\
+trait Named {
+    fn label(self) -> view String
+}
+struct Dog {
+    name: String
+}
+impl Dog: Named {
+    fn label(self) -> view String {
+        return self.name
+    }
+}
+";
+        assert!(covers_trait_method(src, "Dog", "label"));
     }
 
     #[test]
