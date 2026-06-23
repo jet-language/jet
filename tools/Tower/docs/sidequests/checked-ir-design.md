@@ -739,9 +739,84 @@ everything, the AST codegen path is deleted (final phase).
   confirmed the covered methods take the TIR path (7 unique trait-method bodies route;
   53 free fns, 5 inherent methods route across the suite).
 
+## Refinements learned in Phase 13 (the call & method surfaces)
+
+- **A fn-typed VALUE has three syntactic shapes; all collapse to `emit_call_args`'
+  Box-coercion + `emit_named_fn_value` + the `(f)(args)` emit.** (1) A bare top-level
+  fn name in value position (`Expr::Ident` not a local/const, in `cx.fn_types` as a
+  `Type::Fn`) emits `emit_named_fn_value`'s `Box::new(move |…| user_<name>(…)) as
+  <fn-type>` wrapper — rendered ONCE at lowering into a `TFnValueKind::NamedFn`. (2) A
+  call THROUGH a fn-value: `(f)(args)` parses as `Expr::CallValue`, but `f(args)` where
+  `f` is a LOCAL parses as `Expr::Call { name: "f" }` (NOT CallValue) — the AST
+  `emit_call`'s env-contains-name branch emits `(place)(args)` with args PLAIN
+  (`emit_call_args(.., None)`). Both lower to `TFnValueKind::Call`. (3) A fn-typed ARG
+  to a callee with a `Type::Fn` param routes through `emit_call_args`' coercion: the
+  shared `lower_one_call_arg` (the single `emit_call_args` reproduction) carries a total
+  `TFnCoerce { fn_type_rust, already_boxed }` — `already_boxed` (resolved at lowering)
+  reproduces the AST's `s.starts_with("Box::new(")` heuristic (true for a bare fn-name
+  value or a fn-typed local ident, so emit applies only ` as <fn-type>`, never
+  re-boxing). The Phase-11 `no_fn_param`/`!matches!(pty, Type::Fn)` exclusions are
+  **lifted**. A `Type::Fn` param/return is now a covered subset type (`is_covered_fn_ty`
+  — it renders via `cx.rust_type`/`rust_fn_trait` exactly as the AST `rust_param_type`,
+  by value, `param_place`'s deref matches `emit_func`).
+- **The three closure-taking core calls are NOT in `core_fixed_sig` — each gets a
+  bespoke node, not the plain `CoreCall`.** `tasks.spawn` uses `emit_spawn_lambda`
+  (always `move |…|`, NEVER `Box::new` — a DISTINCT render from `emit_lambda`, so a
+  separate `render_spawn_lambda`); `http.serve` (lambda handler) emits
+  `jet_http_serve(&(addr), <lambda>)`; `scope.guard` emits `jet_scope_guard(<lambda>)`.
+  Covered only with a LITERAL in-subset lambda in the closure-arg position (lambdas are
+  Phase-11 in-subset, so the body lowers). `serve`'s router-handler branch is
+  unreachable in subset (an HttpRouter value can only come from `http.router()`, not
+  in `core_fixed_sig`). Their return types (`Task<T>`/Unit/`ScopeGuard`) match
+  `infer_core_call`; rarely load-bearing.
+- **Polymorphic core specials stay DEFERRED — confirmed NOT a total fact.** Their
+  return type lives only in `infer_core_call`'s bespoke logic and is never written back
+  onto the `Expr::MethodCall` node (only `recv_type` is annotated). Recovering it would
+  re-run sema arg-type inference (I3 violation). `io.input` turned out to BE in
+  `core_fixed_sig` (`String?` — already Phase-10-covered); only `io.eprint` + the
+  math/random specials remain deferred.
+- **"Handle method" splits by `recv_type`.** The handles whose method tables are
+  `file_handle_method_return`/`net_method_return`/`alloc_method_return` carry
+  `recv_type == Some(<handle>)` (FileReader/FileWriter/StdinHandle/TcpStream/
+  TcpListener/HttpRequest/HttpResponse/Match/HttpRouter/Arena/…). Phase 13 covers the
+  always-`let`-bound ones (FileReader/FileWriter/StdinHandle/TcpStream/TcpListener) as a
+  total `THandleOp` keyed on `recv_type`, reproducing the `&mut`/`&` handle arms of
+  `emit_builtin_method` byte-for-byte. Excluded with reason: **HttpRequest/HttpResponse**
+  (arise only as a `http.serve` lambda param whose slot type is often `None` — the AST
+  arm keys on `rty = expr_jet_ty`, which is then `None`, so it doesn't fire → covering
+  would diverge); **Arena/Bump/Pool/Fixed** (the `mem.*.new` producer isn't a covered
+  call); **`Match.group`** (the `Option<Match>` unwrap chain isn't cleanly reachable).
+  Handles whose tables are `Collections::builtin_method_return` (`Stopwatch.elapsed_millis`,
+  `Task`/`Channel`/`Sender` methods) carry `recv_type == None` — a Phase-9 `BuiltinMethod`
+  gap, NOT this shape (deferred; only Stopwatch is reachable). The `is_intercepted_method_name`
+  set stays whole; the handle shape is tried BEFORE the instance-method intercept check,
+  gated on a handle `recv_type` — disjoint from user methods (Phase-9 lesson, again).
+- **Surfaced + FIXED a latent TIR-path parity bug: a handle binding wasn't forced to
+  `let mut`.** `emit_let` (Statement.rs) forces `let mut` for a FileReader/FileWriter/
+  TcpStream/HttpRouter/Arena/Bump/Pool/Fixed binding EVEN when bound immutably (their
+  methods take `&mut self`), and applies a `mut_fn` `as <fn-trait>` init coercion +
+  `rust_fn_trait` annotation for an escaping-FnMut lambda binding. The TIR `Let` had
+  carried only `mutable: b.mutable` and rendered the annotation via `cx.rust_type`,
+  missing both — a latent bug invisible until Phase 13 made a handle binding+method
+  routable (a handle bound but never method-called could not previously reach the TIR,
+  because the method excluded the fn). Fixed by resolving `kw` + `ty_clause` (+ the
+  `mut_fn` coercion) at LOWERING into total `TStmt::Let` fields, reproducing `emit_let`
+  exactly. Caught by a TcpStream probe (`stream @= listener.accept() ?? return 1` →
+  `let mut` vs `let`); the full-suite diff stayed 0 (no example binds a handle without
+  a method, so it was unreachable before this phase).
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR`
+  bypass on `emit_func`/`emit_method`/`emit_trait_method`) across the **entire example
+  suite** — 141 files (118 emittable), 0 differ — plus crafted probes exercising:
+  fn-typed param + Box-coercion + named-fn value + lambda arg + `(f)(x)` CallValue
+  (`24_callbacks.jet` + crafted), `scope.guard`/`tasks.spawn` closure-core-calls, and
+  FileWriter (`write_line`/`flush`) + TcpListener/TcpStream (`accept`/`local_addr`/
+  `read`/`write`/`peer_addr`/`close`) handle methods (incl. the forced-`let mut` binding).
+  A routing sentinel confirmed the covered fns take the TIR path (`apply_twice`,
+  `scope_guard` `with_guards`/`question_path`/`main`, `serve`, `write_one` route).
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 12 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
+After Phase 13 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
 reached for these constructs. Each entry: the construct, the AST emit function that
 owns it, and the total fact still missing to cover it.
 
@@ -757,26 +832,39 @@ owns it, and the total fact still missing to cover it.
 - **Generic-type methods + `view`-returning methods** — `emit_method`/`emit_func`
   (generics) / the `is_view_return` borrow lowering. Missing: generic-param lowering
   (`Generics::*`) as total TIR facts, and the view-return borrow shape.
-- **fn-typed values** (a fn stored/passed/returned) — `emit_call_args`' `Box::new(…)
-  as <fn-type>` coercion + a `CallValue` `(f)(args)` emit. The `Call`/method gates
-  exclude any callee with a `Type::Fn` param. Missing: a `CallValue` TIR node + the
-  Box-coercion arg form.
-- **Closure-taking core calls** `tasks.spawn`/`http.serve`/`scope.guard` —
-  `emit_core_call` + `emit_spawn_lambda` / the router-vs-lambda `serve` branch.
-  `spawn` uses a distinct `move |…|` form (no `Box::new`); `serve` wraps a router in a
-  fresh closure; `scope.guard` isn't in `core_fixed_sig`. Missing: bespoke spawn/serve
-  emit shapes (lambdas are now in subset, so this is a clean follow-up).
 - **Polymorphic core specials** `math.abs/min/max/clamp`, `random.pick/shuffle`,
-  `io.input/eprint` — `emit_core_call` (their bespoke arms). Their return type depends
-  on the ARG type, resolved by `check_core_call`, not the fixed `core_fixed_sig`
-  table. Missing: a total return-type fact for these (re-inferring it in lowering would
-  need the sema arg-type machinery, not just the table).
-- **Handle-using methods** (FileWriter/TcpStream/HttpRequest/Router/Stopwatch/Arena/
-  Task/Channel/Sender `.read_line`/`.write_line`/`.accept`/`.elapsed_millis`/…) —
-  `emit_builtin_method`'s handle arms. These carry `recv_type == Some(<handle>)`.
-  Missing: handle-receiver dispatch as total `TBuiltinOp`-style ops (covering the CALL
-  that produces a handle is done — Phase 10 — but a method ON the handle still excludes
-  its enclosing fn).
+  `io.input/io.eprint` — `emit_core_call` (their bespoke arms). Their return type
+  depends on the ARG type, resolved by `infer_core_call`'s bespoke `check_core_call`
+  logic, NOT the fixed `core_fixed_sig` table — and that resolved return type is
+  **never written back onto the AST node** (`Expr::MethodCall` carries only
+  `recv_type: Option<String>`; there is no return-type field or side table). So
+  recovering it at lowering would require re-running sema's arg-type inference
+  (`self.infer(&arg.expr)` → element/arg type), which violates I3. **Confirmed
+  DEFERRED in Phase 13** — the return type is not a total sema fact. (Note `io.input`
+  IS in `core_fixed_sig` → `String?`, so it's covered by Phase 10 already; only
+  `io.eprint` and the math/random specials remain here.)
+- **Handle-using methods that carry `recv_type == None`** (`Stopwatch.elapsed_millis`,
+  `Task.join/detach`, `Channel.receive/sender`, `Sender.send`) — these resolve via
+  `Collections::builtin_method_return` (`stopwatch_method_return`/`task_method_return`/
+  …), which leaves `recv_type == None` (NOT `Some`). They are a Phase-9-style builtin
+  gap, not the `recv_type == Some` handle shape Phase 13 covered. Only Stopwatch is
+  reachable in subset (`time.start` is covered; the Task/Channel/Sender producers
+  aren't). Missing: a Phase-9 `BuiltinMethod` op for `elapsed_millis` (+ `cx.root_prefix`
+  in emit). A clean follow-up.
+- **HttpRequest/HttpResponse method accessors** (`req.method()`/`req.path()`/`.body()`/
+  `.header()`/`.param()`/`resp.status()`/…) — these DO carry `recv_type == Some`, but
+  arise ONLY as a `http.serve` lambda PARAMETER (`(req) => …`), whose slot type is
+  often unresolved (`p.ty == None` — sema doesn't write the inferred param type back
+  onto the lambda param). The AST `emit_builtin_method` keys these on `rty =
+  expr_jet_ty(receiver)`, which is then `None`, so the handle arm does NOT fire — the
+  call falls through. Covering them (selecting the op from `recv_type`) would DIVERGE.
+  Excluded by `handle_method_op` (Phase 13). Unblocks once the serve-lambda param type
+  is total, or by routing these via `recv_type` only when the slot type matches.
+- **The bare `?? return` fallback** (`x ?? return`, no value) — surfaced in Phase 13:
+  `fs.read(p) ?? return` (and any bare-`return` `??`) does NOT route, while `?? return
+  <value>` and `?? <value>` do. The exclusion is upstream of the `??` lowering (a
+  bare-return `OrFallback` apparently fails an earlier in-subset check); not chased this
+  phase. Conservative — stays on the AST path.
 - **The `??` panic fallback** (`a ?? panic(…)`) — `emit_or_fallback_rhs` →
   `emit_panic_stop`/`safe_locals_expr`, which dump the FULL sorted Slot env
   (`rust_name`/`deref`/`jet_ty`). Missing: a richer TIR locals snapshot reproducing the
@@ -826,6 +914,7 @@ owns it, and the total fact still missing to cover it.
 | 11 | Lambdas/closures (capture meta), fn-typed values, fan-out | ✅ done (c109 Phase 11, partial) — `23_closures` `main` now routes (map/filter/reduce/sort_by/each), `41_fan_out` `double` routes; ~86 example fns route through the TIR. Covers: **lambda/closure literals** (`Expr::Lambda`) reading `Lambda.meta.{escapes, needs_fn_mut, mut_captures, cloned_captures}` as TOTAL facts — the `move ` keyword (off `needs_fn_mut && !escapes`), `Box::new(…)` (off `escapes`), and the per-`cloned_capture` `let _jet_cap_<n> = (place).clone();` prelude all resolved at lowering, body lowered on a cloned env extended with params + captures (`TExprKind::Lambda`/`TLambda`); the **fan-out** operator `f.[a, b, c]` (S75/S76) for a plain top-level-fn callee, each item a synthetic single-arg call wrapped in `vec![…]` (`TExprKind::FanOut`); the **closure-taking collection methods** `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` (`TExprKind::ClosureMethod`/`TClosureOp`), the Map-vs-list-vs-trait-object and Fn-vs-FnMut emit branches resolved at lowering from `tir_recv_jet_ty` + the lambda's `needs_fn_mut`. Excludes (deferred): **fn-typed values** (a fn stored/passed/returned — the `Box::new(…) as <fn-type>` coercion in `emit_call_args`; the gate now excludes any plain call whose callee has a Fn-typed param so a lambda/fn-value never reaches the un-coerced path); the **closure-taking core calls** `tasks.spawn` (distinct `emit_spawn_lambda` form), `http.serve` (router-vs-lambda branch), `scope.guard` (not in `core_fixed_sig`); the `??` **panic** fallback (still needs the `safe_locals_expr` reproduction). |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | ✅ done (c109 Phase 10) — the **type-monomorphic** core/stdlib calls now route through the TIR (`TExprKind::CoreCall`). Covered: every `(module, method)` whose full signature is fixed by `Sema::core_fixed_sig` — `core.fs` (read/read_bytes/write/append/exists/is_dir/remove/create_dir/list_dir/copy/rename), `core.io` (args/read_all_input/stdin), `core.env` (get/set/current_dir/home_dir), `core.process` (exit/run), `core.math` (sqrt/pow/floor/ceil/round), `core.random` (int/float/seed), `core.time` (now/sleep/start), `core.json` + `jet.json` (parse/decode/render/render_pretty), `core.files` (open/create/append), `core.path` (join/parent/extension/normalize), `core.net` (all tcp_*), `jet.csv`/`jet.toml`/`jet.yaml` (parse/render), `jet.log` (info/warn/error/debug/set_level/set_trace_id/setup), `jet.time` (now/format), `jet.crypto` (sha256/sha256_bytes), `jet.http` (get/post), `jet.regex` (is_match/match/find/find_all/split/replace/replace_all). The `(module, method)` dispatch + per-arm `&(…)`/`&mut (…)`/move wrappers reproduce `emit_core_call` byte-for-byte; the return type comes from `core_fixed_sig` (totality), so a fallible core call composes with Phase-8 `?`/`??`. ~10 example fns route (across crafted programs exercising 24 covered core calls). Excludes (stay on AST path): closure-taking (`tasks.spawn`/`http.serve`/`scope.guard` → Phase 11); polymorphic math/random/io specials (`abs`/`min`/`max`/`clamp`/`pick`/`shuffle`/`io.input`/`io.eprint` — return type depends on arg type, not in the fixed table); handle-constructor specials not in the table (`tasks.channel`, `http.router`/`parse`/`dispatch`); `core.mem` ptr/alloc (`@unsafe`); and any use of a returned handle's METHOD surface (excludes the enclosing fn). Imports/modules (re-export, `import_mods`, inline code modules), FFI extern, comptime-if, arena/unsafe blocks are NOT yet covered (deferred within this phase). |
 | 12 | The tail: trait-impl method bodies, numeric-conversion methods, + a parity fix | ✅ done (c109 Phase 12, partial) — +7 unique trait-method bodies routed (`Circle`/`Square` `area`/`name`, `Person` `announce`/`greeting`, `ConsoleLogger` `log`). Covers: **trait-impl method bodies** (`emit_trait_method`, both the inline `impl Trait {}` and `impl T: Trait` and external-trait-impl forms — hooked via the shared `emit_trait_method`), as a new `TFuncKind::TraitMethod` — bare name (the trait owns it, no `user_` mangle), no `pub`, always-`&self` receiver, self slot `jet_ty: Some(Type::Named(T))` (NOT `None` as for inherent methods); the **numeric** predicate/bit/width-conversion methods (D-NUMOPS1: `is_nan`/`is_infinite`/`is_finite`, `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`, `to_i8`…`to_u64`/`to_int`/`to_f32`/`to_f64`/`to_float`, and numeric `to_string`) on a numeric receiver (`recv_type == Some(<numeric>)`) — a new `TExprKind::NumericMethod`/`TNumericOp`, the widening-vs-narrowing branch (`numeric_conversion`/`conv_rust_target`) resolved at lowering from the total `recv_type` width. Also fixes a **latent TIR-path parity bug**: an explicit `else { if … }` block was being flattened to `} else if …` (the AST keys solely on `ElseBranch`, never the else-body shape) — `TStmt::If` now carries `else_is_elseif` so only a real `ElseBranch::ElseIf` flattens. Excludes (stay on AST path): **delegation** (`emit_delegation_method`, `using field`), **generic-type** & **`view`-returning** & **`@unsafe fn`** trait methods; **fn-typed values** (Box-coercion); **closure-taking core calls** (`tasks.spawn`/`http.serve`/`scope.guard`); polymorphic math/random/io core specials; the `??` **panic** fallback; modules/imports, FFI extern, comptime-if, arena/`core.mem`/`#Unsafe` (see the AST-path inventory below). |
+| 13 | The call & method surfaces: fn-typed values, closure-core-calls, handle methods | ✅ done (c109 Phase 13, partial) — `24_callbacks.jet` `apply_twice` routes; `67_scope_guard.jet` `with_guards`/`question_path`/`main` route. Covers: **fn-typed values** — a `Type::Fn` param/return (now a covered subset type, `is_covered_fn_ty`); a bare top-level-fn name as a value (`Box::new(move \|…\| user_<name>(…)) as <fn-type>` via `emit_named_fn_value`, `TFnValueKind::NamedFn`); a call through a fn-value (`(f)(args)` as `Expr::CallValue`, and `f(args)` for a local-`f` as `Expr::Call`, both → `TFnValueKind::Call`); the `emit_call_args` `Box::new(…) as <fn-type>` arg-coercion (the shared `lower_one_call_arg` carries a total `TFnCoerce{fn_type_rust, already_boxed}`). The Phase-11 `no_fn_param`/`!Type::Fn` exclusions are lifted. The **closure-taking core calls** `tasks.spawn` (distinct `render_spawn_lambda` `move \|…\|` form), `http.serve` (lambda-handler branch), `scope.guard` (`TExprKind::CoreClosureCall`/`TCoreClosureKind`) with a literal in-subset lambda. The **handle methods** carrying `recv_type == Some(<handle>)` on FileReader/FileWriter/StdinHandle/TcpStream/TcpListener (`read_line`/`write_line`/`flush`/`accept`/`local_addr`/`read`/`write`/`peer_addr`/`close` — `TExprKind::HandleMethod`/`THandleOp`, the `&mut`/`&` handle arms of `emit_builtin_method`). Also fixes a **latent TIR-path parity bug**: a handle binding (FileReader/FileWriter/TcpStream/HttpRouter/Arena/…) wasn't forced to `let mut` (it must be, as its methods take `&mut self`); the TIR `Let` now resolves `kw`+`ty_clause` (+ the escaping-FnMut `as <fn-trait>` coercion) at lowering, reproducing `emit_let` exactly. Excludes (stay on AST path, with reason): **polymorphic core specials** (`math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint` — return type NOT a total fact, never written onto the node → I3); **`recv_type == None` handle methods** (`Stopwatch.elapsed_millis`, Task/Channel/Sender — a Phase-9 builtin gap, not the `Some` shape); **HttpRequest/HttpResponse accessors** (serve-lambda-param slot may be `None` → AST `rty` arm wouldn't fire → divergence); **`Match.group`**, **Arena/Bump/Pool/Fixed** methods (producer not covered); bare **`?? return`** (an upstream `??` gate gap); the `??` **panic** fallback. |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green

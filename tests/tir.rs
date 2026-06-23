@@ -1536,3 +1536,149 @@ fn main() {
     // (else→inner-if false → falls through to the trailing `return 0`).
     assert_eq!(stdout, "5\n7\n0\n");
 }
+
+/// c109 Phase 13: fn-typed values. A fn with a `fn(Int)->Int` parameter routes
+/// through the TIR (the Box-coercion arg form); a bare fn-name value, a lambda arg,
+/// and a call through the fn-value (`f(x)` where `f` is the local param) all lower in
+/// subset. Proves the `Box::new(…) as <fn-type>` coercion + the `(f)(args)` call.
+#[test]
+fn fn_typed_values() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(f(x))
+}
+fn double(x: Int) -> Int {
+    return (x * 2)
+}
+fn main() {
+    print(apply_twice(double, 3))
+    print(apply_twice((n: Int) => (n + 1), 5))
+    g @= double
+    print(apply_twice(g, 4))
+}
+";
+    let (code, stdout) = build_and_run("tir_fn_values", src);
+    assert_eq!(code, 0);
+    // apply_twice(double,3)=12; apply_twice(+1,5)=7; apply_twice(double,4)=16.
+    assert_eq!(stdout, "12\n7\n16\n");
+}
+
+/// c109 Phase 13: a struct field call through a fn-typed field is an `Expr::CallValue`
+/// (`(w.step)(x)`). The struct has a `fn` field so it stays on the AST path, but the
+/// *call site* `apply_twice((x)=>…, …)` routes — and a fn-value stored in a local then
+/// called routes too. This proves the `Expr::Call`-to-a-local fn-value form.
+#[test]
+fn fn_value_call_through_local() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run(f: fn(Int) -> Int) -> Int {
+    return f(10)
+}
+fn inc(x: Int) -> Int {
+    return (x + 1)
+}
+fn main() {
+    print(run(inc))
+    print(run((y: Int) => (y * y)))
+}
+";
+    let (code, stdout) = build_and_run("tir_fn_value_local", src);
+    assert_eq!(code, 0);
+    // run(inc)=11; run(square)=100.
+    assert_eq!(stdout, "11\n100\n");
+}
+
+/// c109 Phase 13: `scope.guard(() => { … })` — a closure-taking core call (NOT in
+/// `core_fixed_sig`). The guard fires on scope exit (LIFO). Routes through the TIR with
+/// the bespoke `jet_scope_guard(<closure>)` emit shape.
+#[test]
+fn scope_guard_closure_core_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.scope as scope
+fn work() {
+    _g @= scope.guard(() => { print(\"cleanup\") })
+    print(\"working\")
+}
+fn main() {
+    work()
+}
+";
+    let (code, stdout) = build_and_run("tir_scope_guard", src);
+    assert_eq!(code, 0);
+    // The guard's closure runs at scope exit, AFTER \"working\".
+    assert_eq!(stdout, "working\ncleanup\n");
+}
+
+/// c109 Phase 13: `tasks.spawn(() => …)` — the distinct `emit_spawn_lambda` form
+/// (`move |…|`, never `Box::new`). The spawned task computes a value joined back.
+/// Routes through the TIR with `JetTask::spawn(move || …)`.
+#[test]
+fn tasks_spawn_closure_core_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn compute() -> Int {
+    return 21
+}
+fn launch() -> Int {
+    t @= tasks.spawn(() => compute())
+    return t.join()
+}
+fn main() {
+    print(launch())
+}
+";
+    // `launch` itself stays on the AST path (`t.join()` is a Task method, not covered),
+    // but the spawn EXPRESSION and `compute` route; rustc accepting proves parity.
+    let (code, stdout) = build_and_run("tir_tasks_spawn", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "21\n");
+}
+
+/// c109 Phase 13: handle methods. A FileWriter (from `files.create`) routes through
+/// the TIR for `write_line`/`flush` (the `&mut` handle arms of `emit_builtin_method`).
+/// A handle binding also forces `let mut` even when bound immutably — the parity fix
+/// to the TIR `Let`. Proves the handle-method emit + the forced-mut binding.
+#[test]
+fn handle_methods_file_writer() {
+    if !have_rustc() {
+        return;
+    }
+    // Write/read through an absolute temp path so the test leaves no repo artifact.
+    let tmp = std::env::temp_dir().join(format!("jet_tir_handle_{}.txt", std::process::id()));
+    let tmp_str = tmp.to_string_lossy().replace('\\', "\\\\");
+    let src = format!(
+        "\
+use core.files as files
+use core.fs as fs
+fn write_file(path: String, text: String) -> Int {{
+    w := files.create(path) ?? return 0
+    _r @= w.write_line(text)
+    _f @= w.flush()
+    return 1
+}}
+fn main() {{
+    done @= write_file(\"{path}\", \"hello handle\")
+    print(done)
+    contents @= fs.read(\"{path}\") ?? \"<none>\"
+    print(contents)
+}}
+",
+        path = tmp_str
+    );
+    let (code, stdout) = build_and_run("tir_handle_writer", &src);
+    let _ = fs::remove_file(&tmp);
+    assert_eq!(code, 0);
+    // write_file returns 1 (success); the file contains the written line + newline.
+    assert_eq!(stdout, "1\nhello handle\n\n");
+}

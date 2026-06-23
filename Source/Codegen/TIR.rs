@@ -87,16 +87,19 @@ pub(crate) enum TFuncKind {
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub(crate) enum TStmt {
-    /// `let [mut] name[: ty] = init;`. `mutable` reproduces `let mut`; `annotated`
-    /// records whether the source binding carried an explicit type annotation, so
-    /// the emitted Rust matches the AST path byte-for-byte (an inferred binding
-    /// emits no `: ty`). `ty` is always total — inferred once here at lowering if
-    /// the source omitted it.
+    /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
+    /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
+    /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
+    /// flag AND the forced-mut cases — a handle binding FileReader/FileWriter/
+    /// TcpStream/HttpRouter/Arena/… needs `let mut` even when bound immutably, and an
+    /// escaping FnMut lambda binding); `ty_clause` is the rendered `": <type>"` (empty
+    /// for an inferred binding; a Fn type renders via `rust_fn_trait`, others via
+    /// `rust_type`). The binding's resolved type is carried on the `LowerEnv` slot (for
+    /// downstream facts), so it is not duplicated on the node.
     Let {
         name: String,
-        ty: Type,
-        annotated: bool,
-        mutable: bool,
+        kw: &'static str,
+        ty_clause: String,
         init: TExpr,
     },
     /// `place [op]= value;` to a plain local (subset excludes indexed assigns).
@@ -461,6 +464,63 @@ pub(crate) enum TExprKind {
         recv: Box<TExpr>,
         op: TNumericOp,
     },
+    /// c109 Phase 13: a method ON a handle (FileReader/FileWriter/StdinHandle/
+    /// Stopwatch/TcpListener/TcpStream/HttpRequest/HttpResponse) — the handle arms of
+    /// `emit_builtin_method` (Source/Codegen/Expression.rs). The handle-receiver
+    /// dispatch (`rty == Some(Named(<handle>))`) is resolved at lowering into a total
+    /// `THandleOp`, so emit makes no type decision (I3). Args are emitted PLAINLY
+    /// (`emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
+    HandleMethod {
+        recv: Box<TExpr>,
+        op: THandleOp,
+        args: Vec<TExpr>,
+    },
+    /// c109 Phase 13: a closure-taking core/stdlib call — `tasks.spawn`,
+    /// `http.serve`, `scope.guard`. These are NOT in `core_fixed_sig` and each has a
+    /// bespoke emit shape (`emit_core_call`, Source/Codegen/Expression.rs) the plain
+    /// `CoreCall` cannot reproduce: `spawn` wraps a `emit_spawn_lambda` (`move |…|`,
+    /// NEVER `Box::new`) in `JetTask::spawn(…)`; `serve` (lambda handler) emits
+    /// `jet_http_serve(&(addr), <lambda>)`; `guard` emits `jet_scope_guard(<lambda>)`.
+    /// The closure body is lowered + rendered at lowering (the lambda is in subset —
+    /// Phase 11), so emit only assembles. `kind` selects the bespoke shape.
+    CoreClosureCall {
+        kind: TCoreClosureKind,
+    },
+    /// c109 Phase 13: a fn-typed-VALUE form. Either a bare function name used as a
+    /// value (`Expr::Ident` resolving to a top-level fn) or a call THROUGH a fn-value
+    /// (`Expr::CallValue` — `(f)(args)`). A bare fn-name value emits the
+    /// `Box::new(move |…| name(…)) as <fn-type>` wrapper (`emit_named_fn_value`,
+    /// Source/Codegen/Statement.rs), resolved at lowering into `wrapper`. A
+    /// `CallValue` emits `({callee})({args})` with the args lowered PLAINLY (the AST
+    /// `Expr::CallValue` passes `None` to `emit_call_args` → no clone/borrow/convention
+    /// wrappers). `kind` selects the form.
+    FnValue {
+        kind: TFnValueKind,
+    },
+}
+
+/// c109 Phase 13: the three closure-taking core-call shapes (see
+/// `TExprKind::CoreClosureCall`). Each holds the already-rendered closure string
+/// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
+/// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
+pub(crate) enum TCoreClosureKind {
+    /// `tasks.spawn(<lambda>)` → `{root}jet_std::JetTask::spawn(<spawn_closure>)`.
+    Spawn { spawn_closure: String },
+    /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
+    Serve { addr: Box<TExpr>, closure: String },
+    /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.
+    Guard { closure: String },
+}
+
+/// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
+pub(crate) enum TFnValueKind {
+    /// A bare function name used as a value. `wrapper` is the already-rendered
+    /// `Box::new(move |…| user_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
+    /// produced at lowering so emit only echoes it.
+    NamedFn { wrapper: String },
+    /// A call through a fn-value `(f)(args)`. `callee` lowers to its place (a local
+    /// of `Type::Fn`, or another fn-value form); args are lowered plainly.
+    Call { callee: Box<TExpr>, args: Vec<TCallArg> },
 }
 
 /// c109 Phase 12: a resolved numeric method form, one per `emit_builtin_method`
@@ -643,6 +703,38 @@ pub(crate) enum TBuiltinOp {
     ToString,
 }
 
+/// c109 Phase 13: a resolved handle-method op, one per handle arm of
+/// `emit_builtin_method` (Source/Codegen/Expression.rs). The handle-receiver branch
+/// (keyed on `rty == Some(Named(<handle>))`) is decided ONCE at lowering from the
+/// total `recv_type` — emit only formats. Args are emitted plainly (raw `arg(i)`).
+/// `{root}` denotes `cx.root_prefix` (program-level, read at emit).
+pub(crate) enum THandleOp {
+    /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
+    FileReaderReadLine,
+    /// FileWriter: `write_line(s)` → `{root}jet_std_file_writer_write_line(&mut (recv), &(a0))`.
+    FileWriterWriteLine,
+    /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
+    FileWriterFlush,
+    /// StdinHandle: `read_line()` → `{root}jet_std_io_stdin_read_line(&mut (recv))`.
+    StdinReadLine,
+    /// Stopwatch: `elapsed_millis()` → `{root}jet_stopwatch_elapsed_millis(&(recv))`.
+    StopwatchElapsedMillis,
+    /// TcpListener: `accept()` → `{root}jet_net_tcp_accept(&(recv))`.
+    TcpListenerAccept,
+    /// TcpListener: `local_addr()` → `{root}jet_net_listener_local_addr(&(recv))`.
+    TcpListenerLocalAddr,
+    /// TcpStream: `read()` → `{root}jet_net_tcp_read(&mut (recv))`.
+    TcpStreamRead,
+    /// TcpStream: `write(s)` → `{root}jet_net_tcp_write(&mut (recv), &(a0))`.
+    TcpStreamWrite,
+    /// TcpStream: `peer_addr()` → `{root}jet_net_tcp_peer_addr(&(recv))`.
+    TcpStreamPeerAddr,
+    /// TcpStream: `local_addr()` → `{root}jet_net_tcp_local_addr(&(recv))`.
+    TcpStreamLocalAddr,
+    /// TcpStream: `close()` → `{ drop(recv); }`.
+    TcpStreamClose,
+}
+
 /// One lowered call argument, with the borrow/clone decisions already made (so
 /// the emitter reproduces `emit_call_args` without consulting `cx.sigs`).
 ///
@@ -661,6 +753,25 @@ pub(crate) struct TCallArg {
     /// Emit `Arc::clone(&...)` (a `Shared` value auto-cloned at the call site).
     /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
     pub(crate) arc_clone: bool,
+    /// c109 Phase 13: the Fn-typed-parameter coercion (`emit_call_args`' fn-arg
+    /// path). When `Some(<fn-type rust string>)`, the value is wrapped
+    /// `Box::new(value) as <fn-type>` — unless it is ALREADY boxed (a bare fn-name
+    /// value emits its own `Box::new(…)`, or the value is a fn-typed local ident), in
+    /// which case only the ` as <fn-type>` suffix is applied. `already_boxed` carries
+    /// that resolved decision so emit makes none. This is mutually exclusive with the
+    /// borrow/clone wrappers (a Fn param is never borrowed/cloned — `emit_call_args`
+    /// skips `&(…)` for `Type::Fn`).
+    pub(crate) fn_coerce: Option<TFnCoerce>,
+}
+
+/// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).
+pub(crate) struct TFnCoerce {
+    /// The target fn-type, rendered as a Rust type string (`cx.rust_type(ty)`).
+    pub(crate) fn_type_rust: String,
+    /// Whether the value already produces a `Box::new(…)` (a bare fn-name value, or a
+    /// fn-typed local ident) — so emit applies only ` as <fn-type>`, never re-boxing.
+    /// Reproduces `emit_call_args`' `already_boxed` decision, resolved at lowering.
+    pub(crate) already_boxed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -877,6 +988,24 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
         || is_covered_fallible_ty(ty, cx)
+        || is_covered_fn_ty(ty, cx)
+}
+
+/// c109 Phase 13: a `fn(…) -> …` parameter/return type the subset lowers. The fn-type
+/// renders via `cx.rust_type` (`Box<dyn Fn(…) -> … [+ Send + Sync]>`) exactly as the
+/// AST `rust_param_type`/`rust_return_type` do — passed/returned by value (no `&`,
+/// `param_place`'s deref matches `emit_func`'s slot). The param/return + arg types must
+/// themselves be covered value types so the rendered fn-trait is well-formed and the
+/// arg lowering can wrap it. A higher-order fn param (a fn taking/returning a fn) is
+/// admitted recursively.
+fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
+    match ty {
+        Type::Fn { params, ret } => {
+            params.iter().all(|p| is_subset_param_ty(p, cx))
+                && ret.as_ref().map(|r| is_subset_param_ty(r, cx)).unwrap_or(true)
+        }
+        _ => false,
+    }
 }
 
 /// c109 Phase 8: `ty` is an optional `T?` (`Type::Option`) or a fallible `T ? E`
@@ -1465,15 +1594,30 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             StrPart::Lit(_) => true,
             StrPart::Interp(e) => expr_in_subset(e, cx, locals),
         }),
-        // An ident must resolve to a local/param. A non-local name is a
-        // program-level reference — a comptime `const` (inlined) or a bare
-        // function-as-value — whose emission the Phase-1 TIR does not cover.
-        Expr::Ident(name, _) => locals.contains(name),
+        // An ident must resolve to a local/param, OR (c109 Phase 13) be a bare
+        // function name used as a VALUE: a non-local, non-const name in `cx.fn_types`
+        // with a `Type::Fn` type. The latter emits `emit_named_fn_value`'s
+        // `Box::new(move |…| …) as <fn-type>` wrapper. A non-local that is a const
+        // (inlined) or an unqualified module import is still out.
+        Expr::Ident(name, _) => {
+            locals.contains(name) || ident_is_named_fn_value(name, cx, locals)
+        }
         Expr::Unary(_, inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Binary(_, l, r, _) => {
             expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals)
         }
         Expr::Call(c) => {
+            // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
+            // parses as `Expr::Call { name: "f" }`, NOT `Expr::CallValue`. The AST path
+            // (`emit_call`, env-contains-name branch) emits `(place)(args)` with args
+            // lowered PLAINLY (`emit_call_args(.., None, ..)`). Cover it: the name is a
+            // local (not a const) and every arg is in-subset + unlabeled.
+            if locals.contains(&c.name) && !cx.consts.contains_key(&c.name) {
+                return c
+                    .args
+                    .iter()
+                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+            }
             // `print` is the one builtin the subset covers (exactly one arg).
             let is_print = c.name == Syntax::BUILTIN_PRINT
                 && !cx.sigs.contains_key(&c.name)
@@ -1488,21 +1632,12 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.extern_funcs.contains_key(&c.name)
                 && !cx.unqualified_inline.contains_key(&c.name)
                 && !cx.unqualified_file.contains_key(&c.name);
-            // c109 Phase 11: a callee with a **Fn-typed parameter** routes its arg
-            // through `emit_call_args`'s `Box::new(…) as <fn-type>` coercion (the
-            // fn-value path), which the plain-`Call` lowering does NOT emit. Before
-            // Phase 11 no fn-value could appear in-subset as an arg (lambdas + bare
-            // fn-name idents were both excluded), so this never arose; now that
-            // lambdas are covered, a lambda/fn-value passed to such a callee would
-            // miscompile (missing Box coercion). Exclude any call whose callee has a
-            // Fn-typed param — conservative, stays on the AST path.
-            let no_fn_param = cx
-                .sigs
-                .get(&c.name)
-                .map(|ps| !ps.iter().any(|(_, t)| matches!(t, Type::Fn { .. })))
-                .unwrap_or(true);
+            // c109 Phase 13: a callee with a **Fn-typed parameter** is now covered.
+            // The arg routes through `emit_call_args`'s `Box::new(…) as <fn-type>`
+            // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
+            // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
+            // local). No special exclusion remains — the Box-coercion is total.
             (is_print || is_plain_fn)
-                && no_fn_param
                 && c.args.iter().all(|a| {
                     // No labels, no shared-auto-clone (Arc) in the subset.
                     a.label.is_none()
@@ -1689,9 +1824,31 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             fan_out_callee_in_subset(callee, cx, locals)
                 && items.iter().all(|i| expr_in_subset(i, cx, locals))
         }
+        // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`).
+        // Covered when the callee is in-subset (a fn-typed local, a fn-name value, or
+        // a lambda) and every arg is in-subset. The AST path emits `({callee})({args})`
+        // with args lowered plainly (`emit_call_args(.., None, ..)`), so no convention
+        // facts are needed — any in-subset arg works; labels are still excluded.
+        Expr::CallValue { callee, args, .. } => {
+            expr_in_subset(callee, cx, locals)
+                && args
+                    .iter()
+                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
+        }
         // Everything else (tuples, deref, …) is out.
         _ => false,
     }
+}
+
+/// c109 Phase 13: is `name` a bare top-level function used as a VALUE? It must be a
+/// non-local, non-const name in `cx.fn_types` whose type is a `Type::Fn`. Such a name
+/// emits `emit_named_fn_value`'s `Box::new(move |…| user_<name>(…)) as <fn-type>`
+/// (Source/Codegen/Statement.rs). A const (inlined value) or an unqualified module
+/// import is NOT a fn-value, so this stays narrow.
+fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<String>) -> bool {
+    !locals.contains(name)
+        && !cx.consts.contains_key(name)
+        && matches!(cx.fn_types.get(name), Some(Type::Fn { .. }))
 }
 
 /// c109 Phase 8: is a `??` fallback right-hand side in-subset? `Value` and early
@@ -1791,6 +1948,12 @@ fn method_call_in_subset(
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
                 if let Some(module) = cx.core_imports.get(alias) {
+                    // c109 Phase 13: the three closure-taking core calls (`tasks.spawn`/
+                    // `http.serve`/`scope.guard`) — NOT in `core_fixed_sig`, each a
+                    // bespoke emit shape with a literal-lambda closure arg.
+                    if core_closure_call_in_subset(module, method, args, cx, locals) {
+                        return true;
+                    }
                     return core_call_covered(module, method)
                         && args.iter().all(|a| {
                             a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
@@ -1846,6 +2009,27 @@ fn method_call_in_subset(
             return expr_in_subset(receiver, cx, locals);
         }
     }
+    // Shape (h) [c109 Phase 13]: a method ON a handle (FileReader/FileWriter/
+    // StdinHandle/Stopwatch/TcpListener/TcpStream). Sema sets `recv_type ==
+    // Some(<handle>)` (CheckerInfer, via the handle `*_method_return` tables). The AST
+    // emit branch (`emit_builtin_method`) keys on `rty = expr_jet_ty(receiver)`; for
+    // these handles the receiver is ALWAYS a `let`-bound local from a covered
+    // handle-producing core call (`files.open`/`time.start`/`net.tcp_connect`/…) or
+    // another covered handle method (`listener.accept()`), so its slot type is total
+    // (`Some(<handle>)`) — `rty == recv_type` always, and the rty-keyed branch fires
+    // identically. (HttpRequest/HttpResponse are EXCLUDED: they only arise as a
+    // `http.serve` lambda param, which may be unannotated → slot type `None` → the
+    // AST handle arm would NOT fire, so covering them would diverge.) Disjoint from
+    // the numeric shape (a handle name isn't numeric) and the instance/static shapes
+    // (a handle name isn't a covered struct/enum).
+    if let Some(handle) = recv_type {
+        if handle_method_op(handle, method, args.len()).is_some() {
+            return expr_in_subset(receiver, cx, locals)
+                && args
+                    .iter()
+                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+        }
+    }
     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
     // this (its `recv_type` is `None`). The AST path emits `user_<T>::user_<method>(…)`
     // when the receiver is a type name in `cx.type_names` (Expression.rs ~L1644). We
@@ -1895,13 +2079,11 @@ fn method_call_in_subset(
     // Every argument must be in-subset and carry no call-site label. Unlike a plain
     // call, a method arg MAY use any of `Read`/`Move`/`Mutate` with implicit/Arc
     // clone — those are carried as total flags and emitted verbatim (mirroring
-    // `emit_call_args`). The arg *type* is restricted to what the emitter can wrap:
-    // a covered value type; a Fn-typed param would need the Box-coercion form, so
-    // exclude any method whose param at this position is a function type.
-    args.iter().zip(sig.iter()).all(|(a, (_, pty))| {
-        a.label.is_none()
-            && !matches!(pty, Type::Fn { .. })
-            && expr_in_subset(&a.expr, cx, locals)
+    // `emit_call_args`). c109 Phase 13: a Fn-typed param routes through the
+    // `Box::new(…) as <fn-type>` coercion (`lower_one_call_arg`), so a fn-arg is no
+    // longer excluded.
+    args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
+        a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
     })
 }
 
@@ -1949,10 +2131,10 @@ fn static_method_call_in_subset(
     if args.len() != sig.len() {
         return false;
     }
-    args.iter().zip(sig.iter()).all(|(a, (_, pty))| {
-        a.label.is_none()
-            && !matches!(pty, Type::Fn { .. })
-            && expr_in_subset(&a.expr, cx, locals)
+    // c109 Phase 13: a Fn-typed static-method param routes through the Box-coercion
+    // (`lower_one_call_arg`); no longer excluded.
+    args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
+        a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
     })
 }
 
@@ -2219,6 +2401,105 @@ fn core_call_covered(module: &str, method: &str) -> bool {
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
+/// c109 Phase 13: is a closure-taking core call (`tasks.spawn`/`http.serve`/
+/// `scope.guard`) inside the subset? These are NOT in `core_fixed_sig` — each has a
+/// bespoke emit shape (`emit_core_call`, Source/Codegen/Expression.rs). We cover only
+/// the cleanest, byte-reproducible case for each, where the closure arg is a LITERAL
+/// in-subset lambda:
+///   - `tasks.spawn(<lambda>)` — 1 arg, a literal lambda (the `emit_spawn_lambda`
+///     `move |…|` form). A non-lambda spawn arg (a fn-value) takes the AST `arg(0)`
+///     path — excluded (its byte shape differs).
+///   - `http.serve(addr, <lambda>)` — 2 args; arg0 (addr) any in-subset value, arg1 a
+///     literal lambda (the `jet_http_serve(&(addr), <lambda>)` branch). The
+///     router-handler branch needs an HttpRouter value, which can only come from
+///     `http.router()` (not in `core_fixed_sig`) — so it can't arise in a covered fn.
+///   - `scope.guard(<lambda>)` — 1 arg, a literal zero-param lambda.
+fn core_closure_call_in_subset(
+    module: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    let lambda_arg = |i: usize| {
+        matches!(args.get(i).map(|a| &a.expr), Some(Expr::Lambda(lam)) if lambda_in_subset(lam, cx, locals))
+    };
+    let no_labels = args.iter().all(|a| a.label.is_none());
+    match (module, method) {
+        ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
+        ("jet.http", "serve") => {
+            args.len() == 2
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && lambda_arg(1)
+        }
+        ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
+        _ => false,
+    }
+}
+
+/// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
+/// `THandleOp`, reproducing the handle arms of `emit_builtin_method`
+/// (Source/Codegen/Expression.rs). Returns `None` for anything not covered (so the
+/// caller falls through to other shapes). Excluded (with reason): `lines` on
+/// FileReader/StdinHandle (dead — E2502, loop-source-only); all HttpRouter `get`/
+/// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HttpRequest/
+/// HttpResponse accessors (serve-lambda-param slot may be unresolved → AST handle arm
+/// wouldn't fire); Arena/Bump/Pool/Fixed (`alloc`/`reset`/`free` — the producer
+/// `mem.*.new` isn't a covered call, so an allocator never binds in a covered fn);
+/// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
+/// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
+fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
+    Some(match (handle, method, nargs) {
+        ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
+        ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
+        ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
+        ("StdinHandle", "read_line", 0) => THandleOp::StdinReadLine,
+        ("Stopwatch", "elapsed_millis", 0) => THandleOp::StopwatchElapsedMillis,
+        ("TcpListener", "accept", 0) => THandleOp::TcpListenerAccept,
+        ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
+        ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,
+        ("TcpStream", "write", 1) => THandleOp::TcpStreamWrite,
+        ("TcpStream", "peer_addr", 0) => THandleOp::TcpStreamPeerAddr,
+        ("TcpStream", "local_addr", 0) => THandleOp::TcpStreamLocalAddr,
+        ("TcpStream", "close", 0) => THandleOp::TcpStreamClose,
+        _ => return None,
+    })
+}
+
+/// c109 Phase 13: the resolved return type of a covered handle method, read from the
+/// authoritative sema handle tables (`file_handle_method_return`/`net_method_return`,
+/// Source/Sema/CheckerCoreLib.rs) — a pure `(handle, method)` dispatch, no inference.
+/// The return type is rarely load-bearing in emit (a binding carries sema's `b.ty`),
+/// but kept total per the design principle. A throwaway diags vec absorbs the table's
+/// diagnostic side-channel (sema already validated, so none fire here).
+fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) -> Type {
+    let span = crate::Diagnostics::Span { start: 0, end: 0 };
+    let mut sink = Vec::new();
+    let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
+        .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink));
+    match ret {
+        Some(Some(t)) => t,
+        _ => unit_type(),
+    }
+}
+
+/// c109 Phase 13: the resolved return type of a closure-taking core call, matching
+/// `infer_core_call` (Source/Sema/CheckerCoreLib.rs). `spawn` → `Task<elem>` (the
+/// closure's body type — total from the lowered lambda's return); `serve` → Unit (runs
+/// forever); `guard` → `ScopeGuard`. These types are rarely load-bearing in emit (a
+/// binding carries sema's `b.ty`), but kept total per the design principle.
+fn core_closure_call_return_ty(module: &str, method: &str, body_ty: Type) -> Type {
+    match (module, method) {
+        ("core.tasks", "spawn") => Type::Apply {
+            name: "Task".to_string(),
+            args: vec![body_ty],
+        },
+        ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
+        _ => unit_type(),
+    }
+}
+
 /// c109 Phase 10: the resolved return type of a covered core call, read from the
 /// authoritative `Sema::core_fixed_sig` table (totality). A `None` return (a
 /// void-effect call like `fs.write`/`env.set`/`process.exit`) lowers to `Unit`.
@@ -2428,18 +2709,66 @@ fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
 fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match s {
         Stmt::Val(b) => {
-            let init = lower_expr(&b.init, cx, env);
+            let mut init = lower_expr(&b.init, cx, env);
+            // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
+            // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
+            // a `: <fn-trait(mut)>` annotation. Decided here from `Lambda.meta`.
+            let mut_fn = matches!(
+                &b.init,
+                Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
+            );
+            if mut_fn {
+                if let Some(Type::Fn { params, ret }) = &b.ty {
+                    let coerced = format!(
+                        "{} as {}",
+                        emit_tir_expr(&init, cx),
+                        cx.rust_fn_trait(params, ret.as_deref(), true)
+                    );
+                    init = TExpr {
+                        ty: init.ty.clone(),
+                        kind: TExprKind::FnValue {
+                            kind: TFnValueKind::NamedFn { wrapper: coerced },
+                        },
+                    };
+                }
+            }
             // Totality: if the source omitted the type, infer it ONCE here from
             // the init's already-resolved type. Codegen never infers.
-            let annotated = b.ty.is_some();
             let ty = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
+            // when bound immutably (its methods take `&mut self`). Mirror
+            // `emit_let`'s `is_file_handle` set exactly.
+            let is_file_handle = matches!(
+                &b.ty,
+                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
+                    || n == "TcpStream" || n == "HttpRouter"
+                    || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
+            );
+            let kw = if (b.mutable && !b.is_comptime) || mut_fn || is_file_handle {
+                "let mut"
+            } else {
+                "let"
+            };
+            // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
+            // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
+            // inferred binding.
+            let ty_clause = b
+                .ty
+                .as_ref()
+                .map(|t| {
+                    if let Type::Fn { params, ret } = t {
+                        format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), mut_fn))
+                    } else {
+                        format!(": {}", cx.rust_type(t))
+                    }
+                })
+                .unwrap_or_default();
             env.locals
-                .insert(b.name.clone(), (mangle(&b.name), Some(ty.clone())));
+                .insert(b.name.clone(), (mangle(&b.name), Some(ty)));
             TStmt::Let {
                 name: b.name.clone(),
-                ty,
-                annotated,
-                mutable: b.mutable,
+                kw,
+                ty_clause,
                 init,
             }
         }
@@ -2957,10 +3286,50 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Ident(name, _) => {
+            // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
+            // const) emits `emit_named_fn_value` — `Box::new(move |…| user_<name>(…))
+            // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
+            if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
+                if let Some(ft @ Type::Fn { .. }) = cx.fn_types.get(name) {
+                    return TExpr {
+                        ty: ft.clone(),
+                        kind: TExprKind::FnValue {
+                            kind: TFnValueKind::NamedFn {
+                                wrapper: emit_named_fn_value(cx, name, ft),
+                            },
+                        },
+                    };
+                }
+            }
             let ty = env.ty_of(name).unwrap_or(Type::Int);
             TExpr {
                 ty,
                 kind: TExprKind::Local(env.place_of(name)),
+            }
+        }
+        // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
+        // AST path (`emit_expr`'s `Expr::CallValue`) emits `({callee})({args})` with the
+        // args lowered PLAINLY (it passes `None` to `emit_call_args` → no convention/
+        // clone/borrow wrappers). Reproduce exactly: lower the callee, lower each arg
+        // with `conv = None`. The result type is the callee fn-type's return (total).
+        Expr::CallValue { callee, args, .. } => {
+            let callee_t = lower_expr(callee, cx, env);
+            let ret_ty = match &callee_t.ty {
+                Type::Fn { ret: Some(r), .. } => (**r).clone(),
+                _ => unit_type(),
+            };
+            let targs = args
+                .iter()
+                .map(|a| lower_one_call_arg(a, None, env, cx))
+                .collect();
+            TExpr {
+                ty: ret_ty,
+                kind: TExprKind::FnValue {
+                    kind: TFnValueKind::Call {
+                        callee: Box::new(callee_t),
+                        args: targs,
+                    },
+                },
             }
         }
         Expr::Unary(op, inner, _) => {
@@ -3008,6 +3377,35 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Call(call) => {
+            // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
+            // parses as `Expr::Call`. The AST path (`emit_call`, env-contains-name
+            // branch) emits `(place)(args)` with args PLAIN (`emit_call_args(.., None)`).
+            // Reproduce as a `FnValue::Call` whose callee is the local's place.
+            if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+                let callee_ty = env.ty_of(&call.name).unwrap_or_else(unit_type);
+                let ret_ty = match &callee_ty {
+                    Type::Fn { ret: Some(r), .. } => (**r).clone(),
+                    _ => unit_type(),
+                };
+                let callee_t = TExpr {
+                    ty: callee_ty,
+                    kind: TExprKind::Local(env.place_of(&call.name)),
+                };
+                let targs = call
+                    .args
+                    .iter()
+                    .map(|a| lower_one_call_arg(a, None, env, cx))
+                    .collect();
+                return TExpr {
+                    ty: ret_ty,
+                    kind: TExprKind::FnValue {
+                        kind: TFnValueKind::Call {
+                            callee: Box::new(callee_t),
+                            args: targs,
+                        },
+                    },
+                };
+            }
             // `print` is ambient only when the user has not defined their own
             // `print` function (matches emit_call; sema enforces the shadowing).
             if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
@@ -3017,32 +3415,18 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::Print(Box::new(arg)),
                 };
             }
-            // Resolve the callee's signature so each arg's borrow/clone is decided
-            // here, totally — mirroring `emit_call_args` for scalar/String params.
-            let sig = cx.sigs.get(&call.name);
+            // Resolve the callee's signature so each arg's borrow/clone/fn-coercion is
+            // decided here, totally — via the shared `lower_one_call_arg` (the single
+            // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
+            // param (now in subset) routes its arg through the Box-coercion form.
+            let sig = cx.sigs.get(&call.name).cloned();
             let args = call
                 .args
                 .iter()
                 .enumerate()
                 .map(|(i, a)| {
-                    let value = lower_expr(&a.expr, cx, env);
-                    let conv = sig.and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
-                    // String (`Read`) → `&(...)`. Scalars never borrow.
-                    let borrow = matches!(
-                        &conv,
-                        Some((AccessConvention::Read, t)) if !t.is_scalar()
-                    );
-                    // An implicit clone (a String passed by value). The plain-call
-                    // subset excludes Arc auto-clone and `Mutate` args (gate), so
-                    // those wrappers are always off here.
-                    let clone = a.flags.implicit_clone;
-                    TCallArg {
-                        value,
-                        borrow,
-                        mut_borrow: false,
-                        clone,
-                        arc_clone: false,
-                    }
+                    let conv = sig.as_ref().and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
+                    lower_one_call_arg(a, conv, env, cx)
                 })
                 .collect();
             let ret = call_return_type(cx, &call.name);
@@ -3418,6 +3802,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 mut_borrow: false,
                                 clone: false,
                                 arc_clone: false,
+                                fn_coerce: None,
                             }],
                         },
                     }
@@ -3527,6 +3912,12 @@ fn lower_method_call(
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias) {
                 if let Some(module) = cx.core_imports.get(alias).cloned() {
+                    // c109 Phase 13: a closure-taking core call (spawn/serve/guard).
+                    // The gate proved a literal-lambda closure arg. Each renders its
+                    // bespoke shape at lowering (lambda in subset — Phase 11).
+                    if let Some(t) = lower_core_closure_call(&module, method, args, cx, env) {
+                        return t;
+                    }
                     let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
                     return TExpr {
                         ty: core_call_return_ty(&module, method),
@@ -3610,6 +4001,25 @@ fn lower_method_call(
             }
         }
     }
+    // c109 Phase 13: a method ON a handle. The gate proved `recv_type ==
+    // Some(<handle>)` + a covered handle op. Resolve the handle-receiver branch HERE
+    // into a total `THandleOp` (reproducing the handle arms of `emit_builtin_method`),
+    // so emit makes no type decision (I3). Args lowered PLAINLY (`arg(i)` = raw
+    // `emit_expr`). The return type is the total sema handle-table fact.
+    if let Some(handle) = recv_type {
+        if let Some(op) = handle_method_op(handle, method, args.len()) {
+            let recv_t = lower_expr(receiver, cx, env);
+            let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            return TExpr {
+                ty: handle_method_return_ty(handle, method, args.len()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(recv_t),
+                    op,
+                    args: targs,
+                },
+            };
+        }
+    }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
@@ -3683,11 +4093,81 @@ fn lower_method_call(
     }
 }
 
-/// c109 Phase 6: lower method-call arguments, mirroring `emit_call_args`
-/// (Source/Codegen/Expression.rs). The clone/Arc wrappers and the borrow/mut-borrow
-/// wrappers are decided here from the total facts (`CallArg.flags` + the resolved
-/// param convention/type), never re-derived in emit. The gate excluded Fn-typed
-/// params, so no Box-coercion form arises.
+/// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`/`http.serve`/
+/// `scope.guard`) into a bespoke `CoreClosureCall` node, reproducing `emit_core_call`
+/// (Source/Codegen/Expression.rs) byte-for-byte. Returns `None` when `(module,
+/// method)` isn't one of the three (so the caller falls through to the plain
+/// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
+/// in-subset lambda in the closure-arg position.
+fn lower_core_closure_call(
+    module: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Option<TExpr> {
+    let lam_at = |i: usize| match args.get(i).map(|a| &a.expr) {
+        Some(Expr::Lambda(lam)) => Some(lam),
+        _ => None,
+    };
+    let kind = match (module, method) {
+        ("core.tasks", "spawn") => {
+            let lam = lam_at(0)?;
+            // The spawned body's type (the lambda's return) is the Task's element type.
+            let body_ty = lambda_body_ty(lam, cx, env);
+            let spawn_closure = render_spawn_lambda(lam, cx, env);
+            return Some(TExpr {
+                ty: core_closure_call_return_ty(module, method, body_ty),
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::Spawn { spawn_closure },
+                },
+            });
+        }
+        ("jet.http", "serve") => {
+            let lam = lam_at(1)?;
+            let addr = lower_expr(&args[0].expr, cx, env);
+            let closure = render_lambda_str(lam, cx, env);
+            TCoreClosureKind::Serve {
+                addr: Box::new(addr),
+                closure,
+            }
+        }
+        ("core.scope", "guard") => {
+            let lam = lam_at(0)?;
+            let closure = render_lambda_str(lam, cx, env);
+            TCoreClosureKind::Guard { closure }
+        }
+        _ => return None,
+    };
+    Some(TExpr {
+        ty: core_closure_call_return_ty(module, method, unit_type()),
+        kind: TExprKind::CoreClosureCall { kind },
+    })
+}
+
+/// c109 Phase 13: the type of a lambda's body (its return), used for a `spawn`ed
+/// closure's `Task<T>` element type. An expression body's type is the lowered expr's
+/// `ty`; a block body's type is rarely load-bearing in the subset (the Task type is
+/// not read by emit), so a `Unit` placeholder is fine for a block.
+fn lambda_body_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
+    match &lam.body {
+        LambdaBody::Expr(e) => {
+            let mut lam_env = clone_env(env);
+            for p in &lam.params {
+                lam_env
+                    .locals
+                    .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
+            }
+            lower_expr(e, cx, &mut lam_env).ty
+        }
+        LambdaBody::Block(_) => unit_type(),
+    }
+}
+
+/// c109 Phase 6/13: lower method-call arguments, mirroring `emit_call_args`
+/// (Source/Codegen/Expression.rs). The clone/Arc wrappers, the borrow/mut-borrow
+/// wrappers, and the Fn-typed Box-coercion are all decided here from total facts
+/// (`CallArg.flags` + the resolved param convention/type), never re-derived in emit.
 fn lower_method_args(
     args: &[crate::AST::CallArg],
     sig: &[(AccessConvention, Type)],
@@ -3697,31 +4177,84 @@ fn lower_method_args(
     args.iter()
         .enumerate()
         .map(|(i, a)| {
-            let value = lower_expr(&a.expr, cx, env);
             let conv = sig.get(i).map(|(c, t)| (*c, t.clone()));
-            // Clone wrappers (applied to the raw value first, exactly as emit_call_args).
-            let clone = a.flags.implicit_clone;
-            let arc_clone = a.flags.shared_auto_clone;
-            // Borrow wrappers (applied after the clone wrapper). A `Read` non-scalar
-            // (non-Fn) is `&(…)`; a `Mutate` is `&mut (…)`.
-            let (borrow, mut_borrow) = match &conv {
-                Some((AccessConvention::Read, t))
-                    if !t.is_scalar() && !matches!(t, Type::Fn { .. }) =>
-                {
-                    (true, false)
-                }
-                Some((AccessConvention::Mutate, _)) => (false, true),
-                _ => (false, false),
-            };
-            TCallArg {
-                value,
-                borrow,
-                mut_borrow,
-                clone,
-                arc_clone,
-            }
+            lower_one_call_arg(a, conv, env, cx)
         })
         .collect()
+}
+
+/// c109 Phase 13: lower ONE call argument, reproducing `emit_call_args`
+/// (Source/Codegen/Expression.rs) byte-for-byte — the single source of truth for
+/// the clone/Arc, Fn-coercion, and borrow/mut-borrow wrapper order. `conv` is the
+/// resolved param `(convention, type)` for this position (`None` when the callee has
+/// no known signature, e.g. a `CallValue`). The emit order is exactly the AST path's:
+///   1. the implicit-clone / Arc-clone wrapper (`(…).clone()` / `Arc::clone(&…)`);
+///   2. the Fn-typed Box-coercion (`Box::new(…) as <fn-type>`, or just ` as <fn-type>`
+///      when already boxed);
+///   3. the borrow wrapper (`&(…)` for a `Read` non-scalar non-Fn, `&mut (…)` for a
+///      `Mutate`).
+fn lower_one_call_arg(
+    a: &crate::AST::CallArg,
+    conv: Option<(AccessConvention, Type)>,
+    env: &mut LowerEnv,
+    cx: &Cx,
+) -> TCallArg {
+    let value = lower_expr(&a.expr, cx, env);
+    let clone = a.flags.implicit_clone;
+    let arc_clone = a.flags.shared_auto_clone;
+    // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
+    let fn_coerce = match &conv {
+        Some((_, Type::Fn { .. })) => {
+            // `already_boxed`: the value already produces a `Box::new(…)`. The AST
+            // checks two cases — the emitted string starts with `Box::new(` (only a
+            // bare fn-name value does, in subset — `emit_named_fn_value`), OR the
+            // value is a fn-typed local ident. Resolve both at lowering.
+            let already_boxed = ast_arg_is_named_fn_value(&a.expr, cx, env)
+                || matches!(
+                    &a.expr,
+                    Expr::Ident(name, _)
+                        if env.ty_of(name).is_some_and(|t| matches!(t, Type::Fn { .. }))
+                );
+            let (_, ty) = conv.as_ref().expect("matched Some above");
+            Some(TFnCoerce {
+                fn_type_rust: cx.rust_type(ty),
+                already_boxed,
+            })
+        }
+        _ => None,
+    };
+    // Borrow wrappers (applied after the clone + fn-coerce wrappers). A `Read`
+    // non-scalar (non-Fn) is `&(…)`; a `Mutate` is `&mut (…)`. A Fn-typed `Read` is
+    // NOT borrowed (the AST `match conv` skips it), so the fn-coerce form stands alone.
+    let (borrow, mut_borrow) = match &conv {
+        Some((AccessConvention::Read, t)) if !t.is_scalar() && !matches!(t, Type::Fn { .. }) => {
+            (true, false)
+        }
+        Some((AccessConvention::Mutate, _)) => (false, true),
+        _ => (false, false),
+    };
+    TCallArg {
+        value,
+        borrow,
+        mut_borrow,
+        clone,
+        arc_clone,
+        fn_coerce,
+    }
+}
+
+/// c109 Phase 13: does this AST arg expression emit as a `Box::new(…)` (a bare
+/// fn-name value via `emit_named_fn_value`)? That is exactly an `Expr::Ident` which
+/// is NOT a local and resolves to a `Type::Fn` in `cx.fn_types` (a top-level fn used
+/// as a value). Mirrors `emit_expr`'s `Expr::Ident` arm + `emit_call_args`'
+/// `s.starts_with("Box::new(")` check, resolved at lowering.
+fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bool {
+    if let Expr::Ident(name, _) = e {
+        if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
+            return matches!(cx.fn_types.get(name), Some(Type::Fn { .. }));
+        }
+    }
+    false
 }
 
 /// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)`
@@ -3974,6 +4507,71 @@ fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
     }
 }
 
+/// c109 Phase 13: render a `tasks.spawn` lambda, reproducing `emit_spawn_lambda`
+/// (Source/Codegen/Expression.rs) byte-for-byte. It is `emit_lambda` minus the
+/// Fn-vs-FnMut and escape logic: ALWAYS `move`, NEVER `Box::new`. The clone-capture
+/// prelude is identical. Returns the full rendered closure string (wrapped in
+/// `{ <prep> <closure> }` when there are cloned captures).
+fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
+    let mut lam_env = clone_env(env);
+    let mut prep = String::new();
+    for name in &lam.meta.cloned_captures {
+        let cap = format!("_jet_cap_{}", mangle(name));
+        prep.push_str(&format!("let {} = ({}).clone();\n    ", cap, env.place_of(name)));
+        lam_env.locals.insert(name.clone(), (cap, None));
+    }
+    for p in &lam.params {
+        lam_env
+            .locals
+            .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
+    }
+    let params: Vec<String> = lam
+        .params
+        .iter()
+        .map(|p| {
+            let ty = p
+                .ty
+                .as_ref()
+                .map(|t| format!(": {}", cx.rust_type(t)))
+                .unwrap_or_default();
+            format!("{}{}", mangle(&p.name), ty)
+        })
+        .collect();
+    let body = match &lam.body {
+        LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
+        LambdaBody::Block(stmts) => {
+            let lowered = lower_stmts(stmts, cx, &mut lam_env);
+            let mut inner = String::new();
+            emit_tir_stmts(&lowered, cx, &mut inner, 1);
+            format!("{{ {} }}", inner)
+        }
+    };
+    let closure = format!("move |{}| {}", params.join(", "), body);
+    if prep.is_empty() {
+        closure
+    } else {
+        format!("{{ {} {} }}", prep, closure)
+    }
+}
+
+/// c109 Phase 13: render a lambda via the plain `emit_lambda` form (used by
+/// `http.serve`'s lambda handler and `scope.guard`). Returns the full closure string.
+fn render_lambda_str(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
+    let tl = lower_lambda(lam, cx, env);
+    let move_kw = if tl.is_move { "move " } else { "" };
+    let closure = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
+    let wrapped = if tl.boxed {
+        format!("Box::new({})", closure)
+    } else {
+        closure
+    };
+    if tl.prep.is_empty() {
+        wrapped
+    } else {
+        format!("{{ {} {} }}", tl.prep, wrapped)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Emission: TIR -> Rust. PURE formatting. No type inference, no decisions.
 // ---------------------------------------------------------------------------
@@ -4107,17 +4705,10 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
     match s {
         TStmt::Let {
             name,
-            ty,
-            annotated,
-            mutable,
+            kw,
+            ty_clause,
             init,
         } => {
-            let kw = if *mutable { "let mut" } else { "let" };
-            let ty_clause = if *annotated {
-                format!(": {}", cx.rust_type(ty))
-            } else {
-                String::new()
-            };
             out.push_str(&format!(
                 "{}{} {}{} = {};\n",
                 pad,
@@ -4755,6 +5346,79 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
             }
         }
+        // c109 Phase 13: a method ON a handle. The handle-receiver branch was resolved
+        // into `op` at lowering; emit only formats, reproducing the handle arms of
+        // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
+        // emitted PLAINLY (raw `arg(i)`). `cx.root_prefix` is program-level.
+        TExprKind::HandleMethod { recv, op, args } => {
+            let recv = emit_tir_expr(recv, cx);
+            let a = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+            let root = &cx.root_prefix;
+            match op {
+                THandleOp::FileReaderReadLine => {
+                    format!("{}jet_std_file_reader_read_line(&mut ({}))", root, recv)
+                }
+                THandleOp::FileWriterWriteLine => format!(
+                    "{}jet_std_file_writer_write_line(&mut ({}), &({}))",
+                    root, recv, a(0)
+                ),
+                THandleOp::FileWriterFlush => {
+                    format!("{}jet_std_file_writer_flush(&mut ({}))", root, recv)
+                }
+                THandleOp::StdinReadLine => {
+                    format!("{}jet_std_io_stdin_read_line(&mut ({}))", root, recv)
+                }
+                THandleOp::StopwatchElapsedMillis => {
+                    format!("{}jet_stopwatch_elapsed_millis(&({}))", root, recv)
+                }
+                THandleOp::TcpListenerAccept => format!("{}jet_net_tcp_accept(&({}))", root, recv),
+                THandleOp::TcpListenerLocalAddr => {
+                    format!("{}jet_net_listener_local_addr(&({}))", root, recv)
+                }
+                THandleOp::TcpStreamRead => format!("{}jet_net_tcp_read(&mut ({}))", root, recv),
+                THandleOp::TcpStreamWrite => {
+                    format!("{}jet_net_tcp_write(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::TcpStreamPeerAddr => {
+                    format!("{}jet_net_tcp_peer_addr(&({}))", root, recv)
+                }
+                THandleOp::TcpStreamLocalAddr => {
+                    format!("{}jet_net_tcp_local_addr(&({}))", root, recv)
+                }
+                THandleOp::TcpStreamClose => format!("{{ drop({}); }}", recv),
+            }
+        }
+        // c109 Phase 13: a closure-taking core call. The closure was rendered at
+        // lowering; emit assembles the bespoke shape, byte-for-byte `emit_core_call`
+        // (Source/Codegen/Expression.rs).
+        TExprKind::CoreClosureCall { kind } => match kind {
+            TCoreClosureKind::Spawn { spawn_closure } => {
+                format!("{}jet_std::JetTask::spawn({})", cx.root_prefix, spawn_closure)
+            }
+            TCoreClosureKind::Serve { addr, closure } => format!(
+                "{}jet_http_serve(&({}), {})",
+                cx.root_prefix,
+                emit_tir_expr(addr, cx),
+                closure
+            ),
+            TCoreClosureKind::Guard { closure } => {
+                format!("{}jet_scope_guard({})", cx.root_prefix, closure)
+            }
+        },
+        // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
+        // already-rendered `Box::new(move |…| …) as <fn-type>` wrapper; a call through
+        // a fn-value emits `({callee})({args})`, byte-for-byte `emit_expr`'s
+        // `Expr::CallValue` (Source/Codegen/Expression.rs).
+        TExprKind::FnValue { kind } => match kind {
+            TFnValueKind::NamedFn { wrapper } => wrapper.clone(),
+            TFnValueKind::Call { callee, args } => {
+                format!(
+                    "({})({})",
+                    emit_tir_expr(callee, cx),
+                    emit_tir_call_args(args, cx)
+                )
+            }
+        },
     }
 }
 
@@ -4956,6 +5620,15 @@ fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 s = format!("({}).clone()", s);
             } else if a.arc_clone {
                 s = format!("std::sync::Arc::clone(&{})", s);
+            }
+            // c109 Phase 13: the Fn-typed Box-coercion, applied AFTER the clone wrapper
+            // and BEFORE the borrow wrapper — exactly `emit_call_args`' order. `Box::new`
+            // is added only when the value isn't already boxed (resolved at lowering).
+            if let Some(fc) = &a.fn_coerce {
+                if !fc.already_boxed {
+                    s = format!("Box::new({})", s);
+                }
+                s = format!("{} as {}", s, fc.fn_type_rust);
             }
             if a.borrow {
                 s = format!("&({})", s);
@@ -5494,5 +6167,78 @@ mod tests {
         // would need clone decisions the subset can't make.
         let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return err(Oops.Msg(\"bad\"))\n }\n return ok(x)\n}\n";
         assert!(!covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_fn_typed_param() {
+        // c109 Phase 13: a fn-typed parameter is now inside the subset (was excluded
+        // through Phase 12, when any callee/param with a `Type::Fn` stayed on the AST
+        // path). The body `f(f(x))` is a fn-value call through the local param.
+        let src = "fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {\n return f(f(x))\n}\n";
+        assert!(covers(src, "apply_twice"));
+    }
+
+    #[test]
+    fn covers_fn_name_value_arg() {
+        // c109 Phase 13: a bare top-level fn name used as a VALUE (passed to a
+        // fn-typed param) is in subset — it emits `emit_named_fn_value`'s
+        // `Box::new(move |…| …) as <fn-type>` wrapper.
+        let src = "fn callit(f: fn(Int) -> Int) -> Int {\n return f(1)\n}\nfn dbl(x: Int) -> Int {\n return (x * 2)\n}\nfn use_it() -> Int {\n return callit(dbl)\n}\n";
+        assert!(covers(src, "use_it"));
+    }
+
+    #[test]
+    fn handle_method_op_table() {
+        // c109 Phase 13: the covered handle-method set, and the excluded ones.
+        assert!(handle_method_op("FileReader", "read_line", 0).is_some());
+        assert!(handle_method_op("FileWriter", "write_line", 1).is_some());
+        assert!(handle_method_op("FileWriter", "flush", 0).is_some());
+        assert!(handle_method_op("TcpStream", "read", 0).is_some());
+        assert!(handle_method_op("TcpStream", "close", 0).is_some());
+        assert!(handle_method_op("TcpListener", "accept", 0).is_some());
+        // Excluded: dead `lines` (E2502), HttpRequest accessors (serve-lambda-param
+        // slot may be unresolved), allocator methods (producer not covered).
+        assert!(handle_method_op("FileReader", "lines", 0).is_none());
+        assert!(handle_method_op("HttpRequest", "method", 0).is_none());
+        assert!(handle_method_op("Arena", "alloc", 1).is_none());
+        // Wrong arity declines.
+        assert!(handle_method_op("FileWriter", "write_line", 0).is_none());
+    }
+
+    #[test]
+    fn core_closure_calls_covered() {
+        // c109 Phase 13: the three closure-taking core calls are covered with a
+        // literal in-subset lambda; the polymorphic specials stay deferred.
+        let cx_src = "fn f() {}\n";
+        let (toks, _) = crate::Lexer::lex(cx_src);
+        let prog = crate::Parser::parse(&toks).expect("parse");
+        let cx = build_cx(&prog, cx_src, "t.jet");
+        let locals = HashSet::new();
+        let lam = |body: &str| -> Vec<crate::AST::CallArg> {
+            let s = format!("fn g() {{ x @= scope.guard({})\n}}\n", body);
+            let (t, _) = crate::Lexer::lex(&s);
+            let p = crate::Parser::parse(&t).expect("parse lam");
+            // Pull the single call arg from the guard call.
+            for item in &p.items {
+                if let crate::AST::Item::Func(f) = item {
+                    for st in &f.body {
+                        if let Stmt::Val(b) = st {
+                            if let Expr::MethodCall { args, .. } = &b.init {
+                                return args.clone();
+                            }
+                        }
+                    }
+                }
+            }
+            Vec::new()
+        };
+        let guard_args = lam("() => { print(\"x\") }");
+        assert!(core_closure_call_in_subset(
+            "core.scope", "guard", &guard_args, &cx, &locals
+        ));
+        // A non-closure core call is not a closure-core-call.
+        assert!(!core_closure_call_in_subset(
+            "core.fs", "read", &guard_args, &cx, &locals
+        ));
     }
 }
