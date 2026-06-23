@@ -2661,3 +2661,86 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "200 OK: m=GET p=/x\n");
 }
+
+/// c109 Phase 21: `tasks.spawn` + `Task<T>` value + `Task.join()` — the spawn/join
+/// surface (32_tasks). The spawn closure is Phase-11/13 covered; the new coverage is the
+/// `Task<Int>` binding value type + the `recv_type == None` `.join()` method.
+#[test]
+fn task_spawn_join() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn sum_range(first: Int, last: Int) -> Int {
+    total := 0
+    loop n in first..last {
+        total = (total + n)
+    }
+    return total
+}
+fn main() {
+    a @= tasks.spawn(() => sum_range(1, 25))
+    b @= tasks.spawn(() => sum_range(26, 50))
+    print((a.join() + b.join()))
+}
+";
+    let (code, stdout) = build_and_run("tir_task_spawn_join", src);
+    assert_eq!(code, 0);
+    // `loop n in first..last` is inclusive (S22/D-SG8): sum(1..=25) + sum(26..=50).
+    assert_eq!(stdout, "1275\n");
+}
+
+/// c109 Phase 21: `Task.detach()` (D-DETACH1) — fire-and-forget; drops the handle.
+#[test]
+fn task_detach() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks
+fn main() {
+    tasks.spawn(() => 42).detach()
+    print(\"launched\")
+}
+";
+    let (code, stdout) = build_and_run("tir_task_detach", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "launched\n");
+}
+
+/// c109 Phase 21: the full channel surface — `tasks.channel()` producer, `Channel<T>`
+/// value, `Channel.sender()`, `Sender.send(v)` (inside a `take(..)` spawn closure),
+/// `Task.join()`, and `Channel.receive() ?? panic(..)` (`Result<T, Closed>` unwrap).
+#[test]
+fn channel_send_receive() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn main() {
+    ch: Channel<Int> @= tasks.channel()
+    s1 @= ch.sender()
+    t1 @= tasks.spawn(take(s1) () => {
+        s1.send(30)
+    })
+    s2 @= ch.sender()
+    t2 @= tasks.spawn(take(s2) () => {
+        s2.send(12)
+    })
+    t1.join()
+    t2.join()
+    results: [Int] := []
+    results.push(ch.receive() ?? panic(\"channel closed\"))
+    results.push(ch.receive() ?? panic(\"channel closed\"))
+    results.sort()
+    loop x in results {
+        print(x)
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_channel", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "12\n30\n");
+}
