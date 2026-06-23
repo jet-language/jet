@@ -25,11 +25,10 @@ fn count_dir(dir: String, mut counts: [String, Int]) {
     if fs.list_dir(dir) {
         it == ok(entries) -> {
             loop entry in entries {
-                full @= "{dir}/{entry}"
-                if fs.is_dir(full) {
-                    count_dir(full, mut counts)
-                } else if entry.ends_with(".txt") {
-                    count_file(full, mut counts)
+                if entry.is_dir {
+                    count_dir(entry.path, mut counts)
+                } else if entry.name.ends_with(".txt") {
+                    count_file(entry.path, mut counts)
                 }
             }
         }

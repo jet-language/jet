@@ -45,17 +45,16 @@ fn build_backlinks(notes: [String, Note]) -> [String, [String]] {
     return bl
 }
 pub fn build(dir: String) -> Index ? String {
-    file_names @= fs.list_dir(dir) ?? return err("cannot read directory: {dir}")
+    entries @= fs.list_dir(dir) ?? return err("cannot read directory: {dir}")
     md_files: [String] := []
-    loop p in file_names {
-        if p.ends_with(".md") {
-            md_files.push(p)
+    loop entry in entries {
+        if !entry.is_dir && entry.name.ends_with(".md") {
+            md_files.push(entry.path)
         }
     }
     md_files.sort()
     results: [ParsedResult] := []
-    loop p in md_files {
-        full @= path.join(dir, p)
+    loop full in md_files {
         text @= fs.read(full) ?? ""
         if note.parse(full, text) {
             it == ok(n) -> {

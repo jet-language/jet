@@ -18,6 +18,13 @@ mod jet_std {
         pub errors: String,
     }
 
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DirEntry {
+        pub name: String,
+        pub path: String,
+        pub is_dir: bool,
+    }
+
     #[derive(Clone, Debug)]
     pub struct Stopwatch {
         pub start: std::time::Instant,
@@ -47,6 +54,11 @@ mod jet_std {
     }
     impl super::JetShow for ProcessResult {
         fn jet_show(&self) -> String { format!("{:?}", self) }
+    }
+    impl super::JetShow for DirEntry {
+        fn jet_show(&self) -> String {
+            format!("DirEntry {{ name: {:?}, path: {:?}, is_dir: {} }}", self.name, self.path, self.is_dir)
+        }
     }
     impl super::JetShow for Stopwatch {
         fn jet_show(&self) -> String { format!("{:?}", self.start) }
@@ -434,14 +446,21 @@ fn jet_std_fs_exists(path: &String) -> bool { std::path::Path::new(path).exists(
 fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IoError> {
     std::fs::remove_file(path).map_err(|e| jet_std::io_error(path, e))
 }
-fn jet_std_fs_list_dir(path: &String) -> Result<Vec<String>, jet_std::IoError> {
+// D-LSDIR1=A: returns DirEntry values with name, full path, and is_dir flag.
+fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IoError> {
     let mut out = Vec::new();
     let rd = std::fs::read_dir(path).map_err(|e| jet_std::io_error(path, e))?;
     for entry in rd {
         let entry = entry.map_err(|e| jet_std::io_error(path, e))?;
-        out.push(entry.file_name().to_string_lossy().to_string());
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full_path = std::path::Path::new(path.as_str())
+            .join(&name)
+            .to_string_lossy()
+            .to_string();
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        out.push(jet_std::DirEntry { name, path: full_path, is_dir });
     }
-    out.sort();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
 fn jet_std_fs_create_dir(path: &String) -> Result<(), jet_std::IoError> {
