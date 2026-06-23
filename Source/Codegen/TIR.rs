@@ -3887,6 +3887,16 @@ fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "jet.http" && matches!(method, "router" | "parse" | "dispatch") {
         return true;
     }
+    // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
+    // type (`Result<String, IOError>`) lives in sema's bespoke `infer_core_call` arm
+    // (CheckerCoreLib.rs), carried total by `core_call_return_ty`. It is the DISTINCT
+    // qualified MethodCall on a `core.io` alias (the ambient bare `input()`, Phase 25, is
+    // a separate `Expr::Call` node → `AmbientInput`). Emits the same fixed-string CoreCall
+    // `{root}jet_std_io_input(None|Some(&(prompt)))` (reproduced in `emit_tir_core_call`),
+    // byte-for-byte the AST `emit_core_call` arm. Composes with the Phase-8 `?? return`.
+    if module == "core.io" && method == "input" {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
@@ -4113,6 +4123,17 @@ fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("jet.http", "router") => return Type::Named("HttpRouter".to_string()),
         ("jet.http", "parse") => return Type::Named("HttpRequest".to_string()),
         ("jet.http", "dispatch") => return Type::Named("HttpResponse".to_string()),
+        // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
+        // type is fixed (`Result<String, IOError>`) but lives in sema's bespoke
+        // `infer_core_call` arm (CheckerCoreLib.rs `("core.io", "input")`), NOT the table.
+        // Same type the ambient bare `input(...)` (Phase 25 `AmbientInput`) carries, so it
+        // composes with the Phase-8 `??`/`?? return <value>` fallback.
+        ("core.io", "input") => {
+            return Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+            }
+        }
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)
@@ -9111,6 +9132,17 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
             arg(1)
         ),
         ("core.io", "args") => format!("{}()", helper("jet_std_io_args")),
+        // c109 Phase 29: qualified `io.input(prompt)`, byte-for-byte `emit_core_call`
+        // (Expression.rs ~L1294): no arg → `jet_std_io_input(None)`; a prompt arg →
+        // `jet_std_io_input(Some(&(prompt)))`. Same emitted helper as the ambient bare
+        // `input(...)` (Phase 25), the only difference being the source node shape.
+        ("core.io", "input") => {
+            if args.is_empty() {
+                format!("{}(None)", helper("jet_std_io_input"))
+            } else {
+                format!("{}(Some(&({})))", helper("jet_std_io_input"), arg(0))
+            }
+        }
         ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
         // D-STDIN1=A: io.stdin() → JetStdinReader handle.
         ("core.io", "stdin") => format!("{}()", helper("jet_std_io_stdin")),
@@ -9990,8 +10022,9 @@ mod tests {
     fn polymorphic_core_specials_covered() {
         // c109 Phase 20: the polymorphic core specials route through the core-call
         // shape (`core_call_covered`), their return type read from the node's
-        // `resolved_ret` (written by sema). `io.input` is NOT a special — it is in
-        // `core_fixed_sig` (covered by Phase 10), so it routes via the table return.
+        // `resolved_ret` (written by sema). `io.input` is NOT a polymorphic special —
+        // its fixed `Result<String, IOError>` return rides `core_call_return_ty`
+        // (c109 Phase 29; it is NOT in `core_fixed_sig`).
         assert!(core_call_covered("core.math", "abs"));
         assert!(core_call_covered("core.math", "min"));
         assert!(core_call_covered("core.math", "max"));
@@ -10012,6 +10045,27 @@ mod tests {
         assert!(core_call_covered("jet.http", "parse"));
         assert!(core_call_covered("jet.http", "dispatch"));
         assert!(!core_call_covered("jet.http", "serve"));
+        // c109 Phase 29: qualified `io.input` is a covered core call. NOT in
+        // `core_fixed_sig` (its `Result<String, IOError>` return lives in sema's bespoke
+        // `infer_core_call` arm, reproduced in `core_call_return_ty`). Distinct from the
+        // ambient bare `input()` (Phase 25), which is its own `Expr::Call` → `AmbientInput`.
+        assert!(core_call_covered("core.io", "input"));
+        assert!(!crate::Sema::core_fixed_sig("core.io", "input").is_some());
+    }
+
+    #[test]
+    fn io_input_return_ty() {
+        // c109 Phase 29: `core_call_return_ty` carries `io.input`'s fixed
+        // `Result<String, IOError>` total (it is NOT in `core_fixed_sig`, so without this
+        // arm the node's `ty` would fall back to Unit and break `?? return` composition).
+        let ty = core_call_return_ty("core.io", "input");
+        match ty {
+            Type::Result { ok, err } => {
+                assert_eq!(*ok, Type::String);
+                assert_eq!(*err, Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()));
+            }
+            other => panic!("io.input return ty should be Result<String, IOError>, got {other:?}"),
+        }
     }
 
     #[test]

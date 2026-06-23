@@ -1814,9 +1814,10 @@ everything, the AST codegen path is deleted (final phase).
   covered six of them — (A) `require`/`require_eq`/`panic`, (B) `#Caps(Io){}`, (C) `mut`/`take`
   free-call arg conventions, (E) fan-out result-list destructure (Phase 26); (D) fn-typed-value-
   stored + struct fn-fields (Phase 27); (F) sized-integer types + literal width-elaboration
-  (Phase 28)** — so the remaining AST-path FEATURE residue is (G) generic fns + trait-object
-  dispatch and (H) `io.input(prompt)`+`?? return`. The AST path cannot be deleted until (G)/(H) are
-  covered (or proven sema-unreachable) and the latent-bug fixes land.
+  (Phase 28); (H) qualified `io.input(prompt)` + `?? return <value>` (Phase 29)** — so the
+  remaining AST-path FEATURE residue is ONLY (G) generic fns + trait-object dispatch. The AST
+  path cannot be deleted until (G) is covered (or proven sema-unreachable) and the latent-bug
+  fixes land.
 
 ## Refinements learned in Phase 26 (require/panic, #Caps, free-arg conventions, list-destructure)
 
@@ -1923,6 +1924,41 @@ everything, the AST codegen path is deleted (final phase).
   The numeric-method + typed-binding halves of `82_sized_integers` need sema, so `main`'s full
   `ROUTE TIR` is proven by tests/tir.rs `sized_integers` + the byte-parity sweep (87 emittable, 0
   diffs). Suite 810 → 815.
+
+## Refinements learned in Phase 29 (qualified io.input + ??-return)
+
+- **`io.input` was never polymorphic — the "Phase-20-deferred" label was a misdiagnosis.** Its
+  return type is FIXED (`Result<String, IOError>`); it is just resolved in sema's bespoke
+  `infer_core_call` arm (`CheckerCoreLib.rs ("core.io","input")`), NOT the `core_fixed_sig` table.
+  So `core_call_covered(module, method)` — which falls through to `core_fixed_sig(...).is_some()` —
+  returned `false` for it, the ACTUAL gap. (`is_polymorphic_core_special` explicitly excludes
+  `io.input` too, with a stale comment claiming it's table-covered; corrected.) This is the same
+  shape as `tasks.channel`/`http.router`/`parse`/`dispatch`: a fixed-return core call whose type
+  lives outside the table. The fix is the identical three-line pattern — admit it in
+  `core_call_covered`, carry its `Result<String, IOError>` in `core_call_return_ty` (without it the
+  node's `ty` falls back to Unit and `?? return` can't compose), emit the byte-for-byte
+  `jet_std_io_input(None|Some(&(prompt)))` arm in `emit_tir_core_call`. The lowering path (the
+  Phase-10 `CoreCall` builder) already handled everything else.
+- **Qualified `io.input(prompt)` and ambient bare `input()` stay DIFFERENT nodes — by design, not
+  duplication.** The ambient form (Phase 25) is an `Expr::Call { name: "input" }` → `AmbientInput`;
+  the qualified form is an `Expr::MethodCall` on a `core.io` alias → `CoreCall`. They emit the SAME
+  Rust helper but reach codegen as distinct AST nodes, so each needs its own gate/lower/emit
+  recognition (the recurring "the AST node that reaches codegen is what the gate recognises" rule).
+- **`?? return <value>` was ALREADY covered (Phase 8) — only bare `?? return` is the dead form.**
+  The gate/lower/emit triple (`orfallback_rhs_in_subset → Return(Some(e))`, `TOrFallback::Return(Some)`,
+  emit `return {e}`) has been in place since Phase 8 and matches the AST `emit_or_fallback_rhs`
+  (`format!("return {}", …)`) byte-for-byte. The inventory's "(H) … `?? return`" residue conflated
+  it with the bare-return form (which sema admits only in a unit fn but rustc then rejects via E0069
+  — genuinely unusable, no action). So (H) reduced to the single `io.input` arm.
+- **Verified byte-identical** via a forced-AST-path diff (temporary `JET_NO_TIR` bypass on
+  `emit_func`/`emit_method`/`emit_trait_method` + a `JET_RS` route sentinel) across the **entire
+  example suite** — 89 emittable, 0 differ. The sentinel confirmed `34_parallel_scan`
+  `paths_from_prompt` flips `ROUTE AST` → `ROUTE TIR`. Instrumentation removed before commit (no
+  `JET_NO_TIR`/`JET_RS`/`ROUTE ` in Source/). tests/tir.rs adds `qualified_io_input_or_return` (a
+  stdin-piping build+run helper — two lines + blank → `count=2`/lines; immediate EOF → `read_line`
+  yields `Ok("")` → loop breaks → `count=0`; the `?? return` fires only on a genuine Err, which
+  EOF is not) + `io_input_return_ty`; the unit tests add the `core.io`/`input` assertions to
+  `polymorphic_core_specials_covered`. Suite 815 → 817.
 
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
@@ -2059,18 +2095,25 @@ overflow opt-outs (`wrapping`/`saturating`/`checked` over an integer `Expr::Bina
 `.each`/`sort_by` over it). Generic functions and trait-object dispatch are a large uncovered
 surface (the generic-type-method *sema* gap is its cousin).
 
-**(H) `io.input(prompt)` polymorphic + `?? return`** (`34_parallel_scan` `paths_from_prompt`).
-`io.input` was Phase-20-deferred (polymorphic return, NOT the ambient bare `input()` Phase 25
-covered — these are different forms: the qualified `io.input(prompt)` MethodCall on a core
-alias); the `?? return` is the dead bare-return form. Stays.
+**(H) ✅ COVERED (Phase 29) — qualified `io.input(prompt)` + `?? return <value>`** (`34_parallel_scan`
+`paths_from_prompt`). The "polymorphic return" label was WRONG: `io.input` has a FIXED return
+(`Result<String, IOError>`), it just lives in sema's bespoke `infer_core_call` arm
+(`CheckerCoreLib.rs ("core.io","input")`), NOT the `core_fixed_sig` table — so
+`core_call_covered`/`core_call_return_ty` didn't admit it (the actual gap). Adding the
+`("core.io","input")` arm to all three (`core_call_covered` → covered, `core_call_return_ty` →
+`Result<String, IOError>`, `emit_tir_core_call` → byte-for-byte `jet_std_io_input(None|Some(&(prompt)))`)
+routes it as a plain CoreCall. The `?? return <value>` fallback was ALREADY covered (Phase 8 —
+`TOrFallback::Return(Some(e))` → `return {e}`); only the bare `?? return` (NO value) is the
+dead/unusable form. So (H) needed only the `io.input` arm.
 
 None of (A)–(H) is the HttpRouter surface, the ambient `input()`, or the static `new` — those
 three are now fully covered. None is a "parity-safe construct form already flagged as
 coverable" (that category remains EMPTY). **Phase 26 covered (A)/(B)/(C)/(E); Phase 27 covered
-(D); Phase 28 covered (F)**; the remaining work toward deleting the AST path is: the uncovered
-FEATURE surfaces (G)/(H) above (future coverage phases), the latent-bug FIXES (separate cards),
-and the sema-unreachable constructs (generic-type methods, trait-object dispatch sema, bare
-`?? return` — no action).
+(D); Phase 28 covered (F); Phase 29 covered (H)** — so the only remaining uncovered FEATURE
+surface is **(G) generic fns + trait-object dispatch**. The remaining work toward deleting the
+AST path is: (G) (a future coverage phase), the latent-bug FIXES (separate cards), and the
+sema-unreachable constructs (generic-type methods, trait-object dispatch sema, bare `?? return`
+— no action).
 
 ## Phases
 
@@ -2106,7 +2149,8 @@ and the sema-unreachable constructs (generic-type methods, trait-object dispatch
 | 26 | `require`/`require_eq`/`panic` builtins + `#Caps(Io){}` + free-call `mut`/`take` arg conventions + fan-out list-destructure | ✅ done (c109 Phase 26) — covers FOUR of the eight (A)–(H) feature surfaces the Phase-25 routing sweep exposed, all byte-identical (89 emittable targets, 0 differ; every target fn routes `ROUTE TIR`). **(A) `require(cond[, msg])`/`require_eq(l, r)`/`panic(msg)`** (S36, `14_panic`/`29_embed`/`59_debug`): a new `TExprKind::RequireStop(rendered)` whose ENTIRE emit string — `{ if !(cond) { jet_panic_rich(…); } }` (default) or the `test_mode` `{ if !(cond) { return Err(…); } }` — is rendered at lowering (`render_require`/`render_require_eq` + the existing `render_panic_stop`); every source-line/col/caret/escaped-file/fn-name/sorted-scalar-locals fact is total there, emit reads nothing from `cx` (I3). Gated on the builtin name + arity, excluded when a user fn / local shadows it. **(B) `#Caps(Io){}`** (D-EFF1, `effect_caps`): erases byte-for-byte to `Stmt::Region` — a plain block, body lowered on the SAME `env` (its `let`s leak); reused `TStmt::Region`. **(C) free-call `mut`/`take` arg conventions** (`08_ownership` — `bump(mut score)`, `archive(take "vault")`): `arg_conv_in_subset` now admits ALL three (`Read`→`&(…)`, `Mutate`→`&mut (…)`, `Move`/`take`→plain); `lower_one_call_arg` already resolved the wrapper from the sig convention. **(E) fan-out result-list destructure** (S74, `41_fan_out` — `[a,b,c] @= doubled`): a new `TStmt::ListDestructure` reproducing `emit_stmt`'s `BindPattern::List` arm (`let tmp = &(init);` + one `jet_unpack_vec(tmp, want, i, file, line)` per element); the element-type partiality (`expr_jet_ty`'s `Some(List(inner))`-only match → a non-`List` `[T#N]` fan-out result yields `None`) reproduced from the lowered init's `.ty`. tests/tir.rs adds `require_builtins`/`caps_block`/`free_call_arg_conventions`/`list_destructure` (build+run); unit tests add `covers_require_builtins`/`covers_caps_block`/`covers_free_call_arg_conventions`/`covers_list_destructure`. Suite 798 → 806. The instrumentation was removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (D) fn-typed-value-stored + struct fn-fields, (F) sized-integer literal width-elaboration, (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
 | 27 | fn-typed VALUE stored in a local + struct fn-FIELD method | ✅ done (c109 Phase 27) — surface (D), all byte-identical (89 emittable targets, 0 differ; `24_callbacks` `main`/`apply_twice`/`double` all `ROUTE TIR`). **Struct fn-FIELD** (`struct Worker { step: fn(Int) -> Int }`): `field_ty_covered` now admits a `Type::Fn` field — it renders via `cx.rust_type` to `Box<dyn Fn(...) -> ...>` (the AST `struct_field_rust`), so a struct with a fn-typed field is a covered VALUE type and `Worker { step: <lambda> }` constructs it (the lambda field value is in-subset and emitted as-is — NO ` as <fn-type>` coercion at the literal site, mirroring `emit_struct_lit`'s plain `emit_expr` field value). **fn-field CALL** (`w.step(4)`): sema (CheckerInfer fn-field arm) sets `recv_type == Some("Worker")` and re-routes through `infer_call_value`, but registers NO `method_sigs` entry — so the user-instance-method shape excluded it. A new gate shape (m) + `TExprKind::FnFieldCall` reproduce the AST `emit_method_call` fn-field branch (`(({recv}).{user_<field>})({args})`, PLAIN args — `emit_call_args(.., None, ..)`), tried BEFORE the user-method/static shapes (the AST checks the fn-field FIRST). **fn-NAME value binding** (`double_fn @= double`): already wired in lowering (`Stmt::Val` lowers the init via `lower_expr`, which classifies a bare top-level-fn `Ident` as a `NamedFn` value — `emit_named_fn_value`'s `Box::new(move |…| name(…)) as <fn-type>`, with the `: <fn-type>` annotation rendered via `rust_fn_trait`); the fn-value ARG + lambda ARG were Phase-13 (`TFnCoerce`/`lower_one_call_arg`). The binding only failed to route because the same `main` used the uncovered struct fn-field + fn-field call. tests/tir.rs adds `fn_value_and_struct_fn_field` (build+run, prints `12`/`7`/`16`); unit tests add `covers_named_fn_value_binding`/`covers_fn_field_struct_value_type`/`covers_fn_field_type_covered`. Suite 806 → 810. The instrumentation was removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (F) sized-integer literal width-elaboration, (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
 | 28 | sized-integer types + literal width-elaboration | ✅ done (c109 Phase 28) — surface (F), all byte-identical (87 emittable targets, 0 differ; `82_sized_integers` `main` `ROUTE TIR`). Most of (F) was ALREADY total: literal width-elaboration (`red: U8 @= 255` → `255u8`) + per-element list widening (`[U8] @= [104, …]`) ride the sema `Expr::Int` width annotation the `IntLit` node carries (Phase 1); width-preserving overflow-trapping arithmetic (`half + half`/`total + 1`) replays `ast_operand_is_integer`; width conversions (`to_i64`/`to_u8() ??`), bit/float queries (`count_ones`/`is_infinite`) are the Phase-12 `NumericMethod` shape. Phase 28 added the two missing leaf forms. **Numeric BOUNDS constants** (`U8.MAX`/`I32.MIN`/`Float.INFINITY`): a `Expr::Field` over a numeric type NAME — the Field gate previously blanket-excluded a non-local non-enum ident receiver, so Phase 28 carves the bounds case out FIRST (`numeric_type_from_name(name)` + a member ∈ `{MIN,MAX,INFINITY,NEG_INFINITY,NAN,EPSILON}`, the exact AST `emit_expr` filter); lowered to a `ConstInline` `{cx.rust_type(nt)}::{member}` string with result type the numeric type itself (so `Float.INFINITY.is_infinite()` composes). **Overflow opt-outs** (`wrapping`/`saturating`/`checked` over one integer `Expr::Binary`): a bare `Expr::Call` claimed when the name is one of the three and unshadowed (`!cx.sigs`); a new `TExprKind::OverflowOpt{prefix, op, lhs, rhs}` emits `(lhs).{prefix}_{add|sub|mul|div}(rhs)` with PLAIN operands (no trap); `checked` yields `T?` (composes with the Phase-8 `??`), the others `T`. Gate returns EARLY for the three (before the generic-call arg machinery). tests/tir.rs adds `sized_integers` (build+run, the full 15-line output); unit tests add `covers_numeric_bounds_const`/`covers_overflow_opt_builtins` + the `rejects_unknown_numeric_member`/`rejects_overflow_opt_nonbinary` negatives. Suite 810 → 815. Instrumentation removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
-| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25), (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema, bare `?? return` — no action), and (3) **uncovered FEATURE surfaces a Phase-25 routing sweep exposed** — Phases 26–28 covered (A) `require`, (B) `#Caps(Io){}`, (C) `mut`/`take` arg conventions, (E) fan-out list-destructure, (D) fn-typed-value-stored + struct fn-fields, (F) sized-integer types + literal width-elaboration; the REMAINING two are (G) generic fns + trait-object params and (H) `io.input(prompt)`+`?? return` — each a future coverage phase. The HttpRouter surface, ambient `input()`, and static `new` are fully covered (Phase 25). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
+| 29 | qualified `io.input(prompt)` + `?? return <value>` | ✅ done (c109 Phase 29) — surface (H), all byte-identical (89 emittable targets, 0 differ; `34_parallel_scan` `paths_from_prompt` flips `ROUTE AST` → `ROUTE TIR`). The "polymorphic return" label was a MISDIAGNOSIS: `io.input` has a FIXED return (`Result<String, IOError>`); it just lives in sema's bespoke `infer_core_call` arm (`CheckerCoreLib.rs ("core.io","input")`), NOT the `core_fixed_sig` table — so `core_call_covered` (which falls through to `core_fixed_sig(...).is_some()`) returned `false`, the real gap. Same shape as `tasks.channel`/`http.{router,parse,dispatch}`: admit it in `core_call_covered`, carry its `Result<String, IOError>` in `core_call_return_ty` (else the node's `ty` falls back to Unit and `?? return` can't compose), emit the byte-for-byte `{root}jet_std_io_input(None|Some(&(prompt)))` arm in `emit_tir_core_call`. The Phase-10 `CoreCall` lowering handled the rest. The `?? return <value>` fallback was ALREADY covered (Phase 8 — `TOrFallback::Return(Some(e))` → `return {e}`, matching the AST `emit_or_fallback_rhs`); only the bare `?? return` (no value) is the dead/unusable form. So (H) reduced to the single `io.input` arm. Distinct from the ambient bare `input()` (Phase 25 `AmbientInput`, an `Expr::Call`) — the qualified form is a `MethodCall` on a `core.io` alias → `CoreCall`. tests/tir.rs adds `qualified_io_input_or_return` (a stdin-piping build+run: two lines + blank → `count=2`/lines; immediate EOF → `read_line` `Ok("")` → loop breaks → `count=0`) + `io_input_return_ty`; unit tests add the `core.io`/`input` assertions to `polymorphic_core_specials_covered`. Suite 815 → 817. Instrumentation removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: ONLY (G) generic fns + trait-object dispatch. |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25), (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema, bare `?? return` — no action), and (3) **uncovered FEATURE surfaces a Phase-25 routing sweep exposed** — Phases 26–29 covered (A) `require`, (B) `#Caps(Io){}`, (C) `mut`/`take` arg conventions, (E) fan-out list-destructure, (D) fn-typed-value-stored + struct fn-fields, (F) sized-integer types + literal width-elaboration, (H) qualified `io.input(prompt)` + `?? return <value>`; the REMAINING surface is ONLY (G) generic fns + trait-object params — a future coverage phase. The HttpRouter surface, ambient `input()`, and static `new` are fully covered (Phase 25). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
 regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep

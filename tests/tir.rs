@@ -3443,3 +3443,83 @@ fn main() {
         "255\n100000\n-120\n9000000001\n200\n[104, 105, 33]\n255\n255\n255\n-2147483648\n3\ntrue\n44\n255\n0\n"
     );
 }
+
+/// Build `src` to a binary, then run it with `stdin` piped in. Like `build_and_run`
+/// but feeds a deterministic stdin so an `io.input(...)` reads known lines (and EOF).
+fn build_and_run_stdin(name: &str, src: &str, stdin: &str) -> (i32, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+    let dir = std::env::temp_dir().join(format!("jet_tir_test_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join(format!("{name}.jet"));
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected:\n{}", jet::render_diagnostics(&shown, src, &diags))
+    });
+    let rs = dir.join(format!("{name}.rs"));
+    let bin = dir.join(name);
+    fs::write(&rs, &out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected generated code (I2 violation):\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let mut child = Command::new(&bin)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+    let run = child.wait_with_output().unwrap();
+    (run.status.code().unwrap_or(0), String::from_utf8_lossy(&run.stdout).into_owned())
+}
+
+/// c109 Phase 29: qualified `io.input(prompt)` (surface (H), 34_parallel_scan
+/// `paths_from_prompt`). DISTINCT from the ambient bare `input()` (Phase 25 `AmbientInput`):
+/// this is a `MethodCall` on a `core.io` alias, lowered to a `CoreCall`
+/// (`jet_std_io_input(Some(&(prompt)))` → `Result<String, IOError>`). It composes with a
+/// `?? return <value>` fallback (the early-return form, already covered since Phase 8).
+/// The loop accumulates piped lines; a blank line breaks; EOF yields `Ok("")` (read_line on
+/// EOF) so the loop also breaks — the `?? return` fires only on a genuine Err. Both stdin
+/// shapes run deterministically.
+#[test]
+fn qualified_io_input_or_return() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.io as io
+fn collect() -> [String] {
+    out: [String] := []
+    loop true {
+        line @= io.input(\"> \") ?? return out.clone()
+        if line == \"\" {
+            break
+        }
+        out.push(line)
+    }
+    return out
+}
+fn main() {
+    got @= collect()
+    print(\"count={got.len()}\")
+    loop g in got {
+        print(g)
+    }
+    print(\"done\")
+}
+";
+    // Two lines then a blank line: the loop accumulates `alpha`/`beta`, the blank breaks.
+    let (code, stdout) = build_and_run_stdin("tir_io_input_lines", src, "alpha\nbeta\n\n");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "> > > count=2\nalpha\nbeta\ndone\n");
+    // Immediate EOF: read_line yields Ok("") → the loop breaks on the empty line, no input.
+    let (code, stdout) = build_and_run_stdin("tir_io_input_eof", src, "");
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "> count=0\ndone\n");
+}
