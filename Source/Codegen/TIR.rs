@@ -1915,11 +1915,16 @@ fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
 /// here we only verify the struct's field TYPES are admissible. Generic/foreign/prelude
 /// structs are out. The visited set terminates the recursion at a boxed cycle.
 fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
+    // A name that is a genuinely-declared user struct (in `cx.struct_fields`) is a
+    // concrete type, never a type variable — even a single-uppercase-letter name like
+    // `P`. The `is_type_var_name` heuristic only excludes *undeclared* single-letter
+    // names (true generic type vars `T`/`U`), so guard it on non-declaration.
+    let is_type_var = crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
         || cx.foreign_types.contains_key(name)
         || net_handle_rust_type(name).is_some()
-        || crate::Generics::is_type_var_name(name)
+        || is_type_var
         || struct_is_generic(name, cx)
     {
         return false;
@@ -1982,11 +1987,14 @@ fn ty_mentions_type_var(ty: &Type) -> bool {
 fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     // A struct that is a trait/enum or a non-user (foreign/core/prelude) type is
     // out. `cx.struct_fields` only holds user structs declared in this module.
+    // A declared user struct is a concrete type, never a type var (see
+    // `struct_lit_constructible`): a single-uppercase-letter struct name (`P`) is real.
+    let is_type_var = crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
     if cx.trait_names.contains(name)
         || cx.enum_variants.contains_key(name)
         || cx.foreign_types.contains_key(name)
         || net_handle_rust_type(name).is_some()
-        || crate::Generics::is_type_var_name(name)
+        || is_type_var
     {
         return false;
     }
@@ -10837,12 +10845,11 @@ fn greet() -> String { return input() }
         // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
         // an out-of-subset body keeps the whole fn off the TIR path.
         assert!(covers("fn f() { #Caps(Io) { print(\"x\") } }", "f"));
-        // The struct-destructure binding `P{x} @= p` IS now covered (c109), but a
-        // single-uppercase-letter struct name (`P`) reads as a type variable
-        // (`Generics::is_type_var_name`), so the `P{x: 1}` LITERAL init is out of
-        // subset and the fn stays on the AST path — the exclusion is the name, not
-        // the destructure (that is proven covered by `covers_struct_destructure`).
-        assert!(!covers(
+        // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
+        // type, not a type variable — the `is_type_var_name` heuristic is now guarded
+        // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
+        // `P{x} @= p` struct-destructure are both covered; the fn routes through TIR.
+        assert!(covers(
             "struct P { x: Int }\nfn f() { p @= P{x: 1}\n#Caps(Io) { P{x} @= p\nprint(x) } }",
             "f"
         ));
@@ -11445,5 +11452,28 @@ fn first_child(t: Tree) -> Int {
 }
 ";
         assert!(covers(src, "first_child"));
+    }
+
+    #[test]
+    fn covers_owning_nonscalar_field_read_clone() {
+        // c109: an owning field read of a NON-SCALAR field (`s @= p.name`, `name:
+        // String`) — sema rewrites the read to `(p.name).clone()` (a `MethodCall`
+        // clone shape). With the single-uppercase-letter struct name `P` now treated
+        // as a concrete declared type (not a type var), the whole `main` routes
+        // through the TIR. The owning clone emits `((user_p).user_name).clone()`.
+        let src = r#"
+struct P {
+    name: String
+}
+
+fn main() {
+    p @= P { name: "x" }
+    s @= p.name
+    t @= p.name
+    print(s)
+    print(t)
+}
+"#;
+        assert!(covers_after_sema(src, "main"), "owning field-read clone not covered");
     }
 }

@@ -4188,3 +4188,38 @@ fn main() {
         String::from_utf8_lossy(&rustc.stderr)
     );
 }
+
+/// c109: an owning field read of a NON-SCALAR field (`s @= p.name`, `name:
+/// String`). Sema rewrites the read in owning position to `(p.name).clone()`;
+/// the TIR emits `((user_p).user_name).clone()`. The single-uppercase-letter
+/// struct name `P` is a concrete declared type (not a type var), so `main`
+/// routes through the TIR. Runs (the two clones print independently) and is
+/// byte-exact on the owning-clone emit.
+#[test]
+fn owning_nonscalar_field_read_clones() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct P {
+    name: String
+}
+
+fn main() {
+    p @= P { name: \"x\" }
+    s @= p.name
+    t @= p.name
+    print(s)
+    print(t)
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.rust.contains("let user_s: String = ((user_p).user_name).clone();"),
+        "owning non-scalar field-read clone not byte-exact:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_owning_field_clone", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "x\nx\n");
+}
