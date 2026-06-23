@@ -204,3 +204,297 @@ impl<F: FnOnce()> Drop for JetScopeGuard<F> {
     }
 }
 trait user_Serialize { fn to_json(&self) -> String; }
+
+// ── D-TERM1 (ratified 2026-06-22): terminal direct-input primitives ───────────
+// `live { … }` blocks in Jet source emit:
+//   jet_term_enter();
+//   let _live_guard = jet_scope_guard(|| { jet_term_leave(); });
+//   <body>
+//
+// `term.read_key()` emits `jet_term_read_key()`.
+//
+// I6: zero external crates. Platform-specific setup uses inline `extern "C"` /
+// `extern "system"` declarations — standard Rust FFI, not the `libc` crate.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// The key-event type returned by `term.read_key()` (D-TERM1).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum JetKey {
+    /// A printable character.
+    Char(char),
+    /// Enter / Return.
+    Enter,
+    /// Escape.
+    Escape,
+    /// Backspace.
+    Backspace,
+    /// Tab.
+    Tab,
+    /// Delete (forward delete).
+    Delete,
+    /// Arrow up.
+    Up,
+    /// Arrow down.
+    Down,
+    /// Arrow left.
+    Left,
+    /// Arrow right.
+    Right,
+    /// Function key F1–F12.
+    F(i64),
+    /// Ctrl + a printable character (e.g. Ctrl-C = Char('\x03')).
+    Ctrl(char),
+    /// Anything else (bytes we could not parse into a known sequence).
+    Unknown,
+}
+
+impl JetShow for JetKey {
+    fn jet_show(&self) -> String {
+        match self {
+            JetKey::Char(c) => format!("Char({})", c),
+            JetKey::Enter => "Enter".to_string(),
+            JetKey::Escape => "Escape".to_string(),
+            JetKey::Backspace => "Backspace".to_string(),
+            JetKey::Tab => "Tab".to_string(),
+            JetKey::Delete => "Delete".to_string(),
+            JetKey::Up => "Up".to_string(),
+            JetKey::Down => "Down".to_string(),
+            JetKey::Left => "Left".to_string(),
+            JetKey::Right => "Right".to_string(),
+            JetKey::F(n) => format!("F({})", n),
+            JetKey::Ctrl(c) => format!("Ctrl({})", c),
+            JetKey::Unknown => "Unknown".to_string(),
+        }
+    }
+}
+
+#[cfg(unix)]
+mod jet_term_unix {
+    use std::io::Read;
+
+    // POSIX termios constants (POSIX.1-2008). We inline these rather than
+    // depending on `libc` (I6).
+    const TCSANOW: i32 = 0;
+    const ECHO: u32 = 0o0000010;
+    const ICANON: u32 = 0o0000002;
+    const VMIN: usize = 6;
+    const VTIME: usize = 5;
+
+    // Termios struct layout for Linux/macOS (glibc + Darwin agree on the fields
+    // that matter here; we only touch `c_lflag` and `c_cc`).
+    #[repr(C)]
+    struct Termios {
+        c_iflag: u32,
+        c_oflag: u32,
+        c_cflag: u32,
+        c_lflag: u32,
+        #[cfg(target_os = "linux")]
+        c_line: u8,
+        c_cc: [u8; 32],
+        #[cfg(target_os = "linux")]
+        c_ispeed: u32,
+        #[cfg(target_os = "linux")]
+        c_ospeed: u32,
+        // macOS pads the c_cc array to 20 bytes inside a struct that's 60 bytes
+        // total. We over-allocate to cover both layouts safely.
+        #[cfg(not(target_os = "linux"))]
+        _pad: [u8; 12],
+    }
+
+    extern "C" {
+        fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
+        fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
+    }
+
+    // Thread-local storage for the saved terminal state so `jet_term_leave`
+    // can restore exactly what `jet_term_enter` captured.
+    std::thread_local! {
+        static SAVED: std::cell::RefCell<Option<Termios>> = std::cell::RefCell::new(None);
+    }
+
+    pub fn enter() {
+        unsafe {
+            let mut t = std::mem::zeroed::<Termios>();
+            if tcgetattr(0, &mut t) != 0 { return; }
+            SAVED.with(|s| *s.borrow_mut() = Some(std::mem::transmute_copy(&t)));
+            t.c_lflag &= !(ECHO | ICANON);
+            t.c_cc[VMIN] = 1;
+            t.c_cc[VTIME] = 0;
+            tcsetattr(0, TCSANOW, &t);
+        }
+    }
+
+    pub fn leave() {
+        unsafe {
+            SAVED.with(|s| {
+                if let Some(saved) = s.borrow().as_ref() {
+                    tcsetattr(0, TCSANOW, saved as *const Termios);
+                }
+            });
+        }
+    }
+
+    pub fn read_key() -> super::JetKey {
+        use super::JetKey;
+        let mut buf = [0u8; 6];
+        let stdin = std::io::stdin();
+        let n = stdin.lock().read(&mut buf).unwrap_or(0);
+        if n == 0 { return JetKey::Unknown; }
+        match &buf[..n] {
+            [0x0d] | [0x0a] => JetKey::Enter,
+            [0x1b] if n == 1 => JetKey::Escape,
+            [0x7f] | [0x08] => JetKey::Backspace,
+            [0x09] => JetKey::Tab,
+            // CSI sequences: ESC [ …
+            [0x1b, 0x5b, rest @ ..] => parse_csi(rest),
+            // Ctrl + letter: bytes 0x01–0x1a (A–Z).
+            [b] if *b >= 1 && *b <= 26 => JetKey::Ctrl((b'a' - 1 + *b) as char),
+            [b] if *b < 0x80 => JetKey::Char(*b as char),
+            // Multi-byte UTF-8 character.
+            bytes => {
+                if let Ok(s) = std::str::from_utf8(bytes) {
+                    if let Some(c) = s.chars().next() {
+                        return JetKey::Char(c);
+                    }
+                }
+                JetKey::Unknown
+            }
+        }
+    }
+
+    fn parse_csi(rest: &[u8]) -> super::JetKey {
+        use super::JetKey;
+        match rest {
+            [0x41] => JetKey::Up,
+            [0x42] => JetKey::Down,
+            [0x43] => JetKey::Right,
+            [0x44] => JetKey::Left,
+            [0x33, 0x7e] => JetKey::Delete,
+            // F1–F4: ESC O P/Q/R/S (VT100) — handled as CSI variant here.
+            // F1–F12 numeric: ESC [ 1 1 ~ through ESC [ 2 4 ~
+            bytes => {
+                // Try numeric Pn ~ form: digits followed by ~.
+                if let Some((&0x7e, digits)) = bytes.split_last() {
+                    if let Ok(s) = std::str::from_utf8(digits) {
+                        if let Ok(n) = s.parse::<i64>() {
+                            let fkey = match n {
+                                11 => 1, 12 => 2, 13 => 3, 14 => 4,
+                                15 => 5, 17 => 6, 18 => 7, 19 => 8,
+                                20 => 9, 21 => 10, 23 => 11, 24 => 12,
+                                _ => return JetKey::Unknown,
+                            };
+                            return JetKey::F(fkey);
+                        }
+                    }
+                }
+                JetKey::Unknown
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+mod jet_term_windows {
+    use std::io::Read;
+
+    extern "system" {
+        fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
+        fn GetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, lpMode: *mut u32) -> i32;
+        fn SetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, dwMode: u32) -> i32;
+    }
+
+    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32;
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+    const ENABLE_LINE_INPUT: u32 = 0x0002;
+
+    std::thread_local! {
+        static SAVED: std::cell::RefCell<Option<u32>> = std::cell::RefCell::new(None);
+    }
+
+    pub fn enter() {
+        unsafe {
+            let h = GetStdHandle(STD_INPUT_HANDLE);
+            let mut mode: u32 = 0;
+            if GetConsoleMode(h, &mut mode) == 0 { return; }
+            SAVED.with(|s| *s.borrow_mut() = Some(mode));
+            let new_mode = mode & !(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
+            SetConsoleMode(h, new_mode);
+        }
+    }
+
+    pub fn leave() {
+        unsafe {
+            let h = GetStdHandle(STD_INPUT_HANDLE);
+            SAVED.with(|s| {
+                if let Some(saved) = *s.borrow() {
+                    SetConsoleMode(h, saved);
+                }
+            });
+        }
+    }
+
+    pub fn read_key() -> super::JetKey {
+        use super::JetKey;
+        let mut buf = [0u8; 6];
+        let n = std::io::stdin().lock().read(&mut buf).unwrap_or(0);
+        if n == 0 { return JetKey::Unknown; }
+        match &buf[..n] {
+            [0x0d] | [0x0a] => JetKey::Enter,
+            [0x1b] => JetKey::Escape,
+            [0x7f] | [0x08] => JetKey::Backspace,
+            [0x09] => JetKey::Tab,
+            [0x1b, 0x5b, rest @ ..] => {
+                match rest {
+                    [0x41] => JetKey::Up,
+                    [0x42] => JetKey::Down,
+                    [0x43] => JetKey::Right,
+                    [0x44] => JetKey::Left,
+                    _ => JetKey::Unknown,
+                }
+            }
+            [b] if *b >= 1 && *b <= 26 => JetKey::Ctrl((b'a' - 1 + *b) as char),
+            [b] if *b < 0x80 => JetKey::Char(*b as char),
+            bytes => {
+                if let Ok(s) = std::str::from_utf8(bytes) {
+                    if let Some(c) = s.chars().next() { return JetKey::Char(c); }
+                }
+                JetKey::Unknown
+            }
+        }
+    }
+}
+
+// ── Platform-dispatched entry points ────────────────────────────────────────
+
+/// Enter un-buffered, no-echo terminal input mode.
+/// Called at the top of every `live { … }` block.
+fn jet_term_enter() {
+    #[cfg(unix)]
+    jet_term_unix::enter();
+    #[cfg(windows)]
+    jet_term_windows::enter();
+    #[cfg(not(any(unix, windows)))]
+    {} // no-op on unsupported targets (freestanding blocks sema-rejected)
+}
+
+/// Restore the terminal to the state captured by the most recent `jet_term_enter`.
+/// Called by the scope guard that `live { … }` installs.
+fn jet_term_leave() {
+    #[cfg(unix)]
+    jet_term_unix::leave();
+    #[cfg(windows)]
+    jet_term_windows::leave();
+    #[cfg(not(any(unix, windows)))]
+    {}
+}
+
+/// Read one key event from stdin (blocking).
+/// Used by `term.read_key()`.
+fn jet_term_read_key() -> JetKey {
+    #[cfg(unix)]
+    return jet_term_unix::read_key();
+    #[cfg(windows)]
+    return jet_term_windows::read_key();
+    #[cfg(not(any(unix, windows)))]
+    return JetKey::Unknown;
+}

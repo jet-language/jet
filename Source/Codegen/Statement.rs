@@ -18,21 +18,39 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     });
     let etype = resolved_type.as_deref().or(enum_type);
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
+    // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
+    let is_key = {
+        let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
+        let from_variant = if let Pattern::Variant { variant, .. } = pattern {
+            is_key_variant(variant)
+        } else { false };
+        from_etype || from_variant
+    };
     let prefix = etype
         .map(|t| {
             if is_json_type_name(t) {
                 format!("{}jet_std::Json", cx.root_prefix)
+            } else if t == crate::Syntax::TYPE_KEY {
+                format!("{}JetKey", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
                 format!("{}{}::user_{}", cx.root_prefix, rust_mod, t)
             } else {
                 format!("user_{}", t)
             }
         })
-        .unwrap_or_else(|| "user_TYPE".to_string());
-    // Variant names are mangled for user enums, but JSON variants keep their
-    // original Rust name (they are defined as plain Rust identifiers in std.rs).
+        .unwrap_or_else(|| {
+            // No etype: infer from the variant name.
+            if let Pattern::Variant { variant, .. } = pattern {
+                if is_key_variant(variant) {
+                    return format!("{}JetKey", cx.root_prefix);
+                }
+            }
+            "user_TYPE".to_string()
+        });
+    // Variant names are mangled for user enums, but JSON and Key variants keep
+    // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json { v.to_string() } else { mangle(v) }
+        if is_json || is_key { v.to_string() } else { mangle(v) }
     };
     match pattern {
         Pattern::Variant {
@@ -94,6 +112,14 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
                 value: Box::new(json),
             }]),
             _ => None,
+        };
+    }
+    // D-TERM1 (ratified 2026-06-22): `Key` variant payload types for codegen.
+    if is_key_variant(variant) {
+        return match variant {
+            "Char" | "Ctrl" => Some(vec![Type::Char]),
+            "F" => Some(vec![Type::Int]),
+            _ => Some(Vec::new()), // unit variants
         };
     }
     let owner = cx.variant_owner.get(variant)?;

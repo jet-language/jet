@@ -206,6 +206,8 @@ impl Cx {
             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
             // so Rust infers the monomorphised type from the initialiser expression.
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
+            // D-TERM1 (ratified 2026-06-22): `Key` is a top-level prelude enum.
+            Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, file_handle_rust_type(name).unwrap())

@@ -97,6 +97,10 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
                 }
                 rewrite_inline_calls_stmts(body, siblings, modname);
             }
+            // D-TERM1 (ratified 2026-06-22): rewrite inline calls in live block body.
+            Stmt::Live { body, .. } => {
+                rewrite_inline_calls_stmts(body, siblings, modname);
+            }
         }
     }
 }
@@ -988,6 +992,13 @@ pub(crate) fn collect_core_stmts(
                 for (_, e, _) in fields {
                     collect_core_expr(e, imports, used);
                 }
+                collect_core_stmts(body, imports, used);
+            }
+            // D-TERM1 (ratified 2026-06-22): collect Core usage from live block body.
+            // The live block implicitly uses `core.term` (jet_term_enter/leave), so
+            // we mark it as used here.
+            Stmt::Live { body, .. } => {
+                used.insert("core.term".to_string());
                 collect_core_stmts(body, imports, used);
             }
         }

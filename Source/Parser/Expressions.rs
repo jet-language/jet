@@ -1503,6 +1503,8 @@ impl<'a> Parser<'a> {
                         Stmt::Caps { span, .. } => span.end,
                         Stmt::ComptimeIf { span, .. } => span.end,
                         Stmt::ContextBlock { span, .. } => span.end,
+                        // D-TERM1 (ratified 2026-06-22): live block span end.
+                        Stmt::Live { span, .. } => span.end,
                     }
                 } else {
                     close_paren.end

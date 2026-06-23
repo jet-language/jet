@@ -264,6 +264,12 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut BTreeMap<String, Vec<(S
                 collect_tuple_shapes_from_stmt(s, out);
             }
         }
+        // D-TERM1 (ratified 2026-06-22): collect tuple shapes from live block body.
+        Stmt::Live { body, .. } => {
+            for s in body {
+                collect_tuple_shapes_from_stmt(s, out);
+            }
+        }
         // D-WHEN1: collect tuple shapes from both arms (conservative).
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             collect_tuple_shapes_from_expr(cond, out);

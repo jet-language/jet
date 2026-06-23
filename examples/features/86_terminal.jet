@@ -1,0 +1,44 @@
+// 86 — terminal direct-input control (D-TERM1, ratified 2026-06-22).
+// `live { … }` enters un-buffered/no-echo mode for its body and guarantees
+// terminal-state restore on every exit path (normal, return, ?, panic) via
+// the D-DEFER1 scope-guard mechanism. `use core.term as term` gives
+// `term.read_key() -> Key` inside or outside a live block.
+//
+// Pattern-tests on Key use the `== Variant(binding)` form.
+// Unit-variant equality (`== Enter`) works as a pattern test when the
+// variant is not in scope as a local variable.
+// Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
+//
+// This example exercises Key pattern matching with synthesised values so the
+// golden test runs without requiring interactive stdin.
+use core.term as term
+
+fn describe_key(k: Key) -> String {
+    if k == Char(c) {
+        return "char: {c}"
+    }
+    if k == F(n) {
+        return "f{n}"
+    }
+    if k == Ctrl(c) {
+        return "ctrl-{c}"
+    }
+    return "other"
+}
+
+fn main() {
+    // Demonstrate Key enum literals and pattern matching without actual input.
+    k1 @= Key.Char('h')
+    k3 @= Key.F(1)
+    k4 @= Key.Ctrl('c')
+    print(describe_key(k1))
+    print(describe_key(k3))
+    print(describe_key(k4))
+
+    // A `live { }` block enters direct-input mode and restores it on exit.
+    // In a real TUI program this block would call `term.read_key()` in a loop.
+    live {
+        print("in live block")
+    }
+    print("restored")
+}

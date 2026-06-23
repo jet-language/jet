@@ -233,6 +233,24 @@ pub const CTX_FIELD_ALLOCATOR: &str = "allocator";
 /// D-CTX1 (ratified 2026-06-22): logger field (v1 bundle).
 pub const CTX_FIELD_LOGGER: &str = "logger";
 
+/// D-TERM1 (ratified 2026-06-22): terminal direct-input block keyword.
+/// `live { … }` enters un-buffered/no-echo input mode for its body and
+/// guarantees terminal-state restore on every exit path including panic
+/// (implemented with the D-DEFER1 scope-guard mechanism). "raw mode" jargon
+/// is deliberately avoided; `live` is the user-facing name. A contextual
+/// keyword: recognised only when followed by `{`.
+pub const KW_LIVE: &str = "live";
+
+/// D-TERM1 (ratified 2026-06-22): the Core module that provides key reading.
+/// `use core.term as term` — exposes `term.read_key() -> Key`.
+pub const CORE_TERM_MODULE: &str = "core.term";
+
+/// D-TERM1 (ratified 2026-06-22): the key-event type returned by `term.read_key()`.
+/// Variants: `Key.Char(c)`, `Key.Enter`, `Key.Escape`, `Key.Backspace`,
+/// `Key.Tab`, `Key.Delete`, `Key.Up`, `Key.Down`, `Key.Left`, `Key.Right`,
+/// `Key.F(n)`, `Key.Ctrl(c)`, `Key.Unknown`.
+pub const TYPE_KEY: &str = "Key";
+
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
 pub const TYPE_LIST: &str = "List";
@@ -975,8 +993,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_MIGRATION, KW_RENAME,
     // Ownership / borrow keywords (S10, M2)
     KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
-    // Memory / expert tier (S58, D-REGION1, D-CTX1)
-    KW_UNSAFE, KW_REGION, CTX_BLOCK,
+    // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)
+    KW_UNSAFE, KW_REGION, CTX_BLOCK, KW_LIVE,
     // Test / tooling (S43, S60, D-TOOL2)
     KW_TEST, KW_PURE, KW_TODO,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)

@@ -1020,6 +1020,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
+        // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
+        | "Key"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1073,6 +1075,44 @@ pub(crate) fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         }]),
         _ => None,
     }
+}
+
+/// D-TERM1 (ratified 2026-06-22): pattern types for `Key` enum variants.
+/// Used by the pattern checker to validate `if k == Key.Char(c)` etc.
+pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
+    match variant {
+        // Unit variants — no payload.
+        "Enter" | "Escape" | "Backspace" | "Tab" | "Delete"
+        | "Up" | "Down" | "Left" | "Right" | "Unknown" => Some(Vec::new()),
+        // `Key.Char(c)` — one Char payload.
+        "Char" => Some(vec![Type::Char]),
+        // `Key.Ctrl(c)` — one Char payload (the control character).
+        "Ctrl" => Some(vec![Type::Char]),
+        // `Key.F(n)` — one Int payload (function key number 1–12).
+        "F" => Some(vec![Type::Int]),
+        _ => None,
+    }
+}
+
+/// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.
+/// Used by `resolve_enum_variants_cloned` so `Key.Char(c)` / `Key.Enter` literals
+/// pass type-checking without `Key` being in the user type registry.
+pub(crate) fn core_key_variants() -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let mut m = std::collections::HashMap::new();
+    // Unit variants.
+    for name in &["Enter", "Escape", "Backspace", "Tab", "Delete",
+                  "Up", "Down", "Left", "Right", "Unknown"]
+    {
+        m.insert((*name).to_string(), (zero, VariantPayload::Unit));
+    }
+    // Single-payload variants.
+    m.insert("Char".to_string(),  (zero, VariantPayload::Single(Type::Char,  zero)));
+    m.insert("Ctrl".to_string(),  (zero, VariantPayload::Single(Type::Char,  zero)));
+    m.insert("F".to_string(),     (zero, VariantPayload::Single(Type::Int,   zero)));
+    m
 }
 
 /// E2-M7: type-check a method call on a FileReader or FileWriter handle (D-IO2).
@@ -1653,6 +1693,12 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::String), (read, Type::String)],
             Some(result_ty(Type::String, Type::String)),
         )),
+        // D-TERM1 (ratified 2026-06-22): terminal direct-input.
+        // `term.read_key()` → `Key` (the key-event enum). No arguments.
+        ("core.term", "read_key") => Some((
+            vec![],
+            Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
+        )),
         _ => None,
     }
 }
@@ -1690,6 +1736,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.path" => &["join", "parent", "extension", "normalize"],
         // D-DEFER1 option B: scope-exit guard.
         "core.scope" => &["guard"],
+        // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
+        "core.term" => &["read_key"],
         "core" => &[],
         // E2-M9: ring packages.
         "jet.csv" => &["parse", "render"],
@@ -1721,6 +1769,8 @@ pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
         module,
         "core.fs" | "core.files" | "core.io" | "core.net" | "core.tasks"
             | "core.process" | "core.time" | "jet.http" | "jet.log" | "jet.time"
+            // D-TERM1: terminal I/O requires an OS terminal device.
+            | "core.term"
     )
 }
 
@@ -1749,6 +1799,9 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         }
         "jet.log" => {
             "The log module writes to stderr (an OS resource). Use a bare-metal write routine or build without `--freestanding`."
+        }
+        "core.term" => {
+            "Terminal I/O requires an OS terminal device. Build without `--freestanding`."
         }
         _ => "Build without `--freestanding`, or replace this call with a core-level alternative.",
     }

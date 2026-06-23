@@ -1262,6 +1262,30 @@ impl<'a> Checker<'a> {
             // Q1 = A2: explicit allocator args at call sites override the
             // ambient — no static binding done here, only type validation and
             // block body checking. Q2 = Cβ: restore is per-block (RAII guard).
+            // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input
+            // block. No type-checking beyond the body; the block is impure (IO
+            // effect), so it is rejected inside `#Pure fn` (same rule as `io.input`).
+            // `use core.term` is NOT required to write a `live` block — the block
+            // is its own syntactic gate. `term.read_key()` does need the import.
+            // E3301: freestanding builds have no terminal device.
+            Stmt::Live { body, span } => {
+                if self.in_pure {
+                    self.diags.push(crate::Sema::e3401(
+                        &self.fn_name.clone(),
+                        "live { … }",
+                        &[],
+                        *span,
+                    ));
+                }
+                if self.freestanding {
+                    self.diags.push(crate::Sema::e3301(
+                        "live { … }",
+                        "Terminal I/O requires an OS terminal device. Build without `--freestanding`.",
+                        *span,
+                    ));
+                }
+                self.check_block(body, true);
+            }
             Stmt::ContextBlock { fields, body, span } => {
                 for (field_name, value_expr, field_span) in fields.iter_mut() {
                     let ty = self.infer(value_expr);

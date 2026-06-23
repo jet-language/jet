@@ -707,6 +707,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.net",
     // D-DEFER1 option B: scope-exit guard (RAII cleanup via closure).
     "core.scope",
+    // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
+    "core.term",
     // E2-M9: first-party ring packages.
     "jet.csv",
     "jet.toml",

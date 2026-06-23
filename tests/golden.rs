@@ -73,38 +73,43 @@ fn examples_compile_and_run() {
 
         // I1 (amended by D-LL1, E2-M13): memory safety is never traded away in
         // ordinary Jet. Generated `unsafe` appears ONLY inside the gated
-        // low-level tier (`use core.mem` + `#Unsafe`) and the vetted Core `mem`
-        // arena helper (`mod jet_mem`, D-ALLOC2 — the one lifetime-extension
-        // `unsafe`, always emitted as part of the prelude). Either way every
-        // `unsafe` must be a *gated* form (`unsafe {` or `unsafe fn`) — never a
-        // bare `unsafe` leaking memory safety. We check the gated-form rule on
-        // the user code; the fixed `jet_mem` prelude block is excluded since it
-        // is the audited helper, not example output.
+        // low-level tier (`use core.mem` + `#Unsafe`) and vetted prelude helpers:
+        //   - `mod jet_mem`        (D-ALLOC2 — arena lifetime-extension)
+        //   - `mod jet_term_unix`  (D-TERM1 — POSIX termios via extern "C")
+        //   - `mod jet_term_windows` (D-TERM1 — Windows console API via extern "system")
+        // These are audited platform-FFI blocks, not user code. All other `unsafe`
+        // in the file must come from the gated `#Unsafe` tier only.
         let user_code: String = {
-            // Drop the `mod jet_mem { … }` block (brace-matched) before scanning.
-            if let Some(start) = rust_code.find("mod jet_mem") {
-                let bytes = rust_code.as_bytes();
-                let mut depth = 0usize;
-                let mut i = start;
-                let mut end = rust_code.len();
-                let mut seen_brace = false;
-                while i < bytes.len() {
-                    match bytes[i] {
-                        b'{' => { depth += 1; seen_brace = true; }
-                        b'}' => {
-                            depth -= 1;
-                            if seen_brace && depth == 0 { end = i + 1; break; }
+            // Helper: strip one named `mod <name> { … }` block (brace-matched).
+            fn strip_mod(src: &str, name: &str) -> String {
+                if let Some(start) = src.find(&format!("mod {}", name)) {
+                    let bytes = src.as_bytes();
+                    let mut depth = 0usize;
+                    let mut i = start;
+                    let mut end = src.len();
+                    let mut seen_brace = false;
+                    while i < bytes.len() {
+                        match bytes[i] {
+                            b'{' => { depth += 1; seen_brace = true; }
+                            b'}' => {
+                                depth -= 1;
+                                if seen_brace && depth == 0 { end = i + 1; break; }
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                        i += 1;
                     }
-                    i += 1;
+                    let mut s = src[..start].to_string();
+                    s.push_str(&src[end..]);
+                    s
+                } else {
+                    src.to_string()
                 }
-                let mut s = rust_code[..start].to_string();
-                s.push_str(&rust_code[end..]);
-                s
-            } else {
-                rust_code.clone()
             }
+            // Strip all vetted prelude modules (order doesn't matter).
+            let s = strip_mod(&rust_code, "jet_mem");
+            let s = strip_mod(&s, "jet_term_unix");
+            strip_mod(&s, "jet_term_windows")
         };
         if stem == "48_lowlevel" {
             assert!(
