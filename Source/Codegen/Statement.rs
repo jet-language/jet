@@ -704,7 +704,7 @@ pub(crate) fn emit_pattern_matches(cx: &Cx, subject: &str, pattern: &Pattern) ->
     }
 }
 
-fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
+pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
     use crate::AST::PatSlot;
     // Resolve the enum type prefix from the pattern if not provided.
     let resolved_type = enum_type.map(|t| t.to_string()).or_else(|| {
@@ -1076,7 +1076,7 @@ fn if_pattern_test(cond: &Expr) -> Option<(&Pattern, &Expr)> {
 /// lowers to a map lookup, not list indexing — B3). Mirrors sema's
 /// `core_json_pattern_types` for the core `JSON` enum and reads `cx` for user
 /// enums. Returns `None` when the types aren't known (binding stays untyped).
-fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
+pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     if is_json_variant(variant) {
         let json = Type::Named(Syntax::TYPE_JSON.to_string());
         return match variant {

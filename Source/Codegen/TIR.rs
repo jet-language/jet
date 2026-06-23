@@ -399,6 +399,14 @@ pub(crate) enum TExprKind {
     /// A local or parameter, rendered as its already-resolved Rust *place*
     /// string (handles parameter deref). No env lookup at emit time.
     Local(String),
+    /// c109 Phase 24: a comptime CONST ident inlined at the use site. Carries the
+    /// pre-rendered Rust value string (`cx.consts[name]`, total — the same string
+    /// `emit_expr`'s `Ident` arm splices), so emit just emits it verbatim. The const's
+    /// `TExpr.ty` is a placeholder (never read — a const operand resolves to `None` in
+    /// `ast_operand_is_integer`, so it never enables the overflow trap, and a covered
+    /// const use — interpolation, a binding RHS — reads the binding/`.jet_show()` type,
+    /// not this).
+    ConstInline(String),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call { name: String, args: Vec<TCallArg> },
     /// `print(x)` — the one builtin the subset covers.
@@ -467,6 +475,19 @@ pub(crate) enum TExprKind {
     EnumLit {
         prefix: String,
         payload: TEnumPayload,
+    },
+    /// c109 Phase 24: a prelude `JSON` enum construction (`JSON.Null` /
+    /// `JSON.Boolean(b)` / `JSON.Number(n)` / `JSON.Text(s)` / `JSON.Array(xs)` /
+    /// `JSON.Object(map)`). The JSON enum is FOREIGN: its variants render non-mangled
+    /// (`{root}jet_std::Json::Object`, NOT `user_…`), distinct from a user enum's
+    /// `EnumLit`. `variant` is the bare variant name (`Object`/`Text`/…). `arg` is the
+    /// payload `TExpr` plus the resolved `implicit_clone` flag (sema's `CallArg.flags`,
+    /// total) — `true` → `(…).clone()`, reproducing `emit_core_json_lit` (Expression.rs)
+    /// byte-for-byte. `JSON.Null` has no arg (`None`). The `{root}jet_std::Json` prefix
+    /// is rendered at emit (`cx.root_prefix` is program-level, read there).
+    JsonLit {
+        variant: String,
+        arg: Option<Box<(TExpr, bool)>>,
     },
     /// c109 Phase 5: a list literal `[a, b, c]`. Lowers to Rust `vec![…]`. Each
     /// element is lowered as-is (the AST path applies no clone/coercion at the
@@ -968,6 +989,10 @@ pub(crate) enum TBuiltinOp {
     ContainsKey,
     /// `to_string()` (on a String receiver) → `(recv).jet_show()`.
     ToString,
+    /// c109 Phase 24: `Match.group(n)` (D-REGEX1) → `(recv).get((a0) as usize).cloned().
+    /// flatten()`. The `Match` renders to `Vec<Option<String>>`; `group` is plain
+    /// indexing into it (the result is `String?`).
+    MatchGroup,
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
@@ -1467,6 +1492,12 @@ fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     if cx.foreign_types.contains_key(name) {
         return true;
     }
+    // c109 Phase 24: a regex `Match` value (`if m == value(mat)` binds `mat: Match`). It
+    // renders via `cx.rust_type` to `Vec<Option<String>>`; the only method on it
+    // (`.group(n)`) is the dedicated builtin shape.
+    if name == "Match" {
+        return true;
+    }
     // A prelude struct constructable via a struct literal, or a core/prelude struct that
     // renders to its own Rust name. (FileReader/TcpStream/Arena/… are opaque handles — no
     // literal form — but are valid value types; admit the constructable + core ones, plus
@@ -1567,12 +1598,24 @@ fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "Closed" {
             return true;
         }
+        // c109 Phase 24: a regex `Match` (the payload of `re.match()`'s `Match?`). It
+        // renders via `cx.rust_type` to `Vec<Option<String>>` (Context.rs), so an
+        // `Option<Match>` payload is byte-identical; the `.group(n)` method is the
+        // dedicated builtin shape.
+        if n == "Match" {
+            return true;
+        }
     }
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
+        // c109 Phase 24: a FOREIGN value-type payload (`Note?` on a `ParsedResult` field —
+        // `Note` is an imported struct). It renders via `cx.rust_type` to its own Rust
+        // head; an `Option<Note>` is byte-identical (the `value(n)`/`null` constructor is
+        // in-subset, the field read plain/sema-cloned).
+        || is_covered_foreign_value_ty(ty, cx)
 }
 
 /// c109 Phase 5: `ty` is a list `[E]` or map `[K, V]` the subset can lower. The
@@ -1609,7 +1652,18 @@ fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // c109 Phase 21: a `[Task<Unit>]` worker list (34_parallel_scan) — a concurrency
         // handle element renders via `cx.rust_type` (`Vec<Jet…<…>>`) like any value type.
         || is_covered_concurrency_ty(ty, cx)
+        // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum (`[JSON]` /
+        // `[String, JSON]`) OR a cross-module imported user struct/enum (`[String, Note]`
+        // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
+        // own Rust head ({root}jet_std::Json / {root}{mod}::user_<Name>), and a foreign
+        // element is moved/cloned by its own sub-expression (a construction or a bound
+        // value), so the owning collection's `.iter().cloned()` / per-key/value clone is
+        // byte-identical. (A foreign METHOD is still out of subset, so a fn that calls one
+        // is excluded by that call — the recurring "cover the value type, let the next
+        // uncovered node exclude its fn" seam.)
+        || is_covered_foreign_value_ty(ty, cx)
 }
+
 
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
 /// bare `Type::Named(E)` that:
@@ -1643,17 +1697,30 @@ fn enum_is_covered(name: &str, cx: &Cx) -> bool {
 /// String/struct/collection payloads route through `emit_boxed_enum_arg`'s borrowed
 /// `.clone()` (reproduced at lowering), so they are byte-parity safe.
 fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
-    if cx.foreign_types.contains_key(name)
-        || crate::Generics::is_type_var_name(name)
+    if crate::Generics::is_type_var_name(name)
         || is_json_type_name(name)
         || core_enum_or_prelude(name)
     {
         return false;
     }
+    // c109 Phase 24: a FOREIGN (imported) enum (`NoteType`/`ParseError`, matched in
+    // search.jet/index.jet). Its variants ARE registered in `cx.enum_variants` /
+    // `cx.variant_owner` (`register_foreign_enum_variants`, Imports.rs), so matching it
+    // resolves the owning enum + variant prefix (`emit_match_pattern` emits the foreign
+    // `{root}{mod}::user_<T>::user_<V>` head via `cx.foreign_types`). A foreign enum is
+    // NOT in `cx.cloneable` (that set tracks only local types), so we DON'T require it
+    // here; instead we require every variant payload to be a covered VALUE type — a
+    // covered payload (scalar/String/covered struct/enum/collection) is itself always
+    // `Clone` in Rust, so the foreign enum's generated `#[derive(Clone)]` holds and the
+    // match scrutinee's unconditional `(subj).clone()` (the AST `emit_pattern_match_switch`
+    // clones a by-ref subject regardless of `cx.cloneable`) is valid. The construction
+    // side has no reachable cross-module literal syntax (`note.NoteType.User` is E0107),
+    // so a foreign enum is only ever MATCHED / passed, never constructed in another module.
+    let is_foreign = cx.foreign_types.contains_key(name);
     let Some(variants) = cx.enum_variants.get(name) else {
         return false;
     };
-    if !cx.cloneable.contains(name) {
+    if !is_foreign && !cx.cloneable.contains(name) {
         return false;
     }
     // A recursive edge back to this enum admits it (already under check) — the box
@@ -1681,6 +1748,14 @@ fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> boo
 /// payload terminates instead of looping.
 fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
+        return true;
+    }
+    // c109 Phase 24: a FOREIGN (imported) struct/enum payload (`Query.Kind(NoteType)`
+    // where `NoteType` lives in another module). It renders via `cx.rust_type` to
+    // `{root}{mod}::user_<Name>`; a payload arg is moved/cloned by `lower_enum_arg`
+    // (the borrowed-`.clone()` decision is total), so a foreign payload is byte-parity
+    // safe. (A foreign METHOD is still out of subset — the recurring value-type seam.)
+    if is_covered_foreign_value_ty(ty, cx) {
         return true;
     }
     match ty {
@@ -1791,6 +1866,30 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     // *used* as a `Type::Apply` — `Pair<Int>` — which `is_covered_generic_struct_ty`
     // gates; a bare `Pair` never type-checks in sema.)
     if is_type_var_param_ty(ty) {
+        return true;
+    }
+    // c109 Phase 24: a FOREIGN value-type field/element — a cross-module imported user
+    // struct/enum or the prelude JSON enum. It renders via `cx.rust_type` to its own
+    // Rust head; a struct-lit field value / collection element is the value itself (by
+    // value), so a foreign-typed field needs no clone/deref decision at the field site.
+    // (Reading a foreign field is in-subset; a foreign METHOD still excludes the fn.)
+    if is_covered_foreign_value_ty(ty, cx) {
+        return true;
+    }
+    // c109 Phase 24: a covered ENUM field (`note_type: NoteType` on a `Note` struct). An
+    // enum field renders to `user_<Enum>` and a field read is a plain place / sema-cloned
+    // `.clone()` (the Phase-3/6 owning-field rewrite) — byte-identical, no new decision.
+    // (Previously `field_ty_covered` admitted only scalar/String/struct/collection fields,
+    // so any struct with an enum field stayed on the AST path.)
+    if is_covered_enum_ty(ty, cx) {
+        return true;
+    }
+    // c109 Phase 24: an OPTIONAL / FALLIBLE field (`note: Note?`, `error_msg: String?` on
+    // a `ParsedResult` struct) whose payload is a covered value type. It renders via
+    // `cx.rust_type` to `Option<…>`/`Result<…,…>`; a struct-lit field value (`value(n)` →
+    // `Some(n)`, `null` → `None`) is in-subset and emitted as-is, and a field read is a
+    // plain place / sema-cloned `.clone()` — byte-identical, no new field-site decision.
+    if is_covered_fallible_ty(ty, cx) {
         return true;
     }
     match ty {
@@ -1907,13 +2006,23 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
             // body scope with an *unresolved* type (matching the AST slot's `jet_ty:
             // None`, so they never enable the overflow trap).
             ForKind::In { collection } => {
-                if let Expr::MethodCall { .. } = collection {
-                    // A method-call collection: the two-binding map form is impossible
-                    // here (a method call is single-binding only), so `var2` must be
-                    // None, and the form must be one `emit_for_in` reproduces.
-                    if var2.is_some()
-                        || !forin_method_collection_in_subset(collection, cx, locals)
-                    {
+                // The TWO-BINDING map form (`loop k, v in map`) ALWAYS emits
+                // `({coll}).iter()` (the `var2` branch of `emit_for_in` fires first,
+                // before the `.chars()`/`.lines()` method-call branches). So a method-call
+                // collection in the two-binding position (notably an owning-field-read
+                // `idx.notes` that sema rewrote to `idx.notes.clone()` — the Phase-3
+                // finding) is just a plain in-subset collection value, not one of the
+                // single-binding `chars`/`lines` special forms. Check it as a plain
+                // expr. The SINGLE-binding form keeps the method-call classification
+                // (`.chars()`/`.lines()`/`.split(…)` → `forin_method_collection_in_subset`).
+                if var2.is_some() {
+                    if !expr_in_subset(collection, cx, locals) {
+                        return false;
+                    }
+                } else if let Expr::MethodCall { .. } = collection {
+                    // A single-binding method-call collection: the form must be one
+                    // `emit_for_in` reproduces (`chars`/`lines`/`.iter().cloned()` default).
+                    if !forin_method_collection_in_subset(collection, cx, locals) {
                         return false;
                     }
                 } else if !expr_in_subset(collection, cx, locals) {
@@ -2043,6 +2152,27 @@ fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) -> Option<V
     } = cond
     {
         if !expr_in_subset(subject, cx, locals) {
+            return None;
+        }
+        // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)` /
+        // `if port == Number(n)`). The prelude JSON enum is matched via a single-payload
+        // variant pattern (`Object`/`Number`/`Text`/`Boolean`/`Array`) binding one name.
+        // The Rust if-let pattern (`{root}jet_std::Json::Object(user_entries)`) is produced
+        // by the JSON-aware `emit_if_let_pattern` (reused at lowering), and the binding's
+        // type comes from `core_json_pattern_types` (totality). Cover ONLY the JSON-variant
+        // single-bind case (a user-enum variant if-let stays on the AST path — conservative,
+        // not yet covered as an if-condition form); `Null` is the `Absent`-style form, but
+        // `data == Null` would parse as a variant pattern with no binding (not used in the
+        // live suite — excluded here, single-bind only).
+        if let Pattern::Variant { variant, bindings, span: _ } = pattern {
+            if is_json_variant(variant)
+                && bindings.len() == 1
+                && matches!(bindings[0], PatSlot::Bind(_))
+            {
+                if let PatSlot::Bind(b) = &bindings[0] {
+                    return Some(vec![b.clone()]);
+                }
+            }
             return None;
         }
         return match pattern {
@@ -2403,7 +2533,15 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // `Box::new(move |…| …) as <fn-type>` wrapper. A non-local that is a const
         // (inlined) or an unqualified module import is still out.
         Expr::Ident(name, _) => {
-            locals.contains(name) || ident_is_named_fn_value(name, cx, locals)
+            // c109 Phase 24: a comptime CONST ident (`PAGE_HEADER`) inlines its pre-rendered
+            // Rust value at the use site (`cx.consts[name]` — a TOTAL string fact, the same
+            // `emit_expr` Ident arm reads). Admit it when it is a known const not shadowed by
+            // a local. (A const used as an arithmetic operand resolves to `None` in
+            // `ast_operand_is_integer` — `env.ty_of(const)` is `None` — exactly as the AST
+            // path's `operand_is_integer`, so the overflow trap is never wrongly claimed.)
+            (cx.consts.contains_key(name) && !locals.contains(name))
+                || locals.contains(name)
+                || ident_is_named_fn_value(name, cx, locals)
         }
         Expr::Unary(_, inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Binary(_, l, r, _) => {
@@ -2581,6 +2719,15 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     && enum_is_covered(enum_name, cx)
                     && cx.variant_owner.get(member).map(String::as_str)
                         == Some(enum_name.as_str())
+                {
+                    return true;
+                }
+                // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
+                // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::Json::Null`,
+                // Expression.rs ~L222). Cover it (the only no-arg JSON variant).
+                if !locals.contains(enum_name)
+                    && is_json_type_name(enum_name)
+                    && member == "Null"
                 {
                     return true;
                 }
@@ -2828,6 +2975,26 @@ fn method_call_in_subset(
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // Shape (l) [c109 Phase 24]: a JSON construction `JSON.Boolean(b)` / `JSON.Number(n)`
+    // / `JSON.Text(s)` / `JSON.Array(xs)` / `JSON.Object(map)`. The receiver is the
+    // bare `Ident("JSON")` (a type name, NOT a local), and `method` is a JSON variant.
+    // Sema (`check_core_json_lit`) types it as `JSON` WITHOUT setting `recv_type` (so
+    // `recv_type == None`), and the AST `emit_method_call` routes it through
+    // `emit_core_json_lit` (Expression.rs ~L1633) BEFORE the user enum-lit / instance
+    // shapes. Tried here FIRST among the type-name receivers: `JSON` is not a core
+    // import alias (so the core shape declines), not a local, not a user enum/struct
+    // name. The single payload arg must be in-subset. `JSON.Null` is the no-arg Field
+    // form, handled in `expr_in_subset`'s `Field` arm, not here.
+    if let Expr::Ident(type_name, _) = receiver {
+        if !locals.contains(type_name)
+            && is_json_type_name(type_name)
+            && is_json_variant(method)
+        {
+            return args.iter().all(|a| {
+                a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+            });
+        }
+    }
     // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
     // `alias` is a core import. Sema leaves `recv_type == None` for core calls
     // (`infer_core_call` returns without setting it). A core call is uniquely a
@@ -2940,6 +3107,20 @@ fn method_call_in_subset(
     // / `tasks.spawn(…)`). Tried after the collection builtins so a list/map/string method
     // can't be misclaimed.
     if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
+    // Shape (d4) [c109 Phase 24]: `Match.group(n)` (D-REGEX1). Sema sets `recv_type ==
+    // Some("Match")` (the `Match` receiver type, CheckerInfer's user/handle-method
+    // writeback), and the AST `emit_builtin_method` dispatches it on the method NAME
+    // guarded by `rty == Some(Named("Match"))` (Expression.rs ~L1132). Keyed on
+    // `recv_type == Some("Match")` + `group`/1 — disjoint from every user instance method
+    // (whose `recv_type` is a covered struct/enum, never `Match`) and from the numeric
+    // shape (a numeric `recv_type`). The receiver is a `Match` value (`if m == value(mat)`
+    // binding). Lowered to `BuiltinMethod`/`TBuiltinOp::MatchGroup`. The result is `String?`.
+    if recv_type.as_deref() == Some("Match") && method == "group" && args.len() == 1 {
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
@@ -4368,6 +4549,30 @@ fn lower_if_cond(
         let subj = lower_expr(subject, cx, env);
         return (TIfCond::IsNone { subj }, None);
     }
+    // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)`). The Rust
+    // if-let pattern is the JSON-aware `emit_if_let_pattern` (`{root}jet_std::Json::Object(
+    // user_entries)`); the binding's type comes from `core_json_pattern_types` (the same
+    // total fact `variant_binding_types` reads, mirroring `add_pattern_bindings`).
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::Variant { variant, bindings, .. },
+        ..
+    } = cond
+    {
+        if is_json_variant(variant) {
+            if let Some(PatSlot::Bind(name)) = bindings.first() {
+                let subj = lower_expr(subject, cx, env);
+                let pat_str = emit_if_let_pattern(cx, pattern);
+                let ty = crate::Sema::core_json_pattern_types(variant)
+                    .and_then(|ts| ts.into_iter().next());
+                let place = mangle(name);
+                return (
+                    TIfCond::IfLet { pat_str, subj },
+                    Some((name.clone(), place, ty)),
+                );
+            }
+        }
+    }
     if let Expr::PatternTest {
         subject, pattern, ..
     } = cond
@@ -4697,54 +4902,15 @@ fn lower_range_switch(
     }
 }
 
-/// TIR-local reproduction of codegen's `emit_match_pattern` (Statement.rs) for the
-/// user-enum case the subset covers. Builds the Rust match pattern string from the
-/// resolved enum type and variant slots — pure formatting, no type inference. The
-/// subset excludes JSON/foreign enums, so this only handles `user_<Enum>::user_<V>`.
+/// TIR-local reproduction of codegen's `emit_match_pattern` for the enum-match (shape
+/// A) case the subset covers. c109 Phase 24: this now DELEGATES to the AST
+/// `emit_match_pattern` (made `pub(crate)`), which is PURE formatting (it takes only
+/// `cx` + the pattern + the resolved enum type — no env, no inference), so reusing it is
+/// byte-parity-safe and automatically handles the FOREIGN-enum (`{root}{mod}::user_<T>::
+/// user_<V>`) and JSON (`{root}jet_std::Json::<Variant>`, non-mangled) variant prefixes
+/// the subset now admits — the same reuse Phase 22 made for `emit_if_let_pattern`.
 fn tir_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
-    let resolved = enum_type
-        .map(|t| t.to_string())
-        .or_else(|| variant_pattern_enum(cx, pattern));
-    let prefix = resolved
-        .as_deref()
-        .map(|t| format!("user_{}", t))
-        .unwrap_or_else(|| "user_TYPE".to_string());
-    match pattern {
-        Pattern::Variant { variant, bindings, .. } => {
-            if bindings.is_empty() {
-                format!("{}::{}", prefix, mangle(variant))
-            } else {
-                let slot_pats: Vec<String> = bindings
-                    .iter()
-                    .enumerate()
-                    .map(|(i, s)| match s {
-                        PatSlot::Bind(n) => mangle(n),
-                        PatSlot::Wildcard => "_".to_string(),
-                        PatSlot::Range { .. } => format!("__jet_range_{}", i),
-                    })
-                    .collect();
-                if slot_pats.len() == 1 {
-                    format!("{}::{}({})", prefix, mangle(variant), slot_pats[0])
-                } else {
-                    let fields: Vec<String> = slot_pats
-                        .iter()
-                        .enumerate()
-                        .map(|(i, p)| format!("f{i}: {p}"))
-                        .collect();
-                    format!("{}::{} {{ {} }}", prefix, mangle(variant), fields.join(", "))
-                }
-            }
-        }
-        Pattern::Or(alts, _) => {
-            let pats: Vec<String> = alts
-                .iter()
-                .map(|a| tir_match_pattern(cx, a, resolved.as_deref()))
-                .collect();
-            pats.join(" | ")
-        }
-        // The gate admits only variant / or-of-variant patterns into shape A.
-        _ => unreachable!("non-variant pattern in enum match (gate)"),
-    }
+    emit_match_pattern(cx, pattern, enum_type)
 }
 
 /// TIR-local reproduction of codegen's `emit_range_guard` (Statement.rs): a payload
@@ -4813,18 +4979,26 @@ fn tir_add_pattern_bindings(
     }
 }
 
-/// The payload field types a variant binds, from the resolved enum layout. Mirrors
-/// `variant_binding_types` (Statement.rs) for user enums (JSON enums are excluded
-/// from the subset).
+/// The payload field types a variant binds, from the resolved enum layout. c109
+/// Phase 24: DELEGATES to the AST `variant_binding_types` (made `pub(crate)`), which
+/// handles the JSON enum (`core_json_pattern_types`) AND user/foreign enums
+/// (`cx.variant_owner` → `cx.enum_variants`) — pure table lookups, no env/inference —
+/// so the bound payload type is byte-parity-faithful for every covered enum (e.g. a
+/// foreign `ParseError.NoFrontmatter(p)` binds `p: String`).
 fn variant_payload_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
-    let owner = cx.variant_owner.get(variant)?;
-    let variants = cx.enum_variants.get(owner)?;
-    let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
-    match payload {
-        VariantPayload::Unit => Some(Vec::new()),
-        VariantPayload::Single(t, _) => Some(vec![t.clone()]),
-        VariantPayload::Named(fields) => Some(fields.iter().map(|f| f.ty.clone()).collect()),
-    }
+    variant_binding_types(cx, variant)
+}
+
+/// c109 Phase 24: the Rust enum-literal head `{prefix}::{mangle(variant)}` for a payload
+/// or named enum literal, reproducing `emit_enum_lit`'s `type_prefix` (Expression.rs): a
+/// FOREIGN (imported) enum → `{root}{mod}::user_<T>::user_<V>`, a local enum →
+/// `user_<T>::user_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
+fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
+    let type_prefix = match cx.foreign_types.get(type_name) {
+        Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
+        None => format!("user_{}", type_name),
+    };
+    format!("{}::{}", type_prefix, mangle(variant))
 }
 
 /// c109 Phase 16: the single-payload type of `(type_name, edge)`, mirroring the AST
@@ -5037,6 +5211,16 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Ident(name, _) => {
+            // c109 Phase 24: a comptime CONST inlines its pre-rendered value FIRST (the
+            // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
+            // check — so a const takes precedence even over a same-named local, matching
+            // byte-for-byte). The `ty` is a placeholder (never read — see `ConstInline`).
+            if let Some(val) = cx.consts.get(name) {
+                return TExpr {
+                    ty: env.ty_of(name).unwrap_or(Type::Int),
+                    kind: TExprKind::ConstInline(val.clone()),
+                };
+            }
             // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
             // const) emits `emit_named_fn_value` — `Box::new(move |…| user_<name>(…))
             // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
@@ -5421,11 +5605,40 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     && cx.variant_owner.get(member).map(String::as_str)
                         == Some(enum_name.as_str())
                 {
+                    // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in
+                    // search.jet) qualifies with the module path, exactly as `emit_expr`'s
+                    // `Field` arm (Expression.rs ~L232): `{root}{mod}::user_<Enum>::<V>`.
+                    // Keyed on the ENUM-name (`enum_name`, the receiver) in `cx.foreign_types`,
+                    // NOT the variant — matching the AST byte-for-byte.
+                    let prefix = match cx.foreign_types.get(enum_name.as_str()) {
+                        Some(rust_mod) => format!(
+                            "{}{}::user_{}::{}",
+                            cx.root_prefix,
+                            rust_mod,
+                            enum_name,
+                            mangle(member)
+                        ),
+                        None => format!("user_{}::{}", enum_name, mangle(member)),
+                    };
                     return TExpr {
                         ty: Type::Named(enum_name.clone()),
                         kind: TExprKind::EnumLit {
-                            prefix: format!("user_{}::{}", enum_name, mangle(member)),
+                            prefix,
                             payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+                // c109 Phase 24: `JSON.Null` → `{root}jet_std::Json::Null` (a unit JSON
+                // construction reaching codegen as a `Field`, the gate proved it).
+                if env.ty_of(enum_name).is_none()
+                    && is_json_type_name(enum_name)
+                    && member == "Null"
+                {
+                    return TExpr {
+                        ty: Type::Named(Syntax::TYPE_JSON.to_string()),
+                        kind: TExprKind::JsonLit {
+                            variant: "Null".to_string(),
+                            arg: None,
                         },
                     };
                 }
@@ -5454,7 +5667,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // (the Phase-4 no-op), so emit is byte-identical. Positional edges key on the
         // variant name; named edges on `"Variant.label"` (never a clone — matches AST).
         Expr::EnumLit { type_name, variant, args, .. } => {
-            let prefix = format!("user_{}::{}", type_name, mangle(variant));
+            let prefix = tir_enum_lit_prefix(cx, type_name, variant);
             let payload = if args.is_empty() {
                 TEnumPayload::Unit
             } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
@@ -5966,6 +6179,27 @@ fn lower_method_call(
             kind: TExprKind::DistinctRaw(Box::new(recv)),
         };
     }
+    // c109 Phase 24: a JSON construction `JSON.<Variant>(arg)` (the gate proved the
+    // receiver is the `Ident("JSON")` type name and `method` is a JSON variant). Lower
+    // to `TExprKind::JsonLit`, carrying the payload's `implicit_clone` flag as a total
+    // fact (reproducing `emit_core_json_lit`). The result type is `JSON`.
+    if let Expr::Ident(type_name, _) = receiver {
+        if !env.locals.contains_key(type_name)
+            && is_json_type_name(type_name)
+            && is_json_variant(method)
+        {
+            let arg = args.first().map(|a| {
+                Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone))
+            });
+            return TExpr {
+                ty: Type::Named(Syntax::TYPE_JSON.to_string()),
+                kind: TExprKind::JsonLit {
+                    variant: method.to_string(),
+                    arg,
+                },
+            };
+        }
+    }
     // c109 Phase 19: the arena allocator constructor `mem.Arena.new(…)` (D-ALLOC1). The
     // gate proved the receiver is `Field(Ident(mem-alias), <AllocType>)` + method `new`.
     // Render the whole ctor call HERE (totality), reproducing `emit_method_call`'s arena
@@ -6007,7 +6241,7 @@ fn lower_method_call(
             if !env.locals.contains_key(type_name) {
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
-                        let prefix = format!("user_{}::{}", type_name, mangle(method));
+                        let prefix = tir_enum_lit_prefix(cx, type_name, method);
                         let payload = if args.is_empty() {
                             TEnumPayload::Unit
                         } else {
@@ -6185,6 +6419,23 @@ fn lower_method_call(
                 recv: Box::new(recv_t),
                 op: THandleOp::StopwatchElapsedMillis,
                 args: Vec::new(),
+            },
+        };
+    }
+    // c109 Phase 24: `Match.group(n)` (gate shape d4). The gate proved `recv_type ==
+    // Some("Match")` + `group`/1 + an in-subset value receiver. Lower to `BuiltinMethod`/
+    // `MatchGroup`, byte-for-byte `emit_builtin_method`'s `("Match", "group")` arm. The
+    // result type is `String?`. Placed BEFORE the user-instance shape (also `recv_type ==
+    // Some`) — `Match` is never a covered user struct/enum, so the two never collide.
+    if recv_type.as_deref() == Some("Match") && method == "group" && args.len() == 1 {
+        let recv_t = lower_expr(receiver, cx, env);
+        let arg0 = lower_expr(&args[0].expr, cx, env);
+        return TExpr {
+            ty: Type::Option(Box::new(Type::String)),
+            kind: TExprKind::BuiltinMethod {
+                recv: Box::new(recv_t),
+                op: TBuiltinOp::MatchGroup,
+                args: vec![arg0],
             },
         };
     }
@@ -7537,6 +7788,8 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::CharLit(c) => format!("{:?}", c),
         TExprKind::StrLit(parts) => emit_tir_str(parts, cx),
         TExprKind::Local(place) => place.clone(),
+        // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
+        TExprKind::ConstInline(val) => val.clone(),
         TExprKind::Print(arg) => {
             format!("println!(\"{{}}\", ({}).jet_show())", emit_tir_expr(arg, cx))
         }
@@ -7641,6 +7894,10 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::ContainsKey => format!("({}).contains_key(&{})", recv, a(0)),
                 TBuiltinOp::ToString => format!("({}).jet_show()", recv),
+                // c109 Phase 24: `Match.group(n)` → indexing into the `Vec<Option<String>>`.
+                TBuiltinOp::MatchGroup => {
+                    format!("({}).get(({}) as usize).cloned().flatten()", recv, a(0))
+                }
             }
         }
         // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method. The
@@ -7751,6 +8008,25 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{} {{ {} }}", prefix, parts)
+            }
+        },
+        // c109 Phase 24: a JSON construction — `{root}jet_std::Json::<Variant>(<arg>)`.
+        // Reproduces `emit_core_json_lit` (Expression.rs): the arg is wrapped in
+        // `(…).clone()` iff its `implicit_clone` flag was set; `Null` has no arg.
+        TExprKind::JsonLit { variant, arg } => {
+            let prefix = format!("{}jet_std::Json", cx.root_prefix);
+            match arg {
+                None => format!("{}::{}", prefix, variant),
+                Some(boxed) => {
+                    let (val, implicit_clone) = boxed.as_ref();
+                    let s = emit_tir_expr(val, cx);
+                    let arg_str = if *implicit_clone {
+                        format!("({}).clone()", s)
+                    } else {
+                        s
+                    };
+                    format!("{}::{}({})", prefix, variant, arg_str)
+                }
             }
         },
         TExprKind::IfExpr {
@@ -9215,5 +9491,104 @@ fn consume(ch: Channel<Int>) -> Int {
         assert!(!core_closure_call_in_subset(
             "core.fs", "read", &guard_args, &cx, &locals
         ));
+    }
+
+    #[test]
+    fn covers_json_construction_and_collection() {
+        // c109 Phase 24: JSON construction (`JSON.Text`/`JSON.Boolean`/`JSON.Array`/
+        // `JSON.Null`) + a `[JSON]` list value type. A fn that builds JSON values and
+        // returns a JSON routes (the JSON value type is a covered foreign value type;
+        // construction is the `JsonLit` shape). The if-let JSON MATCHING + index-assign
+        // need full sema (the JSON pattern / `IndexKind`), proven by `tests/tir.rs` + the
+        // whole-suite byte-parity diff; here we gate the sema-independent construction.
+        let src = "\
+fn build() -> JSON {
+    items: [JSON] := []
+    items.push(JSON.Text(\"jet\"))
+    items.push(JSON.Boolean(true))
+    items.push(JSON.Null)
+    return JSON.Array(items)
+}
+";
+        assert!(covers(src, "build"));
+    }
+
+    #[test]
+    fn covers_json_value_param_and_array() {
+        // A JSON-typed param + a `[JSON]` list value type + `JSON.Array` construction.
+        let src = "\
+fn wrap(x: JSON) -> JSON {
+    items: [JSON] := []
+    items.push(x)
+    return JSON.Array(items)
+}
+";
+        assert!(covers(src, "wrap"));
+    }
+
+    #[test]
+    fn covers_enum_field_struct() {
+        // c109 Phase 24: a struct with an ENUM field (`note_type: NoteType`) is now a
+        // covered struct — `field_ty_covered` admits a covered enum field. So a fn that
+        // takes/reads such a struct routes (previously the enum field excluded the struct).
+        let src = "\
+enum NoteType { User Feedback }
+struct Note {
+    name: String
+    note_type: NoteType
+}
+fn name_of(n: Note) -> String {
+    return n.name
+}
+";
+        assert!(covers(src, "name_of"));
+    }
+
+    #[test]
+    fn covers_local_enum_with_foreign_payload_value_type() {
+        // c109 Phase 24: a local enum whose variant payload is itself a covered enum is
+        // covered (`enum_payload_ty_covered` admits a covered enum). (A FOREIGN-enum
+        // payload needs the cross-module `foreign_types` table, proven by `tests/tir.rs`;
+        // here a LOCAL nested enum exercises the same payload-covered path.)
+        let src = "\
+enum Kind { A B }
+enum Query {
+    Tag(String)
+    OfKind(Kind)
+}
+fn mk(k: Kind) -> Query {
+    return Query.OfKind(k)
+}
+";
+        assert!(covers(src, "mk"));
+    }
+
+    #[test]
+    fn covers_comptime_const_in_interpolation() {
+        // c109 Phase 24: a comptime const inlines its value at the use site
+        // (`cx.consts`), so a fn interpolating a const routes.
+        let src = "\
+comptime HEADER = \"<html>\"
+fn wrap(s: String) -> String {
+    return \"{HEADER}: {s}\"
+}
+";
+        assert!(covers(src, "wrap"));
+    }
+
+    #[test]
+    fn covers_optional_struct_field() {
+        // c109 Phase 24: a struct with an OPTIONAL field (`note: String?`) is now covered
+        // (`field_ty_covered` admits a covered-payload Option). A fn building it routes.
+        let src = "\
+struct PR {
+    file_path: String
+    note: String?
+}
+fn mk(p: String) -> PR {
+    return PR {file_path: p, note: null}
+}
+";
+        assert!(covers(src, "mk"));
     }
 }

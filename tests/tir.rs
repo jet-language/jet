@@ -2975,3 +2975,194 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "1 2 1 2 false\n0 10\n");
 }
+
+/// c109 Phase 24: JSON value type + construction + if-let matching + render/parse
+/// round-trip (the coupled prelude-`JSON` slice). `main` routes through the TIR:
+/// `json.parse(raw) ?? panic`, `if data == Object(entries)` (JSON if-let), `JSON.Text`/
+/// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::Json::…`), a Map
+/// index over `[String, JSON]`, and `json.render`. rustc accepting proves byte-parity.
+#[test]
+fn json_value_construct_match_render() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.json as json
+fn main() {
+    raw @= \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
+    data @= json.parse(raw) ?? panic(\"bad json\")
+    if data == Object(entries) {
+        print(entries.len())
+    }
+    obj: [String, JSON] := [:]
+    obj[\"name\"] = JSON.Text(\"jet\")
+    obj[\"ok\"] = JSON.Boolean(true)
+    obj[\"none\"] = JSON.Null
+    print(json.render(JSON.Object(obj)))
+}
+";
+    let (code, stdout) = build_and_run("tir_json", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\n{\"name\":\"jet\",\"none\":null,\"ok\":true}\n");
+}
+
+/// c109 Phase 24: nested JSON if-let matching coercing typed payloads (`73_json_coerce`).
+/// `if data == Object(entries)` then `if port == Number(n)` / `Text(s)` / `Boolean(b)`
+/// — each binds a typed payload (Float/String/Bool) off `core_json_pattern_types`.
+#[test]
+fn json_nested_variant_matching() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use jet.json as json
+fn main() {
+    raw @= \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
+    data @= json.decode(raw) ?? panic(\"bad json\")
+    if data == Object(entries) {
+        port @= entries[\"port\"]
+        name @= entries[\"name\"]
+        if port == Number(n) {
+            print(n + 1.0)
+        }
+        if name == Text(s) {
+            print(s)
+        }
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_json_coerce", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "8081.0\napi\n");
+}
+
+/// c109 Phase 24: regex `Match` value type + `.group(n)` accessor (`74_regex`). The
+/// `Match?` value (`if m == value(mat)` binds `mat: Match`) and `mat.group(0)` route.
+/// Regex needs the FFI bridge crate (not linkable from a standalone `rustc`), so this
+/// is a COMPILE-only check that the `Match.group` lowering emits the AST's
+/// `.get((n) as usize).cloned().flatten()` form (byte-parity is proven by the
+/// whole-suite diff on `74_regex` + the `74_regex` golden run).
+#[test]
+fn regex_match_group() {
+    let src = "\
+use jet.regex as re
+fn main() {
+    text @= \"order 42 shipped\"
+    m @= re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
+    if m == value(mat) {
+        whole @= mat.group(0) ?? \"none\"
+        print(whole)
+    }
+}
+";
+    let dir = std::env::temp_dir().join(format!("jet_tir_regex_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("regex.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).expect("front end rejected regex fixture");
+    // The `if let Some(user_mat)` if-let binds the `Match`; `.group(0)` indexes it.
+    assert!(
+        out.rust.contains("if let Some(user_mat) ="),
+        "Match value not bound via if-let:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("(user_mat).get((0i64) as usize).cloned().flatten()"),
+        "Match.group lowering not byte-exact:\n{}",
+        out.rust
+    );
+}
+
+/// c109 Phase 24: a comptime const inlined at the use site (`{HEADER}` in interpolation).
+/// `wrap` routes — the const inlines its pre-rendered value (`cx.consts`).
+#[test]
+fn comptime_const_inline() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+comptime VERSION = \"1.0\"
+comptime BANNER = \"logbook {VERSION}\"
+fn wrap(s: String) -> String {
+    return \"{BANNER}: {s}\"
+}
+fn main() {
+    print(wrap(\"hi\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_const", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "logbook 1.0: hi\n");
+}
+
+/// c109 Phase 24: foreign-enum matching + a local enum with a foreign-enum payload, plus
+/// a foreign struct with enum/optional fields — the logbook `note`/`search` shapes. The
+/// `note` module defines `NoteType`/`Note`; `search` (entry) matches over the foreign
+/// `NoteType` directly AND over a local `Query` whose `Kind` payload is the foreign enum,
+/// constructs `NoteType.User` cross-module, and reads a foreign struct's enum field.
+#[test]
+fn foreign_enum_matching_and_payload() {
+    if !have_rustc() {
+        return;
+    }
+    // The foreign struct `Note` is CONSTRUCTED in its own module (`make_note`, matching the
+    // real logbook — an unqualified cross-module `Note {…}` literal is a separate pre-existing
+    // AST-path bug, omitted of `import_ns`, that the gate already excludes). `kind_str` matches
+    // the foreign-LOCAL `NoteType`; the entry matches the foreign `NoteType` via a local
+    // `Query`'s `Kind(NoteType)` payload + constructs `NoteType.User` cross-module.
+    let note = "\
+pub enum NoteType { User Feedback Project Reference }
+pub struct Note {
+    pub name: String
+    pub note_type: NoteType
+    pub parent: String?
+}
+pub fn make_note(take name: String, take t: NoteType) -> Note {
+    return Note {name: name, note_type: t, parent: null}
+}
+pub fn kind_str(n: Note) -> String {
+    k @= n.note_type
+    if k {
+        User -> { return \"user\" }
+        Feedback -> { return \"feedback\" }
+        Project -> { return \"project\" }
+        Reference -> { return \"reference\" }
+    }
+}
+fn main() { print(\"note\") }
+";
+    let entry = "\
+use \"note\"
+enum Query {
+    Tag(String)
+    Kind(NoteType)
+}
+fn classify(raw: String) -> Query {
+    if raw == \"user\" {
+        return Query.Kind(NoteType.User)
+    }
+    return Query.Tag(raw)
+}
+fn describe(n: Note, q: Query) -> String {
+    if q {
+        q == Tag(t) -> { return \"tag:{t}\" }
+        q == Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
+    }
+}
+fn main() {
+    n @= note.make_note(\"x\", NoteType.User)
+    q @= classify(\"user\")
+    print(describe(n, q))
+    q2 @= classify(\"design\")
+    print(describe(n, q2))
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_foreign_enum",
+        "main.jet",
+        &[("main.jet", entry), ("note.jet", note)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "kind:user\ntag:design\n");
+}

@@ -122,6 +122,17 @@ them so they don't regress, but they should be fixed independently of c109):
   was stale. The construct is just dead. Fix: make sema admit a bare `?? return` only in a
   unit-returning fn (then rustc accepts `return;`), OR make codegen emit `return ()` /
   diverge appropriately. (Surfaced in Phase 19.)
+- **An UNQUALIFIED cross-module foreign struct literal miscompiles (I2 hole, both paths).**
+  `Note { … }` written unqualified in an importing module (no `import_ns`) emits
+  `user_Note { … }` via `user_type_apply_rust` (Expression.rs) with NO foreign-module prefix
+  → rustc E0422 ("cannot find struct `user_Note`"). Only the `import_ns` branch of
+  `emit_struct_lit` (the `note.Note { … }` QUALIFIED form) consults `cx.foreign_types`; the
+  unqualified `Named(type_name)` fallthrough does not. Both paths emit identical (broken) Rust
+  (parity holds); the TIR gate already EXCLUDES it (`is_covered_struct_ty` is false for a
+  foreign struct → the `import_ns.is_none()` StructLit branch rejects the fn), so the TIR never
+  claims a miscompiling fn. The live logbook never hits this (foreign structs are constructed in
+  their OWN module). Fix: prefix `cx.foreign_types` in the unqualified struct-lit head
+  (`user_type_apply_rust` / the `import_ns.is_none()` branch). (Surfaced in Phase 24.)
 
 ## Invariants this must preserve
 
@@ -1628,6 +1639,114 @@ everything, the AST codegen path is deleted (final phase).
   method`. After Phase 23 the AST-path residue is: latent-bug-gated + unreachable/dead + the
   ONE remaining coupled feature slice (JSON/core-enum + capstone).
 
+## Refinements learned in Phase 24 (JSON/core-enum matching + capstone foreign types)
+
+- **The JSON slice is a REUSE win, not a new emit family.** The prelude `JSON` enum was
+  already a covered VALUE type (`core_rust_type_name("JSON") == Some("Json")` → `is_covered_
+  foreign_value_ty` admits it). The slice was: (1) **construction** — `JSON.<Variant>(arg)`
+  parses as a `MethodCall` with receiver `Ident("JSON")` (and `JSON.Null` as a `Field`),
+  both with `recv_type == None` (`check_core_json_lit` types it WITHOUT the writeback). A new
+  `TExprKind::JsonLit { variant, arg: Option<(TExpr, implicit_clone)> }` reproduces
+  `emit_core_json_lit` byte-for-byte (`{root}jet_std::Json::<Variant>(<arg>)`, the
+  `implicit_clone` flag total). Gated FIRST among the type-name receivers in
+  `method_call_in_subset` (`JSON` is not a core alias / local / user enum). (2) **matching**
+  — `if data == Object(entries)` is the Phase-22 `TIfCond::IfLet` shape with a `Pattern::
+  Variant` whose variant `is_json_variant`; the Rust if-let pattern reuses the JSON-aware
+  `emit_if_let_pattern` (already foreign/JSON-aware), the binding's type from
+  `core_json_pattern_types` (e.g. `Object` → `[String, JSON]`, `Number` → `Float`). (3) The
+  `when`-match shape A now DELEGATES `tir_match_pattern` to the AST `emit_match_pattern`
+  (made `pub(crate)`) — PURE formatting (cx + pattern + enum-type, no env), so it handles
+  JSON (`jet_std::Json::<V>`, non-mangled) AND foreign enums (`{root}{mod}::user_<T>::user_<V>`)
+  for free, the Phase-22 `emit_if_let_pattern` reuse precedent. `json.render`/`parse`/`decode`
+  were already Phase-10 `CoreCall`s; the slice composes them.
+- **The real capstone blockers were FOREIGN-VALUE-TYPE plumbing, not JSON.** Covering the
+  logbook 100% needed widening four "covered value-type" predicates to admit a foreign
+  (imported) struct/enum, the JSON enum, an optional, or a covered enum where they were
+  previously scalar/String/struct-only: `collection_elem_covered` (`[String, Note]`,
+  `[JSON]`), `field_ty_covered` (a struct FIELD that is a foreign type / a covered ENUM /
+  an `Option<covered>` — e.g. `Note.note_type: NoteType`, `ParsedResult.note: Note?`),
+  `fallible_payload_covered` (a foreign payload — `re.match()`'s `Match?`, `cmd_links`'
+  `Note?`), and `enum_payload_ty_covered` (a foreign-enum payload — `Query.Kind(NoteType)`).
+  Each is byte-parity-safe: the type renders via `cx.rust_type` to its own Rust head, and a
+  field/element/payload value is moved/cloned by its OWN sub-expression (a construction, a
+  bound value, the iteration's per-key/value clone), so the owning aggregate needs no new
+  field-site decision. This is the recurring "cover the value type, let the next uncovered
+  node (a foreign METHOD) exclude its fn" seam — the same one concurrency (Phase 21) used.
+- **A FOREIGN enum is matchable but NOT in `cx.cloneable` — admit it by covered-payload,
+  don't require `cx.cloneable`.** `register_foreign_enum_variants` (Imports.rs) DOES put a
+  foreign enum's variants in `cx.variant_owner`/`cx.enum_variants` (so `arm_variant_pattern`/
+  `variant_pattern_enum`/`emit_match_pattern` resolve the owning enum + the `{root}{mod}::
+  user_<T>` prefix), but `cx.cloneable` tracks only LOCAL types. The match scrutinee's
+  `(subj).clone()` is emitted UNCONDITIONALLY by `emit_pattern_match_switch` (it never reads
+  `cx.cloneable`), and a covered-payload enum is always `Clone` in Rust (every covered payload
+  is `Clone`), so `enum_is_covered` admits a foreign enum on the covered-payload check ALONE
+  (skipping the `cx.cloneable` gate for `is_foreign`). The foreign-enum CONSTRUCTION head
+  (`NoteType.User` cross-module → `{root}{mod}::user_<T>::<V>`) is now reproduced via
+  `enum_type_prefix`/`variant_rust_name` (the `Field` unit literal) and a new
+  `tir_enum_lit_prefix` (the payload `EnumLit` + the variant-construction `MethodCall` shape
+  j), keyed on the ENUM name in `cx.foreign_types` exactly as the AST `emit_expr`/`emit_enum_lit`.
+- **`Match.group(n)` is a `recv_type == Some("Match")` builtin gap (NOT `None`).** The Phase-13
+  note ("`Match.group` not cleanly reachable") was the blocker; sema sets `recv_type ==
+  Some("Match")` (the receiver type writeback) and the AST `emit_builtin_method` dispatches
+  `group` keyed on `rty == Some(Named("Match"))`. A dedicated gate shape (d4) keyed on
+  `recv_type == Some("Match")` + `group`/1 (disjoint from every user instance method — `Match`
+  is never a covered struct/enum — and the numeric shape) lowers to `BuiltinMethod`/
+  `TBuiltinOp::MatchGroup` → `(recv).get((n) as usize).cloned().flatten()`. `Match` joins the
+  covered value types (renders to `Vec<Option<String>>`) so `if m == value(mat)` binds `mat:
+  Match`. The `re.match`/`find`/`find_all`/… producers were already Phase-10 `CoreCall`s.
+- **A comptime CONST inlines its pre-rendered value (`cx.consts[name]`) FIRST — a total
+  string fact.** `PAGE_HEADER`/`BANNER` in interpolation (`{PAGE_HEADER}`) are consts; the AST
+  `emit_expr` Ident arm returns `cx.consts[name]` BEFORE any env/fn-value check (so a const
+  takes precedence even over a same-named local). A new `TExprKind::ConstInline(String)` carries
+  the value verbatim; the gate admits a const ident, the lowering checks `cx.consts` first. The
+  const's `ty` is a placeholder — never read: an arithmetic const operand resolves to `None` in
+  `ast_operand_is_integer` (`env.ty_of(const)` is `None`, matching the AST's `operand_is_integer`),
+  so it never wrongly enables the overflow trap; a covered use (interpolation, a binding RHS)
+  reads the binding/`.jet_show()` type.
+- **The TWO-BINDING map iteration form ignores a method-call collection — fix the gate.** A
+  `loop k, v in idx.notes` where `idx.notes` is an owning foreign field read is rewritten by
+  sema to `idx.notes.clone()` (the Phase-3 finding), a `MethodCall`. `emit_for_in`'s two-binding
+  branch fires FIRST (before the `.chars()`/`.lines()` method-call branches) and emits
+  `({coll}).iter()` regardless. The Phase-22 gate wrongly excluded ANY method-call collection
+  in the two-binding position (`var2.is_some()`); now the two-binding form just requires the
+  collection to be a plain in-subset expr (the single-binding form keeps the method-call
+  classification). Unblocked `graph_json`'s `loop name, n in idx.notes`.
+- **Surfaced a NEW latent AST-path bug (logged, not fixed): an UNQUALIFIED cross-module
+  foreign struct literal miscompiles.** `Note { … }` (no `import_ns`, written unqualified in
+  an importing module) emits `user_Note { … }` via `user_type_apply_rust` (Expression.rs) with
+  NO foreign-module prefix → rustc E0422 ("cannot find struct `user_Note`"). The `import_ns`
+  branch of `emit_struct_lit` (the `note.Note { … }` QUALIFIED form, Phase-19-covered) is the
+  only one that prefixes; the unqualified `Named(type_name)` fallthrough doesn't consult
+  `cx.foreign_types`. Both paths miscompile identically (parity holds), and the TIR gate already
+  EXCLUDES it (`is_covered_struct_ty("Note")` is false for a foreign struct, so the `import_ns.
+  is_none()` StructLit branch rejects it) — so the TIR never claims the miscompiling fn. The
+  real logbook never hits this (foreign structs are built in their OWN module — `note.parse`
+  returns `Note { … }` LOCAL-to-note). Fix: make `user_type_apply_rust`/the
+  `import_ns.is_none()` struct-lit branch prefix a `cx.foreign_types` type, lives in sema's
+  elaboration / Expression.rs. (Surfaced while writing the Phase-24 foreign-enum test.)
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass on all
+  four emit hooks) across the **entire example suite** — 118 emittable, 0 differ — plus the
+  named targets (`30_json`/`73_json_coerce`/`74_regex`/`76_http_routes` handlers + the **logbook
+  capstone**, all 45 of its fns now route), then the instrumentation removed. All four feature
+  examples + the logbook subcommands (`index`/`graph json`/`find`) run end-to-end through the
+  TIR. `tests/tir.rs` adds `json_value_construct_match_render`/`json_nested_variant_matching`/
+  `regex_match_group`/`comptime_const_inline`/`foreign_enum_matching_and_payload`; the TIR unit
+  tests add `covers_json_construction_and_collection`/`covers_json_value_param_and_array`/
+  `covers_enum_field_struct`/`covers_local_enum_with_foreign_payload_value_type`/
+  `covers_comptime_const_in_interpolation`/`covers_optional_struct_field`. Suite 782 → 793.
+- **After Phase 24 the live-suite AST-path residue is ONLY latent-bug-gated + sema-unreachable
+  + the HttpRouter handle surface.** Every emittable example fn routes through the TIR EXCEPT:
+  (1) the latent-codegen-bug-gated constructs (`is_empty`, no-arg `join()`, `mut self`/`view
+  self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign
+  struct literal above, the `new`-name-collision intercept); (2) sema-unreachable / dead
+  constructs (generic-type methods, the bare `?? return`, the ambient `input()`); and (3) the
+  **HttpRouter handle surface** — `76_http_routes`/`logbook serve`'s `main` uses `http.router()`
+  + `router.get`/`router.post` + `http.dispatch` (an HttpRouter producer + its `recv_type ==
+  Some(HttpRouter)` methods, NOT covered — the same handle-method seam as Phase 13's deferred
+  `Arena`/`Match`, now the LAST coverable handle surface). This is NOT a JSON/foreign-enum gap;
+  it is a separate handle-method coverage phase. The "coupled JSON/core-enum + capstone slice"
+  the inventory flagged is now FULLY covered.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
 After Phase 22 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are reached
@@ -1659,8 +1778,10 @@ thing Phase 21 claimed exhausted — so they were silently outside that claim). 
 - **generic-type METHODS** (a method on a generic struct doesn't type-check — E0311 at
   the call site, E0119 on a `T`-referencing body; a sema binding gap, `struct_is_generic`
   exclusion stays); the **bare `?? return`** (ALREADY routes, but is unusable — E0405
-  demands a return type, then rustc E0069 rejects `return;`). Foreign-ENUM *construction*
-  has no reachable cross-module literal syntax (`note.Color.Red` is E0107).
+  demands a return type, then rustc E0069 rejects `return;`). (Correction from Phase 24:
+  foreign-ENUM *construction* IS reachable cross-module — `NoteType.User` in search.jet
+  emits `{root}user_note::user_NoteType::user_User`, now covered. The unqualified foreign
+  STRUCT literal `Note { … }` is the one that miscompiles — see the latent-bug list.)
 
 **(3) Uncovered FEATURE surfaces (parity-safe; a future coverage phase, NOT a latent
 bug, NOT unreachable):** these keep real example functions on the AST path. **Phase 23
@@ -1686,25 +1807,31 @@ slice:
 - ~~`#Todo` holes~~ — **COVERED (Phase 23)**: `Expr::Todo` → diverging
   `todo!("#Todo at … — expected <ty>")` (`Todo`, reads sema's `expected_type`).
   `58_todo_hole` `not_yet`/`double`/`main` route.
-- **STILL ON AST — the JSON / core-enum + capstone slice** (DEFERRED, see Phase 23
-  refinements): `when`/`if` over the prelude `JSON` enum (`Object`/`Number`/`Text`/
-  `Boolean` patterns + `if data == Object(entries)` binding), foreign-enum CONSTRUCTION
-  (`JSON.Object(obj)` → `jet_std::Json::Object(…)`, a non-mangled foreign-enum literal),
-  the JSON value type as a param/return, and the `json.render`/`parse` core-call interplay
-  — a COUPLED slice (the value type + construction + matching + core calls must land
-  together, like the Phase-21 concurrency slice; covering one piece leaves the others
-  unreachable or risks an I2 false-positive). Plus **comptime-evaluated tables** and the
-  capstone's cross-module foreign-type-heavy functions (the logbook `parse`/`build`/
-  `note_*`/`note_score`/`graph_json` family, `30_json`/`73_json_coerce`/`74_regex`/
-  `76_http_routes` `main`) — each blocked by an as-yet-uncovered node its body reaches
-  (foreign-enum JSON, regex `Match`, comptime tables, cross-module foreign structs).
+- ~~JSON / core-enum + capstone slice~~ — **COVERED (Phase 24)**: JSON construction
+  (`JSON.<Variant>(arg)`/`JSON.Null` → `jet_std::Json::<V>(…)`, the `JsonLit` shape),
+  `if data == Object(entries)` JSON if-let matching (`emit_if_let_pattern` reuse +
+  `core_json_pattern_types`), the JSON value type as a param/return/collection element,
+  `json.render`/`parse`/`decode` interplay (Phase-10 `CoreCall`s composed), foreign-enum
+  matching + construction (`NoteType`/`ParseError` — `enum_is_covered` admits a foreign
+  enum on its covered-payload, `tir_match_pattern` delegates to `emit_match_pattern`,
+  `tir_enum_lit_prefix`/`enum_type_prefix` for the foreign head), regex `Match.group(n)`
+  (gate shape d4, `recv_type == Some("Match")`), comptime const inlining (`ConstInline`),
+  and the foreign-value-type plumbing (`collection_elem_covered`/`field_ty_covered`/
+  `fallible_payload_covered`/`enum_payload_ty_covered` admit a foreign struct/enum/JSON/
+  optional). All four feature targets (`30_json`/`73_json_coerce`/`74_regex` route fully;
+  `76_http_routes` handlers route) AND the **logbook capstone (all 45 fns)** route. The
+  capstone `parse`/`build`/`note_*`/`note_score`/`graph_json` family route. (Comptime
+  "tables" were the `28_comptime_table` `make_table` fn — already Phase-9-covered; the
+  comptime CONST inlining was the actual logbook need.)
 
 The remaining work toward deleting the AST path is therefore: the latent-bug FIXES
-(separate cards), the unreachable/dead constructs (no action), plus the **one remaining
-class-(3) coupled slice** — JSON/core-enum matching + the capstone foreign-type-heavy
-functions. None of the residue is a "parity-safe construct form already flagged as
-coverable" — that category stays EMPTY (Phase 22 cleared it; Phase 23 cleared five of
-the six uncovered FEATURE surfaces).
+(separate cards), the unreachable/dead constructs (no action), and the **HttpRouter handle
+surface** (`76_http_routes`/`logbook serve` `main` — `http.router()` + `router.get`/`post`
++ `http.dispatch`, a `recv_type == Some(HttpRouter)` handle producer + methods, the LAST
+coverable handle surface, the same seam as the Phase-13-deferred `Arena`/`Match`). None of
+the residue is a "parity-safe construct form already flagged as coverable" — that category
+stays EMPTY (Phase 22 cleared it; Phase 23 cleared five of the six uncovered FEATURE
+surfaces; Phase 24 cleared the sixth — the JSON/core-enum + capstone slice).
 
 ## Phases
 
@@ -1735,7 +1862,8 @@ the six uncovered FEATURE surfaces).
 | 21 | Task/Channel/Sender concurrency | ✅ done (c109 Phase 21) — the coupled concurrency slice Phase 20 deferred, landed WHOLE and byte-identical. **Value types**: `Task<T>`/`Channel<T>`/`Sender<T>` (`Type::Apply`) as covered param/local/return value types (`is_covered_concurrency_ty` — renders via `cx.rust_type` to `{root}jet_std::Jet{Task,Channel,Sender}<…>`); `[Task<Unit>]` worker lists (`concurrency_elem_covered` admits `Unit` → `()` as a concurrency element only); the `Closed` err type as a covered fallible payload (`receive`'s `Result<T, Closed>`). **Producer**: `tasks.channel()` (added to `core_call_covered` — a fixed-string `JetChannel::new()` `CoreCall`, NOT in `core_fixed_sig`; its `Channel<T>` return type rides on the binding annotation); `tasks.spawn`'s `Task<T>` result was already total (Phase-13 `CoreClosureCall`). **Methods** (the `recv_type == None` builtin gap, gate shape d3 keyed on name+arity, disjoint from every other shape): `Task.join`(0)/`Task.detach`(0), `Channel.receive`(0)/`Channel.sender`(0), `Sender.send`(1) → new `THandleOp::{TaskJoin,TaskDetach,ChannelReceive,ChannelSender,SenderSend}`, byte-for-byte `emit_builtin_method`'s `Type::Apply`-receiver arms. The result type reads `T` off the LOWERED receiver's `.ty` (totality, I3): `join` → `T`, `detach`/`send` → Unit, `receive` → `Result<T, Closed>` (composes with Phase-8 `?? panic`), `sender` → `Sender<T>`. The channel/sender/task value's prelude methods take `&self`, so a `val`-bound handle stays a plain `let` (`Type::Apply` never matches `emit_let`'s `Type::Named`-keyed `is_file_handle`) — byte-identical. All four concurrency examples route (`32_tasks` spawn/join, `80_detached_task` detach, `33_pipeline` channel send/receive, `34_parallel_scan` parallel scan) and run end-to-end; byte-identical across the whole example suite (118 emittable, 0 differ). 235 top-level fns route. **Surfaced an UNRELATED parity-safe uncovered construct** (`if x == value(binding)` optional-binding condition — keeps `scan_parallel`/`paths_from_args` on the AST path; byte-identical, no miscompile; removing it lets `scan_parallel` route fully). tests/tir.rs adds `task_spawn_join`/`task_detach`/`channel_send_receive`; unit tests add `concurrency_method_names`/`concurrency_value_types_covered`/`covers_concurrency_methods` and flip `core_call_covered("core.tasks","channel")`. **After Phase 21 the AST-path inventory is ONLY latent-bug-gated + sema-unreachable + parity-safe uncovered construct forms — NO coverable type/method surface remains.** |
 | 22 | Method-call iteration + optional-binding conditions | ✅ done (c109 Phase 22) — the two parity-safe construct forms the inventory had flagged. **Method-call-collection iteration** (`loop x in <coll>.method(…)`): `emit_for_in`'s four `Expr::MethodCall` branches reproduced via a total `ForIn.method_kind: Option<TForInMethod>` — `chars()` (char iteration, receiver string), `lines()` on `FileReader` (streaming `BufRead::lines(&mut (recv).inner)`), `lines()` on `StdinHandle`/inline `io.stdin()` (streaming + the extra `{ let mut _jet_stdin_h = …; }` block + extra close), and the `.iter().cloned()` default for any other method (`.split(…)`, the whole call as the collection value). The FileReader-vs-stdin split mirrors `expr_jet_ty(receiver)` (via `tir_recv_jet_ty`) + the inline-`stdin` shape, in `emit_for_in`'s order; the iteration var stays `jet_ty: None` (Phase-5 partiality). **Optional-binding `if` condition**: `TStmt::If.cond` became a `TIfCond::{Plain,IfLet,IsNone}` — `x == value(b)`/`ok(b)`/`err(b)` → `if let {pat} = {subj}` (`emit_if_let_pattern`, now `pub(crate)`); `x == null` (`Pattern::Absent`) → `if {subj}.is_none()` — reproducing `emit_if`'s three heads. The if-let then-body uses `fork_panic` (deep-copied panic replica, NON-leaky — the AST clones into a fresh `body_env`); the bound name's inner type comes off the subject's lowered `Option`/`Result` `.ty` (I3). Only the DIRECT `PatternTest` forms (not the `Binary(And,…)` quirk, not Variant/Or/Range) are covered (conservative). `34_parallel_scan` `scan_parallel`/`paths_from_args` + `78_stdin_filter` `main` now route. Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes; all run end-to-end. tests/tir.rs adds `method_call_collection_iteration` + `optional_binding_if_condition`; unit tests flip `rejects_method_call_collection_iteration` → `covers_*` (chars + split) and add `covers_optional_binding_if_condition`. **After Phase 22 the "parity-safe coverable construct form" residue is EMPTY** — the AST-path residue is latent-bug-gated + unreachable/dead + uncovered FEATURE surfaces (tuples, default params, distinct types, `#Pure`, `#Todo`, JSON/core-enum matching — each a NEW coverage phase, NOT a flagged form). FileReader `.lines()` is covered+tested but unreachable in the live suite (`49_stream` is `?`-blocked since Phase 10). |
 | 23 | `#Pure` / `#Todo` / default params + named args / distinct types / tuples | ✅ done (c109 Phase 23) — five of the six uncovered FEATURE surfaces, all byte-identical. **`#Pure fn`** (S60): purity is sema-only (E3401), erased — lift = delete the `is_pure` gate exclusions; `62_pure` routes. **`#Todo`** (`Expr::Todo`, D-TOOL2): diverging `todo!("#Todo at {file}:{line} — expected {ty}")` (`TExprKind::Todo`, reads sema's total `expected_type`; gate excludes a `None` hole); `58_todo_hole` routes. **Default params** (S61/D-NARG-D2): sema fills omitted trailing args at the CALL SITE (codegen never reads `p.default`) — lift = delete the `p.default.is_some()` exclusions; `66_default_refs` (incl. earlier-param-ref defaults) + `Rect.square` route. **Named args** (D-NARG1): labels are checked documentation that NEVER reorder (D-NARG-D4) and codegen ignores `CallArg.label` — relaxed the `a.label.is_none()` gate checks (parity-safe); `63_named_args` methods route. **Distinct types** (D-DIST1/D-DIST3): `is_covered_distinct_ty` (+ a new `cx.distinct_types` table) admits the `user_<Name>` newtype value type; construction `Name(x)` is the `is_distinct_ctor` fallthrough `Call` (no sig → plain args → `user_<Name>(…)`); `.raw()` → `(recv).0` (`DistinctRaw`, recv_type `None`, keyed on the method name); `#Numeric` `+`/`==` use the native operator (`ast_operand_is_integer` returns `None` for a distinct, so no trap claimed); `69_distinct_types` routes. **Tuples** (S73/D-SG7): `is_covered_tuple_ty`; literal `(x:1,y:2)` → `JetTup_<hash>{…}` reordered to the type's CANONICAL field order (`TupleLit`, gate excludes a `ty: None` literal); field `p.x` → `(p).user_x` (generic `Field`; `struct_field_type` resolves off `Type::Tuple`); destructure `(a,b) @= p.clone()` → `__jet_d{span}` borrow-temp + per-element `(tmp).user_<f>.clone()` (`TStmt::TupleDestructure`, one-Stmt-to-many-lines); `40_tuples` routes. **DEFERRED — the JSON/core-enum + capstone slice**: the prelude `JSON` foreign enum (construction → `jet_std::Json::…`, non-mangled-variant matching via `core_json_pattern_types`/`is_json` branch, the value type, `json.render`/`parse` interplay) is a COUPLED slice (like Phase 21's concurrency) — covering one piece leaves the others unreachable / risks an I2 false-positive; the capstone family (`logbook` `parse`/`build`/`note_*`/`note_score`/`graph_json`, `30_json`/`73_json_coerce`/`74_regex`/`76_http_routes` `main`) is blocked by this slice + other uncovered nodes (regex `Match`, comptime tables, cross-module foreign structs). Byte-identical across the whole example suite (118 emittable, 0 differ); 268 top-level fns route (was 235). tests/tir.rs adds 6 build+run tests; unit tests add 7 gate tests. **After Phase 23 the residue is latent-bug-gated + unreachable/dead + the ONE remaining coupled feature slice (JSON/core-enum + capstone).** |
-| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the `new`-name-collision intercept — separate cards), (2) unreachable/dead constructs (generic-type methods, bare `?? return`, ambient `input()`), and (3) the ONE remaining coverage phase: the **JSON/core-enum matching + capstone foreign-type-heavy** coupled slice (the prelude `JSON` enum value type + construction + `when`/`if` matching + `json.render`/`parse` interplay; regex `Match`; comptime tables; cross-module foreign structs). Phase 23 cleared the other five class-(3) feature surfaces (`#Pure`, `#Todo`, default params/named args, distinct types, tuples). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
+| 24 | JSON/core-enum matching + capstone foreign types | ✅ done (c109 Phase 24) — the LAST coupled class-(3) slice, all byte-identical. **JSON** (the coupled prelude-`JSON` slice): construction `JSON.<Variant>(arg)`/`JSON.Null` → `jet_std::Json::<V>(…)` (`TExprKind::JsonLit`, the `implicit_clone` flag total, gated FIRST among type-name receivers); `if data == Object(entries)` JSON if-let matching (the Phase-22 `TIfCond::IfLet` shape with a JSON `Pattern::Variant`, reusing the JSON-aware `emit_if_let_pattern` + `core_json_pattern_types`); the JSON value type as a param/return/`[JSON]`/`[String, JSON]` element; `json.render`/`parse`/`decode` composed (Phase-10 `CoreCall`s). **Foreign-enum matching + construction** (`NoteType`/`ParseError`): `enum_is_covered` admits a foreign enum on its covered-payload (NOT `cx.cloneable` — the scrutinee `.clone()` is unconditional and a covered payload is always Clone); `tir_match_pattern` now DELEGATES to the AST `emit_match_pattern` (made `pub(crate)` — pure formatting, JSON/foreign/user aware); `tir_enum_lit_prefix`/`enum_type_prefix` emit the foreign `{root}{mod}::user_<T>::<V>` construction head. **Regex `Match.group(n)`** (gate shape d4, `recv_type == Some("Match")` → `BuiltinMethod`/`MatchGroup` → `(recv).get((n) as usize).cloned().flatten()`; `Match` joins the covered value types, rendering `Vec<Option<String>>`). **Comptime const inlining** (`TExprKind::ConstInline(cx.consts[name])`, inlined FIRST per `emit_expr`; the `ty` placeholder never read). **Foreign-value-type plumbing**: `collection_elem_covered`/`field_ty_covered`/`fallible_payload_covered`/`enum_payload_ty_covered` widened to admit a foreign struct/enum/JSON, a covered ENUM field, an `Option<covered>` field, and a foreign-enum payload (each byte-parity-safe — the value's own sub-expression moves/clones it). Fixed the Phase-22 two-binding gate (a `.clone()`-rewritten foreign field-read collection is a plain in-subset expr, not a method-call special form). All four feature targets route (`30`/`73`/`74` fully; `76` handlers) AND the **logbook capstone — all 45 fns route** (`parse`/`build`/`note_*`/`note_score`/`graph_json`/…); the JSON examples + logbook `index`/`graph json`/`find` run end-to-end. **Surfaced a NEW latent bug** (logged): an unqualified cross-module foreign STRUCT literal `Note { … }` miscompiles (E0422, both paths — the TIR already excludes it). Byte-identical across the whole example suite (118 emittable, 0 differ). tests/tir.rs adds 5 build+run tests; unit tests add 6 gate tests. Suite 782 → 793. **After Phase 24 the live-suite AST-path residue is ONLY latent-bug-gated + sema-unreachable + the HttpRouter handle surface** — the JSON/core-enum + capstone slice is fully covered. |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal, the `new`-name-collision intercept — separate cards), (2) unreachable/dead constructs (generic-type methods, bare `?? return`, ambient `input()`), and (3) the **HttpRouter handle surface** — `http.router()` + `router.get`/`post` + `http.dispatch` (`76_http_routes`/`logbook serve` `main`), the LAST coverable handle-method surface (same seam as the Phase-13-deferred `Arena`/`Match`, now resolved for `Match`). Phase 24 cleared the sixth and final class-(3) feature surface (JSON/core-enum + capstone). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
 regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep
