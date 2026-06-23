@@ -4339,3 +4339,35 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "7\n7\nseven\nseven\ntrue\ntrue\n");
 }
+
+/// c109 (D-PATW): a user-enum variant if-let condition with a WILDCARD payload
+/// slot (`if w == Some(_)`). The `_` binds nothing; the if-let head renders
+/// `if let user_Wrapper::user_Some(_) = user_w` byte-for-byte. `main` routes
+/// through the TIR; runs (the `Some(42)` value matches the wildcard).
+#[test]
+fn wildcard_enum_payload_if_let() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Wrapper {
+    Some(Int)
+    None
+}
+fn main() {
+    w @= Wrapper.Some(42)
+    if w == Some(_) {
+        print(\"has value\")
+    }
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.rust.contains("if let user_Wrapper::user_Some(_) = user_w"),
+        "wildcard enum-payload if-let not byte-exact:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_wildcard_payload_iflet", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "has value\n");
+}

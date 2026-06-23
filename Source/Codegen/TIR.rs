@@ -2443,6 +2443,23 @@ fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) -> Option<V
                     }
                 }
             }
+            // c109 (D-PATW): a USER-enum variant if-let with a WILDCARD payload slot
+            // (`if w == Some(_)`). The `_` binds nothing, so the then-branch gains no
+            // local; `emit_if_let_pattern` already renders the slot as `_`, producing
+            // `if let user_E::user_V(_) = <subj>` (byte-for-byte the AST `emit_if`). A
+            // single-payload covered-enum variant whose one slot is a wildcard is in
+            // subset, introducing NO binding (empty bindings vec). (The recently-covered
+            // user-variant if-let bound a NAME; this binds `_`.)
+            if !is_json_variant(variant)
+                && bindings.len() == 1
+                && matches!(bindings[0], PatSlot::Wildcard)
+            {
+                if let Some(owner) = cx.variant_owner.get(variant) {
+                    if enum_is_covered(owner, cx) {
+                        return Some(Vec::new());
+                    }
+                }
+            }
             return None;
         }
         return match pattern {
@@ -5356,6 +5373,14 @@ fn lower_if_cond(
                     TIfCond::IfLet { pat_str, subj },
                     Some((name.clone(), place, ty)),
                 );
+            }
+            // c109 (D-PATW): a WILDCARD payload slot (`if w == Some(_)`). `_` binds
+            // nothing, so the if-let introduces NO then-branch binding; the pattern
+            // renders the slot as `_` (`emit_if_let_pattern`), byte-for-byte the AST.
+            if let Some(PatSlot::Wildcard) = bindings.first() {
+                let subj = lower_expr(subject, cx, env);
+                let pat_str = emit_if_let_pattern(cx, pattern);
+                return (TIfCond::IfLet { pat_str, subj }, None);
             }
         }
     }
@@ -11565,5 +11590,26 @@ fn main() {
             covers_after_sema(src, "main"),
             "field-read/== on inlined comptime values not covered"
         );
+    }
+
+    #[test]
+    fn covers_wildcard_enum_payload_if_let() {
+        // c109 (D-PATW): a user-enum variant if-let condition with a WILDCARD payload
+        // slot (`if w == Some(_)`). The `_` binds nothing; the if-let head renders
+        // `if let user_Wrapper::user_Some(_) = user_w` (byte-for-byte the AST). Covered
+        // when the variant is a single-payload variant of a covered enum.
+        let src = "\
+enum Wrapper {
+    Some(Int)
+    None
+}
+fn main() {
+    w @= Wrapper.Some(42)
+    if w == Some(_) {
+        print(\"has value\")
+    }
+}
+";
+        assert!(covers(src, "main"), "wildcard enum-payload if-let not covered");
     }
 }
