@@ -265,7 +265,13 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
                 TIR::emit_tir_func(&tir, cx, out);
                 continue;
             }
-            emit_delegation_method(cx, m, field, out);
+            // c109 Phase N: the TIR is the only codegen seam (R7). A gate-miss here is
+            // a construct the typed IR does not cover — an internal compiler error
+            // (I2-class, exit 101), never an AST fallback.
+            panic!(
+                "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+                m.name
+            );
         }
     } else {
         for m in &i.methods {
@@ -331,6 +337,13 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
         let tir = TIR::lower_trait_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
         return;
+    }
+    if indent == 1 {
+        // c109 Phase N: gate-miss at the trait-method seam is an ICE (I2/R7).
+        panic!(
+            "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+            f.name
+        );
     }
     let pad = "    ".repeat(indent);
     let ret = f
@@ -419,6 +432,13 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
         let tir = TIR::lower_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
         return;
+    }
+    if indent == 1 {
+        // c109 Phase N: gate-miss at the inherent-method seam is an ICE (I2/R7).
+        panic!(
+            "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+            f.name
+        );
     }
     let pad = "    ".repeat(indent);
     let ret = f
@@ -588,6 +608,12 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
+    // c109 Phase N: gate-miss at the free-function seam is an ICE (I2/R7).
+    panic!(
+        "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+        f.name
+    );
+    #[allow(unreachable_code)]
     let extra = if f.type_params.is_empty() {
         HashMap::new()
     } else {
