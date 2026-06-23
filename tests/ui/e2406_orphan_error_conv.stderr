@@ -1,1 +1,15 @@
-(no errors)
+Error [E2406]: can't declare `impl Int -> String` — neither type is defined in this program
+  --> tests/ui/e2406_orphan_error_conv.jet:2:6
+    |
+  2 | impl Int -> String {
+    |      ^^^
+ Why: error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined
+ Fix: define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type
+
+Error [E0113]: `__errconv_Int_to_String` promises to return `String`, but this returns String (text)
+  --> tests/ui/e2406_orphan_error_conv.jet:3:12
+    |
+  3 |     return "number"
+    |            ^^^^^^^^
+ Why: the value handed back must match the type after `->`
+ Fix: use `String` here

@@ -479,6 +479,13 @@ fn main() {
             run_repl(project.as_deref());
             return;
         }
+        // Teaching error: E0043 `jet install` → `jet fetch`
+        "install" => {
+            eprintln!("Error [E0043]: `jet install` isn't a Jet command");
+            eprintln!(" Why: Jet uses `jet fetch` to download and link dependencies");
+            eprintln!(" Fix: run `jet fetch` to install all dependencies listed in pkg.jet");
+            exit(ExitCodes::USER_ERROR);
+        }
         "dev" => {
             // E2-M4 (D-DEV4): the watch/interpret loop. Re-check and re-run the
             // entry file on every save, streaming output, for sub-200ms

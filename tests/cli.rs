@@ -85,6 +85,21 @@ fn exit_code_unknown_subcommand_is_usage() {
 }
 
 #[test]
+fn jet_install_teaches_jet_fetch() {
+    // `jet install` is not a Jet command; the compiler emits E0043 pointing to `jet fetch`.
+    let out = Command::new(jet()).arg("install").output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E0043"),
+        "`jet install` should emit E0043 teaching error:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("jet fetch"),
+        "`jet install` error should mention `jet fetch`:\n{stderr}"
+    );
+}
+
+#[test]
 fn exit_code_explain_unknown() {
     let out = Command::new(jet())
         .arg("explain")

@@ -102,6 +102,7 @@ before continuing.
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
 | E0041 | sema  | teaching: `Mutex`/`lock` → channels |
+| E0043 | jet   | teaching: `jet install` → `jet fetch` |
 | E0044 | parse | teaching: `switch` → `when` (S24, D-SG1)  |
 | E0045 | parse | teaching: `or` fallback → `??` (S71, D-SG6) |
 | E0046 | parse | `?.` optional chaining reaches fields, not methods (S71) |
@@ -184,6 +185,11 @@ before continuing.
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `??` fallback type/`return` mismatch       |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
+| E0420 | sema  | `#Uninit` binding read before it is given a value (D-UNINIT1) |
+| E0421 | parse | `#Uninit` binding needs a type annotation (D-UNINIT1) |
+| E0422 | parse | `#Uninit` binding cannot have an initializer (D-UNINIT1) |
+| E0423 | sema  | `#Uninit` binding's type is not plain data (D-UNINIT1) |
+| E0424 | sema  | `#Uninit` used without `use core.mem` (D-UNINIT1) |
 | E0501 | sema  | empty `[]` / `[:]` needs a context type   |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
