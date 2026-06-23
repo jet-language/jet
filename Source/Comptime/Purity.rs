@@ -190,6 +190,10 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
             }
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }
+        // D-TERM1 (ratified 2026-06-22): walk live block body for purity analysis.
+        Stmt::Live { body, .. } => {
+            body.iter().for_each(|s| walk_stmt_exprs(s, f));
+        }
     }
 }
 

@@ -400,6 +400,15 @@ pub(crate) enum TStmt {
         guards: Vec<(bool, TExpr)>,
         body: Vec<TStmt>,
     },
+    /// D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input block.
+    /// Lowers to:
+    ///   `{ jet_term_enter(); let _live_guard = jet_scope_guard(|| jet_term_leave()); <body> }`
+    /// The scope guard guarantees `jet_term_leave()` runs on every exit path — normal
+    /// fall-through, early `return`, `?` propagation, and panic unwind. Codegen is dumb
+    /// (I3): no decisions here, only emitting the already-checked RAII form.
+    Live {
+        body: Vec<TStmt>,
+    },
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -1493,6 +1502,11 @@ fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Traits, generics,
 /// recursive (boxed) types are still out.
 fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
+    // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (prelude, not user-registry).
+    // It is always cloneable and has scalar/Char payloads only — fully covered.
+    if matches!(ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
+        return true;
+    }
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
         || is_type_var_param_ty(ty)
@@ -2417,6 +2431,9 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         // (E0741); codegen is dumb (I3). Check the body on the SAME `locals` (it leaks
         // like a region), reusing the covered `TStmt::Region` lowering.
         Stmt::Caps { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
+        // The body leaks into the outer scope like a region; check it on the SAME `locals`.
+        Stmt::Live { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // Forward-safety default: a future Stmt variant defaults to the safe AST path
         // (I2 — a false negative keeps a fn off the TIR; a false positive would be unsafe).
         // Currently unreachable because every variant above is matched.
@@ -2501,6 +2518,17 @@ fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) -> Option<V
             {
                 if let PatSlot::Bind(b) = &bindings[0] {
                     return Some(vec![b.clone()]);
+                }
+            }
+            // D-TERM1 (ratified 2026-06-22): a `Key` variant if-let.
+            // `if k == Key.Char(c)` → `if let JetKey::Char(user_c) = (k).clone() { … }`.
+            // Unit variants (`if k == Key.Enter`) → `if let JetKey::Enter = (k).clone()`.
+            if is_key_variant(variant) {
+                if bindings.is_empty() || (bindings.len() == 1 && matches!(bindings[0], PatSlot::Bind(_))) {
+                    let names: Vec<String> = bindings.iter().filter_map(|s| {
+                        if let PatSlot::Bind(n) = s { Some(n.clone()) } else { None }
+                    }).collect();
+                    return Some(names);
                 }
             }
             // c109 (B4): a USER-enum variant if-let (`if m == Ping(n)`). Covered when
@@ -3244,6 +3272,16 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // value is itself in-subset (a scalar/Char value — the enum being covered
         // already guarantees the payload *types* are scalar, so no clone/box).
         Expr::EnumLit { type_name, variant, args, .. } => {
+            // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in
+            // the user registry, but is always covered — all payloads are scalar/Char.
+            let key_type = crate::Syntax::TYPE_KEY;
+            if type_name == key_type {
+                if !is_key_variant(variant) { return false; }
+                return args.iter().all(|a| match a {
+                    EnumLitArg::Positional(e) => expr_in_subset(e, cx, locals),
+                    EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+                });
+            }
             if !enum_is_covered(type_name, cx) {
                 return false;
             }
@@ -3711,6 +3749,14 @@ fn method_call_in_subset(
     if recv_type.is_none() {
         if let Expr::Ident(type_name, _) = receiver {
             if !locals.contains(type_name) {
+                // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum not in
+                // `cx.enum_variants`; handle it specially before the user-enum path.
+                if type_name == crate::Syntax::TYPE_KEY {
+                    return is_key_variant(method)
+                        && args.iter().all(|a| {
+                            a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+                        });
+                }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)
@@ -5396,6 +5442,13 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lower_stmts(body, cx, env),
             }
         }
+        // D-TERM1 (ratified 2026-06-22): `live { … }` block. The body leaks into the
+        // enclosing `env` (same as `Stmt::Region`) so let-bindings inside are visible
+        // after the block (consistent with all other Jet lexical blocks). Lowering only
+        // records the body; the enter/guard/leave preamble is emitted in `emit_tir_stmt`.
+        Stmt::Live { body, .. } => TStmt::Live {
+            body: lower_stmts(body, cx, env),
+        },
         // Forward-safety default: a Stmt variant not in the subset never reaches
         // lowering (`stmt_in_subset` returns false for it). Kept as a guard against a
         // future variant; currently unreachable because every covered variant is matched.
@@ -5960,6 +6013,11 @@ fn variant_payload_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
 /// FOREIGN (imported) enum → `{root}{mod}::user_<T>::user_<V>`, a local enum →
 /// `user_<T>::user_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
 fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
+    // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum; its Rust name is `JetKey`.
+    // Variant names are not mangled (Char, Enter, …).
+    if type_name == crate::Syntax::TYPE_KEY {
+        return format!("{}JetKey::{}", cx.root_prefix, variant);
+    }
     let type_prefix = match cx.foreign_types.get(type_name) {
         Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
         None => format!("user_{}", type_name),
@@ -7455,6 +7513,28 @@ fn lower_method_call(
     if recv_type.is_none() {
         if let Expr::Ident(type_name, _) = receiver {
             if !env.locals.contains_key(type_name) {
+                // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum not in
+                // `cx.enum_variants`; lower `Key.Variant(args)` to a TIR enum lit.
+                let key_type = crate::Syntax::TYPE_KEY;
+                if type_name == key_type && is_key_variant(method) {
+                    let prefix = tir_enum_lit_prefix(cx, type_name, method);
+                    let payload = if args.is_empty() {
+                        TEnumPayload::Unit
+                    } else {
+                        let pos = args
+                            .iter()
+                            .map(|a| {
+                                // Key payload args are always scalar/Char — no clone/box needed.
+                                TEnumArg { value: lower_expr(&a.expr, cx, env), clone: false, boxed: false }
+                            })
+                            .collect();
+                        TEnumPayload::Positional(pos)
+                    };
+                    return TExpr {
+                        ty: Type::Named(type_name.clone()),
+                        kind: TExprKind::EnumLit { prefix, payload },
+                    };
+                }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         let prefix = tir_enum_lit_prefix(cx, type_name, method);
@@ -9059,6 +9139,21 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
         }
         // c109 Phase 19: an explicit `region r { … }` — a plain Rust block, byte-for-byte
         // `emit_stmts`'s `Stmt::Region` arm. The escape/RAII rules are sema's job (I3).
+        // D-TERM1 (ratified 2026-06-22): `live { … }` block — enter terminal mode,
+        // install a scope guard that restores it, then emit the body. The guard fires
+        // on every exit path (normal, return, ?, panic unwind) via Rust's Drop ordering.
+        TStmt::Live { body } => {
+            let inner = indent + 1;
+            let inner_pad = "    ".repeat(inner);
+            out.push_str(&format!("{}{{\n", pad));
+            out.push_str(&format!("{}{}jet_term_enter();\n", inner_pad, cx.root_prefix));
+            out.push_str(&format!(
+                "{}let _live_guard = {}jet_scope_guard(|| {{ {}jet_term_leave(); }});\n",
+                inner_pad, cx.root_prefix, cx.root_prefix
+            ));
+            emit_tir_stmts(body, cx, out, inner);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         TStmt::Region(body) => {
             out.push_str(&format!("{}{{\n", pad));
             emit_tir_stmts(body, cx, out, indent + 1);
@@ -10113,6 +10208,8 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
+        // D-TERM1 (ratified 2026-06-22): terminal direct-input.
+        ("core.term", "read_key") => format!("{}()", helper("jet_term_read_key")),
         _ => "/* unknown std call */".to_string(),
     }
 }

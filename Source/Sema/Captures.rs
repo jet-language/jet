@@ -66,6 +66,10 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
                 }
                 walk_stmts_for_const_refs(body, const_names, taken);
             }
+            // D-TERM1 (ratified 2026-06-22): walk live block body for const refs.
+            Stmt::Live { body, .. } => {
+                walk_stmts_for_const_refs(body, const_names, taken);
+            }
         }
     }
 }
@@ -350,6 +354,8 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
             fields.iter().any(|(_, e, _)| expr_refs_name(e, name))
                 || body.iter().any(|s| stmt_refs_name(s, name))
         }
+        // D-TERM1 (ratified 2026-06-22): live block references same as its body.
+        Stmt::Live { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
     }
 }
 
@@ -721,6 +727,11 @@ pub(crate) fn stmt_collect_captures(
             for (_, e, _) in fields {
                 expr_collect_captures(e, bound, read, mut_cap);
             }
+            let mut body_bound = bound.clone();
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
+        }
+        // D-TERM1 (ratified 2026-06-22): collect captures from live block body.
+        Stmt::Live { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }

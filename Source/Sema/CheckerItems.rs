@@ -399,6 +399,10 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-TERM1 (ratified 2026-06-22): `Key` is a core enum, not in user registry.
+        if enum_name == crate::Syntax::TYPE_KEY {
+            return true;
+        }
         false
     }
 
@@ -419,6 +423,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+        // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (not in user registry).
+        // Synthesise its variant table here so `Key.Char(c)` / `Key.Enter` literals work.
+        if enum_name == crate::Syntax::TYPE_KEY {
+            return Some(core_key_variants());
         }
         None
     }
@@ -870,6 +879,40 @@ impl<'a> Checker<'a> {
             Expr::Binary(BinOp::Eq, lhs, rhs, _) => {
                 self.eq_unit_variant_pattern(lhs, rhs, subject_name, subj_ty)
             }
+            // D-TERM1 (ratified 2026-06-22): `Key` arm heads written as bare
+            // variant name (unit: `Enter`, `Up`, …) or call-like (payload:
+            // `Char(c)`, `F(n)`, `Ctrl(c)`). The parser produces a Call node
+            // for `Variant(binding)` arms and an Ident node for unit variants.
+            // Recognise them as patterns when the subject is a `Key`.
+            //
+            // Also handles JSON patterns written in the arm-head position
+            // (the same call-as-pattern reuse JSON already relies on).
+            Expr::Ident(variant, span) if subject_name.is_some() => {
+                let Type::Named(enum_name) = subj_ty else { return None; };
+                let variants = self.resolve_enum_variants_cloned(enum_name)?;
+                let (_, payload) = variants.get(variant.as_str())?;
+                if !matches!(payload, crate::AST::VariantPayload::Unit) {
+                    return None;
+                }
+                // Only accept if the variant is NOT a live local (avoids shadowing).
+                if self.lookup(variant).is_some() { return None; }
+                Some(Pattern::Variant { variant: variant.clone(), bindings: vec![], span: *span })
+            }
+            Expr::Call(call) if subject_name.is_some() => {
+                // Only a single positional binding arg is the pattern form.
+                if call.args.len() != 1 { return None; }
+                let Expr::Ident(binding, _) = &call.args[0].expr else { return None; };
+                if self.lookup(binding).is_some() { return None; } // it's a real local
+                let Type::Named(enum_name) = subj_ty else { return None; };
+                let variants = self.resolve_enum_variants_cloned(enum_name)?;
+                let (_, payload) = variants.get(call.name.as_str())?;
+                if !matches!(payload, crate::AST::VariantPayload::Single(..)) { return None; }
+                Some(Pattern::Variant {
+                    variant: call.name.clone(),
+                    bindings: vec![crate::AST::PatSlot::Bind(binding.clone())],
+                    span: call.name_span,
+                })
+            }
             _ => None,
         }
     }
@@ -1002,6 +1045,63 @@ impl<'a> Checker<'a> {
                                     Some(span),
                                 ));
                             }
+                        }
+                    }
+                    return result;
+                }
+                // D-TERM1 (ratified 2026-06-22): `Key` is a core enum — resolve
+                // its variants without a user-defined type registry entry.
+                if enum_name == crate::Syntax::TYPE_KEY {
+                    let Some(expected) = core_key_pattern_types(variant) else {
+                        self.diags.push(Diagnostic::error(
+                            "E0305",
+                            format!(
+                                "pattern `{}` doesn't belong to `Key`",
+                                variant
+                            ),
+                            "pattern tests must name a variant on the value's enum type".to_string(),
+                            "valid `Key` variants: `Char(c)`, `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, `Up`, `Down`, `Left`, `Right`, `F(n)`, `Ctrl(c)`, `Unknown`".to_string(),
+                            Some(span),
+                        ));
+                        return HashMap::new();
+                    };
+                    if bindings.len() != expected.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0306",
+                            format!(
+                                "pattern `{}` expects {} binding{}, got {}",
+                                variant,
+                                expected.len(),
+                                if expected.len() == 1 { "" } else { "s" },
+                                bindings.len()
+                            ),
+                            "each payload field needs its own binding name".to_string(),
+                            format!(
+                                "write `{}({})",
+                                variant,
+                                (0..expected.len())
+                                    .map(|i| format!("v{i}"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            Some(span),
+                        ));
+                    }
+                    let mut result = HashMap::new();
+                    for (slot, ty) in bindings.iter().zip(expected.iter()) {
+                        match slot {
+                            crate::AST::PatSlot::Bind(name) => { result.insert(name.clone(), ty.clone()); }
+                            crate::AST::PatSlot::Wildcard => {}
+                            crate::AST::PatSlot::Range { .. } => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0316",
+                                    "range patterns are not supported in `Key` variant payloads".to_string(),
+                                    "`Key` payload types are `Char` and `Int`; use a binding and check at runtime".to_string(),
+                                    "write a name like `c` instead of a range".to_string(),
+                                    Some(span),
+                                ));
+                            }
+                            _ => {}
                         }
                     }
                     return result;

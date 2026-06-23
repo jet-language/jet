@@ -1129,6 +1129,14 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-TERM1 (ratified 2026-06-22): `live { … }` — enter un-buffered/no-echo
+    /// terminal input mode for the body, restore on every exit (normal, `return`,
+    /// `?`, and panic) via the D-DEFER1 scope-guard mechanism.
+    /// `use core.term as term` makes `term.read_key() -> Key` available.
+    Live {
+        body: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 /// Assignment target: local name or indexed collection slot (M5).

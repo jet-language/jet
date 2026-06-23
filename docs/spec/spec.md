@@ -1122,6 +1122,59 @@ An un-annotated trait method is inferred per-impl under static dispatch; the
 dynamic-dispatch fix-it (annotate the method when it's called through an object
 under an effect ceiling, E0743) is the remaining surface here.
 
+## Terminal direct-input (D-TERM1, ratified 2026-06-22)
+
+`live { … }` enters un-buffered, no-echo terminal input mode for its body and
+restores the terminal on every exit path (normal return, `?` propagation, panic
+unwind) via a RAII scope guard (D-DEFER1).
+
+```jet
+use core.term as term
+
+live {
+    k @= term.read_key()
+    if k == Enter { return }
+    print("got: {k}")
+}
+```
+
+`use core.term as term` is required for `term.read_key() -> Key`. The `live`
+keyword itself does not require the import — the block's syntactic gate is
+sufficient.
+
+**`Key` enum** (prelude type, `core.term`):
+
+| Variant | Payload | Description |
+|---------|---------|-------------|
+| `Char(c)` | `Char` | Printable character |
+| `Enter` | — | Enter / Return |
+| `Escape` | — | Escape |
+| `Backspace` | — | Backspace |
+| `Tab` | — | Tab |
+| `Delete` | — | Forward delete |
+| `Up` / `Down` / `Left` / `Right` | — | Arrow keys |
+| `F(n)` | `Int` | Function key F1–F12 |
+| `Ctrl(c)` | `Char` | Ctrl + character |
+| `Unknown` | — | Unrecognised byte sequence |
+
+Pattern matching uses `== Variant(binding)` (PatternTest form):
+
+```jet
+if k == Char(c) { print("char: {c}") }
+if k == Enter   { break }
+if k == F(n)    { print("F{n}") }
+```
+
+Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
+
+**Restrictions:**
+- E3401: `live { … }` is impure — rejected in a `#Pure fn`.
+- E3301: rejected in `--freestanding` builds (no OS terminal device).
+- REPL: rejected in interactive mode.
+
+**Platform FFI:** I6-compliant; uses inline `extern "C"` (POSIX termios) and
+`extern "system"` (Windows console API) — no external crates.
+
 ## Editions & release policy (E2-M2)
 
 A project pins an **edition** with `edition: "2026"` in its `pkg.jet`

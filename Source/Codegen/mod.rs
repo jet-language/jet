@@ -111,6 +111,46 @@ fn strip_unused_mem_prelude(out: String) -> String {
     s
 }
 
+/// D-TERM1: the `jet_term_unix` and `jet_term_windows` platform modules each
+/// carry vetted `unsafe` for terminal I/O FFI. Strip them (along with the
+/// `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatch functions and
+/// the `JetKey` type) when no `live { … }` block or `core.term` call is present
+/// in the generated user code — i.e., when `jet_term_enter` is never called.
+fn strip_unused_term_prelude(out: String) -> String {
+    // Fast path: if jet_term_enter is called in the user code (after the prelude),
+    // keep the full term section.
+    let prelude_end = out.find("fn main()").unwrap_or(out.len());
+    let user_code = &out[prelude_end..];
+    if user_code.contains("jet_term_enter") || user_code.contains("jet_term_read_key") {
+        return out;
+    }
+    // Strip each of the two cfg-gated platform modules by brace-matching.
+    fn strip_mod(src: String, marker: &str) -> String {
+        let Some(start) = src.find(marker) else { return src; };
+        // Back up to the `#[cfg(...)]` line before `mod`.
+        let cfg_start = src[..start].rfind('\n').map(|n| n + 1).unwrap_or(start);
+        let bytes = src.as_bytes();
+        let (mut depth, mut seen, mut i) = (0usize, false, start);
+        let mut end = src.len();
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => { depth += 1; seen = true; }
+                b'}' => {
+                    depth -= 1;
+                    if seen && depth == 0 { end = i + 1; break; }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        let mut s = src[..cfg_start].to_string();
+        s.push_str(src[end..].trim_start_matches('\n'));
+        s
+    }
+    let out = strip_mod(out, "mod jet_term_unix {");
+    strip_mod(out, "mod jet_term_windows {")
+}
+
 pub(crate) fn mangle(name: &str) -> String {
     if name == "main" {
         "main".to_string()
@@ -191,7 +231,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             emit_func(&cx, f, &mut out);
         }
     }
-    strip_unused_mem_prelude(out)
+    strip_unused_term_prelude(strip_unused_mem_prelude(out))
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
@@ -306,7 +346,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
-    strip_unused_mem_prelude(out)
+    strip_unused_term_prelude(strip_unused_mem_prelude(out))
 }
 
 /// c109: emit a `#Test` block body through the TIR (R7 — the only codegen seam). A test
@@ -398,7 +438,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
     emit_program_items(&cx, &entry.items, &mut out, true);
-    strip_unused_mem_prelude(out)
+    strip_unused_term_prelude(strip_unused_mem_prelude(out))
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -523,5 +563,5 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
     out.push_str("    println!(\"{} passed, {} failed\", passed, failed);\n");
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
-    strip_unused_mem_prelude(out)
+    strip_unused_term_prelude(strip_unused_mem_prelude(out))
 }

@@ -643,6 +643,9 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.process") {
         return Some("`core.process`");
     }
+    if t.contains("core.term") || t.contains("live {") || t.contains("live{") {
+        return Some("`core.term` / `live` blocks (terminal direct-input)");
+    }
     None
 }
 

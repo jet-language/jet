@@ -709,6 +709,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.scope",
     // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing builder.
     "core.args",
+    // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
+    "core.term",
     // E2-M9: first-party ring packages.
     "jet.csv",
     "jet.toml",

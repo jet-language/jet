@@ -598,6 +598,10 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
             }
             collect_stmts(body, mp, module, db);
         }
+        // D-TERM1 (ratified 2026-06-22): collect symbols from live block body.
+        AST::Stmt::Live { body, .. } => {
+            collect_stmts(body, mp, module, db);
+        }
     }
 }
 

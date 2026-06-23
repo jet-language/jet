@@ -705,6 +705,23 @@ impl<'a> Parser<'a> {
                     Some(t.span),
                 ))
             }
+            // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input
+            // block. `live` is a lowercase contextual keyword (D-CASING1):
+            // recognised only when immediately followed by `{`, so a variable or
+            // function named `live` still works everywhere else.
+            TokKind::Ident(n)
+                if n == Syntax::KW_LIVE
+                    && matches!(self.peek2().kind, TokKind::LBrace) =>
+            {
+                let start = self.bump().span; // `live`
+                self.expect(TokKind::LBrace, "after `live`")?;
+                let body = self.block_stmts();
+                let end = self.toks[self.pos - 1].span.end;
+                return Ok(Stmt::Live {
+                    body,
+                    span: Span::new(start.start, end),
+                });
+            }
             // D-REGION1 (opt B): `region r { … }` — an explicit allocation
             // region. `region` is a lowercase contextual keyword (D-CASING1):
             // recognized only when followed by `name {`, so a variable named

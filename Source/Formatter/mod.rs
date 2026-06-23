@@ -265,6 +265,8 @@ fn stmt_end(stmt: &Stmt) -> usize {
             .map(stmt_end)
             .unwrap_or(span.end),
         Stmt::ContextBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        // D-TERM1 (ratified 2026-06-22): `live { … }` — use span end.
+        Stmt::Live { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
     }
 }
 
@@ -455,6 +457,8 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Caps { span, .. } => span.start,
         Stmt::ComptimeIf { span, .. } => span.start,
         Stmt::ContextBlock { span, .. } => span.start,
+        // D-TERM1 (ratified 2026-06-22): `live { … }` — use span start.
+        Stmt::Live { span, .. } => span.start,
     }
 }
 

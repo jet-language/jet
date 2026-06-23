@@ -197,6 +197,14 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-TERM1 (ratified 2026-06-22): `live { … }` — terminal direct-input block.
+            Stmt::Live { body, .. } => {
+                self.write(Syntax::KW_LIVE);
+                self.write(" {");
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
         }
     }
 
