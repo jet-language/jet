@@ -1319,7 +1319,7 @@ pub(crate) fn emit_for_in(
     }
 }
 
-fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
+pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
     use crate::AST::PatSlot;
     match pattern {
         Pattern::Variant {

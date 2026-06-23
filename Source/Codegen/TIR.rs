@@ -125,6 +125,40 @@ pub(crate) enum ViewWrap {
     Bare,
 }
 
+/// c109 Phase 22: the method-call-collection iteration form on a `loop x in <coll>`,
+/// resolved at lowering from `emit_for_in`'s `Expr::MethodCall` branches
+/// (Source/Codegen/Statement.rs). Each carries the receiver's emitted Rust string;
+/// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
+/// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
+/// routes to its `else` default) is represented by `ForIn.method_kind == None`.
+pub(crate) enum TForInMethod {
+    /// `loop c in s.chars()` — char iteration: `for _jet_c in ({recv}).chars()`,
+    /// binding `let <var> = _jet_c;`.
+    Chars,
+    /// `loop line in reader.lines()` on a `FileReader` — streaming `BufRead::lines`
+    /// over the reader's `inner`, with a mid-stream-error panic (line `0`, `cx.file`).
+    LinesFile,
+    /// `loop line in io.stdin().lines()` / a `StdinHandle` — the same streaming read,
+    /// but the receiver is materialised into a `_jet_stdin_h` local inside an extra
+    /// block (so the `io.stdin()` temporary outlives the loop body), with a matching
+    /// extra closing brace.
+    LinesStdin,
+}
+
+/// c109 Phase 22: an `if` condition, resolved at lowering from the AST node shape
+/// (`emit_if`/`if_pattern_test`, Source/Codegen/Statement.rs):
+///  - `Plain` — a boolean expression: `if {cond} {`.
+///  - `IfLet` — an optional-binding test (`x == value(b)` → `Some(b)`, `ok(b)`/`err(b)`,
+///    a variant `c == Active(id)`): `if let {pat_str} = {subj} {`. The bound name(s)
+///    are in scope in the then-branch (the binding's resolved type is bound at lowering,
+///    mirroring `add_pattern_bindings`).
+///  - `IsNone` — an `x == null` test (`Pattern::Absent`): `if {subj}.is_none() {`.
+pub(crate) enum TIfCond {
+    Plain(TExpr),
+    IfLet { pat_str: String, subj: TExpr },
+    IsNone { subj: TExpr },
+}
+
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub(crate) enum TStmt {
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
@@ -161,6 +195,10 @@ pub(crate) enum TStmt {
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
     /// Statement-form `if`/`else`. `else_body` is `None` for a bare `if`.
+    /// `cond` (c109 Phase 22) is a `TIfCond`: a plain boolean expr, an optional-binding
+    /// `if let <pat> = <subj>` (an `x == value(b)`/`ok(b)`/`err(b)`/variant condition),
+    /// or an `<subj>.is_none()` test (`x == null`) — reproducing `emit_if`'s three
+    /// condition shapes (Source/Codegen/Statement.rs).
     /// `else_is_elseif` distinguishes the source `ElseBranch`: `true` for a real
     /// `else if` chain (`ElseBranch::ElseIf` — the else-body is the synthesised nested
     /// `If`, emitted as `} else if …`), `false` for an explicit `else { … }` block
@@ -168,7 +206,7 @@ pub(crate) enum TStmt {
     /// single `if`). The AST path keys solely on the `ElseBranch` variant; the TIR
     /// must NOT flatten an explicit `else { if … }` into `else if` (a parity drift).
     If {
-        cond: TExpr,
+        cond: TIfCond,
         then_body: Vec<TStmt>,
         else_body: Option<Vec<TStmt>>,
         else_is_elseif: bool,
@@ -248,18 +286,24 @@ pub(crate) enum TStmt {
         is_map: bool,
         value: TExpr,
     },
-    /// c109 Phase 5: collection iteration `loop x in coll` / `loop k, v in map`
+    /// c109 Phase 5/22: collection iteration `loop x in coll` / `loop k, v in map`
     /// (`Stmt::For` with `ForKind::In`). The collection's emitted Rust string is
     /// resolved at lowering. `var2` distinguishes the two-binding map form (which
     /// iterates `(coll).iter()` and clones each key/value) from the single-binding
-    /// form (`(coll).iter().cloned()`), reproducing `emit_for_in` exactly. The
-    /// subset excludes method-call collections (`.chars()`/`.lines()` → Phase 7),
-    /// so only the two plain `.iter()` shapes arise.
+    /// form (`(coll).iter().cloned()`), reproducing `emit_for_in` exactly.
+    /// `method_kind` (c109 Phase 22) carries the method-call-collection iteration
+    /// form (`.chars()` char iteration, `.lines()` streaming reads) resolved at
+    /// lowering off the same `emit_for_in` branch; `None` is the plain `.iter()`
+    /// form (incl. a non-special method-call collection like `.split(…)`, which the
+    /// AST routes to the `.iter().cloned()` default). When `method_kind` is set the
+    /// `collection_str` holds the *receiver* string (not the whole method call), and
+    /// `var2` is always `None` (a method-call collection is single-binding only).
     ForIn {
         label: Option<String>,
         var: String,
         var2: Option<String>,
         collection_str: String,
+        method_kind: Option<TForInMethod>,
         body: Vec<TStmt>,
     },
     /// c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picked the
@@ -1753,18 +1797,24 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                 body_locals.insert(var.clone());
                 body.iter().all(|s| stmt_in_subset(s, cx, &mut body_locals))
             }
-            // c109 Phase 5: `loop x in coll` / `loop k, v in map` (ForKind::In). The
-            // collection must be in-subset AND NOT a method-call receiver — a
-            // `.chars()`/`.lines()` collection takes a different `emit_for_in`
-            // branch (char iteration, streaming line reads) the subset does not
-            // reproduce. The single-binding non-method form and the two-binding map
-            // form are the only two shapes covered. The loop var(s) bind in the body
-            // scope with an *unresolved* type (matching the AST slot's `jet_ty: None`).
+            // c109 Phase 5/22: `loop x in coll` / `loop k, v in map` (ForKind::In).
+            // A method-call collection (`.chars()`/`.lines()`/`.split(…)`) takes a
+            // distinct `emit_for_in` branch; Phase 22 reproduces each (`forin_method_
+            // collection_in_subset`). A non-method-call collection is the plain
+            // `.iter()` form (single- or two-binding map). The loop var(s) bind in the
+            // body scope with an *unresolved* type (matching the AST slot's `jet_ty:
+            // None`, so they never enable the overflow trap).
             ForKind::In { collection } => {
-                if matches!(collection, Expr::MethodCall { .. }) {
-                    return false;
-                }
-                if !expr_in_subset(collection, cx, locals) {
+                if let Expr::MethodCall { .. } = collection {
+                    // A method-call collection: the two-binding map form is impossible
+                    // here (a method call is single-binding only), so `var2` must be
+                    // None, and the form must be one `emit_for_in` reproduces.
+                    if var2.is_some()
+                        || !forin_method_collection_in_subset(collection, cx, locals)
+                    {
+                        return false;
+                    }
+                } else if !expr_in_subset(collection, cx, locals) {
                     return false;
                 }
                 let mut body_locals = locals.clone();
@@ -1834,13 +1884,87 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
     }
 }
 
-fn if_in_subset(ifs: &IfStmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
-    if !expr_in_subset(&ifs.cond, cx, locals) {
+/// c109 Phase 22: is a method-call collection iteration (`loop x in <coll>` where
+/// `<coll>` is an `Expr::MethodCall`) in-subset? Mirrors `emit_for_in`'s
+/// `Expr::MethodCall` branches (Source/Codegen/Statement.rs):
+///  - `.chars()` — char iteration; only the *receiver* (a string) is emitted, so it
+///    must be in-subset.
+///  - `.lines()` — streaming `BufRead::lines`; the receiver is a `FileReader`/
+///    `StdinHandle` (or inline `io.stdin()`), again emitted on its own, so it must be
+///    in-subset. (Both lines shapes route here; the FileReader-vs-stdin split is
+///    resolved at lowering off `tir_recv_jet_ty`/the inline-`stdin` shape.)
+///  - any other method — the `.iter().cloned()` default, which emits the WHOLE method
+///    call as the collection value, so the whole call must be in-subset (e.g. a
+///    Phase-9 `.split(…)` builtin returns a `[String]` value).
+fn forin_method_collection_in_subset(
+    collection: &Expr,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    let Expr::MethodCall {
+        receiver, method, ..
+    } = collection
+    else {
         return false;
+    };
+    match method.as_str() {
+        "chars" | "lines" => expr_in_subset(receiver, cx, locals),
+        _ => expr_in_subset(collection, cx, locals),
     }
+}
+
+/// c109 Phase 22: classify an `if` condition. Returns `None` if the condition is not
+/// in-subset; otherwise returns the binding name(s) the condition introduces into the
+/// then-branch scope (empty for a plain/`is_none` condition). Mirrors `emit_if`'s three
+/// condition shapes via `if_pattern_test` (Source/Codegen/Statement.rs):
+///  - a plain boolean expr → in-subset iff `expr_in_subset`, no bindings;
+///  - an `x == null` test (`Pattern::Absent`) → `is_none`, subject in-subset, no bindings;
+///  - an optional-binding test (`value(b)`/`ok(b)`/`err(b)`) → if-let, subject in-subset,
+///    the binding `b` in scope. Variant/Or/Range patterns in an `if` condition stay on
+///    the AST path (conservative — not covered here).
+fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) -> Option<Vec<String>> {
+    // The `x == null` (`Pattern::Absent`) form: `if {subj}.is_none()`.
+    if let Expr::PatternTest {
+        subject,
+        pattern: Pattern::Absent(_),
+        ..
+    } = cond
+    {
+        return expr_in_subset(subject, cx, locals).then(Vec::new);
+    }
+    // The optional-binding (if-let) form — only a DIRECT `PatternTest` (not the
+    // `Binary(And, …)` shape `if_pattern_test` also admits, which we leave on the AST
+    // path). Covered patterns: `value(b)`/`ok(b)`/`err(b)` (single binding). Variant/
+    // Or/Range patterns are excluded (conservative).
+    if let Expr::PatternTest {
+        subject, pattern, ..
+    } = cond
+    {
+        if !expr_in_subset(subject, cx, locals) {
+            return None;
+        }
+        return match pattern {
+            Pattern::Present { binding, .. }
+            | Pattern::Ok { binding, .. }
+            | Pattern::Err { binding, .. } => Some(vec![binding.clone()]),
+            _ => None,
+        };
+    }
+    // A plain boolean condition.
+    expr_in_subset(cond, cx, locals).then(Vec::new)
+}
+
+fn if_in_subset(ifs: &IfStmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
+    let Some(cond_bindings) = if_cond_in_subset(&ifs.cond, cx, locals) else {
+        return false;
+    };
     // Each branch scopes its own bindings; check on a clone so a `let` in the
-    // `then` arm doesn't leak into the `else` arm's classification.
+    // `then` arm doesn't leak into the `else` arm's classification. An optional-binding
+    // condition introduces its binding(s) into the then-branch scope.
     let mut then_locals = locals.clone();
+    for b in &cond_bindings {
+        then_locals.insert(b.clone());
+    }
     if !ifs.then_body.iter().all(|s| stmt_in_subset(s, cx, &mut then_locals)) {
         return false;
     }
@@ -3899,7 +4023,11 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // scope with an *unresolved* type (`None`) — matching the AST slot's
             // `jet_ty: None`, so they never enable the overflow trap (parity).
             ForKind::In { collection } => {
-                let collection_str = emit_tir_expr(&lower_expr(collection, cx, env), cx);
+                // c109 Phase 22: classify a method-call collection into the matching
+                // `emit_for_in` branch (`chars`/`lines`/the `.iter().cloned()` default),
+                // resolving the receiver/collection string off the SAME node shape the
+                // AST path reads. `method_kind == None` is the plain `.iter()` form.
+                let (collection_str, method_kind) = lower_forin_collection(collection, cx, env);
                 let mut branch = clone_env(env);
                 branch
                     .locals
@@ -3914,6 +4042,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     var: var.clone(),
                     var2: var2.as_ref().map(|(n, _)| n.clone()),
                     collection_str,
+                    method_kind,
                     body: lower_stmts(body, cx, &mut branch),
                 }
             }
@@ -3989,12 +4118,153 @@ fn label_name(label: &Option<(String, Span)>) -> Option<String> {
     label.as_ref().map(|(n, _)| n.clone())
 }
 
+/// c109 Phase 22: resolve a `loop x in <coll>` collection into its emitted Rust
+/// string + (for a method-call collection) the iteration form, reproducing
+/// `emit_for_in`'s branch selection (Source/Codegen/Statement.rs) byte-for-byte.
+/// For `chars`/`lines` the returned string is the *receiver* (the form emits
+/// `({recv}).chars()` / `BufRead::lines(&mut ({recv}).inner)`); for the plain form
+/// (incl. a non-special method call routed to `.iter().cloned()`) it is the whole
+/// collection. The FileReader-vs-stdin `lines` split mirrors the AST's
+/// `expr_jet_ty(receiver)` / inline-`io.stdin()` test exactly.
+fn lower_forin_collection(
+    collection: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> (String, Option<TForInMethod>) {
+    if let Expr::MethodCall {
+        receiver, method, ..
+    } = collection
+    {
+        match method.as_str() {
+            "chars" => {
+                let recv = emit_tir_expr(&lower_expr(receiver, cx, env), cx);
+                return (recv, Some(TForInMethod::Chars));
+            }
+            "lines" => {
+                // FileReader streaming vs stdin streaming — the AST tests
+                // `expr_jet_ty(receiver)` (reproduced by `tir_recv_jet_ty`) for the
+                // FileReader case, then a `StdinHandle` type OR an inline `io.stdin()`
+                // receiver for the stdin case. Checked in the SAME order as
+                // `emit_for_in` (FileReader first).
+                let recv = emit_tir_expr(&lower_expr(receiver, cx, env), cx);
+                if matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n)) if n == "FileReader")
+                {
+                    return (recv, Some(TForInMethod::LinesFile));
+                }
+                // stdin: a `StdinHandle`-typed receiver OR an inline `io.stdin()` call.
+                let is_stdin = matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n)) if n == "StdinHandle")
+                    || matches!(receiver.as_ref(), Expr::MethodCall { method: m, .. } if m == "stdin");
+                if is_stdin {
+                    return (recv, Some(TForInMethod::LinesStdin));
+                }
+                // A `.lines()` on neither (unreachable in valid Jet — sema E2502
+                // restricts `.lines()` to a FileReader/StdinHandle loop position) would
+                // fall to the AST `else` default; reproduce that for totality.
+                let coll = emit_tir_expr(&lower_expr(collection, cx, env), cx);
+                (coll, None)
+            }
+            _ => {
+                // The `.iter().cloned()` default: emit the WHOLE method call as the
+                // collection value (e.g. a `.split(…)` builtin returning a `[String]`).
+                let coll = emit_tir_expr(&lower_expr(collection, cx, env), cx);
+                (coll, None)
+            }
+        }
+    } else {
+        let coll = emit_tir_expr(&lower_expr(collection, cx, env), cx);
+        (coll, None)
+    }
+}
+
+/// c109 Phase 22: lower an `if` condition into a `TIfCond`, plus the optional
+/// then-branch binding the condition introduces (name, rust place, resolved type).
+/// Reproduces `emit_if`'s condition handling (Source/Codegen/Statement.rs):
+///  - `x == null` (`Pattern::Absent`) → `IsNone` (no binding);
+///  - `value(b)`/`ok(b)`/`err(b)` → `IfLet` with the Rust pattern from
+///    `emit_if_let_pattern`, the binding's type resolved off the subject's lowered
+///    `Option`/`Result` (mirroring `add_pattern_bindings`);
+///  - anything else → `Plain`.
+fn lower_if_cond(
+    cond: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> (TIfCond, Option<(String, String, Option<Type>)>) {
+    if let Expr::PatternTest {
+        subject,
+        pattern: Pattern::Absent(_),
+        ..
+    } = cond
+    {
+        let subj = lower_expr(subject, cx, env);
+        return (TIfCond::IsNone { subj }, None);
+    }
+    if let Expr::PatternTest {
+        subject, pattern, ..
+    } = cond
+    {
+        if matches!(
+            pattern,
+            Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
+        ) {
+            let subj = lower_expr(subject, cx, env);
+            let pat_str = emit_if_let_pattern(cx, pattern);
+            // The bound name + its inner type, off the subject's resolved Option/Result
+            // (totality — never re-inferred). Mirrors `add_pattern_bindings`.
+            let binding = match pattern {
+                Pattern::Present { binding, .. } => {
+                    let ty = match &subj.ty {
+                        Type::Option(inner) => Some((**inner).clone()),
+                        _ => None,
+                    };
+                    (binding.clone(), ty)
+                }
+                Pattern::Ok { binding, .. } => {
+                    let ty = match &subj.ty {
+                        Type::Result { ok, .. } => Some((**ok).clone()),
+                        _ => None,
+                    };
+                    (binding.clone(), ty)
+                }
+                Pattern::Err { binding, .. } => {
+                    let ty = match &subj.ty {
+                        Type::Result { err, .. } => Some((**err).clone()),
+                        _ => None,
+                    };
+                    (binding.clone(), ty)
+                }
+                _ => unreachable!("checked above"),
+            };
+            let (name, ty) = binding;
+            let place = mangle(&name);
+            return (
+                TIfCond::IfLet { pat_str, subj },
+                Some((name, place, ty)),
+            );
+        }
+    }
+    (TIfCond::Plain(lower_expr(cond, cx, env)), None)
+}
+
 fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
-    let cond = lower_expr(&ifs.cond, cx, env);
-    // Each branch gets its own scope; bindings inside must not leak. Clone the
-    // env so a `let` in the `then` arm is not visible after the `if`.
+    // c109 Phase 22: classify the condition (plain / if-let / is_none), reproducing
+    // `emit_if`'s three head shapes. The if-let form binds its name into the
+    // then-branch scope (mirroring `add_pattern_bindings`).
+    let (cond, then_binding) = lower_if_cond(&ifs.cond, cx, env);
+    // Each branch gets its own `locals` scope (deep-cloned, so a `let` is not visible
+    // after the `if`). The panic-dump replica leaks for a plain/`is_none` `if` (the AST
+    // `emit_if` passes the SHARED `&mut env` to `emit_stmts` → `clone_env`), but does
+    // NOT leak for an if-let condition (the AST clones the env into a fresh `body_env`
+    // before `add_pattern_bindings` → `fork_panic`, a deep-copied replica), so a `let`
+    // inside an if-let then-body is scoped exactly as the AST's `body_env`.
     let then_body = {
-        let mut branch = clone_env(env);
+        let mut branch = if then_binding.is_some() {
+            fork_panic(env)
+        } else {
+            clone_env(env)
+        };
+        if let Some((name, place, ty)) = then_binding {
+            branch.bind(&name, place, ty);
+        }
         lower_stmts(&ifs.then_body, cx, &mut branch)
     };
     let (else_body, else_is_elseif) = match &ifs.else_branch {
@@ -6588,7 +6858,28 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             else_body,
             else_is_elseif,
         } => {
-            out.push_str(&format!("{}if {} {{\n", pad, emit_tir_expr(cond, cx)));
+            // c109 Phase 22: render the head per the condition form, byte-for-byte
+            // `emit_if` (Source/Codegen/Statement.rs).
+            match cond {
+                TIfCond::Plain(c) => {
+                    out.push_str(&format!("{}if {} {{\n", pad, emit_tir_expr(c, cx)));
+                }
+                TIfCond::IfLet { pat_str, subj } => {
+                    out.push_str(&format!(
+                        "{}if let {} = {} {{\n",
+                        pad,
+                        pat_str,
+                        emit_tir_expr(subj, cx)
+                    ));
+                }
+                TIfCond::IsNone { subj } => {
+                    out.push_str(&format!(
+                        "{}if {}.is_none() {{\n",
+                        pad,
+                        emit_tir_expr(subj, cx)
+                    ));
+                }
+            }
             emit_tir_stmts(then_body, cx, out, indent + 1);
             match else_body {
                 None => out.push_str(&format!("{}}}\n", pad)),
@@ -6771,39 +7062,90 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             var,
             var2,
             collection_str,
+            method_kind,
             body,
         } => {
             let lbl = tir_label_prefix(label);
-            match var2 {
-                Some(v2) => {
+            // c109 Phase 22: a method-call collection takes a distinct `emit_for_in`
+            // branch (`collection_str` holds the RECEIVER for chars/lines). Only the
+            // stdin form opens an extra block that needs an extra closing brace.
+            let mut needs_extra_close = false;
+            match method_kind {
+                Some(TForInMethod::Chars) => {
                     out.push_str(&format!(
-                        "{}{}for (_jet_k, _jet_v) in ({}).iter() {{\n",
+                        "{}{}for _jet_c in ({recv}).chars() {{\n    {}let {} = _jet_c;\n",
+                        pad,
+                        lbl,
+                        pad,
+                        mangle(var),
+                        recv = collection_str
+                    ));
+                }
+                Some(TForInMethod::LinesFile) => {
+                    out.push_str(&format!(
+                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut ({}).inner) {{\n",
                         pad, lbl, collection_str
                     ));
                     out.push_str(&format!(
-                        "{}    let {} = _jet_k.clone();\n",
+                        "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
                         pad,
-                        mangle(var)
-                    ));
-                    out.push_str(&format!(
-                        "{}    let {} = _jet_v.clone();\n",
-                        pad,
-                        mangle(v2)
+                        mangle(var),
+                        cx.root_prefix,
+                        cx.file,
+                        0
                     ));
                 }
-                None => {
+                Some(TForInMethod::LinesStdin) => {
+                    out.push_str(&format!("{}{{ let mut _jet_stdin_h = {};\n", pad, collection_str));
+                    needs_extra_close = true;
                     out.push_str(&format!(
-                        "{}{}for _jet_item in ({}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+                        "{}{}for _jet_raw_line in std::io::BufRead::lines(&mut _jet_stdin_h.inner) {{\n",
+                        pad, lbl
+                    ));
+                    out.push_str(&format!(
+                        "{}    let {} = _jet_raw_line.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &_e.to_string()));\n",
                         pad,
-                        lbl,
-                        collection_str,
-                        pad,
-                        mangle(var)
+                        mangle(var),
+                        cx.root_prefix,
+                        cx.file,
+                        0
                     ));
                 }
+                None => match var2 {
+                    Some(v2) => {
+                        out.push_str(&format!(
+                            "{}{}for (_jet_k, _jet_v) in ({}).iter() {{\n",
+                            pad, lbl, collection_str
+                        ));
+                        out.push_str(&format!(
+                            "{}    let {} = _jet_k.clone();\n",
+                            pad,
+                            mangle(var)
+                        ));
+                        out.push_str(&format!(
+                            "{}    let {} = _jet_v.clone();\n",
+                            pad,
+                            mangle(v2)
+                        ));
+                    }
+                    None => {
+                        out.push_str(&format!(
+                            "{}{}for _jet_item in ({}).iter().cloned() {{\n    {}let {} = _jet_item;\n",
+                            pad,
+                            lbl,
+                            collection_str,
+                            pad,
+                            mangle(var)
+                        ));
+                    }
+                },
             }
             emit_tir_stmts(body, cx, out, indent + 1);
             out.push_str(&format!("{}}}\n", pad));
+            // D-STDIN1=A: close the outer block holding the JetStdinReader local.
+            if needs_extra_close {
+                out.push_str(&format!("{}}}\n", pad));
+            }
         }
         // c109 Phase 15: a resolved comptime-if — emit ONLY the selected branch's
         // statements INLINE at the SAME indent, with no wrapper (no `if`, no block),
@@ -8087,11 +8429,24 @@ mod tests {
     }
 
     #[test]
-    fn rejects_method_call_collection_iteration() {
-        // `loop c in s.chars()` iterates a method-call collection — a different
-        // `emit_for_in` branch (char iteration) the subset does not reproduce.
-        let src = "fn f(s: String) {\n loop c in s.chars() {\n print(c)\n }\n}\n";
-        assert!(!covers(src, "f"));
+    fn covers_method_call_collection_iteration() {
+        // c109 Phase 22: `loop c in s.chars()` (char iteration) and `loop x in
+        // s.split(…)` (the `.iter().cloned()` default) are now reproduced from
+        // `emit_for_in`'s method-call branches.
+        let chars = "fn f(s: String) {\n loop c in s.chars() {\n print(c)\n }\n}\n";
+        assert!(covers(chars, "f"));
+        let split = "fn f(s: String) {\n loop w in s.split(\",\") {\n print(w)\n }\n}\n";
+        assert!(covers(split, "f"));
+    }
+
+    #[test]
+    fn covers_optional_binding_if_condition() {
+        // c109 Phase 22: `if x == value(b) { … b … }` lowers to `if let Some(b) = …`.
+        let src = "fn f(x: Int?) {\n if x == value(n) {\n print(\"{n}\")\n }\n}\n";
+        assert!(covers(src, "f"));
+        // `x == null` lowers to `.is_none()`.
+        let isnone = "fn f(x: Int?) {\n if x == null {\n print(\"none\")\n }\n}\n";
+        assert!(covers(isnone, "f"));
     }
 
     #[test]

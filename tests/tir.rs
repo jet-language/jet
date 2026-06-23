@@ -2744,3 +2744,77 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "12\n30\n");
 }
+
+/// c109 Phase 22: method-call-collection iteration — `loop c in s.chars()` (char
+/// iteration) and `loop w in s.split(sep)` (the `.iter().cloned()` default), both
+/// reproduced from `emit_for_in`'s `Expr::MethodCall` branches.
+#[test]
+fn method_call_collection_iteration() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn count_chars(s: String) -> Int {
+    n := 0
+    loop c in s.chars() {
+        n+= 1
+    }
+    return n
+}
+fn join_words(s: String) -> String {
+    out := \"\"
+    loop w in s.split(\",\") {
+        out = \"{out}[{w}]\"
+    }
+    return out
+}
+fn main() {
+    print(count_chars(\"hello\"))
+    print(join_words(\"a,b,c\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_method_iter", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "5\n[a][b][c]\n");
+}
+
+/// c109 Phase 22: the optional-binding `if` condition — `if x == value(b) { … b … }`
+/// lowers to `if let Some(b) = x`, and `x == null` lowers to `.is_none()`. Reproduces
+/// `emit_if`'s if-let / is_none condition shapes byte-for-byte.
+#[test]
+fn optional_binding_if_condition() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn describe(x: Int?) -> String {
+    if x == value(n) {
+        return \"got {n}\"
+    }
+    if x == null {
+        return \"nothing\"
+    }
+    return \"?\"
+}
+fn first_even(xs: [Int]) -> Int {
+    out: [Int] := []
+    i := 0
+    loop i < xs.len() {
+        if xs.get(i) == value(v) {
+            out.push(v)
+        }
+        i+= 1
+    }
+    return out.len()
+}
+fn main() {
+    nothing: Int? := null
+    print(describe(value(7)))
+    print(describe(nothing))
+    print(first_even([1, 2, 3]))
+}
+";
+    let (code, stdout) = build_and_run("tir_opt_if", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "got 7\nnothing\n3\n");
+}

@@ -1465,49 +1465,129 @@ everything, the AST codegen path is deleted (final phase).
   deleting the AST path is the latent-bug FIXES (separate cards) + these last
   parity-safe construct forms, NOT a new type/method surface.
 
+## Refinements learned in Phase 22 (method-call iteration + optional-binding conditions)
+
+- **`emit_for_in` has FOUR branches keyed on the collection's `Expr::MethodCall` shape;
+  the method-call form is carried as a total `ForIn.method_kind`, the receiver/collection
+  string resolved at lowering.** `loop x in <coll>`: a `chars()` collection emits
+  `for _jet_c in ({recv}).chars()` (binding `_jet_c`); a `lines()` collection on a
+  `FileReader` emits the streaming `for _jet_raw_line in std::io::BufRead::lines(&mut
+  ({recv}).inner)` with a mid-stream-error panic; a `lines()` on a `StdinHandle`/inline
+  `io.stdin()` adds an extra `{ let mut _jet_stdin_h = …; }` block (the temporary must
+  outlive the loop body) + a matching extra closing brace; ANY OTHER method falls to the
+  `.iter().cloned()` default (`.split(…)` returns a `[String]` value, emitted whole). The
+  load-bearing distinction: for `chars`/`lines` the emit reads the **receiver** (`recv`),
+  for the default it reads the **whole collection** — so `ForIn.method_kind == None` holds
+  the whole-call string and `Some(Chars|LinesFile|LinesStdin)` holds the receiver string.
+  The FileReader-vs-stdin split mirrors the AST's `expr_jet_ty(receiver)` (reproduced by
+  `tir_recv_jet_ty`, byte-identical) AND the inline-`io.stdin()` MethodCall-shape test,
+  checked in the SAME order `emit_for_in` does (FileReader first). The panic line is the
+  literal `0` the AST embeds (no inference).
+- **The iteration var stays type-`None` in the method-call branch too** (the recurring
+  Phase-5 partiality lesson): `_jet_c`/the line var bind with `jet_ty: None`, so they never
+  enable the overflow trap and never enter the `??` panic dump (`safe_locals_expr` filters
+  to scalar Int/Float/Bool). The two-binding map form is impossible for a method-call
+  collection (single-binding only), so the gate excludes `var2.is_some()` there.
+- **The optional-binding `if` condition is a NEW `TStmt::If.cond` enum (`TIfCond`), not a
+  plain `TExpr` — `emit_if` has THREE condition heads.** Before Phase 22 `TStmt::If`
+  carried `cond: TExpr` (always `if {expr} {`). `emit_if` actually forks on the condition
+  shape (`if_pattern_test`): an `x == value(b)`/`ok(b)`/`err(b)` `Expr::PatternTest`
+  → `if let {pat} = {subj} {` (the Rust pattern from `emit_if_let_pattern`, now
+  `pub(crate)` and reused for byte-parity); an `x == null` (`Pattern::Absent`) →
+  `if {subj}.is_none() {`; anything else → plain. So `cond` became `TIfCond::{Plain,IfLet,
+  IsNone}` resolved at lowering. Only the DIRECT `PatternTest` forms are covered (the
+  `Binary(And, …)` shape `if_pattern_test` also admits — which DROPS the `&&` rhs, a
+  latent AST quirk — stays on the AST path, conservative); Variant/Or/Range `if`-condition
+  patterns (only the prelude `JSON` enum uses them in the live suite — out of subset
+  anyway) are excluded.
+- **The if-let binding's scope is the SUBTLE parity point: the AST clones the env into a
+  fresh `body_env` (deep copy) before `add_pattern_bindings`, so it is NON-leaky.** A plain
+  / `is_none` `if` then-body is emitted on the SHARED `&mut env` (leaks into the `??` panic
+  dump → `clone_env`, Rc-shared `panic_locals`), but the if-let then-body uses
+  `env.clone()` (a deep copy → `fork_panic`, deep-copied `panic_locals`). So a `let` inside
+  an if-let then-body does NOT leak into the enclosing fn's panic dump, exactly matching the
+  AST's `body_env`. The bound name binds with its inner type read off the lowered subject's
+  total `Option`/`Result` `.ty` (mirroring `add_pattern_bindings` — never re-inferred, I3).
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass on
+  `emit_func`/`emit_method`/`emit_trait_method` + the delegation hook) across the **entire
+  example suite** — 118 emittable, 0 differ — exercising every form: char iteration
+  (`17_strings`), `.split(…)` iteration (`16_wordcount`/`35_zerocopy`/`34_parallel_scan`
+  `count_lines`), streaming stdin `.lines()` (`78_stdin_filter`), and the optional-binding
+  condition (`34_parallel_scan` `paths_from_args`/`scan_parallel` — now routing fully). A
+  routing sentinel confirmed the target fns take the TIR path (`scan_parallel`/
+  `paths_from_args`/`count_lines`/`main` in 34; `78_stdin_filter` `main`); all run
+  end-to-end. tests/tir.rs adds `method_call_collection_iteration` + `optional_binding_if_
+  condition` (build+run); the TIR unit tests flip `rejects_method_call_collection_iteration`
+  → `covers_method_call_collection_iteration` (chars + split) and add
+  `covers_optional_binding_if_condition` (value-binding + `is_none`).
+- **FileReader `.lines()` is reproduced but UNREACHABLE in the live suite** — the only
+  FileReader-lines example (`49_stream` `count_lines`/`copy_upper`) is held back by a bare
+  `?` on a core fallible (`files.open(src)?` with a `… ? IOError` return — excluded since
+  Phase 10), so it never reaches the loop. The branch is covered for totality + tested via a
+  crafted probe; it routes the moment a non-`?`-blocked FileReader-lines fn appears.
+- **The "parity-safe coverable construct form" residue is now EMPTY.** What remains on the
+  AST path is latent-bug-gated, unreachable/dead, OR an uncovered FEATURE surface (tuples,
+  default params, distinct types, `#Pure`, `#Todo`, JSON/core-enum matching) — NOT a flagged
+  construct form. See the corrected inventory below.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 21 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are reached
-ONLY for constructs that MISCOMPILE on both paths today (latent codegen/sema bugs the
-TIR must not *claim*), are genuinely UNREACHABLE in any valid Jet program, or are an
-as-yet-uncovered but parity-safe construct *form* (no new type/method surface). The
-Task/Channel/Sender concurrency surface — the last *coverable type/method surface* — is
-now COVERED (Phase 21). **Precisely, the residue is: the latent-bug-gated constructs
-(`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs,
-view-returning TRAIT methods); generic-type METHODS (unreachable — a sema binding gap);
-the bare `?? return` (dead — a sema/codegen mismatch); and the parity-safe uncovered
-construct forms (`if x == value(binding)` optional-binding conditions; the
-method-call-collection iteration `loop x in s.split(…)`/`.chars()`/`.lines()`).** Each:
+After Phase 22 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are reached
+for three disjoint classes of construct: (1) constructs that MISCOMPILE on both paths
+today (latent codegen/sema bugs the TIR must not *claim*); (2) constructs genuinely
+UNREACHABLE / dead in any valid Jet program; and (3) **as-yet-uncovered FEATURE
+surfaces** that are not yet a TIR coverage phase. Phase 22 covered the last two
+parity-safe construct *forms* the inventory had explicitly flagged — the
+**method-call-collection iteration** (`.chars()`/`.lines()`/`.split(…)`) and the
+**optional-binding `if` condition** (`if x == value(b)` / `x == null`) — so
+`scan_parallel`/`paths_from_args` (34_parallel_scan) and `78_stdin_filter` `main` now
+route, and there is no longer any flagged "coverable construct form" residue.
 
-- **Generic-type METHODS** — UNREACHABLE, not a TIR gap. A method on a generic struct
-  doesn't type-check in current Jet (E0311 at the call site; E0119 if the body uses `T`).
-  See the latent-bug list. The `struct_is_generic` exclusion stays; the fix is in sema's
-  method registration/scope, independent of c109. (`view`-returning **trait** methods are
-  also excluded, for a different reason — they MISCOMPILE on both paths: `emit_trait_def`
-  drops `is_view_return` from the declared return → rustc E0053; latent-bug list.)
-- **Task/Channel/Sender `recv_type == None` methods are COVERED (Phase 21).** `Task.join/
-  detach`, `Channel.receive/sender`, `Sender.send` — the coupled slice (the `Type::Apply`
-  value types + the `Closed` err type + the `tasks.channel` producer + the gate shape d3,
-  name+arity-keyed) landed whole, byte-identical across all four concurrency examples. The
-  one residue here is the UNRELATED `if x == value(binding)` optional-binding condition (a
-  parity-safe uncovered construct form, not a concurrency gap — see Phase 21 refinements)
-  that keeps `scan_parallel`/`paths_from_args` in `34_parallel_scan` on the AST path.
-  **`Stopwatch.elapsed_millis` is COVERED (Phase 19).**
-- **Recursive (boxed) STRUCTS** — the struct gate (`struct_is_covered`) still excludes
-  recursive structs (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)`
-  field wrap → rustc E0308; see the latent-bug list; the TIR must not claim a miscompiling
-  fn). **FOREIGN (imported user) STRUCTS are now COVERED (Phase 19)** — a `cx.foreign_types`
-  struct is a covered value type and `alias.Note { … }` construction reproduces
-  `emit_struct_lit`'s `import_ns` head at lowering. Foreign ENUMS are covered as value types,
-  but foreign-enum CONSTRUCTION has no reachable cross-module literal syntax (`note.Color.Red`
-  is E0107 — there's nothing to lower). Missing for the recursive-struct residue: the
-  `Box::new(…)` struct-lit-field wrap (an AST-path bug to fix first).
-  (NB: the `?? panic(…)` form IS covered — Phase 15; a bare `?? return` (no value) ALREADY
-  routes but is unusable for a sema/codegen reason — see the latent-bug list.)
-- **Latent-bug-gated constructs** (`is_empty`, no-arg `join()`, `mut self`/`view self`
-  reassignment) — excluded because they MISCOMPILE on both paths today (see the
-  latent-bug list); the TIR must not *claim* a function that miscompiles. These unblock
-  only once the underlying codegen bug is fixed.
+**Correction to the post-Phase-21 claim:** the live example suite is NOT yet at zero
+AST-path routing. Beyond the latent-bug-gated + unreachable constructs, a non-trivial
+set of functions still routes via the AST path because they use **feature surfaces no
+TIR phase has covered yet** (these were never a "type/method surface" — the narrower
+thing Phase 21 claimed exhausted — so they were silently outside that claim). The
+**precise** residue after Phase 22, by class:
+
+**(1) Latent-bug-gated (MISCOMPILE on both paths — the TIR must not claim them):**
+- `is_empty` (typed `Int` not `Bool` → E0308), no-arg `join()` (dead — sema requires a
+  separator), `mut self`/`view self` **reassignment** (`self = …` → E0308), **recursive
+  (boxed) STRUCTS** (`emit_struct_lit` omits the `Box::new(…)` field wrap → E0308),
+  **view-returning TRAIT methods** (`emit_trait_def` drops `is_view_return` → E0053).
+  All on the latent-bug list; unblock only when the underlying codegen/sema bug is fixed.
+
+**(2) UNREACHABLE / dead (no valid Jet program exercises them):**
+- **generic-type METHODS** (a method on a generic struct doesn't type-check — E0311 at
+  the call site, E0119 on a `T`-referencing body; a sema binding gap, `struct_is_generic`
+  exclusion stays); the **bare `?? return`** (ALREADY routes, but is unusable — E0405
+  demands a return type, then rustc E0069 rejects `return;`). Foreign-ENUM *construction*
+  has no reachable cross-module literal syntax (`note.Color.Red` is E0107).
+
+**(3) Uncovered FEATURE surfaces (parity-safe; a future coverage phase, NOT a latent
+bug, NOT unreachable):** these keep real example functions on the AST path:
+- **`#Pure fn`** (no TIR representation) — `62_pure` `double`/`greeting`, `effects.jet`
+  `square`, `effect_higher_order` `inc`.
+- **default parameter values** (`p.default.is_some()` excluded by the param gate) —
+  `66_default_refs` `box_dims`/`Rect::square`, `showcase/library` + `47_library` +
+  `65_io_prelude` `greet`, `63_named_args` `Rect::scale`.
+- **distinct types** (`Type::Named` resolving to a `distinct` def — not a covered value
+  type) — `69_distinct_types` `greet`/`main`.
+- **tuple types** (`Type::Tuple` params/returns/literals — `_ => false` in
+  `expr_in_subset`/`is_subset_param_ty`) — `40_tuples` `bounds`/`main`, and any `main`
+  that constructs/destructures a tuple.
+- **`#Todo` holes** (`Expr::Todo`) — `58_todo_hole` `not_yet`.
+- plus the **JSON / core-enum** surface (`when`/`if` over the prelude `JSON` enum,
+  `Object`/`Number`/`Text`/`Boolean` patterns), **comptime-evaluated tables**, and the
+  capstone's cross-module foreign-type-heavy functions — each blocked by an as-yet-
+  uncovered node its body reaches (the logbook capstone `parse`/`build`/`note_*`/`rank`
+  family, `30_json`/`73_json_coerce`/`74_regex`/`76_http_routes` `main`, etc.).
+
+The remaining work toward deleting the AST path is therefore: the latent-bug FIXES
+(separate cards), plus NEW coverage phases for the class-(3) feature surfaces (tuples,
+default params, distinct types, `#Pure`, `#Todo`, JSON/core-enum matching). None of
+these is a "parity-safe construct form already flagged as coverable" — that category is
+now EMPTY (Phase 22 cleared it).
 
 ## Phases
 
@@ -1536,7 +1616,8 @@ method-call-collection iteration `loop x in s.split(…)`/`.chars()`/`.lines()`)
 | 19 | Generic structs, foreign types, arena/region, Stopwatch | ✅ done (c109 Phase 19) — covers the UNBLOCKED inventory residue. **Generic STRUCTS** (free functions): a type-var struct field admitted by `field_ty_covered`; a `Type::Apply` (`Pair<T>`/`Stack<Int>`) param/return/local admitted by `is_covered_generic_struct_ty`; the turbofish StructLit (`user_Pair::<T> { … }`) + foreign `import_ns` head resolved at lowering into the total `StructLit.rust_type`; the `[T]`-field builtin routes via the Phase-9 shape unchanged. `26_generic_types` `make_pair`/`empty_stack`/`push` route. **FOREIGN (imported user) structs** as covered value types (`cx.foreign_types` → `{root}{mod}::user_<Name>` via `cx.rust_type`) + `alias.Note { … }` construction (`emit_struct_lit`'s `import_ns` branch reproduced); foreign enums covered as value types (construction has no reachable literal syntax). **`Stopwatch.elapsed_millis()`** — a `recv_type == None` builtin gap (gate shape d2 → `THandleOp::StopwatchElapsedMillis`). **Arena/region/context**: the `mem.<Alloc>.new()` producer (`TExprKind::AllocNew`, ctor tail rendered at lowering, claimed FIRST mirroring `emit_method_call`); `alloc`/`reset`/`free` handle methods (`THandleOp::{AllocAlloc,AllocReset,AllocFree}`); the `arena_view` binding (`let <x> = …;` no-type/no-mut + deref'd slot); `region r { … }` (`TStmt::Region`, leaky block); `#Context(allocator:) { … }` (`TStmt::ContextBlock`, RAII guard + leaky body). `70_arena`/`75_arena_regions`/`77_smart_context` route. **I1 holds:** the arena `unsafe` lives entirely in the vetted `jet_mem` prelude — the TIR-path `main`s emit ZERO `unsafe`. Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (2-file foreign module, Stopwatch, generic-struct method that emits byte-identically but stays excluded). ~240 fn-routes (was ~218). tests/tir.rs adds `generic_struct_fns`/`foreign_struct_construction`/`stopwatch_elapsed_millis`/`arena_alloc_reset_free`/`arena_region_block`/`smart_context_block`; unit tests flip `rejects_generic_struct_fn`/`rejects_generic_struct_literal` → `covers_*`, update `rejects_generic_method` (now via `struct_is_generic`) + `handle_method_op_table`. Excludes (stay on AST path, with reason): **generic-type METHODS** (`impl<T> user_<T>` — `struct_is_generic` excludes; conservative until validated end-to-end); **`view`-returning trait methods** (MISCOMPILE on both paths — `emit_trait_def` drops `is_view_return` → rustc E0053, a NEW latent bug); polymorphic core specials; Task/Channel/Sender `recv_type == None` methods (producers not covered); HttpRequest/HttpResponse accessors; recursive STRUCTS; latent-bug-gated constructs. |
 | 20 | Polymorphic core specials, http accessors, generic methods (assessed) | ✅ done (c109 Phase 20) — covers the two remaining COVERABLE residue surfaces. **Polymorphic core specials** (`math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint`): their arg-type-dependent return type is now a TOTAL fact — a new `Expr::MethodCall.resolved_ret: Option<Type>` field, written by sema (`infer_method_call` after `infer_core_call`, gated on the new `is_polymorphic_core_special`), read at lowering into the node's `ty`. The specials join `core_call_covered` + the Phase-10 `CoreCall` shape; the fixed emit strings (`(x).abs()`, `(a).min(b)`, `jet_std_random_pick(&(xs))`, `eprintln!`) are added to `emit_tir_core_call` byte-for-byte (`random.pick` → `Int?` proves the writeback). Adding the field touched 5 construct sites (rest `..`); no existing emit/diagnostic reads it, so behavior is unchanged. **HttpRequest/HttpResponse accessors** (`method`/`path`/`body`/`header`/`param`/`status`): the Phase-13 "serve-lambda-param unresolved" exclusion was a RED HERRING — `http.serve` REQUIRES an annotated handler param (an unannotated `(req) =>` is E0801, a sema gap, logged), so the accessors reach codegen only on a TYPED param where `recv_type == Some` AND the slot type is already total. Covered purely by adding the eight ops to `handle_method_op` + the `THandleOp::Http{Req,Resp}{Field,Header,Param}` emit arms (byte-for-byte `emit_builtin_method`); the handle-shape gate widened for free. `57_http_server` `handle` routes byte-identically. A speculative lambda-param-type writeback was tried + REVERTED (it changes emit for `[Shape]`-list `.each((s)=>…)` trait-object closures → rustc E0631, caught by `trait_impl_method_bodies`; the http coverage doesn't need it). Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes. tests/tir.rs adds `polymorphic_core_specials` + `http_request_response_accessors`; unit tests add `polymorphic_core_specials_covered` + flip `handle_method_op_table`. **Assessed + DEFERRED (with reason):** **generic-type METHODS** are UNREACHABLE — a method on a generic struct doesn't type-check in current Jet (E0311 at the call site; E0119 if the body uses `T`); Phase 19's "byte-identical probe" was a `build_cx`-only AST bypassing sema's method binding. The `struct_is_generic` exclusion stays; the fix is in sema (logged in the latent-bug list). **Task/Channel/Sender `recv_type == None` methods** need a coupled slice (cover `Channel<T>`/`Task<T>`/`Sender<T>` `Type::Apply` value types + the `Closed` err type + the `tasks.channel` producer return-type writeback together) — covering the producer alone leaves the methods unreachable; DEFERRED. After Phase 20 the AST-path residue is ONLY the latent-bug-gated constructs (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning TRAIT methods), the unreachable generic-type methods, the deferred Task/Channel/Sender slice, and the dead bare `?? return`. |
 | 21 | Task/Channel/Sender concurrency | ✅ done (c109 Phase 21) — the coupled concurrency slice Phase 20 deferred, landed WHOLE and byte-identical. **Value types**: `Task<T>`/`Channel<T>`/`Sender<T>` (`Type::Apply`) as covered param/local/return value types (`is_covered_concurrency_ty` — renders via `cx.rust_type` to `{root}jet_std::Jet{Task,Channel,Sender}<…>`); `[Task<Unit>]` worker lists (`concurrency_elem_covered` admits `Unit` → `()` as a concurrency element only); the `Closed` err type as a covered fallible payload (`receive`'s `Result<T, Closed>`). **Producer**: `tasks.channel()` (added to `core_call_covered` — a fixed-string `JetChannel::new()` `CoreCall`, NOT in `core_fixed_sig`; its `Channel<T>` return type rides on the binding annotation); `tasks.spawn`'s `Task<T>` result was already total (Phase-13 `CoreClosureCall`). **Methods** (the `recv_type == None` builtin gap, gate shape d3 keyed on name+arity, disjoint from every other shape): `Task.join`(0)/`Task.detach`(0), `Channel.receive`(0)/`Channel.sender`(0), `Sender.send`(1) → new `THandleOp::{TaskJoin,TaskDetach,ChannelReceive,ChannelSender,SenderSend}`, byte-for-byte `emit_builtin_method`'s `Type::Apply`-receiver arms. The result type reads `T` off the LOWERED receiver's `.ty` (totality, I3): `join` → `T`, `detach`/`send` → Unit, `receive` → `Result<T, Closed>` (composes with Phase-8 `?? panic`), `sender` → `Sender<T>`. The channel/sender/task value's prelude methods take `&self`, so a `val`-bound handle stays a plain `let` (`Type::Apply` never matches `emit_let`'s `Type::Named`-keyed `is_file_handle`) — byte-identical. All four concurrency examples route (`32_tasks` spawn/join, `80_detached_task` detach, `33_pipeline` channel send/receive, `34_parallel_scan` parallel scan) and run end-to-end; byte-identical across the whole example suite (118 emittable, 0 differ). 235 top-level fns route. **Surfaced an UNRELATED parity-safe uncovered construct** (`if x == value(binding)` optional-binding condition — keeps `scan_parallel`/`paths_from_args` on the AST path; byte-identical, no miscompile; removing it lets `scan_parallel` route fully). tests/tir.rs adds `task_spawn_join`/`task_detach`/`channel_send_receive`; unit tests add `concurrency_method_names`/`concurrency_value_types_covered`/`covers_concurrency_methods` and flip `core_call_covered("core.tasks","channel")`. **After Phase 21 the AST-path inventory is ONLY latent-bug-gated + sema-unreachable + parity-safe uncovered construct forms — NO coverable type/method surface remains.** |
-| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the remaining residue is latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods — separate cards) + the parity-safe uncovered construct forms (`if x == value(binding)`, method-call-collection iteration `loop x in s.split(…)`), NOT a new type/method surface |
+| 22 | Method-call iteration + optional-binding conditions | ✅ done (c109 Phase 22) — the two parity-safe construct forms the inventory had flagged. **Method-call-collection iteration** (`loop x in <coll>.method(…)`): `emit_for_in`'s four `Expr::MethodCall` branches reproduced via a total `ForIn.method_kind: Option<TForInMethod>` — `chars()` (char iteration, receiver string), `lines()` on `FileReader` (streaming `BufRead::lines(&mut (recv).inner)`), `lines()` on `StdinHandle`/inline `io.stdin()` (streaming + the extra `{ let mut _jet_stdin_h = …; }` block + extra close), and the `.iter().cloned()` default for any other method (`.split(…)`, the whole call as the collection value). The FileReader-vs-stdin split mirrors `expr_jet_ty(receiver)` (via `tir_recv_jet_ty`) + the inline-`stdin` shape, in `emit_for_in`'s order; the iteration var stays `jet_ty: None` (Phase-5 partiality). **Optional-binding `if` condition**: `TStmt::If.cond` became a `TIfCond::{Plain,IfLet,IsNone}` — `x == value(b)`/`ok(b)`/`err(b)` → `if let {pat} = {subj}` (`emit_if_let_pattern`, now `pub(crate)`); `x == null` (`Pattern::Absent`) → `if {subj}.is_none()` — reproducing `emit_if`'s three heads. The if-let then-body uses `fork_panic` (deep-copied panic replica, NON-leaky — the AST clones into a fresh `body_env`); the bound name's inner type comes off the subject's lowered `Option`/`Result` `.ty` (I3). Only the DIRECT `PatternTest` forms (not the `Binary(And,…)` quirk, not Variant/Or/Range) are covered (conservative). `34_parallel_scan` `scan_parallel`/`paths_from_args` + `78_stdin_filter` `main` now route. Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes; all run end-to-end. tests/tir.rs adds `method_call_collection_iteration` + `optional_binding_if_condition`; unit tests flip `rejects_method_call_collection_iteration` → `covers_*` (chars + split) and add `covers_optional_binding_if_condition`. **After Phase 22 the "parity-safe coverable construct form" residue is EMPTY** — the AST-path residue is latent-bug-gated + unreachable/dead + uncovered FEATURE surfaces (tuples, default params, distinct types, `#Pure`, `#Todo`, JSON/core-enum matching — each a NEW coverage phase, NOT a flagged form). FileReader `.lines()` is covered+tested but unreachable in the live suite (`49_stream` is `?`-blocked since Phase 10). |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods — separate cards), (2) unreachable/dead constructs (generic-type methods, bare `?? return`), and (3) NEW coverage phases for the uncovered FEATURE surfaces (tuples, default parameter values, distinct types, `#Pure fn`, `#Todo` holes, JSON/core-enum `when`/`if` matching). The "parity-safe construct form already flagged as coverable" category is EMPTY after Phase 22. |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
 regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep
