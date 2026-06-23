@@ -5,12 +5,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use crate::AST::{BinOp, BindPattern, EnumLitArg, Expr, Func, Stmt, StrPart, Type, UnOp};
+use crate::AST::{BinOp, BindPattern, EnumLitArg, Expr, Func, OrFallback as FallbackKind, Stmt, StrPart, Type, UnOp};
 use crate::Diagnostics::{Diagnostic, Span};
 
-use super::Builtins::{as_bool, as_int, eval_binop};
+use super::Builtins::{apply_static_type_method, as_bool, as_int, eval_binop};
 use super::Diagnostics::{
-    comptime_panic, index_oob, map_missing, overflow, slice_oob, unsupported, unsupported_expr,
+    comptime_panic, early_return_sentinel, err_propagate_sentinel, index_oob, map_missing,
+    overflow, slice_oob, unsupported, unsupported_expr, ERR_PROPAGATE_CODE,
 };
 use super::Value::{CtKey, CtValue};
 
@@ -702,6 +703,76 @@ impl<'a> Interp<'a> {
                 }
             }
             Expr::FanOut { callee, items, span } => self.eval_fan_out(callee, items, *span, scope),
+            // c97/D-STRPARSE1: `ok(expr)` — wraps a value in the success arm.
+            Expr::Ok(inner, _) => {
+                let v = self.eval(inner, scope)?;
+                Ok(CtValue::Ok(Box::new(v)))
+            }
+            // c97/D-STRPARSE1: `err(expr)` — wraps a value in the failure arm.
+            Expr::Err(inner, _) => {
+                let v = self.eval(inner, scope)?;
+                Ok(CtValue::Err(Box::new(v)))
+            }
+            // c97/D-STRPARSE1: `expr?` — unwrap `ok(v)` to `v`, propagate `err(e)`.
+            // For `T?` (Option): unwrap `Some(v)` to `v`, propagate `None` as an
+            // empty-error sentinel.
+            Expr::Try(inner, span, _convert) => {
+                let v = self.eval(inner, scope)?;
+                match v {
+                    CtValue::Ok(inner) => Ok(*inner),
+                    CtValue::Err(e) => {
+                        // Propagate the error through the call stack via sentinel.
+                        Err(err_propagate_sentinel(&e.jet_show(), *span))
+                    }
+                    CtValue::Some(inner) => Ok(*inner),
+                    CtValue::None(_) => {
+                        Err(err_propagate_sentinel("null propagated via ?", *span))
+                    }
+                    other => Err(unsupported(
+                        &format!("using `?` on a value that isn't a result or option (got {})", other.jet_show()),
+                        *span,
+                    )),
+                }
+            }
+            // c97/D-STRPARSE1: `value ?? fallback` — use fallback on failure/absence.
+            Expr::OrFallback { value, fallback, is_option, span } => {
+                let v = self.eval(value, scope)?;
+                // Determine if the value is "absent" (needs fallback).
+                let is_absent = if *is_option {
+                    matches!(v, CtValue::None(_))
+                } else {
+                    matches!(v, CtValue::Err(_))
+                };
+                if is_absent {
+                    // Evaluate the fallback.
+                    match fallback {
+                        FallbackKind::Value(fb) => self.eval(fb, scope),
+                        FallbackKind::Return(ret_expr, ret_span) => {
+                            let rv = match ret_expr {
+                                Some(e) => self.eval(e, scope)?,
+                                None => CtValue::Unit,
+                            };
+                            // Signal an early return via the sentinel — eval_call
+                            // intercepts EARLY_RETURN_CODE and converts it to a
+                            // `CtValue::Unit` / value return from the callee.
+                            Err(early_return_sentinel(&rv.jet_show(), *ret_span))
+                        }
+                        FallbackKind::Panic { name_span, args } => {
+                            let msg = match args.first() {
+                                Some(a) => self.eval(&a.expr, scope)?.jet_show(),
+                                None => "?? fallback panic".to_string(),
+                            };
+                            Err(comptime_panic(&msg, *name_span))
+                        }
+                    }
+                } else {
+                    // Value is present/ok — unwrap it.
+                    match v {
+                        CtValue::Some(inner) | CtValue::Ok(inner) => Ok(*inner),
+                        other => Ok(other),
+                    }
+                }
+            }
             other => Err(unsupported_expr(other)),
         }
     }

@@ -80,6 +80,44 @@ fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnos
     }
 }
 
+/// c97/D-STRPARSE1: static method dispatch for built-in types (`Int.parse`,
+/// `Float.parse`). Returns `None` when the receiver is not a recognised
+/// built-in type name; the caller falls through to user-defined methods.
+pub(super) fn apply_static_type_method(
+    type_name: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    match (type_name, method) {
+        ("Int", "parse") => {
+            let s = match args.into_iter().next() {
+                Some(CtValue::Str(s)) => s,
+                _ => return Some(Err(unsupported("Int.parse with a non-text argument", span))),
+            };
+            Some(Ok(match s.trim().parse::<i64>() {
+                Ok(n) => CtValue::Ok(Box::new(CtValue::Int(n))),
+                Err(_) => CtValue::Err(Box::new(CtValue::Str(
+                    format!("cannot parse `{}` as an integer", s),
+                ))),
+            }))
+        }
+        ("Float", "parse") => {
+            let s = match args.into_iter().next() {
+                Some(CtValue::Str(s)) => s,
+                _ => return Some(Err(unsupported("Float.parse with a non-text argument", span))),
+            };
+            Some(Ok(match s.trim().parse::<f64>() {
+                Ok(f) => CtValue::Ok(Box::new(CtValue::Float(f))),
+                Err(_) => CtValue::Err(Box::new(CtValue::Str(
+                    format!("cannot parse `{}` as a float", s),
+                ))),
+            }))
+        }
+        _ => None,
+    }
+}
+
 /// Mutating list/map methods (`push`, `pop`, …). Returns the method's value.
 pub(super) fn apply_mutating(
     recv: &mut CtValue,
@@ -247,6 +285,17 @@ pub(super) fn apply_method(
             ))
         }
         (CtValue::Str(s), "chars") => Ok(CtValue::List(s.chars().map(CtValue::Char).collect())),
+        // c97/D-STRPARSE1: `.lines()` — split on `\n`, stripping `\r\n` too (mirrors runtime).
+        (CtValue::Str(s), "lines") => Ok(CtValue::List(
+            s.lines().map(|l| CtValue::Str(l.to_string())).collect(),
+        )),
+        // c97/D-STRPARSE1: `.to_int()` — fallible integer parse, returns `Int ? ParseError`.
+        (CtValue::Str(s), "to_int") => Ok(match s.trim().parse::<i64>() {
+            Ok(n) => CtValue::Ok(Box::new(CtValue::Int(n))),
+            Err(_) => CtValue::Err(Box::new(CtValue::Str(
+                format!("cannot parse `{}` as an integer", s),
+            ))),
+        }),
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),
             span,

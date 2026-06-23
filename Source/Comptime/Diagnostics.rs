@@ -54,6 +54,38 @@ pub(super) fn map_missing(span: Span) -> Diagnostic {
     comptime_panic("the map has no entry for this key", span)
 }
 
+/// c97/D-STRPARSE1: internal sentinel used by `Expr::Try` to propagate an
+/// error value through the interpreter call stack. The error value is encoded
+/// in `what`; `eval_call` intercepts this code and converts it to a
+/// `CtValue::Err(...)` return instead of surfacing it as a user diagnostic.
+pub(super) const ERR_PROPAGATE_CODE: &str = "__CT_ERR_PROPAGATE__";
+
+/// c97/D-STRPARSE1: internal sentinel for `?? return expr` — signals an early
+/// return (not an error) from the current comptime function. The stringified
+/// return value is in `what`. `eval_call` intercepts this and returns the
+/// value wrapped in a `Flow::Return`-equivalent `CtValue`.
+pub(super) const EARLY_RETURN_CODE: &str = "__CT_EARLY_RETURN__";
+
+pub(super) fn err_propagate_sentinel(encoded_err: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        ERR_PROPAGATE_CODE,
+        encoded_err.to_string(),
+        String::new(),
+        String::new(),
+        Some(span),
+    )
+}
+
+pub(super) fn early_return_sentinel(encoded_val: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        EARLY_RETURN_CODE,
+        encoded_val.to_string(),
+        String::new(),
+        String::new(),
+        Some(span),
+    )
+}
+
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0956",
