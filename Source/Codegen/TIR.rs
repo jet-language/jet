@@ -578,6 +578,16 @@ pub(crate) enum TExprKind {
         method_rust: String,
         args: Vec<TCallArg>,
     },
+    /// c109 Phase 27: a CALL THROUGH a fn-typed struct field — `w.step(4)` where `step`
+    /// is a `fn(...)` FIELD (not a user method). Emits `(({recv}).{field_rust})({args})`,
+    /// byte-for-byte the AST `emit_method_call` fn-field branch (Expression.rs ~L1573).
+    /// `field_rust` is the mangled `user_<field>`; args emit PLAINLY (the AST passes
+    /// `None` to `emit_call_args` — no param convention, only each arg's own clone flags).
+    FnFieldCall {
+        recv: Box<TExpr>,
+        field_rust: String,
+        args: Vec<TCallArg>,
+    },
     /// c109 Phase 7: a STATIC (associated) method call `Type.make(args)`. Resolved
     /// at lowering to `user_<Type>::user_<method>(args)` — `type_prefix` is the
     /// already-resolved Rust type head (`user_<Type>`), `method_rust` the mangled
@@ -1931,6 +1941,17 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     if is_covered_fallible_ty(ty, cx) {
         return true;
     }
+    // c109 Phase 27: a FUNCTION-typed field (`step: fn(Int) -> Int` on a `Worker`
+    // struct). It renders via `cx.rust_type` to `Box<dyn Fn(...) -> ...>` exactly as
+    // the AST `struct_field_rust` does; a struct-lit field value (a lambda / a bare
+    // fn-name) lowers in-subset and is emitted as-is (NO ` as <fn-type>` coercion at
+    // the literal site — the AST `emit_struct_lit` field value is a plain `emit_expr`),
+    // and a fn-field READ / CALL routes through the Phase-27 `FnFieldCall` shape. The
+    // param/ret types are only RENDERED (never inspected for a decision), so any Fn
+    // signature is admissible.
+    if matches!(ty, Type::Fn { .. }) {
+        return true;
+    }
     match ty {
         Type::Named(n) => struct_is_covered(n, cx, seen),
         // c109 Phase 16: a collection field (`[E]` / `[K, V]`) whose element/key/value
@@ -3073,6 +3094,18 @@ fn method_call_in_subset(
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
+    // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
+    // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
+    // node through `infer_call_value`, but registers NO `method_sigs` entry (it is a field,
+    // not a method). The AST `emit_method_call` (Expression.rs ~L1573) detects this case
+    // FIRST — a `struct_fields` entry whose type is `Type::Fn` — and emits
+    // `(({recv}).{user_<field>})({args})` with PLAIN args (`emit_call_args(.., None, ..)`).
+    // We mirror that order: tried before the user-method/static shapes so a fn-field whose
+    // name happens to match a method name resolves to the field, exactly as the AST path.
+    if fn_field_call_in_subset(receiver, method, args, recv_type, cx, locals) {
+        return true;
+    }
     // Shape (l) [c109 Phase 24]: a JSON construction `JSON.Boolean(b)` / `JSON.Number(n)`
     // / `JSON.Text(s)` / `JSON.Array(xs)` / `JSON.Object(map)`. The receiver is the
     // bare `Ident("JSON")` (a type name, NOT a local), and `method` is a JSON variant.
@@ -3366,6 +3399,48 @@ fn method_call_in_subset(
     args.iter().zip(sig.iter()).all(|(a, (_, _pty))| {
         expr_in_subset(&a.expr, cx, locals)
     })
+}
+
+/// c109 Phase 27: is `recv.method(args)` a call THROUGH a fn-typed struct FIELD (not a
+/// user method)? Returns the field's `Type::Fn` when so. `recv_type` is the total sema
+/// fact (`Some(<StructType>)`, set by CheckerInfer's fn-field arm); the field must exist
+/// on a COVERED struct with a `Type::Fn` type and the same name as `method`. Mirrors the
+/// AST `emit_method_call` fn-field branch's guard (`struct_fields` lookup + `Type::Fn`).
+fn fn_field_call_ty<'a>(
+    method: &str,
+    recv_type: &Option<String>,
+    cx: &'a Cx,
+) -> Option<&'a Type> {
+    let ty_name = recv_type.as_ref()?;
+    if !is_covered_struct_ty(&Type::Named(ty_name.clone()), cx) {
+        return None;
+    }
+    let fields = cx.struct_fields.get(ty_name)?;
+    let (_, fty) = fields.iter().find(|(n, _)| n == method)?;
+    matches!(fty, Type::Fn { .. }).then_some(fty)
+}
+
+/// c109 Phase 27: is `w.step(4)` (a call through a fn-typed struct field) in-subset? The
+/// receiver and every arg must be in-subset; args are emitted PLAINLY by the AST path
+/// (`emit_call_args(.., None, ..)`), so no convention/Arc-clone fact applies — exclude any
+/// labeled / Arc-clone arg defensively (sema never produces them here, but stay strict).
+fn fn_field_call_in_subset(
+    receiver: &Expr,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    recv_type: &Option<String>,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    if fn_field_call_ty(method, recv_type, cx).is_none() {
+        return false;
+    }
+    expr_in_subset(receiver, cx, locals)
+        && args.iter().all(|a| {
+            a.label.is_none()
+                && !a.flags.shared_auto_clone
+                && expr_in_subset(&a.expr, cx, locals)
+        })
 }
 
 /// c109 Phase 7: is a STATIC method call `Type.make(args)` inside the subset? The
@@ -6556,6 +6631,29 @@ fn lower_method_call(
             kind: TExprKind::DistinctRaw(Box::new(recv)),
         };
     }
+    // c109 Phase 27: a CALL THROUGH a fn-typed struct field — `w.step(4)`. The gate
+    // proved `recv_type == Some(<CoveredStruct>)` and the named field is `Type::Fn`. The
+    // AST `emit_method_call` (Expression.rs ~L1573) emits `(({recv}).{user_<field>})({args})`
+    // with PLAIN args. Resolve the field's Rust name + the call's result type (the Fn's
+    // return) here; emit just splices. (Tried before the JSON/core/user shapes, mirroring
+    // the AST dispatch order — a fn-field check fires before user-method dispatch.)
+    if let Some(Type::Fn { ret, .. }) = fn_field_call_ty(method, recv_type, cx) {
+        let ret_ty = ret.as_deref().cloned().unwrap_or_else(unit_type);
+        let recv = lower_expr(receiver, cx, env);
+        // Args emit PLAINLY (AST `emit_call_args(.., None, ..)` — no convention), but the
+        // arg's own `implicit_clone`/`shared_auto_clone` flags still apply: pass `conv:
+        // None` to `lower_one_call_arg`, the single `emit_call_args` reproduction.
+        let targs: Vec<TCallArg> =
+            args.iter().map(|a| lower_one_call_arg(a, None, env, cx)).collect();
+        return TExpr {
+            ty: ret_ty,
+            kind: TExprKind::FnFieldCall {
+                recv: Box::new(recv),
+                field_rust: mangle(method),
+                args: targs,
+            },
+        };
+    }
     // c109 Phase 24: a JSON construction `JSON.<Variant>(arg)` (the gate proved the
     // receiver is the `Ident("JSON")` type name and `method` is a JSON variant). Lower
     // to `TExprKind::JsonLit`, carrying the payload's `implicit_clone` flag as a total
@@ -8255,6 +8353,16 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let arg_str = emit_tir_call_args(args, cx);
             format!("({}).{}({})", emit_tir_expr(recv, cx), method_rust, arg_str)
         }
+        // c109 Phase 27: a call through a fn-typed struct field. Mirrors the AST
+        // `emit_method_call` fn-field branch: `(({recv}).{field})({args})`.
+        TExprKind::FnFieldCall {
+            recv,
+            field_rust,
+            args,
+        } => {
+            let arg_str = emit_tir_call_args(args, cx);
+            format!("(({}).{})({})", emit_tir_expr(recv, cx), field_rust, arg_str)
+        }
         // c109 Phase 7: a static method call. Mirrors the AST type-name dispatch:
         // `user_<Type>::user_<method>(args)`. All facts resolved at lowering.
         TExprKind::StaticCall {
@@ -9871,6 +9979,52 @@ fn greet() -> String { return input() }
             "fn f() { xs @= [1, 2, 3]\n[a, b, c] @= xs\nprint(a) }",
             "f"
         ));
+    }
+
+    #[test]
+    fn covers_named_fn_value_binding() {
+        // c109 Phase 27: a bare top-level fn name bound to a local as a VALUE
+        // (`double_fn @= double`). The init `Ident("double")` resolves to a `Type::Fn`
+        // value (`emit_named_fn_value`), in-subset via `ident_is_named_fn_value`. (This
+        // binding-site coercion was already wired in lowering; the live-suite `24_callbacks`
+        // never routed only because the struct fn-field / fn-field-call were uncovered.)
+        assert!(covers(
+            "fn dbl(x: Int) -> Int { return (x * 2) }\nfn f() { g @= dbl\nprint(g(3)) }",
+            "f"
+        ));
+    }
+
+    #[test]
+    fn covers_fn_field_struct_value_type() {
+        // c109 Phase 27: a struct with a FUNCTION-typed field is a covered VALUE type — the
+        // fn-typed field renders to `Box<dyn Fn(...)>` and needs no clone/deref decision at
+        // the field site (sema-independent — `build_cx` populates `struct_fields`). (The
+        // full construction + `w.step(4)` fn-field CALL is sema-dependent — `recv_type ==
+        // Some("Worker")` is a sema fact — so it is proven by tests/tir.rs + byte-parity.)
+        let src = "struct Worker { step: fn(Int) -> Int }\nfn f() {}";
+        let (toks, _) = crate::Lexer::lex(src);
+        let prog = crate::Parser::parse(&toks).expect("parse");
+        let cx = build_cx(&prog, src, "test.jet");
+        assert!(is_covered_struct_ty(&Type::Named("Worker".to_string()), &cx));
+        // The fn-field-call shape resolves the field's Fn type from a covered struct's
+        // `struct_fields` (the `recv_type` half is the sema fact tests/tir.rs supplies).
+        assert!(fn_field_call_ty("step", &Some("Worker".to_string()), &cx).is_some());
+        // A non-existent / non-Fn field is not a fn-field call.
+        assert!(fn_field_call_ty("missing", &Some("Worker".to_string()), &cx).is_none());
+    }
+
+    #[test]
+    fn covers_fn_field_type_covered() {
+        // c109 Phase 27: `field_ty_covered` admits a `Type::Fn` field directly.
+        let src = "fn f() {}";
+        let (toks, _) = crate::Lexer::lex(src);
+        let prog = crate::Parser::parse(&toks).expect("parse");
+        let cx = build_cx(&prog, src, "test.jet");
+        let fn_ty = Type::Fn {
+            params: vec![Type::Int],
+            ret: Some(Box::new(Type::Int)),
+        };
+        assert!(field_ty_covered(&fn_ty, &cx, &mut HashSet::new()));
     }
 
     #[test]

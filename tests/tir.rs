@@ -3357,3 +3357,36 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "2\n4\n6\n");
 }
+
+/// c109 Phase 27: a fn-typed VALUE stored in a local + a struct fn-FIELD method
+/// (24_callbacks). `double_fn @= double` binds a bare fn-name as a value; `apply_twice`
+/// takes it (and a lambda) as a Fn arg; `Worker { step: … }` constructs a struct with a
+/// fn-typed field; `w.step(4)` calls THROUGH that field. All route through the TIR.
+#[test]
+fn fn_value_and_struct_fn_field() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+    return f(f(x))
+}
+fn double(x: Int) -> Int {
+    return (x * 2)
+}
+struct Worker {
+    step: fn(Int) -> Int
+}
+fn main() {
+    double_fn @= double
+    print(apply_twice(double_fn, 3))
+    print(apply_twice((x: Int) => (x + 1), 5))
+    w @= Worker {step: (n: Int) => (n * n)}
+    print(w.step(4))
+}
+";
+    let (code, stdout) = build_and_run("tir_fn_value_struct_field", src);
+    assert_eq!(code, 0);
+    // double(double(3)) = 12; apply_twice(x+1, 5) = ((5+1)+1) = 7; w.step(4) = 4*4 = 16.
+    assert_eq!(stdout, "12\n7\n16\n");
+}
