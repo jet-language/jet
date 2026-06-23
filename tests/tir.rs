@@ -3760,3 +3760,35 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "3\n");
 }
+
+/// c109 (foreign struct literal): an UNqualified cross-module foreign struct literal
+/// (`Note { text: "hi" }` written in an importing module, no `note.` namespace) must
+/// prefix the foreign module (`user_notes::user_Note`) or rustc can't find the type
+/// (E0422). The AST `emit_struct_lit` plain branch only prefixed via `user_type_apply_rust`
+/// once `cx.foreign_types` is consulted (the fix); the TIR reproduces the prefixed head.
+/// `main` constructs + reads the foreign struct and routes through the TIR.
+#[test]
+fn unqualified_foreign_struct_literal() {
+    if !have_rustc() {
+        return;
+    }
+    let main_src = "\
+use \"notes\"
+fn main() {
+    n @= Note { text: \"hi\" }
+    print(n.text)
+}
+";
+    let notes_src = "\
+pub struct Note {
+    pub text: String
+}
+";
+    let (code, stdout) = build_and_run_multi(
+        "tir_foreign_struct_lit",
+        "main.jet",
+        &[("main.jet", main_src), ("notes.jet", notes_src)],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "hi\n");
+}

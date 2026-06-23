@@ -12,11 +12,21 @@ pub(crate) fn emit_expr_stmt(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> 
 }
 
 fn user_type_apply_rust(cx: &Cx, name: &str, type_args: &[Type]) -> String {
-    if type_args.is_empty() {
+    // A cross-module imported (foreign) struct lives in `mod user_<module>`; an
+    // UNqualified literal (`Note { … }`, no `import_ns`) must still prefix that module
+    // (`{root}user_notes::user_Note`) or rustc can't find the type (E0422). The
+    // qualified `note.Note { … }` form goes through `emit_struct_lit`'s `import_ns`
+    // branch and never reaches here. Mirrors `emit_enum_lit`'s foreign-type prefix.
+    let head = if let Some(rust_mod) = cx.foreign_types.get(name) {
+        format!("{}{}::user_{name}", cx.root_prefix, rust_mod)
+    } else {
         format!("user_{name}")
+    };
+    if type_args.is_empty() {
+        head
     } else {
         format!(
-            "user_{name}::<{}>",
+            "{head}::<{}>",
             type_args
                 .iter()
                 .map(|a| cx.rust_type(a))

@@ -142,17 +142,22 @@ them so they don't regress, but they should be fixed independently of c109):
   was stale. The construct is just dead. Fix: make sema admit a bare `?? return` only in a
   unit-returning fn (then rustc accepts `return;`), OR make codegen emit `return ()` /
   diverge appropriately. (Surfaced in Phase 19.)
-- **An UNQUALIFIED cross-module foreign struct literal miscompiles (I2 hole, both paths).**
-  `Note { … }` written unqualified in an importing module (no `import_ns`) emits
+- **An UNQUALIFIED cross-module foreign struct literal miscompiles (I2 hole, both paths). FIXED.**
+  Was: `Note { … }` written unqualified in an importing module (no `import_ns`) emitted
   `user_Note { … }` via `user_type_apply_rust` (Expression.rs) with NO foreign-module prefix
   → rustc E0422 ("cannot find struct `user_Note`"). Only the `import_ns` branch of
-  `emit_struct_lit` (the `note.Note { … }` QUALIFIED form) consults `cx.foreign_types`; the
-  unqualified `Named(type_name)` fallthrough does not. Both paths emit identical (broken) Rust
-  (parity holds); the TIR gate already EXCLUDES it (`is_covered_struct_ty` is false for a
-  foreign struct → the `import_ns.is_none()` StructLit branch rejects the fn), so the TIR never
-  claims a miscompiling fn. The live logbook never hits this (foreign structs are constructed in
-  their OWN module). Fix: prefix `cx.foreign_types` in the unqualified struct-lit head
-  (`user_type_apply_rust` / the `import_ns.is_none()` branch). (Surfaced in Phase 24.)
+  `emit_struct_lit` (the `note.Note { … }` QUALIFIED form) consulted `cx.foreign_types`; the
+  unqualified `Named(type_name)` fallthrough did not. **Fix:** `user_type_apply_rust` now
+  prefixes the foreign module head (`{root}user_<mod>::user_<Note>`) when `name ∈
+  cx.foreign_types` (mirroring `emit_enum_lit`'s foreign prefix), so the unqualified struct-lit
+  head resolves. With the head fixed, the unqualified foreign struct literal now routes through
+  the TIR: the StructLit gate arm admits a `cx.foreign_types` type (its own admission — a
+  foreign struct is not an `is_covered_struct_ty`), and the plain-struct lowering reproduces the
+  prefixed head from `cx.foreign_types`. Covered by tests/tir.rs `unqualified_foreign_struct_literal`
+  (build+run, two-file module) and the `covers_unqualified_foreign_struct_literal` unit test
+  (via a new `covers_with_foreign` helper that injects the foreign-types table, mirroring
+  `covers_with_mem`); byte-parity holds across the example suite (no example constructs a
+  foreign struct unqualified). (Surfaced in Phase 24; fixed in the c109 fix-first effort.)
 
 ## Invariants this must preserve
 

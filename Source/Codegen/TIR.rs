@@ -2928,6 +2928,17 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 }
                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
+            // c109: an UNqualified cross-module FOREIGN struct literal (`Note { … }` with
+            // no `import_ns` — sema resolves the bare imported type, no `use` of the type
+            // needed). The AST `emit_struct_lit` plain branch now prefixes the foreign
+            // module (`{root}user_<mod>::user_<Note>`) via `user_type_apply_rust`,
+            // reproduced at lowering. Cover it when the type is a registered foreign type
+            // (`cx.foreign_types`); the field VALUES are checked in-subset below. (A
+            // foreign type is NOT a `is_covered_struct_ty` — its fields live in another
+            // module — so this needs its own admission.)
+            if cx.foreign_types.contains_key(type_name) {
+                return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+            }
             // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) — the
             // `is_prelude_struct` branch of `emit_struct_lit` (a `<root>Jet…` head, PLAIN
             // field names, and an auto `params: BTreeMap::new()` for HttpRequest).
@@ -6302,12 +6313,19 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
             // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
             // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.
+            // c109: an UNqualified FOREIGN struct (`Note { … }`, no `import_ns`) prefixes its
+            // module head (`{root}user_<mod>::user_<Note>`), exactly as `user_type_apply_rust`
+            // — or rustc can't find the type (E0422). A local struct keeps the plain head.
+            let head = match cx.foreign_types.get(type_name) {
+                Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
+                None => format!("user_{}", type_name),
+            };
             let rust_type = if type_args.is_empty() {
-                format!("user_{}", type_name)
+                head
             } else {
                 format!(
-                    "user_{}::<{}>",
-                    type_name,
+                    "{}::<{}>",
+                    head,
                     type_args
                         .iter()
                         .map(|a| cx.rust_type(a))
@@ -9704,6 +9722,45 @@ mod tests {
             })
             .unwrap_or_else(|| panic!("no fn {fn_name}"));
         tir_covers(f, &cx)
+    }
+
+    /// Like `covers`, but injects a foreign type → module mapping (`cx.foreign_types`)
+    /// — the `build_cx`-only path leaves it empty (it's populated from the bundle at real
+    /// codegen). Mirrors `covers_with_mem`. The end-to-end build+run + the full-suite
+    /// byte-parity diff are the authoritative proof (tests/tir.rs); this exercises the gate.
+    fn covers_with_foreign(src: &str, fn_name: &str, foreign: &[(&str, &str)]) -> bool {
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        let mut cx = build_cx(&prog, src, "test.jet");
+        for (ty, module) in foreign {
+            cx.foreign_types.insert(ty.to_string(), module.to_string());
+        }
+        let f = prog
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Func(f) if f.name == fn_name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        tir_covers(f, &cx)
+    }
+
+    #[test]
+    fn covers_unqualified_foreign_struct_literal() {
+        // c109 (foreign struct literal): an UNqualified cross-module foreign struct literal
+        // (`Note { … }`, no `import_ns`) is now covered — the StructLit gate admits a
+        // `cx.foreign_types` type and lowering prefixes the module head
+        // (`user_notes::user_Note`). The construct miscompiled to a bare `user_Note { … }`
+        // (E0422) before; the fix prefixes the foreign module.
+        let src = "\
+fn mk() {
+    n @= Note { text: \"hi\" }
+    print(n.text)
+}
+";
+        assert!(covers_with_foreign(src, "mk", &[("Note", "user_notes")]));
     }
 
     #[test]
