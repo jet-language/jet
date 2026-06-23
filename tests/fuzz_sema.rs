@@ -144,6 +144,14 @@ fn fuzz_sema_rustc_agreement() {
                         "I1 violated in fuzz variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                     );
                 }
+                // FFI ring crates (jet.regex etc.) emit `extern crate jet_ffi_…`,
+                // which a bare `rustc` invocation can't resolve — the FFI crate is
+                // built and linked only by the full pipeline (I6 bootstrap), not by
+                // this standalone check. Sema-acceptance is still exercised above;
+                // skip just the rustc link-check for these variants.
+                if out.rust.contains("extern crate jet_ffi_") {
+                    continue;
+                }
                 if let Err(rustc_err) = rustc_accepts(&format!("v{i}"), &out.rust) {
                     panic!(
                         "I2 violated: sema accepted variant {i} from {shown} but rustc rejected:\n{rustc_err}\n--- generated ---\n{}",

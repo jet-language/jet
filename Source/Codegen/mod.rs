@@ -117,38 +117,38 @@ fn strip_unused_mem_prelude(out: String) -> String {
 /// the `JetKey` type) when no `live { … }` block or `core.term` call is present
 /// in the generated user code — i.e., when `jet_term_enter` is never called.
 fn strip_unused_term_prelude(out: String) -> String {
-    // Fast path: if jet_term_enter is called in the user code (after the prelude),
-    // keep the full term section.
+    // Fast path: if the term dispatchers are referenced in user code (after the
+    // prelude), keep the whole term section.
     let prelude_end = out.find("fn main()").unwrap_or(out.len());
     let user_code = &out[prelude_end..];
     if user_code.contains("jet_term_enter") || user_code.contains("jet_term_read_key") {
         return out;
     }
-    // Strip each of the two cfg-gated platform modules by brace-matching.
-    fn strip_mod(src: String, marker: &str) -> String {
-        let Some(start) = src.find(marker) else { return src; };
-        // Back up to the `#[cfg(...)]` line before `mod`.
-        let cfg_start = src[..start].rfind('\n').map(|n| n + 1).unwrap_or(start);
-        let bytes = src.as_bytes();
-        let (mut depth, mut seen, mut i) = (0usize, false, start);
-        let mut end = src.len();
-        while i < bytes.len() {
-            match bytes[i] {
-                b'{' => { depth += 1; seen = true; }
-                b'}' => {
-                    depth -= 1;
-                    if seen && depth == 0 { end = i + 1; break; }
-                }
-                _ => {}
+    // The term prelude is one contiguous block: the `#[cfg(unix)]` line above
+    // `mod jet_term_unix` through the end of `fn jet_term_read_key` (the two
+    // platform modules plus the enter/leave/read_key dispatchers that call into
+    // them). Excise it as a single span — stripping only the `mod` blocks would
+    // leave the dispatchers referencing now-missing modules (I2: E0433).
+    let Some(unix_mod) = out.find("mod jet_term_unix {") else { return out; };
+    let block_start = out[..unix_mod].rfind("#[cfg(unix)]").unwrap_or(unix_mod);
+    let Some(read_key) = out.find("fn jet_term_read_key") else { return out; };
+    let bytes = out.as_bytes();
+    let (mut depth, mut seen, mut i) = (0usize, false, read_key);
+    let mut end = out.len();
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => { depth += 1; seen = true; }
+            b'}' => {
+                depth -= 1;
+                if seen && depth == 0 { end = i + 1; break; }
             }
-            i += 1;
+            _ => {}
         }
-        let mut s = src[..cfg_start].to_string();
-        s.push_str(src[end..].trim_start_matches('\n'));
-        s
+        i += 1;
     }
-    let out = strip_mod(out, "mod jet_term_unix {");
-    strip_mod(out, "mod jet_term_windows {")
+    let mut s = out[..block_start].to_string();
+    s.push_str(out[end..].trim_start_matches('\n'));
+    s
 }
 
 pub(crate) fn mangle(name: &str) -> String {
