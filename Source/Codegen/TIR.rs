@@ -1267,6 +1267,16 @@ pub(crate) fn tir_covers_test_body(body: &[Stmt], cx: &Cx) -> bool {
     body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
+/// c109: is an error-conversion `impl Old -> New { … }` body fully inside the TIR subset?
+/// The body has the Old value bound as `self`, returns the New type, and is emitted at
+/// indent 1 inside the `pub fn <conv>(user_self: Old) -> New` `emit_error_conv` opens.
+/// The signature/braces are fixed by `emit_error_conv`; only the body statements gate.
+pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
+    let mut locals: HashSet<String> = HashSet::new();
+    locals.insert(Syntax::KW_SELF.to_string());
+    body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
+}
+
 /// c109 Phase 7: is this method (an inherent method of `type_name`) fully inside
 /// the TIR subset? Covers two method classes:
 ///   - **instance methods** — a `self` first parameter (`self`/`mut self`/`view
@@ -4615,6 +4625,28 @@ pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
     emit_tir_stmts(&tbody, cx, out, 1);
 }
 
+/// c109: lower + emit an error-conversion `impl Old -> New { … }` body through the TIR,
+/// reproducing `emit_error_conv`'s `emit_stmts(cx, body, &mut env, out, 1, false)`
+/// byte-for-byte. `emit_error_conv` already emitted the signature + opening brace and set
+/// `cx.current_fn` to the conversion fn name; it binds `self` to `user_self` (Move, the
+/// Old named type — Slot `{rust_name:"user_self", deref:false}`), so the env's `self`
+/// place is the bare `user_self`. The body's `return <e>` lowers the expr as-is (sema
+/// already inserted any wrapping); emitted at indent 1, the closing brace is the caller's.
+pub(crate) fn emit_tir_error_conv_body(
+    body: &[Stmt],
+    from_ty: &str,
+    cx: &Cx,
+    out: &mut String,
+) {
+    let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    env.bind(
+        Syntax::KW_SELF,
+        "user_self".to_string(),
+        Some(Type::Named(from_ty.to_string())),
+    );
+    let tbody = lower_stmts(body, cx, &mut env);
+    emit_tir_stmts(&tbody, cx, out, 1);
+}
 
 /// c109 Phase 17: render the Rust generic clause exactly as `emit_func` does — every type
 /// param carries an extra `Clone` bound (`rust_extra_clone_bounds`), so `<T>` → `<T: Clone>`

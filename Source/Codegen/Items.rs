@@ -425,16 +425,15 @@ pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut 
         from = from_rust,
         to = to_rust,
     ));
-    let mut env: HashMap<String, Slot> = HashMap::new();
-    // `self` maps to `user_self` (Move convention, named type).
-    env.insert(
-        crate::Syntax::KW_SELF.to_string(),
-        Slot {
-            rust_name: "user_self".to_string(),
-            deref: false,
-            jet_ty: Some(crate::AST::Type::Named(ec.from_ty.clone())),
-        },
+    // c109: the TIR is the only codegen seam (R7). The body lowers + emits through the
+    // TIR; a gate-miss is an internal compiler error (I2-class), never an AST fallback.
+    if TIR::tir_covers_error_conv_body(&ec.body, cx) {
+        TIR::emit_tir_error_conv_body(&ec.body, &ec.from_ty, cx, out);
+        out.push_str("}\n\n");
+        return;
+    }
+    panic!(
+        "internal compiler error: codegen reached an error-conversion body construct the typed IR does not cover ({} -> {}) — compiler bug (I2/R7)",
+        ec.from_ty, ec.to_ty
     );
-    emit_stmts(cx, &ec.body, &mut env, out, 1, false);
-    out.push_str("}\n\n");
 }
