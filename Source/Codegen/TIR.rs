@@ -292,6 +292,22 @@ pub(crate) enum TStmt {
     /// The body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the
     /// body is lowered on the SAME `LowerEnv` (not a cloned scope).
     Unsafe(Vec<TStmt>),
+    /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
+    /// Rust block `{ … }` — a lexical scope. The region's escape bound (E0631) and arena
+    /// drop ordering (S63 RAII) are enforced entirely in sema; codegen is dumb (I3). The
+    /// body's `let`s LEAK into the outer scope (the AST shares `&mut env`), so the body is
+    /// lowered on the SAME `LowerEnv`.
+    Region(Vec<TStmt>),
+    /// c109 Phase 19: a `#Context(field: value) { … }` smart-context block (D-CTX1). Lowers
+    /// to a plain block with one RAII guard per field (in declaration order) BEFORE the
+    /// body: an `allocator` field → `let _ctx_guard_<i> = jet_mem::jet_ctx_push_alloc(&<v>);`
+    /// (a safe fn — the unsafe cast is inside the vetted jet_mem zone, I1 holds); any other
+    /// field (logger) → `let _ctx_logger_<i> = <v>;` (v1 no-op; the value still runs). Each
+    /// `(is_allocator, value)` guard is resolved at lowering. The body leaks like a region.
+    ContextBlock {
+        guards: Vec<(bool, TExpr)>,
+        body: Vec<TStmt>,
+    },
 }
 
 /// c109 Phase 4: one lowered arm of an exhaustive enum match. `pattern` is the
@@ -373,6 +389,16 @@ pub(crate) enum TExprKind {
     PtrFromAddr {
         elem_rust: String,
         addr: Box<TExpr>,
+    },
+    /// c109 Phase 19: an arena allocator constructor `mem.Arena.new([capacity: N])`
+    /// (D-ALLOC1). The receiver is `Field(Ident(mem-alias), <AllocType>)` with method
+    /// `new`. `rust_type` is the resolved `jet_mem::Jet<Alloc>` head; `ctor` is the fully
+    /// rendered constructor call tail (`::new()` or `::with_capacity(N as usize)` /
+    /// `::with_slots(...)` / `::with_size(...)`), reproducing `emit_method_call`'s arena
+    /// constructor branch (Expression.rs ~L1515) byte-for-byte. The allocator's only
+    /// `unsafe` lives in the vetted `jet_mem` prelude (I1 scan excludes it).
+    AllocNew {
+        ctor: String,
     },
     /// c109 Phase 4: an enum literal `Enum.Variant`, `Variant(args)`, or a
     /// named-payload `Variant { f: v, … }`. The Rust head (`user_Enum::user_Variant`)
@@ -893,6 +919,13 @@ pub(crate) enum THandleOp {
     TcpStreamLocalAddr,
     /// TcpStream: `close()` → `{ drop(recv); }`.
     TcpStreamClose,
+    /// c109 Phase 19: Arena/Bump/Pool/Fixed `alloc(v)` → `(recv).alloc(a0)` (hands back a
+    /// `&mut T` view into the allocator's storage). The arg is emitted plainly.
+    AllocAlloc,
+    /// c109 Phase 19: Arena/Bump/Pool/Fixed `reset()` → `(recv).reset()`.
+    AllocReset,
+    /// c109 Phase 19: Arena/Bump/Pool/Fixed `free()` → `drop(recv)`.
+    AllocFree,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -1024,6 +1057,13 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     if !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx) {
         return false;
     }
+    // c109 Phase 19: a method on a GENERIC struct (`impl<T> user_<T>`) is the deferred
+    // "generic-type method" surface — exclude it (the owning struct is a covered value
+    // type, but the method's `impl<T>` clause + turbofish receiver are not yet validated
+    // across every method shape; stay conservative — exclude on any doubt).
+    if struct_is_generic(type_name, cx) {
+        return false;
+    }
     // The self parameter (if any) must be the FIRST parameter, per the method
     // calling convention. A `self`-bearing method is an instance method; a method
     // with no `self` is a static (associated) function. Any non-first `self` is
@@ -1074,12 +1114,27 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     // Signature shape: no generics, not pure, not view-returning. c109 Phase 18: an
     // `#Unsafe fn` trait method IS covered (`TFuncKind::TraitMethod.is_unsafe` already
     // drives the `unsafe ` prefix in `emit_tir_trait_method`).
+    //
+    // c109 Phase 19: a `view`-returning trait method STAYS EXCLUDED — NOT for a TIR
+    // limitation (the borrow shape is the same total `TStmt::ViewReturn { wrap }` Phase 17
+    // used for inherent/free view methods; lowering + emit already render `&T`), but
+    // because it MISCOMPILES on both paths today: `emit_trait_def` (Source/M9.rs ~L454)
+    // renders the trait DECLARATION's return via `rust_type_name(m.return_type)` WITHOUT
+    // `m.is_view_return`, so the trait says `-> String` while the impl says `-> &String`
+    // → rustc E0053. A latent AST-path bug (logged in the design doc's list); the TIR must
+    // not *claim* a function that miscompiles (the `is_empty` precedent). Unblocks once
+    // `emit_trait_def` threads `is_view_return` into the declared return type.
     if !f.type_params.is_empty() || f.is_pure || f.is_view_return {
         return false;
     }
     // The owning type must be a covered struct or enum.
     let owner_ty = Type::Named(type_name.to_string());
     if !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx) {
+        return false;
+    }
+    // c109 Phase 19: a trait method on a GENERIC struct is the deferred generic-type
+    // method surface — exclude (conservative, as in `tir_covers_method`).
+    if struct_is_generic(type_name, cx) {
         return false;
     }
     // A trait method must have `self` as its FIRST parameter (the receiver `&self`).
@@ -1168,6 +1223,31 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_fallible_ty(ty, cx)
         || is_covered_fn_ty(ty, cx)
         || is_covered_foreign_value_ty(ty, cx)
+        || is_covered_generic_struct_ty(ty, cx)
+}
+
+/// c109 Phase 19: a GENERIC struct application `Pair<T>` / `Stack<Int>` (a `Type::Apply`)
+/// usable as a param/return/local value type. The base name must be a covered user struct
+/// (`struct_is_covered` — which now admits type-var fields, Phase 19), and every type
+/// argument must itself be a covered value type OR a bare type variable. The Rust head is
+/// `user_<Name>::<args>` (the turbofish from `user_type_apply_rust`), resolved at lowering.
+/// `cx.rust_type` already renders `Type::Apply` to that head, so param/return/local typing
+/// is byte-identical to the AST path. (A non-generic `Type::Apply` would be malformed;
+/// sema only produces `Apply` for a generic struct/enum instantiation.)
+fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Apply { name, args } = ty else {
+        return false;
+    };
+    // The base must be a known user struct (not an enum/trait/foreign/prelude type).
+    if !cx.struct_fields.contains_key(name) {
+        return false;
+    }
+    if !struct_is_covered(name, cx, &mut HashSet::new()) {
+        return false;
+    }
+    // Every type argument is a covered value type or a bare type variable (`T`).
+    args.iter()
+        .all(|a| is_type_var_param_ty(a) || is_subset_param_ty(a, cx))
 }
 
 /// c109 Phase 17: a bare type-PARAMETER type (`T` in a generic `fn id<T>(x: T)`). A
@@ -1192,10 +1272,20 @@ fn is_type_var_param_ty(ty: &Type) -> bool {
 /// (handle/prelude methods → Phase 13's residue), so a function that *calls* a method on
 /// one is excluded by that call — covering the value type never reaches an uncovered
 /// method form.
-fn is_covered_foreign_value_ty(ty: &Type, _cx: &Cx) -> bool {
+fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Named(name) = ty else {
         return false;
     };
+    // c109 Phase 19: a FOREIGN (imported user) struct/enum used as a value type. It
+    // renders via `cx.rust_type` to `{root}{mod}::user_<Name>` (Context.rs), and a field
+    // read on it mangles (`(n).user_title`) exactly as `mangle` produces — byte-identical
+    // to the AST path with no new emit. Construction (`alias.Note { … }`) routes via the
+    // `import_ns` StructLit shape; a method on it is still out of subset, so a fn that
+    // calls one is excluded by that call (the recurring "cover the value type, let the next
+    // uncovered node exclude its fn" seam).
+    if cx.foreign_types.contains_key(name) {
+        return true;
+    }
     // A prelude struct constructable via a struct literal, or a core/prelude struct that
     // renders to its own Rust name. (FileReader/TcpStream/Arena/… are opaque handles — no
     // literal form — but are valid value types; admit the constructable + core ones, plus
@@ -1213,6 +1303,35 @@ fn is_covered_foreign_value_ty(ty: &Type, _cx: &Cx) -> bool {
 /// and HttpRequest additionally an injected `params: BTreeMap::new()` field.
 fn is_prelude_struct_name(name: &str) -> bool {
     matches!(name, "HttpRequest" | "HttpResponse")
+}
+
+/// c109 Phase 19: is a FOREIGN (imported user) struct literal `alias.Type { … }` in
+/// subset? The AST `emit_struct_lit` `import_ns` branch (Source/Codegen/Expression.rs)
+/// emits `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED field names.
+/// Cover it when: the import alias resolves in `cx.import_mods` (so the module head is
+/// total), the type is a registered cross-module type (`cx.foreign_types`), and every
+/// turbofish type arg is a covered/type-var value. The field VALUES are checked in-subset
+/// by the caller; the foreign struct's field *types* live in another module and don't
+/// affect the emit (the head + mangled field names are the whole shape). A trait-coerced
+/// foreign literal (`as_trait`) is excluded by the caller.
+fn foreign_struct_lit_in_subset(
+    type_name: &str,
+    type_args: &[Type],
+    import_ns: Option<&str>,
+    cx: &Cx,
+) -> bool {
+    let Some(alias) = import_ns else {
+        return false;
+    };
+    if !cx.import_mods.contains_key(alias) {
+        return false;
+    }
+    if !cx.foreign_types.contains_key(type_name) {
+        return false;
+    }
+    type_args
+        .iter()
+        .all(|a| is_type_var_param_ty(a) || is_subset_param_ty(a, cx))
 }
 
 /// c109 Phase 13: a `fn(…) -> …` parameter/return type the subset lowers. The fn-type
@@ -1414,6 +1533,31 @@ fn is_covered_struct_ty(ty: &Type, cx: &Cx) -> bool {
     struct_is_covered(name, cx, &mut HashSet::new())
 }
 
+/// c109 Phase 19: is `name` a GENERIC user struct (one with a type-var field)? A generic
+/// struct's fields reference type vars (`first: T`); `struct_is_covered` now admits those
+/// (so a generic struct is a covered VALUE type — Phase 19 covers turbofish construction +
+/// `Type::Apply` params). But a METHOD on a generic struct (`impl<T> user_<T>`) is a
+/// SEPARATE deferred surface (the inventory's "generic-type method"), so the method gates
+/// exclude an owning type that is generic. (Free generic functions are covered by Phase 17;
+/// generic STRUCT free functions by Phase 19; generic METHODS stay on the AST path.)
+fn struct_is_generic(name: &str, cx: &Cx) -> bool {
+    cx.struct_fields
+        .get(name)
+        .map(|fields| fields.iter().any(|(_, fty)| ty_mentions_type_var(fty)))
+        .unwrap_or(false)
+}
+
+/// True if `ty` references a bare type variable anywhere (a `Type::Named(T)` with
+/// `is_type_var_name`, or nested inside a list/map). Used to detect a generic struct.
+fn ty_mentions_type_var(ty: &Type) -> bool {
+    match ty {
+        Type::Named(n) => crate::Generics::is_type_var_name(n),
+        Type::List(inner) => ty_mentions_type_var(inner),
+        Type::Map { key, value } => ty_mentions_type_var(key) || ty_mentions_type_var(value),
+        _ => false,
+    }
+}
+
 fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     // A struct that is a trait/enum or a non-user (foreign/core/prelude) type is
     // out. `cx.struct_fields` only holds user structs declared in this module.
@@ -1449,6 +1593,15 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
         return true;
     }
+    // c109 Phase 19: a generic struct's field may be a bare type VARIABLE (`first: T`
+    // in `Pair<T>`). It renders to the bare `T` via `cx.rust_type` and a struct-lit
+    // field value is the type-var value itself (by value), so a type-var field needs no
+    // clone/deref decision — admit it. (A struct with a type-var field is only ever
+    // *used* as a `Type::Apply` — `Pair<Int>` — which `is_covered_generic_struct_ty`
+    // gates; a bare `Pair` never type-checks in sema.)
+    if is_type_var_param_ty(ty) {
+        return true;
+    }
     match ty {
         Type::Named(n) => struct_is_covered(n, cx, seen),
         // c109 Phase 16: a collection field (`[E]` / `[K, V]`) whose element/key/value
@@ -1470,11 +1623,15 @@ fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -> bool {
 fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
     match s {
         Stmt::Val(b) => {
-            // No destructuring patterns, no comptime, no uninit/arena views.
+            // No destructuring patterns, no comptime, no uninit. c109 Phase 19: an
+            // `arena_view` binding (`x @= arena.alloc(v)` / `x :: arena.alloc(v)`) IS now
+            // covered — it lowers to a plain `let <x> = <init>;` (no type, no mut) with a
+            // deref'd slot, exactly as `emit_let`'s `arena_view` branch (the init is a
+            // covered `arena.alloc(v)` handle call). The escape/use-after-reset rules
+            // (E0631/E0632) are enforced entirely in sema; codegen is dumb.
             let ok = b.pattern.is_none()
                 && !b.is_comptime
                 && !b.uninit
-                && !b.arena_view
                 && expr_in_subset(&b.init, cx, locals);
             // The binding's name is in scope for subsequent statements.
             locals.insert(b.name.clone());
@@ -1594,7 +1751,18 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         // nothing. I1: this is the source gate — the only place a Rust `unsafe` block is
         // produced — so admitting it here cannot introduce an ungated `unsafe`.
         Stmt::Unsafe { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
-        // region, caps, context — all still out.
+        // c109 Phase 19: an explicit `region r { … }` (D-REGION1) lowers to a plain Rust
+        // block; the body's `let`s LEAK into the outer scope (the AST shares `&mut env`),
+        // so the gate checks the body on the SAME `locals`.
+        Stmt::Region { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1) — a plain block
+        // with a per-field guard. Each field value + the body must be in-subset (the body
+        // leaks like a region).
+        Stmt::ContextBlock { fields, body, .. } => {
+            fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
+                && body.iter().all(|s| stmt_in_subset(s, cx, locals))
+        }
+        // caps — still out.
         _ => false,
     }
 }
@@ -2037,14 +2205,37 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             fields,
             ..
         } => {
-            // A trait-object coercion (S48) or an imported-namespace struct uses
-            // a different Rust head the subset does not emit — exclude.
-            if as_trait.is_some() || import_ns.is_some() {
+            // A trait-object coercion (S48) uses a different Rust head — exclude.
+            if as_trait.is_some() {
                 return false;
             }
-            // Generic struct instantiation is out (the subset has no generics).
+            // c109 Phase 19: a FOREIGN (imported user) struct literal — a `import_ns`
+            // namespace head (`{root}{mod}::{user_<Name>}[::<args>]`, mangled fields).
+            // Covered when the named foreign type is a covered foreign struct and the
+            // import alias resolves; the head is resolved at lowering (`lower_expr`).
+            if import_ns.is_some() {
+                return foreign_struct_lit_in_subset(
+                    type_name,
+                    type_args,
+                    import_ns.as_deref(),
+                    cx,
+                ) && fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
+            }
+            // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`
+            // → the turbofish `user_Pair::<T> { … }`). The base must be a covered struct
+            // and every type arg covered/type-var (`is_covered_generic_struct_ty`). The
+            // turbofish head is resolved at lowering via `user_type_apply_rust`.
             if !type_args.is_empty() {
-                return false;
+                if !is_covered_generic_struct_ty(
+                    &Type::Apply {
+                        name: type_name.clone(),
+                        args: type_args.clone(),
+                    },
+                    cx,
+                ) {
+                    return false;
+                }
+                return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
             // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) — the
             // `is_prelude_struct` branch of `emit_struct_lit` (a `<root>Jet…` head, PLAIN
@@ -2358,6 +2549,19 @@ fn method_call_in_subset(
             }
         }
     }
+    // Shape (k) [c109 Phase 19]: the arena allocator constructor `mem.Arena.new(…)`
+    // (D-ALLOC1). The receiver is `Field(Ident(mem-alias), <AllocType>)`, method `new`.
+    // Sema sets `recv_type == Some(<AllocType>)` (the receiver `mem.Arena` is typed
+    // `Named(Arena)` via `infer_core_field`, then `.new()` dispatches through
+    // `alloc_method_return`). The AST `emit_method_call` claims it via its FIRST branch
+    // (the `mem.<Alloc>.new()` constructor, Expression.rs ~L1515) BEFORE any `rty`-keyed
+    // arm — so we mirror that and try it FIRST, before the handle shape. The optional
+    // `capacity:`/`slots:`/`size:` arg is admitted (a label is allowed HERE — the AST reads
+    // `arg(0)` ignoring the label, choosing the ctor by allocator type, not label).
+    if alloc_new_type(receiver, method, cx, locals).is_some() {
+        return args.len() <= 1
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (d) [c109 Phase 9]: a built-in collection/string method
     // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
     // list/map/string receiver. Sema resolves these via `Collections::
@@ -2380,6 +2584,19 @@ fn method_call_in_subset(
             && args.iter().all(|a| {
                 a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
             });
+    }
+    // Shape (d2) [c109 Phase 19]: `Stopwatch.elapsed_millis()`. The AST
+    // `emit_builtin_method` dispatches `elapsed_millis` on the method NAME alone (it
+    // fires before any `rty` test, Expression.rs ~L1023), and sema types it via
+    // `Collections::stopwatch_method_return` — leaving `recv_type == None` (NOT the
+    // `Some(<handle>)` of the Phase-13 handle shape). So it is a Phase-9-style builtin
+    // gap: a `MethodCall` with `recv_type == None`, a covered builtin name, an in-subset
+    // value receiver (a `Stopwatch` `let`-bound from the covered `time.start` producer).
+    // Lower to the existing `THandleOp::StopwatchElapsedMillis` (`{root}jet_stopwatch_
+    // elapsed_millis(&(recv))`). Tried after the collection builtins so a list/map/string
+    // `elapsed_millis` (impossible — no such method) can't be misclaimed.
+    if recv_type.is_none() && method == "elapsed_millis" && args.is_empty() {
+        return expr_in_subset(receiver, cx, locals);
     }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
@@ -2880,6 +3097,38 @@ fn core_closure_call_in_subset(
 /// `mem.*.new` isn't a covered call, so an allocator never binds in a covered fn);
 /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
 /// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
+/// c109 Phase 19: is this MethodCall the arena allocator constructor `mem.Arena.new(…)`
+/// (D-ALLOC1)? Reproduces `emit_method_call`'s constructor branch (Expression.rs ~L1515):
+/// the receiver is `Field(Ident(alias), <AllocType>)` where `alias ∈ core_imports` maps to
+/// `core.mem` and `<AllocType> ∈ {Arena,Bump,Pool,Fixed}`, and `method == "new"`. Returns
+/// the resolved allocator type-name (so the gate can admit it) or `None`.
+fn alloc_new_type<'a>(
+    receiver: &'a Expr,
+    method: &str,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> Option<&'a str> {
+    if method != Syntax::MEM_ALLOC_NEW {
+        return None;
+    }
+    let Expr::Field(inner, alloc_type, _) = receiver else {
+        return None;
+    };
+    let Expr::Ident(alias, _) = &**inner else {
+        return None;
+    };
+    if locals.contains(alias) {
+        return None;
+    }
+    if cx.core_imports.get(alias).map(String::as_str) != Some(Syntax::CORE_MEM_MODULE) {
+        return None;
+    }
+    match alloc_type.as_str() {
+        "Arena" | "Bump" | "Pool" | "Fixed" => Some(alloc_type.as_str()),
+        _ => None,
+    }
+}
+
 fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
     Some(match (handle, method, nargs) {
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
@@ -2894,6 +3143,13 @@ fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleO
         ("TcpStream", "peer_addr", 0) => THandleOp::TcpStreamPeerAddr,
         ("TcpStream", "local_addr", 0) => THandleOp::TcpStreamLocalAddr,
         ("TcpStream", "close", 0) => THandleOp::TcpStreamClose,
+        // c109 Phase 19: the four arena allocators (`alloc`/`reset`/`free`). Sema sets
+        // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
+        // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`
+        // share identical Rust method names (the engines differ; the surface doesn't).
+        ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
+        ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
+        ("Arena" | "Bump" | "Pool" | "Fixed", "free", 0) => THandleOp::AllocFree,
         _ => return None,
     })
 }
@@ -3352,6 +3608,21 @@ fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
 fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match s {
         Stmt::Val(b) => {
+            // c109 Phase 19: an arena `view` binding (`x @= arena.alloc(v)`). The AST
+            // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
+            // NEVER `let mut` — a view is a non-reassignable `&mut T`) and binds a DEREF'd
+            // slot (reads go through `(*x)`). Reproduce it exactly: a `Let` with `kw: "let"`,
+            // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
+            if b.arena_view {
+                let init = lower_expr(&b.init, cx, env);
+                env.bind(&b.name, format!("(*{})", mangle(&b.name)), b.ty.clone());
+                return TStmt::Let {
+                    name: b.name.clone(),
+                    kw: "let",
+                    ty_clause: String::new(),
+                    init,
+                };
+            }
             let mut init = lower_expr(&b.init, cx, env);
             // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
             // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
@@ -3555,6 +3826,27 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
         Stmt::Unsafe { body, .. } => TStmt::Unsafe(lower_stmts(body, cx, env)),
+        // c109 Phase 19: an explicit `region r { … }` (D-REGION1). The AST emits a plain
+        // block and lowers the body on the SAME `&mut env` (its `let`s leak into the outer
+        // scope). Reproduce: lower the body on the SAME `env`, wrap in `TStmt::Region`.
+        Stmt::Region { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
+        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1). Resolve each
+        // field into an `(is_allocator, value)` guard at lowering, then lower the body on
+        // the SAME `env` (it leaks like a region). Emit reproduces `emit_stmts`'s
+        // `Stmt::ContextBlock` arm byte-for-byte.
+        Stmt::ContextBlock { fields, body, .. } => {
+            let guards = fields
+                .iter()
+                .map(|(name, v, _)| {
+                    let is_alloc = name == Syntax::CTX_FIELD_ALLOCATOR;
+                    (is_alloc, lower_expr(v, cx, env))
+                })
+                .collect();
+            TStmt::ContextBlock {
+                guards,
+                body: lower_stmts(body, cx, env),
+            }
+        }
         _ => unreachable!("statement not in TIR subset"),
     }
 }
@@ -4446,8 +4738,51 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // Field values are lowered as-is — no clone/coercion at the literal site
         // (mirrors the AST path; a value's own move/clone facts live in itself).
         Expr::StructLit {
-            type_name, fields, ..
+            type_name,
+            type_args,
+            import_ns,
+            fields,
+            ..
         } => {
+            // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
+            // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
+            // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
+            // Resolve the head here (totality); a missing alias falls to `user_unknown`,
+            // exactly as the AST path (the gate already required the alias to resolve).
+            if let Some(alias) = import_ns {
+                let mod_name = cx
+                    .import_mods
+                    .get(alias)
+                    .map(|s| s.as_str())
+                    .unwrap_or("user_unknown");
+                let rust_type = if type_args.is_empty() {
+                    format!("{}{}::{}", cx.root_prefix, mod_name, mangle(type_name))
+                } else {
+                    format!(
+                        "{}{}::{}::<{}>",
+                        cx.root_prefix,
+                        mod_name,
+                        mangle(type_name),
+                        type_args
+                            .iter()
+                            .map(|a| cx.rust_type(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                let tfields = fields
+                    .iter()
+                    .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type,
+                        fields: tfields,
+                        extra: None,
+                    },
+                };
+            }
             // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) uses the
             // `is_prelude_struct` branch of `emit_struct_lit`: a `<root>Jet…` Rust head,
             // PLAIN (unmangled) field names, and — for HttpRequest — an injected
@@ -4471,6 +4806,22 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // c109 Phase 19: a GENERIC struct literal carries `type_args` (`Pair<T> {…}`).
+            // The Rust head is the turbofish `user_<Name>::<args>` (`user_type_apply_rust`),
+            // resolved at lowering; fields mangle. A non-generic literal renders `user_<Name>`.
+            let rust_type = if type_args.is_empty() {
+                format!("user_{}", type_name)
+            } else {
+                format!(
+                    "user_{}::<{}>",
+                    type_name,
+                    type_args
+                        .iter()
+                        .map(|a| cx.rust_type(a))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
             let tfields = fields
                 .iter()
                 .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
@@ -4478,7 +4829,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty: Type::Named(type_name.clone()),
                 kind: TExprKind::StructLit {
-                    rust_type: format!("user_{}", type_name),
+                    rust_type,
                     fields: tfields,
                     extra: None,
                 },
@@ -4956,6 +5307,36 @@ fn lower_method_call(
             kind: TExprKind::Clone(Box::new(recv)),
         };
     }
+    // c109 Phase 19: the arena allocator constructor `mem.Arena.new(…)` (D-ALLOC1). The
+    // gate proved the receiver is `Field(Ident(mem-alias), <AllocType>)` + method `new`.
+    // Render the whole ctor call HERE (totality), reproducing `emit_method_call`'s arena
+    // branch (Expression.rs ~L1515): `jet_mem::Jet<Alloc>::new()` (no arg) or
+    // `::with_capacity|with_slots|with_size((arg) as usize)` (one optional arg). The
+    // result type is the allocator handle `Named(<AllocType>)` (`alloc_method_return`'s
+    // `new` arm). The allocator's only `unsafe` lives in the vetted `jet_mem` prelude (I1).
+    {
+        let locals: HashSet<String> = env.locals.keys().cloned().collect();
+        {
+            if let Some(alloc_type) = alloc_new_type(receiver, method, cx, &locals) {
+                let rust_type = alloc_handle_rust_type(alloc_type).unwrap_or("jet_mem::JetArena");
+                let ctor = if args.is_empty() {
+                    format!("{}::new()", rust_type)
+                } else {
+                    let ctor_fn = match alloc_type {
+                        "Pool" => "with_slots",
+                        "Fixed" => "with_size",
+                        _ => "with_capacity",
+                    };
+                    let a0 = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
+                    format!("{}::{}({} as usize)", rust_type, ctor_fn, a0)
+                };
+                return TExpr {
+                    ty: Type::Named(alloc_type.to_string()),
+                    kind: TExprKind::AllocNew { ctor },
+                };
+            }
+        }
+    }
     // c109 Phase 16: an enum-variant CONSTRUCTION `Enum.Variant(args)` reaching codegen
     // as a `MethodCall` (sema never rewrites a payload variant to `Expr::EnumLit`). The
     // AST `emit_method_call` routes it to `emit_enum_lit` with all-positional args; we
@@ -5125,6 +5506,23 @@ fn lower_method_call(
             };
         }
     }
+    // c109 Phase 19: `Stopwatch.elapsed_millis()` (gate shape d2). The gate proved
+    // `recv_type == None` + the `elapsed_millis` name + an in-subset value receiver.
+    // Lower to the existing `THandleOp::StopwatchElapsedMillis` (`{root}jet_stopwatch_
+    // elapsed_millis(&(recv))`), the same node the Phase-13 handle shape uses — emit is
+    // byte-identical to `emit_builtin_method`'s name-keyed `elapsed_millis` arm. The
+    // result type is `Int` (`stopwatch_method_return`), kept total per the design.
+    if recv_type.is_none() && method == "elapsed_millis" && args.is_empty() {
+        let recv_t = lower_expr(receiver, cx, env);
+        return TExpr {
+            ty: Type::Int,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::StopwatchElapsedMillis,
+                args: Vec::new(),
+            },
+        };
+    }
     // c109 Phase 11: a closure-taking collection method (`map`/`filter`/`each`/…).
     // The gate proved `recv_type == None` + a closure-method name + a literal lambda
     // arg. Resolve the receiver-type + Fn-vs-FnMut dispatch HERE into a total
@@ -5179,9 +5577,22 @@ fn lower_method_call(
     if let Some(handle) = recv_type {
         if let Some(op) = handle_method_op(handle, method, args.len()) {
             let recv_t = lower_expr(receiver, cx, env);
-            let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            // c109 Phase 19: an arena `alloc(v)` returns a `&mut T` view whose VALUE type is
+            // the arg's type (sema's `alloc_method_return` returns a `__alloc_infer__`
+            // sentinel, resolved from the arg). The result `ty` is rarely load-bearing (an
+            // `arena_view` binding emits no type annotation), but kept total per the design —
+            // recovered from the LOWERED arg's total `ty`, never re-inferred (I3).
+            let ty = match op {
+                THandleOp::AllocAlloc => targs
+                    .first()
+                    .map(|a| a.ty.clone())
+                    .unwrap_or_else(unit_type),
+                THandleOp::AllocReset | THandleOp::AllocFree => unit_type(),
+                _ => handle_method_return_ty(handle, method, args.len()),
+            };
             return TExpr {
-                ty: handle_method_return_ty(handle, method, args.len()),
+                ty,
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(recv_t),
                     op,
@@ -6222,6 +6633,37 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
             emit_tir_stmts(body, cx, out, indent + 1);
             out.push_str(&format!("{}}}\n", pad));
         }
+        // c109 Phase 19: an explicit `region r { … }` — a plain Rust block, byte-for-byte
+        // `emit_stmts`'s `Stmt::Region` arm. The escape/RAII rules are sema's job (I3).
+        TStmt::Region(body) => {
+            out.push_str(&format!("{}{{\n", pad));
+            emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        // c109 Phase 19: a `#Context(field: value) { … }` block — a plain block with one
+        // RAII guard per field (declaration order) BEFORE the body, byte-for-byte
+        // `emit_stmts`'s `Stmt::ContextBlock` arm.
+        TStmt::ContextBlock { guards, body } => {
+            out.push_str(&format!("{}{{\n", pad));
+            let inner = indent + 1;
+            let inner_pad = "    ".repeat(inner);
+            for (i, (is_alloc, value)) in guards.iter().enumerate() {
+                let val = emit_tir_expr(value, cx);
+                if *is_alloc {
+                    out.push_str(&format!(
+                        "{}let _ctx_guard_{} = jet_mem::jet_ctx_push_alloc(&{});\n",
+                        inner_pad, i, val
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{}let _ctx_logger_{} = {};\n",
+                        inner_pad, i, val
+                    ));
+                }
+            }
+            emit_tir_stmts(body, cx, out, inner);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // c109 Phase 15: a mixed comparison/Bool switch — the general `emit_mixed_switch`
         // (Statement.rs) `if/else if … else` chain inside a block that binds
         // `_jet_switch_subject = &(subject)` (emitted for parity even when unused).
@@ -6484,6 +6926,10 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::PtrFromAddr { elem_rust, addr } => {
             format!("(({}) as usize as *mut {})", emit_tir_expr(addr, cx), elem_rust)
         }
+        // c109 Phase 19: the arena allocator constructor — the ctor tail was rendered whole
+        // at lowering (`jet_mem::Jet<Alloc>::new()` / `::with_capacity(...)`), so emit just
+        // splices it. Byte-for-byte `emit_method_call`'s arena constructor branch.
+        TExprKind::AllocNew { ctor } => ctor.clone(),
         // c109 Phase 4/16: an enum literal. Prefix + payload were resolved at lowering;
         // emit applies each arg's resolved `clone`/`boxed` wrappers (mirroring
         // `emit_boxed_enum_arg`: `(…).clone()` first, then `Box::new(…)`).
@@ -6714,6 +7160,13 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_net_tcp_local_addr(&({}))", root, recv)
                 }
                 THandleOp::TcpStreamClose => format!("{{ drop({}); }}", recv),
+                // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
+                THandleOp::AllocAlloc => {
+                    let a0 = emit_tir_expr(&args[0], cx);
+                    format!("({}).alloc({})", recv, a0)
+                }
+                THandleOp::AllocReset => format!("({}).reset()", recv),
+                THandleOp::AllocFree => format!("drop({})", recv),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -7116,12 +7569,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_generic_struct_fn() {
-        // c109 Phase 17: a GENERIC STRUCT (`Pair<T>`) — its `Type::Apply` param/return
-        // type and the turbofish construction (`user_Pair::<T> { … }`) are deferred, so a
-        // function that constructs/returns one stays on the AST path.
+    fn covers_generic_struct_fn() {
+        // c109 Phase 19: a GENERIC STRUCT free function — its `Type::Apply` (`Pair<T>`)
+        // param/return type and the turbofish construction (`user_Pair::<T> { … }`) are now
+        // covered. The struct's type-var fields are admitted by `field_ty_covered`; the
+        // turbofish head is resolved at lowering.
         let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) -> Pair<T> {\n return Pair<T> {first: a, second: b}\n}\n";
-        assert!(!covers(src, "mk"));
+        assert!(covers(src, "mk"));
     }
 
     /// c109 Phase 18: like `covers`, but injects the `mem` → `core.mem` import (the
@@ -7229,12 +7683,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_generic_struct_literal() {
-        // A generic struct (`Pair<Int> { … }`) carries non-empty `type_args` and
-        // its field types reference type vars — both outside the subset (no
-        // generics in Phase 3). The owning fn stays on the AST path.
+    fn covers_generic_struct_literal() {
+        // c109 Phase 19: a generic struct literal (`Pair<Int> { … }`) carries non-empty
+        // `type_args` (the turbofish `user_Pair::<i64> { … }`) and its field types reference
+        // type vars — both now covered. The owning fn routes through the TIR.
         let src = "struct Pair<T> { first: T\n second: T }\nfn mk() -> Pair<Int> {\n return Pair<Int> { first: 1, second: 2 }\n}\n";
-        assert!(!covers(src, "mk"));
+        assert!(covers(src, "mk"));
     }
 
     // c109 Phase 2: control-flow loops are now covered.
@@ -7502,8 +7956,10 @@ mod tests {
 
     #[test]
     fn rejects_generic_method() {
-        // A method on a generic type isn't covered (no generics in the subset). The
-        // owning type `Box<T>` is not a covered struct, so the gate bails.
+        // c109 Phase 19: a method on a GENERIC struct (`impl<T> user_<T>`) is the deferred
+        // "generic-type method" surface — `struct_is_generic` excludes it even though the
+        // owning struct is now a covered VALUE type (turbofish construction is covered, but
+        // the method's `impl<T>` clause is not yet validated across every shape).
         let src = "struct Box<T> {\n v: T\n fn get(self) -> T {\n return self.v\n }\n}\n";
         assert!(!covers_method(src, "Box", "get"));
     }
@@ -7674,11 +8130,15 @@ mod tests {
         assert!(handle_method_op("TcpStream", "read", 0).is_some());
         assert!(handle_method_op("TcpStream", "close", 0).is_some());
         assert!(handle_method_op("TcpListener", "accept", 0).is_some());
+        // c109 Phase 19: the arena allocator methods (`alloc`/`reset`/`free`) are now
+        // covered (the producer `mem.Arena.new()` is covered too).
+        assert!(handle_method_op("Arena", "alloc", 1).is_some());
+        assert!(handle_method_op("Bump", "reset", 0).is_some());
+        assert!(handle_method_op("Pool", "free", 0).is_some());
         // Excluded: dead `lines` (E2502), HttpRequest accessors (serve-lambda-param
-        // slot may be unresolved), allocator methods (producer not covered).
+        // slot may be unresolved).
         assert!(handle_method_op("FileReader", "lines", 0).is_none());
         assert!(handle_method_op("HttpRequest", "method", 0).is_none());
-        assert!(handle_method_op("Arena", "alloc", 1).is_none());
         // Wrong arity declines.
         assert!(handle_method_op("FileWriter", "write_line", 0).is_none());
     }

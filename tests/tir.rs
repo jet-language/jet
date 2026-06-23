@@ -2388,3 +2388,198 @@ fn main() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// c109 Phase 19: generic structs, foreign types, Stopwatch, arena/region.
+// ---------------------------------------------------------------------------
+
+/// c109 Phase 19: a GENERIC STRUCT free function — a turbofish struct literal
+/// (`user_Pair::<i64> { … }`), a `Type::Apply` param/return, a `[T]`-field builtin
+/// (`copy.items.push(item)`), and the generic-struct value clone (`copy := s`).
+#[test]
+fn generic_struct_fns() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Pair<T> {
+    first: T
+    second: T
+}
+fn make_pair<T>(a: T, b: T) -> Pair<T> {
+    return Pair<T> {first: a, second: b}
+}
+struct Stack<T> {
+    items: [T]
+}
+fn empty_stack<T>() -> Stack<T> {
+    return Stack<T> {items: []}
+}
+fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
+    copy := s
+    copy.items.push(item)
+    return copy
+}
+fn main() {
+    p: Pair<Int> @= make_pair(1, 2)
+    print(p.first)
+    st: Stack<Int> := empty_stack()
+    st = push(st, 42)
+    print(st.items[0])
+}
+";
+    let (code, stdout) = build_and_run("tir_generic_struct", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n42\n");
+}
+
+/// c109 Phase 19: a FOREIGN (imported user) struct constructed via the `import_ns`
+/// namespace path (`alias.Note { … }` → `{root}user_note::user_Note { … }`), passed
+/// across the module boundary, with a field read on the returned value.
+#[test]
+fn foreign_struct_construction() {
+    if !have_rustc() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_tir_foreign_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("note.jet"),
+        "pub struct Note {\n    pub title: String\n    pub pages: Int\n}\n",
+    )
+    .unwrap();
+    let main_src = "\
+use \"note\"
+fn make() -> Note {
+    return note.Note { title: \"hello\", pages: 3 }
+}
+fn main() {
+    n := make()
+    print(n.title)
+    print(n.pages)
+}
+";
+    let main_path = dir.join("main.jet");
+    fs::write(&main_path, main_src).unwrap();
+    let shown = main_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(main_src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, main_src, &diags)
+        )
+    });
+    // The foreign struct head + mangled fields, byte-exact.
+    assert!(
+        out.rust
+            .contains("user_note::user_Note { user_title: \"hello\".to_string(), user_pages: 3i64 }"),
+        "foreign struct construction not byte-exact:\n{}",
+        out.rust
+    );
+}
+
+/// c109 Phase 19: `Stopwatch.elapsed_millis()` (a `recv_type == None` builtin-name
+/// handle method) — the `time.start` producer (covered) + the elapsed read.
+#[test]
+fn stopwatch_elapsed_millis() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.time
+fn main() {
+    sw := time.start()
+    n := 0
+    loop i in 0..100 {
+        n = n + i
+    }
+    ms := sw.elapsed_millis()
+    print(ms >= 0)
+    print(n)
+}
+";
+    let (code, stdout) = build_and_run("tir_stopwatch", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true\n5050\n");
+}
+
+/// c109 Phase 19: arena allocators — the `mem.Arena.new()` / `mem.Bump.new()` /
+/// `mem.Pool.new(slots:)` / `mem.Fixed.new(size:)` producers, the `alloc`/`reset`/`free`
+/// handle methods, and the `arena_view` binding (`x @= arena.alloc(v)`, read via deref).
+#[test]
+fn arena_alloc_reset_free() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.mem
+fn main() {
+    arena @= mem.Arena.new()
+    x @= arena.alloc(42)
+    print(x)
+    arena.reset()
+    y @= arena.alloc(99)
+    print(y)
+    sized @= mem.Arena.new(capacity: 4096)
+    s @= sized.alloc(7)
+    print(s)
+    pool @= mem.Pool.new(slots: 8)
+    p @= pool.alloc(3)
+    print(p)
+    arena.free()
+}
+";
+    let (code, stdout) = build_and_run("tir_arena", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n99\n7\n3\n");
+}
+
+/// c109 Phase 19: an explicit `region r { … }` block (D-REGION1) — a plain Rust block
+/// scope; views made inside live only until the block ends.
+#[test]
+fn arena_region_block() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.mem
+fn main() {
+    region scratch {
+        a @= mem.Arena.new()
+        b @= mem.Bump.new()
+        x @= a.alloc(1)
+        y @= b.alloc(2)
+        print(x)
+        print(y)
+    }
+    print(99)
+}
+";
+    let (code, stdout) = build_and_run("tir_region", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n2\n99\n");
+}
+
+/// c109 Phase 19: a `#Context(allocator: …) { … }` smart-context block (D-CTX1) — a
+/// plain block with an `_ctx_guard_<i>` RAII guard, body leaking like a region.
+#[test]
+fn smart_context_block() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.mem
+fn main() {
+    arena @= mem.Arena.new()
+    #Context(allocator: arena) {
+        x @= arena.alloc(10)
+        print(x)
+    }
+    y @= arena.alloc(20)
+    print(y)
+    arena.free()
+}
+";
+    let (code, stdout) = build_and_run("tir_context", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "10\n20\n");
+}

@@ -6,6 +6,7 @@ use crate::AST::{
 use crate::Generics;
 use crate::Syntax;
 use std::collections::HashMap;
+
 fn struct_lifetimes(fields: &[Field]) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     for f in fields {

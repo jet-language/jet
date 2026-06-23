@@ -78,6 +78,27 @@ them so they don't regress, but they should be fixed independently of c109):
   construction MethodCall shape, not the (effectively dead) `Expr::EnumLit` lowering.
   (Surfaced in Phase 16; consistent with the Phase-4/8 "the AST node that reaches
   codegen is what the gate must recognise" finding.)
+- **A `view`-returning TRAIT method miscompiles (I2 hole on both paths).** `emit_trait_def`
+  (Source/M9.rs ~L454) renders a trait method's DECLARATION return type via
+  `rust_type_name(m.return_type)` WITHOUT consulting `m.is_view_return`, so the trait
+  declaration emits `fn label(&self) -> String` while the impl (`emit_trait_method` /
+  the TIR `emit_tir_trait_method`) emits `fn label(&self) -> &String` → rustc E0053
+  ("incompatible type for trait"). Both paths produce identical (broken) Rust, so parity
+  holds, but the construct is unusable. Phase 19 EXCLUDES view-returning trait methods for
+  this reason (the TIR must not *claim* a miscompiling fn — the `is_empty` precedent); the
+  borrow shape is otherwise the same total `TStmt::ViewReturn { wrap }` Phase 17 used for
+  inherent/free view methods, so the lift is trivial once `emit_trait_def` threads
+  `is_view_return` into the declared return type. (Surfaced in Phase 19.)
+- **A bare `?? return` (no value) is unusable (sema/codegen mismatch).** `x ?? return`
+  (no fallback value) emits `match … { None => return }`. Sema E0405 REQUIRES the enclosing
+  fn to have a return type ("a bare return needs a function with a return type"); but rustc
+  then rejects `return;` in a non-unit function (E0069). So a bare `?? return` cannot appear
+  in any program that passes BOTH sema and rustc. Phase 19 confirms the shape ALREADY routes
+  through the TIR (the gate's `orfallback_rhs_in_subset → Return(None) => true`, an earlier
+  phase) and is byte-identical on both paths — the inventory note claiming it doesn't route
+  was stale. The construct is just dead. Fix: make sema admit a bare `?? return` only in a
+  unit-returning fn (then rustc accepts `return;`), OR make codegen emit `return ()` /
+  diverge appropriately. (Surfaced in Phase 19.)
 
 ## Invariants this must preserve
 
@@ -1177,41 +1198,112 @@ everything, the AST codegen path is deleted (final phase).
   (byte-exact emit + I1 self-check); the TIR unit tests add `covers_unsafe_fn_with_ptr_ops`
   / `covers_unsafe_block_and_address_of`.
 
+## Refinements learned in Phase 19 (generic structs, foreign types, arena/region)
+
+- **Generic STRUCTS are a pure GATE widening + a turbofish head resolved at lowering — no
+  new emit logic.** A generic struct's type-var FIELD (`first: T` in `Pair<T>`) is now
+  admitted by `field_ty_covered` (it renders to the bare `T` via `cx.rust_type`, and a
+  struct-lit field value is the type-var value itself — no clone/deref decision), so
+  `struct_is_covered("Pair")` returns true. A `Type::Apply` (`Pair<T>`/`Stack<Int>`)
+  param/return/local is admitted by a new `is_covered_generic_struct_ty` (base a covered
+  struct, every arg covered-or-type-var). The turbofish StructLit (`user_Pair::<T> { … }`)
+  reproduces `user_type_apply_rust` at lowering: `format!("user_{}::<{}>", name, args…)` —
+  carried as the total `StructLit.rust_type` string, so emit decides nothing. The `[T]`-field
+  builtin (`copy.items.push(item)`) routes via the Phase-9 builtin shape unchanged (the Field
+  receiver `copy.items` is `tir_recv_jet_ty == None` → list/default branch, exactly the AST).
+  The `copy := s` generic-struct clone is the Phase-6 sema-inserted `.clone()`. `26_generic_types`
+  `make_pair`/`empty_stack`/`push` route, byte-identical, and run (`1`/`42`).
+- **Generic-struct METHODS stay EXCLUDED — a separate deferred surface.** Admitting a
+  generic struct as a covered VALUE type makes `is_covered_struct_ty("Box")` true, which would
+  let `tir_covers_method`/`tir_covers_trait_method` claim a method on a generic struct
+  (`impl<T> user_<T>`). A probe showed such a method emits byte-identically, but the `impl<T>`
+  clause + turbofish receiver aren't validated across every method shape (view returns,
+  generic-struct method args, etc.), so a new `struct_is_generic` (a struct with a type-var
+  field) excludes it from both method gates — conservative (exclude on any doubt). Generic
+  *methods* are the remaining generic residue.
+- **FOREIGN (imported user) structs are a value-type widening + the `import_ns` head resolved
+  at lowering.** A foreign struct/enum (in `cx.foreign_types`) is now a covered value type
+  (`is_covered_foreign_value_ty` — it renders via `cx.rust_type` to `{root}{mod}::user_<Name>`,
+  and a field read on it mangles `(n).user_title` exactly as `mangle` produces). Construction
+  `alias.Note { … }` (`import_ns`) reproduces `emit_struct_lit`'s `import_ns` branch:
+  `{root}{import_mods[alias]}::{mangle(Note)}[::<args>]` with MANGLED fields — resolved at
+  lowering into the total `StructLit.rust_type`. No example exercises this (verified via a
+  crafted 2-file module: `make` + `main` route, byte-identical, runs `hello`). FOREIGN ENUM
+  *construction* has no reachable cross-module literal syntax (`note.Color.Red` is E0107), so
+  foreign enums are covered as value types only. A borrowed-String foreign struct-lit field
+  hits the SAME pre-existing E0507 bug as a local struct (latent bug #7) — parity holds, the
+  literal-field case works end-to-end.
+- **`Stopwatch.elapsed_millis()` is a Phase-9-style `recv_type == None` builtin gap.** Sema
+  types it via `Collections::stopwatch_method_return` (leaving `recv_type == None`, NOT the
+  `Some(<handle>)` of the Phase-13 handle shape), and the AST `emit_builtin_method` dispatches
+  it on the method NAME alone. A new gate shape (d2) — `recv_type == None` + the
+  `elapsed_millis` name + an in-subset `Stopwatch` value receiver (from the covered
+  `time.start` producer) — lowers to the existing `THandleOp::StopwatchElapsedMillis`
+  (`{root}jet_stopwatch_elapsed_millis(&(recv))`), byte-for-byte. Verified byte-identical +
+  runs.
+- **The arena/region surface is six coupled pieces, all byte-exact and total.** (1) The
+  PRODUCER `mem.Arena.new(…)` — a MethodCall with `recv_type == Some(<Alloc>)` (the receiver
+  `mem.Arena` is typed `Named(Arena)` via `infer_core_field`, then `.new()` dispatches through
+  `alloc_method_return`), claimed by a new shape (k) tried FIRST (before the handle shape,
+  mirroring `emit_method_call`'s constructor-first dispatch); the whole ctor tail
+  (`jet_mem::Jet<Alloc>::new()` / `::with_capacity|with_slots|with_size((arg) as usize)`) is
+  rendered at lowering into `TExprKind::AllocNew { ctor }`. (2) `alloc`/`reset`/`free` handle
+  methods (`recv_type == Some(<Alloc>)`) — new `THandleOp::{AllocAlloc,AllocReset,AllocFree}`
+  (`(recv).alloc(a0)` / `(recv).reset()` / `drop(recv)`); `alloc`'s result type is the arg's
+  total `ty` (sema's `__alloc_infer__` sentinel resolved from the lowered arg, never
+  re-inferred — I3). (3) The ARENA BINDING already forced `let mut` via the TIR `Let`'s
+  `is_file_handle` set (Phase 13). (4) The `arena_view` BINDING (`x @= arena.alloc(v)`) —
+  `emit_let`'s `arena_view` branch reproduced: `let <x> = <init>;` (NO type, NEVER `let mut`)
+  with a DEREF'd slot place `(*<x>)`, so view reads emit `(*user_x)`. (5) `region r { … }` →
+  `TStmt::Region` (a plain block, body leaks into the outer scope like comptime-if/unsafe).
+  (6) `#Context(allocator: …) { … }` → `TStmt::ContextBlock` (an `_ctx_guard_<i> =
+  jet_mem::jet_ctx_push_alloc(&v)` per `allocator` field / `_ctx_logger_<i> = v` per other
+  field, then the leaky body). **I1 holds:** the arena `unsafe` lives ENTIRELY in the vetted
+  `jet_mem` prelude (untouched, excluded from the I1 scan) — the TIR-path `main` of all three
+  examples emits ZERO `unsafe`. `70_arena`/`75_arena_regions`/`77_smart_context` all route,
+  byte-identical, and run end-to-end.
+- **The bare `?? return` inventory entry was stale — it already routes.** `x ?? return` (no
+  value) was claimed (in the AST-path inventory) not to route; in fact the gate's
+  `orfallback_rhs_in_subset → Return(None) => true` (an earlier phase) admits it, and it emits
+  byte-identically (`match … { None => return }`). The construct is unusable for an unrelated
+  sema/codegen reason (E0405 demands a return type, rustc E0069 then rejects `return;` in a
+  non-unit fn) — logged in the latent-bug list, NOT a TIR gap.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass on
+  `emit_func`/`emit_method`/`emit_trait_method` + the delegation hook) across the **entire
+  example suite** — 118 emittable, 0 differ — incl. the four Phase-19 example surfaces
+  (`26_generic_types` generic structs; `70_arena`/`75_arena_regions`/`77_smart_context`
+  arena/region/context) — plus crafted probes (a 2-file foreign-struct module, a Stopwatch
+  program, a generic-struct method that emits byte-identically but stays excluded by
+  `struct_is_generic`). A routing sentinel confirmed the covered fns take the TIR path
+  (`make_pair`/`empty_stack`/`push`/`main` in `26`; the three arena example `main`s; the
+  foreign `make`/`main`; the Stopwatch `main`). ~240 fn-routes across the suite now (was
+  ~218). tests/tir.rs adds `generic_struct_fns`/`foreign_struct_construction`/
+  `stopwatch_elapsed_millis`/`arena_alloc_reset_free`/`arena_region_block`/`smart_context_block`;
+  the TIR unit tests flip `rejects_generic_struct_fn`/`rejects_generic_struct_literal` →
+  `covers_*` and update `rejects_generic_method` (now excluded by `struct_is_generic`, not the
+  bare-name check) + `handle_method_op_table` (arena ops now covered).
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 18 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
+After Phase 19 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
 reached for these constructs. Each entry: the construct, the AST emit function that
-owns it, and the total fact still missing to cover it.
+owns it, and the total fact still missing to cover it. **After Phase 19 the inventory is
+down to: generic-type METHODS, polymorphic core specials, the `recv_type == None`
+Task/Channel/Sender handle methods, HttpRequest/HttpResponse accessors, recursive structs,
+and the latent-bug-gated constructs.** The big surfaces (generic structs, foreign types,
+arena/region, Stopwatch) are now COVERED.
 
-- **`core.mem` arena/alloc + `mem.set_allocator` + `#Context(allocator:)`** (residue
-  after Phase 18) — `emit_method_call`'s `alloc`/`reset`/`free` arms + `emit_method_call`'s
-  `mem.Arena.new()`/`mem.Bump.new()`/… constructor + `Stmt::ContextBlock`. Phase 18
-  covered the `#Unsafe`/`#Unsafe fn` gate surface and the `core.mem` POINTER ops
-  (`Ptr<T>.from_addr`/`address_of`/`volatile_read`). Still on the AST path: the four
-  ARENA allocators (`Arena`/`Bump`/`Pool`/`Fixed`) — their `mem.<A>.new()` constructor
-  is a bespoke `emit_method_call` shape (not in `core_fixed_sig`), and their handle
-  methods (`.alloc`/`.reset`/`.free`) carry `recv_type == Some(<allocator>)` but the
-  PRODUCER isn't a covered call (so they never bind in a covered fn — the Phase-13
-  `handle_method_op` already excludes them, and `is_subset_param_ty` does not admit an
-  `Arena`/`Bump`/`Pool`/`Fixed` value type). An `arena.alloc(v)` *view* binding
-  (`x :: …`, `arena_view`) is excluded by `stmt_in_subset`. `#Context(allocator: …)`
-  (`Stmt::ContextBlock`) and `region r { … }` (`Stmt::Region`) emit plain Rust blocks +
-  RAII guards — small bespoke shapes, deferred. (`70_arena`/`75_arena_regions`/
-  `77_smart_context` stay on the AST path — byte-identical, no regression.) The arena
-  `unsafe` lives entirely in the vetted `jet_mem` prelude (excluded from the I1 scan), so
-  none of these emit user `unsafe`.
-- **Generic STRUCT types/methods** (residue after Phase 17) — `emit_func`/`emit_method`
-  + `emit_struct_lit`'s turbofish branch. Phase 17 covered generic FREE functions whose
-  params/return are type vars or `[T]` lists (the `<T: Clone>` clause + by-value type-var
-  params are total TIR facts). Still on the AST path: a function whose param/return is a
-  generic STRUCT type (`Pair<T>` — a `Type::Apply`), a turbofish struct literal
-  (`user_Pair::<T> { … }`), a `[T]`-field builtin (`copy.items.push(item)` in `26`'s
-  `push`), and a generic-type *method* inside an `impl<T> user_<T>` block. Missing: covering
-  the `Type::Apply` generic-struct value type, the turbofish StructLit form, and the
-  generic-struct field-read/clone shape. (Example `26_generic_types` `make_pair`/
-  `empty_stack`/`push` stay on the AST path.) `view`-returning **trait** methods are also
-  still excluded (the trait-method gate keeps the `is_view_return` exclusion — conservative,
-  no example needs it).
+- **Generic-type METHODS** (residue after Phase 19) — `emit_method`/`emit_trait_method` for a
+  method inside an `impl<T> user_<T>` block. Phase 19 covered generic STRUCT free functions
+  (turbofish StructLit, `Type::Apply` params/returns, `[T]`-field builtins — `26_generic_types`
+  `make_pair`/`empty_stack`/`push`) and admits a generic struct as a covered VALUE type, but
+  a METHOD on a generic struct stays excluded by `struct_is_generic` (the `impl<T>` clause +
+  turbofish receiver aren't validated across every method shape). A probe showed such a method
+  emits byte-identically; lifting it needs validating the generic method gate end-to-end
+  (view returns, generic-struct method args). `view`-returning **trait** methods are ALSO
+  excluded, but for a DIFFERENT reason — they MISCOMPILE on both paths (`emit_trait_def`
+  drops `is_view_return` from the declared return → rustc E0053; see the latent-bug list),
+  so the trait-method gate keeps the `is_view_return` exclusion until that bug is fixed.
 - **Polymorphic core specials** `math.abs/min/max/clamp`, `random.pick/shuffle`,
   `io.input/io.eprint` — `emit_core_call` (their bespoke arms). Their return type
   depends on the ARG type, resolved by `infer_core_call`'s bespoke `check_core_call`
@@ -1223,14 +1315,15 @@ owns it, and the total fact still missing to cover it.
   DEFERRED in Phase 13** — the return type is not a total sema fact. (Note `io.input`
   IS in `core_fixed_sig` → `String?`, so it's covered by Phase 10 already; only
   `io.eprint` and the math/random specials remain here.)
-- **Handle-using methods that carry `recv_type == None`** (`Stopwatch.elapsed_millis`,
-  `Task.join/detach`, `Channel.receive/sender`, `Sender.send`) — these resolve via
-  `Collections::builtin_method_return` (`stopwatch_method_return`/`task_method_return`/
-  …), which leaves `recv_type == None` (NOT `Some`). They are a Phase-9-style builtin
-  gap, not the `recv_type == Some` handle shape Phase 13 covered. Only Stopwatch is
-  reachable in subset (`time.start` is covered; the Task/Channel/Sender producers
-  aren't). Missing: a Phase-9 `BuiltinMethod` op for `elapsed_millis` (+ `cx.root_prefix`
-  in emit). A clean follow-up.
+- **Handle-using methods that carry `recv_type == None`** (`Task.join/detach`,
+  `Channel.receive/sender`, `Sender.send`) — these resolve via
+  `Collections::builtin_method_return` (`task_method_return`/`channel_method_return`/…),
+  which leaves `recv_type == None` (NOT `Some`). They are a Phase-9-style builtin gap, not
+  the `recv_type == Some` handle shape Phase 13 covered. **`Stopwatch.elapsed_millis` is now
+  COVERED (Phase 19)** via a dedicated gate shape (d2). The remaining Task/Channel/Sender
+  methods are NOT reachable in subset (their producers — `tasks.channel`/`tasks.spawn`'s
+  Task result — aren't covered calls), so covering them needs the producer first. A clean
+  follow-up.
 - **HttpRequest/HttpResponse method accessors** (`req.method()`/`req.path()`/`.body()`/
   `.header()`/`.param()`/`resp.status()`/…) — these DO carry `recv_type == Some`, but
   arise ONLY as a `http.serve` lambda PARAMETER (`(req) => …`), whose slot type is
@@ -1240,21 +1333,17 @@ owns it, and the total fact still missing to cover it.
   call falls through. Covering them (selecting the op from `recv_type`) would DIVERGE.
   Excluded by `handle_method_op` (Phase 13). Unblocks once the serve-lambda param type
   is total, or by routing these via `recv_type` only when the slot type matches.
-- **The bare `?? return` fallback** (`x ?? return`, no value) — surfaced in Phase 13:
-  `fs.read(p) ?? return` (and any bare-`return` `??`) does NOT route, while `?? return
-  <value>` and `?? <value>` do. The exclusion is upstream of the `??` lowering (a
-  bare-return `OrFallback` apparently fails an earlier in-subset check); not chased.
-  Conservative — stays on the AST path. (NB: the `?? panic(…)` form IS covered — Phase 15.)
-- **Recursive (boxed) STRUCTS + FOREIGN (imported user) structs/enums** — the struct gate
-  (`struct_is_covered`) still excludes recursive structs (broken on the AST path — see
-  the latent-bug list; the TIR must not claim a miscompiling fn), and a foreign struct/enum
-  imported from another file-module (`cx.foreign_types` — a `user_<alias>::user_<Name>` head
-  whose construction needs the `import_ns` turbofish/namespace path, a Phase-14 surface).
-  (c109 Phase 16 covered string/struct/collection-payload enums + recursive *enums* +
-  collection struct fields; Phase 17 covered the constructable PRELUDE structs
-  HttpRequest/HttpResponse + core/prelude/handle types as value param/return/local types.)
-  Missing for the residue: the `Box::new(…)` struct-lit-field wrap (an AST-path bug to fix
-  first), and foreign (cross-module) struct/enum construction (`import_ns`).
+- **Recursive (boxed) STRUCTS** — the struct gate (`struct_is_covered`) still excludes
+  recursive structs (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)`
+  field wrap → rustc E0308; see the latent-bug list; the TIR must not claim a miscompiling
+  fn). **FOREIGN (imported user) STRUCTS are now COVERED (Phase 19)** — a `cx.foreign_types`
+  struct is a covered value type and `alias.Note { … }` construction reproduces
+  `emit_struct_lit`'s `import_ns` head at lowering. Foreign ENUMS are covered as value types,
+  but foreign-enum CONSTRUCTION has no reachable cross-module literal syntax (`note.Color.Red`
+  is E0107 — there's nothing to lower). Missing for the recursive-struct residue: the
+  `Box::new(…)` struct-lit-field wrap (an AST-path bug to fix first).
+  (NB: the `?? panic(…)` form IS covered — Phase 15; a bare `?? return` (no value) ALREADY
+  routes but is unusable for a sema/codegen reason — see the latent-bug list.)
 - **Latent-bug-gated constructs** (`is_empty`, no-arg `join()`, `mut self`/`view self`
   reassignment) — excluded because they MISCOMPILE on both paths today (see the
   latent-bug list); the TIR must not *claim* a function that miscompiles. These unblock
@@ -1284,6 +1373,7 @@ owns it, and the total fact still missing to cover it.
 | 16 | Payload-carrying & recursive types: string/struct/collection-payload enums, recursive (boxed) enums, collection struct fields | ✅ done (c109 Phase 16) — +17 example fns route (201 → 218). Covers: **string/struct/collection-payload enums** (a variant payload may be String, a covered struct, a covered collection, or another covered enum) — the per-arg borrowed-`.clone()` + `Box::new(…)` decisions of `emit_boxed_enum_arg` are now a TOTAL fact (`TEnumArg { value, clone, boxed }`) resolved at lowering, byte-for-byte. **Recursive (boxed) enums** (linked-list / expr-AST) — the enum gate's `seen` set now ADMITS a self-reference, and the only box-related emit decision is the `Box::new(…)` at construction (Rust auto-derefs the `Box` at every read/match site, so no deref node is needed). **Collection struct fields** (`field_ty_covered` admits `[E]`/`[K, V]`) and **collection enum payloads**. The construction routes through a NEW variant-construction `MethodCall` shape (shape (j)) — a payload variant never becomes an `Expr::EnumLit` node (parser → `Field`/`MethodCall`; sema type-checks in place without rewriting), so the AST `emit_method_call`→`emit_enum_lit` path is reproduced. Excludes (stay on AST path, with reason): **recursive STRUCTS** (broken on the AST path — `emit_struct_lit` omits the `Box::new(…)` field wrap → rustc E0308; a latent I2 hole logged in the bug list; the TIR must not claim a miscompiling fn); **generic** & **foreign/prelude** types; **`view`-returning** methods (borrow lowering) — all deferred to a later phase. |
 | 17 | Generics, foreign/prelude types, view-returning methods | ✅ done (c109 Phase 17, partial) — covers three independent surfaces. **`view`-returning functions/methods** (`-> view T` borrow): `emit_view_return` reproduced as a total `TStmt::ViewReturn { value, wrap }` (`wrap ∈ {Addr, Bare}` resolved at lowering from the AST node shape), `TFunc.is_view` drives `rust_return_type → &T`, the `view_return` flag rides `LowerEnv` (threaded through `clone_env`/`fork_panic`). `35_zerocopy` `name_of` routes. **Generic FREE functions** whose params/return are type vars (`<T: Clone>` clause rendered at lowering into `TFunc.generics` via `Generics::rust_type_param_list` + `rust_extra_clone_bounds`; a type-var param admitted by `is_subset_param_ty`, forced `Move` for the slot deref via `param_place_generic` — EXACTLY `emit_func`'s `is_type_param`) or `[T]` lists (`collection_elem_covered` admits a type var). **Constructable PRELUDE structs** (HttpRequest/HttpResponse): `emit_struct_lit`'s `is_prelude_struct` branch (`Jet…` head, PLAIN fields, HttpRequest's injected `params` field) reproduced via a total `StructLit { …, extra: Option<String> }`; the core/prelude/handle types (ProcessResult/Json/Stopwatch/FileReader/TcpStream/Arena/…) admitted as covered VALUE types (`is_covered_foreign_value_ty`). Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (view field accessor, `id`/`pick`/`firstof`/`wrap` generics, `build_resp`/`build_req` prelude construction). 206 free fns route through `emit_func`. tests/tir.rs adds `generic_free_fns`/`view_return_fn`/`prelude_struct_construction`; unit tests flip `rejects_generic_fn` → `covers_generic_fn` + add `rejects_generic_struct_fn`. Excludes (stay on AST path, with reason): **generic STRUCT types/methods** (`Pair<T>` `Type::Apply` value type, turbofish `user_Pair::<T> { … }`, `[T]`-field builtins, generic-type methods — `26_generic_types` `make_pair`/`empty_stack`/`push`); **FOREIGN (imported user) structs/enums** (cross-module `import_ns` construction — Phase 14 surface); **`view`-returning trait methods** (gate keeps the exclusion — conservative); recursive STRUCTS, latent-bug-gated constructs, and the remaining inventory entries (polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse method accessors, `@unsafe`/`#Unsafe`/`core.mem`). |
 | 18 | @unsafe / #Unsafe / core.mem pointer tier | ✅ done (c109 Phase 18) — covers the audited expert low-level tier. **`#Unsafe fn`** (S58, E2-M13/D-LL1): a function-level `unsafe` — the `unsafe ` keyword prefixes the signature (`{vis}{unsafe_kw}fn` / `pub {unsafe_kw}fn` / trait-method `{unsafe_kw}fn`), body unchanged — carried as `TFunc.is_unsafe` (the three gates' `f.is_unsafe` exclusion LIFTED; `TFuncKind::TraitMethod` already carried it since Phase 12). **`#Unsafe { … }`** audited region (`Stmt::Unsafe`): lowers to `unsafe { … }` (`TStmt::Unsafe`), the `#Audit("…")` annotation emits NOTHING; body `let`s leak into the outer scope (lowered/gated on the SAME env/locals, like comptime-if). **`core.mem` POINTER ops**: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr` → `TExprKind::PtrFromAddr`, total `elem`, safe cast `(({addr}) as usize as *mut {T})`, no `unsafe`); `mem.address_of(x)` → `Int` (`(&(x) as *const _ as usize as i64)`); `mem.volatile_read(p)` → `ptr_elem(p.ty)` (`std::ptr::read_volatile(p)`) — both NOT in `core_fixed_sig` but deterministic, admitted by `core_call_covered` with the return type special-cased at lowering. **I1 holds:** every emitted `unsafe` is a gated form (`unsafe fn` / `unsafe {`) tied 1:1 to a source `#Unsafe`/`#Unsafe fn` gate — verified by grepping the TIR-path Rust (drop the vetted `jet_mem` prelude). Byte-identical across the whole example suite (118 emittable, 0 differ) incl. both `#Unsafe`-tier examples (`48_lowlevel` + `showcase/lowlevel`), which run end-to-end. +4 example fns route (`read_reg`/`main`, `read_int`/`main`). tests/tir.rs adds `unsafe_fn_block_and_ptr_ops` + `unsafe_tier_emit_is_byte_exact`; unit tests add `covers_unsafe_fn_with_ptr_ops` / `covers_unsafe_block_and_address_of`. Excludes (stay on AST path, with reason): **`core.mem` ARENA allocators** (`Arena`/`Bump`/`Pool`/`Fixed` — `mem.<A>.new()` producer + `.alloc`/`.reset`/`.free` handle methods + `arena_view` bindings; their `unsafe` is vetted-`jet_mem`-only) and **`#Context(allocator:)`** / **`region r { … }`** (plain-block + RAII-guard emit) — a clean follow-up; plus the prior inventory residue (generic structs, polymorphic core specials, `recv_type == None` handle methods, HttpRequest/HttpResponse accessors, recursive/foreign structs, latent-bug-gated constructs). |
+| 19 | Generic structs, foreign types, arena/region, Stopwatch | ✅ done (c109 Phase 19) — covers the UNBLOCKED inventory residue. **Generic STRUCTS** (free functions): a type-var struct field admitted by `field_ty_covered`; a `Type::Apply` (`Pair<T>`/`Stack<Int>`) param/return/local admitted by `is_covered_generic_struct_ty`; the turbofish StructLit (`user_Pair::<T> { … }`) + foreign `import_ns` head resolved at lowering into the total `StructLit.rust_type`; the `[T]`-field builtin routes via the Phase-9 shape unchanged. `26_generic_types` `make_pair`/`empty_stack`/`push` route. **FOREIGN (imported user) structs** as covered value types (`cx.foreign_types` → `{root}{mod}::user_<Name>` via `cx.rust_type`) + `alias.Note { … }` construction (`emit_struct_lit`'s `import_ns` branch reproduced); foreign enums covered as value types (construction has no reachable literal syntax). **`Stopwatch.elapsed_millis()`** — a `recv_type == None` builtin gap (gate shape d2 → `THandleOp::StopwatchElapsedMillis`). **Arena/region/context**: the `mem.<Alloc>.new()` producer (`TExprKind::AllocNew`, ctor tail rendered at lowering, claimed FIRST mirroring `emit_method_call`); `alloc`/`reset`/`free` handle methods (`THandleOp::{AllocAlloc,AllocReset,AllocFree}`); the `arena_view` binding (`let <x> = …;` no-type/no-mut + deref'd slot); `region r { … }` (`TStmt::Region`, leaky block); `#Context(allocator:) { … }` (`TStmt::ContextBlock`, RAII guard + leaky body). `70_arena`/`75_arena_regions`/`77_smart_context` route. **I1 holds:** the arena `unsafe` lives entirely in the vetted `jet_mem` prelude — the TIR-path `main`s emit ZERO `unsafe`. Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes (2-file foreign module, Stopwatch, generic-struct method that emits byte-identically but stays excluded). ~240 fn-routes (was ~218). tests/tir.rs adds `generic_struct_fns`/`foreign_struct_construction`/`stopwatch_elapsed_millis`/`arena_alloc_reset_free`/`arena_region_block`/`smart_context_block`; unit tests flip `rejects_generic_struct_fn`/`rejects_generic_struct_literal` → `covers_*`, update `rejects_generic_method` (now via `struct_is_generic`) + `handle_method_op_table`. Excludes (stay on AST path, with reason): **generic-type METHODS** (`impl<T> user_<T>` — `struct_is_generic` excludes; conservative until validated end-to-end); **`view`-returning trait methods** (MISCOMPILE on both paths — `emit_trait_def` drops `is_view_return` → rustc E0053, a NEW latent bug); polymorphic core specials; Task/Channel/Sender `recv_type == None` methods (producers not covered); HttpRequest/HttpResponse accessors; recursive STRUCTS; latent-bug-gated constructs. |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
