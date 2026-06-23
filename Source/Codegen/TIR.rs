@@ -5220,14 +5220,31 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // resolving the receiver/collection string off the SAME node shape the
                 // AST path reads. `method_kind == None` is the plain `.iter()` form.
                 let (collection_str, method_kind) = lower_forin_collection(collection, cx, env);
+                // Infer the element type from the lowered collection so the loop
+                // variable binds with its concrete type. This lets `core_struct_field_rust_name`
+                // emit plain field names (not `user_<field>`) for core types like DirEntry.
+                let coll_elem_ty: Option<Type> = {
+                    let lowered_coll = lower_expr(collection, cx, env);
+                    match &lowered_coll.ty {
+                        Type::List(inner) => Some((**inner).clone()),
+                        Type::FixedList { elem, .. } => Some((**elem).clone()),
+                        // Map iteration: key type for single-binding form.
+                        Type::Map { key, .. } => Some((**key).clone()),
+                        _ => None,
+                    }
+                };
                 let mut branch = clone_env(env);
                 branch
                     .locals
-                    .insert(var.clone(), (mangle(var), None));
+                    .insert(var.clone(), (mangle(var), coll_elem_ty.clone()));
                 if let Some((v2, _)) = var2 {
+                    // Two-binding map form: v2 gets the value type.
+                    let v2_ty = match &coll_elem_ty {
+                        _ => None, // map value type is not tracked here; keep None for v2
+                    };
                     branch
                         .locals
-                        .insert(v2.clone(), (mangle(v2), None));
+                        .insert(v2.clone(), (mangle(v2), v2_ty));
                 }
                 TStmt::ForIn {
                     label: label_name(label),
@@ -7175,6 +7192,8 @@ fn core_struct_field_rust_name(recv_ty: &Type, member: &str) -> Option<String> {
             matches!(member, "line" | "message")
         }
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
+        // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
+        "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
         // E2-M10: HttpRequest / HttpResponse field access.
         "HttpRequest" | "HttpResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")

@@ -25,13 +25,12 @@ fn grep_dir(dir: String, pattern: String, show_line_nums: Bool) -> Bool {
     entries @= fs.list_dir(dir) ?? return false
     matched := false
     loop entry in entries {
-        full @= "{dir}/{entry}"
-        if fs.is_dir(full) {
-            if grep_dir(full, pattern, show_line_nums) {
+        if entry.is_dir {
+            if grep_dir(entry.path, pattern, show_line_nums) {
                 matched = true
             }
         } else {
-            if grep_file(full, pattern, show_line_nums) {
+            if grep_file(entry.path, pattern, show_line_nums) {
                 matched = true
             }
         }

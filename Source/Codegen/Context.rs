@@ -93,6 +93,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "ProcessResult" => Some("ProcessResult"),
         "Stopwatch" => Some("Stopwatch"),
         "Closed" => Some("Closed"),
+        // D-LSDIR1=A: fs.list_dir returns [DirEntry].
+        "DirEntry" => Some("DirEntry"),
         _ => None,
     }
 }

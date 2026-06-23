@@ -631,6 +631,26 @@ only; file handles and streaming are out of scope. Paths are `String` in M10.
 Binary APIs use `U8` and `[U8]`. Unknown items in a core module are **E1004**
 with a did-you-mean suggestion when possible.
 
+#### Directory listing — `fs.list_dir` (D-LSDIR1=A + C)
+
+`fs.list_dir(path) -> [DirEntry] ? IOError` returns one `DirEntry` value per
+entry in the directory, sorted by name. `DirEntry` has three readable fields:
+
+| Field    | Type   | Meaning                            |
+|----------|--------|------------------------------------|
+| `name`   | String | bare filename (no directory prefix) |
+| `path`   | String | full path (portable, OS-native sep) |
+| `is_dir` | Bool   | true when the entry is a directory  |
+
+The old bare-name return (`[String]`) is replaced. Any code that was
+building a full path manually (`"{dir}/{entry}"`) should switch to `entry.path`
+directly; use `entry.name` for the bare filename check (e.g. `entry.name.ends_with(".txt")`).
+
+`path.join(dir, name) -> String` (D-LSDIR1 option C) constructs a portable
+OS-native path from two pieces, for cases where experts need to compose paths
+independently of `DirEntry`. `core.path` also provides `.parent()`, `.extension()`,
+and `.normalize()`. Example: `examples/features/86_dir_entry.jet`.
+
 #### Sized numeric types (D-SG9/S42)
 
 `Int` and `Float` are the beginner defaults (64-bit: `Int` = `I64`, `Float` =

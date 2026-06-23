@@ -1,6 +1,6 @@
 # Plan: `fs.list_dir` full paths + path joining (D-LSDIR1)
 
-**Status: plan — awaiting owner decision D-LSDIR1.**
+**Status: DONE (D-LSDIR1=A+C, 2026-06-23). See examples/features/86_dir_entry.jet.**
 
 Unblocks: **Priya** (directory-scanning tool — the canonical beginner CLI task).
 

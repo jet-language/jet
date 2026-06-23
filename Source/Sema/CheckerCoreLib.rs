@@ -1016,6 +1016,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines"
+        // D-LSDIR1=A: directory entry value.
+        | "DirEntry"
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
@@ -1041,6 +1043,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         };
     }
     match (type_name, field) {
+        // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
+        ("DirEntry", "name" | "path") => Some(Type::String),
+        ("DirEntry", "is_dir") => Some(Type::Bool),
         ("ProcessResult", "code") => Some(Type::Int),
         ("ProcessResult", "output" | "errors") => Some(Type::String),
         // E2-M10: HTTP request fields exposed to handlers.
@@ -1405,7 +1410,6 @@ pub(crate) fn core_fixed_sig(
     let unit = unit_ty();
     let io = io_error_ty();
     let json = json_ty();
-    let list_string = Type::List(Box::new(Type::String));
     let list_u8 = Type::List(Box::new(u8_ty()));
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
@@ -1423,9 +1427,10 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
+        // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
         ("core.fs", "list_dir") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(list_string, io_error_ty())),
+            Some(result_ty(Type::List(Box::new(Type::Named("DirEntry".to_string()))), io_error_ty())),
         )),
         ("core.fs", "copy" | "rename") => Some((
             vec![(read, Type::String), (read, Type::String)],
