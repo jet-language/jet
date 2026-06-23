@@ -1173,6 +1173,22 @@ pub(crate) enum THandleOp {
     HttpRespField(&'static str),
     /// c109 Phase 20: HttpResponse `header(name)` → `(recv).headers.get(&a0).cloned()`.
     HttpRespHeader,
+    /// D-ARGS1: ArgsSpec `.flag(name, help)` → `(recv).flag(&a0, &a1)` → `JetArgsSpec`.
+    ArgsSpecFlag,
+    /// D-ARGS1: ArgsSpec `.option(name, help, meta)` → `(recv).option(&a0, &a1, &a2)` → `JetArgsSpec`.
+    ArgsSpecOption,
+    /// D-ARGS1: ArgsSpec `.positional(name, help)` → `(recv).positional(&a0, &a1)` → `JetArgsSpec`.
+    ArgsSpecPositional,
+    /// D-ARGS1: ArgsSpec `.help()` → `(recv).help()` → `String`.
+    ArgsSpecHelp,
+    /// D-ARGS1: ArgsSpec `.parse(argv)` → `{root}jet_args_parse(&(recv), &(a0))` → `Result<JetParsedArgs, String>`.
+    ArgsSpecParse,
+    /// D-ARGS1: ParsedArgs `.flag(name)` → `{root}jet_args_flag(&(recv), &(a0))` → `bool`.
+    ParsedArgsFlag,
+    /// D-ARGS1: ParsedArgs `.option(name)` → `{root}jet_args_option(&(recv), &(a0))` → `Option<String>`.
+    ParsedArgsOption,
+    /// D-ARGS1: ParsedArgs `.positional(n)` → `{root}jet_args_positional(&(recv), a0)` → `Option<String>`.
+    ParsedArgsPositional,
     /// c109 Phase 21: Task `join()` → `(recv).join()` (the no-arg `join` arm of
     /// `emit_builtin_method`, Source/Codegen/Expression.rs ~L967 — shared with the dead
     /// list no-arg join, but here it's the JetTask method). Returns the task's value `T`.
@@ -4403,6 +4419,16 @@ fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleO
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`
         // share identical Rust method names (the engines differ; the surface doesn't).
+        // D-ARGS1: ArgsSpec builder methods.
+        ("ArgsSpec", "flag", 2) => THandleOp::ArgsSpecFlag,
+        ("ArgsSpec", "option", 3) => THandleOp::ArgsSpecOption,
+        ("ArgsSpec", "positional", 2) => THandleOp::ArgsSpecPositional,
+        ("ArgsSpec", "help", 0) => THandleOp::ArgsSpecHelp,
+        ("ArgsSpec", "parse", 1) => THandleOp::ArgsSpecParse,
+        // D-ARGS1: ParsedArgs query methods.
+        ("ParsedArgs", "flag", 1) => THandleOp::ParsedArgsFlag,
+        ("ParsedArgs", "option", 1) => THandleOp::ParsedArgsOption,
+        ("ParsedArgs", "positional", 1) => THandleOp::ParsedArgsPositional,
         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
         ("Arena" | "Bump" | "Pool" | "Fixed", "free", 0) => THandleOp::AllocFree,
@@ -9749,6 +9775,33 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // value's prelude methods take `&self`, so the receiver is emitted plainly
                 // (Rust autoref); args are plain (raw `emit_expr`). `join` reuses the
                 // no-arg `join` arm (`(recv).join()`); `detach` drops the handle (D-DETACH1).
+                // D-ARGS1: ArgsSpec builder methods (consuming by value; builder is moved on each call).
+                THandleOp::ArgsSpecFlag => format!(
+                    "{}jet_args_flag({}, &({}), &({}))",
+                    root, recv, a(0), a(1)
+                ),
+                THandleOp::ArgsSpecOption => format!(
+                    "{}jet_args_option({}, &({}), &({}), &({}))",
+                    root, recv, a(0), a(1), a(2)
+                ),
+                THandleOp::ArgsSpecPositional => format!(
+                    "{}jet_args_positional({}, &({}), &({}))",
+                    root, recv, a(0), a(1)
+                ),
+                THandleOp::ArgsSpecHelp => format!("({}).help()", recv),
+                THandleOp::ArgsSpecParse => {
+                    format!("{}jet_args_parse(&({}), &({}))", root, recv, a(0))
+                }
+                // D-ARGS1: ParsedArgs query methods.
+                THandleOp::ParsedArgsFlag => {
+                    format!("{}jet_parsed_flag(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::ParsedArgsOption => {
+                    format!("{}jet_parsed_option(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::ParsedArgsPositional => {
+                    format!("{}jet_parsed_positional(&({}), {})", root, recv, a(0))
+                }
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("{{ let _detach = ({}); }}", recv),
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
@@ -9909,6 +9962,8 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
             arg(1)
         ),
         ("core.io", "args") => format!("{}()", helper("jet_std_io_args")),
+        // D-ARGS1: `args.spec()` → empty builder.
+        ("core.args", "spec") => format!("{}()", helper("jet_args_spec")),
         // c109 Phase 29: qualified `io.input(prompt)`, byte-for-byte `emit_core_call`
         // (Expression.rs ~L1294): no arg → `jet_std_io_input(None)`; a prompt arg →
         // `jet_std_io_input(Some(&(prompt)))`. Same emitted helper as the ambient bare
@@ -11031,6 +11086,15 @@ fn mk() {
         assert!(handle_method_op("HttpRequest", "param", 1).is_some());
         assert!(handle_method_op("HttpResponse", "status", 0).is_some());
         assert!(handle_method_op("HttpResponse", "body", 0).is_some());
+        // D-ARGS1: ArgsSpec builder and ParsedArgs query methods.
+        assert!(handle_method_op("ArgsSpec", "flag", 2).is_some());
+        assert!(handle_method_op("ArgsSpec", "option", 3).is_some());
+        assert!(handle_method_op("ArgsSpec", "positional", 2).is_some());
+        assert!(handle_method_op("ArgsSpec", "help", 0).is_some());
+        assert!(handle_method_op("ArgsSpec", "parse", 1).is_some());
+        assert!(handle_method_op("ParsedArgs", "flag", 1).is_some());
+        assert!(handle_method_op("ParsedArgs", "option", 1).is_some());
+        assert!(handle_method_op("ParsedArgs", "positional", 1).is_some());
         // Excluded: dead `lines` (E2502).
         assert!(handle_method_op("FileReader", "lines", 0).is_none());
         // Wrong arity declines.

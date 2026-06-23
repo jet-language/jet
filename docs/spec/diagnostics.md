@@ -292,6 +292,10 @@ before continuing.
 | E1003 | sema  | integer literal out of range for its width |
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |
+| E1301 | sema  | `ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity (D-ARGS1) |
+| E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
+| E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |
+| E1304 | sema  | `ArgsSpec.parse` called with wrong arity (D-ARGS1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
@@ -347,6 +351,19 @@ diagnostic plumbing (the C-FFI E3202 precedent: registered + honest about reach)
 | E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet upgrade`, or set `edition: "2026"` in `pkg.jet`. |
 | E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
 | L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
+
+## CLI arg-parsing diagnostics (D-ARGS1, `core.args`)
+
+`core.args` provides a declarative builder: `args.spec().flag(…).option(…).positional(…)`
+parsed against `io.args()` into a typed `ParsedArgs`. These errors fire when builder
+or query methods are called with the wrong number of arguments.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E1301 | `` `flag` expects 2 arguments (name, help), got N `` | `ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`; both the flag name and a one-line help string are required. | Pass exactly two strings: the flag name and a help description, e.g. `.flag("verbose", "enable verbose output")`. |
+| E1302 | `` `option` expects 3 arguments (name, help, metavar), got N `` | `ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`; all three strings are required. | Pass three strings: the option name, a help description, and a placeholder like `FILE`, e.g. `.option("output", "write to FILE", "FILE")`. |
+| E1303 | `` `positional` expects 2 arguments (name, help), got N `` | `ArgsSpec.positional(name, help)` registers a required positional argument; both name and help are required. | Pass exactly two strings: the positional name and a help description, e.g. `.positional("input", "file to process")`. |
+| E1304 | `` `parse` expects 1 argument (argv), got N `` | `ArgsSpec.parse(argv)` parses a `[String]` against the spec; pass exactly the argv list. | Pass exactly one argument: the argv list, e.g. `spec.parse(io.args())`. |
 
 ## Command-line diagnostics (E2-M3)
 

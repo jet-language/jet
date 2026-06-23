@@ -1456,3 +1456,208 @@ fn jet_http_serve_router(addr: &String, router: JetHttpRouter) {
 fn jet_http_request_param(req: &JetHttpRequest, name: &String) -> Option<String> {
     req.params.get(name.as_str()).cloned()
 }
+
+// ── D-ARGS1: declarative CLI arg parsing (ratified 2026-06-22) ───────────────
+// The builder accumulates a spec; `jet_args_parse` runs it against an argv
+// list, producing `ParsedArgs` or an error string (never exits — the caller
+// decides what to print and how to exit, which keeps the API testable).
+//
+// Design: builder methods take the spec BY VALUE and return a new one —
+// ownership-safe, no aliasing, works with both immutable (@=) and mutable
+// (:=) bindings in Jet. The parse result is cloneable.
+//
+// `--help` is recognized but NOT parsed out of argv here; the caller tests
+// `parsed.flag("help")` if they want to handle it. The auto-generated help
+// text is available via `spec.help()` and `spec.help_auto()`.
+
+/// A single entry in the spec.
+#[derive(Clone)]
+enum JetArgKind {
+    /// Boolean flag: `--name` sets it to true.
+    Flag { name: String, help: String },
+    /// Value option: `--name VALUE` captures VALUE.
+    Option { name: String, help: String, meta: String },
+    /// Positional argument (in declaration order).
+    Positional { name: String, help: String },
+}
+
+/// The builder. All methods consume self and return a new spec (builder pattern).
+#[derive(Clone)]
+struct JetArgsSpec {
+    entries: Vec<JetArgKind>,
+    prog: String,
+}
+
+/// The parse result.
+#[derive(Clone)]
+struct JetParsedArgs {
+    flags: std::collections::HashMap<String, bool>,
+    options: std::collections::HashMap<String, String>,
+    positionals: Vec<String>,
+}
+
+impl JetArgsSpec {
+    /// Render the generated --help text.
+    fn help(&self) -> String {
+        let mut s = String::new();
+        // usage line
+        let prog = if self.prog.is_empty() { "program".to_string() } else { self.prog.clone() };
+        let has_opts = self.entries.iter().any(|e| matches!(e, JetArgKind::Flag { .. } | JetArgKind::Option { .. }));
+        let positionals: Vec<&JetArgKind> = self.entries.iter().filter(|e| matches!(e, JetArgKind::Positional { .. })).collect();
+        s.push_str("Usage: ");
+        s.push_str(&prog);
+        if has_opts { s.push_str(" [options]"); }
+        for p in &positionals {
+            if let JetArgKind::Positional { name, .. } = p {
+                s.push(' ');
+                s.push_str(name);
+            }
+        }
+        s.push('\n');
+        // flags and options
+        let flags_opts: Vec<&JetArgKind> = self.entries.iter().filter(|e| !matches!(e, JetArgKind::Positional { .. })).collect();
+        if !flags_opts.is_empty() {
+            s.push('\n');
+            s.push_str("Options:\n");
+            for e in flags_opts {
+                match e {
+                    JetArgKind::Flag { name, help } => {
+                        s.push_str(&format!("  --{:<20} {}\n", name, help));
+                    }
+                    JetArgKind::Option { name, help, meta } => {
+                        s.push_str(&format!("  --{} {:<16} {}\n", name, meta, help));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // positionals
+        if !positionals.is_empty() {
+            s.push('\n');
+            s.push_str("Arguments:\n");
+            for p in positionals {
+                if let JetArgKind::Positional { name, help } = p {
+                    s.push_str(&format!("  {:<22} {}\n", name, help));
+                }
+            }
+        }
+        s
+    }
+}
+
+fn jet_args_spec() -> JetArgsSpec {
+    // argv[0] is the program name — capture it from env at spec-creation time.
+    let prog = std::env::args().next().unwrap_or_default();
+    JetArgsSpec { entries: Vec::new(), prog }
+}
+
+fn jet_args_flag(mut spec: JetArgsSpec, name: &String, help: &String) -> JetArgsSpec {
+    spec.entries.push(JetArgKind::Flag { name: name.clone(), help: help.clone() });
+    spec
+}
+
+fn jet_args_option(mut spec: JetArgsSpec, name: &String, help: &String, meta: &String) -> JetArgsSpec {
+    spec.entries.push(JetArgKind::Option { name: name.clone(), help: help.clone(), meta: meta.clone() });
+    spec
+}
+
+fn jet_args_positional(mut spec: JetArgsSpec, name: &String, help: &String) -> JetArgsSpec {
+    spec.entries.push(JetArgKind::Positional { name: name.clone(), help: help.clone() });
+    spec
+}
+
+/// Parse argv against the spec. Returns `Err(message)` on unknown flags/options
+/// or missing required positionals. `argv[0]` (the program name) is skipped.
+fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArgs, String> {
+    let mut flags: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut options: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut positionals: Vec<String> = Vec::new();
+
+    // Seed all flags as false (so .flag("name") returns false when absent).
+    for e in &spec.entries {
+        if let JetArgKind::Flag { name, .. } = e {
+            flags.insert(name.clone(), false);
+        }
+    }
+
+    // Build fast lookup sets.
+    let flag_names: std::collections::HashSet<String> = spec.entries.iter()
+        .filter_map(|e| if let JetArgKind::Flag { name, .. } = e { Some(name.clone()) } else { None })
+        .collect();
+    let option_names: std::collections::HashSet<String> = spec.entries.iter()
+        .filter_map(|e| if let JetArgKind::Option { name, .. } = e { Some(name.clone()) } else { None })
+        .collect();
+
+    let mut i = 1usize; // skip argv[0]
+    while i < argv.len() {
+        let arg = &argv[i];
+        if arg == "--" {
+            i += 1;
+            // Everything after `--` is positional.
+            while i < argv.len() {
+                positionals.push(argv[i].clone());
+                i += 1;
+            }
+            break;
+        }
+        if let Some(rest) = arg.strip_prefix("--") {
+            // Try `--name=value` form.
+            if let Some(eq) = rest.find('=') {
+                let name = &rest[..eq];
+                let val = &rest[eq + 1..];
+                if option_names.contains(name) {
+                    options.insert(name.to_string(), val.to_string());
+                } else if flag_names.contains(name) {
+                    return Err(format!("--{} is a flag; it takes no value (got `={}`)\n\n{}", name, val, spec.help()));
+                } else {
+                    return Err(format!("unknown option `--{}`\n\n{}", name, spec.help()));
+                }
+            } else if flag_names.contains(rest) {
+                flags.insert(rest.to_string(), true);
+            } else if option_names.contains(rest) {
+                i += 1;
+                if i >= argv.len() {
+                    return Err(format!("`--{}` requires a value\n\n{}", rest, spec.help()));
+                }
+                options.insert(rest.to_string(), argv[i].clone());
+            } else {
+                return Err(format!("unknown option `--{}`\n\n{}", rest, spec.help()));
+            }
+        } else {
+            positionals.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    // Check required positionals.
+    let required_count = spec.entries.iter().filter(|e| matches!(e, JetArgKind::Positional { .. })).count();
+    if positionals.len() < required_count {
+        let missing: Vec<&str> = spec.entries.iter()
+            .filter_map(|e| if let JetArgKind::Positional { name, .. } = e { Some(name.as_str()) } else { None })
+            .skip(positionals.len())
+            .collect();
+        return Err(format!("missing required argument{}: {}\n\n{}", if missing.len() == 1 { "" } else { "s" }, missing.join(", "), spec.help()));
+    }
+
+    Ok(JetParsedArgs { flags, options, positionals })
+}
+
+fn jet_parsed_flag(parsed: &JetParsedArgs, name: &String) -> bool {
+    *parsed.flags.get(name.as_str()).unwrap_or(&false)
+}
+
+fn jet_parsed_option(parsed: &JetParsedArgs, name: &String) -> Option<String> {
+    parsed.options.get(name.as_str()).cloned()
+}
+
+fn jet_parsed_positional(parsed: &JetParsedArgs, idx: i64) -> Option<String> {
+    if idx < 0 { return None; }
+    parsed.positionals.get(idx as usize).cloned()
+}
+
+impl JetShow for JetArgsSpec {
+    fn jet_show(&self) -> String { format!("ArgsSpec({})", self.entries.len()) }
+}
+impl JetShow for JetParsedArgs {
+    fn jet_show(&self) -> String { format!("ParsedArgs(flags={}, options={}, positionals={})", self.flags.len(), self.options.len(), self.positionals.len()) }
+}
