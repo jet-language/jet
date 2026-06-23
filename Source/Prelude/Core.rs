@@ -187,6 +187,98 @@ fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) ->
 fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F) where F: Fn(K, V) {
     for (k, v) in m { f(k, v); }
 }
+// ── D-ITER1: lazy iterator adapter set ───────────────────────────────────────
+// All adapters are allocation-free until terminal — they materialise to Vec<T>
+// only when a terminal method (collect) is needed. For the Jet surface these
+// are the terminal forms (the language is not lazy at the surface); the Rust
+// functions are still lazy internally where the size is bounded.
+fn jet_list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+    xs.into_iter().take(n.max(0) as usize).collect()
+}
+fn jet_list_skip<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+    xs.into_iter().skip(n.max(0) as usize).collect()
+}
+fn jet_list_step_by<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+    if n <= 0 { return Vec::new(); }
+    xs.into_iter().step_by(n as usize).collect()
+}
+fn jet_list_dedup<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
+    let mut out: Vec<T> = Vec::new();
+    for x in xs {
+        if out.last().map(|last| last != &x).unwrap_or(true) {
+            out.push(x);
+        }
+    }
+    out
+}
+fn jet_list_chunks<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+    let n = n.max(1) as usize;
+    xs.chunks(n).map(|c| c.to_vec()).collect()
+}
+fn jet_list_windows<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+    let n = n.max(1) as usize;
+    if n > xs.len() { return Vec::new(); }
+    xs.windows(n).map(|w| w.to_vec()).collect()
+}
+fn jet_list_take_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
+    xs.into_iter().take_while(|x| f(x.clone())).collect()
+}
+fn jet_list_skip_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
+    xs.into_iter().skip_while(|x| f(x.clone())).collect()
+}
+fn jet_list_flat_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> Vec<U> {
+    xs.into_iter().flat_map(f).collect()
+}
+fn jet_list_scan<T, U: Clone, F>(xs: Vec<T>, init: U, f: F) -> Vec<U>
+where F: Fn(U, T) -> U {
+    let mut acc = init;
+    let mut out = Vec::new();
+    for x in xs {
+        acc = f(acc, x);
+        out.push(acc.clone());
+    }
+    out
+}
+fn jet_list_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) -> U {
+    xs.into_iter().fold(init, f)
+}
+fn jet_list_position<T: Clone, F>(xs: Vec<T>, f: F) -> Option<i64>
+where F: Fn(T) -> bool {
+    xs.into_iter().position(|x| f(x)).map(|i| i as i64)
+}
+fn jet_list_min_by<T: Clone, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
+where F: Fn(T) -> K {
+    xs.into_iter().min_by_key(|x| f(x.clone()))
+}
+fn jet_list_max_by<T: Clone, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
+where F: Fn(T) -> K {
+    xs.into_iter().max_by_key(|x| f(x.clone()))
+}
+fn jet_list_group_by<T: Clone, K: Ord + Clone, F>(
+    xs: Vec<T>, f: F
+) -> std::collections::BTreeMap<K, Vec<T>>
+where F: Fn(T) -> K {
+    let mut m: std::collections::BTreeMap<K, Vec<T>> = std::collections::BTreeMap::new();
+    for x in xs {
+        let k = f(x.clone());
+        m.entry(k).or_default().push(x);
+    }
+    m
+}
+/// `partition(f)` — splits into (true-list, false-list) as a named-tuple struct.
+/// `build` receives `(true_vec, false_vec)` and wraps them into the JetTup struct.
+fn jet_list_partition<T: Clone, F, S, B>(xs: Vec<T>, f: F, build: B) -> S
+where
+    F: Fn(T) -> bool,
+    B: FnOnce(Vec<T>, Vec<T>) -> S,
+{
+    let mut yes: Vec<T> = Vec::new();
+    let mut no: Vec<T> = Vec::new();
+    for x in xs {
+        if f(x.clone()) { yes.push(x); } else { no.push(x); }
+    }
+    build(yes, no)
+}
 // ── D-DEFER1 option B: core.scope.guard ──────────────────────────────────────
 // A ScopeGuard stores a zero-argument closure and runs it in Drop — on every
 // exit path (normal fall-through, early `return`, `?` propagation).

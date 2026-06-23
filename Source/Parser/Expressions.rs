@@ -98,6 +98,13 @@ impl<'a> Parser<'a> {
             self.emit_numeric_field_error(span);
             return Ok(("0".to_string(), span));
         }
+        // D-ITER1: `take` is `KwMove` in the lexer but is valid as a method name
+        // in dot position (`xs.take(n)`). Accept it as an identifier here.
+        if matches!(self.peek().kind, TokKind::KwMove) {
+            let span = self.peek().span;
+            self.bump();
+            return Ok((Syntax::KW_MOVE.to_string(), span));
+        }
         self.expect_ident("after `.`")
     }
 

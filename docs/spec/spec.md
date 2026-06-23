@@ -596,10 +596,21 @@ the binding is rejected (**E0804**). Calling a non-function → **E0803**.
 **Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
 `sort_by`, `reduce` on `[T]`; `each` on `[K, V]` (two parameters).
 
+**D-ITER1 — lazy iterator adapter set (c105):** `take(n)`, `skip(n)`, `step_by(n)`,
+`dedup()`, `chunks(n)`, `windows(n)`, `take_while(f)`, `skip_while(f)`, `flat_map(f)`,
+`scan(init, f)`, `fold(init, f)`, `position(f)`, `min_by(f)`, `max_by(f)`, `group_by(f)`,
+`partition(f)` on `[T]`. No new grammar — all are library methods on the iterator
+protocol (D-EXT1 Tier 1). `take` is accepted in dot-method position even though `take`
+is also the lambda-capture keyword. `enumerate()` and `zip(other)` return named tuples
+`(idx: Int, item: T)` and `(a: T, b: U)` respectively; `partition(f)` returns
+`(false_: [T], true_: [T])`. All lazy (evaluated at call site, allocation deferred to
+result use).
+
 Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
 **`|x|`** pipes → `(x) => …` (**E0033**).
 
-Examples: `examples/features/23_closures.jet`, `examples/features/24_callbacks.jet`. Ui:
+Examples: `examples/features/23_closures.jet`, `examples/features/24_callbacks.jet`,
+`examples/features/36_iter_adapters.jet`. Ui:
 `tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
 E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 `tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`

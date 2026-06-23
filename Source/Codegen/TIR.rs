@@ -924,6 +924,27 @@ pub(crate) enum TClosureOp {
     SortBy,
     /// `reduce` — `jet_list_reduce((recv).clone(), seed, f)`.
     Reduce,
+    // D-ITER1: lazy adapter closure methods.
+    /// `take_while(f)` — `jet_list_take_while((recv).clone(), f)`.
+    TakeWhile,
+    /// `skip_while(f)` — `jet_list_skip_while((recv).clone(), f)`.
+    SkipWhile,
+    /// `flat_map(f)` — `jet_list_flat_map((recv).clone(), f)`.
+    FlatMap,
+    /// `scan(seed, f)` — `jet_list_scan((recv).clone(), seed, f)`.
+    Scan,
+    /// `position(f)` — `jet_list_position((recv).clone(), f)`.
+    Position,
+    /// `min_by(f)` — `jet_list_min_by((recv).clone(), f)`.
+    MinBy,
+    /// `max_by(f)` — `jet_list_max_by((recv).clone(), f)`.
+    MaxBy,
+    /// `fold(init, f)` — `jet_list_fold((recv).clone(), init, f)`.
+    Fold,
+    /// `group_by(f)` — `jet_list_group_by((recv).clone(), f)`.
+    GroupBy,
+    /// `partition(f)` — inline emit; struct name embedded. `TupleStruct` is `JetTup_<hash>`.
+    Partition { tuple_struct: String },
 }
 
 /// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
@@ -1085,6 +1106,24 @@ pub(crate) enum TBuiltinOp {
     /// flatten()`. The `Match` renders to `Vec<Option<String>>`; `group` is plain
     /// indexing into it (the result is `String?`).
     MatchGroup,
+    // D-ITER1: non-closure lazy adapters.
+    /// `take(n)` → `jet_list_take((recv).clone(), a0)`.
+    Take,
+    /// `skip(n)` → `jet_list_skip((recv).clone(), a0)`.
+    Skip,
+    /// `step_by(n)` → `jet_list_step_by((recv).clone(), a0)`.
+    StepBy,
+    /// `dedup()` → `jet_list_dedup((recv).clone())`.
+    Dedup,
+    /// `chunks(n)` → `jet_list_chunks((recv).clone(), a0)`.
+    Chunks,
+    /// `windows(n)` → `jet_list_windows((recv).clone(), a0)`.
+    Windows,
+    /// `enumerate()` → inline emit building `JetTup_<hash>` struct. The struct name
+    /// is embedded here at lowering so emit is a pure formatter.
+    Enumerate { tuple_struct: String },
+    /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
+    Zip { tuple_struct: String },
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
@@ -3876,6 +3915,11 @@ fn is_intercepted_method_name(method: &str) -> bool {
         | "to_lower" | "repeat" | "slice" | "keys" | "values" | "contains_key"
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
         | "sort_by" | "reduce"
+        // D-ITER1: lazy iterator adapters.
+        | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
+        | "enumerate" | "zip"
+        | "take_while" | "skip_while" | "flat_map" | "scan"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "partition"
         // Numeric predicates / bit ops / width conversions (D-NUMOPS1).
         | "is_nan" | "is_infinite" | "is_finite"
         | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
@@ -3923,14 +3967,14 @@ fn closure_method_in_subset(
         return false;
     }
     match method {
-        "reduce" => {
+        "reduce" | "scan" | "fold" => {
             // (seed, lambda). The seed is any in-subset value; the lambda must be a
             // literal in-subset closure.
             args.len() == 2
                 && expr_in_subset(&args[0].expr, cx, locals)
                 && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
         }
-        // (lambda). map/filter/each/find/any/all/sort_by.
+        // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 closure adapters.
         _ => {
             args.len() == 1
                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
@@ -3977,6 +4021,10 @@ fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
         // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
         | ("to_string", 0)
+        // D-ITER1: non-closure lazy adapters.
+        | ("take", 1) | ("skip", 1) | ("step_by", 1)
+        | ("dedup", 0) | ("chunks", 1) | ("windows", 1)
+        | ("enumerate", 0) | ("zip", 1)
     )
     // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
     // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no
@@ -8143,6 +8191,44 @@ fn resolve_builtin_op(
         ("values", 0) => TBuiltinOp::Values,
         ("contains_key", 1) => TBuiltinOp::ContainsKey,
         ("to_string", 0) => TBuiltinOp::ToString,
+        // D-ITER1: non-closure list adapters.
+        ("take", 1) => TBuiltinOp::Take,
+        ("skip", 1) => TBuiltinOp::Skip,
+        ("step_by", 1) => TBuiltinOp::StepBy,
+        ("dedup", 0) => TBuiltinOp::Dedup,
+        ("chunks", 1) => TBuiltinOp::Chunks,
+        ("windows", 1) => TBuiltinOp::Windows,
+        ("enumerate", 0) => {
+            // Build the tuple struct name for `(idx: Int, item: T)`.
+            // Fields are alpha-sorted: idx < item.
+            let elem_ty = match &rty {
+                Some(Type::List(inner)) => *inner.clone(),
+                _ => Type::Int,
+            };
+            let fields = vec![
+                ("idx".to_string(), Type::Int),
+                ("item".to_string(), elem_ty),
+            ];
+            let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            TBuiltinOp::Enumerate { tuple_struct: ts }
+        }
+        ("zip", 1) => {
+            // Build the tuple struct name for `(a: T, b: U)`.
+            let a_ty = match &rty {
+                Some(Type::List(inner)) => *inner.clone(),
+                _ => Type::Int,
+            };
+            let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
+                Some(Type::List(inner)) => *inner,
+                _ => Type::Int,
+            };
+            let fields = vec![
+                ("a".to_string(), a_ty),
+                ("b".to_string(), b_ty),
+            ];
+            let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            TBuiltinOp::Zip { tuple_struct: ts }
+        }
         _ => return None,
     })
 }
@@ -8202,6 +8288,31 @@ fn resolve_closure_op(
         "all" => TClosureOp::All,
         "sort_by" => TClosureOp::SortBy,
         "reduce" => TClosureOp::Reduce,
+        // D-ITER1: new closure adapters.
+        "take_while" => TClosureOp::TakeWhile,
+        "skip_while" => TClosureOp::SkipWhile,
+        "flat_map" => TClosureOp::FlatMap,
+        "scan" => TClosureOp::Scan,
+        "fold" => TClosureOp::Fold,
+        "position" => TClosureOp::Position,
+        "min_by" => TClosureOp::MinBy,
+        "max_by" => TClosureOp::MaxBy,
+        "group_by" => TClosureOp::GroupBy,
+        "partition" => {
+            // Compute the tuple struct name from the receiver element type.
+            // recv = List<T>; partition returns (false_: [T], true_: [T]).
+            let elem_ty = match tir_recv_jet_ty(receiver, env) {
+                Some(Type::List(inner)) => *inner,
+                _ => Type::Int,
+            };
+            let list_ty = Type::List(Box::new(elem_ty.clone()));
+            let fields = vec![
+                ("false_".to_string(), list_ty.clone()),
+                ("true_".to_string(), list_ty),
+            ];
+            let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            TClosureOp::Partition { tuple_struct: ts }
+        }
         // The gate (`is_closure_method`) admits only the names above.
         _ => unreachable!("non-closure method in resolve_closure_op (gate)"),
     }
@@ -9153,6 +9264,25 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::MatchGroup => {
                     format!("({}).get(({}) as usize).cloned().flatten()", recv, a(0))
                 }
+                // D-ITER1: non-closure lazy adapters.
+                TBuiltinOp::Take => format!("jet_list_take(({}).clone(), {})", recv, a(0)),
+                TBuiltinOp::Skip => format!("jet_list_skip(({}).clone(), {})", recv, a(0)),
+                TBuiltinOp::StepBy => format!("jet_list_step_by(({}).clone(), {})", recv, a(0)),
+                TBuiltinOp::Dedup => format!("jet_list_dedup(({}).clone())", recv),
+                TBuiltinOp::Chunks => format!("jet_list_chunks(({}).clone(), {})", recv, a(0)),
+                TBuiltinOp::Windows => format!("jet_list_windows(({}).clone(), {})", recv, a(0)),
+                TBuiltinOp::Enumerate { tuple_struct } => format!(
+                    "({}).clone().into_iter().enumerate()\
+                     .map(|(i, x)| {} {{ user_idx: i as i64, user_item: x }})\
+                     .collect::<Vec<_>>()",
+                    recv, tuple_struct
+                ),
+                TBuiltinOp::Zip { tuple_struct } => format!(
+                    "({}).clone().into_iter().zip(({}).clone().into_iter())\
+                     .map(|(x, y)| {} {{ user_a: x, user_b: y }})\
+                     .collect::<Vec<_>>()",
+                    recv, a(0), tuple_struct
+                ),
             }
         }
         // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method. The
@@ -9495,6 +9625,44 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::SortBy => format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, a(0)),
                 TClosureOp::Reduce => {
                     format!("jet_list_reduce(({}).clone(), {}, {})", recv, a(0), a(1))
+                }
+                // D-ITER1: new closure adapters.
+                TClosureOp::TakeWhile => {
+                    format!("jet_list_take_while(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::SkipWhile => {
+                    format!("jet_list_skip_while(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::FlatMap => {
+                    format!("jet_list_flat_map(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::Scan => {
+                    format!("jet_list_scan(({}).clone(), {}, {})", recv, a(0), a(1))
+                }
+                TClosureOp::Fold => {
+                    format!("jet_list_fold(({}).clone(), {}, {})", recv, a(0), a(1))
+                }
+                TClosureOp::Position => {
+                    format!("jet_list_position(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::MinBy => {
+                    format!("jet_list_min_by(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::MaxBy => {
+                    format!("jet_list_max_by(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::GroupBy => {
+                    format!("jet_list_group_by(({}).clone(), {})", recv, a(0))
+                }
+                TClosureOp::Partition { tuple_struct } => {
+                    // `partition` passes each element by value (T: Clone).
+                    // The lambda `f` takes T by value, but `Iterator::partition`
+                    // passes `&T` to its predicate. Use jet_list_partition helper.
+                    format!(
+                        "jet_list_partition(({}).clone(), {}, |__t, __f| \
+                         {} {{ user_false_: __f, user_true_: __t }})",
+                        recv, a(0), tuple_struct
+                    )
                 }
             }
         }
