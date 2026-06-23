@@ -82,12 +82,29 @@ them so they don't regress, but they should be fixed independently of c109):
   `struct_lit_constructible` predicate admits a recursive struct in the StructLit gate arm
   (the boxed-edge/visited-set exclusion is no longer total there), and the struct-lit lowering
   carries a total `boxed` flag per field (from `cx.boxed_edges`) that emit reproduces as the
-  `Box::new(…)` wrap. Reading a boxed field still needs deref, so the `Field` gate arm
-  excludes a boxed-edge READ (`field_is_boxed_edge`) — that stays on the AST path (a separate,
-  deeper deref bug, not part of this effort). Covered by tests/tir.rs
-  `recursive_struct_construction` (build+run) and the `covers_recursive_struct_construction` /
-  `rejects_recursive_struct_boxed_field_read` unit tests; byte-parity holds across the example
-  suite (no example constructs a recursive struct, so nothing changed). (Surfaced in Phase 16;
+  `Box::new(…)` wrap. Covered by tests/tir.rs `recursive_struct_construction` (build+run) and
+  the `covers_recursive_struct_construction` unit test; byte-parity holds across the example
+  suite (no example constructs a recursive struct). (Surfaced in Phase 16; fixed in the c109
+  fix-first effort.)
+- **Reading a boxed recursive struct field needs a deref (E0308, AST path). FIXED.**
+  Was: after the construction fix, READING a boxed field (`t.child` where the field is
+  `Box<…>` via `cx.boxed_edges`) emitted `((*user_t)).user_child` (a `Box<Option<user_Tree>>`)
+  where the unboxed type was wanted — `Box` auto-derefs for method/field/match but NOT when the
+  value is bound or moved as the inner type (`let kid: Option<Tree> = …` → rustc E0308).
+  **Fix:** a new `boxed_field_read` (Expression.rs) derefs the read (`(*(…))`) when
+  `(struct_type, member) ∈ cx.boxed_edges`. With the read fixed, a recursive struct is now a
+  covered VALUE type — `struct_is_covered` admits a boxed edge (its payload struct must itself
+  be covered), the `Field` gate arm's `field_is_boxed_edge` read exclusion is dropped, and the
+  TIR `Field` lowering carries a total `boxed: bool` (from `cx.boxed_edges`) that emit reproduces
+  as the deref. So a fn that builds AND traverses a `Tree` (binds a boxed child, matches,
+  recurses) ROUTES THROUGH THE TIR. Covered by tests/tir.rs `boxed_recursive_struct_field_read`
+  (build+run, prints `6`) and the `covers_recursive_struct_boxed_field_read` unit test;
+  byte-parity holds across the example suite. NOTE: a *direct* match on a boxed field with a
+  payload binding via the mixed-switch form (`if t.child { … == value(c) -> … else -> … }`) hits
+  a SEPARATE pre-existing bug — the mixed `matches!(…, Some(c))` path discards the payload
+  binding (E0425), reproduced identically with a NON-boxed `Int?` field-access scrutinee, so it
+  is unrelated to boxing and out of scope here. The canonical traversal (bind the child to a
+  local, then exhaustive-match) works. (Surfaced while fixing construction in commit 46d301c;
   fixed in the c109 fix-first effort.)
 - **A borrowed non-Copy struct-lit field value isn't cloned (E0507, AST path).** A
   struct literal whose field value is a borrowed-in-env ident (`Person { name: n }`

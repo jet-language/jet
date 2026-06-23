@@ -254,10 +254,10 @@ pub(crate) fn emit_expr(cx: &Cx, e: &Expr, env: &HashMap<String, Slot>) -> Strin
                         format!("user_{}::{}", alias, mangle(member))
                     }
                 } else {
-                    format!("({}).{}", emit_expr(cx, inner, env), field)
+                    boxed_field_read(cx, inner, member, &field, env)
                 }
             } else {
-                format!("({}).{}", emit_expr(cx, inner, env), field)
+                boxed_field_read(cx, inner, member, &field, env)
             }
         }
         Expr::OptField {
@@ -733,6 +733,27 @@ fn is_json_error_type_name(name: &str) -> bool {
 
 fn is_utf8_error_type_name(name: &str) -> bool {
     name == Syntax::TYPE_UTF8_ERROR || name == "Utf8Error"
+}
+
+/// Emit a plain struct field read `({inner}).{field}`, dereferencing the `Box` when
+/// the edge is recursive (`(struct_type, member) ∈ cx.boxed_edges`). A self-referential
+/// field has Rust type `Box<…>`, so the read yields a `Box<…>`; binding/moving it as the
+/// unboxed type needs `(*(…))` (rustc E0308 otherwise — `Box` only auto-derefs for
+/// method/field/match, not when the value itself is bound or moved as the inner type).
+fn boxed_field_read(
+    cx: &Cx,
+    inner: &Expr,
+    member: &str,
+    field: &str,
+    env: &HashMap<String, Slot>,
+) -> String {
+    let read = format!("({}).{}", emit_expr(cx, inner, env), field);
+    if let Some(ty) = receiver_struct_type(inner, env) {
+        if cx.boxed_edges.contains(&(ty, member.to_string())) {
+            return format!("(*{})", read);
+        }
+    }
+    read
 }
 
 pub(crate) fn expr_jet_ty(expr: &Expr, env: &HashMap<String, Slot>) -> Option<Type> {

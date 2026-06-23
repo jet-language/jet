@@ -3886,3 +3886,46 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "10\n99\n");
 }
+
+/// c109 (boxed recursive field read): reading a self-referential struct field
+/// (`t.child`, Rust type `Box<…>` via `cx.boxed_edges`) miscompiled — the read
+/// yielded a `Box<…>` where the unboxed type was wanted (rustc E0308). The fix
+/// derefs the `Box` (`(*(…))`) on a boxed-field read. With the read fixed, a
+/// recursive struct is now a covered VALUE type, so a fn that builds AND traverses
+/// a `Tree` (binds a boxed child, matches, recurses) routes through the TIR.
+#[test]
+fn boxed_recursive_struct_field_read() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Tree {
+    value: Int
+    child: Tree?
+}
+fn sum(t: Tree) -> Int {
+    total := t.value
+    kid: Tree? @= t.child
+    if kid {
+        kid == value(c) -> {
+            total = total + sum(c)
+        }
+        kid == null -> {}
+    }
+    return total
+}
+fn main() {
+    root @= Tree {
+        value: 3,
+        child: value(Tree {
+            value: 2,
+            child: value(Tree { value: 1, child: null })
+        })
+    }
+    print(sum(root))
+}
+";
+    let (code, stdout) = build_and_run("tir_boxed_field_read", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "6\n");
+}
