@@ -411,6 +411,11 @@ pub(crate) enum TExprKind {
     Call { name: String, args: Vec<TCallArg> },
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
+    /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare call
+    /// (no module alias) lowering to `{root}jet_std_io_input(None|Some(&(prompt)))`,
+    /// byte-for-byte the `emit_call` ambient-input branch (Source/Codegen/Expression.rs
+    /// ~L1778). `prompt` is `Some` when a String prompt arg is given, else `None`.
+    AmbientInput { prompt: Option<Box<TExpr>> },
     /// Binary op. `overflow` is the *computed* decision (true → emit the
     /// trapping `jet_add`/… helper). It mirrors today's `operand_is_integer`
     /// logic but is decided here, at lowering, from the total operand types.
@@ -1055,6 +1060,12 @@ pub(crate) enum THandleOp {
     ChannelSender,
     /// c109 Phase 21: Sender `send(v)` → `(recv).send(a0)`. Returns unit.
     SenderSend,
+    /// c109 Phase 25: HttpRouter `get`/`post`/`put`/`delete` route registration
+    /// (D-ROUTE1=A). Emits `{root}jet_http_router_register(&mut (recv), "<VERB>".to_string(),
+    /// <path>, <handler>)` where `<path>` is the lowered first arg (args[0]) and `<handler>`
+    /// is a pre-rendered boxed-closure string (`emit_router_handler` reproduction, resolved
+    /// at lowering). `verb` is the uppercase HTTP method literal.
+    HttpRouterRegister { verb: &'static str, handler: String },
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -2564,6 +2575,18 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
+            // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare
+            // `Expr::Call { name: "input" }` with NO user `input` fn (`!cx.sigs`) and no
+            // local shadow lowers to the SAME `jet_std_io_input(None|Some(&(arg)))` form
+            // as `io.input(...)` (the AST `emit_call` ambient-input branch, Expression.rs
+            // ~L1778; sema mirrors it in CheckerInfer + returns `Result<String, IOError>`).
+            // 0 args → `(None)`, 1 arg (a String prompt) → `(Some(&(arg)))`. Reproduced
+            // byte-for-byte in `emit_tir_ambient_input`. Disjoint from a plain fn (those
+            // ARE in `cx.sigs`) and the local-call branch (shadowing local handled above).
+            let is_ambient_input = c.name == Syntax::BUILTIN_INPUT
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() <= 1;
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
             // unqualified module import (those lower to different call forms — covered
@@ -2608,7 +2631,7 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
             // and codegen never reads `CallArg.label` (`emit_call_args` is purely
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
-            (is_print || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
+            (is_print || is_ambient_input || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
                     // No shared-auto-clone (Arc) in the subset; labels are sema-only.
                     !a.flags.shared_auto_clone
@@ -3150,6 +3173,21 @@ fn method_call_in_subset(
             return expr_in_subset(receiver, cx, locals);
         }
     }
+    // Shape (h2) [c109 Phase 25]: HttpRouter route registration `router.get(path, handler)`
+    // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HttpRouter")`.
+    // The AST `emit_builtin_method` keys these on `rty == Some(HttpRouter)` BEFORE the
+    // generic `get`/`post` collection arms, and emits the handler via `emit_router_handler`
+    // (a boxed `Fn(HttpRequest)->HttpResponse` closure). We cover it when the receiver is
+    // in-subset, the path arg is in-subset, and the handler arg is one `emit_router_handler`
+    // reproduces byte-for-byte: a bare top-level-fn name (NOT a local → the `Box::new(move
+    // |__req| user_<fn>(&__req)) as …` wrapper) or an in-subset literal lambda. Tried BEFORE
+    // the numeric/handle/builtin shapes so the HttpRouter `get`/`post` is claimed here.
+    if recv_type.as_deref() == Some("HttpRouter")
+        && matches!(method, "get" | "post" | "put" | "delete")
+        && args.len() == 2
+    {
+        return router_register_in_subset(receiver, args, cx, locals);
+    }
     // Shape (h) [c109 Phase 13]: a method ON a handle (FileReader/FileWriter/
     // StdinHandle/Stopwatch/TcpListener/TcpStream). Sema sets `recv_type ==
     // Some(<handle>)` (CheckerInfer, via the handle `*_method_return` tables). The AST
@@ -3279,7 +3317,17 @@ fn static_method_call_in_subset(
     if locals.contains(type_name) {
         return false;
     }
-    if is_intercepted_method_name(method) {
+    // c109 Phase 25: a STATIC constructor `Type.new(args)` is the Phase-7 static-call
+    // shape (`recv_type == None`, receiver a covered type-name ident, `(Type, "new") ∈
+    // method_sigs`) — NOT a builtin/instance intercept. `emit_builtin_method` has no
+    // `new` arm, and the only `new` special-case (`MEM_ALLOC_NEW`, D-ALLOC1) fires ONLY
+    // for a `Field(mem_alias, AllocType)` receiver, never an `Ident(Type)` receiver. So
+    // the AST path falls through `emit_builtin_method` (returns None) to the type-name
+    // static dispatch (Expression.rs ~L1644) → `user_<Type>::user_new(args)` — exactly
+    // what the StaticCall lowering reproduces. We therefore admit `new` HERE (the
+    // static shape) while `is_intercepted_method_name` keeps the INSTANCE-method intercept
+    // (shape b) whole: a user instance method named `new`/`get`/… stays on the AST path.
+    if method != Syntax::MEM_ALLOC_NEW && is_intercepted_method_name(method) {
         return false;
     }
     let ty = Type::Named(type_name.to_string());
@@ -3610,6 +3658,18 @@ fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.tasks" && method == "channel" {
         return true;
     }
+    // c109 Phase 25: the HttpRouter producer + the parse/dispatch core calls (D-ROUTE1=A).
+    // NOT in `core_fixed_sig` — their return types are fixed per `(module, method)` but
+    // live in sema's bespoke `infer_core_call` (`router` → HttpRouter, `parse` →
+    // HttpRequest, `dispatch` → HttpResponse). Each emits a fixed-string `CoreCall`
+    // (`{root}jet_http_router_new()` / `{root}jet_http_parse_request(&(raw))` /
+    // `{root}jet_http_router_dispatch(&(router), req)`), reproduced in `emit_tir_core_call`.
+    // `http.serve` stays out (closure-taking, covered by `CoreClosureCall`); `http.router`
+    // is arg-free so it can't collide. The producer's `HttpRouter` value type is covered
+    // (`is_covered_handle_ty`) and its binding is forced to `let mut` (D-ROUTE1=A).
+    if module == "jet.http" && matches!(method, "router" | "parse" | "dispatch") {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 
@@ -3693,6 +3753,65 @@ fn alloc_new_type<'a>(
     }
 }
 
+/// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
+/// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
+/// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
+/// the `env.get(name).is_none()` branch → the `move |__req| user_<fn>(&__req)` wrapper)
+/// or an in-subset literal LAMBDA (the `Box::new(<lambda>)` branch). The path (arg 0) is
+/// any in-subset value. No labels.
+fn router_register_in_subset(
+    receiver: &Expr,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> bool {
+    if args.iter().any(|a| a.label.is_some()) {
+        return false;
+    }
+    if !expr_in_subset(receiver, cx, locals) {
+        return false;
+    }
+    if !expr_in_subset(&args[0].expr, cx, locals) {
+        return false;
+    }
+    match &args[1].expr {
+        // A bare top-level fn name (the `env.get(name).is_none()` named-fn branch). It
+        // must NOT be a local (a local handler would take the `Box::new(emit_expr(…))`
+        // path, which for a fn-typed local emits its own `Box::new` — still covered, but
+        // we keep to the simple named-fn + lambda shapes the live suite uses).
+        Expr::Ident(name, _) => !locals.contains(name),
+        // A literal in-subset lambda (the `Box::new(<lambda>)` branch).
+        Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
+        _ => false,
+    }
+}
+
+/// c109 Phase 25: render the router handler (arg 1) exactly as `emit_router_handler`
+/// (Source/Codegen/Expression.rs) does, at lowering. A bare top-level fn name (not a
+/// local) becomes the `Box::new(move |__req: …| user_<fn>(&__req)) as Box<dyn Fn(…) -> …
+/// + Send + Sync>` wrapper; a lambda becomes `Box::new(<lambda>) as Box<…>`.
+fn render_router_handler(args: &[crate::AST::CallArg], cx: &Cx, env: &LowerEnv) -> String {
+    let root = &cx.root_prefix;
+    let boxed_dyn = format!(
+        "as Box<dyn Fn({}JetHttpRequest) -> {}JetHttpResponse + Send + Sync>",
+        root, root
+    );
+    match &args[1].expr {
+        Expr::Ident(name, _) if !env.locals.contains_key(name) => {
+            let rust_name = mangle(name);
+            format!(
+                "Box::new(move |__req: {}JetHttpRequest| {}(&__req)) {}",
+                root, rust_name, boxed_dyn
+            )
+        }
+        Expr::Lambda(lam) => {
+            format!("Box::new({}) {}", render_lambda_str(lam, cx, env), boxed_dyn)
+        }
+        // The gate (`router_register_in_subset`) proved arg 1 is one of the two above.
+        _ => unreachable!("router handler gate proved a named-fn or lambda handler"),
+    }
+}
+
 fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
     Some(match (handle, method, nargs) {
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
@@ -3768,6 +3887,17 @@ fn core_closure_call_return_ty(module: &str, method: &str, body_ty: Type) -> Typ
 /// authoritative `Sema::core_fixed_sig` table (totality). A `None` return (a
 /// void-effect call like `fs.write`/`env.set`/`process.exit`) lowers to `Unit`.
 fn core_call_return_ty(module: &str, method: &str) -> Type {
+    // c109 Phase 25: the http producer/parse/dispatch calls aren't in `core_fixed_sig`;
+    // their return types are fixed (sema's `infer_core_call`). Carried total per the
+    // design principle (the binding's annotation/inference is the load-bearing fact, but
+    // this keeps the node's `ty` honest — `dispatch` → HttpResponse composes with the
+    // `.status()`/`.body()` accessors that read it).
+    match (module, method) {
+        ("jet.http", "router") => return Type::Named("HttpRouter".to_string()),
+        ("jet.http", "parse") => return Type::Named("HttpRequest".to_string()),
+        ("jet.http", "dispatch") => return Type::Named("HttpResponse".to_string()),
+        _ => {}
+    }
     crate::Sema::core_fixed_sig(module, method)
         .and_then(|(_, ret)| ret)
         .unwrap_or_else(unit_type)
@@ -5350,6 +5480,24 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::Print(Box::new(arg)),
                 };
             }
+            // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
+            // lowering as `io.input(...)` (CoreCall would also work, but the bare-call
+            // surface has no module alias, so it is its own node). Resolves to
+            // `Result<String, IOError>` (matching sema), so it composes with the
+            // Phase-8 `??` fallback. The prompt arg (if any) is lowered in-subset.
+            if call.name == Syntax::BUILTIN_INPUT
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+            {
+                let prompt = call.args.first().map(|a| Box::new(lower_expr(&a.expr, cx, env)));
+                return TExpr {
+                    ty: Type::Result {
+                        ok: Box::new(Type::String),
+                        err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
+                    },
+                    kind: TExprKind::AmbientInput { prompt },
+                };
+            }
             // c109 Phase 14: an FFI extern call (`emit_call`'s `extern_funcs` arm).
             // Checked BEFORE the unqualified arms, matching `emit_call`'s order. Args
             // use `emit_extern_call_args` (a non-scalar `Read` is `(…).clone()`).
@@ -6531,6 +6679,34 @@ fn lower_method_call(
                 };
             }
         }
+    }
+    // c109 Phase 25: HttpRouter route registration `router.get/post/put/delete(path,
+    // handler)` (D-ROUTE1=A). The gate (`router_register_in_subset`) proved the receiver
+    // + path in-subset and the handler a named-fn/lambda. Render the handler closure HERE
+    // (the `emit_router_handler` reproduction); emit assembles the register call. Result
+    // is Unit (the registration is a statement effect).
+    if recv_type.as_deref() == Some("HttpRouter")
+        && matches!(method, "get" | "post" | "put" | "delete")
+        && args.len() == 2
+    {
+        let verb = match method {
+            "get" => "GET",
+            "post" => "POST",
+            "put" => "PUT",
+            "delete" => "DELETE",
+            _ => unreachable!(),
+        };
+        let recv_t = lower_expr(receiver, cx, env);
+        let path_t = lower_expr(&args[0].expr, cx, env);
+        let handler = render_router_handler(args, cx, env);
+        return TExpr {
+            ty: unit_type(),
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::HttpRouterRegister { verb, handler },
+                args: vec![path_t],
+            },
+        };
     }
     // c109 Phase 13: a method ON a handle. The gate proved `recv_type ==
     // Some(<handle>)` + a covered handle op. Resolve the handle-receiver branch HERE
@@ -7793,6 +7969,16 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Print(arg) => {
             format!("println!(\"{{}}\", ({}).jet_show())", emit_tir_expr(arg, cx))
         }
+        // c109 Phase 25: ambient prelude `input(...)`, byte-for-byte the `emit_call`
+        // ambient-input branch (Source/Codegen/Expression.rs): a bare call with NO arg
+        // emits `{root}jet_std_io_input(None)`; with a prompt arg `{root}jet_std_io_input(Some(&(arg)))`.
+        TExprKind::AmbientInput { prompt } => {
+            let helper = format!("{}jet_std_io_input", cx.root_prefix);
+            match prompt {
+                None => format!("{}(None)", helper),
+                Some(p) => format!("{}(Some(&({})))", helper, emit_tir_expr(p, cx)),
+            }
+        }
         TExprKind::Call { name, args } => {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
@@ -8287,6 +8473,14 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::ChannelSender => format!("({}).sender()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
+                // c109 Phase 25: HttpRouter route registration, byte-for-byte the
+                // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
+                // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
+                // the pre-rendered boxed closure.
+                THandleOp::HttpRouterRegister { verb, handler } => format!(
+                    "{}jet_http_router_register(&mut ({}), \"{}\".to_string(), {}, {})",
+                    root, recv, verb, a(0), handler
+                ),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -8524,6 +8718,16 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
         ("jet.http", "post") => {
             format!("{}(&({}), &({}))", helper("jet_http_post"), arg(0), arg(1))
         }
+        // c109 Phase 25: HttpRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
+        // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free;
+        // `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router
+        // and passes the request by value.
+        ("jet.http", "router") => format!("{}()", helper("jet_http_router_new")),
+        ("jet.http", "parse") => format!("{}(&({}))", helper("jet_http_parse_request"), arg(0)),
+        ("jet.http", "dispatch") => format!(
+            "{}(&({}), {})",
+            helper("jet_http_router_dispatch"), arg(0), arg(1)
+        ),
         // D-REGEX1: jet.regex — calls land in the FFI bridge crate.
         ("jet.regex", "is_match") => {
             format!("{}(&({}), &({}))", regex_fn("jet_regex_is_match"), arg(0), arg(1))
@@ -9318,6 +9522,52 @@ mod tests {
         // shape — it has its own bespoke `CoreClosureCall` shape (a `move |…|` closure).
         assert!(core_call_covered("core.tasks", "channel"));
         assert!(!core_call_covered("core.tasks", "spawn"));
+        // c109 Phase 25: the HttpRouter producer + parse/dispatch core calls are covered
+        // (fixed-string emits; their return types live in sema's `infer_core_call`, not
+        // `core_fixed_sig`). `http.serve` stays out (closure-taking → `CoreClosureCall`).
+        assert!(core_call_covered("jet.http", "router"));
+        assert!(core_call_covered("jet.http", "parse"));
+        assert!(core_call_covered("jet.http", "dispatch"));
+        assert!(!core_call_covered("jet.http", "serve"));
+    }
+
+    #[test]
+    fn covers_static_new_constructor() {
+        // c109 Phase 25: a STATIC constructor `Rect.new(...)` routes (the Phase-7 static
+        // shape — `recv_type == None`, type-name receiver, `(Rect, "new") ∈ method_sigs`),
+        // even though `new` is in `is_intercepted_method_name` (which guards the INSTANCE
+        // shape). `build_cx`-only: the static call carries `recv_type == None` by default.
+        let src = "\
+struct Rect { width: Int height: Int }
+impl Rect {
+    fn new(width: Int, height: Int) -> Rect { return Rect{width: width, height: height} }
+}
+fn build() -> Rect { return Rect.new(4, 3) }
+";
+        assert!(covers(src, "build"));
+        // The instance-method intercept stays whole: a user INSTANCE method named `new`
+        // is still excluded (it stays on the AST path).
+        assert!(is_intercepted_method_name("new"));
+    }
+
+    #[test]
+    fn covers_ambient_input() {
+        // c109 Phase 25: the ambient prelude `input(...)` routes (bare call, no user
+        // `input` fn). It composes with the `??` value fallback (Phase 8).
+        let src = "\
+fn greet() -> String {
+    name @= input() ?? \"world\"
+    return \"hi {name}\"
+}
+";
+        assert!(covers(src, "greet"));
+        // A user-defined `input` fn shadows the prelude — the gate then treats `input(...)`
+        // as a plain fn call (still covered, but via the plain-fn shape, not ambient).
+        let shadowed = "\
+fn input() -> String { return \"x\" }
+fn greet() -> String { return input() }
+";
+        assert!(covers(shadowed, "greet"));
     }
 
     #[test]

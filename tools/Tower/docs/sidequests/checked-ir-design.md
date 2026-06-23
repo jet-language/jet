@@ -1747,6 +1747,73 @@ everything, the AST codegen path is deleted (final phase).
   it is a separate handle-method coverage phase. The "coupled JSON/core-enum + capstone slice"
   the inventory flagged is now FULLY covered.
 
+## Refinements learned in Phase 25 (HttpRouter, ambient input, static-new)
+
+- **The HttpRouter producer/parse/dispatch calls are NOT in `core_fixed_sig` — but their
+  return types are still FIXED per `(module, method)`** (sema's bespoke `infer_core_call`:
+  `router` → HttpRouter, `parse` → HttpRequest, `dispatch` → HttpResponse). So they join
+  `core_call_covered` like the Phase-21 `tasks.channel()` producer (a fixed-string `CoreCall`),
+  with `core_call_return_ty` carrying the bespoke type total (the `dispatch` → HttpResponse type
+  is load-bearing: it lets `resp.status()`/`.body()` read the receiver's total `.ty`). `http.serve`
+  stays OUT of this set — it is closure-taking (`CoreClosureCall`, Phase 13). HttpRouter was
+  already a covered value type (`net_handle_rust_type` → `JetHttpRouter`) and already forced to
+  `let mut` (the Phase-13 handle-binding fix listed it), so the producer binding needed no new work.
+- **`router.get(path, handler)` is the FIRST handle method whose arg is rendered at lowering,
+  not lowered as a `TExpr`.** The handler (`emit_router_handler`) is a boxed `Fn(HttpRequest)
+  ->HttpResponse` closure built from either a bare top-level-fn name (the `move |__req| user_<fn>
+  (&__req)` wrapper — DIFFERENT from the Phase-13 `emit_named_fn_value` wrapper, which uses the
+  fn's own param names, not `__req`) or a literal lambda (`render_lambda_str`). So the new
+  `THandleOp::HttpRouterRegister { verb, handler: String }` carries the PRE-RENDERED handler
+  string (resolved at lowering), and emit only assembles `jet_http_router_register(&mut (recv),
+  "<VERB>".to_string(), <path>, <handler>)`. Gated as a dedicated shape (h2) BEFORE the generic
+  handle/builtin shapes so HttpRouter's `get`/`post` is claimed here (not by the collection
+  `get`/`post` builtin arms — the same "a `recv_type == Some(<handle>)` method routes to the
+  handle shape first" order `emit_builtin_method` uses).
+- **The ambient bare `input()` and the qualified `io.input(prompt)` are DIFFERENT AST nodes
+  and only the bare form is covered.** Bare `input()` is an `Expr::Call { name: "input" }` (no
+  receiver) — a no-`use` prelude builtin (D-PRELUDE1 = B) sema resolves to `Result<String,
+  IOError>`; it lowers to a dedicated `TExprKind::AmbientInput`, byte-for-byte the `emit_call`
+  ambient branch. The qualified `io.input(prompt)` is an `Expr::MethodCall` on a core alias with
+  a POLYMORPHIC return (Phase-20-deferred) — still on the AST path (`34_parallel_scan`
+  `paths_from_prompt`). Covering one says nothing about the other (the recurring "the AST node
+  that reaches codegen is what the gate recognises" lesson).
+- **The `new`-name over-exclusion was a STATIC-vs-INSTANCE distinction, not a "remove the name"
+  fix.** `is_intercepted_method_name("new")` stays WHOLE — it guards the INSTANCE shape (a user
+  method `recv.new()` would be mis-dispatched only if `new` were a builtin, but keeping it
+  excluded is the conservative choice). The LIFT is narrow: `static_method_call_in_subset` admits
+  `new` because a `Type.new(args)` static call (`recv_type == None`, type-name receiver, `(Type,
+  "new") ∈ method_sigs`) is the Phase-7 `user_<Type>::user_new(args)` form — provably NOT a
+  builtin intercept: `emit_builtin_method` has NO `new` arm, and the only `new` special-case
+  (`MEM_ALLOC_NEW`, D-ALLOC1) fires ONLY for a `Field(mem_alias, AllocType)` receiver, never an
+  `Ident(Type)` receiver — so the AST falls through to the type-name static dispatch. The guard
+  is `method != Syntax::MEM_ALLOC_NEW && is_intercepted_method_name(method)`, lifting exactly
+  `new` and nothing else. This is the "a partial sema fact (`recv_type == None`) is the total
+  routing signal" rule applied to disambiguate two shapes that share a name.
+- **A full routing sweep (the `JET_RS` sentinel) corrected an optimistic inventory.** The
+  post-Phase-24 claim "every emittable fn routes EXCEPT latent-bug/unreachable/HttpRouter" was
+  INCOMPLETE: 12 live functions still route via the AST path on **uncovered FEATURE surfaces the
+  inventory never enumerated** — `require`, `#Caps(Io){}`, `mut`/`take` arg conventions,
+  fn-typed-value-stored + struct fn-fields, fan-out result-list destructure, sized-integer
+  literal width-elaboration, generic fns + trait-object dispatch, and `io.input`+`?? return`.
+  The lesson (again): "every emittable fn routes" claims must be sweep-VERIFIED, never inferred
+  from "no *flagged* form remains". The precise residue is enumerated in "What still routes"
+  below as classes (A)–(H).
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass on
+  `emit_func`/`emit_method`/`emit_trait_method` + the delegation/trait hooks) across the **entire
+  example suite** — 90 emittable targets, 0 differ — incl. all three feature targets. A routing
+  sentinel confirmed the target fns take the TIR path (`63_named_args` `main`; `65_io_prelude`
+  `greet`+`main`; `76_http_routes` `main`+all 3 handlers). All three run end-to-end (`12.0`/`8.0`/
+  `2.0`/`100.0`; the prelude prints; `welcome`/`user=42`/`created`/`404 Not Found`). tests/tir.rs
+  adds `static_new_constructor`/`ambient_input`/`http_router_dispatch` (build+run); the unit tests
+  add `covers_static_new_constructor`/`covers_ambient_input` and extend
+  `polymorphic_core_specials_covered` with the three http calls. The instrumentation was removed
+  before commit (no `JET_NO_TIR`/`JET_RS` left in Source/).
+- **Phase-N readiness state: NOT every emittable live fn routes through the TIR.** Phase 25
+  cleared the LAST *handle* surface + the input/new over-exclusions, but the routing sweep proved
+  8 uncovered FEATURE-surface classes (A)–(H) keep 12 live functions on the AST path. These are
+  future coverage phases (or sema-unreachable, for generic/trait-object dispatch). The AST path
+  cannot be deleted until (A)–(H) are covered and the latent-bug fixes land.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
 After Phase 22 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are reached
@@ -1824,14 +1891,58 @@ slice:
   "tables" were the `28_comptime_table` `make_table` fn — already Phase-9-covered; the
   comptime CONST inlining was the actual logbook need.)
 
-The remaining work toward deleting the AST path is therefore: the latent-bug FIXES
-(separate cards), the unreachable/dead constructs (no action), and the **HttpRouter handle
-surface** (`76_http_routes`/`logbook serve` `main` — `http.router()` + `router.get`/`post`
-+ `http.dispatch`, a `recv_type == Some(HttpRouter)` handle producer + methods, the LAST
-coverable handle surface, the same seam as the Phase-13-deferred `Arena`/`Match`). None of
-the residue is a "parity-safe construct form already flagged as coverable" — that category
-stays EMPTY (Phase 22 cleared it; Phase 23 cleared five of the six uncovered FEATURE
-surfaces; Phase 24 cleared the sixth — the JSON/core-enum + capstone slice).
+**Phase 25 cleared the HttpRouter handle surface + the ambient `input()` + the `new`-name
+over-exclusion** — so `76_http_routes`/`63_named_args`/`65_io_prelude` all route now. But a
+full routing sweep (the `JET_RS` sentinel, c109 Phase 25) revealed the post-Phase-24
+inventory was OPTIMISTIC: a handful of live functions still route via the AST path on
+**uncovered FEATURE surfaces the inventory never listed**. The PRECISE, sweep-verified
+AST-path residue after Phase 25 (12 live functions) is:
+
+**(A) The `require(cond[, msg])` builtin** (`14_panic` `main`, `29_embed` `check_nonempty`,
+`59_debug` `summarize`) — `emit_require`/`emit_require_eq` (Source/Codegen/Expression.rs), a
+bespoke builtin call form (rich-panic on failure). NOT a latent bug — a real uncovered
+builtin. A future phase covers it as a dedicated TIR node (the `panic`/`expect` family lives
+in the same emit cluster).
+
+**(B) The `#Caps(Io) { … }` capability block** (`effect_caps` `main`) — a sema-checked
+effect-gate region (D-EFF/D-CAPS); erased at codegen but the block stmt isn't a covered TIR
+node yet. Uncovered feature surface.
+
+**(C) `mut`/`take` argument conventions** (`08_ownership` `main` — `bump(mut score)`,
+`archive(take "vault")`) — a `Mutate`-convention plain-call arg (`&mut place`) + the explicit
+`take` move marker. `arg_conv_in_subset` excludes `Mutate`; the `take`-marked move arg is a
+distinct call-arg form. Uncovered.
+
+**(D) fn-typed VALUE stored in a local + a struct fn-FIELD method** (`24_callbacks` `main` —
+`double_fn @= double` then a worker struct with a `step: Fn(...)` field). The bare fn-name
+value binding + the `w.step(4)` fn-field call are uncovered call/value forms (related to but
+beyond the Phase-13 fn-value-coercion at *call sites*).
+
+**(E) fan-out result-list DESTRUCTURE** (`41_fan_out` `main` — `[a, b, c] @= doubled`). The
+fan-out *operator* is covered (Phase 11), but binding its `[T#N]` result via a list-pattern
+destructure (`[a,b,c] @=`) is the uncovered piece.
+
+**(F) sized-integer LITERAL width-elaboration** (`82_sized_integers` `main` — `red: U8 @= 255`,
+`[U8] @= [104, …]`). A literal taking a fixed width from its binding context (the
+`U8`/`I32`/`I8` elaboration + the per-element list widening). Uncovered literal-elaboration
+form.
+
+**(G) generic fn + trait-OBJECT params** (`25_traits` `largest` — `<T: Comparable>`;
+`print_area` — a trait-object `Shape` param; `main` — a `[Shape]` trait-object list +
+`.each`/`sort_by` over it). Generic functions and trait-object dispatch are a large uncovered
+surface (the generic-type-method *sema* gap is its cousin).
+
+**(H) `io.input(prompt)` polymorphic + `?? return`** (`34_parallel_scan` `paths_from_prompt`).
+`io.input` was Phase-20-deferred (polymorphic return, NOT the ambient bare `input()` Phase 25
+covered — these are different forms: the qualified `io.input(prompt)` MethodCall on a core
+alias); the `?? return` is the dead bare-return form. Stays.
+
+None of (A)–(H) is the HttpRouter surface, the ambient `input()`, or the static `new` — those
+three are now fully covered. None is a "parity-safe construct form already flagged as
+coverable" (that category remains EMPTY). The remaining work toward deleting the AST path is:
+the latent-bug FIXES (separate cards), the sema-unreachable constructs (generic-type methods,
+trait-object dispatch sema, bare `?? return` — no action), and the uncovered FEATURE surfaces
+(A)–(H) above (future coverage phases).
 
 ## Phases
 
@@ -1863,7 +1974,8 @@ surfaces; Phase 24 cleared the sixth — the JSON/core-enum + capstone slice).
 | 22 | Method-call iteration + optional-binding conditions | ✅ done (c109 Phase 22) — the two parity-safe construct forms the inventory had flagged. **Method-call-collection iteration** (`loop x in <coll>.method(…)`): `emit_for_in`'s four `Expr::MethodCall` branches reproduced via a total `ForIn.method_kind: Option<TForInMethod>` — `chars()` (char iteration, receiver string), `lines()` on `FileReader` (streaming `BufRead::lines(&mut (recv).inner)`), `lines()` on `StdinHandle`/inline `io.stdin()` (streaming + the extra `{ let mut _jet_stdin_h = …; }` block + extra close), and the `.iter().cloned()` default for any other method (`.split(…)`, the whole call as the collection value). The FileReader-vs-stdin split mirrors `expr_jet_ty(receiver)` (via `tir_recv_jet_ty`) + the inline-`stdin` shape, in `emit_for_in`'s order; the iteration var stays `jet_ty: None` (Phase-5 partiality). **Optional-binding `if` condition**: `TStmt::If.cond` became a `TIfCond::{Plain,IfLet,IsNone}` — `x == value(b)`/`ok(b)`/`err(b)` → `if let {pat} = {subj}` (`emit_if_let_pattern`, now `pub(crate)`); `x == null` (`Pattern::Absent`) → `if {subj}.is_none()` — reproducing `emit_if`'s three heads. The if-let then-body uses `fork_panic` (deep-copied panic replica, NON-leaky — the AST clones into a fresh `body_env`); the bound name's inner type comes off the subject's lowered `Option`/`Result` `.ty` (I3). Only the DIRECT `PatternTest` forms (not the `Binary(And,…)` quirk, not Variant/Or/Range) are covered (conservative). `34_parallel_scan` `scan_parallel`/`paths_from_args` + `78_stdin_filter` `main` now route. Byte-identical across the whole example suite (118 emittable, 0 differ) + crafted probes; all run end-to-end. tests/tir.rs adds `method_call_collection_iteration` + `optional_binding_if_condition`; unit tests flip `rejects_method_call_collection_iteration` → `covers_*` (chars + split) and add `covers_optional_binding_if_condition`. **After Phase 22 the "parity-safe coverable construct form" residue is EMPTY** — the AST-path residue is latent-bug-gated + unreachable/dead + uncovered FEATURE surfaces (tuples, default params, distinct types, `#Pure`, `#Todo`, JSON/core-enum matching — each a NEW coverage phase, NOT a flagged form). FileReader `.lines()` is covered+tested but unreachable in the live suite (`49_stream` is `?`-blocked since Phase 10). |
 | 23 | `#Pure` / `#Todo` / default params + named args / distinct types / tuples | ✅ done (c109 Phase 23) — five of the six uncovered FEATURE surfaces, all byte-identical. **`#Pure fn`** (S60): purity is sema-only (E3401), erased — lift = delete the `is_pure` gate exclusions; `62_pure` routes. **`#Todo`** (`Expr::Todo`, D-TOOL2): diverging `todo!("#Todo at {file}:{line} — expected {ty}")` (`TExprKind::Todo`, reads sema's total `expected_type`; gate excludes a `None` hole); `58_todo_hole` routes. **Default params** (S61/D-NARG-D2): sema fills omitted trailing args at the CALL SITE (codegen never reads `p.default`) — lift = delete the `p.default.is_some()` exclusions; `66_default_refs` (incl. earlier-param-ref defaults) + `Rect.square` route. **Named args** (D-NARG1): labels are checked documentation that NEVER reorder (D-NARG-D4) and codegen ignores `CallArg.label` — relaxed the `a.label.is_none()` gate checks (parity-safe); `63_named_args` methods route. **Distinct types** (D-DIST1/D-DIST3): `is_covered_distinct_ty` (+ a new `cx.distinct_types` table) admits the `user_<Name>` newtype value type; construction `Name(x)` is the `is_distinct_ctor` fallthrough `Call` (no sig → plain args → `user_<Name>(…)`); `.raw()` → `(recv).0` (`DistinctRaw`, recv_type `None`, keyed on the method name); `#Numeric` `+`/`==` use the native operator (`ast_operand_is_integer` returns `None` for a distinct, so no trap claimed); `69_distinct_types` routes. **Tuples** (S73/D-SG7): `is_covered_tuple_ty`; literal `(x:1,y:2)` → `JetTup_<hash>{…}` reordered to the type's CANONICAL field order (`TupleLit`, gate excludes a `ty: None` literal); field `p.x` → `(p).user_x` (generic `Field`; `struct_field_type` resolves off `Type::Tuple`); destructure `(a,b) @= p.clone()` → `__jet_d{span}` borrow-temp + per-element `(tmp).user_<f>.clone()` (`TStmt::TupleDestructure`, one-Stmt-to-many-lines); `40_tuples` routes. **DEFERRED — the JSON/core-enum + capstone slice**: the prelude `JSON` foreign enum (construction → `jet_std::Json::…`, non-mangled-variant matching via `core_json_pattern_types`/`is_json` branch, the value type, `json.render`/`parse` interplay) is a COUPLED slice (like Phase 21's concurrency) — covering one piece leaves the others unreachable / risks an I2 false-positive; the capstone family (`logbook` `parse`/`build`/`note_*`/`note_score`/`graph_json`, `30_json`/`73_json_coerce`/`74_regex`/`76_http_routes` `main`) is blocked by this slice + other uncovered nodes (regex `Match`, comptime tables, cross-module foreign structs). Byte-identical across the whole example suite (118 emittable, 0 differ); 268 top-level fns route (was 235). tests/tir.rs adds 6 build+run tests; unit tests add 7 gate tests. **After Phase 23 the residue is latent-bug-gated + unreachable/dead + the ONE remaining coupled feature slice (JSON/core-enum + capstone).** |
 | 24 | JSON/core-enum matching + capstone foreign types | ✅ done (c109 Phase 24) — the LAST coupled class-(3) slice, all byte-identical. **JSON** (the coupled prelude-`JSON` slice): construction `JSON.<Variant>(arg)`/`JSON.Null` → `jet_std::Json::<V>(…)` (`TExprKind::JsonLit`, the `implicit_clone` flag total, gated FIRST among type-name receivers); `if data == Object(entries)` JSON if-let matching (the Phase-22 `TIfCond::IfLet` shape with a JSON `Pattern::Variant`, reusing the JSON-aware `emit_if_let_pattern` + `core_json_pattern_types`); the JSON value type as a param/return/`[JSON]`/`[String, JSON]` element; `json.render`/`parse`/`decode` composed (Phase-10 `CoreCall`s). **Foreign-enum matching + construction** (`NoteType`/`ParseError`): `enum_is_covered` admits a foreign enum on its covered-payload (NOT `cx.cloneable` — the scrutinee `.clone()` is unconditional and a covered payload is always Clone); `tir_match_pattern` now DELEGATES to the AST `emit_match_pattern` (made `pub(crate)` — pure formatting, JSON/foreign/user aware); `tir_enum_lit_prefix`/`enum_type_prefix` emit the foreign `{root}{mod}::user_<T>::<V>` construction head. **Regex `Match.group(n)`** (gate shape d4, `recv_type == Some("Match")` → `BuiltinMethod`/`MatchGroup` → `(recv).get((n) as usize).cloned().flatten()`; `Match` joins the covered value types, rendering `Vec<Option<String>>`). **Comptime const inlining** (`TExprKind::ConstInline(cx.consts[name])`, inlined FIRST per `emit_expr`; the `ty` placeholder never read). **Foreign-value-type plumbing**: `collection_elem_covered`/`field_ty_covered`/`fallible_payload_covered`/`enum_payload_ty_covered` widened to admit a foreign struct/enum/JSON, a covered ENUM field, an `Option<covered>` field, and a foreign-enum payload (each byte-parity-safe — the value's own sub-expression moves/clones it). Fixed the Phase-22 two-binding gate (a `.clone()`-rewritten foreign field-read collection is a plain in-subset expr, not a method-call special form). All four feature targets route (`30`/`73`/`74` fully; `76` handlers) AND the **logbook capstone — all 45 fns route** (`parse`/`build`/`note_*`/`note_score`/`graph_json`/…); the JSON examples + logbook `index`/`graph json`/`find` run end-to-end. **Surfaced a NEW latent bug** (logged): an unqualified cross-module foreign STRUCT literal `Note { … }` miscompiles (E0422, both paths — the TIR already excludes it). Byte-identical across the whole example suite (118 emittable, 0 differ). tests/tir.rs adds 5 build+run tests; unit tests add 6 gate tests. Suite 782 → 793. **After Phase 24 the live-suite AST-path residue is ONLY latent-bug-gated + sema-unreachable + the HttpRouter handle surface** — the JSON/core-enum + capstone slice is fully covered. |
-| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal, the `new`-name-collision intercept — separate cards), (2) unreachable/dead constructs (generic-type methods, bare `?? return`, ambient `input()`), and (3) the **HttpRouter handle surface** — `http.router()` + `router.get`/`post` + `http.dispatch` (`76_http_routes`/`logbook serve` `main`), the LAST coverable handle-method surface (same seam as the Phase-13-deferred `Arena`/`Match`, now resolved for `Match`). Phase 24 cleared the sixth and final class-(3) feature surface (JSON/core-enum + capstone). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
+| 25 | HttpRouter handle surface + ambient `input()` + static-`new` | ✅ done (c109 Phase 25) — the LAST coverable handle surface + two over-exclusions, all byte-identical. **HttpRouter** (D-ROUTE1=A): `http.router()`/`http.parse(raw)`/`http.dispatch(router, req)` are now covered CoreCalls (NOT in `core_fixed_sig` — their fixed return types `HttpRouter`/`HttpRequest`/`HttpResponse` live in sema's `infer_core_call`, carried total in `core_call_return_ty`; emitted byte-for-byte `{root}jet_http_router_new()`/`jet_http_parse_request(&(raw))`/`jet_http_router_dispatch(&(router), req)`). `router.get/post/put/delete(path, handler)` is a new `THandleOp::HttpRouterRegister { verb, handler }` gated FIRST among HttpRouter methods (a dedicated shape h2, `recv_type == Some("HttpRouter")` + 2 args), the boxed handler closure RENDERED at lowering (`render_router_handler` reproduces `emit_router_handler`: a bare top-level-fn name → `Box::new(move |__req| user_<fn>(&__req)) as Box<dyn Fn(JetHttpRequest)->JetHttpResponse + Send + Sync>`, a literal lambda → `Box::new(<lambda>) as …`). HttpRouter is already a covered value type (`net_handle_rust_type`) + forced `let mut`. **Ambient `input()`** (D-PRELUDE1 = B): bare `Expr::Call { name: "input" }` with no user `input`/local → `TExprKind::AmbientInput { prompt }` → `{root}jet_std_io_input(None|Some(&(prompt)))`, `Result<String, IOError>` (composes with `??`). DISTINCT from `io.input(prompt)` (the qualified polymorphic MethodCall — still Phase-20-deferred). **Static `new`**: `is_intercepted_method_name("new")` is kept WHOLE (the INSTANCE intercept stays); `static_method_call_in_subset` now admits `new` (`method != MEM_ALLOC_NEW && intercepted`) because a `Type.new(args)` static call (`recv_type == None`, type-name receiver, `(Type,"new") ∈ method_sigs`) is the Phase-7 `user_<Type>::user_new(args)` form — NOT a builtin (`emit_builtin_method` has no `new` arm; `MEM_ALLOC_NEW` fires only for a `Field(mem)` receiver). `63_named_args`/`65_io_prelude`/`76_http_routes` `main` (+ `greet`) all route. Byte-identical across the whole example suite (90 emittable targets, 0 differ). 12 live fns remain on the AST path — all uncovered FEATURE surfaces a routing sweep newly exposed (`require`, `#Caps`, `mut`/`take` args, fn-value-stored, fan-out destructure, sized-int literals, generic/trait-object dispatch, `io.input`+`?? return`); NONE is the HttpRouter/input/new surface, none latent-bug-gated *for these three*. tests/tir.rs adds `static_new_constructor`/`ambient_input`/`http_router_dispatch`; unit tests add `covers_static_new_constructor`/`covers_ambient_input` + extend `polymorphic_core_specials_covered` with the http calls. Suite 793 → 798. |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25), (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema, bare `?? return` — no action), and (3) **uncovered FEATURE surfaces a Phase-25 routing sweep exposed** (12 live fns): the `require` builtin, `#Caps(Io){}` blocks, `mut`/`take` arg conventions, fn-typed-value-stored + struct fn-fields, fan-out result-list destructure, sized-integer literal width-elaboration, generic fns + trait-object params, and `io.input(prompt)`+`?? return` — each a future coverage phase. The HttpRouter surface, ambient `input()`, and static `new` are now fully covered (Phase 25). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
 regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep

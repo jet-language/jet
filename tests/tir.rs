@@ -3166,3 +3166,94 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "kind:user\ntag:design\n");
 }
+
+/// c109 Phase 25: a STATIC constructor `Type.new(args)` (D-NARG1, 63_named_args). `new`
+/// is in `is_intercepted_method_name` (the instance-method intercept stays), but the
+/// STATIC shape (`recv_type == None`, type-name receiver, `(Type, "new") ∈ method_sigs`)
+/// is the Phase-7 `user_<Type>::user_new(args)` form — not a builtin intercept — so it
+/// now routes. The instance method named `area` still routes too.
+#[test]
+fn static_new_constructor() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Rect {
+    width: Int
+    height: Int
+}
+impl Rect {
+    fn new(width: Int, height: Int) -> Rect {
+        return Rect{width: width, height: height}
+    }
+    fn area(self) -> Int {
+        return (self.width * self.height)
+    }
+}
+fn main() {
+    r @= Rect.new(4, 3)
+    print(r.area())
+}
+";
+    let (code, stdout) = build_and_run("tir_static_new", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "12\n");
+}
+
+/// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B, 65_io_prelude). A bare
+/// `input()` with NO user `input` fn lowers to `jet_std_io_input(None)` → `Result<String,
+/// IOError>`, composing with the `??` fallback. No stdin is provided, so `input()` errs and
+/// the fallback value is used (deterministic).
+#[test]
+fn ambient_input() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn greet() -> String {
+    name @= input() ?? \"world\"
+    return \"hello, {name}\"
+}
+fn main() {
+    print(greet())
+}
+";
+    // No stdin is piped, so `input()` reads EOF and yields Ok("") — the `??` fallback is
+    // NOT taken (it fires only on Err), so `name` is the empty string. (The point of the
+    // test is that the ambient `input()` lowers + runs through the TIR, not the fallback.)
+    let (code, stdout) = build_and_run("tir_ambient_input", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "hello, \n");
+}
+
+/// c109 Phase 25: the HttpRouter handle surface (D-ROUTE1=A, 76_http_routes). `http.router()`
+/// (producer), `router.get(path, handler)` with a named-fn handler (the boxed-closure
+/// `emit_router_handler` reproduction), and `http.dispatch(router, req)` — all without
+/// networking (dispatch a directly-parsed request). The handler routes too.
+#[test]
+fn http_router_dispatch() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use jet.http as http
+fn handle_root(req: HttpRequest) -> HttpResponse {
+    return HttpResponse {status: \"200 OK\", body: \"welcome\", headers: [:]}
+}
+fn handle_user(req: HttpRequest) -> HttpResponse {
+    id @= req.param(\"id\") ?? \"unknown\"
+    return HttpResponse {status: \"200 OK\", body: \"user={id}\", headers: [:]}
+}
+fn main() {
+    router @= http.router()
+    router.get(\"/\", handle_root)
+    router.get(\"/users/:id\", handle_user)
+    req @= http.parse(\"GET / HTTP/1.1\\nHost: localhost\")
+    resp @= http.dispatch(router, req)
+    print(resp.body())
+}
+";
+    let (code, stdout) = build_and_run("tir_http_router", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "welcome\n");
+}
