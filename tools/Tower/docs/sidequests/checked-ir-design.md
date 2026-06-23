@@ -1810,14 +1810,14 @@ everything, the AST codegen path is deleted (final phase).
   before commit (no `JET_NO_TIR`/`JET_RS` left in Source/).
 - **Phase-N readiness state: NOT every emittable live fn routes through the TIR.** Phase 25
   cleared the LAST *handle* surface + the input/new over-exclusions, and the routing sweep proved
-  8 uncovered FEATURE-surface classes (A)–(H) keep live functions on the AST path. **Phases 26–28
-  covered six of them — (A) `require`/`require_eq`/`panic`, (B) `#Caps(Io){}`, (C) `mut`/`take`
+  8 uncovered FEATURE-surface classes (A)–(H) keep live functions on the AST path. **Phases 26–30
+  covered ALL of them — (A) `require`/`require_eq`/`panic`, (B) `#Caps(Io){}`, (C) `mut`/`take`
   free-call arg conventions, (E) fan-out result-list destructure (Phase 26); (D) fn-typed-value-
   stored + struct fn-fields (Phase 27); (F) sized-integer types + literal width-elaboration
-  (Phase 28); (H) qualified `io.input(prompt)` + `?? return <value>` (Phase 29)** — so the
-  remaining AST-path FEATURE residue is ONLY (G) generic fns + trait-object dispatch. The AST
-  path cannot be deleted until (G) is covered (or proven sema-unreachable) and the latent-bug
-  fixes land.
+  (Phase 28); (H) qualified `io.input(prompt)` + `?? return <value>` (Phase 29); (G) generic fns +
+  trait-object (dyn) dispatch (Phase 30)** — so NO uncovered AST-path FEATURE residue remains. The
+  AST path can be deleted once the latent-bug fixes land (the only other residue is
+  sema-unreachable/dead constructs — no action).
 
 ## Refinements learned in Phase 26 (require/panic, #Caps, free-arg conventions, list-destructure)
 
@@ -1960,6 +1960,57 @@ everything, the AST codegen path is deleted (final phase).
   EOF is not) + `io_input_return_ty`; the unit tests add the `core.io`/`input` assertions to
   `polymorphic_core_specials_covered`. Suite 815 → 817.
 
+## Refinements learned in Phase 30 (generic fns + trait-object dispatch)
+
+- **(G) was three narrow gate-widenings, not new emit — the trait-object machinery was already
+  built.** `list_carries_trait` + the `EachRef` closure op (`jet_list_each_ref`), `rust_param_type`'s
+  trait-object `&Box<dyn …>` arm, and Context's `Type::TraitObject → Box<dyn user_<T>>` all predate
+  this phase (the `EachRef` op even carried a comment "always false for a covered receiver — built
+  for exactness"). Phase 30 made those live by admitting the trait-object TYPE.
+- **A type-var `T?` return was the SOLE excluder of `largest`.** `fallible_payload_covered` admitted
+  no type var, so a generic `-> (T?)` exited the gate at the return-type check. Adding
+  `is_type_var_param_ty` (one line) routes it: `cx.rust_type(Option<T>)` is `Option<T>`,
+  `value(best)`/`null` → `Some(user_best)`/`None`, and the `>` on a `Comparable` type var emits
+  PLAIN (`ast_operand_is_integer` is `None` for a type-var operand — the overflow trap is never
+  claimed, matching the AST). `[T]` indexing/`.len()` were Phase-9/17 already.
+- **A trait-object param is a value TYPE admission + a dispatch SHAPE — kept separate.** The TYPE
+  (`is_covered_trait_object_ty` — `Type::TraitObject(t)` or `Named(t) ∈ cx.trait_names`) is admitted
+  in `is_subset_param_ty` (param/return) and `collection_elem_covered` (`[Shape]` list); the param
+  slot's `(*user_s)` deref (non-scalar `Read`) + the `&Box<dyn …>` signature were already total in
+  `param_place`/`rust_param_type`. The dynamic DISPATCH (`s.name()`) is a new gate shape (n) keyed
+  on `recv_type == Some(<trait>)` (a trait name, disjoint from every struct/enum/handle/numeric
+  recv), lowered to the reused `MethodCall` node with the BARE (unmangled) method name and PLAIN
+  args (`emit_call_args(.., None, ..)`) — byte-for-byte the AST `emit_method_call` trait arm.
+- **A trait-object method call's result type is genuinely absent — carry `unit_type`, matching the
+  AST.** The AST trait-dispatch arm uses NO sig and NO return fact (a trait-method return isn't
+  registered in `cx.method_rets` by trait name — those tables key on concrete impl types). The
+  result type is load-bearing ONLY where a call result feeds a type-driven decision (arithmetic
+  trap, binding annotation), which the sole reachable program never does: `print("{s.name()}:
+  {s.area()}")` interpolates via `.jet_show()`, type-agnostic. So `unit_type()` is exact parity, not
+  a partiality — the AST has no more type information here than the TIR does.
+- **The trait-coerced struct literal is a wrap-the-whole-literal field on `StructLit`, NOT a node
+  change.** `Circle {…}` in a `[Shape]` list carries sema's `as_trait = Some("Shape")`; the AST
+  wraps the rendered literal `Box::new(<lit>) as Box<dyn user_Shape>` (`emit_struct_lit`). A new
+  `as_trait: Option<String>` on `TExprKind::StructLit` (the resolved `Generics::user_trait_rust`
+  name) reproduces it; the coerced literal's `.ty` becomes the `TraitObject` (so `[Circle…, Square…]`
+  types `[Shape]`). The gate admits it only for a PLAIN covered user struct + a known user trait (no
+  import_ns/generic/prelude coerced form — conservative, none such exists in a covered program).
+- **The lambda-param-type writeback the Phase-20 note warned against is correctly NOT applied.**
+  `shapes.each((s) => print_area(s))` emits `move |user_s|` with NO `Box<dyn>` annotation — the
+  closure-arg type is inferred from `jet_list_each_ref`'s `&T`, and annotating it `Box<dyn user_Shape>`
+  would be an E0631 mismatch (the exact failure mode the note documents). The TIR lowers the lambda
+  on the same path as any closure; the untyped param rides through byte-identically.
+- **Verified byte-identical** via a forced-AST-path diff (`JET_NO_TIR`) across the **entire example
+  suite** — 89 emittable, 0 differ — and a `JET_RS` route sentinel confirmed `25_traits`
+  `largest`/`print_area`/`main` flip `ROUTE AST` → `ROUTE TIR` (the Circle/Square `Shape` trait
+  methods already routed since Phase 12). Instrumentation removed before commit (no
+  `JET_NO_TIR`/`JET_RS`/`ROUTE ` in Source/). tests/tir.rs adds `generic_fns_and_trait_object_dispatch`
+  (build+run, prints `circle: 3.14159`/`square: 4.0`/`5`/`10`); unit tests add
+  `covers_generic_optional_return`/`covers_trait_object_param`/`covers_trait_object_list_param` +
+  the `rejects_optional_return_uncovered_payload`/`rejects_non_trait_object_named` negatives (the
+  sema-dependent dynamic-dispatch + `as_trait` gate paths are proven by e2e + parity). Suite 817 →
+  823. **(G) was the last feature surface — all (A)–(H) are now covered.**
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
 After Phase 22 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are reached
@@ -2090,10 +2141,17 @@ to route because the same fn used the uncovered struct fn-field + fn-field call.
 overflow opt-outs (`wrapping`/`saturating`/`checked` over an integer `Expr::Binary` → a total
 `OverflowOpt` node, `(lhs).{prefix}_{op}(rhs)`, PLAIN operands; `checked` yields `T?`).
 
-**(G) generic fn + trait-OBJECT params** (`25_traits` `largest` — `<T: Comparable>`;
-`print_area` — a trait-object `Shape` param; `main` — a `[Shape]` trait-object list +
-`.each`/`sort_by` over it). Generic functions and trait-object dispatch are a large uncovered
-surface (the generic-type-method *sema* gap is its cousin).
+**(G) ✅ COVERED (Phase 30) — generic fns + trait-OBJECT (dyn) dispatch** (`25_traits`
+`largest`/`print_area`/`main`). The last feature surface. `largest<T: Comparable>(xs: [T]) ->
+(T?)` needed only the `T?` type-var-payload admission (the `>` on a `Comparable` type var, `[T]`
+indexing were Phase-17 total); `print_area(s: Shape)` needed the trait-object param-type
+admission (`is_covered_trait_object_ty`) + a new dynamic-dispatch gate shape/lowering (`recv_type
+== Some(<trait>)` → `({recv}).{bare-method}({plain args})` via the reused `MethodCall` node);
+`main`'s `[Shape]` list needed the trait-object collection element + the `Box::new(<lit>) as
+Box<dyn …>` coercion (a new `as_trait` field on `TExprKind::StructLit`), with `.each` →
+`jet_list_each_ref` (the `EachRef` op, pre-built). All byte-identical. The generic-type-METHOD
+*sema* gap (a method on a generic struct, unreachable on either path) remains a sema card, not a
+TIR gap.
 
 **(H) ✅ COVERED (Phase 29) — qualified `io.input(prompt)` + `?? return <value>`** (`34_parallel_scan`
 `paths_from_prompt`). The "polymorphic return" label was WRONG: `io.input` has a FIXED return
@@ -2109,11 +2167,11 @@ dead/unusable form. So (H) needed only the `io.input` arm.
 None of (A)–(H) is the HttpRouter surface, the ambient `input()`, or the static `new` — those
 three are now fully covered. None is a "parity-safe construct form already flagged as
 coverable" (that category remains EMPTY). **Phase 26 covered (A)/(B)/(C)/(E); Phase 27 covered
-(D); Phase 28 covered (F); Phase 29 covered (H)** — so the only remaining uncovered FEATURE
-surface is **(G) generic fns + trait-object dispatch**. The remaining work toward deleting the
-AST path is: (G) (a future coverage phase), the latent-bug FIXES (separate cards), and the
-sema-unreachable constructs (generic-type methods, trait-object dispatch sema, bare `?? return`
-— no action).
+(D); Phase 28 covered (F); Phase 29 covered (H); Phase 30 covered (G)** — so ALL EIGHT (A)–(H)
+feature surfaces are now covered. The remaining work toward deleting the AST path is ONLY the
+latent-bug FIXES (separate cards) and the sema-unreachable constructs (generic-type methods,
+trait-object dispatch sema, bare `?? return` — no action). Phase N (AST-path deletion) is
+UNBLOCKED on feature coverage.
 
 ## Phases
 
@@ -2150,7 +2208,8 @@ sema-unreachable constructs (generic-type methods, trait-object dispatch sema, b
 | 27 | fn-typed VALUE stored in a local + struct fn-FIELD method | ✅ done (c109 Phase 27) — surface (D), all byte-identical (89 emittable targets, 0 differ; `24_callbacks` `main`/`apply_twice`/`double` all `ROUTE TIR`). **Struct fn-FIELD** (`struct Worker { step: fn(Int) -> Int }`): `field_ty_covered` now admits a `Type::Fn` field — it renders via `cx.rust_type` to `Box<dyn Fn(...) -> ...>` (the AST `struct_field_rust`), so a struct with a fn-typed field is a covered VALUE type and `Worker { step: <lambda> }` constructs it (the lambda field value is in-subset and emitted as-is — NO ` as <fn-type>` coercion at the literal site, mirroring `emit_struct_lit`'s plain `emit_expr` field value). **fn-field CALL** (`w.step(4)`): sema (CheckerInfer fn-field arm) sets `recv_type == Some("Worker")` and re-routes through `infer_call_value`, but registers NO `method_sigs` entry — so the user-instance-method shape excluded it. A new gate shape (m) + `TExprKind::FnFieldCall` reproduce the AST `emit_method_call` fn-field branch (`(({recv}).{user_<field>})({args})`, PLAIN args — `emit_call_args(.., None, ..)`), tried BEFORE the user-method/static shapes (the AST checks the fn-field FIRST). **fn-NAME value binding** (`double_fn @= double`): already wired in lowering (`Stmt::Val` lowers the init via `lower_expr`, which classifies a bare top-level-fn `Ident` as a `NamedFn` value — `emit_named_fn_value`'s `Box::new(move |…| name(…)) as <fn-type>`, with the `: <fn-type>` annotation rendered via `rust_fn_trait`); the fn-value ARG + lambda ARG were Phase-13 (`TFnCoerce`/`lower_one_call_arg`). The binding only failed to route because the same `main` used the uncovered struct fn-field + fn-field call. tests/tir.rs adds `fn_value_and_struct_fn_field` (build+run, prints `12`/`7`/`16`); unit tests add `covers_named_fn_value_binding`/`covers_fn_field_struct_value_type`/`covers_fn_field_type_covered`. Suite 806 → 810. The instrumentation was removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (F) sized-integer literal width-elaboration, (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
 | 28 | sized-integer types + literal width-elaboration | ✅ done (c109 Phase 28) — surface (F), all byte-identical (87 emittable targets, 0 differ; `82_sized_integers` `main` `ROUTE TIR`). Most of (F) was ALREADY total: literal width-elaboration (`red: U8 @= 255` → `255u8`) + per-element list widening (`[U8] @= [104, …]`) ride the sema `Expr::Int` width annotation the `IntLit` node carries (Phase 1); width-preserving overflow-trapping arithmetic (`half + half`/`total + 1`) replays `ast_operand_is_integer`; width conversions (`to_i64`/`to_u8() ??`), bit/float queries (`count_ones`/`is_infinite`) are the Phase-12 `NumericMethod` shape. Phase 28 added the two missing leaf forms. **Numeric BOUNDS constants** (`U8.MAX`/`I32.MIN`/`Float.INFINITY`): a `Expr::Field` over a numeric type NAME — the Field gate previously blanket-excluded a non-local non-enum ident receiver, so Phase 28 carves the bounds case out FIRST (`numeric_type_from_name(name)` + a member ∈ `{MIN,MAX,INFINITY,NEG_INFINITY,NAN,EPSILON}`, the exact AST `emit_expr` filter); lowered to a `ConstInline` `{cx.rust_type(nt)}::{member}` string with result type the numeric type itself (so `Float.INFINITY.is_infinite()` composes). **Overflow opt-outs** (`wrapping`/`saturating`/`checked` over one integer `Expr::Binary`): a bare `Expr::Call` claimed when the name is one of the three and unshadowed (`!cx.sigs`); a new `TExprKind::OverflowOpt{prefix, op, lhs, rhs}` emits `(lhs).{prefix}_{add|sub|mul|div}(rhs)` with PLAIN operands (no trap); `checked` yields `T?` (composes with the Phase-8 `??`), the others `T`. Gate returns EARLY for the three (before the generic-call arg machinery). tests/tir.rs adds `sized_integers` (build+run, the full 15-line output); unit tests add `covers_numeric_bounds_const`/`covers_overflow_opt_builtins` + the `rejects_unknown_numeric_member`/`rejects_overflow_opt_nonbinary` negatives. Suite 810 → 815. Instrumentation removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: (G) generic fns + trait-object dispatch, (H) `io.input(prompt)`+`?? return`. |
 | 29 | qualified `io.input(prompt)` + `?? return <value>` | ✅ done (c109 Phase 29) — surface (H), all byte-identical (89 emittable targets, 0 differ; `34_parallel_scan` `paths_from_prompt` flips `ROUTE AST` → `ROUTE TIR`). The "polymorphic return" label was a MISDIAGNOSIS: `io.input` has a FIXED return (`Result<String, IOError>`); it just lives in sema's bespoke `infer_core_call` arm (`CheckerCoreLib.rs ("core.io","input")`), NOT the `core_fixed_sig` table — so `core_call_covered` (which falls through to `core_fixed_sig(...).is_some()`) returned `false`, the real gap. Same shape as `tasks.channel`/`http.{router,parse,dispatch}`: admit it in `core_call_covered`, carry its `Result<String, IOError>` in `core_call_return_ty` (else the node's `ty` falls back to Unit and `?? return` can't compose), emit the byte-for-byte `{root}jet_std_io_input(None|Some(&(prompt)))` arm in `emit_tir_core_call`. The Phase-10 `CoreCall` lowering handled the rest. The `?? return <value>` fallback was ALREADY covered (Phase 8 — `TOrFallback::Return(Some(e))` → `return {e}`, matching the AST `emit_or_fallback_rhs`); only the bare `?? return` (no value) is the dead/unusable form. So (H) reduced to the single `io.input` arm. Distinct from the ambient bare `input()` (Phase 25 `AmbientInput`, an `Expr::Call`) — the qualified form is a `MethodCall` on a `core.io` alias → `CoreCall`. tests/tir.rs adds `qualified_io_input_or_return` (a stdin-piping build+run: two lines + blank → `count=2`/lines; immediate EOF → `read_line` `Ok("")` → loop breaks → `count=0`) + `io_input_return_ty`; unit tests add the `core.io`/`input` assertions to `polymorphic_core_specials_covered`. Suite 815 → 817. Instrumentation removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). Remaining AST-path FEATURE residue: ONLY (G) generic fns + trait-object dispatch. |
-| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending — the residue is now (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25), (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema, bare `?? return` — no action), and (3) **uncovered FEATURE surfaces a Phase-25 routing sweep exposed** — Phases 26–29 covered (A) `require`, (B) `#Caps(Io){}`, (C) `mut`/`take` arg conventions, (E) fan-out list-destructure, (D) fn-typed-value-stored + struct fn-fields, (F) sized-integer types + literal width-elaboration, (H) qualified `io.input(prompt)` + `?? return <value>`; the REMAINING surface is ONLY (G) generic fns + trait-object params — a future coverage phase. The HttpRouter surface, ambient `input()`, and static `new` are fully covered (Phase 25). The "parity-safe construct form already flagged as coverable" category is EMPTY. |
+| 30 | generic fns + trait-OBJECT (dyn) dispatch | ✅ done (c109 Phase 30) — surface (G), the LAST feature surface, all byte-identical (89 emittable targets, 0 differ; `25_traits` `largest`/`print_area`/`main` all flip `ROUTE AST` → `ROUTE TIR`, joining the Circle/Square `Shape` trait methods already routed since Phase 12). THREE sub-parts, each one narrow gate-widening — the trait-object EMIT infra was already built (`list_carries_trait`, `EachRef` → `jet_list_each_ref`, `rust_param_type`'s trait-object arm, Context's `Type::TraitObject` → `Box<dyn user_<T>>`). **`largest<T: Comparable>(xs: [T]) -> (T?)`**: the SOLE excluder was the `T?` return — `fallible_payload_covered` admitted no type var; adding `is_type_var_param_ty` (a type-var payload renders `Option<T>`, `value(best)`/`null` → `Some(user_best)`/`None`) routes it. The `>` on a `Comparable` type var emits PLAIN (`ast_operand_is_integer` is `None` for a type-var operand — no trap), `[T]` indexing was Phase-17. **`print_area(s: Shape)`** (trait-OBJECT param → `&Box<dyn user_Shape>`): `is_subset_param_ty` now admits a trait-object type (`is_covered_trait_object_ty` — `Type::TraitObject(t)` or a `Named(t)` ∈ `cx.trait_names`); `param_place`'s non-scalar-`Read` deref `(*user_s)` + `rust_param_type`'s trait-object `&` arm were already total. **Dynamic dispatch** `s.name()`/`s.area()`: sema sets `recv_type == Some(<trait>)`; a new gate shape (n) + lowering branch reproduce the AST `emit_method_call` trait-object arm (`({recv}).{method}({args})` — BARE method name for vtable dispatch, args PLAIN via `emit_call_args(.., None, ..)`), reusing the `MethodCall` node. The result type carries `unit_type` (the AST has no sig/return fact for a trait call, and a trait-method return isn't registered in `cx.method_rets` by trait name — load-bearing only where the result feeds a type decision, which the sole reachable program never does: `print("{s.name()}: {s.area()}")` calls `.jet_show()`, type-agnostic). **`main`**: `shapes: [Shape] @= [Circle {…}, Square {…}]` — `collection_elem_covered` now admits a trait-object element; each list element is a trait-coerced `StructLit` (`as_trait = Some("Shape")`), wrapped `Box::new(<lit>) as Box<dyn user_Shape>` via a new `as_trait: Option<String>` field on `TExprKind::StructLit` (resolved at lowering to the `Generics::user_trait_rust` name, the literal's `.ty` becomes the trait object); the gate admits the coerced literal when the trait is a known user trait + the base is a plain covered struct. `.each((s) => print_area(s))` over a `[Shape]` list → the `EachRef` closure op (`jet_list_each_ref(&recv, f)`), the lambda param `s` UNANNOTATED (the writeback the Phase-20 note warns against is NOT applied — `move |user_s|`, no `Box<dyn>` annotation). `largest(nums)` is a plain generic call; `sort_by` a derived-Comparable closure (both already covered). tests/tir.rs adds `generic_fns_and_trait_object_dispatch` (build+run, prints `circle: 3.14159`/`square: 4.0`/`5`/`10`); unit tests add `covers_generic_optional_return`/`covers_trait_object_param`/`covers_trait_object_list_param` + the `rejects_optional_return_uncovered_payload`/`rejects_non_trait_object_named` negatives (the sema-dependent dynamic-dispatch + `as_trait` gate paths are proven by e2e + parity, not the structural `covers` helper). Suite 817 → 823. Instrumentation removed before commit (no `JET_NO_TIR`/`JET_RS` left in Source/). **All eight (A)–(H) feature surfaces are now covered** — the ONLY remaining AST-path residue is the latent-bug FIXES + sema-unreachable constructs (Phase N — AST-path deletion — is UNBLOCKED on feature coverage). |
+| N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | UNBLOCKED on feature coverage (all of (A)–(H) covered, Phases 26–30) — the residue is now ONLY (1) latent-bug FIXES (`is_empty`, no-arg `join()`, `mut self`/`view self` reassignment, recursive structs, view-returning trait methods, the unqualified foreign struct literal — separate cards; the `new`-name-collision over-exclusion is FIXED in Phase 25) and (2) sema-unreachable/dead constructs (generic-type methods, trait-object dispatch sema gaps, bare `?? return` — no action). No uncovered FEATURE surface remains; the "parity-safe construct form already flagged as coverable" category is EMPTY. |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
 regardless of order. Each phase: extend `tir_covers`/`lower_func`/`emit_tir_func`, keep

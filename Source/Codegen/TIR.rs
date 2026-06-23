@@ -470,6 +470,11 @@ pub(crate) enum TExprKind {
         /// (e.g. HttpRequest's injected `params: std::collections::BTreeMap::new()`).
         /// `None` for a plain user struct.
         extra: Option<String>,
+        /// c109 Phase 30: a TRAIT-OBJECT coercion (`Circle {…}` in a `[Shape]` list, S48).
+        /// When `Some(trait_rust)` — the already-resolved `Generics::user_trait_rust` name —
+        /// the whole literal is wrapped `Box::new({lit}) as Box<dyn {trait_rust}>`, exactly as
+        /// `emit_struct_lit`'s `as_trait` branch. `None` for a non-coerced literal.
+        as_trait: Option<String>,
     },
     /// c109 Phase 3: a struct field *read* `recv.field` in borrow position. The
     /// AST path never derefs/clones a plain field read (Rust reads the place;
@@ -1418,6 +1423,7 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
         || is_type_var_param_ty(ty)
+        || is_covered_trait_object_ty(ty, cx)
         || is_covered_distinct_ty(ty, cx)
         || is_covered_tuple_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
@@ -1624,6 +1630,23 @@ fn is_covered_fn_ty(ty: &Type, cx: &Cx) -> bool {
     }
 }
 
+/// c109 Phase 30: a TRAIT-OBJECT param/return/local type (`s: Shape` where `Shape` is a
+/// user trait → `Type::TraitObject("Shape")`, or a bare `Type::Named("Shape")` naming a
+/// trait). It renders via `cx.rust_type` to `Box<dyn user_Shape>` (Context.rs), and the
+/// param convention is decided by `rust_param_type`'s trait-object arm (`Read` → `&Box<dyn
+/// …>`, the slot deref'd to `(*user_s)` by `param_place` — a non-scalar `Read` param). A
+/// METHOD on it is the dedicated trait-object dispatch shape (`recv_type == Some(<trait>)`,
+/// dynamic dispatch via the bare method name); a non-method use (pass/bind/return) is
+/// byte-identical to the AST path. The trait must be a known user trait (`cx.trait_names`),
+/// never a foreign/prelude name.
+fn is_covered_trait_object_ty(ty: &Type, cx: &Cx) -> bool {
+    match ty {
+        Type::TraitObject(t) => cx.trait_names.contains(t),
+        Type::Named(n) => cx.trait_names.contains(n),
+        _ => false,
+    }
+}
+
 /// c109 Phase 8: `ty` is an optional `T?` (`Type::Option`) or a fallible `T ? E`
 /// (`Type::Result`) whose payload(s) are themselves covered *value* types. Both
 /// lower through `cx.rust_type` (`Option<…>` / `Result<…, …>`) exactly as the AST
@@ -1648,6 +1671,14 @@ fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
 /// lowers to plain `String` — its construction/binding is a String, so no clone/box
 /// decision the subset can't make).
 fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
+    // c109 Phase 30: a type-variable payload (`T` in a generic fn's `T?` return —
+    // `largest<T: Comparable>() -> (T?)`). A type var renders via `cx.rust_type` to the
+    // bare letter (`Option<T>`), and `value(best)`/`null` lower to `Some(user_best)`/`None`
+    // byte-identically (no clone/box decision). A type var only appears where a type param
+    // is in scope (sema guarantees), so an `Option<T>` payload is total.
+    if is_type_var_param_ty(ty) {
+        return true;
+    }
     if let Type::Named(n) = ty {
         if n == "Error" {
             return true;
@@ -1713,6 +1744,12 @@ fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // c109 Phase 21: a `[Task<Unit>]` worker list (34_parallel_scan) — a concurrency
         // handle element renders via `cx.rust_type` (`Vec<Jet…<…>>`) like any value type.
         || is_covered_concurrency_ty(ty, cx)
+        // c109 Phase 30: a TRAIT-OBJECT element (`[Shape]` → `Vec<Box<dyn user_Shape>>`).
+        // Each element is a `Box::new(<lit>) as Box<dyn …>` (the trait-coerced literal),
+        // and `.each` over such a list dispatches via `jet_list_each_ref` (the `EachRef`
+        // closure op, already built — `list_carries_trait`). The element renders via
+        // `cx.rust_type` to `Box<dyn user_<Trait>>`, byte-identical to the AST path.
+        || is_covered_trait_object_ty(ty, cx)
         // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum (`[JSON]` /
         // `[String, JSON]`) OR a cross-module imported user struct/enum (`[String, Note]`
         // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
@@ -2805,9 +2842,24 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             fields,
             ..
         } => {
-            // A trait-object coercion (S48) uses a different Rust head — exclude.
-            if as_trait.is_some() {
-                return false;
+            // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
+            // list). The AST wraps the rendered literal `Box::new(<lit>) as Box<dyn
+            // user_<Trait>>` (`emit_struct_lit`'s `as_trait` branch). Covered when the trait
+            // is a known user trait and the base is a PLAIN covered user struct (no import_ns,
+            // no type_args — a coerced foreign/generic literal is not a construct any covered
+            // program produces, so stay conservative and require the plain form). The fields
+            // are checked in the plain-struct path below. A coercion to a non-trait name (or a
+            // foreign/generic coerced literal) stays excluded.
+            if let Some(trait_name) = as_trait {
+                if !cx.trait_names.contains(trait_name)
+                    || import_ns.is_some()
+                    || !type_args.is_empty()
+                    || is_prelude_struct_name(type_name)
+                    || !is_covered_struct_ty(&Type::Named(type_name.clone()), cx)
+                {
+                    return false;
+                }
+                return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
             // c109 Phase 19: a FOREIGN (imported user) struct literal — a `import_ns`
             // namespace head (`{root}{mod}::{user_<Name>}[::<args>]`, mangled fields).
@@ -3405,6 +3457,23 @@ fn method_call_in_subset(
             return static_method_call_in_subset(type_name, method, args, cx, locals);
         }
         return false;
+    }
+    // Shape (n) [c109 Phase 30]: DYNAMIC dispatch on a TRAIT-OBJECT receiver
+    // (`s.name()`/`s.area()` where `s: Shape` is a `Box<dyn user_Shape>`). Sema sets
+    // `recv_type == Some(<trait>)` with the trait in `cx.trait_names`; the AST
+    // `emit_method_call` (Expression.rs ~L1657) keys on `cx.trait_names.contains(rt)` and
+    // emits `({recv}).{method}({args})` — the BARE method name (vtable dispatch), args
+    // lowered PLAINLY (`emit_call_args(.., None, ..)`). Disjoint from the user-instance
+    // shape below (a trait name is never a covered struct/enum) and from the
+    // numeric/handle/builtin shapes (a trait name isn't any of those). Covered when the
+    // receiver is in-subset and every arg is in-subset + unlabeled.
+    if let Some(ty) = recv_type {
+        if cx.trait_names.contains(ty) {
+            return expr_in_subset(receiver, cx, locals)
+                && args
+                    .iter()
+                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+        }
     }
     // Shape (b): a user-defined instance method. The `recv_type` is the TOTAL sema
     // fact; a `None` was handled above (static). Anything else (a fallback-inferred
@@ -6070,9 +6139,18 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             type_name,
             type_args,
             import_ns,
+            as_trait,
             fields,
             ..
         } => {
+            // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
+            // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn user_<Trait>>`; the
+            // value's type is the trait object. Resolved here (totality) — only the plain
+            // user-struct branch below carries it (a coerced import_ns/prelude literal is
+            // not a construct any covered program produces; the gate keeps those uncoerced).
+            let trait_coerce = as_trait
+                .as_ref()
+                .map(|t| crate::Generics::user_trait_rust(t));
             // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
             // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
             // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
@@ -6109,6 +6187,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         rust_type,
                         fields: tfields,
                         extra: None,
+                        as_trait: None,
                     },
                 };
             }
@@ -6132,6 +6211,7 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         rust_type: format!("{}{}", cx.root_prefix, rust),
                         fields: tfields.drain(..).collect(),
                         extra,
+                        as_trait: None,
                     },
                 };
             }
@@ -6155,12 +6235,19 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env)))
                 .collect();
+            // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
+            // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
+            let ty = match as_trait {
+                Some(t) => Type::TraitObject(t.clone()),
+                None => Type::Named(type_name.clone()),
+            };
             TExpr {
-                ty: Type::Named(type_name.clone()),
+                ty,
                 kind: TExprKind::StructLit {
                     rust_type,
                     fields: tfields,
                     extra: None,
+                    as_trait: trait_coerce,
                 },
             }
         }
@@ -7238,6 +7325,33 @@ fn lower_method_call(
                 args: targs,
             },
         };
+    }
+    // c109 Phase 30: DYNAMIC dispatch on a TRAIT-OBJECT receiver (`s.name()`/`s.area()`,
+    // `s: Box<dyn user_Shape>`). The gate proved `recv_type == Some(<trait>)` with the
+    // trait in `cx.trait_names`. The AST `emit_method_call` (Expression.rs ~L1657) emits
+    // `({recv}).{method}({args})` — the BARE (unmangled) method name (vtable dispatch),
+    // args lowered PLAINLY (`emit_call_args(.., None, ..)` — no sig). Reuse the `MethodCall`
+    // node (`({recv}).{method_rust}({args})`) with the bare method name. The result type is
+    // NOT load-bearing here (the AST carries no sig/return for a trait-object call, and a
+    // trait-method return isn't registered in `cx.method_rets` by trait name) — it is read
+    // only where the call result feeds a type-driven decision, which the sole reachable
+    // program (`print("{s.name()}: {s.area()}")` — string interpolation calls `.jet_show()`,
+    // type-agnostic) never does. Carry `unit_type`, exactly as the AST has no return fact.
+    if let Some(ty) = recv_type {
+        if cx.trait_names.contains(ty) {
+            let recv = lower_expr(receiver, cx, env);
+            // Plain args (conv None), reproducing `emit_call_args(cx, None, args, env)`.
+            let targs: Vec<TCallArg> =
+                args.iter().map(|a| lower_one_call_arg(a, None, env, cx)).collect();
+            return TExpr {
+                ty: unit_type(),
+                kind: TExprKind::MethodCall {
+                    recv: Box::new(recv),
+                    method_rust: method.to_string(),
+                    args: targs,
+                },
+            };
+        }
     }
     // A user instance method on a covered type. `recv_type` is total (gate proved
     // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
@@ -8650,7 +8764,7 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 3: `user_S { f: v, … }`. The Rust head and mangled field
         // names were resolved at lowering; values format like any other node.
-        TExprKind::StructLit { rust_type, fields, extra } => {
+        TExprKind::StructLit { rust_type, fields, extra, as_trait } => {
             let mut parts = fields
                 .iter()
                 .map(|(field_rust, v)| format!("{}: {}", field_rust, emit_tir_expr(v, cx)))
@@ -8660,7 +8774,13 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             if let Some(extra) = extra {
                 parts.push(extra.clone());
             }
-            format!("{} {{ {} }}", rust_type, parts.join(", "))
+            let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
+            // c109 Phase 30: a trait-object coercion wraps the whole literal, byte-for-byte
+            // `emit_struct_lit`'s `as_trait` branch (Source/Codegen/Expression.rs ~L342).
+            match as_trait {
+                Some(trait_rust) => format!("Box::new({lit}) as Box<dyn {trait_rust}>"),
+                None => lit,
+            }
         }
         // c109 Phase 3: `(recv).field`. Mirrors the AST `Expr::Field` emit form
         // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
@@ -10533,5 +10653,78 @@ fn nope(x: U8) {
 }
 ";
         assert!(!covers(src, "nope"));
+    }
+
+    #[test]
+    fn covers_generic_optional_return() {
+        // c109 Phase 30: a generic fn with a `T?` return whose payload is a type var
+        // (`largest<T: Comparable>() -> (T?)`). Before Phase 30 the `T?` payload was
+        // excluded (`fallible_payload_covered` admitted no type var) — now it routes.
+        // Body is a structural `value(x)` (a type-var payload `Some(user_x)`).
+        let src = "\
+fn opt_id<T: Comparable>(x: T) -> (T?) {
+    return value(x)
+}
+";
+        assert!(covers(src, "opt_id"));
+    }
+
+    #[test]
+    fn rejects_optional_return_uncovered_payload() {
+        // A `T?` return whose payload is an UNcovered type (a trait object is not a
+        // fallible payload) stays excluded — the type-var admission is narrow.
+        let src = "\
+trait Shape {
+    fn area(self) -> Float
+}
+fn maybe_shape(s: Shape) -> (Shape?) {
+    return value(s)
+}
+";
+        assert!(!covers(src, "maybe_shape"));
+    }
+
+    #[test]
+    fn covers_trait_object_param() {
+        // c109 Phase 30: a TRAIT-OBJECT param (`s: Shape` → `&Box<dyn user_Shape>`). The
+        // param type is admitted (`is_covered_trait_object_ty`); a body with no method
+        // call is structurally in-subset (the dynamic-dispatch shape needs sema's
+        // `recv_type`, proven by tests/tir.rs + parity). An empty body covers.
+        let src = "\
+trait Shape {
+    fn area(self) -> Float
+    fn name(self) -> String
+}
+fn takes_shape(s: Shape) {
+}
+";
+        assert!(covers(src, "takes_shape"));
+    }
+
+    #[test]
+    fn covers_trait_object_list_param() {
+        // c109 Phase 30: a `[Shape]` trait-object list is a covered collection
+        // (`collection_elem_covered` admits a trait-object element). A fn taking one,
+        // with no body construct beyond the param, routes.
+        let src = "\
+trait Shape {
+    fn area(self) -> Float
+}
+fn takes_shapes(xs: [Shape]) {
+}
+";
+        assert!(covers(src, "takes_shapes"));
+    }
+
+    #[test]
+    fn rejects_non_trait_object_named() {
+        // `is_covered_trait_object_ty` admits only a NAME in `cx.trait_names`. A param
+        // typed as an unknown name (no such trait/struct) stays excluded — the gate
+        // never wrongly treats a plain name as a trait object.
+        let src = "\
+fn bad(s: Nonexistent) {
+}
+";
+        assert!(!covers(src, "bad"));
     }
 }

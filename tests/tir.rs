@@ -3523,3 +3523,84 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "> count=0\ndone\n");
 }
+
+/// c109 Phase 30: GENERIC functions + TRAIT-OBJECT dispatch (surface (G), 25_traits).
+/// Three covered fns: a generic `largest<T: Comparable>(xs: [T]) -> (T?)` (a `>` on a
+/// `Comparable`-bound type var, `[T]` indexing, a `T?` return with `value`/`null`); a
+/// trait-OBJECT param `print_area(s: Shape)` (dynamic dispatch `s.name()`/`s.area()`
+/// through a `Box<dyn user_Shape>`); and `main` — a `[Shape]` trait-object list built from
+/// `Box::new(<lit>) as Box<dyn user_Shape>` element coercions, iterated via `.each`
+/// (`jet_list_each_ref`), plus a generic call `largest(nums)` and a derived-Comparable
+/// `scores.sort_by(...)`. All route `ROUTE TIR` (the Circle/Square trait methods already
+/// route since Phase 12), and the whole suite is byte-identical (golden parity).
+#[test]
+fn generic_fns_and_trait_object_dispatch() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Shape {
+    fn area(self) -> Float
+    fn name(self) -> String
+}
+struct Circle {
+    radius: Float
+
+    impl Shape {
+        fn area(self) -> Float {
+            return ((3.14159 * self.radius) * self.radius)
+        }
+        fn name(self) -> String {
+            return \"circle\"
+        }
+    }
+}
+struct Square {
+    side: Float
+}
+impl Square: Shape {
+    fn area(self) -> Float {
+        return (self.side * self.side)
+    }
+    fn name(self) -> String {
+        return \"square\"
+    }
+}
+fn largest<T: Comparable>(xs: [T]) -> (T?) {
+    if xs.len() == 0 {
+        return null
+    }
+    best := xs[0]
+    i := 1
+    loop i < xs.len() {
+        if xs[i] > best {
+            best = xs[i]
+        }
+        i+= 1
+    }
+    return value(best)
+}
+fn print_area(s: Shape) {
+    print(\"{s.name()}: {s.area()}\")
+}
+struct Score {
+    points: Int
+    derive Comparable
+}
+fn main() {
+    shapes: [Shape] @= [Circle {radius: 1.0}, Square {side: 2.0}]
+    shapes.each((s) => {
+        print_area(s)
+    })
+    nums @= [3, 1, 4, 1, 5]
+    print(largest(nums))
+    scores := [Score {points: 10}, Score {points: 20}]
+    scores.sort_by((s: Score) => s.points)
+    print(scores[0].points)
+}
+";
+    let (code, stdout) = build_and_run("tir_generic_trait_object", src);
+    assert_eq!(code, 0);
+    // circle/square areas via dynamic dispatch; largest([3,1,4,1,5]) = 5; scores[0].points = 10.
+    assert_eq!(stdout, "circle: 3.14159\nsquare: 4.0\n5\n10\n");
+}
