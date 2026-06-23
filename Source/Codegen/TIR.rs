@@ -2385,6 +2385,25 @@ fn if_cond_in_subset(cond: &Expr, cx: &Cx, locals: &HashSet<String>) -> Option<V
                     return Some(vec![b.clone()]);
                 }
             }
+            // c109 (B4): a USER-enum variant if-let (`if m == Ping(n)`). Covered when
+            // the variant is a single-payload variant (one `Bind` slot) of a covered
+            // user enum — the AST `emit_if` already emits the correct
+            // `if let user_E::user_V(user_b) = <subj>` head. The subject was checked
+            // above; require the owning enum to be covered so the prefix/payload are
+            // total. Multi-bind / unit variants stay on the AST path (the single-bind
+            // shape mirrors the JSON-variant if-let exactly).
+            if !is_json_variant(variant)
+                && bindings.len() == 1
+                && matches!(bindings[0], PatSlot::Bind(_))
+            {
+                if let Some(owner) = cx.variant_owner.get(variant) {
+                    if enum_is_covered(owner, cx) {
+                        if let PatSlot::Bind(b) = &bindings[0] {
+                            return Some(vec![b.clone()]);
+                        }
+                    }
+                }
+            }
             return None;
         }
         return match pattern {
@@ -5208,6 +5227,23 @@ fn lower_if_cond(
                 let subj = lower_expr(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 let ty = crate::Sema::core_json_pattern_types(variant)
+                    .and_then(|ts| ts.into_iter().next());
+                let place = mangle(name);
+                return (
+                    TIfCond::IfLet { pat_str, subj },
+                    Some((name.clone(), place, ty)),
+                );
+            }
+        }
+        // c109 (B4): a USER-enum variant if-let (`if m == Ping(n)`). The Rust if-let
+        // pattern is the same `emit_if_let_pattern` (`user_E::user_V(user_b)`), and the
+        // binding's type is the variant's first payload type from `variant_binding_types`
+        // (the same total fact `add_pattern_bindings` reads on the AST path).
+        if !is_json_variant(variant) {
+            if let Some(PatSlot::Bind(name)) = bindings.first() {
+                let subj = lower_expr(subject, cx, env);
+                let pat_str = emit_if_let_pattern(cx, pattern);
+                let ty = variant_binding_types(cx, variant)
                     .and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
                 return (
@@ -10179,6 +10215,14 @@ fn mk() {
         // `x == null` lowers to `.is_none()`.
         let isnone = "fn f(x: Int?) {\n if x == null {\n print(\"none\")\n }\n}\n";
         assert!(covers(isnone, "f"));
+    }
+
+    #[test]
+    fn covers_user_enum_variant_if_let_condition() {
+        // c109 (B4): `if m == Ping(n) { … } else { … }` over a covered user enum lowers
+        // to `if let user_Msg::user_Ping(user_n) = m`. Single-payload variant (one bind).
+        let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) -> Int {\n if m == Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
+        assert!(covers(src, "f"));
     }
 
     #[test]

@@ -3977,3 +3977,29 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "3\n");
 }
+
+/// c109 (B4): a user-enum variant if-let condition `if m == Ping(n) { } else { }`
+/// routes through the TIR and binds the payload (byte-for-byte the AST if-let).
+#[test]
+fn user_enum_variant_if_let_condition() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Msg { Ping(Int) Pong }
+fn f(m: Msg) -> Int {
+    if m == Ping(n) {
+        return n
+    } else {
+        return -1
+    }
+}
+fn main() {
+    print(f(Msg.Ping(7)))
+    print(f(Msg.Pong))
+}
+";
+    let (code, stdout) = build_and_run("tir_user_enum_if_let", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "7\n-1\n");
+}
