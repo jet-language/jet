@@ -78,7 +78,7 @@ pub(crate) struct Cx {
     pub(crate) current_fn: std::cell::RefCell<String>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each};\n\n";
 
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     name == Syntax::TYPE_JSON || name == "Json"
@@ -194,6 +194,12 @@ impl Cx {
             }
             Type::Named(name) if name == "Unit" => "()".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
+            // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`,
+            // `String.to_int`) erases to a plain message — never user-constructed.
+            // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
+            Type::Named(name) if name == "ParseError" && !self.type_names.contains(name) => {
+                "String".to_string()
+            }
             // D-REGEX1: a regex `Match` is a list of capture groups (index 0 = whole
             // match), each `Some` if it participated. `.group(n)` is plain indexing.
             Type::Named(name) if name == "Match" => "Vec<Option<String>>".to_string(),

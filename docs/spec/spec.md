@@ -671,7 +671,11 @@ Each takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005**.
 
 Receiver additions: `String.bytes() -> [U8]`,
 `String.from_bytes([U8]) -> String ? UTF8Error`, `n.to_u8()`, and
-`b.to_int()`. Time stays unix milliseconds (`time.now()`); random is
+`b.to_int()`. String parsing (c97/D-STRPARSE1): `String.to_int() -> Int ?
+ParseError` is a fallible integer parse (same result `Int.parse(s)` returns,
+handled with `?`/`??`), and `String.lines() -> [String]` splits text into its
+lines (recognizing `\n` and `\r\n`, with no trailing empty line). Time stays
+unix milliseconds (`time.now()`); random is
 deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
 `json.parse`, `json.render`, and `json.render_pretty`. `jet.json` also exposes
 `json.decode` (D-JSON1-decode + D-JSON3=B): a lenient variant that coerces

@@ -142,6 +142,7 @@ fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> 
 }
 fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
 fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
+fn jet_string_lines(s: &String) -> Vec<String> { s.lines().map(|x| x.to_string()).collect() }
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len() as i64;

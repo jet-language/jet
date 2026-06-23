@@ -510,6 +510,30 @@ fn main() {
 
 ---
 
+## Text parsing
+
+Turn text into values and split it into lines. `to_int` is fallible — it returns
+the same `Int ? ParseError` result `Int.parse` does, so handle it with `?`/`??`.
+
+```jet
+fn main() {
+    n @= "42".to_int() ?? -1                 // 42
+    bad @= "oops".to_int() ?? -1             // -1 (parse failed → fallback)
+    print(n + bad)
+
+    loop line in "first\nsecond".lines() {   // ["first", "second"]
+        print(line)
+    }
+}
+```
+
+| API | Returns | What it does |
+|-----|---------|--------------|
+| `String.to_int()` | `Int ? ParseError` | Parse the text as an integer (leading/trailing space ignored) |
+| `String.lines()` | `[String]` | Split into lines (`\n` and `\r\n`; no trailing empty line) |
+
+---
+
 ## Binary data (`U8`)
 
 The `U8` type holds one byte (0–255). Literals outside that range are a compile

@@ -4371,3 +4371,50 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "has value\n");
 }
+
+/// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `String.to_int()` (→
+/// `Int ? ParseError`). Both are built-in String methods, so `main` routes
+/// through the TIR — proven by the emitted `jet_string_lines` helper call and
+/// the `to_int` parse form. `to_int` composes with `??`: a good parse yields the
+/// value, a bad one (`"abc"`) takes the fallback.
+#[test]
+fn string_lines_and_to_int() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    n @= \"42\".to_int() ?? -1
+    print((n + 1))
+    bad @= \"abc\".to_int() ?? -1
+    print(bad)
+    lines @= \"a\\nb\\nc\".lines()
+    print(lines.len())
+    loop line in lines {
+        print(line)
+    }
+    total := 0
+    loop row in \"10\\n20\\n30\".lines() {
+        total += (row.to_int() ?? 0)
+    }
+    print(total)
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    // TIR routing: `lines()` lowers to the `jet_string_lines` helper, `to_int()`
+    // to the trim+parse form. (The AST emit path is gone — these prove the TIR.)
+    assert!(
+        out.rust.contains("jet_string_lines(&("),
+        "lines() did not lower through the TIR (no jet_string_lines):\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust
+            .contains(".trim().parse::<i64>().map_err(|e| e.to_string())"),
+        "to_int() did not lower through the TIR (no parse form):\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_string_parse", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "43\n-1\n3\na\nb\nc\n60\n");
+}

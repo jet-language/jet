@@ -1054,6 +1054,11 @@ pub(crate) enum TBuiltinOp {
     Trim,
     /// `split(sep)` → `jet_string_split(&(recv), &a0)`.
     Split,
+    /// c97/D-STRPARSE1: `lines()` → `{root}jet_string_lines(&(recv))`.
+    Lines,
+    /// c97/D-STRPARSE1: `to_int()` on a String → fallible parse, mirroring `Int.parse`:
+    /// `(recv).trim().parse::<i64>().map_err(|e| e.to_string())` (`Int ? ParseError`).
+    ToIntString,
     /// `starts_with(s)` → `(recv).starts_with(&a0)`.
     StartsWith,
     /// `ends_with(s)` → `(recv).ends_with(&a0)`.
@@ -3965,6 +3970,10 @@ fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
         | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
         | ("to_upper", 0) | ("to_lower", 0) | ("repeat", 1) | ("slice", 2)
+        // c97/D-STRPARSE1. `to_int`/0 on a String reaches here only with `recv_type ==
+        // None` (the numeric `to_int` sets a numeric `recv_type`, so it never does);
+        // `resolve_builtin_op`'s `is_string` guard is the final filter.
+        | ("lines", 0) | ("to_int", 0)
         // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
         // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
         | ("to_string", 0)
@@ -8111,6 +8120,14 @@ fn resolve_builtin_op(
         ("bytes", 0) => TBuiltinOp::Bytes,
         ("trim", 0) => TBuiltinOp::Trim,
         ("split", 1) => TBuiltinOp::Split,
+        // c97/D-STRPARSE1: String-only builtins. The numeric `to_int` is a `MethodCall`
+        // with a numeric `recv_type` (→ `NumericMethod`) and never reaches this path;
+        // the stream-handle `lines` carries a handle `recv_type` and is likewise routed
+        // elsewhere. There is no list/map `to_int`/`lines`, so an unguarded match here is
+        // unambiguous — no `is_string` test (the loop-var receiver carries `jet_ty: None`,
+        // so it would spuriously fail one).
+        ("lines", 0) => TBuiltinOp::Lines,
+        ("to_int", 0) => TBuiltinOp::ToIntString,
         ("starts_with", 1) => TBuiltinOp::StartsWith,
         ("ends_with", 1) => TBuiltinOp::EndsWith,
         ("replace", 2) => TBuiltinOp::Replace,
@@ -9106,6 +9123,14 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::Trim => format!("({}).trim().to_string()", recv),
                 TBuiltinOp::Split => format!("jet_string_split(&({}), &{})", recv, a(0)),
+                // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE,
+                // like `jet_string_split` — emitted bare, no root prefix).
+                TBuiltinOp::Lines => format!("jet_string_lines(&({}))", recv),
+                // c97/D-STRPARSE1: `to_int()` on a String — fallible parse mirroring
+                // `Int.parse`. The `Err` (a `ParseError`) lowers to a plain message string.
+                TBuiltinOp::ToIntString => {
+                    format!("({}).trim().parse::<i64>().map_err(|e| e.to_string())", recv)
+                }
                 TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
                 TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
                 TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),

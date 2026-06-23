@@ -209,8 +209,16 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
         ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        // c97/D-STRPARSE1: split text into its lines (mirrors `split`).
+        ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
+        // c97/D-STRPARSE1: fallible integer parse. Same `Int ? ParseError` result
+        // `Int.parse(s)` returns, so one error type covers text→int.
+        ("to_int", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named("ParseError".to_string())),
+        })),
         _ => None,
     }
 }
