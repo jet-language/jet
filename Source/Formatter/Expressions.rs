@@ -548,8 +548,13 @@ impl<'a> Fmt<'a> {
             // before the label (`f(mut x: v)`), so fmt must emit it in that
             // order or the output won't re-parse.
             match arg.convention {
-                AccessConvention::Read => {}
-                AccessConvention::Mutate => {
+                // D-CAP8/9: Infer is unmarked (renders nothing); Share/Raw aren't
+                // produced yet — the D-CAP7 keyword→sigil migration rewrites this.
+                AccessConvention::Read
+                | AccessConvention::Infer
+                | AccessConvention::Share
+                | AccessConvention::Raw => {}
+                AccessConvention::Write => {
                     self.write("mut ");
                 }
                 AccessConvention::Move => {

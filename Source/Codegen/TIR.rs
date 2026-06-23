@@ -4826,7 +4826,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             // `mut self` receiver is `&mut Self`, so its place DEREFS (`(*self)`) —
             // `self.field = v` → `((*self)).field = v`, whole-`self` `self = New{}` →
             // `(*self) = New{}` (D-MUTSELF1). `self`/`take self` carry no deref.
-            let place = if matches!(p.convention, AccessConvention::Mutate) {
+            let place = if matches!(p.convention, AccessConvention::Write) {
                 "(*self)".to_string()
             } else {
                 "self".to_string()
@@ -4885,7 +4885,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             // The self slot, EXACTLY `emit_trait_method`'s: type `Some(Named(type_name))`
             // (NOT `None` like `emit_method`). D-MUTSELF1: a `mut self` receiver is
             // `&mut self`, so its place DEREFS (`(*self)`); `self`/`take self` do not.
-            let place = if matches!(p.convention, AccessConvention::Mutate) {
+            let place = if matches!(p.convention, AccessConvention::Write) {
                 "(*self)".to_string()
             } else {
                 "self".to_string()
@@ -5005,9 +5005,20 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
 fn param_place(rust_name: &str, p: &Param) -> String {
     let deref = match p.convention {
-        AccessConvention::Read if p.ty.is_scalar() => false,
-        AccessConvention::Read => true,
-        AccessConvention::Mutate => true,
+        // D-CAP8/9: Infer/Share/Raw follow Read until their phases specialize them.
+        AccessConvention::Read
+        | AccessConvention::Infer
+        | AccessConvention::Share
+        | AccessConvention::Raw
+            if p.ty.is_scalar() =>
+        {
+            false
+        }
+        AccessConvention::Read
+        | AccessConvention::Infer
+        | AccessConvention::Share
+        | AccessConvention::Raw => true,
+        AccessConvention::Write => true,
         AccessConvention::Move => false,
     };
     if deref {
@@ -8125,7 +8136,7 @@ fn lower_one_call_arg(
         Some((AccessConvention::Read, t)) if !t.is_scalar() && !matches!(t, Type::Fn { .. }) => {
             (true, false)
         }
-        Some((AccessConvention::Mutate, _)) => (false, true),
+        Some((AccessConvention::Write, _)) => (false, true),
         _ => (false, false),
     };
     TCallArg {
@@ -8653,8 +8664,11 @@ fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, ou
     if let Some(conv) = self_conv {
         params.push(
             match conv {
-                AccessConvention::Read => "&self",
-                AccessConvention::Mutate => "&mut self",
+                AccessConvention::Read
+                | AccessConvention::Infer
+                | AccessConvention::Share
+                | AccessConvention::Raw => "&self",
+                AccessConvention::Write => "&mut self",
                 AccessConvention::Move => "self",
             }
             .to_string(),
@@ -8703,8 +8717,11 @@ fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, self_conv: AccessConventi
     // D-MUTSELF1: the receiver honors the source convention — `&self` / `&mut self` /
     // `self` — matching `emit_trait_method` and the trait declaration (emit_trait_def).
     let self_recv = match self_conv {
-        AccessConvention::Read => "&self",
-        AccessConvention::Mutate => "&mut self",
+        AccessConvention::Read
+        | AccessConvention::Infer
+        | AccessConvention::Share
+        | AccessConvention::Raw => "&self",
+        AccessConvention::Write => "&mut self",
         AccessConvention::Move => "self",
     };
     let mut params: Vec<String> = vec![self_recv.to_string()];

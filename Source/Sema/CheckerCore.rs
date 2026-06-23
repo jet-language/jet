@@ -827,7 +827,7 @@ impl<'a> Checker<'a> {
                                     && matches!(
                                         info.param_conv,
                                         Some(AccessConvention::Read)
-                                            | Some(AccessConvention::Mutate)
+                                            | Some(AccessConvention::Write)
                                     )
                                 {
                                     self.diags.push(Diagnostic::error(
@@ -1865,7 +1865,7 @@ impl<'a> Checker<'a> {
             return;
         }
         for arg in args {
-            if arg.convention == AccessConvention::Mutate {
+            if arg.convention == AccessConvention::Write {
                 if let Expr::Ident(n, _) = &arg.expr {
                     self.uninit.remove(n);
                 }
@@ -1917,7 +1917,7 @@ impl<'a> Checker<'a> {
                         };
                     } else if matches!(
                         info.param_conv,
-                        Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
                     ) {
                         self.diags.push(Diagnostic::error(
                             "E0120",

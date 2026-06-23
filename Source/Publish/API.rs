@@ -83,8 +83,13 @@ fn format_fn_sig(f: &crate::AST::Func) -> String {
         .iter()
         .map(|p| {
             let prefix = match p.convention {
-                AccessConvention::Read => "",
-                AccessConvention::Mutate => "mut ",
+                // D-CAP8/9: Infer is unmarked; Share/Raw not produced yet. c129 will
+                // freeze resolved sigils (~/^/&) into this api metadata.
+                AccessConvention::Read
+                | AccessConvention::Infer
+                | AccessConvention::Share
+                | AccessConvention::Raw => "",
+                AccessConvention::Write => "mut ",
                 AccessConvention::Move => "take ",
             };
             format!("{}{}: {}", prefix, p.name, format_type(&p.ty))

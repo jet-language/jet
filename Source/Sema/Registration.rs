@@ -27,7 +27,7 @@ impl<'a> Checker<'a> {
                         p.name.clone(),
                         LocalInfo {
                             ty: self_ty,
-                            mutable: matches!(p.convention, AccessConvention::Mutate),
+                            mutable: matches!(p.convention, AccessConvention::Write),
                             param_conv: Some(p.convention),
                             decl_loop_depth: 0,
                             sendable: true,
@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
                     p.name.clone(),
                     LocalInfo {
                         ty: pty,
-                        mutable: matches!(p.convention, AccessConvention::Mutate),
+                        mutable: matches!(p.convention, AccessConvention::Write),
                         param_conv: Some(p.convention),
                         decl_loop_depth: 0,
                         sendable: true,

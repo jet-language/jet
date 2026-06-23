@@ -249,8 +249,12 @@ impl<'a> Fmt<'a> {
 
     fn fmt_param(&mut self, p: &Param) {
         match p.convention {
-            AccessConvention::Read => {}
-            AccessConvention::Mutate => self.write("mut "),
+            // D-CAP8/9: Infer is unmarked; Share/Raw not produced yet (D-CAP7 migration).
+            AccessConvention::Read
+            | AccessConvention::Infer
+            | AccessConvention::Share
+            | AccessConvention::Raw => {}
+            AccessConvention::Write => self.write("mut "),
             AccessConvention::Move => self.write("take "),
         }
         self.write(&p.name);

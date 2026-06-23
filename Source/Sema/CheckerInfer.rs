@@ -1254,7 +1254,7 @@ impl<'a> Checker<'a> {
                     if !info.ty.is_scalar() {
                         if matches!(
                             info.param_conv,
-                            Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                            Some(AccessConvention::Read) | Some(AccessConvention::Write)
                         ) {
                             self.diags.push(Diagnostic::error(
                                 "E0120",
@@ -2421,7 +2421,7 @@ impl<'a> Checker<'a> {
         *recv_type_out = Some(type_name.clone());
         // `mut self` methods change the receiver: it must be changeable,
         // free of an active `for` borrow, and not aliased by an argument.
-        if msig.self_conv == Some(AccessConvention::Mutate) {
+        if msig.self_conv == Some(AccessConvention::Write) {
             if let Some(root) = expr_root_ident(receiver) {
                 let root = root.to_string();
                 if self.iter_borrowed.contains(&root) {
@@ -2477,7 +2477,7 @@ impl<'a> Checker<'a> {
                     if !type_is_copy(&info.ty)
                         && matches!(
                             info.param_conv,
-                            Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                            Some(AccessConvention::Read) | Some(AccessConvention::Write)
                         )
                     {
                         self.diags.push(Diagnostic::error(
@@ -3329,7 +3329,7 @@ impl<'a> Checker<'a> {
             if let Expr::Ident(name, span) = &arg.expr {
                 if mut_borrowed.contains(name) {
                     self.diags.push(aliasing_while_mut(name, *span));
-                } else if arg.convention == AccessConvention::Mutate && read_borrowed.contains(name)
+                } else if arg.convention == AccessConvention::Write && read_borrowed.contains(name)
                 {
                     self.diags.push(aliasing_mut_after_read(name, *span));
                 }
@@ -3372,7 +3372,7 @@ impl<'a> Checker<'a> {
             if matches!(param_ty, Type::Fn { .. }) {
                 self.attribute_fn_arg(&arg.expr);
             }
-            if arg.convention == AccessConvention::Mutate && !matches!(arg.expr, Expr::Ident(_, _))
+            if arg.convention == AccessConvention::Write && !matches!(arg.expr, Expr::Ident(_, _))
             {
                 self.diags.push(Diagnostic::error(
                     "E0202",
@@ -3476,7 +3476,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                (AccessConvention::Mutate, AccessConvention::Read) => {
+                (AccessConvention::Write, AccessConvention::Read) => {
                     if let Expr::Ident(name, span) = &arg.expr {
                         self.diags.push(Diagnostic::error(
                             "E0202",
@@ -3499,7 +3499,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                (AccessConvention::Mutate, AccessConvention::Mutate) => {
+                (AccessConvention::Write, AccessConvention::Write) => {
                     // `mut x` at the call site: x itself must be changeable.
                     if let Expr::Ident(name, span) = &arg.expr {
                         if let Some(info) = self.lookup(name) {
@@ -3523,7 +3523,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                (AccessConvention::Read | AccessConvention::Mutate, AccessConvention::Move) => {
+                (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
                     self.diags.push(Diagnostic::error(
                         "E0203",
                         format!(
@@ -3541,7 +3541,7 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
 
-            if arg.convention == AccessConvention::Mutate {
+            if arg.convention == AccessConvention::Write {
                 if let Expr::Ident(name, _) = &arg.expr {
                     mut_borrowed.insert(name.clone());
                 }

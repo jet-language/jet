@@ -586,7 +586,7 @@ impl<'a> Checker<'a> {
                 if !type_is_copy(&info.ty)
                     && matches!(
                         info.param_conv,
-                        Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
                     )
                 {
                     self.diags.push(Diagnostic::error(
@@ -625,7 +625,7 @@ impl<'a> Checker<'a> {
         // it (Read convention) is fine; only ownership/`mut` transfer escapes.
         if matches!(
             arg.convention,
-            AccessConvention::Move | AccessConvention::Mutate
+            AccessConvention::Move | AccessConvention::Write
         ) {
             if let Expr::Ident(name, span) = &arg.expr {
                 if self.is_arena_view(name) {
@@ -639,7 +639,12 @@ impl<'a> Checker<'a> {
             }
         }
         match arg.convention {
-            AccessConvention::Read => {
+            // D-CAP8/9: Infer follows Read (default pre-resolution); Share/Raw aren't
+            // produced yet — ownership specializes them when their phases land.
+            AccessConvention::Read
+            | AccessConvention::Infer
+            | AccessConvention::Share
+            | AccessConvention::Raw => {
                 if let Expr::Ident(name, span) = &arg.expr {
                     if is_cloneable(param_ty, self.registry, self.structs) {
                         arg.flags.implicit_clone = true;
@@ -691,7 +696,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            AccessConvention::Mutate => {}
+            AccessConvention::Write => {}
         }
     }
 

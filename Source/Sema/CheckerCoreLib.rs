@@ -161,7 +161,7 @@ impl<'a> Checker<'a> {
                                 arg.flags.implicit_clone = true;
                             }
                         }
-                        (AccessConvention::Mutate, AccessConvention::Read) => {
+                        (AccessConvention::Write, AccessConvention::Read) => {
                             self.diags.push(Diagnostic::error(
                                 "E0202",
                                 format!(
@@ -533,7 +533,7 @@ impl<'a> Checker<'a> {
                 let Some(arg) = args.get_mut(0) else {
                     return None;
                 };
-                if arg.convention != AccessConvention::Mutate {
+                if arg.convention != AccessConvention::Write {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         "`shuffle` changes its list".to_string(),
@@ -812,7 +812,7 @@ impl<'a> Checker<'a> {
                 .push(wrong_core_arity(name, params.len(), args.len(), span));
         }
         for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
-            if *conv == AccessConvention::Mutate && arg.convention != AccessConvention::Mutate {
+            if *conv == AccessConvention::Write && arg.convention != AccessConvention::Write {
                 self.diags.push(Diagnostic::error(
                     "E0202",
                     format!("argument {} to `{}` must be passed with `mut`", i + 1, name),
@@ -1623,12 +1623,12 @@ pub(crate) fn core_fixed_sig(
             Some(result_ty(Type::Named("TcpStream".to_string()), Type::String)),
         )),
         ("core.net", "tcp_read") => Some((
-            vec![(AccessConvention::Mutate, Type::Named("TcpStream".to_string()))],
+            vec![(AccessConvention::Write, Type::Named("TcpStream".to_string()))],
             Some(result_ty(Type::String, Type::String)),
         )),
         ("core.net", "tcp_write") => Some((
             vec![
-                (AccessConvention::Mutate, Type::Named("TcpStream".to_string())),
+                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
                 (read, Type::String),
             ],
             Some(result_ty(unit_ty(), Type::String)),
@@ -1639,7 +1639,7 @@ pub(crate) fn core_fixed_sig(
         )),
         ("core.net", "set_timeout") => Some((
             vec![
-                (AccessConvention::Mutate, Type::Named("TcpStream".to_string())),
+                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
                 (read, Type::Int),
             ],
             None,

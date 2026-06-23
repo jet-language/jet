@@ -1613,7 +1613,7 @@ impl<'a> Parser<'a> {
                         ),
                         Some(span),
                     ));
-                    return AccessConvention::Mutate;
+                    return AccessConvention::Write;
                 }
                 _ => {}
             }
@@ -1621,7 +1621,7 @@ impl<'a> Parser<'a> {
         match self.peek().kind {
             TokKind::KwMutate => {
                 self.bump();
-                AccessConvention::Mutate
+                AccessConvention::Write
             }
             TokKind::KwMove => {
                 // `take(names) () =>` is a lambda take-prefix, not an arg convention.

@@ -194,7 +194,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                if arg.convention == AccessConvention::Mutate
+                if arg.convention == AccessConvention::Write
                     && !matches!(arg.expr, Expr::Ident(_, _))
                 {
                     self.diags.push(Diagnostic::error(
@@ -274,7 +274,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    (AccessConvention::Mutate, AccessConvention::Read) => {
+                    (AccessConvention::Write, AccessConvention::Read) => {
                         if let Expr::Ident(name, nspan) = &arg.expr {
                             self.diags.push(Diagnostic::error(
                                 "E0202",
@@ -295,7 +295,7 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                    (AccessConvention::Mutate, AccessConvention::Mutate) => {
+                    (AccessConvention::Write, AccessConvention::Write) => {
                         if let Expr::Ident(name, span) = &arg.expr {
                             if let Some(info) = self.lookup(name) {
                                 if !info.mutable {
@@ -322,7 +322,7 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    (AccessConvention::Read | AccessConvention::Mutate, AccessConvention::Move) => {
+                    (AccessConvention::Read | AccessConvention::Write, AccessConvention::Move) => {
                         self.diags.push(Diagnostic::error(
                             "E0203",
                             format!(
@@ -653,7 +653,7 @@ impl<'a> Checker<'a> {
                     && !is_type_var
                     && matches!(
                         info.param_conv,
-                        Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                        Some(AccessConvention::Read) | Some(AccessConvention::Write)
                     )
             }),
             _ => false,

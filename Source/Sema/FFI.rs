@@ -237,8 +237,11 @@ pub(crate) fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut 
 pub(crate) fn access_keyword(c: AccessConvention) -> &'static str {
     match c {
         AccessConvention::Read => "read",
-        AccessConvention::Mutate => Syntax::KW_MUTATE,
+        AccessConvention::Infer => "read", // unmarked defaults to read pre-resolution
+        AccessConvention::Write => Syntax::KW_MUTATE,
         AccessConvention::Move => Syntax::KW_MOVE,
+        AccessConvention::Share => "share",
+        AccessConvention::Raw => "raw",
     }
 }
 

@@ -477,17 +477,31 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                     // impl side (emit_trait_method) renders the same receiver. `self` /
                     // `take self` stay `&self` / `self`.
                     match p.convention {
-                        AccessConvention::Mutate => "&mut self".to_string(),
+                        AccessConvention::Write => "&mut self".to_string(),
                         AccessConvention::Move => "self".to_string(),
-                        AccessConvention::Read => "&self".to_string(),
+                        // D-CAP8/9: Infer/Share/Raw follow Read until specialized.
+                        AccessConvention::Read
+                        | AccessConvention::Infer
+                        | AccessConvention::Share
+                        | AccessConvention::Raw => "&self".to_string(),
                     }
                 } else {
                     // Match the convention applied by emit_trait_method / rust_param_type.
                     let base = rust_type_name(&p.ty);
                     let rust_ty = match p.convention {
-                        AccessConvention::Read if p.ty.is_scalar() => base,
-                        AccessConvention::Read => format!("&{}", base),
-                        AccessConvention::Mutate => format!("&mut {}", base),
+                        AccessConvention::Read
+                        | AccessConvention::Infer
+                        | AccessConvention::Share
+                        | AccessConvention::Raw
+                            if p.ty.is_scalar() =>
+                        {
+                            base
+                        }
+                        AccessConvention::Read
+                        | AccessConvention::Infer
+                        | AccessConvention::Share
+                        | AccessConvention::Raw => format!("&{}", base),
+                        AccessConvention::Write => format!("&mut {}", base),
                         AccessConvention::Move => base,
                     };
                     format!("_{}: {}", p.name, rust_ty)

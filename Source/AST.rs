@@ -4,14 +4,30 @@
 use crate::Diagnostics::Span;
 use crate::Syntax;
 
+/// The access capability of a parameter / argument / receiver (D-CAP7/8/9/10).
+///
+/// Surface sigils map here: `T`→`Infer`, `~T`→`Write`, `^T`→`Move`, `&T`→`Share`,
+/// `*T`→`Raw`. Inference (D-CAP8=C) resolves `Infer` to one of the concrete
+/// capabilities from body usage before codegen; the parser still seeds unmarked
+/// params as `Read` until the constraint solver lands (the seam is
+/// `parse_access_prefix`). `Raw` is only produced by the `*` sigil inside
+/// `#Unsafe` and never inferred in safe code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessConvention {
-    /// Default: shared read borrow (`&T` in Rust; scalars pass by value).
+    /// Unmarked `T`: capability inferred from body usage (D-CAP8). Resolves to
+    /// one of the concrete variants below; treated as `Read` until resolved.
+    Infer,
+    /// Shared read borrow (`&T` in Rust; scalars pass by value).
     Read,
-    /// Mutable borrow (`&mut T`).
-    Mutate,
-    /// Ownership transfer (`T` by value).
+    /// `~T`: exclusive write/edit access (mutable borrow, `&mut T`).
+    Write,
+    /// `^T`: ownership transfer / move (`T` by value).
     Move,
+    /// `&T`: the value may escape / be retained beyond the call (share). Composes
+    /// with regions/arenas (D-CAP10/c130); a safe escaping handle, not a raw pointer.
+    Share,
+    /// `*T`: raw unsafe pointer/address (`#Unsafe`-only, never inferred; D-CAP9).
+    Raw,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

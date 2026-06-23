@@ -22,6 +22,12 @@ unblocked). Capability spine already exists: `AccessConvention {Read,Mutate,Move
 unmarked→Read at :1631) — grow it into `AccessCapability {Infer,Read,Write,Move,Share,Raw}`.
 
 Sequencing: the memory-model build touches Parser/Sema/AST/TIR/diagnostics — the same shared
-files as the in-flight stdlib burn-down (c87/c88/c91/c97/c105). Integrate those worktrees onto
-a clean green master FIRST, then start the memory-model implementation on the stable base.
-See [[project-tower-pm-pipeline]].
+files as the stdlib burn-down. **Burn-down DONE 2026-06-23**: all 7 agents (c87/c88/c91/c97/
+c105/c106-107/c116) integrated to local master, full suite green (876 tests). Three integration
+bugs were found+fixed at merge (none catchable in isolated worktrees): c97 `CtValue::Ok/Err`
+shadowed `Result` (→ResOk/ResErr); c87 term FFI prelude leaked `unsafe`/dangling refs (strip
+wired to only 2/4 codegen exits + incomplete) ; example renumber shifted fuzz corpus onto a
+regex FFI variant (skip bare-rustc link check for `extern crate jet_ffi_`). Nothing pushed yet
+(awaiting owner go-ahead on push). Memory-model implementation starts now on this green base
+as a coherent sequenced effort. See [[project-tower-pm-pipeline]] and
+docs/research/memory-model-implementation-plan.md.
