@@ -106,16 +106,24 @@ them so they don't regress, but they should be fixed independently of c109):
   is unrelated to boxing and out of scope here. The canonical traversal (bind the child to a
   local, then exhaustive-match) works. (Surfaced while fixing construction in commit 46d301c;
   fixed in the c109 fix-first effort.)
-- **A borrowed non-Copy struct-lit field value isn't cloned (E0507, AST path).** A
-  struct literal whose field value is a borrowed-in-env ident (`Person { name: n }`
-  where `n: String` is a `Read` param → `&String`) emits `user_name: (*user_n)` →
+- **A borrowed non-Copy struct-lit field value isn't cloned (E0507, AST path). FIXED.**
+  Was: a struct literal whose field value is a borrowed-in-env ident (`Person { name: n }`
+  where `n: String` is a `read` param → `&String`) emitted `user_name: (*user_n)` →
   rustc E0507 ("cannot move out of `*user_n`"). `field_read_to_clone` rewrites owning
-  *field reads* but not a bare borrowed ident used as a struct-lit value. This is the
-  pre-existing `Read`-convention struct-param bug (Phase 3 latent list) in a new dress.
-  Both paths miscompile identically (parity holds); NOT separately gated — the
-  construction is the same broken Rust on both paths. Fix lives in sema's elaboration
-  (clone a borrowed non-Copy struct-lit value), where the field-read clone already
-  lives. (Surfaced in Phase 16.)
+  *field reads* but not a bare borrowed ident used as a struct-lit value. **Fix:** a new
+  `clone_borrowed_struct_field_value` (CheckerItems.rs) — called per struct-lit field value
+  in `check_struct_lit`, where the field-read clone already lives — rewrites a bare borrowed
+  non-`Copy` ident (`read`/`mut` param) into a `.clone()` MethodCall, so it emits
+  `((*user_n)).clone()`. A type-VAR param (`a: T`) is by-value in codegen
+  (`is_type_param` → `Move`/no deref), NOT borrowed, so it is excluded — without that
+  exclusion the generic `make_pair<T>` example would gain a spurious clone (the only
+  example whose codegen the unrefined fix touched). The struct lit + the sema-inserted clone
+  ROUTE THROUGH THE TIR (both already covered; the TIR consumes the rewritten AST). Covered
+  by tests/tir.rs `borrowed_struct_lit_field_value_cloned` (build+run) and the
+  `covers_struct_lit_with_string_field_value` unit test; byte-parity holds AND no existing
+  example's codegen changes (verified by a before/after diff of the full example suite —
+  the type-var exclusion was added precisely to keep `26_generic_types` byte-stable).
+  (Surfaced in Phase 16; fixed in the c109 fix-first effort.)
 - **A payload/named enum-variant literal NEVER becomes an `Expr::EnumLit` node.** The
   parser produces `Expr::Field` for a unit variant (`Light.Red`) and `Expr::MethodCall`
   for a payload variant (`Expr.Wrap(x)`); sema type-checks the payload form via

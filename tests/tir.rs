@@ -3929,3 +3929,31 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "6\n");
 }
+
+/// c109 (borrowed struct-lit value clone): a struct literal whose field value is a
+/// bare borrowed-in-env non-Copy ident (`Person { name: n }` where `n: String` is a
+/// `read` param → `&String`) emitted `user_name: (*user_n)` → rustc E0507 ("cannot
+/// move out of `*user_n`"). `field_read_to_clone` clones owning field READS but not a
+/// bare borrowed ident used as a struct-lit value; the fix clones it in sema's
+/// elaboration. `make` (struct lit + the sema-inserted clone) routes through the TIR.
+#[test]
+fn borrowed_struct_lit_field_value_cloned() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Person {
+    name: String
+}
+fn make(n: String) -> Person {
+    return Person { name: n }
+}
+fn main() {
+    p @= make(\"Ada\")
+    print(p.name)
+}
+";
+    let (code, stdout) = build_and_run("tir_borrowed_struct_lit", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "Ada\n");
+}

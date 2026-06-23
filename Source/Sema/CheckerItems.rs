@@ -548,6 +548,12 @@ impl<'a> Checker<'a> {
             let et = self.infer(expr);
             self.expected_type = saved_expected;
             self.lambda_escapes = saved_esc;
+            // A struct-lit field VALUE is an owning position. A bare borrowed-in-env
+            // non-`Copy` ident (a `read`/`mut` param → `&T`/`&mut T`) can't be moved
+            // into the field — codegen would emit `(*user_n)` → rustc E0507. `infer`'s
+            // clone rewrite only fires for *field reads* (`field_read_to_clone`), not a
+            // bare ident, so clone it here, where the owning-field clone already lives.
+            self.clone_borrowed_struct_field_value(expr);
             // D-ALLOC2: E0631 — storing an arena `view` in a struct field would
             // let the struct (which can outlive the region) keep a dangling
             // borrow into the arena.
@@ -615,6 +621,45 @@ impl<'a> Checker<'a> {
             }
         } else {
             Type::Named(type_name.to_string())
+        }
+    }
+
+    /// Rewrite a struct-literal field VALUE that is a bare borrowed-in-env non-`Copy`
+    /// ident into a `.clone()` MethodCall. A `read`/`mut` param is `&T`/`&mut T`, so
+    /// using it directly as the (owning) field value would emit `(*user_n)` →
+    /// rustc E0507 ("cannot move out of `*user_n`"). This mirrors `field_read_to_clone`
+    /// (which clones an owning *field read*) for the bare-ident case. Owned locals,
+    /// `take` params, `Copy` types, and non-ident values are left untouched (no clone).
+    /// A type-VAR param (`a: T`) is emitted BY VALUE in codegen (`is_type_param` →
+    /// `Move`/no deref, Items.rs), not by reference, so it must NOT be cloned even though
+    /// its convention reads as `Read` — cloning would diverge from the AST path.
+    fn clone_borrowed_struct_field_value(&mut self, expr: &mut Expr) {
+        let should_clone = match expr {
+            Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
+                // A type-var-typed param is by-value (codegen's `is_type_param`), never
+                // borrowed — exclude it (matches the AST path's owned move).
+                let is_type_var = matches!(&info.ty,
+                    Type::Named(n) if self.type_param_scope.iter().any(|p| &p.name == n));
+                !type_is_copy(&info.ty)
+                    && !is_type_var
+                    && matches!(
+                        info.param_conv,
+                        Some(AccessConvention::Read) | Some(AccessConvention::Mutate)
+                    )
+            }),
+            _ => false,
+        };
+        if should_clone {
+            let span = expr.span();
+            let old = std::mem::replace(expr, Expr::Absent(span));
+            *expr = Expr::MethodCall {
+                receiver: Box::new(old),
+                method: "clone".to_string(),
+                method_span: span,
+                args: Vec::new(),
+                recv_type: None,
+                resolved_ret: None,
+            };
         }
     }
 

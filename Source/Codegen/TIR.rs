@@ -9717,6 +9717,24 @@ mod tests {
     }
 
     #[test]
+    fn covers_struct_lit_with_string_field_value() {
+        // c109 (borrowed struct-lit value clone): a struct with a String field, built
+        // from a param value, is in-subset (struct + clone are covered). The borrowed-
+        // ident clone is a SEMA rewrite (`(n).clone()`) — the `covers` helper is
+        // build_cx-only so it sees the bare ident here, which is also in-subset; the
+        // authoritative byte-for-byte proof is tests/tir.rs `borrowed_struct_lit_field_value_cloned`.
+        let src = "\
+struct Person {
+    name: String
+}
+fn make(n: String) -> Person {
+    return Person { name: n }
+}
+";
+        assert!(covers(src, "make"));
+    }
+
+    #[test]
     fn covers_is_empty_bool() {
         // c109 (`is_empty` Bool fix): `is_empty` on a list/map/string is now covered
         // (`TBuiltinOp::IsEmpty`, Bool result) — it was excluded while sema mistyped it
