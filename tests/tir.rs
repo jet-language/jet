@@ -3957,3 +3957,23 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "Ada\n");
 }
+
+/// c109 (B3): a struct-destructuring binding `Type { x, y } @= p` routes through
+/// the TIR and prints the field sum (byte-for-byte the AST `BindPattern::Struct`).
+#[test]
+fn struct_destructure_binding() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Point { x: Int, y: Int }
+fn main() {
+    p @= Point { x: 1, y: 2 }
+    Point { x, y } @= p
+    print(x + y)
+}
+";
+    let (code, stdout) = build_and_run("tir_struct_destructure", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "3\n");
+}

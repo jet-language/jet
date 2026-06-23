@@ -191,6 +191,20 @@ pub(crate) enum TStmt {
         /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
         binds: Vec<(String, String)>,
     },
+    /// c109: a STRUCT-destructuring binding `Type { x, y } @= <init>` (S74,
+    /// `BindPattern::Struct`). Reproduces `emit_stmt`'s `BindPattern::Struct` arm
+    /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
+    /// `let[ mut] {field_rust} = ({tmp}).{field_rust}.clone();` per bound field
+    /// (the pattern's field name is BOTH the bound local and the struct field
+    /// read, mangled once). The field's resolved type comes from `cx.struct_fields`
+    /// (the init's `Type::Named`/`Apply` name), resolved at lowering for the slot.
+    StructDestructure {
+        tmp: String,
+        init: TExpr,
+        kw: &'static str,
+        /// `field_rust_name` per bound field, source order.
+        fields: Vec<String>,
+    },
     /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] @= <init>` (S74,
     /// `BindPattern::List`). Reproduces `emit_stmt`'s `BindPattern::List` arm
     /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
@@ -2104,10 +2118,23 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                     }
                     ok
                 }
-                Some(_) => {
-                    // Struct destructuring not yet covered — stay on the AST path.
-                    false
+                // c109: a STRUCT-destructuring binding `Type { x, y } @= <init>`
+                // (S74, `BindPattern::Struct`). The AST `emit_stmt` borrows the init
+                // into a temp, then binds each field via `(tmp).user_<field>.clone()`
+                // (the pattern's field name is both the bound local and the read).
+                // Covered when the init is in-subset; the per-field type comes from
+                // `cx.struct_fields` at lowering (total — sema proved the pattern
+                // destructures a struct value).
+                Some(BindPattern::Struct { fields, .. }) => {
+                    let ok = !b.is_comptime
+                        && !b.uninit
+                        && expr_in_subset(&b.init, cx, locals);
+                    for f in fields {
+                        locals.insert(f.name.clone());
+                    }
+                    ok
                 }
+                Some(_) => false,
                 None => {
                     let ok =
                         !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
@@ -4709,6 +4736,40 @@ fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
 
 fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     match s {
+        Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
+            // c109: a struct-destructuring binding `Type { x, y } @= <init>`. Lower the
+            // init ONCE; its total `.ty` is a `Type::Named`/`Apply` naming a struct
+            // (sema guarantees it). The per-field type comes from `cx.struct_fields`,
+            // reproducing `emit_stmt`'s `BindPattern::Struct` arm. Each field binds with
+            // its resolved type and a non-deref'd slot (the clone owns the value); the
+            // pattern's field name is BOTH the bound local and the `.field` read.
+            let Some(BindPattern::Struct { fields, span, .. }) = &b.pattern else {
+                unreachable!("guard matched a struct pattern")
+            };
+            let init = lower_expr(&b.init, cx, env);
+            let field_tys: HashMap<String, Type> = match &init.ty {
+                Type::Named(n) | Type::Apply { name: n, .. } => cx
+                    .struct_fields
+                    .get(n)
+                    .map(|fs| fs.iter().cloned().collect())
+                    .unwrap_or_default(),
+                _ => HashMap::new(),
+            };
+            let tmp = format!("__jet_d{}", span.start);
+            let kw = if b.mutable { "let mut" } else { "let" };
+            let mut field_names = Vec::new();
+            for f in fields {
+                let m = mangle(&f.name).to_string();
+                field_names.push(m.clone());
+                env.bind(&f.name, m, field_tys.get(&f.name).cloned());
+            }
+            return TStmt::StructDestructure {
+                tmp,
+                init,
+                kw,
+                fields: field_names,
+            };
+        }
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
             // c109 Phase 23: a tuple-destructuring binding `(a, b) @= <init>`. Lower the
             // init ONCE; its total `.ty` is a `Type::Tuple` (sema guarantees it). Pair the
@@ -8249,6 +8310,18 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
                 ));
             }
         }
+        // c109: struct destructure. Mirrors `emit_stmt`'s `BindPattern::Struct` arm
+        // byte-for-byte: borrow the init into a temp, then bind each field from a
+        // cloned field of it (the field name is both the local and the `.field` read).
+        TStmt::StructDestructure { tmp, init, kw, fields } => {
+            out.push_str(&format!("{}let {} = &({});\n", pad, tmp, emit_tir_expr(init, cx)));
+            for field_rust in fields {
+                out.push_str(&format!(
+                    "{}{} {} = ({}).{}.clone();\n",
+                    pad, kw, field_rust, tmp, field_rust
+                ));
+            }
+        }
         // c109 Phase 26: list destructure. Mirrors `emit_stmt`'s `BindPattern::List`
         // arm byte-for-byte: borrow the init into a temp, then bind each element via
         // the runtime bounds-checked `jet_unpack_vec(tmp, want, i, file, line)` move.
@@ -10557,8 +10630,11 @@ fn greet() -> String { return input() }
         // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
         // an out-of-subset body keeps the whole fn off the TIR path.
         assert!(covers("fn f() { #Caps(Io) { print(\"x\") } }", "f"));
-        // A struct-destructure binding inside the body is NOT covered (only LIST
-        // destructure landed in Phase 26), so the fn stays on the AST path.
+        // The struct-destructure binding `P{x} @= p` IS now covered (c109), but a
+        // single-uppercase-letter struct name (`P`) reads as a type variable
+        // (`Generics::is_type_var_name`), so the `P{x: 1}` LITERAL init is out of
+        // subset and the fn stays on the AST path — the exclusion is the name, not
+        // the destructure (that is proven covered by `covers_struct_destructure`).
         assert!(!covers(
             "struct P { x: Int }\nfn f() { p @= P{x: 1}\n#Caps(Io) { P{x} @= p\nprint(x) } }",
             "f"
@@ -10585,6 +10661,17 @@ fn greet() -> String { return input() }
         // when the init is in-subset — the fan-out result destructure (`41_fan_out`).
         assert!(covers(
             "fn f() { xs @= [1, 2, 3]\n[a, b, c] @= xs\nprint(a) }",
+            "f"
+        ));
+    }
+
+    #[test]
+    fn covers_struct_destructure() {
+        // c109: a struct-destructuring binding `Type { x, y } @= <init>` (S74) routes
+        // when the init is in-subset — the AST `BindPattern::Struct` arm is covered
+        // byte-for-byte (per-field type from `cx.struct_fields`).
+        assert!(covers(
+            "struct Point { x: Int, y: Int }\nfn f() { p @= Point { x: 1, y: 2 }\nPoint { x, y } @= p\nprint(x + y) }",
             "f"
         ));
     }
