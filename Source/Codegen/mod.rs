@@ -16,7 +16,7 @@ use crate::AST::{
     Program, ProgramBundle, TestDef,
 };
 use crate::FFI::FfiLink;
-use crate::M9;
+use crate::Traits;
 use crate::Sema::CompileMode;
 use crate::Syntax;
 use std::collections::HashMap;
@@ -148,7 +148,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
-            Item::Trait(t) => M9::emit_trait_def(t, &mut out),
+            Item::Trait(t) => Traits::emit_trait_def(t, &mut out),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
@@ -228,7 +228,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     for item in &prog.items {
         match item {
-            Item::Trait(t) => M9::emit_trait_def(t, &mut out),
+            Item::Trait(t) => Traits::emit_trait_def(t, &mut out),
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),

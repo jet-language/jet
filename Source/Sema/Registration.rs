@@ -5,7 +5,7 @@ use crate::AST::{
 };
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::M9::M9Registry;
+use crate::Traits::TraitRegistry;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
@@ -91,7 +91,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         types: HashMap::new(),
     };
     let mut consts: HashMap<String, Type> = HashMap::new();
-    let mut m9 = M9Registry::default();
+    let mut trait_reg = TraitRegistry::default();
     // Legacy M2 struct map for ref-field checks and cloneable helper.
     let mut struct_fields_legacy: HashMap<String, Vec<(Option<String>, Type)>> = HashMap::new();
 
@@ -208,7 +208,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             // S59: C FFI modules are folded by CFFI::assemble before the
             // bundle path runs; this legacy single-Program path ignores them.
             Item::CModule(_) => {}
-            // D-ERR-CONV: registration happens in m9.register_items below.
+            // D-ERR-CONV: registration happens in trait_reg.register_items below.
             Item::ErrorConv(_) => {}
             // D-MIGRATE1: migration decls are handled by the schema diff pass.
             Item::Migration(_) => {}
@@ -220,10 +220,10 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // Func nodes are visible when method lookup is registered.
     synthesize_impls(&mut prog.items);
     register_impl_methods(&prog.items, &mut registry, &mut diags);
-    m9.register_items(&prog.items, &mut diags);
+    trait_reg.register_items(&prog.items, &mut diags);
 
     // S62: delegation validation — check the field exists and implements the trait.
-    // Runs after m9.register_items so implements_trait is populated.
+    // Runs after trait_reg.register_items so implements_trait is populated.
     for item in &prog.items {
         if let Item::Impl(i) = item {
             if let (Some(trait_name), Some(field_name)) =
@@ -232,7 +232,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 if let Some(fields) = registry.struct_fields(&i.type_name) {
                     if let Some((_, _, field_ty, _, _)) = fields.iter().find(|(n, _, _, _, _)| n == field_name) {
                         let field_type_name = field_ty.name();
-                        if !m9.implements_trait(&field_type_name, trait_name) {
+                        if !trait_reg.implements_trait(&field_type_name, trait_name) {
                             diags.push(Diagnostic::error(
                                 "E2401",
                                 format!(
@@ -380,7 +380,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &registry,
                     &struct_fields_legacy,
                     &consts,
-                    &m9,
+                    &trait_reg,
                     None,
                     &ct_funcs,
                     &ct_externs,
@@ -398,7 +398,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &registry,
                         &struct_fields_legacy,
                         &consts,
-                        &m9,
+                        &trait_reg,
                         Some(&i.type_name),
                         &ct_funcs,
                         &ct_externs,
@@ -417,7 +417,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &registry,
                         &struct_fields_legacy,
                         &consts,
-                        &m9,
+                        &trait_reg,
                         Some(&s.name),
                         &ct_funcs,
                         &ct_externs,
@@ -435,7 +435,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             &registry,
                             &struct_fields_legacy,
                             &consts,
-                            &m9,
+                            &trait_reg,
                             Some(&s.name),
                             &ct_funcs,
                             &ct_externs,
@@ -455,7 +455,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &registry,
                         &struct_fields_legacy,
                         &consts,
-                        &m9,
+                        &trait_reg,
                         Some(&e.name),
                         &ct_funcs,
                         &ct_externs,
@@ -486,7 +486,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &registry,
                     &struct_fields_legacy,
                     &consts,
-                    &m9,
+                    &trait_reg,
                     None,
                     &ct_funcs,
                     &ct_externs,
@@ -505,7 +505,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &registry,
                     &struct_fields_legacy,
                     &consts,
-                    &m9,
+                    &trait_reg,
                     &ct_funcs,
                     &ct_externs,
                     ct_base_dir,
@@ -1171,7 +1171,7 @@ pub(crate) fn check_func_body(
     registry: &TypeRegistry,
     structs: &HashMap<String, Vec<(Option<String>, Type)>>,
     consts: &HashMap<String, Type>,
-    m9: &M9Registry,
+    trait_reg: &TraitRegistry,
     owner_type: Option<&str>,
     ct_funcs: &HashMap<String, Func>,
     ct_externs: &HashSet<String>,
@@ -1229,7 +1229,7 @@ pub(crate) fn check_func_body(
         current_binding_name: None,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
-        m9,
+        trait_reg,
         ct_funcs,
         ct_externs,
         ct_base_dir,
@@ -1280,7 +1280,7 @@ pub(crate) fn check_error_conv_body(
     registry: &TypeRegistry,
     structs: &HashMap<String, Vec<(Option<String>, Type)>>,
     consts: &HashMap<String, Type>,
-    m9: &M9Registry,
+    trait_reg: &TraitRegistry,
     ct_funcs: &HashMap<String, Func>,
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
@@ -1313,7 +1313,7 @@ pub(crate) fn check_error_conv_body(
         registry,
         structs,
         consts,
-        m9,
+        trait_reg,
         Some(&ec.from_ty),
         ct_funcs,
         ct_externs,
@@ -1414,7 +1414,7 @@ pub(crate) fn impl_type_exists(
 }
 
 pub(crate) fn synthesize_impls(items: &mut Vec<Item>) {
-    // Build trait_name -> method sigs from the AST (no m9 needed).
+    // Build trait_name -> method sigs from the AST (no trait_reg needed).
     let mut trait_methods: HashMap<String, Vec<crate::AST::TraitMethodSig>> = HashMap::new();
     for item in items.iter() {
         if let Item::Trait(t) = item {

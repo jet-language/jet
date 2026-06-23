@@ -104,7 +104,7 @@ impl<'a> Checker<'a> {
                 if self.type_param_scope.iter().any(|p| p.name == *n) {
                     return;
                 }
-                if self.m9.is_trait_name(n) {
+                if self.trait_reg.is_trait_name(n) {
                     return;
                 }
                 if self.registry.contains(n) {
@@ -148,10 +148,10 @@ impl<'a> Checker<'a> {
                 }
                 if !is_core_generic {
                     let expected = self
-                        .m9
+                        .trait_reg
                         .struct_params
                         .get(name)
-                        .or_else(|| self.m9.enum_params.get(name));
+                        .or_else(|| self.trait_reg.enum_params.get(name));
                     if let Some(params) = expected {
                         if params.len() != args.len() {
                             self.diags.push(Diagnostic::error(
@@ -192,7 +192,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::TraitObject(t) => {
-                if !self.m9.is_trait_name(t) {
+                if !self.trait_reg.is_trait_name(t) {
                     self.diags.push(Diagnostic::error(
                         "E0119",
                         format!("there's no trait called `{t}`"),
@@ -330,7 +330,7 @@ impl<'a> Checker<'a> {
         }
         match (want, got) {
             (Type::TraitObject(trait_name), Type::Named(type_name)) => {
-                if self.m9.implements_trait(type_name, trait_name) {
+                if self.trait_reg.implements_trait(type_name, trait_name) {
                     return false;
                 }
                 let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
@@ -339,7 +339,7 @@ impl<'a> Checker<'a> {
                 return true;
             }
             (Type::TraitObject(trait_name), Type::Apply { name, .. }) => {
-                if self.m9.implements_trait(name, trait_name) {
+                if self.trait_reg.implements_trait(name, trait_name) {
                     return false;
                 }
                 let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
@@ -1633,7 +1633,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn resolve_type(&self, ty: Type) -> Type {
         match ty {
-            Type::Named(n) if self.m9.is_trait_name(&n) && !self.registry.contains(&n) => {
+            Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
                 Type::TraitObject(n)
             }
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
@@ -1673,7 +1673,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn struct_subst(&self, type_name: &str, type_args: &[Type]) -> HashMap<String, Type> {
         let params = self
-            .m9
+            .trait_reg
             .struct_params
             .get(type_name)
             .cloned()

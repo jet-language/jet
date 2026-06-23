@@ -1,4 +1,4 @@
-//! M9 registration, checking hooks, and codegen helpers.
+//! Trait registration & metadata, auto-derive checking, and trait codegen.
 
 use crate::AST::{
     AccessConvention, EnumDef, Func, ImplDef, Item, StructDef, TraitDef, TraitImplBlock,
@@ -14,7 +14,7 @@ use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
-pub struct M9Registry {
+pub struct TraitRegistry {
     pub traits: HashMap<String, TraitInfo>,
     pub trait_impls: HashSet<(String, String)>,
     pub struct_params: HashMap<String, Vec<TypeParam>>,
@@ -37,7 +37,7 @@ pub struct TraitInfo {
     pub span: Span,
 }
 
-impl M9Registry {
+impl TraitRegistry {
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for item in items {
             match item {

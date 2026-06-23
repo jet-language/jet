@@ -32,7 +32,7 @@ pub mod Lexer;
 pub mod Loader;
 pub mod Lock;
 pub mod LSP;
-pub mod M9;
+pub mod Traits;
 pub mod Manifest;
 pub mod Parser;
 pub mod Publish;

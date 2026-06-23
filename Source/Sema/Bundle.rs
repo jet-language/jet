@@ -6,7 +6,7 @@ use crate::AST::{
 };
 use crate::Diagnostics::Diagnostic;
 use crate::Loader;
-use crate::M9::M9Registry;
+use crate::Traits::TraitRegistry;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
@@ -259,7 +259,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             imports: HashMap::new(),
             core_imports: HashMap::new(),
             tests: HashMap::new(),
-            m9: M9Registry::default(),
+            trait_reg: TraitRegistry::default(),
             code_modules: HashMap::new(),
             unqualified: HashMap::new(),
             unqualified_file: HashMap::new(),
@@ -393,7 +393,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         synthesize_impls(&mut module.items);
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
-        st.m9.register_items(&module.items, &mut diags);
+        st.trait_reg.register_items(&module.items, &mut diags);
         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
         diags.extend(check_schema_migrations(&module.items, &bundle.project_root));
     }
@@ -412,7 +412,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                             fields.iter().find(|(n, _, _, _, _)| n == field_name)
                         {
                             let field_type_name = field_ty.name();
-                            if !st.m9.implements_trait(&field_type_name, trait_name) {
+                            if !st.trait_reg.implements_trait(&field_type_name, trait_name) {
                                 diags.push(Diagnostic::error(
                                     "E2401",
                                     format!(
@@ -1315,7 +1315,7 @@ pub(crate) fn check_module_bodies(
                     &st.registry,
                     &st.structs,
                     &st.consts,
-                    &st.m9,
+                    &st.trait_reg,
                     &ct_funcs,
                     &ct_externs,
                     &ct_base_dir,
@@ -1385,7 +1385,7 @@ pub(crate) fn check_func_body_bundle(
         current_binding_name: None,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
-        m9: &st.m9,
+        trait_reg: &st.trait_reg,
         ct_funcs,
         ct_externs,
         ct_base_dir,

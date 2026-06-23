@@ -539,7 +539,7 @@ impl<'a> Checker<'a> {
             let saved_expected = self.expected_type.clone();
             let saved_esc = self.lambda_escapes;
             if let Some((_, _, fty, _, _)) = field_def {
-                let inst = self.m9.instantiate_type(fty, &subst);
+                let inst = self.trait_reg.instantiate_type(fty, &subst);
                 self.expected_type = Some(inst);
             }
             if matches!(expr, Expr::Lambda(_)) {
@@ -557,7 +557,7 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some((_, _, fty, _, _)) = field_def {
-                let inst = self.m9.instantiate_type(fty, &subst);
+                let inst = self.trait_reg.instantiate_type(fty, &subst);
                 if let Some(et) = et {
                     self.check_type_assignable(&inst, &et, expr.span());
                 }
@@ -597,7 +597,7 @@ impl<'a> Checker<'a> {
                 args: type_args.to_vec(),
             }
         } else if self
-            .m9
+            .trait_reg
             .struct_params
             .get(type_name)
             .is_some_and(|p| !p.is_empty())
@@ -605,7 +605,7 @@ impl<'a> Checker<'a> {
             Type::Apply {
                 name: type_name.to_string(),
                 args: self
-                    .m9
+                    .trait_reg
                     .struct_params
                     .get(type_name)
                     .unwrap()

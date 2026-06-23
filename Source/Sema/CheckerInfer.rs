@@ -649,7 +649,7 @@ impl<'a> Checker<'a> {
                         let ret_err_name = ret_err.name();
 
                         // D-ERR-CONV: check if a declared `impl Source -> Target` conversion exists.
-                        if self.m9.has_error_conv(&err_type_name, &ret_err_name) {
+                        if self.trait_reg.has_error_conv(&err_type_name, &ret_err_name) {
                             let fn_name = error_conv_fn_name(&err_type_name, &ret_err_name);
                             *convert = TryConvert::Typed(fn_name);
                             return Some((*ok).clone());
@@ -658,7 +658,7 @@ impl<'a> Checker<'a> {
                         // S80/D-LIB3: check if the error type implements `Fallible`
                         // and the return error is the default `Error`.
                         if is_default_error(ret_err) {
-                            if self.m9.implements_trait(&err_type_name, Syntax::TRAIT_FALLIBLE) {
+                            if self.trait_reg.implements_trait(&err_type_name, Syntax::TRAIT_FALLIBLE) {
                                 // Mark the Try node for Fallible conversion in codegen.
                                 *convert = TryConvert::Fallible;
                                 return Some((*ok).clone());
@@ -1441,13 +1441,13 @@ impl<'a> Checker<'a> {
                 for e in elems.iter_mut() {
                     if let Some(t) = self.infer(e) {
                         match &t {
-                            Type::Named(n) if self.m9.implements_trait(n, trait_name) => {
+                            Type::Named(n) if self.trait_reg.implements_trait(n, trait_name) => {
                                 if let Expr::StructLit { as_trait, .. } = e {
                                     *as_trait = Some(trait_name.clone());
                                 }
                             }
                             Type::Apply { name, .. }
-                                if self.m9.implements_trait(name, trait_name) =>
+                                if self.trait_reg.implements_trait(name, trait_name) =>
                             {
                                 if let Expr::StructLit { as_trait, .. } = e {
                                     *as_trait = Some(trait_name.clone());
@@ -1973,7 +1973,7 @@ impl<'a> Checker<'a> {
                                 self.diags.push(private_item(member, span));
                                 return None;
                             }
-                            return Some(self.m9.instantiate_type(fty, &subst));
+                            return Some(self.trait_reg.instantiate_type(fty, &subst));
                         }
                     }
                     let field_names: Vec<String> = fields.iter().map(|(n, ..)| n.clone()).collect();
@@ -2240,7 +2240,7 @@ impl<'a> Checker<'a> {
         }
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
-                for (trait_name, info) in &self.m9.traits {
+                for (trait_name, info) in &self.trait_reg.traits {
                     if let Some(msig) = info.methods.get(method) {
                         if !param.bounds.iter().any(|b| b == trait_name) {
                             self.diags.push(e0901(method, trait_name, span));
@@ -2264,7 +2264,7 @@ impl<'a> Checker<'a> {
         }
         if let Type::TraitObject(trait_name) = &recv_ty {
             let sig = self
-                .m9
+                .trait_reg
                 .traits
                 .get(trait_name)
                 .and_then(|t| t.methods.get(method));
@@ -3228,7 +3228,7 @@ impl<'a> Checker<'a> {
         }
 
         let fn_type_params = self
-            .m9
+            .trait_reg
             .fn_params
             .get(&call.name)
             .cloned()
@@ -3241,7 +3241,7 @@ impl<'a> Checker<'a> {
             }
             let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
             if arg_types.len() == call.args.len() {
-                match self.m9.infer_fn_subst(
+                match self.trait_reg.infer_fn_subst(
                     &sig,
                     &arg_types,
                     &fn_type_params,
@@ -3257,7 +3257,7 @@ impl<'a> Checker<'a> {
         } else {
             sig.params
                 .iter()
-                .map(|(c, t)| (*c, self.m9.instantiate_type(t, &generic_subst)))
+                .map(|(c, t)| (*c, self.trait_reg.instantiate_type(t, &generic_subst)))
                 .collect()
         };
         let args_pre_inferred = !generic_subst.is_empty() && pre_inferred.len() == call.args.len();
@@ -3523,7 +3523,7 @@ impl<'a> Checker<'a> {
             if generic_subst.is_empty() {
                 t.clone()
             } else {
-                self.m9.instantiate_type(t, &generic_subst)
+                self.trait_reg.instantiate_type(t, &generic_subst)
             }
         }))
     }

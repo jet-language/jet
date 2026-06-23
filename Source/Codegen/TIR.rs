@@ -1321,7 +1321,7 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     // in `emit_tir_trait_method`).
     //
     // c109 (this phase): a `view`-returning trait method is NOW COVERED. The latent
-    // AST-path I2 hole it depended on is fixed — `emit_trait_def` (Source/M9.rs) now
+    // AST-path I2 hole it depended on is fixed — `emit_trait_def` (Source/Traits.rs) now
     // threads `m.is_view_return` into the declared return type, so the trait says
     // `-> &String` to match the impl's `-> &String` (was E0053). The borrow shape is
     // the existing total `TStmt::ViewReturn { wrap }` Phase 17 used for inherent/free

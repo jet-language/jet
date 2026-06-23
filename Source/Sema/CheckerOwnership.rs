@@ -441,7 +441,7 @@ impl<'a> Checker<'a> {
                             kind: SendProblemKind::RefField,
                         });
                     }
-                    let actual_ty = self.m9.instantiate_type(field_ty, &subst);
+                    let actual_ty = self.trait_reg.instantiate_type(field_ty, &subst);
                     if let Some(problem) = self.sendability_problem_inner(&actual_ty, true, seen) {
                         return Some(prepend_send_path(name, field_name, problem));
                     }
@@ -453,11 +453,11 @@ impl<'a> Checker<'a> {
                     let problem = match payload {
                         VariantPayload::Unit => None,
                         VariantPayload::Single(ty, _) => {
-                            let actual_ty = self.m9.instantiate_type(ty, &subst);
+                            let actual_ty = self.trait_reg.instantiate_type(ty, &subst);
                             self.sendability_problem_inner(&actual_ty, true, seen)
                         }
                         VariantPayload::Named(fields) => fields.iter().find_map(|field| {
-                            let actual_ty = self.m9.instantiate_type(&field.ty, &subst);
+                            let actual_ty = self.trait_reg.instantiate_type(&field.ty, &subst);
                             self.sendability_problem_inner(&actual_ty, true, seen)
                                 .map(|p| prepend_send_path(name, &field.name, p))
                         }),

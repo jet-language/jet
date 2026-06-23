@@ -12,7 +12,7 @@ use crate::AST::{
     ExternFn, Func, Type, VariantPayload,
 };
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::M9::M9Registry;
+use crate::Traits::TraitRegistry;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -391,7 +391,7 @@ pub(crate) struct ModuleState {
     imports: HashMap<String, usize>,
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
-    m9: M9Registry,
+    trait_reg: TraitRegistry,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
     /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
     code_modules: HashMap<String, String>,
@@ -494,7 +494,7 @@ pub(crate) struct Checker<'a> {
     /// Names mutably captured by an escaping lambda still in scope (E0204).
     lambda_mut_borrow_stack: Vec<HashSet<String>>,
     /// M9: generic/trait metadata for this program.
-    m9: &'a M9Registry,
+    trait_reg: &'a TraitRegistry,
     /// M9.5: local comptime evaluation context.
     ct_funcs: &'a HashMap<String, Func>,
     ct_externs: &'a HashSet<String>,

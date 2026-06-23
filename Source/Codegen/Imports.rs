@@ -3,7 +3,7 @@ use crate::AST::{
     AccessConvention, ImportKind, Item, ProgramBundle, Type,
 };
 use crate::Loader;
-use crate::M9;
+use crate::Traits;
 use std::collections::HashMap;
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneable/comparable checks for any local
@@ -372,7 +372,7 @@ pub(crate) fn emit_program_items(cx: &Cx, items: &[Item], out: &mut String, incl
     emit_tuple_structs(cx, &tuple_shapes, out);
     for item in items {
         match item {
-            Item::Trait(t) => M9::emit_trait_def(t, out),
+            Item::Trait(t) => Traits::emit_trait_def(t, out),
             Item::Struct(s) => emit_struct(cx, s, out),
             Item::Enum(e) => emit_enum(cx, e, out),
             Item::Const(c) => emit_const(c, out),
