@@ -1020,6 +1020,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
+        // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing types.
+        | "ArgsSpec" | "ParsedArgs"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1653,6 +1655,128 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::String), (read, Type::String)],
             Some(result_ty(Type::String, Type::String)),
         )),
+        // D-ARGS1 (ratified 2026-06-22): `args.spec()` → `ArgsSpec` builder.
+        // The builder methods (.flag/.option/.positional/.help/.parse) are handled
+        // in `args_spec_method_return` / `parsed_args_method_return` below.
+        ("core.args", "spec") => Some((vec![], Some(Type::Named("ArgsSpec".to_string())))),
+        _ => None,
+    }
+}
+
+/// D-ARGS1: type-check a method call on `ArgsSpec` (the builder).
+/// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs ? String`.
+/// Returns `Some(Some(ty))` for valid calls, `Some(None)` for void (none here),
+/// `None` for unknown method (caller emits E0102).
+pub(crate) fn args_spec_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let spec_ty = Type::Named("ArgsSpec".to_string());
+    match (method, n_args) {
+        // .flag("name", "help text") → ArgsSpec  (boolean flag, no value)
+        ("flag", 2) => Some(Some(spec_ty)),
+        // .option("name", "help text", "METAVAR") → ArgsSpec  (value option)
+        ("option", 3) => Some(Some(spec_ty)),
+        // .positional("name", "help text") → ArgsSpec  (positional argument)
+        ("positional", 2) => Some(Some(spec_ty)),
+        // .help() → String  (render --help text)
+        ("help", 0) => Some(Some(Type::String)),
+        // .parse([String]) → ParsedArgs ? String
+        ("parse", 1) => Some(Some(result_ty(
+            Type::Named("ParsedArgs".to_string()),
+            Type::String,
+        ))),
+        // Arity mismatches
+        ("flag", _) => {
+            diags.push(Diagnostic::error(
+                "E1301",
+                format!("`flag` expects 2 arguments (name, help), got {}", n_args),
+                "`ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`".to_string(),
+                "pass exactly two strings: the flag name and a help description".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("option", _) => {
+            diags.push(Diagnostic::error(
+                "E1302",
+                format!("`option` expects 3 arguments (name, help, metavar), got {}", n_args),
+                "`ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`".to_string(),
+                "pass three strings: the option name, a help description, and a metavar like `FILE`".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("positional", _) => {
+            diags.push(Diagnostic::error(
+                "E1303",
+                format!("`positional` expects 2 arguments (name, help), got {}", n_args),
+                "`ArgsSpec.positional(name, help)` registers a required positional argument".to_string(),
+                "pass exactly two strings: the positional name and a help description".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("parse", _) => {
+            diags.push(Diagnostic::error(
+                "E1304",
+                format!("`parse` expects 1 argument (argv), got {}", n_args),
+                "`ArgsSpec.parse(argv)` parses a `[String]` (from `io.args()`) against the spec".to_string(),
+                "pass exactly one argument: the argv list, e.g. `io.args()`".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        _ => None,
+    }
+}
+
+/// D-ARGS1: type-check a method call on `ParsedArgs`.
+pub(crate) fn parsed_args_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    match (method, n_args) {
+        // .flag("name") → Bool
+        ("flag", 1) => Some(Some(Type::Bool)),
+        // .option("name") → String?
+        ("option", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+        // .positional(n) → String?
+        ("positional", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+        ("flag", _) => {
+            diags.push(Diagnostic::error(
+                "E1301",
+                format!("`ParsedArgs.flag` expects 1 argument (flag name), got {}", n_args),
+                "`parsed.flag(\"verbose\")` returns `true` when `--verbose` was passed".to_string(),
+                "pass exactly one string: the flag name (without leading `--`)".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("option", _) => {
+            diags.push(Diagnostic::error(
+                "E1302",
+                format!("`ParsedArgs.option` expects 1 argument (option name), got {}", n_args),
+                "`parsed.option(\"output\")` returns the value of `--output VALUE`, or `null`".to_string(),
+                "pass exactly one string: the option name (without leading `--`)".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("positional", _) => {
+            diags.push(Diagnostic::error(
+                "E1303",
+                format!("`ParsedArgs.positional` expects 1 argument (index), got {}", n_args),
+                "`parsed.positional(0)` returns the first positional argument, or `null`".to_string(),
+                "pass exactly one Int: the zero-based positional argument index".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
         _ => None,
     }
 }
@@ -1690,6 +1814,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.path" => &["join", "parent", "extension", "normalize"],
         // D-DEFER1 option B: scope-exit guard.
         "core.scope" => &["guard"],
+        // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing.
+        "core.args" => &["spec"],
         "core" => &[],
         // E2-M9: ring packages.
         "jet.csv" => &["parse", "render"],

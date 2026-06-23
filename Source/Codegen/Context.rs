@@ -135,6 +135,15 @@ pub(crate) fn alloc_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// D-ARGS1 (ratified 2026-06-22): ArgsSpec and ParsedArgs are top-level prelude structs.
+pub(crate) fn args_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "ArgsSpec" => Some("JetArgsSpec"),
+        "ParsedArgs" => Some("JetParsedArgs"),
+        _ => None,
+    }
+}
+
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
         let base = self.rust_type(ty);
@@ -217,6 +226,10 @@ impl Cx {
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
                 format!("{}{}", self.root_prefix, alloc_handle_rust_type(name).unwrap())
+            }
+            // D-ARGS1 (ratified 2026-06-22): ArgsSpec / ParsedArgs are top-level prelude structs.
+            Type::Named(name) if args_handle_rust_type(name).is_some() => {
+                format!("{}{}", self.root_prefix, args_handle_rust_type(name).unwrap())
             }
             Type::Named(name) if core_rust_type_name(name).is_some() => {
                 format!(

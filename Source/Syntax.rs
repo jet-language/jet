@@ -213,6 +213,9 @@ pub const MEM_ALLOC_FREE: &str = "free";
 /// D-ALLOC-C (ratified 2026-06-19): wider allocator API namespace.
 pub const CORE_MEM_ALLOC_MODULE: &str = "core.mem.alloc";
 
+/// D-ARGS1 (ratified 2026-06-22): declarative CLI argument parsing module.
+pub const CORE_ARGS_MODULE: &str = "core.args";
+
 /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation-region block
 /// `region r { … }`. A lowercase contextual block keyword (D-CASING1) that
 /// names a region spanning multiple arenas or narrower than the enclosing

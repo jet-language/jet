@@ -619,7 +619,7 @@ use jet.core.json as json;
 ```
 
 Implemented modules: `core.fs`, `core.io`, `core.env`, `core.process`,
-`core.math`, `core.random`, `core.time`, and `core.json`. Unknown core modules are
+`core.math`, `core.random`, `core.time`, `core.json`, and `core.args`. Unknown core modules are
 **E1001**; local modules/import aliases may not shadow reserved first-party
 roots (`core`, `jet`, `http`, `regex`, `csv`, `toml`, `crypto`, `archive`) —
 **E1002**. Selective imports are rejected; keep qualified access through an
@@ -630,6 +630,41 @@ Fallible core functions return `T ? E` and must be handled with `?`,
 only; file handles and streaming are out of scope. Paths are `String` in M10.
 Binary APIs use `U8` and `[U8]`. Unknown items in a core module are **E1004**
 with a did-you-mean suggestion when possible.
+
+#### `core.args` — declarative CLI parsing (D-ARGS1, ratified 2026-06-22)
+
+```jet
+use core.args as args
+spec @= args.spec()
+    .flag("verbose", "print extra detail")
+    .option("output", "write result to FILE", "FILE")
+    .positional("input", "file to read")
+parsed @= spec.parse(io.args()) ?? panic(spec.help())
+```
+
+`args.spec()` → `ArgsSpec` (builder). Each builder method consumes `ArgsSpec`
+and returns a new one:
+
+| Method | Signature | Registers |
+|--------|-----------|-----------|
+| `.flag(name, help)` | `(String, String) → ArgsSpec` | `--name` boolean flag |
+| `.option(name, help, meta)` | `(String, String, String) → ArgsSpec` | `--name VALUE` string option |
+| `.positional(name, help)` | `(String, String) → ArgsSpec` | required positional |
+| `.help()` | `() → String` | returns formatted help text |
+| `.parse(argv)` | `([String]) → ParsedArgs ? String` | parses `io.args()` against the spec |
+
+`ParsedArgs` query methods:
+
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `.flag(name)` | `(String) → Bool` | true if `--name` was passed |
+| `.option(name)` | `(String) → String?` | value of `--name VALUE`, or `None` |
+| `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `None` |
+
+`--help` is not wired automatically; add a `.flag("help", "…")` and check
+`parsed.flag("help")` explicitly. `.parse` returns `ParsedArgs ? String`
+where the error string contains the parse message (unknown flag, missing positional, etc.).
+Wrong argument counts on builder/query methods are **E1301–E1304**.
 
 #### Sized numeric types (D-SG9/S42)
 

@@ -2261,6 +2261,23 @@ impl<'a> Checker<'a> {
                 return ret;
             }
         }
+        // D-ARGS1: method calls on ArgsSpec / ParsedArgs (builder and result types).
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == "ArgsSpec" {
+                if let Some(ret) = args_spec_method_return(method, args.len(), span, &mut self.diags) {
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some("ArgsSpec".to_string());
+                    return ret;
+                }
+            }
+            if handle_ty == "ParsedArgs" {
+                if let Some(ret) = parsed_args_method_return(method, args.len(), span, &mut self.diags) {
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    *recv_type_out = Some("ParsedArgs".to_string());
+                    return ret;
+                }
+            }
+        }
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
                 for (trait_name, info) in &self.trait_reg.traits {
