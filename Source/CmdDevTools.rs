@@ -200,9 +200,11 @@ pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
 /// `jet bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
 ///
 /// Generates a `#bindgen module c.<lib>.__bindgen__` cache from a C header,
-/// the same backend the compiler invokes on a cache miss. The header→Jet
-/// translator (D-CBIND3 bindgen helper) is not built into this binary yet, so
-/// this surfaces **E3208** with the workaround (hand-write `#extern module`).
+/// using the same native std-only backend the compiler invokes on a cache miss
+/// (owner 2026-06-18, supersedes D-CBIND3=B). Parses C function prototypes
+/// over the bindable type subset; skips and reports what it cannot map (I3).
+/// **E3208** fires only when the header is unreadable or has no bindable
+/// prototypes — use `#extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         eprintln!("usage: {} bind <header.h> [--pkg <lib>] [-o <out.jet>]", jet::Syntax::BINARY_NAME);

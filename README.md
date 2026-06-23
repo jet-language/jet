@@ -38,9 +38,9 @@ Seven real programs live in `examples/showcase/`. They are golden-tested like
 | [jsonfmt](examples/showcase/jsonfmt.jet) | `core.json`, fallible `T ? E`, stdin/files |
 | [wordfreq](examples/showcase/wordfreq.jet) | `Map`, sorting, directory walk, closures |
 | [library](examples/showcase/library.jet) | library authoring, associated types, error conversion |
-| [lowlevel](examples/showcase/lowlevel.jet) | `#unsafe`, `#audit`, `Ptr<T>`, expert low-level tier |
+| [lowlevel](examples/showcase/lowlevel.jet) | `#Unsafe`, `#Audit`, `Ptr<T>`, expert low-level tier |
 | [freestanding](examples/showcase/freestanding.jet) | `--freestanding`, no-std cross-compilation |
-| [http_service](examples/showcase/http_service.jet) | HTTP server, blocking networking, TLS |
+| [http_service](examples/showcase/http_service.jet) | HTTP server, blocking TCP networking (plain HTTP) |
 
 ```bash
 nix develop -c jet run examples/showcase/jetgrep.jet pattern examples/showcase/fixtures/
@@ -66,11 +66,11 @@ Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
 Jet keeps ownership and safety but drops most of Rust's surface syntax and
 jargon. Errors are values (`T ? E`), not exceptions. There is no macro
 system, no `async`/`await`, and the compiler never speaks rustc's language to
-you. Expert unsafe is opt-in via `#unsafe { … }` / `#audit("…")`, not the default.
+you. Expert unsafe is opt-in via `#Unsafe { … }` / `#Audit("…")`, not the default.
 
 **How is Jet different from Go?**  
 Jet is statically typed with generics and traits, and stricter error handling —
-you cannot ignore a fallible result. Bindings are `name :: value` (immutable)
+you cannot ignore a fallible result. Bindings are `name @= value` (immutable)
 or `name := value` (mutable). Use `core.tasks` channels for concurrency
 (blocking; async is deferred to a later epoch).
 
@@ -84,8 +84,12 @@ headers (`if`, `loop`, `fn`) don't need them; line continuation works when
 the next line starts with `.` or a binary operator. `jet fmt` handles layout.
 
 **Can I use this in production?**  
-Jet is at Epoch 3 (v1.0 + GA are complete). Pin your toolchain in `pkg.jet`
-and read [versioning](docs/reference/versioning.md).
+The language, compiler, and core library are post-v1.0. Pin your toolchain with
+`edition:` in `pkg.jet` and read [versioning](docs/reference/versioning.md).
+Not yet ready: registry upload (`jet publish` validates but does not upload —
+use git-based dependencies), `jet gc` (stub until M12.2 registry lands), and
+`jet doctor --online` (registry not wired). TLS requires the separate `jet.tls`
+package; the built-in HTTP client is plain HTTP only.
 
 ## Repo map
 

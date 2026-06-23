@@ -581,15 +581,15 @@ ships as versioned `jet.*` packages. These shipped in Epoch 2:
 
 | Package | What it unlocks |
 |---------|-----------------|
-| `jet.http` | HTTP client + server, blocking networking, TLS |
+| `jet.http` | HTTP client + server, blocking networking (plain HTTP; TLS requires `jet.tls`) |
 | `jet.regex` | grep-class tools, text validation |
 | `jet.csv` | CSV data files |
 | `jet.toml` | TOML config files |
 | `jet.log` | Structured logging / tracing / metrics |
 | `jet.time` | Calendar dates, time zones, formatted dates |
 | `jet.crypto` | Hash, HMAC, vetted random primitives |
-| `jet.archive` | zip / tar / gzip |
-| `jet.db` | SQLite (FFI-tier) |
+| `jet.archive` | zip / tar / gzip (staged — not yet available) |
+| `jet.db` | SQLite (FFI-tier) (staged — not yet available) |
 
 ---
 

@@ -377,7 +377,7 @@ Teaching: **`unsafe`** / C-style FFI spellings → **`extern rust`** (**E0031**)
 Example: `examples/features/22_ffi.jet` (`base64@0.22`). Ui: `tests/ui/ffi_*.jet`.
 Integration: `tests/ffi.rs` (gated on `cargo`).
 
-## E2-M14 — C FFI (implemented: overlay + merge + link; bind backend deferred)
+## E2-M14 — C FFI (implemented: overlay + merge + link + bind backend)
 
 **S59** — C import with auto-generated bindings (default) and optional user
 overlay. (Full spec follows in this section.)
@@ -408,13 +408,15 @@ generated cache file (**E3207**); users may not name the reserved `__bindgen__`
 segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
 
 `jet bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
-shares the compile-time auto-bind backend. The header→Jet translator (D-CBIND3
-bindgen helper) is not built into this binary yet, so both auto-bind and
-`jet bind` report **E3208** with the hand-written-overlay workaround; ship a
-hand-written `@bindgen` cache or `@extern module` in the meantime. Rust FFI
-(S50) is unchanged. Diagnostics: **E3201–E3208** in diagnostics.md with
-snapshots (front-end ones under `tests/ui/cffi_*`; link-time/gated ones pinned in
-`tests/cffi.rs`).
+shares the compile-time auto-bind backend (owner 2026-06-18: native std-only
+implementation, D-CBIND3 superseded). It parses C function prototypes over the
+bindable type subset (scalars, `char*` strings, `void`) and emits a `@bindgen`
+cache; declarations it cannot map are skipped and reported rather than faked
+(I3). **E3208** fires only when the header cannot be read or contains no
+bindable prototypes — the fix is a hand-written `@extern module c.<lib>` overlay
+for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
+**E3201–E3208** in diagnostics.md with snapshots (front-end ones under
+`tests/ui/cffi_*`; link-time/gated ones pinned in `tests/cffi.rs`).
 
 ## E2-M13 — Expert low-level tier (S58, implemented)
 
