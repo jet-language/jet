@@ -22,6 +22,24 @@
                                     speaks to users — see R5)
 ```
 
+### Typed IR (TIR) — the codegen seam
+
+Codegen does not read the AST plus side registries; it lowers the checked AST to a
+**typed IR** (`Source/Codegen/TIR.rs`) that carries only sema-approved facts, then emits
+Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
+is resolved at lowering — R1/I3). The TIR is the single codegen seam for every user
+function, method, and trait method: a per-function gate (`tir_covers*`) decides coverage,
+and a construct **outside** the TIR subset is an **internal compiler error** (R5 ICE), never
+an AST fallback or a miscompile. The legacy AST codegen path was deleted (c109 Phase N) once
+a whole-test-suite check proved every reachable function routes through the TIR. Constructs
+the gate excludes are provably sema-unreachable (generic-struct methods E0311, bare `?? return`
+in a value fn E0405, nested `T??`, a bare `Variant(n) ->` arm) — they never reach codegen.
+
+**Not yet on the TIR (separate non-function emit surfaces, still using the legacy
+`emit_expr`/`emit_stmt`):** `#Test` block bodies, error-conversion `impl Old -> New` bodies,
+and lambda expression bodies reached within those. Routing these three through the TIR is the
+remaining work to make it literally the *only* codegen seam.
+
 ## Module map
 
 | File           | Job                                  | May emit diagnostics? |
