@@ -40,7 +40,9 @@ use crate::AST::{
 };
 use crate::Diagnostics::Span;
 use crate::Syntax;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 // ---------------------------------------------------------------------------
 // TIR types. Every node carries the facts codegen needs, pre-resolved (totality).
@@ -83,6 +85,16 @@ pub(crate) enum TFuncKind {
     /// `unsafe fn` prefix for an `@unsafe fn` trait method (S58/D-LL1 — the body may
     /// use gated ops; calling it is already gated to an `@unsafe` block in sema).
     TraitMethod { is_unsafe: bool },
+    /// c109 Phase 15: a DELEGATION trait method (`using field`) — `emit_delegation_method`
+    /// (Source/Codegen/Items.rs). The whole method is structural: a forwarding call
+    /// `(self).<field>.<method>(<args>)` to the delegated field, with the BARE trait
+    /// method name (no `user_` mangle). There is NO body to lower — the forward string is
+    /// resolved at lowering. The signature reproduces `emit_delegation_method`'s exact
+    /// shape (a quirky two-space `  {` before the brace, `&self` receiver, no `pub`).
+    /// `has_return` decides whether the forward line ends in `;` (unit) or not (returns).
+    /// `sig` is the fully-rendered signature line (`    fn name(params)  {\n` with its
+    /// quirky double space) and `fwd` the forwarding call — both resolved at lowering.
+    Delegation { sig: String, fwd: String, has_return: bool },
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
@@ -215,6 +227,28 @@ pub(crate) enum TStmt {
         var2: Option<String>,
         collection_str: String,
         body: Vec<TStmt>,
+    },
+    /// c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picked the
+    /// branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
+    /// statements INLINE at the same indent (no `if`, no block — and its `let`s leak
+    /// into the outer scope, exactly like a plain block). The TIR carries the lowered
+    /// statements of the selected branch and emits them with no wrapper. When the
+    /// selected branch is `else` but there is no else-body (or sema didn't resolve),
+    /// this holds an empty vec (emits nothing).
+    Inline(Vec<TStmt>),
+    /// c109 Phase 15: a MIXED comparison/Bool `when` switch (`emit_mixed_switch`,
+    /// Source/Codegen/Statement.rs) — the general `if/else if … else` form used when the
+    /// arms are NOT all-variant (that is shape A, a Rust `match`), NOT all-range (shape
+    /// B, `RangeSwitch`), and NOT all-fallible (shape C). Each arm head is a plain
+    /// comparison/Bool expression. The AST path wraps the chain in a block that binds
+    /// `_jet_switch_subject = &(subject)` (emitted for parity even when unused), then an
+    /// `if/else if …` chain over each arm's condition, with the `else`/fallthrough form
+    /// reproduced exactly. Each arm's condition is resolved to a Rust string at lowering
+    /// (emit makes no decision). `else_body` is the optional `else` arm.
+    MixedSwitch {
+        subject_str: String,
+        arms: Vec<(String, Vec<TStmt>)>,
+        else_body: Option<Vec<TStmt>>,
     },
 }
 
@@ -649,12 +683,21 @@ pub(crate) enum TTryConvert {
     Typed(String),
 }
 
-/// c109 Phase 8: the resolved right-hand side of a `??` fallback (`AST::OrFallback`),
-/// minus the Panic form (deferred). `Value` is an expression; `Return` is an early
-/// `return [expr]` from the enclosing function.
+/// c109 Phase 8: the resolved right-hand side of a `??` fallback (`AST::OrFallback`).
+/// `Value` is an expression; `Return` is an early `return [expr]` from the enclosing
+/// function. c109 Phase 15: `Panic` reproduces `emit_panic_stop`/`safe_locals_expr`
+/// (the `a ?? panic(…)` form) — all of its inputs (the panic message, source line,
+/// column, caret width, function name, file, and the sorted scalar-locals snapshot)
+/// are resolved at lowering into a single pre-rendered Rust string, so emit makes no
+/// decision (I3) and never reaches into `cx.src`/`cx.current_fn` for it.
 pub(crate) enum TOrFallback {
     Value(Box<TExpr>),
     Return(Option<Box<TExpr>>),
+    /// The fully-rendered `{ jet_panic_rich(…); }` statement string, resolved at
+    /// lowering — byte-identical to `emit_panic_stop`'s output. The interpolated panic
+    /// message (which itself may contain lowered sub-expressions) and the locals
+    /// snapshot are baked in here.
+    Panic(String),
 }
 
 pub(crate) enum TStrPart {
@@ -1350,7 +1393,27 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
             else_body,
             ..
         } => switch_in_subset(subject, arms, else_body, cx, locals),
-        // unsafe, region, caps, comptime-if, context — all still out.
+        // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picks the
+        // branch (`selected_then`); codegen emits ONLY that branch's statements inline.
+        // The gate must classify the SELECTED branch (the unselected one is dropped and
+        // never reaches codegen — it is name-resolution-only, D-WHEN2). Its statements
+        // leak into the outer scope (the AST shares `&mut env`), so they extend `locals`.
+        // Before sema resolves `selected_then` (a `build_cx`-only gate test), default to
+        // the `then` branch so the gate is still exercised; at real codegen
+        // `selected_then` is always set.
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            selected_then,
+            ..
+        } => {
+            let chosen: &[Stmt] = match selected_then {
+                Some(true) | None => then_body,
+                Some(false) => else_body.as_deref().unwrap_or(&[]),
+            };
+            chosen.iter().all(|s| stmt_in_subset(s, cx, locals))
+        }
+        // unsafe, region, caps, context — all still out.
         _ => false,
     }
 }
@@ -1498,7 +1561,58 @@ fn switch_in_subset(
         }
         return true;
     }
+    // Shape D (c109 Phase 15): a MIXED comparison/Bool switch — the general
+    // `emit_mixed_switch` `if/else if … else` chain used when the arms are NOT all
+    // variant (shape A), NOT all range (shape B), and NOT all fallible (shape C). Every
+    // arm head must be a PLAIN in-subset comparison/Bool expression — i.e. the
+    // `_ => emit_expr(cond)` branch of `emit_switch_arm_cond` (NOT a variant/Eq-variant
+    // pattern, which would route through `emit_pattern_matches`, and NOT a range head).
+    // Conservative: a single pattern-test arm in the chain excludes the whole switch
+    // (stays on the AST path). The `else` is optional (`emit_mixed_switch` handles both).
+    if arms.iter().all(|a| arm_is_plain_cond(cx, &a.cond, subject)) {
+        for a in arms {
+            if !expr_in_subset(&a.cond, cx, locals) {
+                return false;
+            }
+            let mut body_locals = locals.clone();
+            if !a
+                .body
+                .iter()
+                .all(|s| stmt_in_subset(s, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        if let Some(body) = else_body {
+            let mut else_locals = locals.clone();
+            if !body.iter().all(|s| stmt_in_subset(s, cx, &mut else_locals)) {
+                return false;
+            }
+        }
+        return true;
+    }
     false
+}
+
+/// c109 Phase 15: an arm head that `emit_switch_arm_cond` would emit as a PLAIN
+/// expression (`_ => emit_expr(cond)`) — NOT a variant/Eq-to-variant pattern (which it
+/// routes through `emit_pattern_matches`) and NOT an arm-head range (shape B). This is
+/// the comparison/Bool arm of the general mixed switch (shape D).
+fn arm_is_plain_cond(cx: &Cx, cond: &Expr, subject: &Expr) -> bool {
+    // A variant or Eq-to-variant arm → `emit_pattern_matches` (excluded here).
+    if arm_variant_pattern(cx, cond, subject).is_some() {
+        return false;
+    }
+    // An arm-head range → shape B / `emit_pattern_matches` Range (excluded here).
+    if arm_head_range(cond, subject).is_some() {
+        return false;
+    }
+    // Any other pattern test (`ok`/`err`/`value`/`null`/`present`/wildcard) → not a
+    // plain comparison; exclude (those are shape C or unsupported).
+    if matches!(cond, Expr::PatternTest { .. }) {
+        return false;
+    }
+    true
 }
 
 /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
@@ -1914,16 +2028,22 @@ fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<String>) -> boo
         && matches!(cx.fn_types.get(name), Some(Type::Fn { .. }))
 }
 
-/// c109 Phase 8: is a `??` fallback right-hand side in-subset? `Value` and early
-/// `return [expr]` are covered; the `panic(…)` form is deferred (it reproduces
-/// `emit_panic_stop`/`safe_locals_expr`, which depend on the full Slot env in a way
-/// the TIR does not yet model — staying on the AST path is the safe choice).
+/// c109 Phase 8/15: is a `??` fallback right-hand side in-subset? `Value` and early
+/// `return [expr]` are covered (Phase 8). c109 Phase 15: the `panic(…)` form is now
+/// covered too — `emit_panic_stop`/`safe_locals_expr` is reproduced from a faithful
+/// `panic_locals` env replica resolved at lowering. The panic message expression must
+/// be in-subset (it is lowered into the rendered panic string). `panic(…)` always takes
+/// exactly one message argument (the parser builds `OrFallback::Panic{args}` from it).
 fn orfallback_rhs_in_subset(fallback: &OrFallback, cx: &Cx, locals: &HashSet<String>) -> bool {
     match fallback {
         OrFallback::Value(e) => expr_in_subset(e, cx, locals),
         OrFallback::Return(None, _) => true,
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
-        OrFallback::Panic { .. } => false,
+        OrFallback::Panic { args, .. } => {
+            args.len() == 1
+                && args[0].label.is_none()
+                && expr_in_subset(&args[0].expr, cx, locals)
+        }
     }
 }
 
@@ -2616,9 +2736,39 @@ struct LowerEnv {
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
     fn_name: String,
+    /// c109 Phase 15: the `safe_locals_expr` env replica for the `a ?? panic(…)` form.
+    /// `safe_locals_expr` (Source/Codegen/Statement.rs) dumps the FULL codegen `env`
+    /// (`HashMap<String, Slot>`), filtered to scalar Int/Float/Bool slots, sorted by
+    /// name, at the panic site. The AST codegen `env` LEAKS: a `let` inside a plain
+    /// block / loop / mixed-or-range switch arm / comptime-if branch stays in the
+    /// shared `&mut env` after the block (sema scopes the *name* so it is never read,
+    /// but `safe_locals_expr` dumps the raw env regardless). Only the two
+    /// `emit_pattern_match_switch` arm-body boundaries and lambda bodies clone the env
+    /// (no leak). To reproduce the dump byte-exact this replica is shared (`Rc<RefCell>`)
+    /// across leaky branches via `clone_env`, and DEEP-COPIED via `fork_panic` at the
+    /// non-leaky boundaries. It is updated in lock-step with `locals` through `bind`.
+    panic_locals: Rc<RefCell<HashMap<String, (String, Option<Type>)>>>,
 }
 
 impl LowerEnv {
+    /// A fresh root env for a function/method body (an empty `panic_locals` replica).
+    fn new(fn_name: String) -> LowerEnv {
+        LowerEnv {
+            locals: HashMap::new(),
+            fn_name,
+            panic_locals: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+    /// Bind `name` to its resolved Rust place + type, updating BOTH `locals` (used for
+    /// place/type resolution) and the `panic_locals` replica (used only for the `??`
+    /// panic locals dump). Every covered binding site routes through here so the two
+    /// stay in lock-step.
+    fn bind(&mut self, name: &str, place: String, ty: Option<Type>) {
+        self.locals.insert(name.to_string(), (place.clone(), ty.clone()));
+        self.panic_locals
+            .borrow_mut()
+            .insert(name.to_string(), (place, ty));
+    }
     fn place_of(&self, name: &str) -> String {
         match self.locals.get(name) {
             Some((place, _)) => place.clone(),
@@ -2649,18 +2799,14 @@ impl LowerEnv {
 }
 
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
-    let mut env = LowerEnv {
-        locals: HashMap::new(),
-        fn_name: f.name.clone(),
-    };
+    let mut env = LowerEnv::new(f.name.clone());
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
         let place = param_place(&rust_name, p);
-        env.locals
-            .insert(p.name.clone(), (place, Some(p.ty.clone())));
+        env.bind(&p.name, place, Some(p.ty.clone()));
         params.push((rust_name, p.ty.clone(), p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
@@ -2685,18 +2831,14 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
 /// The `self_conv` (instance) / `None` (static) and the resolved return type drive
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
-    let mut env = LowerEnv {
-        locals: HashMap::new(),
-        fn_name: f.name.clone(),
-    };
+    let mut env = LowerEnv::new(f.name.clone());
     let mut params = Vec::new();
     let mut self_conv: Option<AccessConvention> = None;
     let mut is_static = true;
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
             // The self slot: place `self`, no deref, type None (parity with emit_method).
-            env.locals
-                .insert(Syntax::KW_SELF.to_string(), ("self".to_string(), None));
+            env.bind(Syntax::KW_SELF, "self".to_string(), None);
             self_conv = Some(p.convention);
             is_static = false;
             continue;
@@ -2705,7 +2847,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         let place = param_place(&rust_name, p);
         // A `Self`-typed param resolves to the owning type for totality.
         let pty = resolve_self_ty(&p.ty, type_name);
-        env.locals.insert(p.name.clone(), (place, Some(pty.clone())));
+        env.bind(&p.name, place, Some(pty.clone()));
         params.push((rust_name, pty, p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
@@ -2735,25 +2877,23 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
 ///    for `Read`, which is identical to `param_place` for `Read` (scalar → false).
 /// The `TraitMethod` kind drives a bare name, no `pub`, always-`&self` signature.
 pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
-    let mut env = LowerEnv {
-        locals: HashMap::new(),
-        fn_name: f.name.clone(),
-    };
+    let mut env = LowerEnv::new(f.name.clone());
     let mut params = Vec::new();
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
             // The self slot: place `self`, no deref, type `Some(Named(type_name))` —
             // EXACTLY `emit_trait_method`'s slot (NOT `None` like `emit_method`).
-            env.locals.insert(
-                Syntax::KW_SELF.to_string(),
-                ("self".to_string(), Some(Type::Named(type_name.to_string()))),
+            env.bind(
+                Syntax::KW_SELF,
+                "self".to_string(),
+                Some(Type::Named(type_name.to_string())),
             );
             continue;
         }
         let rust_name = cx.mangle_name(&p.name);
         let place = param_place(&rust_name, p);
         let pty = resolve_self_ty(&p.ty, type_name);
-        env.locals.insert(p.name.clone(), (place, Some(pty.clone())));
+        env.bind(&p.name, place, Some(pty.clone()));
         params.push((rust_name, pty, p.convention));
     }
     let body = lower_stmts(&f.body, cx, &mut env);
@@ -2765,6 +2905,78 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
+        },
+    }
+}
+
+/// c109 Phase 15: is a DELEGATION trait method (`using field`) coverable? Always — the
+/// method is purely structural: a fixed forwarding call `(self).<field>.<method>(args)`
+/// with the bare trait method name, and a signature rendered by the SAME
+/// `rust_param_type`/`rust_return_type` the AST path uses. There is no body to lower, no
+/// type to re-infer; the forward + signature are deterministic. (The `field`/method/
+/// args come straight off the `ImplDef`; nothing here can produce code rustc rejects
+/// that the AST path wouldn't.) Returns `true` for any delegation method.
+pub(crate) fn tir_covers_delegation_method(_f: &Func, _field: &str, _cx: &Cx) -> bool {
+    true
+}
+
+/// c109 Phase 15: lower a delegation trait method to a `TFunc` with a `Delegation` kind,
+/// reproducing `emit_delegation_method` (Source/Codegen/Items.rs) byte-for-byte: the
+/// signature line (incl. its quirky two-space `  {`), and the forwarding call. There is
+/// no body — the method only forwards to the delegated field with the BARE trait method
+/// name (no `user_` mangle, as the trait owns it in Rust).
+pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
+    let ret = f
+        .return_type
+        .as_ref()
+        .map(|t| rust_return_type(cx, t, f.is_view_return))
+        .unwrap_or_default();
+    let ret_clause = if ret.is_empty() {
+        String::new()
+    } else {
+        format!(" -> {}", ret)
+    };
+    let params: Vec<String> = f
+        .params
+        .iter()
+        .map(|p| {
+            if p.name == Syntax::KW_SELF {
+                "&self".to_string()
+            } else {
+                format!("{}: {}", mangle(&p.name), rust_param_type(cx, p.convention, &p.ty))
+            }
+        })
+        .collect();
+    // The signature line, EXACTLY `emit_delegation_method`'s format (note the two spaces
+    // before `{` and the ` {ret}` only when there is a return).
+    let sig = format!(
+        "    fn {}({}){}  {{\n",
+        f.name,
+        params.join(", "),
+        if ret_clause.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", ret_clause.trim())
+        }
+    );
+    let fwd_args: Vec<String> = f
+        .params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| mangle(&p.name).to_string())
+        .collect();
+    let field_rust = mangle(field);
+    let fwd = format!("(self).{}.{}({})", field_rust, f.name, fwd_args.join(", "));
+    TFunc {
+        name: f.name.clone(),
+        params: Vec::new(),
+        ret: f.return_type.clone(),
+        is_main: false,
+        body: Vec::new(),
+        kind: TFuncKind::Delegation {
+            sig,
+            fwd,
+            has_return: f.return_type.is_some(),
         },
     }
 }
@@ -2847,8 +3059,7 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }
                 })
                 .unwrap_or_default();
-            env.locals
-                .insert(b.name.clone(), (mangle(&b.name), Some(ty)));
+            env.bind(&b.name, mangle(&b.name), Some(ty));
             TStmt::Let {
                 name: b.name.clone(),
                 kw,
@@ -2906,18 +3117,30 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let start = lower_expr(start, cx, env);
                 let end = lower_expr(end, cx, env);
                 let step = step.as_ref().map(|s| lower_expr(s, cx, env));
-                // The loop var is an `Int` local for the body's scope only.
+                // The loop var is an `Int` local for the body's scope only. The AST
+                // (`Statement.rs`) inserts it into the shared env, emits the body, then
+                // RESTORES the prior binding — so a scalar `??` panic dump INSIDE the body
+                // sees the var, but one after the loop does not. Reproduce that exactly:
+                // bind it on the shared `panic_locals`, lower the body, then restore.
                 let mut branch = clone_env(env);
-                branch
-                    .locals
-                    .insert(var.clone(), (mangle(var), Some(Type::Int)));
+                let prev = branch.panic_locals.borrow().get(var).cloned();
+                branch.bind(var, mangle(var), Some(Type::Int));
+                let lowered_body = lower_stmts(body, cx, &mut branch);
+                match prev {
+                    Some(p) => {
+                        branch.panic_locals.borrow_mut().insert(var.clone(), p);
+                    }
+                    None => {
+                        branch.panic_locals.borrow_mut().remove(var);
+                    }
+                }
                 TStmt::Range {
                     label: label_name(label),
                     var: var.clone(),
                     start,
                     end,
                     step,
-                    body: lower_stmts(body, cx, &mut branch),
+                    body: lowered_body,
                 }
             }
             // c109 Phase 5: collection iteration `loop x in coll` / `loop k, v in map`.
@@ -2956,6 +3179,26 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             else_body,
             ..
         } => lower_switch(subject, arms, else_body, cx, env),
+        // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema chose the
+        // branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
+        // statements INLINE on the SAME `&mut env` at the SAME indent (no `if`, no
+        // block — its `let`s leak into the outer scope). Reproduce both: lower the
+        // selected branch's statements on the SAME `env` (so their bindings leak, like
+        // the AST shared env) and wrap them in a flat `Inline` node.
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            selected_then,
+            ..
+        } => {
+            let chosen: &[Stmt] = match selected_then {
+                Some(true) => then_body,
+                Some(false) => else_body.as_deref().unwrap_or(&[]),
+                // Sema didn't resolve (earlier error) — emit nothing (I3), like the AST.
+                None => &[],
+            };
+            TStmt::Inline(lower_stmts(chosen, cx, env))
+        }
         _ => unreachable!("statement not in TIR subset"),
     }
 }
@@ -3016,8 +3259,48 @@ fn lower_switch(
     {
         return lower_fallible_match(subject, arms, else_body, cx, env);
     }
+    // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds → the general
+    // mixed `if/else if … else` chain (`emit_mixed_switch`).
+    if arms.iter().all(|a| arm_is_plain_cond(cx, &a.cond, subject)) {
+        return lower_mixed_switch(subject, arms, else_body, cx, env);
+    }
     // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
     lower_enum_match(subject, arms, else_body, cx, env)
+}
+
+/// c109 Phase 15: lower a MIXED comparison/Bool `when` switch (shape D) to a
+/// `TStmt::MixedSwitch`, reproducing `emit_mixed_switch` (Source/Codegen/Statement.rs).
+/// The subject is bound once to `_jet_switch_subject = &(subject)` (emitted for parity);
+/// each arm's PLAIN condition is resolved to a Rust string at lowering (`emit_expr`); the
+/// arm bodies + `else` are lowered on a SHARED env (leaky, like the AST `&mut env`).
+fn lower_mixed_switch(
+    subject: &Expr,
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TStmt {
+    // The subject's emitted string, used once for the `_jet_switch_subject` borrow —
+    // exactly as `emit_mixed_switch` re-emits `emit_expr(subject)`.
+    let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
+    let mut tarms = Vec::new();
+    for arm in arms {
+        // A plain comparison/Bool arm head → `emit_switch_arm_cond`'s `emit_expr(cond)`.
+        let cond_str = emit_tir_expr(&lower_expr(&arm.cond, cx, env), cx);
+        // The arm body uses the SHARED `&mut env` in `emit_mixed_switch` (leaks).
+        let mut branch = clone_env(env);
+        let body = lower_stmts(&arm.body, cx, &mut branch);
+        tarms.push((cond_str, body));
+    }
+    let else_lowered = else_body.as_ref().map(|body| {
+        let mut branch = clone_env(env);
+        lower_stmts(body, cx, &mut branch)
+    });
+    TStmt::MixedSwitch {
+        subject_str,
+        arms: tarms,
+        else_body: else_lowered,
+    }
 }
 
 /// c109 Phase 8: lower a fallible/optional pattern match (`when … { it == ok(n) ->
@@ -3052,11 +3335,13 @@ fn lower_fallible_match(
     for arm in arms {
         let pattern = arm_fallible_pattern(&arm.cond, subject).expect("gate proved fallible arm");
         let pat = tir_fallible_pattern(&pattern);
-        let mut body_env = clone_env(env);
+        // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
+        let mut body_env = fork_panic(env);
         tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm { pattern: pat, guard: None, body });
     }
+    // The `else` arm uses the SHARED `&mut env` in `emit_pattern_match_switch` (leaks).
     let else_lowered = else_body.as_ref().map(|body| {
         let mut branch = clone_env(env);
         lower_stmts(body, cx, &mut branch)
@@ -3108,7 +3393,7 @@ fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, subject_ty: &
         // `null` (Absent) binds nothing.
         _ => return,
     };
-    env.locals.insert(binding.clone(), (mangle(&binding), ty));
+    env.bind(&binding, mangle(&binding), ty);
 }
 
 fn lower_enum_match(
@@ -3140,12 +3425,14 @@ fn lower_enum_match(
             arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
         let pat = tir_match_pattern(cx, &pattern, enum_type.as_deref());
         let guard = tir_range_guard(&pattern);
-        // The arm body sees the variant's payload bindings, typed from the layout.
-        let mut body_env = clone_env(env);
+        // The arm body sees the variant's payload bindings, typed from the layout. The
+        // arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
+        let mut body_env = fork_panic(env);
         tir_add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm { pattern: pat, guard, body });
     }
+    // The `else` arm uses the SHARED `&mut env` in `emit_pattern_match_switch` (leaks).
     let else_lowered = else_body.as_ref().map(|body| {
         let mut branch = clone_env(env);
         lower_stmts(body, cx, &mut branch)
@@ -3293,7 +3580,7 @@ fn tir_add_pattern_bindings(
                         .as_ref()
                         .and_then(|ts| ts.get(i).cloned())
                         .unwrap_or(Type::Int);
-                    env.locals.insert(b.clone(), (mangle(b), Some(ty)));
+                    env.bind(b, mangle(b), Some(ty));
                 }
             }
         }
@@ -3331,11 +3618,127 @@ fn expr_ast_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     }
 }
 
+/// Clone the env for a LEAKY child scope (a plain block / loop / mixed-or-range switch
+/// arm / comptime-if branch / enum-match else). `locals` is deep-cloned (each branch
+/// scopes its own bindings for resolution), but `panic_locals` is SHARED (the Rc is
+/// cloned, not its contents) so a `let` inside the child leaks into the parent's panic
+/// dump — exactly as the AST codegen `&mut env` does (`safe_locals_expr`).
 fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
+        panic_locals: Rc::clone(&env.panic_locals),
     }
+}
+
+/// Clone the env for a NON-LEAKY child scope — the two `emit_pattern_match_switch` arm
+/// bodies (an enum or fallible/optional match arm; the AST uses `env.clone()` there) and
+/// a lambda body (`emit_lambda` clones the env). Here `panic_locals` is DEEP-COPIED, so
+/// bindings inside the arm/lambda do NOT leak into the enclosing function's panic dump,
+/// matching the AST's cloned `body_env`/`lam_env`.
+fn fork_panic(env: &LowerEnv) -> LowerEnv {
+    LowerEnv {
+        locals: env.locals.clone(),
+        fn_name: env.fn_name.clone(),
+        panic_locals: Rc::new(RefCell::new(env.panic_locals.borrow().clone())),
+    }
+}
+
+/// c109 Phase 15: render the `{ jet_panic_rich(…); }` statement string for a
+/// `a ?? panic(msg)` fallback, byte-for-byte `emit_panic_stop`
+/// (Source/Codegen/Statement.rs). Every input — the panic message (lowered from the
+/// message expression), the source-line text / line / column / caret width (from
+/// `cx.src` at the `panic` name span), the escaped file + enclosing function name, and
+/// the sorted scalar-locals snapshot — is resolved here so emit reads nothing from
+/// `cx.src`/`cx.current_fn` (I3).
+fn render_panic_stop(
+    name_span: &Span,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> String {
+    let msg = render_panic_message(&args[0].expr, cx, env);
+    let (src_line, line, col) = tir_src_line_at(&cx.src, name_span.start);
+    let caret_len = (name_span.end - name_span.start) as u32;
+    let fn_name = env.fn_name.clone();
+    let locals_expr = render_safe_locals(env);
+    format!(
+        "{{ jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+        file = escape_rust_str(&cx.file),
+        line = line,
+        fn_name_esc = escape_rust_str(&fn_name),
+        src_line_esc = escape_rust_str(src_line.trim_end()),
+        col = col,
+        caret = caret_len,
+        msg = msg,
+        locals = locals_expr,
+    )
+}
+
+/// c109 Phase 15: reproduce `emit_panic_message` (Statement.rs): a `Str` literal emits
+/// its interpolated form directly; any other expression is `({…}).jet_show()`. The
+/// message expression is lowered + emitted via the TIR (= `emit_expr`).
+fn render_panic_message(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> String {
+    match e {
+        Expr::Str(_, _) => emit_tir_expr(&lower_expr(e, cx, env), cx),
+        other => format!("({}).jet_show()", emit_tir_expr(&lower_expr(other, cx, env), cx)),
+    }
+}
+
+/// c109 Phase 15: reproduce `src_line_at` (Statement.rs) — the (line text, 1-based line,
+/// 1-based column) for a byte offset.
+fn tir_src_line_at(src: &str, offset: usize) -> (&str, u32, u32) {
+    let (line, col) = crate::Diagnostics::span_line_col(src, offset);
+    let line_start = src[..offset].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let line_end = src[offset..].find('\n').map(|p| offset + p).unwrap_or(src.len());
+    (&src[line_start..line_end], line as u32, col as u32)
+}
+
+/// c109 Phase 15: reproduce `safe_locals_expr` (Statement.rs) from the `panic_locals`
+/// env replica (which mirrors the AST codegen `env` leak semantics — see `LowerEnv`).
+/// Dumps the FULL replica filtered to scalar Int/Float/Bool slots, sorted by name, as a
+/// `format!("name = {}, …", (place).jet_show(), …)` expression. A deref'd slot uses
+/// `(*name).jet_show()` (the place already carries the `(*…)` wrapper, which is the bare
+/// `(*name)` form, NOT a double-paren). Empty → `String::new()`.
+fn render_safe_locals(env: &LowerEnv) -> String {
+    let replica = env.panic_locals.borrow();
+    let mut parts: Vec<(String, String)> = replica
+        .iter()
+        .filter_map(|(name, (place, jet_ty))| {
+            let safe = jet_ty
+                .as_ref()
+                .map_or(false, |t| matches!(t, Type::Int | Type::Float | Type::Bool));
+            if !safe {
+                return None;
+            }
+            // `safe_locals_expr` builds `(*rust_name).jet_show()` for a deref'd slot and
+            // `(rust_name).jet_show()` otherwise. The replica's `place` is exactly
+            // `(*rust_name)` (deref) or `rust_name` — decode it back so the rendered
+            // string is byte-identical (NOT `((*rust_name)).jet_show()`).
+            let value_expr = if place.starts_with("(*") && place.ends_with(')') {
+                let rust_name = &place[2..place.len() - 1];
+                format!("(*{}).jet_show()", rust_name)
+            } else {
+                format!("({}).jet_show()", place)
+            };
+            Some((name.clone(), value_expr))
+        })
+        .collect();
+    parts.sort_by(|a, b| a.0.cmp(&b.0));
+    if parts.is_empty() {
+        return "String::new()".to_string();
+    }
+    let fmt_str = parts
+        .iter()
+        .map(|(n, _)| format!("{} = {{}}", n))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let args = parts
+        .iter()
+        .map(|(_, e)| e.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("format!(\"{}\", {})", fmt_str, args)
 }
 
 fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
@@ -3682,11 +4085,18 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             let recv = lower_expr(receiver, cx, env);
             let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
+            // A field of a CORE struct (`ProcessResult.code`, `JsonError.message`, …) is
+            // emitted by its PLAIN Rust name, never `user_<name>` (the core structs in
+            // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
+            // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
+            // type so the field read is byte-exact for both core and user structs.
+            let field_rust =
+                core_struct_field_rust_name(&recv.ty, member).unwrap_or_else(|| mangle(member));
             TExpr {
                 ty: field_ty,
                 kind: TExprKind::Field {
                     recv: Box::new(recv),
-                    field_rust: mangle(member),
+                    field_rust,
                 },
             }
         }
@@ -3892,8 +4302,13 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 OrFallback::Return(Some(e), _) => {
                     TOrFallback::Return(Some(Box::new(lower_expr(e, cx, env))))
                 }
-                // The gate excludes the Panic form, so this never arises.
-                OrFallback::Panic { .. } => unreachable!("gate excludes panic fallback"),
+                // c109 Phase 15: the `panic(…)` form — render the whole
+                // `{ jet_panic_rich(…); }` statement string at lowering, byte-for-byte
+                // `emit_panic_stop`/`safe_locals_expr`, so emit reads nothing from
+                // `cx.src`/`cx.current_fn`.
+                OrFallback::Panic { name_span, args } => {
+                    TOrFallback::Panic(render_panic_stop(name_span, args, cx, env))
+                }
             };
             TExpr {
                 ty: result_ty,
@@ -4002,6 +4417,34 @@ fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
         Expr::Str(..) => Some(false),
         Expr::Char(..) => Some(false),
         _ => None,
+    }
+}
+
+/// c109 Phase 15: the PLAIN Rust field name for a CORE-struct field read, mirroring
+/// `core_struct_field_rust_name` (Source/Codegen/Expression.rs) — but keyed on the
+/// RESOLVED receiver type (the TIR's total `recv.ty`) instead of `expr_jet_ty(env)`.
+/// Returns `Some(plain_name)` for a known core-struct field (so it is emitted
+/// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).
+fn core_struct_field_rust_name(recv_ty: &Type, member: &str) -> Option<String> {
+    let Type::Named(type_name) = recv_ty else {
+        return None;
+    };
+    let known = match type_name.as_str() {
+        "ProcessResult" => matches!(member, "code" | "output" | "errors"),
+        n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => {
+            matches!(member, "line" | "message")
+        }
+        n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
+        // E2-M10: HttpRequest / HttpResponse field access.
+        "HttpRequest" | "HttpResponse" => {
+            matches!(member, "method" | "path" | "body" | "headers" | "status")
+        }
+        _ => false,
+    };
+    if known {
+        Some(member.to_string())
+    } else {
+        None
     }
 }
 
@@ -4722,7 +5165,10 @@ fn list_carries_trait(cx: &Cx, inner: &Type) -> bool {
 /// AST slot) and the params (place = mangled name, type from the annotation). The
 /// rendered closure body string is produced now so emit is a pure wrapper.
 fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
-    let mut lam_env = clone_env(env);
+    // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
+    // lambda body dumps the lambda's env (outer locals + captures + params) and does NOT
+    // leak into the enclosing fn — a NON-leaky boundary, so fork the panic replica.
+    let mut lam_env = fork_panic(env);
     // The clone-capture prelude: `let _jet_cap_<n> = (<outer place>).clone();`. The
     // outer place comes from the *outer* env (the capture is an outer local). The cap
     // rebinds the name with place `_jet_cap_<n>`, no deref, type `None` (matching the
@@ -4735,13 +5181,11 @@ fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
             cap,
             env.place_of(name)
         ));
-        lam_env.locals.insert(name.clone(), (cap, None));
+        lam_env.bind(name, cap, None);
     }
     // Params bind as `mangle(name)` (no deref), typed from the annotation (or `None`).
     for p in &lam.params {
-        lam_env
-            .locals
-            .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
+        lam_env.bind(&p.name, mangle(&p.name), p.ty.clone());
     }
     // The rendered param list: `name[: ty]`, exactly as `emit_lambda`.
     let params: Vec<String> = lam
@@ -4785,17 +5229,15 @@ fn lower_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TLambda {
 /// prelude is identical. Returns the full rendered closure string (wrapped in
 /// `{ <prep> <closure> }` when there are cloned captures).
 fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> String {
-    let mut lam_env = clone_env(env);
+    let mut lam_env = fork_panic(env);
     let mut prep = String::new();
     for name in &lam.meta.cloned_captures {
         let cap = format!("_jet_cap_{}", mangle(name));
         prep.push_str(&format!("let {} = ({}).clone();\n    ", cap, env.place_of(name)));
-        lam_env.locals.insert(name.clone(), (cap, None));
+        lam_env.bind(name, cap, None);
     }
     for p in &lam.params {
-        lam_env
-            .locals
-            .insert(p.name.clone(), (mangle(&p.name), p.ty.clone()));
+        lam_env.bind(&p.name, mangle(&p.name), p.ty.clone());
     }
     let params: Vec<String> = lam
         .params
@@ -4857,6 +5299,9 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
         TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
         TFuncKind::Method { self_conv } => emit_tir_method(tir, *self_conv, cx, out),
         TFuncKind::TraitMethod { is_unsafe } => emit_tir_trait_method(tir, *is_unsafe, cx, out),
+        TFuncKind::Delegation { sig, fwd, has_return } => {
+            emit_tir_delegation(tir, sig, fwd, *has_return, cx, out)
+        }
     }
 }
 
@@ -4964,6 +5409,24 @@ fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, cx: &Cx, out: &mut String
     ));
     emit_tir_stmts(&tir.body, cx, out, indent + 1);
     out.push_str(&format!("{pad}}}\n"));
+}
+
+/// c109 Phase 15: a DELEGATION trait method (`using field`), emitted INSIDE the
+/// `impl Trait for user_<T> { … }` block `emit_external_trait_impl` opened. Byte-for-byte
+/// `emit_delegation_method` (Source/Codegen/Items.rs): the pre-rendered signature line,
+/// then the single forwarding call (`(self).<field>.<method>(args)`) at 8-space indent —
+/// with a trailing `;` for a unit method, none for a returning one — then `    }`.
+fn emit_tir_delegation(tir: &TFunc, sig: &str, fwd: &str, has_return: bool, cx: &Cx, out: &mut String) {
+    // E2-M12 D-OBS1: track the current function name (parity with the AST path, though a
+    // delegation body has no panic site of its own).
+    *cx.current_fn.borrow_mut() = tir.name.clone();
+    out.push_str(sig);
+    if has_return {
+        out.push_str(&format!("        {}\n", fwd));
+    } else {
+        out.push_str(&format!("        {};\n", fwd));
+    }
+    out.push_str("    }\n");
 }
 
 fn emit_tir_stmts(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
@@ -5227,6 +5690,50 @@ fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize) {
                 }
             }
             emit_tir_stmts(body, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+        // c109 Phase 15: a resolved comptime-if — emit ONLY the selected branch's
+        // statements INLINE at the SAME indent, with no wrapper (no `if`, no block),
+        // exactly as the AST `emit_stmts` does for `Stmt::ComptimeIf`.
+        TStmt::Inline(stmts) => {
+            emit_tir_stmts(stmts, cx, out, indent);
+        }
+        // c109 Phase 15: a mixed comparison/Bool switch — the general `emit_mixed_switch`
+        // (Statement.rs) `if/else if … else` chain inside a block that binds
+        // `_jet_switch_subject = &(subject)` (emitted for parity even when unused).
+        TStmt::MixedSwitch {
+            subject_str,
+            arms,
+            else_body,
+        } => {
+            out.push_str(&format!("{}{{\n", pad));
+            let inner_pad = "    ".repeat(indent + 1);
+            out.push_str(&format!(
+                "{}let _jet_switch_subject = &({});\n",
+                inner_pad, subject_str
+            ));
+            for (i, (cond, body)) in arms.iter().enumerate() {
+                let kw = if i == 0 { "if" } else { "} else if" };
+                out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, cond));
+                emit_tir_stmts(body, cx, out, indent + 2);
+            }
+            // The `else`/fallthrough, byte-for-byte `emit_mixed_switch`: with arms and no
+            // else → close the chain (`}`); with an else → `} else { … }`. (An empty
+            // arm list is not reachable here — the gate requires at least one arm.)
+            match else_body {
+                None if !arms.is_empty() => {
+                    out.push_str(&format!("{}}}\n", inner_pad));
+                }
+                None => {}
+                Some(body) if arms.is_empty() => {
+                    emit_tir_stmts(body, cx, out, indent + 1);
+                }
+                Some(body) => {
+                    out.push_str(&format!("{}}} else {{\n", inner_pad));
+                    emit_tir_stmts(body, cx, out, indent + 2);
+                    out.push_str(&format!("{}}}\n", inner_pad));
+                }
+            }
             out.push_str(&format!("{}}}\n", pad));
         }
     }
@@ -5730,14 +6237,15 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     }
 }
 
-/// c109 Phase 8: format a `??` fallback right-hand side, mirroring
-/// `emit_or_fallback_rhs` (Statement.rs) for the Value and early-`return` forms (the
-/// Panic form is excluded by the gate).
+/// c109 Phase 8/15: format a `??` fallback right-hand side, mirroring
+/// `emit_or_fallback_rhs` (Statement.rs). Value and early-`return` (Phase 8); the
+/// `panic(…)` form (Phase 15) carries its fully-rendered statement string from lowering.
 fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String {
     match fallback {
         TOrFallback::Value(e) => emit_tir_expr(e, cx),
         TOrFallback::Return(None) => "return".to_string(),
         TOrFallback::Return(Some(e)) => format!("return {}", emit_tir_expr(e, cx)),
+        TOrFallback::Panic(rendered) => rendered.clone(),
     }
 }
 
@@ -6403,11 +6911,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_or_fallback_panic_form() {
-        // The `panic(…)` fallback form is deferred (its `safe_locals_expr`
-        // reproduction is out of subset) — the owning fn stays on the AST path.
+    fn covers_or_fallback_panic_form() {
+        // c109 Phase 15: the `panic(…)` fallback form is now covered — the
+        // `safe_locals_expr` snapshot is reproduced from the `panic_locals` replica.
         let src = "fn p(x: (Int?)) -> Int {\n return x ?? panic(\"missing\")\n}\n";
-        assert!(!covers(src, "p"));
+        assert!(covers(src, "p"));
+    }
+
+    #[test]
+    fn covers_comptime_if() {
+        // c109 Phase 15: a resolved comptime-if routes through the TIR — only the
+        // selected branch's statements are emitted inline. (`build_cx`-only gate test:
+        // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
+        // lowering reads `selected_then`, but the gate does not need sema for routing.)
+        let src = "fn f(x: Int) -> Int {\n comptime if true {\n return x\n } else {\n return 0\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_mixed_bool_switch() {
+        // c109 Phase 15: a mixed comparison/Bool `when` switch (shape D) routes via the
+        // TIR's `MixedSwitch` (the general `emit_mixed_switch` if/else chain).
+        let src = "fn f(x: Int) -> Int {\n if x {\n x > 10 -> {\n return 2\n }\n x > 0 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
+        assert!(covers(src, "f"));
     }
 
     // c109 Phase 9: built-in collection/string methods. A builtin call has

@@ -256,6 +256,14 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
         // call mangling that the standard path applies (trait methods are not
         // prefixed with `user_` in Rust).
         for m in &i.methods {
+            // c109 Phase 15: route a covered delegation method through the typed IR.
+            // Byte-identical Rust (golden parity); the whole method is structural so
+            // every fact is resolved at lowering (I3).
+            if TIR::tir_covers_delegation_method(m, field, cx) {
+                let tir = TIR::lower_delegation_method(m, field, cx);
+                TIR::emit_tir_func(&tir, cx, out);
+                continue;
+            }
             emit_delegation_method(cx, m, field, out);
         }
     } else {

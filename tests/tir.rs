@@ -1892,3 +1892,124 @@ fn decorate(s: String) -> String {
     assert_eq!(code, 0);
     assert_eq!(stdout, "[hi]\n");
 }
+
+/// c109 Phase 15: a resolved comptime-if (`comptime if … { } else { }`). Sema selects
+/// the branch; codegen emits ONLY that branch's statements inline (no `if`). Here
+/// `DEBUG` is `false`, so the `else` branch is emitted; the `then` branch is dropped.
+#[test]
+fn comptime_if_selected_branch() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+comptime DEBUG = false
+fn pick(x: Int) -> Int {
+    comptime if DEBUG {
+        return x + 100
+    } else {
+        return x + 1
+    }
+    return 0
+}
+fn main() {
+    print(\"{pick(5)}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_comptime_if", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "6\n");
+}
+
+/// c109 Phase 15: a MIXED comparison `when` switch — the general `emit_mixed_switch`
+/// `if/else if … else` chain (shape D). The arm heads are plain comparisons over the
+/// subject; the body picks the first matching band.
+#[test]
+fn mixed_comparison_switch() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn grade(score: Int) -> String {
+    if score {
+        score > 89 -> { return \"A\" }
+        score > 79 -> { return \"B\" }
+        else -> { return \"F\" }
+    }
+    return \"?\"
+}
+fn main() {
+    print(grade(85))
+    print(grade(95))
+    print(grade(50))
+}
+";
+    let (code, stdout) = build_and_run("tir_mixed_switch", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "B\nA\nF\n");
+}
+
+/// c109 Phase 15: a DELEGATION trait method (`impl T: Trait using field`). The
+/// forwarding method routes through the TIR's `Delegation` kind — `(self).<field>.<m>(…)`
+/// with the bare trait method name.
+#[test]
+fn delegation_trait_method() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Speaker {
+    fn say(self, msg: String) -> String
+}
+struct Voice {
+    prefix: String
+}
+impl Voice: Speaker {
+    fn say(self, msg: String) -> String {
+        p @= self.prefix
+        return \"{p}: {msg}\"
+    }
+}
+struct Megaphone {
+    inner: Voice
+}
+impl Megaphone: Speaker using inner
+fn main() {
+    v := Voice { prefix: \"HEY\" }
+    m := Megaphone { inner: v }
+    print(m.say(\"go\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_delegation", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "HEY: go\n");
+}
+
+/// c109 Phase 15: the `a ?? panic(…)` fallback form. The panic message + the sorted
+/// scalar-locals snapshot (`safe_locals_expr`) are reproduced from the `panic_locals`
+/// replica. On the success path the fallback is never taken; the program returns the
+/// unwrapped value.
+#[test]
+fn or_fallback_panic_form() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn maybe(n: Int) -> (Int?) {
+    if n > 0 {
+        return value(n)
+    }
+    return null
+}
+fn risky(count: Int, ratio: Float) -> Int {
+    base := count + 1
+    got @= maybe(count) ?? panic(\"no value at {count}\")
+    return got + base
+}
+fn main() {
+    print(\"{risky(5, 1.5)}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_panic_fallback", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "11\n");
+}

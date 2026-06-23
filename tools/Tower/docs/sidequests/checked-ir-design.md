@@ -869,16 +869,89 @@ everything, the AST codegen path is deleted (final phase).
   bodies). `22_ffi` runs end-to-end (`aGk=`). tests/tir.rs adds 5 cases (inline qualified,
   unqualified inline, file qualified + String arg, unqualified file, `pub use` re-export).
 
+## Refinements learned in Phase 15 (remaining control flow + delegation)
+
+- **The `??` panic locals dump needs a SEPARATE leak-faithful env replica — the
+  AST codegen `env` LEAKS in a way `LowerEnv.locals` (which clones at every branch) does
+  not.** `safe_locals_expr` (Statement.rs) dumps the FULL codegen `env`
+  (`HashMap<String, Slot>`), filtered to scalar Int/Float/Bool, sorted by name, at the
+  `??` panic site. The AST codegen `env` is a single `&mut` shared through branch bodies:
+  a `let` inside a plain block / loop / mixed-or-range switch arm / comptime-if branch /
+  enum-match `else` STAYS in the env after the block (sema scopes the *name* so it is
+  never read for resolution, but `safe_locals_expr` dumps the raw env regardless). Only
+  the two `emit_pattern_match_switch` arm bodies and a lambda body clone the env (no leak).
+  `LowerEnv.locals` clones at every branch (correct for resolution), so it CANNOT feed the
+  dump. The fix is a parallel `panic_locals: Rc<RefCell<HashMap>>` mirroring the env via a
+  `bind` helper, SHARED across leaky branches (`clone_env` clones the Rc) and DEEP-COPIED
+  at the two non-leaky boundaries (`fork_panic`), with the range-loop var save/restored
+  exactly as `Statement.rs` does. Because branch-locals are scoped-DEAD (never read for
+  resolution), this replica affects ONLY the panic dump — it can't regress any other
+  decision. Verified byte-exact on a probe with `let`s leaking from a plain-if and a loop
+  live at the `??` (`format!("a = {}, b = {}, c = {}, x = {}", …)`, b/c leaked — identical
+  to the AST). **The `??` panic exclusion is LIFTED.** The Phase-8/11 deferral note (the
+  reason the panic form was held back) is now resolved.
+- **The panic *statement string* is rendered whole at lowering, like the `?` trace frame
+  (Phase 8).** `render_panic_stop` reproduces `emit_panic_stop` byte-for-byte: the message
+  (lowered from the message expr via the TIR — a `Str` emits its interpolation directly,
+  any other expr is `(…).jet_show()`, exactly `emit_panic_message`), the source-line
+  text/line/column/caret from `cx.src` at the `panic` span, the escaped file +
+  `env.fn_name`, and the locals dump. Emit just splices the pre-rendered string into the
+  `match … { Err(_)/None => <here> }` arm — no `cx.src`/`cx.current_fn` read (I3).
+- **comptime-if emits ONLY the selected branch, INLINE, with no `if` — and its `let`s
+  leak.** `emit_stmts` reads `Stmt::ComptimeIf.selected_then` (a total sema fact) and
+  emits the chosen branch's statements on the SAME `&mut env` at the SAME indent (the
+  unselected branch is name-resolution-only, D-WHEN2, and never reaches codegen). The TIR
+  lowers the selected branch on the SAME `env` (so bindings leak, matching the shared AST
+  env) into a flat `TStmt::Inline(Vec<TStmt>)` that emits its children at the parent
+  indent with no wrapper. The gate classifies the SELECTED branch only (the dropped branch
+  is irrelevant — it is never emitted); before sema resolves `selected_then` (a
+  `build_cx`-only gate test) it defaults to the `then` branch.
+- **The mixed comparison/Bool switch (shape D) is the LAST `emit_mixed_switch` slice —
+  arm heads resolve to plain `emit_expr(cond)` strings.** `emit_switch_arm_cond` routes a
+  variant/Eq-to-variant head through `emit_pattern_matches` and a range head through the
+  range guard; everything else is `emit_expr(cond)`. Shape D covers only the latter
+  (`arm_is_plain_cond` excludes any pattern-test / variant / range arm), so a switch with
+  even ONE pattern arm stays on the AST path (conservative — a mixed variant+comparison
+  switch is not covered). The `_jet_switch_subject = &(subject)` borrow binding is emitted
+  for parity even when unused, and the arm conditions + bodies + `else` reproduce
+  `emit_mixed_switch`'s exact `if/else if … else` rendering. Arm bodies use the SHARED env
+  (leaky), like the AST.
+- **A delegation method (`using field`) is purely structural — no body to lower.**
+  `emit_delegation_method` (Items.rs) forwards `(self).<field>.<method>(args)` with the
+  BARE trait method name (the trait owns it in Rust) and a signature rendered by the SAME
+  `rust_param_type`/`rust_return_type` the AST uses (incl. a quirky two-space `  {` before
+  the brace). A new `TFuncKind::Delegation { sig, fwd, has_return }` carries the
+  fully-rendered signature line + forward call, resolved at lowering; `emit_tir_delegation`
+  just splices them. The gate (`tir_covers_delegation_method`) returns `true`
+  unconditionally — the forward is deterministic, nothing it produces can diverge.
+- **Surfaced + FIXED a latent TIR-path divergence: a CORE-struct field read was mangled.**
+  Lifting the `??` panic exclusion let `result @= process.run(…) ?? panic(…); result.code`
+  route through the TIR — and the TIR `Field` emit was `mangle(member)` unconditionally,
+  emitting `user_code` where the AST emits the PLAIN `code` (core structs declare
+  unprefixed fields — B2, `core_struct_field_rust_name`). The hole pre-dated Phase 15 (a
+  field read on a core/foreign struct) but was MASKED — those functions all carried a
+  `??`/`?` that excluded them. Fixed by reproducing `core_struct_field_rust_name` in the
+  `Field` lowering, keyed on the resolved `recv.ty` (ProcessResult/JSONError/UTF8Error/
+  HttpRequest/HttpResponse). Caught by `tests/ice_regressions.rs::b2_…` the moment the
+  panic form routed; the full-suite diff then stayed 0. (HttpRequest/HttpResponse *method*
+  accessors remain excluded — those are MethodCalls, a separate deferred entry.)
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass
+  on `emit_func`/`emit_method`/`emit_trait_method` + the delegation hook) across the
+  **entire example suite** — 118 emittable, 0 differ — plus crafted probes exercising: a
+  `?? panic(…)` with several live locals of mixed deref/type at the panic site, a
+  `?? panic` AFTER a plain-if `let` and a loop-body `let` (the leak case — `b`/`c` leaked
+  into the dump, byte-identical), a comptime-if (selected-`else`, inline, no `if`), a
+  comptime else-if chain, a mixed comparison switch, and a delegation forward
+  (`47_library` `App: Logger using logger`). All ran correctly end-to-end. tests/tir.rs
+  adds 4 cases (comptime-if, mixed switch, delegation, `?? panic`); the TIR unit tests
+  add `covers_comptime_if`/`covers_mixed_bool_switch`/`covers_or_fallback_panic_form`.
+
 ## What still routes via the AST path (for Phase N — delete the AST path)
 
-After Phase 13 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
+After Phase 15 the AST `emit_func`/`emit_method`/`emit_trait_method` paths are still
 reached for these constructs. Each entry: the construct, the AST emit function that
 owns it, and the total fact still missing to cover it.
 
-- **Delegation trait methods** (`using field`) — `emit_delegation_method`
-  (Items.rs). Forwards `self.<field>.<method>(args)` with the bare trait method name.
-  Missing: a `TFuncKind` carrying the delegation field + the forward shape. (No deep
-  blocker; a clean follow-up.)
 - **`@unsafe fn` trait methods / `@unsafe` blocks / `#Unsafe` regions / `core.mem`
   ptr+alloc** — `emit_trait_method`/`emit_method`/`emit_func` + `emit_stmts`/`emit_expr`
   unsafe-block lowering. Missing: TIR nodes for the audited `unsafe { … }` gate region
@@ -918,20 +991,8 @@ owns it, and the total fact still missing to cover it.
 - **The bare `?? return` fallback** (`x ?? return`, no value) — surfaced in Phase 13:
   `fs.read(p) ?? return` (and any bare-`return` `??`) does NOT route, while `?? return
   <value>` and `?? <value>` do. The exclusion is upstream of the `??` lowering (a
-  bare-return `OrFallback` apparently fails an earlier in-subset check); not chased this
-  phase. Conservative — stays on the AST path.
-- **The `??` panic fallback** (`a ?? panic(…)`) — `emit_or_fallback_rhs` →
-  `emit_panic_stop`/`safe_locals_expr`, which dump the FULL sorted Slot env
-  (`rust_name`/`deref`/`jet_ty`). Missing: a richer TIR locals snapshot reproducing the
-  sorted Slot dump byte-exact (the `LowerEnv.locals` map lacks the deref/jet_ty trio in
-  sorted form). NOT lifted this phase — byte-exactness wasn't provable, and the gate
-  (`orfallback_rhs_in_subset → Panic => false`) stays conservative.
-- **comptime-if (resolved branch)** — `emit_stmts` reads `Stmt::ComptimeIf.selected_then`
-  to emit only the chosen branch. The gate's `stmt_in_subset` `_ => false` excludes it.
-  Missing: a TIR lowering that emits only the `selected_then` branch's statements.
-- **Mixed comparison/Bool `when` switches** — `emit_mixed_switch` (Statement.rs) for an
-  arm-head comparison/Bool chain (not all-range, not all-variant, not all-fallible).
-  Missing: a mixed-arm switch TIR shape.
+  bare-return `OrFallback` apparently fails an earlier in-subset check); not chased.
+  Conservative — stays on the AST path. (NB: the `?? panic(…)` form IS covered — Phase 15.)
 - **String/struct/collection-payload enums, recursive (boxed) enums/structs, generic
   & foreign/prelude types** — the struct/enum gate (`struct_is_covered`/
   `enum_is_covered`) excludes these; their literal/field/pattern emit needs box/deref +
@@ -961,6 +1022,7 @@ owns it, and the total fact still missing to cover it.
 | 12 | The tail: trait-impl method bodies, numeric-conversion methods, + a parity fix | ✅ done (c109 Phase 12, partial) — +7 unique trait-method bodies routed (`Circle`/`Square` `area`/`name`, `Person` `announce`/`greeting`, `ConsoleLogger` `log`). Covers: **trait-impl method bodies** (`emit_trait_method`, both the inline `impl Trait {}` and `impl T: Trait` and external-trait-impl forms — hooked via the shared `emit_trait_method`), as a new `TFuncKind::TraitMethod` — bare name (the trait owns it, no `user_` mangle), no `pub`, always-`&self` receiver, self slot `jet_ty: Some(Type::Named(T))` (NOT `None` as for inherent methods); the **numeric** predicate/bit/width-conversion methods (D-NUMOPS1: `is_nan`/`is_infinite`/`is_finite`, `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros`, `to_i8`…`to_u64`/`to_int`/`to_f32`/`to_f64`/`to_float`, and numeric `to_string`) on a numeric receiver (`recv_type == Some(<numeric>)`) — a new `TExprKind::NumericMethod`/`TNumericOp`, the widening-vs-narrowing branch (`numeric_conversion`/`conv_rust_target`) resolved at lowering from the total `recv_type` width. Also fixes a **latent TIR-path parity bug**: an explicit `else { if … }` block was being flattened to `} else if …` (the AST keys solely on `ElseBranch`, never the else-body shape) — `TStmt::If` now carries `else_is_elseif` so only a real `ElseBranch::ElseIf` flattens. Excludes (stay on AST path): **delegation** (`emit_delegation_method`, `using field`), **generic-type** & **`view`-returning** & **`@unsafe fn`** trait methods; **fn-typed values** (Box-coercion); **closure-taking core calls** (`tasks.spawn`/`http.serve`/`scope.guard`); polymorphic math/random/io core specials; the `??` **panic** fallback; modules/imports, FFI extern, comptime-if, arena/`core.mem`/`#Unsafe` (see the AST-path inventory below). |
 | 13 | The call & method surfaces: fn-typed values, closure-core-calls, handle methods | ✅ done (c109 Phase 13, partial) — `24_callbacks.jet` `apply_twice` routes; `67_scope_guard.jet` `with_guards`/`question_path`/`main` route. Covers: **fn-typed values** — a `Type::Fn` param/return (now a covered subset type, `is_covered_fn_ty`); a bare top-level-fn name as a value (`Box::new(move \|…\| user_<name>(…)) as <fn-type>` via `emit_named_fn_value`, `TFnValueKind::NamedFn`); a call through a fn-value (`(f)(args)` as `Expr::CallValue`, and `f(args)` for a local-`f` as `Expr::Call`, both → `TFnValueKind::Call`); the `emit_call_args` `Box::new(…) as <fn-type>` arg-coercion (the shared `lower_one_call_arg` carries a total `TFnCoerce{fn_type_rust, already_boxed}`). The Phase-11 `no_fn_param`/`!Type::Fn` exclusions are lifted. The **closure-taking core calls** `tasks.spawn` (distinct `render_spawn_lambda` `move \|…\|` form), `http.serve` (lambda-handler branch), `scope.guard` (`TExprKind::CoreClosureCall`/`TCoreClosureKind`) with a literal in-subset lambda. The **handle methods** carrying `recv_type == Some(<handle>)` on FileReader/FileWriter/StdinHandle/TcpStream/TcpListener (`read_line`/`write_line`/`flush`/`accept`/`local_addr`/`read`/`write`/`peer_addr`/`close` — `TExprKind::HandleMethod`/`THandleOp`, the `&mut`/`&` handle arms of `emit_builtin_method`). Also fixes a **latent TIR-path parity bug**: a handle binding (FileReader/FileWriter/TcpStream/HttpRouter/Arena/…) wasn't forced to `let mut` (it must be, as its methods take `&mut self`); the TIR `Let` now resolves `kw`+`ty_clause` (+ the escaping-FnMut `as <fn-trait>` coercion) at lowering, reproducing `emit_let` exactly. Excludes (stay on AST path, with reason): **polymorphic core specials** (`math.abs/min/max/clamp`, `random.pick/shuffle`, `io.eprint` — return type NOT a total fact, never written onto the node → I3); **`recv_type == None` handle methods** (`Stopwatch.elapsed_millis`, Task/Channel/Sender — a Phase-9 builtin gap, not the `Some` shape); **HttpRequest/HttpResponse accessors** (serve-lambda-param slot may be `None` → AST `rty` arm wouldn't fire → divergence); **`Match.group`**, **Arena/Bump/Pool/Fixed** methods (producer not covered); bare **`?? return`** (an upstream `??` gate gap); the `??` **panic** fallback. |
 | 14 | Cross-module calls + FFI extern | ✅ done (c109 Phase 14) — all 8 module/FFI example `main`s route (`22_ffi`, `42`–`48` module forms), plus imported submodule bodies (`47` `wrap`/`decorate`, the inline-module fns in `42`/`45`/`46`). Covers the FIVE cross-module call forms — qualified `mod.fn()` (`import_mods`), `pub use` re-export (`reexport_calls`), inline code module `alias.method()` (`code_modules`), unqualified inline import (`unqualified_inline`), unqualified file import (`unqualified_file`) — each resolved at lowering into a total `TExprKind::ModuleCall`/`TModuleCallForm` (`Qualified{rust_mod, rust_fn}` or `InlineMangled{mangled}`); emit only prepends `cx.root_prefix` (program-level) where the AST does. Also covers **FFI extern** (`extern rust`/`extern C`) — `emit_call`'s `extern_funcs` arm as a total `TExprKind::ExternCall{wrapper, args}` reproducing `emit_extern_call_args` (a non-scalar `Read` arg is `(…).clone()`, NOT `&(…)`); the call is `{ffi_crate}::{wrapper}(args)` with `cx.ffi_crate` read at emit. Module-call args resolve their conventions from `cx.import_sigs`/`cx.sigs`; a new `cx.import_rets` table (`import_ret_map`) supplies the call's total return type. The gate widens the `Call` arm (extern/unqualified) and `method_call_in_subset` (reexport/import_mods/code_modules), reproducing `emit_call`/`emit_method_call`'s dispatch ORDER exactly. **I1:** an extern call introduces no Rust `unsafe` by itself — reproduced byte-for-byte (no `unsafe` emitted); the audited `@unsafe` gate surface is the separate, deferred Phase-17 work. Excludes (stay on AST path): the `@unsafe`/`#Unsafe`/`core.mem` ptr+alloc surface, comptime-if, and the other AST-path inventory entries (mixed switches, payload/boxed/generic types, latent-bug-gated constructs). |
+| 15 | Remaining control flow + delegation: comptime-if, mixed switches, delegation, `?? panic` | ✅ done (c109 Phase 15) — covers the FOUR remaining inventory entries. **comptime-if** (`Stmt::ComptimeIf`): the selected branch (sema's `selected_then`) emits inline at the same indent with no `if`, its `let`s leaking into the outer scope (`TStmt::Inline`). **Mixed comparison/Bool switches** (shape D — the general `emit_mixed_switch` `if/else if … else` chain, used when arms are NOT all-variant/range/fallible): each plain comparison arm head resolves to an `emit_expr` string, wrapped in the `_jet_switch_subject` block (`TStmt::MixedSwitch`); a switch with any pattern-test arm stays on the AST path (conservative). **Delegation trait methods** (`impl T: Trait using field`, `emit_delegation_method`): a structural forward `(self).<field>.<method>(args)` with the bare trait name (`TFuncKind::Delegation`, hooked in `emit_external_trait_impl`). **The `?? panic(…)` fallback** (Phase-8/11 deferral now LIFTED): `emit_panic_stop`/`safe_locals_expr` reproduced from a leak-faithful `panic_locals` Rc-replica that mirrors the AST codegen env's branch-leak semantics (shared across leaky branches, deep-copied at the two `emit_pattern_match_switch` arm bodies + lambda bodies, range-loop var save/restored); the whole `{ jet_panic_rich(…); }` statement string (message + sorted scalar-locals dump) is rendered at lowering (`TOrFallback::Panic`). Also fixes a **latent TIR-path divergence** the panic lift exposed: a CORE-struct field read (`result.code` on a `ProcessResult`) was mangled to `user_code` instead of the plain `code` (B2) — fixed by reproducing `core_struct_field_rust_name` in the `Field` lowering off the resolved `recv.ty`. Byte-identical across the entire example suite (118 emittable, 0 differ) + crafted probes (incl. a `?? panic` with leaked scalar locals from a plain-if and a loop body). The delegation example `47_library` (`App: Logger using logger`) routes. Excludes (stay on AST path): bare `?? return` (an upstream `??` gate gap); `@unsafe`/`#Unsafe`/`core.mem`; generic & `view`-returning methods; polymorphic core specials; `recv_type == None` handle methods; HttpRequest/HttpResponse method accessors; payload/boxed/generic types; latent-bug-gated constructs. |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
 Phase ordering may adjust as coverage reveals coupling; the gate keeps the suite green
