@@ -330,6 +330,17 @@ pub(crate) enum TExprKind {
         method_rust: String,
         args: Vec<TCallArg>,
     },
+    /// c109 Phase 9: a built-in collection/string method (`emit_builtin_method`).
+    /// The receiver-type dispatch (`expr_jet_ty(receiver)` → Map/List/String) is
+    /// resolved at lowering into a concrete `op`, so emit makes no type decision
+    /// (I3). The args are lowered as PLAIN expressions — `emit_builtin_method`
+    /// emits each arg via a raw `emit_expr`, with NO clone/borrow convention
+    /// wrappers (unlike `emit_call_args`), so the TIR carries no `TCallArg` here.
+    BuiltinMethod {
+        recv: Box<TExpr>,
+        op: TBuiltinOp,
+        args: Vec<TExpr>,
+    },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
         cond: Box<TExpr>,
@@ -417,6 +428,83 @@ pub(crate) enum TEnumPayload {
     /// `Variant { f: v, … }` — named payload, emitted as `prefix { f: v, … }`.
     /// Each field's Rust name is already mangled at lowering.
     Named(Vec<(String, TExpr)>),
+}
+
+/// c109 Phase 9: a resolved built-in collection/string method op. Each variant is
+/// one emit form from `emit_builtin_method` (Source/Codegen/Expression.rs). The
+/// receiver-type dispatch (`rty = expr_jet_ty(receiver)` → Map vs List vs String)
+/// is decided ONCE at lowering — the variant encodes the chosen branch, so emit
+/// only formats. Line numbers (for the bounds/remove panic frames) are resolved at
+/// lowering; `cx.file`/`cx.root_prefix` are read at emit (program-level, not a
+/// per-node decision). Args are emitted plainly (no clone/borrow wrappers), exactly
+/// as `emit_builtin_method`'s `arg(i)` does.
+pub(crate) enum TBuiltinOp {
+    /// `len` on a `String` → `jet_char_len(&(recv))` (char count, not byte len).
+    LenString,
+    /// `len` on a list/map → `(recv).len() as i64`.
+    LenList,
+    /// `push(x)` → `(recv).push(a0)`.
+    Push,
+    /// `pop()` → `(recv).pop()`.
+    Pop,
+    /// `insert(k, v)` on a map → `(recv).insert((a0).clone(), a1)`.
+    InsertMap,
+    /// `insert(i, v)` on a list → `(recv).insert(a0 as usize, a1)`.
+    InsertList,
+    /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
+    RemoveMap,
+    /// `remove(i)` on a list → `jet_list_remove(&mut (recv), a0, file, line)`.
+    RemoveList { line: usize },
+    /// `get(k)` on a map → `(recv).get(&(a0).clone()).cloned()`.
+    GetMap,
+    /// `get(i)` on a list → `(recv).get(a0 as usize).cloned()`.
+    GetList,
+    /// `first()` → `(recv).first().cloned()`.
+    First,
+    /// `last()` → `(recv).last().cloned()`.
+    Last,
+    /// `contains(x)` → `(recv).contains(&a0)` (list element / String substring).
+    Contains,
+    /// `index_of(x)` → `(recv).iter().position(|x| *x == a0).map(|i| i as i64)`.
+    IndexOf,
+    /// `reverse()` → `(recv).reverse()`.
+    Reverse,
+    /// `sort()` (no comparator) → `(recv).sort()`.
+    Sort,
+    /// `join(sep)` → `(recv).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join((a0).as_str())`.
+    JoinSep,
+    /// `clear()` → `(recv).clear()`.
+    Clear,
+    /// `chars()` → `(recv).chars().collect::<Vec<char>>()`.
+    Chars,
+    /// `bytes()` → `{root}jet_string_bytes(&(recv))`.
+    Bytes,
+    /// `trim()` → `(recv).trim().to_string()`.
+    Trim,
+    /// `split(sep)` → `jet_string_split(&(recv), &a0)`.
+    Split,
+    /// `starts_with(s)` → `(recv).starts_with(&a0)`.
+    StartsWith,
+    /// `ends_with(s)` → `(recv).ends_with(&a0)`.
+    EndsWith,
+    /// `replace(from, to)` → `(recv).replace(&a0, &a1)`.
+    Replace,
+    /// `to_upper()` → `(recv).to_uppercase()`.
+    ToUpper,
+    /// `to_lower()` → `(recv).to_lowercase()`.
+    ToLower,
+    /// `repeat(n)` → `(recv).repeat(a0 as usize)`.
+    Repeat,
+    /// `slice(a, b)` → `jet_string_slice(&(recv), a0, a1, file, line)`.
+    Slice { line: usize },
+    /// `keys()` → `(recv).keys().cloned().collect::<Vec<_>>()`.
+    Keys,
+    /// `values()` → `(recv).values().cloned().collect::<Vec<_>>()`.
+    Values,
+    /// `contains_key(k)` → `(recv).contains_key(&a0)`.
+    ContainsKey,
+    /// `to_string()` (on a String receiver) → `(recv).jet_show()`.
+    ToString,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -1421,6 +1509,29 @@ fn method_call_in_subset(
     if method == "clone" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // Shape (d) [c109 Phase 9]: a built-in collection/string method
+    // (`emit_builtin_method`) — `len`/`push`/`get`/`keys`/`trim`/`split`/… on a
+    // list/map/string receiver. Sema resolves these via `Collections::
+    // builtin_method_return` and leaves `recv_type == None` (it sets `recv_type`
+    // only for the numeric width conversions — Phase 12 — and for user instance /
+    // handle methods). So `recv_type.is_none()` + a covered builtin name + an
+    // in-subset *value* receiver uniquely identifies a builtin collection/string
+    // call: the receiver must be a collection/string (the program type-checked, and
+    // a struct/enum/handle/numeric receiver would have set `recv_type`). A bare
+    // type-name ident (a static-call receiver) is NOT in `locals`, so it fails
+    // `expr_in_subset` and is excluded here, falling through to the static shape.
+    //
+    // The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is
+    // resolved at LOWERING from the receiver's total type (reproducing the AST's
+    // `expr_jet_ty`, incl. its `None` → default-branch partiality), never re-derived
+    // in emit. Tried BEFORE the static/instance shapes (both keyed on the same
+    // `recv_type`) to claim builtins first.
+    if recv_type.is_none() && is_covered_builtin_name(method, args.len()) {
+        return expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|a| {
+                a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+            });
+    }
     // Shape (c): a STATIC (associated) method call `Type.make(x)`. Phase 6 deferred
     // this (its `recv_type` is `None`). The AST path emits `user_<T>::user_<method>(…)`
     // when the receiver is a type name in `cx.type_names` (Expression.rs ~L1644). We
@@ -1571,6 +1682,53 @@ fn is_intercepted_method_name(method: &str) -> bool {
 /// clone). `Mutate` args would need `&mut place` handling we don't yet emit.
 fn arg_conv_in_subset(a: &crate::AST::CallArg) -> bool {
     !matches!(a.convention, AccessConvention::Mutate)
+}
+
+/// c109 Phase 9: is `method` (with `nargs` arguments) a built-in collection/string
+/// method the TIR lowers? This is the NON-closure, non-numeric, non-handle slice of
+/// `emit_builtin_method` (Source/Codegen/Expression.rs), restricted to the list/map/
+/// string surface (`Source/Collections.rs`). The closure-taking methods (`map`/
+/// `filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` — `Collections::
+/// is_closure_method`) are deferred to the lambda phase; the numeric width/predicate/
+/// bit methods (`to_i32`/`is_nan`/`count_ones`/… — D-NUMOPS1) and the handle methods
+/// (FileWriter/TcpStream/HttpRequest/… — Phase 10) carry a `Some(recv_type)`, so the
+/// gate's `recv_type.is_none()` guard already excludes them; this name list is the
+/// final filter. The arg count disambiguates `join()` (no separator) vs `join(sep)`.
+fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
+    // Closure-taking methods are NEVER covered here (Phase 11), even by name.
+    if crate::Collections::is_closure_method(method) {
+        return false;
+    }
+    matches!(
+        (method, nargs),
+        // List + map shared.
+        ("len", 0) | ("clear", 0)
+        // List-only.
+        | ("push", 1) | ("pop", 0) | ("first", 0) | ("last", 0)
+        | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)
+        // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
+        | ("insert", 2) | ("remove", 1) | ("get", 1)
+        // List + string: contains.
+        | ("contains", 1)
+        // Map-only.
+        | ("keys", 0) | ("values", 0) | ("contains_key", 1)
+        // String-only.
+        | ("chars", 0) | ("bytes", 0) | ("trim", 0) | ("split", 1)
+        | ("starts_with", 1) | ("ends_with", 1) | ("replace", 2)
+        | ("to_upper", 0) | ("to_lower", 0) | ("repeat", 1) | ("slice", 2)
+        // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
+        // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
+        | ("to_string", 0)
+    )
+    // NOTE: `is_empty` is deliberately EXCLUDED. Sema's `Collections::
+    // builtin_method_return` types it as `Int` (a latent bug — it should be `Bool`),
+    // so `x := list.is_empty()` emits `let x: i64 = (…).is_empty()` (bool ≠ i64 →
+    // rustc E0308) on BOTH paths, and `if list.is_empty()` is E0110 at sema. The
+    // method is unusable today; the TIR must not *claim* a function that miscompiles
+    // (the Phase-7 `self`-reassignment lesson), so it stays on the AST path. Filed in
+    // the design doc's latent-bug list. `join()` (no separator) is likewise excluded:
+    // sema requires `join(sep)` (E0311 on no-arg), so the no-arg form never reaches
+    // codegen — its AST arm is dead.
 }
 
 // ---------------------------------------------------------------------------
@@ -2354,8 +2512,8 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
         // exactly the synthetic `.clone()` or a user instance method on a covered
         // type; lower accordingly. Every dispatch fact is resolved here (totality).
-        Expr::MethodCall { receiver, method, args, recv_type, .. } => {
-            lower_method_call(receiver, method, args, recv_type, cx, env)
+        Expr::MethodCall { receiver, method, method_span, args, recv_type } => {
+            lower_method_call(receiver, method, *method_span, args, recv_type, cx, env)
         }
         Expr::If {
             cond,
@@ -2738,6 +2896,7 @@ fn call_return_type(cx: &Cx, name: &str) -> Type {
 fn lower_method_call(
     receiver: &Expr,
     method: &str,
+    method_span: Span,
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
     cx: &Cx,
@@ -2752,6 +2911,30 @@ fn lower_method_call(
             ty,
             kind: TExprKind::Clone(Box::new(recv)),
         };
+    }
+    // c109 Phase 9: a built-in collection/string method (`emit_builtin_method`). The
+    // gate proved `recv_type == None` + a covered builtin name + an in-subset value
+    // receiver. Resolve the Map-vs-List-vs-String emit branch HERE from the
+    // receiver's type (reproducing `expr_jet_ty`, incl. its `None` partiality), so
+    // emit makes no type decision (I3). The result type comes from the builtin's
+    // sema return (`Collections::builtin_method_return`) for totality.
+    if recv_type.is_none() {
+        if let Some(op) = resolve_builtin_op(receiver, method, method_span, args, env, cx) {
+            let recv_t = lower_expr(receiver, cx, env);
+            let recv_ast_ty = tir_recv_jet_ty(receiver, env);
+            let result_ty = builtin_result_ty(method, args.len(), recv_ast_ty.as_ref());
+            // Args are emitted plainly (no clone/borrow wrappers), exactly as
+            // `emit_builtin_method`'s `arg(i)` = raw `emit_expr`.
+            let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            return TExpr {
+                ty: result_ty,
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(recv_t),
+                    op,
+                    args: targs,
+                },
+            };
+        }
     }
     // c109 Phase 7: a STATIC method call `Type.make(args)`. The gate
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
@@ -2865,6 +3048,134 @@ fn lower_method_args(
             }
         })
         .collect()
+}
+
+/// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)`
+/// (Source/Codegen/Expression.rs) for a built-in method receiver, using the TIR
+/// lowering env's slot types. This MUST match `expr_jet_ty` bit-for-bit (incl. its
+/// `None` results) because the Map-vs-List-vs-String emit branch in
+/// `emit_builtin_method` is keyed on it: a divergence here flips a branch and breaks
+/// byte-parity. Only `Ident` (via its slot type), `Str`/`Char`, and chained
+/// `chars`/`split`/other method calls resolve; everything else (notably a struct
+/// `Field` read) is `None` — exactly as `expr_jet_ty` does, so a `None`-typed
+/// receiver lands on the AST's default branch (the list/else arm).
+fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
+    match e {
+        Expr::Ident(name, _) => env.ty_of(name),
+        Expr::Str(_, _) => Some(Type::String),
+        Expr::Char(_, _) => Some(Type::Char),
+        Expr::TupleLit(_, _, Some(ty)) => Some(ty.clone()),
+        Expr::MethodCall { receiver, method, .. } => {
+            if method == "chars" {
+                return Some(Type::List(Box::new(Type::Char)));
+            }
+            if method == "split" {
+                return Some(Type::List(Box::new(Type::String)));
+            }
+            tir_recv_jet_ty(receiver, env)
+        }
+        _ => None,
+    }
+}
+
+/// c109 Phase 9: resolve the built-in method op from the method name, arg count, and
+/// the receiver's resolved type — reproducing `emit_builtin_method`'s name+`rty`
+/// dispatch (Source/Codegen/Expression.rs) exactly. The Map-vs-List branch
+/// (`insert`/`remove`/`get`) and the String-vs-list branch (`len`) come from
+/// `tir_recv_jet_ty` (matching the AST's `rty`); a `None` or non-Map/non-String
+/// receiver falls to the list/else branch, byte-for-byte the AST default. Returns
+/// `None` for any name/shape the TIR does not lower (the caller stays on the AST
+/// path — the gate already excluded these, so this is a defensive belt).
+fn resolve_builtin_op(
+    receiver: &Expr,
+    method: &str,
+    method_span: Span,
+    args: &[crate::AST::CallArg],
+    env: &LowerEnv,
+    cx: &Cx,
+) -> Option<TBuiltinOp> {
+    if crate::Collections::is_closure_method(method) {
+        return None;
+    }
+    let rty = tir_recv_jet_ty(receiver, env);
+    let is_string = matches!(rty, Some(Type::String));
+    let is_map = matches!(rty, Some(Type::Map { .. }));
+    Some(match (method, args.len()) {
+        ("len", 0) => {
+            if is_string {
+                TBuiltinOp::LenString
+            } else {
+                TBuiltinOp::LenList
+            }
+        }
+        ("push", 1) => TBuiltinOp::Push,
+        ("pop", 0) => TBuiltinOp::Pop,
+        ("insert", 2) => {
+            if is_map {
+                TBuiltinOp::InsertMap
+            } else {
+                TBuiltinOp::InsertList
+            }
+        }
+        ("remove", 1) => {
+            if is_map {
+                TBuiltinOp::RemoveMap
+            } else {
+                // The list form embeds the *method-span* line for its bounds panic,
+                // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
+                let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                TBuiltinOp::RemoveList { line }
+            }
+        }
+        ("get", 1) => {
+            if is_map {
+                TBuiltinOp::GetMap
+            } else {
+                TBuiltinOp::GetList
+            }
+        }
+        ("first", 0) => TBuiltinOp::First,
+        ("last", 0) => TBuiltinOp::Last,
+        ("contains", 1) => TBuiltinOp::Contains,
+        ("index_of", 1) => TBuiltinOp::IndexOf,
+        ("reverse", 0) => TBuiltinOp::Reverse,
+        ("sort", 0) => TBuiltinOp::Sort,
+        ("join", 1) => TBuiltinOp::JoinSep,
+        ("clear", 0) => TBuiltinOp::Clear,
+        ("chars", 0) => TBuiltinOp::Chars,
+        ("bytes", 0) => TBuiltinOp::Bytes,
+        ("trim", 0) => TBuiltinOp::Trim,
+        ("split", 1) => TBuiltinOp::Split,
+        ("starts_with", 1) => TBuiltinOp::StartsWith,
+        ("ends_with", 1) => TBuiltinOp::EndsWith,
+        ("replace", 2) => TBuiltinOp::Replace,
+        ("to_upper", 0) => TBuiltinOp::ToUpper,
+        ("to_lower", 0) => TBuiltinOp::ToLower,
+        ("repeat", 1) => TBuiltinOp::Repeat,
+        ("slice", 2) => {
+            // The string-slice form embeds the *receiver-span* line for its bounds panic.
+            let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
+            TBuiltinOp::Slice { line }
+        }
+        ("keys", 0) => TBuiltinOp::Keys,
+        ("values", 0) => TBuiltinOp::Values,
+        ("contains_key", 1) => TBuiltinOp::ContainsKey,
+        ("to_string", 0) => TBuiltinOp::ToString,
+        _ => return None,
+    })
+}
+
+/// c109 Phase 9: the resolved return type of a built-in collection/string method,
+/// from `Collections::builtin_method_return` (the sema table). Kept total per the
+/// design principle; rarely load-bearing in emit (a binding carries sema's `b.ty`),
+/// but resolved here so the TIR never guesses. Falls back to `Unit` for a void
+/// method or an unresolved receiver type (impossible for a covered call — sema
+/// validated it).
+fn builtin_result_ty(method: &str, nargs: usize, recv_ty: Option<&Type>) -> Type {
+    match recv_ty.and_then(|rt| crate::Collections::builtin_method_return(rt, method, nargs, false)) {
+        Some(Some(t)) => t,
+        _ => unit_type(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3276,6 +3587,71 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}::{}({})", type_prefix, method_rust, arg_str)
+        }
+        // c109 Phase 9: a built-in collection/string method. The Map-vs-List-vs-String
+        // branch was resolved into `op` at lowering; emit only formats, reproducing
+        // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
+        // emitted PLAINLY (no clone/borrow wrappers — `arg(i)` is a raw `emit_expr`).
+        TExprKind::BuiltinMethod { recv, op, args } => {
+            let recv = emit_tir_expr(recv, cx);
+            let a = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
+            match op {
+                TBuiltinOp::LenString => format!("jet_char_len(&({}))", recv),
+                TBuiltinOp::LenList => format!("({}).len() as i64", recv),
+                TBuiltinOp::Push => format!("({}).push({})", recv, a(0)),
+                TBuiltinOp::Pop => format!("({}).pop()", recv),
+                TBuiltinOp::InsertMap => {
+                    format!("({}).insert(({}).clone(), {})", recv, a(0), a(1))
+                }
+                TBuiltinOp::InsertList => {
+                    format!("({}).insert({} as usize, {})", recv, a(0), a(1))
+                }
+                TBuiltinOp::RemoveMap => format!("({}).remove(&({}).clone())", recv, a(0)),
+                TBuiltinOp::RemoveList { line } => format!(
+                    "jet_list_remove(&mut ({}), {}, {:?}, {})",
+                    recv, a(0), cx.file, line
+                ),
+                TBuiltinOp::GetMap => format!("({}).get(&({}).clone()).cloned()", recv, a(0)),
+                TBuiltinOp::GetList => format!("({}).get({} as usize).cloned()", recv, a(0)),
+                TBuiltinOp::First => format!("({}).first().cloned()", recv),
+                TBuiltinOp::Last => format!("({}).last().cloned()", recv),
+                TBuiltinOp::Contains => format!("({}).contains(&{})", recv, a(0)),
+                TBuiltinOp::IndexOf => format!(
+                    "({}).iter().position(|x| *x == {}).map(|i| i as i64)",
+                    recv, a(0)
+                ),
+                TBuiltinOp::Reverse => format!("({}).reverse()", recv),
+                TBuiltinOp::Sort => format!("({}).sort()", recv),
+                TBuiltinOp::JoinSep => format!(
+                    "({}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+                    recv, a(0)
+                ),
+                TBuiltinOp::Clear => format!("({}).clear()", recv),
+                TBuiltinOp::Chars => format!("({}).chars().collect::<Vec<char>>()", recv),
+                TBuiltinOp::Bytes => {
+                    format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)
+                }
+                TBuiltinOp::Trim => format!("({}).trim().to_string()", recv),
+                TBuiltinOp::Split => format!("jet_string_split(&({}), &{})", recv, a(0)),
+                TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
+                TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
+                TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),
+                TBuiltinOp::ToUpper => format!("({}).to_uppercase()", recv),
+                TBuiltinOp::ToLower => format!("({}).to_lowercase()", recv),
+                TBuiltinOp::Repeat => format!("({}).repeat({} as usize)", recv, a(0)),
+                TBuiltinOp::Slice { line } => format!(
+                    "jet_string_slice(&({}), {}, {}, {:?}, {})",
+                    recv, a(0), a(1), cx.file, line
+                ),
+                TBuiltinOp::Keys => {
+                    format!("({}).keys().cloned().collect::<Vec<_>>()", recv)
+                }
+                TBuiltinOp::Values => {
+                    format!("({}).values().cloned().collect::<Vec<_>>()", recv)
+                }
+                TBuiltinOp::ContainsKey => format!("({}).contains_key(&{})", recv, a(0)),
+                TBuiltinOp::ToString => format!("({}).jet_show()", recv),
+            }
         }
         TExprKind::Binary {
             op,
@@ -3967,6 +4343,64 @@ mod tests {
         // reproduction is out of subset) — the owning fn stays on the AST path.
         let src = "fn p(x: (Int?)) -> Int {\n return x ?? panic(\"missing\")\n}\n";
         assert!(!covers(src, "p"));
+    }
+
+    // c109 Phase 9: built-in collection/string methods. A builtin call has
+    // `recv_type == None` (parser default; sema leaves it None for non-numeric
+    // builtins), so `build_cx` alone proves the gate's builtin shape.
+
+    #[test]
+    fn covers_list_builtin_methods() {
+        // push/len/get/sort/reverse/contains on a list-typed param — all covered,
+        // so the whole function routes through the TIR.
+        let src = "fn f(xs: [Int]) -> Int {\n ys := xs\n ys.push(1)\n ys.reverse()\n ys.sort()\n n := ys.len()\n c := ys.contains(3)\n return n\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_map_builtin_methods() {
+        // insert/get/keys/values/contains_key/clear on a map-typed param.
+        let src = "fn f(m: [String, Int]) -> Int {\n m2 := m\n m2.insert(\"k\", 1)\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.contains_key(\"a\")\n m2.clear()\n return n\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn covers_string_builtin_methods() {
+        // to_upper/to_lower/trim/split/starts_with/replace/repeat/slice/chars/bytes.
+        let src = "fn f(s: String) -> String {\n up := s.to_upper()\n tr := s.trim()\n sp := s.split(\",\")\n sw := s.starts_with(\"a\")\n rp := s.replace(\"a\", \"b\")\n rep := s.repeat(2)\n sl := s.slice(0, 2)\n ch := s.chars()\n by := s.bytes()\n return up\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
+    fn rejects_closure_builtin_method() {
+        // A closure-taking builtin (`map`/`filter`/…) is deferred to the lambda
+        // phase — `is_covered_builtin_name` returns false, and the lambda arg is
+        // out-of-subset anyway. The owning function stays on the AST path.
+        for name in ["map", "filter", "each", "find", "any", "all", "sort_by", "reduce"] {
+            assert!(
+                !is_covered_builtin_name(name, 1),
+                "{name} (closure method) must NOT be a covered builtin"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_is_empty_builtin() {
+        // `is_empty` is excluded — sema types it `Int` (a latent bug), so it
+        // miscompiles on both paths; the TIR must not claim it.
+        assert!(!is_covered_builtin_name("is_empty", 0));
+        let src = "fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n return 0\n}\n";
+        // The function has a non-covered builtin (`is_empty`), so it is NOT covered.
+        assert!(!covers(src, "f"));
+    }
+
+    #[test]
+    fn rejects_numeric_conversion_builtin() {
+        // Numeric width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`) are
+        // Phase 12 — not covered builtins here, and they carry a `Some(recv_type)`.
+        for name in ["to_i32", "to_u8", "is_nan", "count_ones", "to_f64"] {
+            assert!(!is_covered_builtin_name(name, 0), "{name} is a Phase-12 numeric method");
+        }
     }
 
     #[test]

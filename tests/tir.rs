@@ -997,6 +997,151 @@ fn main() {
     assert_eq!(stdout, "jay\nnone\n");
 }
 
+// c109 Phase 9: built-in collection/string methods. These route through the TIR
+// (`recv_type == None` + a covered builtin name), with the Map-vs-List-vs-String
+// emit branch resolved at lowering. Each proves rustc accepts the output (I2) and
+// runs correctly. Closure-taking methods (`map`/`filter`/…) are deferred (Phase 11).
+
+/// List methods: push, insert, get, first, last, len, contains, index_of, sort,
+/// reverse, pop — a covered function exercising the non-closure list surface.
+#[test]
+fn list_builtin_methods() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn build() -> [Int] {
+    xs := [3, 1, 2]
+    xs.push(5)
+    xs.insert(0, 0)
+    xs.sort()
+    xs.reverse()
+    return xs
+}
+fn main() {
+    xs := build()
+    print(xs.len())
+    print(xs.contains(5))
+    print(xs.index_of(2))
+    g := xs.get(0)
+    print(g ?? 0)
+    f := xs.first()
+    print(f ?? 0)
+}
+";
+    let (code, stdout) = build_and_run("tir_list_builtins", src);
+    assert_eq!(code, 0);
+    // sorted [0,1,2,3,5] reversed → [5,3,2,1,0]. len 5, contains 5 true,
+    // index_of 2 → 2, get(0) → 5, first → 5.
+    assert_eq!(stdout, "5\ntrue\n2\n5\n5\n");
+}
+
+/// String methods: len (char count), to_upper, to_lower, trim, split, starts_with,
+/// ends_with, replace, repeat, slice, chars, contains, to_string.
+#[test]
+fn string_builtin_methods() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    s := \"  Hello, World  \"
+    t := s.trim()
+    print(t.to_upper())
+    print(t.to_lower())
+    print(t.len())
+    print(t.starts_with(\"Hello\"))
+    print(t.ends_with(\"World\"))
+    print(t.replace(\"World\", \"Jet\"))
+    print(\"ab\".repeat(3))
+    print(t.contains(\"World\"))
+    parts := \"a,b,c\".split(\",\")
+    print(parts.len())
+}
+";
+    let (code, stdout) = build_and_run("tir_string_builtins", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "HELLO, WORLD\nhello, world\n12\ntrue\ntrue\nHello, Jet\nababab\ntrue\n3\n"
+    );
+}
+
+/// Map methods: insert, get, contains_key, keys, values, len, clear. BTreeMap
+/// iterates/collects in sorted key order, so output is deterministic.
+#[test]
+fn map_builtin_methods() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    m: [String, Int] := [:]
+    m.insert(\"banana\", 3)
+    m.insert(\"apple\", 5)
+    print(m.len())
+    print(m.contains_key(\"apple\"))
+    v := m.get(\"apple\")
+    print(v ?? 0)
+    ks := m.keys()
+    print(ks.len())
+    vs := m.values()
+    print(vs.len())
+}
+";
+    let (code, stdout) = build_and_run("tir_map_builtins", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\ntrue\n5\n2\n2\n");
+}
+
+/// `remove` on both a list (the `jet_list_remove` panic-framed helper) and a map
+/// (the `.remove(&(k).clone())` form) — the Map-vs-List branch resolved at lowering.
+#[test]
+fn list_and_map_remove() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn drop_first(xs: [Int]) -> Int {
+    ys := xs
+    r := ys.remove(0)
+    return ys.len()
+}
+fn drop_key(m: [String, Int]) -> Int {
+    m2 := m
+    r := m2.remove(\"a\")
+    return m2.len()
+}
+fn main() {
+    print(drop_first([10, 20, 30]))
+    counts: [String, Int] := [:]
+    counts[\"a\"] = 1
+    counts[\"b\"] = 2
+    print(drop_key(counts))
+}
+";
+    let (code, stdout) = build_and_run("tir_remove", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\n1\n");
+}
+
+/// `join(sep)` on a list of strings — the `.iter().map(jet_show)…join` form.
+#[test]
+fn list_join_with_separator() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn main() {
+    words := [\"a\", \"b\", \"c\"]
+    print(words.join(\"-\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_join", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "a-b-c\n");
+}
+
 /// A `when` over a fallible value with `ok`/`err` patterns (Shape C). The subject
 /// is a user fallible fn call; the bound payload prints.
 #[test]

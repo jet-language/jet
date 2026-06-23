@@ -27,6 +27,16 @@ them so they don't regress, but they should be fixed independently of c109):
   (Phases 6–7.)
 - **`Read`-convention struct params** in some arithmetic/move shapes hit E0507/E0308 on both
   paths (a sema convention-inference gap). (Phase 3.)
+- **`.is_empty()` is typed `Int`, not `Bool`.** `Collections::builtin_method_return`
+  (Source/Collections.rs) returns `Some(Some(Type::Int))` for `is_empty` on a list/map/string.
+  So `e := xs.is_empty()` emits `let e: i64 = (…).is_empty()` (bool ≠ i64 → rustc E0308), and
+  `if xs.is_empty()` is E0110 (Int isn't Bool) at sema. The method is unusable in any real
+  program today — fix is a one-line `Type::Int` → `Type::Bool` in `list_method_return`/
+  `map_method_return`/`string_method_return`. (Phase 9 gates it OUT so the TIR never claims a
+  miscompiling function; both paths miscompile it identically.)
+- **No-arg `.join()` is dead.** `emit_builtin_method` has a `"join" if args.is_empty()` arm,
+  but sema requires `join(sep)` (E0311 on no-arg), so that arm never reaches codegen. (Phase 9
+  excludes the no-arg form for the same reason.)
 
 ## Invariants this must preserve
 
@@ -464,6 +474,65 @@ everything, the AST codegen path is deleted (final phase).
   through the TIR (`13_errors` `parse_age`/`load`/`main`, `12_option`
   `find_even`/`main`).
 
+## Refinements learned in Phase 9 (builtin collection/string methods)
+
+- **A builtin collection/string call carries `recv_type == None` — that is the total
+  routing signal.** Sema resolves `xs.push(1)`/`s.trim()`/`m.keys()` via
+  `Collections::builtin_method_return` and leaves `recv_type` unset (it sets it ONLY for
+  numeric width conversions — `is_numeric()` at CheckerInfer ~L2248 — and for user-instance /
+  handle methods). So `recv_type.is_none()` + a covered builtin name + an in-subset *value*
+  receiver uniquely identifies a builtin call: a struct/enum/handle/numeric receiver would
+  have set `recv_type`, and a bare type-name (static-call) receiver isn't a local so it fails
+  `expr_in_subset`. The builtin shape is tried in `method_call_in_subset` BEFORE the static and
+  instance shapes (both keyed on `recv_type`), claiming builtins first. **No type info is
+  needed in the gate** — the receiver type only matters for the *emit branch*, resolved at
+  lowering. This is the Phase-6 lesson again: a partial sema fact (`recv_type == None`) is the
+  total signal for "not a user/handle/numeric method."
+- **The intercept set stays intact; a dedicated builtin GATE handles the routing — the literal
+  "remove the name from `is_intercepted_method_name`" instruction is unsafe.** Removing a name
+  un-guards the *user-method* instance/static shapes (3/4), and a user method named `len`/`get`/…
+  on a struct is MISCOMPILED on the AST path by the builtin-name collision (the receiver-keyed
+  `emit_builtin_method` fires before user dispatch — a noted latent bug). So routing such a
+  user method through the TIR's user-method path would DIVERGE from the (buggy) AST output. The
+  parity-preserving design adds a separate builtin shape gated on receiver type (List/Map/String
+  via `recv_type == None`), which is disjoint from user methods (Named receiver → `recv_type` Some)
+  — the two never collide. `is_intercepted_method_name` is kept whole so the user-method shapes
+  still exclude collision names (correct: those stay on the AST path).
+- **`emit_builtin_method` args are emitted PLAINLY — no clone/borrow wrappers (unlike
+  `emit_call_args`).** Each `arg(i)` is a raw `emit_expr`; the `CallArg.flags`
+  (implicit_clone/shared_auto_clone) and the param convention are IGNORED. So `TExprKind::
+  BuiltinMethod` carries args as plain `Vec<TExpr>`, NOT `Vec<TCallArg>`, and emits them with
+  no wrapper. Carrying conventions here would add spurious `&(…)`/`.clone()` and break parity.
+- **The Map-vs-List-vs-String branch is `expr_jet_ty(receiver)` — reproduce its partiality
+  exactly.** `len` forks String (`jet_char_len`) vs else (`.len() as i64`); `insert`/`remove`/
+  `get` fork Map vs List. The AST keys these on `rty = expr_jet_ty(receiver, env)`, which is
+  PARTIAL: `Ident`→slot type, `Str`→String, `Char`→Char, `MethodCall(chars/split)`→typed list,
+  else recurse, and **everything else (notably a struct `Field` read) → `None`**. A `None` rty
+  lands on the *default* (list/else) branch. `tir_recv_jet_ty` mirrors `expr_jet_ty` bit-for-bit
+  (incl. `Field → None`), resolved once at lowering into a concrete `TBuiltinOp`, so emit makes
+  no type decision (I3). A divergence here would flip a branch — the recurring "reproduce the
+  AST's partiality where load-bearing" lesson.
+- **`recv_type == None` is reused by static + builtin shapes; order matters.** Both the static
+  call (`Type.make()`) and a builtin call have `recv_type == None`. The builtin shape is checked
+  first (in both the gate and `lower_method_call`), but a static receiver (a bare type-name ident)
+  is NOT in `locals`, so `expr_in_subset(receiver)` is false → the builtin shape declines and the
+  static shape claims it. A builtin receiver (a list/string local/literal) IS in-subset → builtin
+  shape claims it. The two are cleanly separated by receiver-is-a-value vs receiver-is-a-type-name.
+- **Panic-frame lines are resolved at lowering from the real `method_span`/receiver span.**
+  `remove`-on-list embeds `span_line_col(method_span.start)`; `slice` embeds
+  `span_line_col(receiver.span().start)`. Both are read off the AST `MethodCall.method_span` /
+  receiver span at lowering and carried as plain `usize` on the op, so emit (which never sees
+  `cx.src`) reproduces the AST's `jet_list_remove(…, file, line)` / `jet_string_slice(…, file,
+  line)` byte-for-byte. `cx.file`/`cx.root_prefix` are program-level, read at emit.
+- **Verified byte-identical** via a forced-AST-path diff (a temporary `JET_NO_TIR` bypass on both
+  `emit_func`/`emit_method`) on a program exercising the full covered surface — list ops
+  (push/insert/reverse/sort/len/pop/first/last/get/index_of/contains), string ops (len/to_upper/
+  to_lower/trim/split/starts_with/ends_with/replace/repeat/slice/chars/bytes/contains/to_string),
+  map ops (insert/len/get/contains_key/keys/values/clear), and both `remove` forms (list helper +
+  map clone) and `join(sep)` — byte-for-byte identical, then the instrumentation removed. The
+  `is_empty` E0308 (latent bug) reproduces identically on both paths, confirming the gate's
+  exclusion of it is conservative (it would miscompile on either path).
+
 ## Phases
 
 | # | Scope | Status |
@@ -478,7 +547,8 @@ everything, the AST codegen path is deleted (final phase).
 | 6b | Remaining ownership facts: `take`/`mut`/`view` access conventions on free-function args, general Shared/Arc auto-clone outside method args | pending — the Phase-6 method-arg path already emits `Arc::clone(&…)` and `&mut (…)` from the total flags; extend the same to free `Call` args + view returns. |
 | 7 | Method bodies + static methods | ✅ done (c109 Phase 7) — ~4 example methods routed (`10_structs` `Point::dist_sq`/`Point::unit`, `63_named_args` `Rect::new`/`Rect::area`). Covers: **inherent** method *bodies* (instance + static) on a covered struct/enum, hooked into `emit_method`. The `self` slot reproduces `emit_method` exactly (place `self`, no deref, type `None`); the receiver form is `&self`/`&mut self`/`self` per the resolved convention (`TFuncKind::Method`). **Static** (associated) methods are covered on both sides — the body (no self) and the call site (`Type.make(x)` → `user_<T>::user_<m>(x)`, a new `TExprKind::StaticCall`, which Phase 6 deferred). `Self` params/returns resolve to the owning type. Excludes: **trait-impl** method bodies (distinct signature — bare name, no `pub`, always `&self`, self `jet_ty: Some(T)`; a separate provable-parity hook); **delegation** (`using field`), **generic-type**, and **`view`-returning** methods; any `mut self`/`view self` method that **reassigns `self`** (`self = …` is a pre-existing AST-path I2 hole, gated out via `stmt_assigns_self`); methods whose body uses any not-yet-covered construct (core/stdlib calls, `?`/optionals, lambdas → Phases 8–10). |
 | 8 | Fallible/optional: `?`/try (TryConvert), `??`, `T?` optionals, `ok`/`err` | ✅ done (c109 Phase 8) — ~5 example fns routed (`13_errors` `parse_age`/`load`/`main`, `12_option` `find_even`/`main`). Covers: **optional** `T?` (`Type::Option`) and **fallible** `T ? E` (`Type::Result`) params/locals/returns whose payloads are covered value types (incl. default `Error`→`String`); the `value(x)`/`null` and `ok(x)`/`err(e)` constructors; the `?` propagation operator carrying the total `TryConvert` (`None`/`Fallible`/`Typed(fn)` → bare / `.map_err(\|e\| e.to_error())` / `.map_err(<fn>)`, all wrapped in `jet_trace_err(…)?` with the trace-frame `file`/`line`/`fn_name` resolved at lowering); the `??` fallback (`OrFallback::{Value,Return}`, `is_option` total → `match` over Result/Option); `?.` optional chaining (the total `flatten` fact → `.and_then`/`.map`); and `when ok/err/value/null` matches (Shape C, reusing `EnumMatch`). Excludes: the `??` **panic** fallback form (`safe_locals_expr` reproduction deferred); String/struct/collection-payload error *enums* (non-covered enum → excluded); list/map *of* options; core/stdlib fallible calls (`fs.read` → Phase 10, but a USER fallible call is covered); nested `T??` (sema-rejected anyway). |
-| 9 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
+| 9 | Built-in collection/string methods (`emit_builtin_method`: list/map/string surface) | ✅ done (c109 Phase 9) — +6 example fns routed (`15_lists`/`20_list_remove_bounds`/`38_method_chain` `main`, `28_comptime_table` `make_table`, `34_parallel_scan` `copy_paths`/`main`). Covers the NON-closure list/map/string builtins (`len`/`push`/`pop`/`insert`/`remove`/`get`/`first`/`last`/`contains`/`index_of`/`reverse`/`sort`/`clear`/`join(sep)`/`keys`/`values`/`contains_key`/`chars`/`bytes`/`trim`/`split`/`starts_with`/`ends_with`/`replace`/`to_upper`/`to_lower`/`repeat`/`slice`/`to_string`) on a list/map/string receiver. The Map-vs-List-vs-String emit branch (`rty = expr_jet_ty(receiver)`) is resolved at lowering into a total `TBuiltinOp` (`TExprKind::BuiltinMethod`), reproducing the AST's `expr_jet_ty` partiality (incl. its `None` → default branch) exactly. Excludes: **closure-taking** methods (`map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` → Phase 11); the **numeric** width/predicate/bit methods (`to_i32`/`is_nan`/`count_ones`/… → Phase 12, already carry `Some(recv_type)`); **handle** methods (FileWriter/TcpStream/HttpRequest/Router/Arena/… → Phase 10, also `Some(recv_type)`); `clone`/`raw`/`snapshot`/`new` (Phase 6 special cases); `Int.parse`/`Float.parse`/`String.from_bytes` (type-name-receiver statics); and **`is_empty`** + no-arg `join()` (both unusable today — see latent bugs). |
+| 11 | Lambdas/closures (capture meta), fn-typed values, fan-out | pending |
 | 10 | Core/stdlib calls, imports/modules, FFI, comptime-if, arena/unsafe | pending |
 | N | Delete the AST `emit_func`/`expr_jet_ty`/`operand_is_integer` path; TIR is the only seam | pending |
 
