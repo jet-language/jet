@@ -13,6 +13,17 @@ use crate::Generics::{
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
+/// D-ITER1: returns true when `ty` or an immediate inner layer is `Type::Tuple`.
+/// Used to decide whether to store `resolved_ret` on a `MethodCall` node so that
+/// `Tuples.rs` can collect the JetTup_ shape for `enumerate`/`zip`/`partition`.
+fn contains_tuple_type(ty: &Type) -> bool {
+    match ty {
+        Type::Tuple(_) => true,
+        Type::List(inner) => matches!(inner.as_ref(), Type::Tuple(_)),
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
         self.infer(e)
@@ -2283,7 +2294,16 @@ impl<'a> Checker<'a> {
             if recv_ty.is_numeric() {
                 *recv_type_out = Some(recv_ty.name());
             }
-            return self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+            let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+            // D-ITER1: enumerate/zip/partition return named-tuple types. Store the
+            // resolved return type in `resolved_ret_out` so Tuples.rs can collect
+            // the JetTup_ shape and the TIR lowering pass can read the field names.
+            if let Some(ref ty) = result {
+                if contains_tuple_type(ty) {
+                    *resolved_ret_out = Some(ty.clone());
+                }
+            }
+            return result;
         }
         if let Type::TraitObject(trait_name) = &recv_ty {
             let sig = self

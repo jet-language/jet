@@ -20,11 +20,14 @@ pub fn is_map_key_type(ty: &Type) -> bool {
     )
 }
 
-/// M8: built-in methods that take a closure argument.
+/// M8 + D-ITER1: built-in methods that take a closure argument.
 pub fn is_closure_method(method: &str) -> bool {
     matches!(
         method,
         "map" | "filter" | "each" | "find" | "any" | "all" | "sort_by" | "reduce"
+        // D-ITER1: lazy adapter set
+        | "take_while" | "skip_while" | "flat_map" | "scan"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by"
     )
 }
 
@@ -164,6 +167,33 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
     }
 }
 
+/// D-ITER1: the named-tuple element type for `enumerate` — `(idx: Int, item: T)`.
+/// Fields are canonical (alpha-sorted by name): `idx` < `item`.
+pub fn enumerate_elem_ty(inner: &Type) -> Type {
+    Type::Tuple(vec![
+        ("idx".to_string(), Box::new(Type::Int)),
+        ("item".to_string(), Box::new(inner.clone())),
+    ])
+}
+
+/// D-ITER1: the named-tuple element type for `zip` — `(a: T, b: U)`.
+pub fn zip_elem_ty(a: &Type, b: &Type) -> Type {
+    Type::Tuple(vec![
+        ("a".to_string(), Box::new(a.clone())),
+        ("b".to_string(), Box::new(b.clone())),
+    ])
+}
+
+/// D-ITER1: the named-tuple return type for `partition` — `(false_: [T], true_: [T])`.
+/// Fields are alpha-sorted: `false_` < `true_`.
+pub fn partition_ret_ty(inner: &Type) -> Type {
+    let list = Type::List(Box::new(inner.clone()));
+    Type::Tuple(vec![
+        ("false_".to_string(), Box::new(list.clone())),
+        ("true_".to_string(), Box::new(list)),
+    ])
+}
+
 fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
@@ -182,6 +212,38 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("any" | "all", 1) => Some(Some(Type::Bool)),
         ("sort_by", 1) => Some(None),
         ("reduce", 2) => Some(Some(Type::Int)), // placeholder; sema refines from init arg
+        // D-ITER1: non-closure lazy adapters (return [T]).
+        ("take" | "skip" | "step_by", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("dedup", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("chunks" | "windows", 1) => {
+            Some(Some(Type::List(Box::new(Type::List(Box::new(inner.clone()))))))
+        }
+        // D-ITER1: enumerate → [(idx: Int, item: T)].
+        ("enumerate", 0) => Some(Some(Type::List(Box::new(enumerate_elem_ty(inner))))),
+        // D-ITER1: zip([U]) → [(a: T, b: U)]; sema refines `b` from arg type.
+        ("zip", 1) => {
+            // placeholder element type (Int for `b`); sema will correct via resolved_ret.
+            Some(Some(Type::List(Box::new(zip_elem_ty(inner, &Type::Int)))))
+        }
+        // D-ITER1: partition(f) → (false_: [T], true_: [T]).
+        ("partition", 1) => Some(Some(partition_ret_ty(inner))),
+        // D-ITER1: closure adapters returning [T].
+        ("take_while" | "skip_while", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        // D-ITER1: flat_map(f: T->[U]) → [U]; placeholder; sema refines.
+        ("flat_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
+        // D-ITER1: scan(seed, f: (acc,T)->acc) → [acc]; placeholder; sema refines.
+        ("scan", 2) => Some(Some(Type::List(Box::new(Type::Int)))),
+        // D-ITER1: position(f) → Int?
+        ("position", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        // D-ITER1: min_by/max_by(f: T->K) → T?
+        ("min_by" | "max_by", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        // D-ITER1: fold(init, f: (acc,T)->acc) → acc; placeholder; sema refines from init.
+        ("fold", 2) => Some(Some(Type::Int)),
+        // D-ITER1: group_by(f: T->K) → [K, [T]] (Map<K, List<T>>); sema refines K.
+        ("group_by", 1) => Some(Some(Type::Map {
+            key: Box::new(Type::String), // placeholder; sema refines
+            value: Box::new(Type::List(Box::new(inner.clone()))),
+        })),
         _ => None,
     }
 }
@@ -285,7 +347,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Int)), // sema refines via expected_type
             }]),
-            "filter" | "find" | "any" | "all" => Some(vec![Type::Fn {
+            "filter" | "find" | "any" | "all"
+            // D-ITER1: closure bool predicates.
+            | "take_while" | "skip_while" | "position" | "partition" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Bool)),
             }]),
@@ -293,17 +357,33 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 params: vec![(**inner).clone()],
                 ret: None,
             }]),
-            "sort_by" => Some(vec![Type::Fn {
+            // D-ITER1: key-extracting closure methods.
+            "sort_by" | "min_by" | "max_by" | "group_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Int)), // sema refines key type
             }]),
-            "reduce" => Some(vec![
+            "reduce" | "fold" => Some(vec![
                 Type::Int, // init — sema refines
                 Type::Fn {
                     params: vec![Type::Int, (**inner).clone()],
                     ret: Some(Box::new(Type::Int)),
                 },
             ]),
+            "scan" => Some(vec![
+                Type::Int, // seed — sema refines
+                Type::Fn {
+                    params: vec![Type::Int, (**inner).clone()],
+                    ret: Some(Box::new(Type::Int)), // sema refines
+                },
+            ]),
+            "flat_map" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: Some(Box::new(Type::List(Box::new(Type::Int)))), // sema refines
+            }]),
+            // D-ITER1: non-closure adapters.
+            "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
+            "zip" => Some(vec![Type::List(Box::new((**inner).clone()))]),
+            "dedup" | "enumerate" => Some(vec![]),
             _ => Some(vec![]),
         },
         Type::Map { key, value } => match method {

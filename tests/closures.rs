@@ -81,3 +81,49 @@ fn main() {
 "#;
     jet::compile(src).expect("sort_by lambda should compile");
 }
+
+// D-ITER1: lazy iterator adapter set.
+#[test]
+fn iter_adapters_compile() {
+    let src = r#"
+fn main() {
+    nums := [1, 2, 3, 4, 5]
+    print(nums.take(3))
+    print(nums.skip(2))
+    print(nums.step_by(2))
+    print(nums.dedup())
+    print(nums.take_while((n: Int) => (n < 4)))
+    print(nums.skip_while((n: Int) => (n < 4)))
+    sum := nums.fold(0, (acc: Int, n: Int) => (acc + n))
+    print(sum)
+    pos := nums.position((n: Int) => (n == 3))
+    print(pos)
+    words := ["b", "a", "c"]
+    print(words.min_by((w: String) => w.len()))
+    print(words.max_by((w: String) => w.len()))
+    nested := [[1, 2], [3, 4]]
+    print(nested.flat_map((xs: [Int]) => xs))
+}
+"#;
+    let out = jet::compile(src).expect("D-ITER1 adapters should compile");
+    assert!(!out.rust.contains("unsafe"), "invariant I1");
+    assert!(out.rust.contains("jet_list_take"), "take should lower to helper");
+    assert!(out.rust.contains("jet_list_skip("), "skip should lower to helper");
+    assert!(out.rust.contains("jet_list_fold"), "fold should lower to helper");
+    assert!(out.rust.contains("jet_list_take_while"), "take_while should lower");
+    assert!(out.rust.contains("jet_list_flat_map"), "flat_map should lower");
+}
+
+#[test]
+fn iter_chunks_windows() {
+    let src = r#"
+fn main() {
+    nums := [1, 2, 3, 4, 5, 6]
+    print(nums.chunks(2).len())
+    print(nums.windows(3).len())
+}
+"#;
+    let out = jet::compile(src).expect("chunks/windows should compile");
+    assert!(out.rust.contains("jet_list_chunks"), "chunks should lower");
+    assert!(out.rust.contains("jet_list_windows"), "windows should lower");
+}

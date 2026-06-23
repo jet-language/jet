@@ -119,10 +119,16 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         Expr::Field(inner, _, _) | Expr::OptField { base: inner, .. } => {
             collect_tuple_shapes_from_expr(inner, out);
         }
-        Expr::MethodCall { receiver, args, .. } => {
+        Expr::MethodCall { receiver, args, resolved_ret, .. } => {
             collect_tuple_shapes_from_expr(receiver, out);
             for a in args {
                 collect_tuple_shapes_from_expr(&a.expr, out);
+            }
+            // D-ITER1: enumerate/zip/partition return named-tuple types. Sema stores
+            // the resolved return type in `resolved_ret`; collect any tuple shapes
+            // it contains so the JetTup_ struct declarations are emitted.
+            if let Some(ty) = resolved_ret {
+                collect_tuple_shapes_from_type(ty, out);
             }
         }
         Expr::StructLit { fields, .. } => {
