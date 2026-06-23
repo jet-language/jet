@@ -1,10 +1,9 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, ConstAttr, DistinctDef, EnumDef, Expr, Field,
+    ConstAttr, DistinctDef, EnumDef, Expr, Field,
     Func, ImplDef, RustConstKind, StructDef, TraitImplBlock, Type, VariantPayload,
 };
 use crate::Generics;
-use crate::Syntax;
 use std::collections::HashMap;
 
 fn struct_lifetimes(fields: &[Field]) -> Vec<String> {
@@ -281,239 +280,38 @@ pub(crate) fn emit_external_trait_impl(cx: &Cx, i: &ImplDef, out: &mut String) {
     out.push_str("}\n\n");
 }
 
-fn emit_delegation_method(cx: &Cx, f: &Func, field: &str, out: &mut String) {
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(|t| rust_return_type(cx, t, f.is_view_return))
-        .unwrap_or_default();
-    let ret_clause = if ret.is_empty() {
-        String::new()
-    } else {
-        format!(" -> {}", ret)
-    };
-    // Emit signature.
-    let params: Vec<String> = f
-        .params
-        .iter()
-        .map(|p| {
-            if p.name == Syntax::KW_SELF {
-                "&self".to_string()
-            } else {
-                format!("{}: {}", mangle(&p.name), rust_param_type(cx, p.convention, &p.ty))
-            }
-        })
-        .collect();
-    out.push_str(&format!(
-        "    fn {}({}){}  {{\n",
-        f.name,
-        params.join(", "),
-        if ret_clause.is_empty() { String::new() } else { format!(" {}", ret_clause.trim()) }
-    ));
-    // Emit forwarding call: self.<field>.<method>(args...) using trait method name (no mangle).
-    // The target trait method has the same convention, so forward args as-is.
-    let fwd_args: Vec<String> = f
-        .params
-        .iter()
-        .filter(|p| p.name != Syntax::KW_SELF)
-        .map(|p| mangle(&p.name).to_string())
-        .collect();
-    let field_rust = mangle(field);
-    let fwd = format!("(self).{}.{}({})", field_rust, f.name, fwd_args.join(", "));
-    if f.return_type.is_some() {
-        out.push_str(&format!("        {}\n", fwd));
-    } else {
-        out.push_str(&format!("        {};\n", fwd));
-    }
-    out.push_str("    }\n");
-}
-
 fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
-    // c109 Phase 12: route fully-covered trait-impl method bodies through the typed IR.
-    // Byte-identical Rust (golden parity); every fact resolved at lowering (I3). The
-    // method emits at indent 1 inside the `impl Trait for user_<T>` block the caller
-    // opened; anything outside the subset stays on the AST path below, undisturbed.
-    if indent == 1 && TIR::tir_covers_trait_method(f, type_name, cx) {
+    // c109 Phase N: the typed IR is the only codegen seam (R7). A trait-impl
+    // method always emits at indent 1 inside the `impl Trait for user_<T>` block
+    // the caller opened; it lowers + emits through the TIR. A gate-miss is an
+    // internal compiler error (I2-class), never an AST fallback.
+    debug_assert_eq!(indent, 1, "trait methods always emit at impl-block indent 1");
+    if TIR::tir_covers_trait_method(f, type_name, cx) {
         let tir = TIR::lower_trait_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
-    if indent == 1 {
-        // c109 Phase N: gate-miss at the trait-method seam is an ICE (I2/R7).
-        panic!(
-            "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
-            f.name
-        );
-    }
-    let pad = "    ".repeat(indent);
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(|t| rust_return_type(cx, t, f.is_view_return))
-        .unwrap_or_default();
-    let ret_clause = if ret.is_empty() {
-        String::new()
-    } else {
-        format!(" -> {}", ret)
-    };
-    let params = f
-        .params
-        .iter()
-        .map(|p| {
-            if p.name == Syntax::KW_SELF {
-                // D-MUTSELF1: honor the receiver convention so a `mut self` trait
-                // method gets `&mut self` (its body may mutate `self`); matches the
-                // trait declaration (emit_trait_def).
-                match p.convention {
-                    AccessConvention::Read => "&self".to_string(),
-                    AccessConvention::Mutate => "&mut self".to_string(),
-                    AccessConvention::Move => "self".to_string(),
-                }
-            } else {
-                // No underscore prefix — the body references the same mangled name.
-                format!(
-                    "{}: {}",
-                    cx.mangle_name(&p.name),
-                    rust_param_type(cx, p.convention, &p.ty)
-                )
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    // S58 (E2-M13, D-LL1): an `@unsafe fn` lowers to a Rust `unsafe fn` so its
-    // body may use gated pointer ops directly; calling it is already gated to an
-    // `@unsafe` block in sema (E3103). Codegen stays dumb.
-    let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
-    out.push_str(&format!(
-        "{pad}{unsafe_kw}fn {}({}){ret_clause} {{\n",
-        f.name,
-        params,
-        ret_clause = ret_clause
-    ));
-    let mut env: HashMap<String, Slot> = HashMap::new();
-    for p in &f.params {
-        if p.name == Syntax::KW_SELF {
-            // D-MUTSELF1: a `mut self` trait method's receiver is `&mut self`, so its
-            // slot derefs (`(*self)`) — `self.field = v` → `((*self)).field = v`.
-            env.insert(
-                p.name.clone(),
-                Slot {
-                    rust_name: "self".to_string(),
-                    deref: matches!(p.convention, AccessConvention::Mutate),
-                    jet_ty: Some(Type::Named(type_name.to_string())),
-                },
-            );
-            continue;
-        }
-        let deref = match p.convention {
-            AccessConvention::Read => !p.ty.is_scalar(),
-            AccessConvention::Mutate => true,
-            AccessConvention::Move => false,
-        };
-        env.insert(
-            p.name.clone(),
-            Slot {
-                rust_name: cx.mangle_name(&p.name),
-                deref,
-                jet_ty: Some(p.ty.clone()),
-            },
-        );
-    }
-    emit_stmts(cx, &f.body, &mut env, out, indent + 1, f.is_view_return);
-    out.push_str(&format!("{pad}}}\n"));
+    panic!(
+        "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+        f.name
+    );
 }
 
 fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usize) {
-    // c109 Phase 7: route fully-covered inherent methods (instance + static)
-    // through the typed IR. Byte-identical Rust (golden parity), every fact
-    // resolved at lowering (I3). The method emits at indent 1 inside the `impl`
-    // block the caller opened; anything outside the subset stays on the AST path.
-    if indent == 1 && TIR::tir_covers_method(f, type_name, cx) {
+    // c109 Phase N: the typed IR is the only codegen seam (R7). An inherent
+    // method always emits at indent 1 inside the `impl` block the caller opened;
+    // it lowers + emits through the TIR. A gate-miss is an internal compiler
+    // error (I2-class), never an AST fallback.
+    debug_assert_eq!(indent, 1, "inherent methods always emit at impl-block indent 1");
+    if TIR::tir_covers_method(f, type_name, cx) {
         let tir = TIR::lower_method(f, type_name, cx);
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
-    if indent == 1 {
-        // c109 Phase N: gate-miss at the inherent-method seam is an ICE (I2/R7).
-        panic!(
-            "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
-            f.name
-        );
-    }
-    let pad = "    ".repeat(indent);
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(|t| rust_return_type(cx, t, f.is_view_return))
-        .unwrap_or_default();
-    let ret_clause = if ret.is_empty() {
-        String::new()
-    } else {
-        format!(" -> {}", ret)
-    };
-    let params = f
-        .params
-        .iter()
-        .map(|p| {
-            if p.name == Syntax::KW_SELF {
-                match p.convention {
-                    AccessConvention::Read => "&self".to_string(),
-                    AccessConvention::Mutate => "&mut self".to_string(),
-                    AccessConvention::Move => "self".to_string(),
-                }
-            } else {
-                format!(
-                    "{}: {}",
-                    mangle(&p.name),
-                    rust_param_type(cx, p.convention, &p.ty)
-                )
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
-    out.push_str(&format!(
-        "{}pub {}fn {}({}){} {{\n",
-        pad,
-        unsafe_kw,
-        mangle(&f.name),
-        params,
-        ret_clause
-    ));
-    let mut env: HashMap<String, Slot> = HashMap::new();
-    for p in &f.params {
-        if p.name == Syntax::KW_SELF {
-            // D-MUTSELF1: a `mut self` receiver is `&mut Self`, so its slot derefs —
-            // `self.field = v` renders `(*self).field = v` and whole-`self` `self =
-            // New{}` renders `*self = New{}` (the prior I2 hole). `self`/`take self`
-            // are by-ref/by-value with no deref.
-            env.insert(
-                Syntax::KW_SELF.to_string(),
-                Slot {
-                    rust_name: "self".to_string(),
-                    deref: matches!(p.convention, AccessConvention::Mutate),
-                    jet_ty: None,
-                },
-            );
-            continue;
-        }
-        let deref = match p.convention {
-            AccessConvention::Read => !p.ty.is_scalar(),
-            AccessConvention::Mutate => true,
-            AccessConvention::Move => false,
-        };
-        env.insert(
-            p.name.clone(),
-            Slot {
-                rust_name: mangle(&p.name),
-                deref,
-                jet_ty: Some(p.ty.clone()),
-            },
-        );
-    }
-    emit_stmts(cx, &f.body, &mut env, out, indent + 1, f.is_view_return);
-    out.push_str(&format!("{}}}\n", pad));
-    let _ = type_name;
+    panic!(
+        "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
+        f.name
+    );
 }
 
 /// D-DIST1/D-DIST3 (ratified 2026-06-19/20): emit a `#[repr(transparent)]`
@@ -599,91 +397,18 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
 }
 
 pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
-    // c109 Phase 1: route fully-covered simple functions through the typed IR
-    // (TIR). The TIR path produces byte-identical Rust (golden parity) but makes
-    // no semantic decision in codegen — every fact is resolved at lowering (I3).
-    // Anything outside the subset stays on the AST path below, undisturbed.
+    // c109 Phase N: the typed IR (TIR) is the only codegen seam (R7). Every
+    // reachable function lowers + emits through the TIR; a gate-miss is an
+    // internal compiler error (I2-class), never an AST fallback.
     if TIR::tir_covers(f, cx) {
         let tir = TIR::lower_func(f, cx);
         TIR::emit_tir_func(&tir, cx, out);
         return;
     }
-    // c109 Phase N: gate-miss at the free-function seam is an ICE (I2/R7).
     panic!(
         "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
     );
-    #[allow(unreachable_code)]
-    let extra = if f.type_params.is_empty() {
-        HashMap::new()
-    } else {
-        Generics::rust_extra_clone_bounds(&f.type_params)
-    };
-    let gen = Generics::rust_type_param_list(&f.type_params, &extra);
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(|t| rust_return_type(cx, t, f.is_view_return))
-        .unwrap_or_default();
-    let ret_clause = if ret.is_empty() {
-        String::new()
-    } else {
-        format!(" -> {}", ret)
-    };
-    let params = f
-        .params
-        .iter()
-        .map(|p| {
-            format!(
-                "{}: {}",
-                cx.mangle_name(&p.name),
-                rust_param_type(cx, p.convention, &p.ty)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let vis = if f.name == "main" { "" } else { "pub " };
-    // S58 (E2-M13, D-LL1): an `@unsafe fn` lowers to a Rust `unsafe fn` so its
-    // body may use gated ops directly (callers are gated to an `@unsafe` block
-    // in sema, E3103). Codegen stays dumb.
-    let unsafe_kw = if f.is_unsafe { "unsafe " } else { "" };
-    // E2-M12 D-OBS1: track the current function name for rich panic reports.
-    *cx.current_fn.borrow_mut() = f.name.clone();
-    out.push_str(&format!(
-        "{vis}{unsafe_kw}fn {name}{gen}({params}){ret} {{\n",
-        name = cx.mangle_name(&f.name),
-        gen = gen,
-        params = params,
-        ret = ret_clause,
-    ));
-    let mut env: HashMap<String, Slot> = HashMap::new();
-    for p in &f.params {
-        let is_type_param = f
-            .type_params
-            .iter()
-            .any(|tp| matches!(&p.ty, Type::Named(n) if n == &tp.name));
-        let conv = if is_type_param {
-            AccessConvention::Move
-        } else {
-            p.convention
-        };
-        let deref = match conv {
-            AccessConvention::Read if p.ty.is_scalar() => false,
-            AccessConvention::Read => true,
-            AccessConvention::Mutate => true,
-            AccessConvention::Move => false,
-        };
-        env.insert(
-            p.name.clone(),
-            Slot {
-                rust_name: cx.mangle_name(&p.name),
-                deref,
-                jet_ty: Some(p.ty.clone()),
-            },
-        );
-    }
-    emit_stmts(cx, &f.body, &mut env, out, 1, f.is_view_return);
-    out.push_str("}\n\n");
 }
 
 /// D-ERR-CONV: emit a standalone Rust function for `impl Source -> Target { body }`.
