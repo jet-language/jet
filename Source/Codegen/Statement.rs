@@ -218,6 +218,19 @@ fn emit_stmt(
                         None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
                     }
                 }
+                // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place is
+                // rendered exactly as a field READ (`Expr::Field`) — so `self.field`
+                // becomes `((*self)).field` once the `mut self` slot derefs — and the
+                // value is assigned through it. Byte-for-byte the read place + ` = v;`.
+                LValue::Field { base, field, span } => {
+                    let place = emit_expr(cx, &Expr::Field(base.clone(), field.clone(), *span), env);
+                    match op {
+                        Some(op) => {
+                            out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v))
+                        }
+                        None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
+                    }
+                }
                 LValue::Index {
                     base, index, kind, ..
                 } => {

@@ -1146,6 +1146,16 @@ pub enum LValue {
         /// runtime helper for `xs[i] = v` vs `m[k] = v`.
         kind: IndexKind,
     },
+    /// D-MUTSELF1: a field-assignment target `place.field = v`. The headline use is
+    /// `self.field = v` inside a `mut self` method (lowers to `(*self).field = v` on
+    /// the `&mut Self` receiver). `base` is the receiver expression (an `Expr`, not a
+    /// nested `LValue`), `field` the member name. Sema gates the root: a field-assign
+    /// rooted at a non-`mut` `self` (or any non-changeable place) is E0205.
+    Field {
+        base: Box<Expr>,
+        field: String,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

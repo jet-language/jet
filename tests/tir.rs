@@ -3639,3 +3639,91 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "Rex\n");
 }
+
+/// D-MUTSELF1: a `mut self` method that assigns a field in place — `self.field = v`
+/// and the compound `self.field += v` (S17) — lowers to `((*self)).field = …` on the
+/// `&mut Self` receiver. rustc accepts it (I2); the receiver mutates as written.
+#[test]
+fn mut_self_field_assign() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Counter {
+    n: Int
+    fn bump(mut self) {
+        self.n = self.n + 1
+    }
+    fn add(mut self, k: Int) {
+        self.n += k
+    }
+}
+fn main() {
+    c: Counter := Counter { n: 0 }
+    c.bump()
+    c.add(10)
+    print(c.n)
+}
+";
+    let (code, stdout) = build_and_run("tir_mut_self_field", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "11\n");
+}
+
+/// D-MUTSELF1: whole-`self` reassignment — `self = New{…}` — lowers to `(*self) = …`
+/// (the prior AST-path I2 hole, where the `mut self` slot wasn't dereferenced on the
+/// LHS, is now closed). rustc accepts the dereferenced assignment.
+#[test]
+fn mut_self_whole_reassignment() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Counter {
+    n: Int
+    fn reset(mut self) {
+        self = Counter { n: 0 }
+    }
+}
+fn main() {
+    c: Counter := Counter { n: 9 }
+    c.reset()
+    print(c.n)
+}
+";
+    let (code, stdout) = build_and_run("tir_mut_self_whole", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "0\n");
+}
+
+/// D-MUTSELF1: self-mutation through a TRAIT-impl `mut self` method. The trait
+/// declaration and impl both render `&mut self` (was hardcoded `&self`), so the
+/// in-place field write compiles. Exercises the trait emit + self-slot deref.
+#[test]
+fn mut_self_trait_method_field_assign() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+trait Bumpable {
+    fn bump(mut self)
+}
+struct Counter {
+    n: Int
+}
+impl Counter: Bumpable {
+    fn bump(mut self) {
+        self.n = self.n + 1
+    }
+}
+fn main() {
+    c: Counter := Counter { n: 0 }
+    c.bump()
+    c.bump()
+    print(c.n)
+}
+";
+    let (code, stdout) = build_and_run("tir_mut_self_trait", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "2\n");
+}

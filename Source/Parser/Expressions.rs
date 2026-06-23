@@ -710,6 +710,10 @@ impl<'a> Parser<'a> {
                 span,
                 kind: crate::AST::IndexKind::Unknown,
             }),
+            // D-MUTSELF1: a field-access target `place.field = v` (the headline being
+            // `self.field = v` in a `mut self` method). Sema gates whether the root is
+            // mutable (E0205); the parser only records the place.
+            Expr::Field(base, field, span) => Ok(LValue::Field { base, field, span }),
             other => Err(Diagnostic::error(
                 "E0003",
                 "this value can't be assigned to".to_string(),

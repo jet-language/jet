@@ -153,6 +153,7 @@ before continuing.
 | E0202 | sema  | `mut` required at call site               |
 | E0203 | sema  | `take` on a non-consuming parameter       |
 | E0204 | sema  | same value used while `mut` is active in one call |
+| E0205 | sema  | `self.field = v` in a non-`mut self` method (D-MUTSELF1) |
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | multiple unlabeled `ref` fields           |
 | E0208 | sema  | `*` outside `unsafe`                      |

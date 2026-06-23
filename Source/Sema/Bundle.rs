@@ -1011,6 +1011,8 @@ pub(crate) fn collect_core_lvalue(lv: &LValue, imports: &HashMap<String, String>
             collect_core_expr(base, imports, used);
             collect_core_expr(index, imports, used);
         }
+        // D-MUTSELF1: `place.field = v` — the base place may use a core import.
+        LValue::Field { base, .. } => collect_core_expr(base, imports, used),
     }
 }
 

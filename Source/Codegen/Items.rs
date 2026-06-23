@@ -348,7 +348,14 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
         .iter()
         .map(|p| {
             if p.name == Syntax::KW_SELF {
-                "&self".to_string()
+                // D-MUTSELF1: honor the receiver convention so a `mut self` trait
+                // method gets `&mut self` (its body may mutate `self`); matches the
+                // trait declaration (emit_trait_def).
+                match p.convention {
+                    AccessConvention::Read => "&self".to_string(),
+                    AccessConvention::Mutate => "&mut self".to_string(),
+                    AccessConvention::Move => "self".to_string(),
+                }
             } else {
                 // No underscore prefix — the body references the same mangled name.
                 format!(
@@ -373,11 +380,13 @@ fn emit_trait_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, inden
     let mut env: HashMap<String, Slot> = HashMap::new();
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
+            // D-MUTSELF1: a `mut self` trait method's receiver is `&mut self`, so its
+            // slot derefs (`(*self)`) — `self.field = v` → `((*self)).field = v`.
             env.insert(
                 p.name.clone(),
                 Slot {
                     rust_name: "self".to_string(),
-                    deref: false,
+                    deref: matches!(p.convention, AccessConvention::Mutate),
                     jet_ty: Some(Type::Named(type_name.to_string())),
                 },
             );
@@ -454,11 +463,15 @@ fn emit_method(cx: &Cx, type_name: &str, f: &Func, out: &mut String, indent: usi
     let mut env: HashMap<String, Slot> = HashMap::new();
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
+            // D-MUTSELF1: a `mut self` receiver is `&mut Self`, so its slot derefs —
+            // `self.field = v` renders `(*self).field = v` and whole-`self` `self =
+            // New{}` renders `*self = New{}` (the prior I2 hole). `self`/`take self`
+            // are by-ref/by-value with no deref.
             env.insert(
                 Syntax::KW_SELF.to_string(),
                 Slot {
                     rust_name: "self".to_string(),
-                    deref: false,
+                    deref: matches!(p.convention, AccessConvention::Mutate),
                     jet_ty: None,
                 },
             );

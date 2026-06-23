@@ -19,9 +19,16 @@ checking; codegen consumes TIR and is a pure, decision-free translator.
 
 The phased coverage keeps exposing pre-existing codegen bugs (the gate routes around
 them so they don't regress, but they should be fixed independently of c109):
-- **`mut self` mutation is broken.** `self.field = v` is E0003 (field-assign isn't a Jet
-  construct) and `self = v` emits `self = …` on `&mut user_T` → rustc E0308. So a `mut self`
-  method can today only read/return. (Phase 7.)
+- **`mut self` mutation is broken. FIXED (D-MUTSELF1).** Was: `self.field = v` is E0003
+  (field-assign isn't a Jet construct) and `self = v` emits `self = …` on `&mut user_T` →
+  rustc E0308, so a `mut self` method could only read/return. Now: a new `LValue::Field`
+  parser form admits `self.field = v` (and S17 `self.field += v`); the `mut self` self-slot
+  carries `deref: true`, so field-assign emits `((*self)).field = v` and whole-`self`
+  `self = New{}` emits `(*self) = New{}` (the I2 hole closed). The same write in a non-`mut`
+  method is the new ownership-voice error **E0205**. Self-mutating methods now route through
+  the TIR (the `stmt_assigns_self` exclusion is gone); `mut self` also works through trait
+  impls — the trait decl + impl emit + TIR trait-method emit now render `&mut self` per the
+  receiver convention (was hardcoded `&self`). Byte-parity verified across the example suite.
 - **Builtin-name method collision.** A user no-arg method named `get`/`len`/etc. is
   mis-dispatched by `emit_builtin_method` (name-keyed, not receiver-typed) on the AST path.
   (Phases 6–7.)
@@ -294,10 +301,12 @@ everything, the AST codegen path is deleted (final phase).
   field out (the common "getter returning a String field") stays on the AST path until
   **Phase 6/7** make the clone fact total. This is the right seam — the clone decision lives
   in sema's elaboration, not codegen.
-- **Field assignment `s.field = value` is not a Jet construct.** `expr_to_lvalue`
-  (Source/Parser/Expressions.rs) only admits `Ident`/`Index`; `LValue` has no `Field`
-  variant; a field assign is rejected at parse time (E0003). Struct mutation is method-only
-  (`mut self`) — a Phase 7 concern. There was nothing to lower for "field assignment."
+- **Field assignment `s.field = value` (D-MUTSELF1).** `expr_to_lvalue`
+  (Source/Parser/Expressions.rs) now admits a field-access target as `LValue::Field`, so
+  `self.field = v` parses (was E0003). Sema gates the root place (E0205 when it isn't a
+  `mut self` / `:=` / `mut`); the `mut self` slot derefs so codegen emits `((*self)).field
+  = v`. Self-mutating methods now route through the TIR (the field-assign lowers to a plain
+  `TStmt::Assign` over the resolved place string).
 - **A struct-field operand must not enable the overflow trap.** The AST `operand_is_integer`
   resolves a field read to `None` (`expr_jet_ty` has no `Field` arm), so `p.x + p.y` emits a
   plain `+`, never `jet_add` — even though both fields are `Int`. The TIR's `overflow` flag

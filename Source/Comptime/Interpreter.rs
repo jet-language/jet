@@ -482,6 +482,12 @@ impl<'a> Interp<'a> {
                 scope.insert(bname.clone(), container);
                 Ok(())
             }
+            // D-MUTSELF1: a field-assignment `place.field = v`. The comptime
+            // interpreter has no struct-field mutation model — report it unsupported
+            // rather than silently dropping the write.
+            crate::AST::LValue::Field { span, .. } => {
+                Err(unsupported("this field assignment", *span))
+            }
         }
     }
 

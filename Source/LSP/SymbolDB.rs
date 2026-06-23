@@ -625,6 +625,8 @@ fn collect_lvalue(lv: &AST::LValue, mp: &str, db: &mut SymbolDB) {
             collect_expr(base, mp, db);
             collect_expr(index, mp, db);
         }
+        // D-MUTSELF1: `place.field = v` — record references in the base place.
+        AST::LValue::Field { base, .. } => collect_expr(base, mp, db),
     }
 }
 

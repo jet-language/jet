@@ -443,6 +443,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Assign { target, .. } => match target {
             LValue::Local { name_span, .. } => name_span.start,
             LValue::Index { span, .. } => span.start,
+            LValue::Field { base, .. } => base.span().start,
         },
         Stmt::Return(_, s) => s.start,
         Stmt::If(i) => i.span.start,

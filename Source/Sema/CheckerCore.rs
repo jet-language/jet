@@ -685,6 +685,85 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
+                    // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place
+                    // must be a CHANGEABLE place: a `mut self` receiver, or a `:=`/`mut`
+                    // local. A non-`mut` `self` (shared-read receiver) or a `@=`/shared
+                    // binding is E0205, pointed at the assignment, with a "write the
+                    // receiver as `mut self`" / "make it changeable" fix (owner Q1).
+                    LValue::Field { base, field, span } => {
+                        self.borrow_ctx = true;
+                        let base_ty = self.infer(base);
+                        // Validate the field exists and get its type (emits E0302 on a
+                        // bad field). The value's type must match the field type (E0108).
+                        if let Some(bt) = &base_ty {
+                            if let Some(ft) = self.field_type(bt, field, *span) {
+                                if let Some(vt) = &vt {
+                                    if *vt != ft && ft != Type::Named(String::new()) {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0108",
+                                            format!(
+                                                "field `{}` holds {}, but this value is {}",
+                                                field,
+                                                ft.show(),
+                                                vt.show()
+                                            ),
+                                            "a field keeps one type for its whole life"
+                                                .to_string(),
+                                            type_fix_hint(&ft, vt),
+                                            Some(value.span()),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        // The root place must be changeable. The headline is `self`:
+                        // a `mut self` receiver (param_conv == Mutate) may be mutated;
+                        // a shared-read `self`, or any non-`mut` local, may not.
+                        if let Some(root) = expr_root_ident(base) {
+                            let root = root.to_string();
+                            if let Some(info) = self.lookup(&root) {
+                                if !info.mutable {
+                                    let is_self = root == Syntax::KW_SELF;
+                                    let what = if is_self {
+                                        format!(
+                                            "can't change `{}` through a shared `{}` receiver",
+                                            field,
+                                            Syntax::KW_SELF
+                                        )
+                                    } else {
+                                        format!("can't change `{}` — `{}` isn't changeable", field, root)
+                                    };
+                                    let fix = if is_self {
+                                        format!(
+                                            "write the receiver as `{} {}` so the method may change it",
+                                            Syntax::KW_MUTATE,
+                                            Syntax::KW_SELF
+                                        )
+                                    } else if info.param_conv.is_some() {
+                                        format!(
+                                            "mark the parameter `{} {}: {}` if the function should change it",
+                                            Syntax::KW_MUTATE,
+                                            root,
+                                            info.ty.name()
+                                        )
+                                    } else {
+                                        format!(
+                                            "declare it with `{} {} ...` so it can change",
+                                            root,
+                                            Syntax::SIGIL_BIND_MUT
+                                        )
+                                    };
+                                    self.diags.push(Diagnostic::error(
+                                        "E0205",
+                                        what,
+                                        "while something is being changed in place, the place that owns it must be changeable".to_string(),
+                                        fix,
+                                        Some(*span),
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Stmt::Expr(expr) => {

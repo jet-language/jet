@@ -210,6 +210,13 @@ impl Circle {
 ```
 
 - **`self`** is the receiver; prefix with `mut` or `take` like any parameter.
+- **Self-mutation (D-MUTSELF1):** inside a **`mut self`** method the receiver may be
+  changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
+  S17), or reassign the whole receiver (`self = New{…}`). No new syntax (a `mut`
+  parameter is already a valid assignment LHS). The same write in a non-`mut self`
+  method (a shared-read receiver) is **E0205**, pointed at the assignment with a "write
+  the receiver as `mut self`" fix. Calling a `mut self` method needs a changeable
+  receiver binding (`:=`/`mut`), enforced at the call site by E0202.
 - Invoke with **`c.area()`** (not `area(c)`).
 - Methods may live **inside** the type **or** in **`impl Type { }`** — same rules either way.
 - Static methods omit `self` (e.g. `Circle.unit()`).

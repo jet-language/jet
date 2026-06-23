@@ -372,6 +372,8 @@ pub(crate) fn lvalue_refs_name(lv: &LValue, name: &str) -> bool {
         LValue::Index { base, index, .. } => {
             expr_refs_name(base, name) || expr_refs_name(index, name)
         }
+        // D-MUTSELF1: `place.field = v` references whatever the base place references.
+        LValue::Field { base, .. } => expr_refs_name(base, name),
     }
 }
 

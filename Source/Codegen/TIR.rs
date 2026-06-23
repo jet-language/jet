@@ -96,11 +96,12 @@ pub(crate) enum TFuncKind {
     /// c109 Phase 12: a trait-impl method inside `impl Trait for user_<T> { … }` (the
     /// caller `emit_trait_impl`/`emit_external_trait_impl` opened the block). Distinct
     /// from an inherent `Method`: the method name is BARE (the trait owns it — no
-    /// `user_` mangle), there is NO `pub`, and the receiver is ALWAYS `&self`
-    /// (`emit_trait_method` ignores the source convention). `is_unsafe` reproduces the
-    /// `unsafe fn` prefix for an `@unsafe fn` trait method (S58/D-LL1 — the body may
-    /// use gated ops; calling it is already gated to an `@unsafe` block in sema).
-    TraitMethod { is_unsafe: bool },
+    /// `user_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
+    /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`) — D-MUTSELF1: a `mut self`
+    /// trait method gets `&mut self` and may mutate the receiver in place. `is_unsafe`
+    /// reproduces the `unsafe fn` prefix for an `@unsafe fn` trait method (S58/D-LL1 —
+    /// the body may use gated ops; calling it is already gated to an `@unsafe` block).
+    TraitMethod { is_unsafe: bool, self_conv: AccessConvention },
     /// c109 Phase 15: a DELEGATION trait method (`using field`) — `emit_delegation_method`
     /// (Source/Codegen/Items.rs). The whole method is structural: a forwarding call
     /// `(self).<field>.<method>(<args>)` to the delegated field, with the BARE trait
@@ -1275,11 +1276,11 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     if f.params.iter().skip(1).any(|p| p.name == Syntax::KW_SELF) {
         return false;
     }
-    // A `mut self` / `view self` reassignment (`self = …`) is a known AST-path I2
-    // hole (the self slot does not deref on the LHS); the covered subset never
-    // admits an assignment to `self` because `Stmt::Assign` to a `Local` named
-    // `self` would emit the buggy form. Guard it: a body that assigns `self` is out.
-    // (Field assignment `self.field = v` is already E0003 — not a Jet construct.)
+    // D-MUTSELF1: self-mutation in a `mut self` method is now FULLY lowered — the
+    // `mut self` slot derefs (`(*self)`), so whole-`self` `self = New{}` emits
+    // `(*self) = New{}` and `self.field = v` emits `((*self)).field = v`, both
+    // byte-for-byte with the AST path (the prior I2 hole is closed). The covered
+    // subset therefore admits both, and the old `stmt_assigns_self` exclusion is gone.
     //
     // Non-self params + the return type must be covered value types (Self resolves
     // to the owning type). c109 Phase 23: a default param value is covered (sema fills
@@ -1297,16 +1298,13 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     // `self` is a binding in scope for the body (its field reads + the implicit
     // match subject). Non-self params join it.
     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    // The body must be entirely in-subset AND never assign to `self`.
-    f.body.iter().all(|s| {
-        !stmt_assigns_self(s) && stmt_in_subset(s, cx, &mut locals)
-    })
+    f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
 /// c109 Phase 12: is this TRAIT-IMPL method (a method of `impl Trait for type_name`)
 /// fully inside the TIR subset? Distinct from `tir_covers_method` because the trait
 /// method emits via a different function (`emit_trait_method`): bare name, no `pub`,
-/// always `&self`, self slot `jet_ty: Some(Type::Named(type_name))`. Same rule —
+/// receiver per convention (D-MUTSELF1), self slot `jet_ty: Some(Type::Named(type_name))`. Same rule —
 /// **exclude on any doubt**. The owning type must be a covered struct/enum; the body
 /// must be in-subset and never reassign `self`.
 ///
@@ -1314,7 +1312,7 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
 ///  - `is_unsafe` (`@unsafe fn`) is excluded — its body may use gated pointer ops the
 ///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
 ///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
-///    static trait method, rare; exclude it — the receiver form is fixed at `&self`).
+///    static trait method, rare; exclude it — the emit hook always renders a receiver).
 pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
     // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
@@ -1342,9 +1340,9 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
     if struct_is_generic(type_name, cx) {
         return false;
     }
-    // A trait method must have `self` as its FIRST parameter (the receiver `&self`).
-    // A trait method with no `self` (static trait fn) emits no receiver — exclude it
-    // (the emit hook always renders `&self`).
+    // A trait method must have `self` as its FIRST parameter (the receiver `&self`/
+    // `&mut self`/`self` per convention). A trait method with no `self` (static trait
+    // fn) emits no receiver — exclude it (the emit hook always renders a receiver).
     let Some(first) = f.params.first() else {
         return false;
     };
@@ -1368,9 +1366,9 @@ pub(crate) fn tir_covers_trait_method(f: &Func, type_name: &str, cx: &Cx) -> boo
         }
     }
     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    f.body
-        .iter()
-        .all(|s| !stmt_assigns_self(s) && stmt_in_subset(s, cx, &mut locals))
+    // D-MUTSELF1: self-mutation is fully lowered (the `mut self` slot derefs), so a
+    // trait method that assigns `self` / `self.field` is now covered like any other.
+    f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
 /// Resolve a `Self` type reference to the owning concrete type. Other types pass
@@ -1381,35 +1379,6 @@ fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
     match ty {
         Type::Named(n) if n == "Self" => Type::Named(type_name.to_string()),
         _ => ty.clone(),
-    }
-}
-
-/// True if any statement in this (recursively walked) tree assigns to a local
-/// named `self`. Such an assignment is the known AST-path I2 hole for `mut self`
-/// (the self slot does not deref on the LHS), so the gate excludes the whole
-/// method. Only the constructs the subset already admits need be walked.
-fn stmt_assigns_self(s: &Stmt) -> bool {
-    match s {
-        Stmt::Assign { target: LValue::Local { name, .. }, .. } => name == Syntax::KW_SELF,
-        Stmt::Assign { .. } => false,
-        Stmt::If(ifs) => {
-            ifs.then_body.iter().any(stmt_assigns_self)
-                || match &ifs.else_branch {
-                    Some(ElseBranch::Else(body)) => body.iter().any(stmt_assigns_self),
-                    Some(ElseBranch::ElseIf(next)) => stmt_assigns_self(&Stmt::If((**next).clone())),
-                    None => false,
-                }
-        }
-        Stmt::Loop { body, .. } | Stmt::While { body, .. } | Stmt::For { body, .. } => {
-            body.iter().any(stmt_assigns_self)
-        }
-        Stmt::Switch { arms, else_body, .. } => {
-            arms.iter().any(|a| a.body.iter().any(stmt_assigns_self))
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| b.iter().any(stmt_assigns_self))
-        }
-        _ => false,
     }
 }
 
@@ -2085,6 +2054,13 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                     && expr_in_subset(base, cx, locals)
                     && expr_in_subset(index, cx, locals)
                     && expr_in_subset(value, cx, locals)
+            }
+            // D-MUTSELF1: a field-assignment `place.field = v`. The base place (a
+            // field-read expr, e.g. `self`) and the value must both be in-subset; the
+            // place is rendered through the same field-read lowering, so its
+            // resolution is total. Compound ops (`+=`, S17) ride the same path.
+            LValue::Field { base, .. } => {
+                expr_in_subset(base, cx, locals) && expr_in_subset(value, cx, locals)
             }
         },
         Stmt::Return(Some(e), _) => expr_in_subset(e, cx, locals),
@@ -4436,8 +4412,16 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut is_static = true;
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
-            // The self slot: place `self`, no deref, type None (parity with emit_method).
-            env.bind(Syntax::KW_SELF, "self".to_string(), None);
+            // The self slot, parity with `emit_method`: place `self`, type None. A
+            // `mut self` receiver is `&mut Self`, so its place DEREFS (`(*self)`) —
+            // `self.field = v` → `((*self)).field = v`, whole-`self` `self = New{}` →
+            // `(*self) = New{}` (D-MUTSELF1). `self`/`take self` carry no deref.
+            let place = if matches!(p.convention, AccessConvention::Mutate) {
+                "(*self)".to_string()
+            } else {
+                "self".to_string()
+            };
+            env.bind(Syntax::KW_SELF, place, None);
             self_conv = Some(p.convention);
             is_static = false;
             continue;
@@ -4484,13 +4468,21 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.view_return = f.is_view_return;
     let mut params = Vec::new();
+    let mut self_conv = AccessConvention::Read;
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
-            // The self slot: place `self`, no deref, type `Some(Named(type_name))` —
-            // EXACTLY `emit_trait_method`'s slot (NOT `None` like `emit_method`).
+            self_conv = p.convention;
+            // The self slot, EXACTLY `emit_trait_method`'s: type `Some(Named(type_name))`
+            // (NOT `None` like `emit_method`). D-MUTSELF1: a `mut self` receiver is
+            // `&mut self`, so its place DEREFS (`(*self)`); `self`/`take self` do not.
+            let place = if matches!(p.convention, AccessConvention::Mutate) {
+                "(*self)".to_string()
+            } else {
+                "self".to_string()
+            };
             env.bind(
                 Syntax::KW_SELF,
-                "self".to_string(),
+                place,
                 Some(Type::Named(type_name.to_string())),
             );
             continue;
@@ -4516,6 +4508,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
+            self_conv,
         },
     }
 }
@@ -4783,6 +4776,20 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     index: index_t,
                     is_map: matches!(kind, IndexKind::Map),
                     value: value_t,
+                }
+            }
+            // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place is the
+            // field READ lowered to its resolved Rust string (`((*self)).field` once
+            // the `mut self` slot derefs), reusing the same `Expr::Field` lowering the
+            // read path uses — byte-for-byte the AST `LValue::Field` form. Carried as a
+            // plain `TStmt::Assign` so the `op` compound form rides the shared emit.
+            LValue::Field { base, field, span } => {
+                let field_expr = Expr::Field(base.clone(), field.clone(), *span);
+                let place = emit_tir_expr(&lower_expr(&field_expr, cx, env), cx);
+                TStmt::Assign {
+                    place,
+                    op: *op,
+                    value: lower_expr(value, cx, env),
                 }
             }
         },
@@ -7928,7 +7935,9 @@ pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
     match &tir.kind {
         TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
         TFuncKind::Method { self_conv } => emit_tir_method(tir, *self_conv, cx, out),
-        TFuncKind::TraitMethod { is_unsafe } => emit_tir_trait_method(tir, *is_unsafe, cx, out),
+        TFuncKind::TraitMethod { is_unsafe, self_conv } => {
+            emit_tir_trait_method(tir, *is_unsafe, *self_conv, cx, out)
+        }
         TFuncKind::Delegation { sig, fwd, has_return } => {
             emit_tir_delegation(tir, sig, fwd, *has_return, cx, out)
         }
@@ -8016,7 +8025,7 @@ fn emit_tir_method(tir: &TFunc, self_conv: Option<AccessConvention>, cx: &Cx, ou
 /// Byte-identical to `emit_trait_method` (Source/Codegen/Items.rs): a BARE method name
 /// (no `user_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
 /// an `unsafe ` prefix iff the source was an `@unsafe fn`.
-fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, cx: &Cx, out: &mut String) {
+fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, self_conv: AccessConvention, cx: &Cx, out: &mut String) {
     let indent = 1;
     let pad = "    ".repeat(indent);
     let ret_clause = match &tir.ret {
@@ -8032,8 +8041,14 @@ fn emit_tir_trait_method(tir: &TFunc, is_unsafe: bool, cx: &Cx, out: &mut String
         }
         None => String::new(),
     };
-    // The receiver is ALWAYS `&self` (the trait method ignores the source convention).
-    let mut params: Vec<String> = vec!["&self".to_string()];
+    // D-MUTSELF1: the receiver honors the source convention — `&self` / `&mut self` /
+    // `self` — matching `emit_trait_method` and the trait declaration (emit_trait_def).
+    let self_recv = match self_conv {
+        AccessConvention::Read => "&self",
+        AccessConvention::Mutate => "&mut self",
+        AccessConvention::Move => "self",
+    };
+    let mut params: Vec<String> = vec![self_recv.to_string()];
     for (rust_name, ty, conv) in &tir.params {
         params.push(format!("{}: {}", rust_name, rust_param_type(cx, *conv, ty)));
     }
@@ -9958,11 +9973,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_self_reassignment_method() {
-        // A `mut self` method that reassigns `self` (`self = …`) is a known AST-path
-        // I2 hole (the self slot doesn't deref on the LHS) — the gate excludes it.
+    fn covers_self_reassignment_method() {
+        // D-MUTSELF1: a `mut self` method that reassigns `self` (`self = …`) is NOW
+        // covered — the `mut self` slot derefs (`(*self)`), so the LHS lowers to
+        // `(*self) = …` (the prior AST-path I2 hole is closed).
         let src = "struct Acc {\n n: Int\n fn reset(mut self) {\n self = Acc { n: 0 }\n }\n}\n";
-        assert!(!covers_method(src, "Acc", "reset"));
+        assert!(covers_method(src, "Acc", "reset"));
+    }
+
+    #[test]
+    fn covers_self_field_assign_method() {
+        // D-MUTSELF1: a `mut self` method assigning a field (`self.field = v`, S17
+        // compound `+=` too) is covered — lowers to `((*self)).field = v`.
+        let src = "struct Acc {\n n: Int\n fn bump(mut self) {\n self.n = self.n + 1\n }\n}\n";
+        assert!(covers_method(src, "Acc", "bump"));
+        let compound = "struct Acc {\n n: Int\n fn bump(mut self) {\n self.n += 1\n }\n}\n";
+        assert!(covers_method(compound, "Acc", "bump"));
     }
 
     #[test]

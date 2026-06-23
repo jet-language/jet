@@ -28,6 +28,7 @@ impl<'a> Fmt<'a> {
             } => {
                 self.fmt_lvalue(target);
                 if let Some(op) = op {
+                    self.write(" ");
                     self.write(compound_spell(*op));
                 } else {
                     self.write(" =");
@@ -386,6 +387,12 @@ impl<'a> Fmt<'a> {
                 self.write("[");
                 self.fmt_expr(index, Prec::OrFallback);
                 self.write("]");
+            }
+            // D-MUTSELF1: `place.field` field-assignment target.
+            LValue::Field { base, field, .. } => {
+                self.fmt_expr(base, Prec::Postfix);
+                self.write(".");
+                self.write(field);
             }
         }
     }

@@ -472,7 +472,15 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
             .iter()
             .map(|p| {
                 if p.name == Syntax::KW_SELF {
-                    "&self".to_string()
+                    // D-MUTSELF1: a `mut self` trait method declares `&mut self` so its
+                    // impl may mutate the receiver in place (`(*self).field = v`); the
+                    // impl side (emit_trait_method) renders the same receiver. `self` /
+                    // `take self` stay `&self` / `self`.
+                    match p.convention {
+                        AccessConvention::Mutate => "&mut self".to_string(),
+                        AccessConvention::Move => "self".to_string(),
+                        AccessConvention::Read => "&self".to_string(),
+                    }
                 } else {
                     // Match the convention applied by emit_trait_method / rust_param_type.
                     let base = rust_type_name(&p.ty);
