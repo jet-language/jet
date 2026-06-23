@@ -173,8 +173,8 @@ impl<'a> Interp<'a> {
                 // c97/D-STRPARSE1: `?` on an `Err` or `null` propagated via
                 // the sentinel — convert to an `Err` return from this callee
                 // so the caller can handle it (e.g. with `??`).
-                let msg = result.unwrap_err().what;
-                Ok(CtValue::Err(Box::new(CtValue::Str(msg))))
+                let msg = d.what.clone();
+                Ok(CtValue::ResErr(Box::new(CtValue::Str(msg))))
             }
             Err(ref d) if d.code == EARLY_RETURN_CODE => {
                 // `?? return expr` inside a function — the return value was
@@ -182,7 +182,7 @@ impl<'a> Interp<'a> {
                 // In practice comptime code rarely uses `?? return` in a callee;
                 // the primary use case is `?? return` at the top-level comptime
                 // binding site where `exec_block` gets it directly.
-                let _ = result.unwrap_err(); // consume
+                let _ = d; // diagnostic already matched; nothing to extract
                 Ok(CtValue::Unit)
             }
             Err(e) => Err(e),

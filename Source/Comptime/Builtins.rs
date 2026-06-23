@@ -96,8 +96,8 @@ pub(super) fn apply_static_type_method(
                 _ => return Some(Err(unsupported("Int.parse with a non-text argument", span))),
             };
             Some(Ok(match s.trim().parse::<i64>() {
-                Ok(n) => CtValue::Ok(Box::new(CtValue::Int(n))),
-                Err(_) => CtValue::Err(Box::new(CtValue::Str(
+                Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
+                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(
                     format!("cannot parse `{}` as an integer", s),
                 ))),
             }))
@@ -108,8 +108,8 @@ pub(super) fn apply_static_type_method(
                 _ => return Some(Err(unsupported("Float.parse with a non-text argument", span))),
             };
             Some(Ok(match s.trim().parse::<f64>() {
-                Ok(f) => CtValue::Ok(Box::new(CtValue::Float(f))),
-                Err(_) => CtValue::Err(Box::new(CtValue::Str(
+                Ok(f) => CtValue::ResOk(Box::new(CtValue::Float(f))),
+                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(
                     format!("cannot parse `{}` as a float", s),
                 ))),
             }))
@@ -291,8 +291,8 @@ pub(super) fn apply_method(
         )),
         // c97/D-STRPARSE1: `.to_int()` — fallible integer parse, returns `Int ? ParseError`.
         (CtValue::Str(s), "to_int") => Ok(match s.trim().parse::<i64>() {
-            Ok(n) => CtValue::Ok(Box::new(CtValue::Int(n))),
-            Err(_) => CtValue::Err(Box::new(CtValue::Str(
+            Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
+            Err(_) => CtValue::ResErr(Box::new(CtValue::Str(
                 format!("cannot parse `{}` as an integer", s),
             ))),
         }),

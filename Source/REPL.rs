@@ -229,6 +229,7 @@ impl Session {
             CtValue::List(_) => "List<Int> @= []",
             CtValue::Map(_) => "Map<String, Int> @= [:]",
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
+            CtValue::ResOk(_) | CtValue::ResErr(_) => return, // skip Result for now
             CtValue::Struct { .. } => {
                 // We can't easily construct a dummy struct; skip sema pre-check
                 // for struct bindings. The interpreter scope still has the value.
@@ -963,6 +964,7 @@ fn type_name(v: &CtValue) -> &'static str {
         CtValue::Struct { .. } => "Struct",
         CtValue::Enum { .. } => "Enum",
         CtValue::Some(_) | CtValue::None(_) => "Option",
+        CtValue::ResOk(_) | CtValue::ResErr(_) => "Result",
         CtValue::Unit => "()",
     }
 }

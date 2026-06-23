@@ -706,12 +706,12 @@ impl<'a> Interp<'a> {
             // c97/D-STRPARSE1: `ok(expr)` — wraps a value in the success arm.
             Expr::Ok(inner, _) => {
                 let v = self.eval(inner, scope)?;
-                Ok(CtValue::Ok(Box::new(v)))
+                Ok(CtValue::ResOk(Box::new(v)))
             }
             // c97/D-STRPARSE1: `err(expr)` — wraps a value in the failure arm.
             Expr::Err(inner, _) => {
                 let v = self.eval(inner, scope)?;
-                Ok(CtValue::Err(Box::new(v)))
+                Ok(CtValue::ResErr(Box::new(v)))
             }
             // c97/D-STRPARSE1: `expr?` — unwrap `ok(v)` to `v`, propagate `err(e)`.
             // For `T?` (Option): unwrap `Some(v)` to `v`, propagate `None` as an
@@ -719,8 +719,8 @@ impl<'a> Interp<'a> {
             Expr::Try(inner, span, _convert) => {
                 let v = self.eval(inner, scope)?;
                 match v {
-                    CtValue::Ok(inner) => Ok(*inner),
-                    CtValue::Err(e) => {
+                    CtValue::ResOk(inner) => Ok(*inner),
+                    CtValue::ResErr(e) => {
                         // Propagate the error through the call stack via sentinel.
                         Err(err_propagate_sentinel(&e.jet_show(), *span))
                     }
@@ -741,7 +741,7 @@ impl<'a> Interp<'a> {
                 let is_absent = if *is_option {
                     matches!(v, CtValue::None(_))
                 } else {
-                    matches!(v, CtValue::Err(_))
+                    matches!(v, CtValue::ResErr(_))
                 };
                 if is_absent {
                     // Evaluate the fallback.
@@ -768,7 +768,7 @@ impl<'a> Interp<'a> {
                 } else {
                     // Value is present/ok — unwrap it.
                     match v {
-                        CtValue::Some(inner) | CtValue::Ok(inner) => Ok(*inner),
+                        CtValue::Some(inner) | CtValue::ResOk(inner) => Ok(*inner),
                         other => Ok(other),
                     }
                 }
