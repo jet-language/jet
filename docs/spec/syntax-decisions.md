@@ -2031,6 +2031,23 @@ through dynamic dispatch. (c66)
 > the whole cluster (D-EFF1 and everything gated on it — D-SCAP1/D-TAINT1/D-DET1/D-TXN1/
 > D-TXN2/D-PROP1) was waiting only on these two sub-questions; the gate is cleared. Build now.
 
+**D-MUTSELF1 — self-mutation in `mut self` methods** *(ratified 2026-06-23, option A)*: a
+`mut self` method may mutate its receiver in place — `self.field = v` (and the compound
+`self.field += v`, S17) lowers to `(*self).field = v` on the `&mut Self` receiver. Whole-`self`
+reassignment `self = New{…}` is likewise sanctioned (lowers to `*self = …`, fixing a prior
+AST-path I2 hole where the `mut self` slot wasn't dereferenced on the LHS). **No new syntax** —
+S17 already admits a `mut` parameter as an assignment LHS, and `mut self` is one. `self.field =
+v` in a non-`mut` method (a shared-read `self`) or a call on a non-`mut` binding is **E0205**,
+pointed at the assignment with a "write the receiver as `mut self`" fix (owner Q1: at the
+assignment, not the signature). The copy-into-a-local write-back form (option B) is **not** a
+parallel sanctioned spelling (owner Q2). Memory-safe by construction — the `mut` borrow
+discipline + rustc verify are unchanged (I1). Rejected: C (functional update via struct-spread,
+needs unratified spread syntax), D (a new `with` keyword for what A does with none), and
+keep-banned. Unblocks deleting the legacy AST codegen path (c109 Phase N). Implementation
+touches: parser lvalue grammar (a new `LValue::Field`), the E0003 lvalue site, the sema
+mut-receiver check (new E0205 + a tests/ui snapshot, I4), codegen `Stmt::Assign` + the self-slot
+`deref` flag, and TIR coverage (drop the `stmt_assigns_self` exclusion).
+
 **D-MIGRATE2A — `add f: T = val`** *(ratified 2026-06-22, option A)*: a migration adds a
 field with a default using the `=` already used for struct-field defaults: `add verified:
 Bool = false`. UNBLOCKED. (c73)

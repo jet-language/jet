@@ -90,3 +90,10 @@ Decision: **A**
 
 **D-ITER1** — Standard lazy iterator-adapter set
 Decision: **A**
+
+---
+
+_submitted 2026-06-23 (presented directly — owner could not access Tower)_
+
+**D-MUTSELF1** — self-mutation in `mut self` methods
+Decision: **A** (direct `self.field = v`; whole-`self` `self = New{}` → `*self =` confirmed). Q1: E0205 points at the assignment. Q2: no option B.
