@@ -993,6 +993,8 @@ pub(crate) enum TBuiltinOp {
     LenString,
     /// `len` on a list/map → `(recv).len() as i64`.
     LenList,
+    /// `is_empty()` on a list/map/string → `(recv).is_empty()` (Bool).
+    IsEmpty,
     /// `push(x)` → `(recv).push(a0)`.
     Push,
     /// `pop()` → `(recv).pop()`.
@@ -3795,7 +3797,7 @@ fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
         // List + map shared.
-        ("len", 0) | ("clear", 0)
+        ("len", 0) | ("is_empty", 0) | ("clear", 0)
         // List-only.
         | ("push", 1) | ("pop", 0) | ("first", 0) | ("last", 0)
         | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)
@@ -3813,15 +3815,10 @@ fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
         | ("to_string", 0)
     )
-    // NOTE: `is_empty` is deliberately EXCLUDED. Sema's `Collections::
-    // builtin_method_return` types it as `Int` (a latent bug — it should be `Bool`),
-    // so `x := list.is_empty()` emits `let x: i64 = (…).is_empty()` (bool ≠ i64 →
-    // rustc E0308) on BOTH paths, and `if list.is_empty()` is E0110 at sema. The
-    // method is unusable today; the TIR must not *claim* a function that miscompiles
-    // (the Phase-7 `self`-reassignment lesson), so it stays on the AST path. Filed in
-    // the design doc's latent-bug list. `join()` (no separator) is likewise excluded:
-    // sema requires `join(sep)` (E0311 on no-arg), so the no-arg form never reaches
-    // codegen — its AST arm is dead.
+    // NOTE: `is_empty` (now Bool-typed in `Collections::*_method_return` after the
+    // c109 fix; lowered to `TBuiltinOp::IsEmpty`) is covered above. `join()` (no
+    // separator) stays excluded: sema requires `join(sep)` (E0311 on no-arg), so the
+    // no-arg form never reaches codegen — its AST arm is dead.
 }
 
 /// c109 Phase 21: is `(method, nargs)` a Task/Channel/Sender concurrency method
@@ -7779,6 +7776,7 @@ fn resolve_builtin_op(
                 TBuiltinOp::LenList
             }
         }
+        ("is_empty", 0) => TBuiltinOp::IsEmpty,
         ("push", 1) => TBuiltinOp::Push,
         ("pop", 0) => TBuiltinOp::Pop,
         ("insert", 2) => {
@@ -8764,6 +8762,7 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             match op {
                 TBuiltinOp::LenString => format!("jet_char_len(&({}))", recv),
                 TBuiltinOp::LenList => format!("({}).len() as i64", recv),
+                TBuiltinOp::IsEmpty => format!("({}).is_empty()", recv),
                 TBuiltinOp::Push => format!("({}).push({})", recv, a(0)),
                 TBuiltinOp::Pop => format!("({}).pop()", recv),
                 TBuiltinOp::InsertMap => {
@@ -9691,6 +9690,15 @@ mod tests {
     }
 
     #[test]
+    fn covers_is_empty_bool() {
+        // c109 (`is_empty` Bool fix): `is_empty` on a list/map/string is now covered
+        // (`TBuiltinOp::IsEmpty`, Bool result) — it was excluded while sema mistyped it
+        // as `Int`. The `if xs.is_empty()` form must be in-subset.
+        let src = "fn f(xs: [Int]) {\n if xs.is_empty() {\n print(\"e\")\n }\n}\n";
+        assert!(covers(src, "f"));
+    }
+
+    #[test]
     fn covers_generic_fn() {
         // c109 Phase 17: a generic free function whose params/return are type vars is
         // covered — the `<T: Clone>` clause renders at lowering; the body uses the
@@ -10317,13 +10325,12 @@ fn mk() {
     }
 
     #[test]
-    fn rejects_is_empty_builtin() {
-        // `is_empty` is excluded — sema types it `Int` (a latent bug), so it
-        // miscompiles on both paths; the TIR must not claim it.
-        assert!(!is_covered_builtin_name("is_empty", 0));
-        let src = "fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n return 0\n}\n";
-        // The function has a non-covered builtin (`is_empty`), so it is NOT covered.
-        assert!(!covers(src, "f"));
+    fn covers_is_empty_builtin() {
+        // `is_empty` is now Bool-typed (c109 fix) and covered (`TBuiltinOp::IsEmpty`);
+        // a function using it routes through the TIR.
+        assert!(is_covered_builtin_name("is_empty", 0));
+        let src = "fn f(xs: [Int]) -> Int {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
+        assert!(covers(src, "f"));
     }
 
     #[test]

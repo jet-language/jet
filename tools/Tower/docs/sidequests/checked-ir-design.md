@@ -48,13 +48,16 @@ them so they don't regress, but they should be fixed independently of c109):
   c109 fix-first effort.)
 - **`Read`-convention struct params** in some arithmetic/move shapes hit E0507/E0308 on both
   paths (a sema convention-inference gap). (Phase 3.)
-- **`.is_empty()` is typed `Int`, not `Bool`.** `Collections::builtin_method_return`
-  (Source/Collections.rs) returns `Some(Some(Type::Int))` for `is_empty` on a list/map/string.
-  So `e := xs.is_empty()` emits `let e: i64 = (…).is_empty()` (bool ≠ i64 → rustc E0308), and
-  `if xs.is_empty()` is E0110 (Int isn't Bool) at sema. The method is unusable in any real
-  program today — fix is a one-line `Type::Int` → `Type::Bool` in `list_method_return`/
-  `map_method_return`/`string_method_return`. (Phase 9 gates it OUT so the TIR never claims a
-  miscompiling function; both paths miscompile it identically.)
+- **`.is_empty()` is typed `Int`, not `Bool`. FIXED.** Was: `Collections::builtin_method_return`
+  (Source/Collections.rs) returned `Some(Some(Type::Int))` for `is_empty` on a list/map/string, so
+  `e := xs.is_empty()` emitted `let e: i64 = (…).is_empty()` (bool ≠ i64 → rustc E0308) and
+  `if xs.is_empty()` was E0110 (Int isn't Bool) at sema. **Fix:** split `is_empty` from `len` in
+  `list_method_return`/`map_method_return`/`string_method_return` to return `Type::Bool`. With the
+  type fixed, `is_empty` now ROUTES THROUGH THE TIR (`is_covered_builtin_name` admits it; lowered to
+  `TBuiltinOp::IsEmpty` → `(recv).is_empty()`). Covered by tests/tir.rs `is_empty_returns_bool`
+  (build+run, list/map/string + `if` form) and the `covers_is_empty_bool` unit test; byte-parity
+  holds across the example suite (no example uses `.is_empty()`; `len` stays Int). (Phase 9 gated
+  it out while it miscompiled; fixed in the c109 fix-first effort.)
 - **No-arg `.join()` is dead.** `emit_builtin_method` has a `"join" if args.is_empty()` arm,
   but sema requires `join(sep)` (E0311 on no-arg), so that arm never reaches codegen. (Phase 9
   excludes the no-arg form for the same reason.)

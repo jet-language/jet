@@ -166,7 +166,8 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
 
 fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("len" | "is_empty", 0) => Some(Some(Type::Int)),
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
         ("push" | "insert" | "remove" | "reverse" | "sort" | "clear", _) => Some(None),
         ("pop" | "get" | "first" | "last" | "index_of", 0 | 1) => {
             Some(Some(Type::Option(Box::new(inner.clone()))))
@@ -187,7 +188,8 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
 
 fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("len" | "is_empty", 0) => Some(Some(Type::Int)),
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
         ("insert" | "clear", _) => Some(None),
         ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("contains_key", 1) => Some(Some(Type::Bool)),
@@ -200,7 +202,8 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
 
 fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("len" | "is_empty", 0) => Some(Some(Type::Int)),
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
         ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
         ("trim" | "to_upper" | "to_lower" | "to_string", 0) => Some(Some(Type::String)),
         ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),

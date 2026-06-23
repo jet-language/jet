@@ -3824,3 +3824,37 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "42\n7\n");
 }
+
+/// c109 (`is_empty` Bool fix): `Collections::*_method_return` typed `is_empty` as
+/// `Int`, so `e := xs.is_empty()` emitted `let e: i64 = (…).is_empty()` (bool ≠ i64
+/// → rustc E0308) and `if xs.is_empty()` was E0110 at sema. The fix returns `Bool`;
+/// `is_empty` is now covered (`TBuiltinOp::IsEmpty`) on list/map/string receivers.
+#[test]
+fn is_empty_returns_bool() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn check(xs: [Int]) {
+    if xs.is_empty() {
+        print(\"empty\")
+    } else {
+        print(\"not empty\")
+    }
+}
+fn main() {
+    e @= [1, 2, 3].is_empty()
+    print(e)
+    m @= [1: 2]
+    print(m.is_empty())
+    s @= \"hi\"
+    print(s.is_empty())
+    empty: [Int] @= []
+    check(empty)
+    check([9])
+}
+";
+    let (code, stdout) = build_and_run("tir_is_empty", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "false\nfalse\nfalse\nempty\nnot empty\n");
+}
