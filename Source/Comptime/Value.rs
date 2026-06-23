@@ -31,6 +31,10 @@ pub enum CtValue {
     },
     Some(Box<CtValue>),
     None(Type),
+    /// c97/D-STRPARSE1: `ok(v)` — the success arm of `T ? E` at comptime.
+    Ok(Box<CtValue>),
+    /// c97/D-STRPARSE1: `err(e)` — the failure arm of `T ? E` at comptime.
+    Err(Box<CtValue>),
     Unit,
 }
 
@@ -103,6 +107,14 @@ impl CtValue {
             }
             CtValue::Some(inner) => Type::Option(Box::new(inner.jet_type())),
             CtValue::None(t) => Type::Option(Box::new(t.clone())),
+            CtValue::Ok(inner) => Type::Result {
+                ok: Box::new(inner.jet_type()),
+                err: Box::new(Type::Named("ParseError".to_string())),
+            },
+            CtValue::Err(e) => Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(e.jet_type()),
+            },
             CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
                 Type::Named(type_name.clone())
             }
@@ -136,6 +148,8 @@ impl CtValue {
             }
             CtValue::Some(v) => v.jet_show(),
             CtValue::None(_) => "null".to_string(),
+            CtValue::Ok(v) => v.jet_show(),
+            CtValue::Err(_) => "err".to_string(),
             CtValue::Struct { type_name, fields } => {
                 let parts: Vec<String> = fields
                     .iter()
@@ -256,6 +270,16 @@ impl CtValue {
                 out.push(')');
             }
             CtValue::None(_) => out.push_str("None"),
+            CtValue::Ok(v) => {
+                out.push_str("ok(");
+                v.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::Err(e) => {
+                out.push_str("err(");
+                e.render_pretty_inner(out, depth);
+                out.push(')');
+            }
             CtValue::Unit => out.push_str("()"),
         }
     }
@@ -337,6 +361,8 @@ impl CtValue {
             }
             CtValue::Some(v) => v.to_json(),
             CtValue::None(_) => "null".to_string(),
+            CtValue::Ok(v) => format!("{{\"ok\":{}}}", v.to_json()),
+            CtValue::Err(e) => format!("{{\"err\":{}}}", e.to_json()),
             CtValue::Unit => "null".to_string(),
         }
     }
@@ -378,6 +404,8 @@ impl CtValue {
             }
             CtValue::Some(v) => format!("Some({})", v.serialize()),
             CtValue::None(_) => "None".to_string(),
+            CtValue::Ok(v) => format!("Ok({})", v.serialize()),
+            CtValue::Err(e) => format!("Err({})", e.serialize()),
             CtValue::Struct { type_name, fields } => {
                 let parts: Vec<String> = fields
                     .iter()

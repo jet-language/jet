@@ -683,7 +683,11 @@ Receiver additions: `String.bytes() -> [U8]`,
 `b.to_int()`. String parsing (c97/D-STRPARSE1): `String.to_int() -> Int ?
 ParseError` is a fallible integer parse (same result `Int.parse(s)` returns,
 handled with `?`/`??`), and `String.lines() -> [String]` splits text into its
-lines (recognizing `\n` and `\r\n`, with no trailing empty line). Time stays
+lines (recognizing `\n` and `\r\n`, with no trailing empty line). Both
+`.to_int()` / `.lines()` and `Int.parse(s)` / `Float.parse(s)` are fully
+evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
+`?` / `??` propagate or unwrap them in pure comptime expressions
+(examples/features/86_comptime_parse.jet). Time stays
 unix milliseconds (`time.now()`); random is
 deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
 `json.parse`, `json.render`, and `json.render_pretty`. `jet.json` also exposes

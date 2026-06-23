@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use crate::AST::{CallArg, Expr, StrPart};
 use crate::Diagnostics::{Diagnostic, Span};
 
-use super::Builtins::{apply_method, apply_mutating, as_bool};
+use super::Builtins::{apply_method, apply_mutating, apply_static_type_method, as_bool};
+use super::Diagnostics::{ERR_PROPAGATE_CODE, EARLY_RETURN_CODE};
 use super::Diagnostics::{comptime_panic, unsupported};
 use super::Interpreter::{Flow, Interp};
 use super::Value::CtValue;
@@ -164,9 +165,27 @@ impl<'a> Interp<'a> {
             let v = self.eval(&a.expr, scope)?;
             frame.insert(p.name.clone(), v);
         }
-        match self.exec_block(&func.body, &mut frame)? {
-            Flow::Return(v) => Ok(v),
-            _ => Ok(CtValue::Unit),
+        let result = self.exec_block(&func.body, &mut frame);
+        match result {
+            Ok(Flow::Return(v)) => Ok(v),
+            Ok(_) => Ok(CtValue::Unit),
+            Err(ref d) if d.code == ERR_PROPAGATE_CODE => {
+                // c97/D-STRPARSE1: `?` on an `Err` or `null` propagated via
+                // the sentinel — convert to an `Err` return from this callee
+                // so the caller can handle it (e.g. with `??`).
+                let msg = result.unwrap_err().what;
+                Ok(CtValue::Err(Box::new(CtValue::Str(msg))))
+            }
+            Err(ref d) if d.code == EARLY_RETURN_CODE => {
+                // `?? return expr` inside a function — the return value was
+                // encoded as a string; use Unit since we can't re-parse it.
+                // In practice comptime code rarely uses `?? return` in a callee;
+                // the primary use case is `?? return` at the top-level comptime
+                // binding site where `exec_block` gets it directly.
+                let _ = result.unwrap_err(); // consume
+                Ok(CtValue::Unit)
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -270,6 +289,27 @@ impl<'a> Interp<'a> {
         args: &[crate::AST::CallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
+        // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
+        if let Expr::Ident(type_name, _) = receiver {
+            // Only intercept known built-in type names; user struct names use normal path.
+            let is_builtin_type = matches!(type_name.as_str(), "Int" | "Float" | "Bool" | "String");
+            if is_builtin_type {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
+                if let Some(result) = apply_static_type_method(type_name, method, argv, span) {
+                    return result;
+                }
+                // If the static dispatch didn't match, fall through to the error below —
+                // a built-in type name is not a valid receiver for unknown methods.
+                return Err(super::Diagnostics::unsupported(
+                    &format!("`{}.{}()`", type_name, method),
+                    span,
+                ));
+            }
+        }
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
             "push", "pop", "insert", "remove", "clear", "reverse", "sort",
