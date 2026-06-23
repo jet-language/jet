@@ -29,9 +29,23 @@ them so they don't regress, but they should be fixed independently of c109):
   the TIR (the `stmt_assigns_self` exclusion is gone); `mut self` also works through trait
   impls — the trait decl + impl emit + TIR trait-method emit now render `&mut self` per the
   receiver convention (was hardcoded `&self`). Byte-parity verified across the example suite.
-- **Builtin-name method collision.** A user no-arg method named `get`/`len`/etc. is
-  mis-dispatched by `emit_builtin_method` (name-keyed, not receiver-typed) on the AST path.
-  (Phases 6–7.)
+- **Builtin-name method collision. FIXED.** Was: a user method named `get`/`len`/etc. was
+  mis-dispatched by `emit_builtin_method` (name-keyed, not receiver-typed) on the AST path —
+  `b.get()` emitted index garbage (`(b).get( as usize)`) and `b.len()` → rustc E0599. **Fix:**
+  `emit_method_call` now dispatches to the USER method (the `(recv).user_<method>(args)` form)
+  BEFORE `emit_builtin_method` whenever `recv_type == Some(T)` and `(T, method) ∈
+  cx.method_sigs` (a real user method exists). With the AST dispatch fixed, such a method now
+  routes through the TIR: the user-method gate (`method_call_in_subset`) keys on a real
+  `method_sigs` entry instead of excluding any `is_intercepted_method_name` (which over-excluded
+  shadowing methods); the existing user-instance lowering (`recv_type == Some` → `user_<method>`)
+  reproduces it (the builtin lowering branch is `recv_type == None`, so it's never reached). The
+  `clone`/`raw` special forms return earlier in the gate; `snapshot`/`new` fire their AST special
+  cases only for non-instance receivers, so an instance method of that name with a `method_sigs`
+  entry routes to the user method on both paths. (The `new` instance case was the Phase-25 lift.)
+  Covered by tests/tir.rs `user_method_shadowing_builtin_name` (build+run, prints `42`/`7`) and
+  the `covers_user_method_shadowing_builtin_name` unit test (drives `method_call_in_subset` with a
+  synthetic `recv_type`); byte-parity holds across the example suite. (Phases 6–7; fixed in the
+  c109 fix-first effort.)
 - **`Read`-convention struct params** in some arithmetic/move shapes hit E0507/E0308 on both
   paths (a sema convention-inference gap). (Phase 3.)
 - **`.is_empty()` is typed `Int`, not `Bool`.** `Collections::builtin_method_return`

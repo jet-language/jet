@@ -3792,3 +3792,35 @@ pub struct Note {
     assert_eq!(code, 0);
     assert_eq!(stdout, "hi\n");
 }
+
+/// c109 (builtin-name collision): a user method whose name collides with a builtin
+/// (`get`/`len`) was mis-dispatched by `emit_builtin_method` (name-keyed, not
+/// receiver-typed) → `b.get()` emitted garbage, `b.len()` → E0599. The fix dispatches
+/// to the USER method (`user_<method>`) when `recv_type == Some(T)` and `(T, method) ∈
+/// cx.method_sigs`. `main` and both methods route through the TIR.
+#[test]
+fn user_method_shadowing_builtin_name() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Bag {
+    items: [Int]
+
+    fn get(self) -> Int {
+        return 42
+    }
+    fn len(self) -> Int {
+        return 7
+    }
+}
+fn main() {
+    b @= Bag { items: [1, 2, 3] }
+    print(b.get())
+    print(b.len())
+}
+";
+    let (code, stdout) = build_and_run("tir_builtin_collision", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n7\n");
+}

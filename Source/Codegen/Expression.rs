@@ -1648,9 +1648,21 @@ fn emit_method_call(
             return format!("{}user_{}__{}({})", cx.root_prefix, alias, method, arg_str);
         }
     }
+    // A user method that SHADOWS a builtin name (`get`/`len`/… defined on a struct/enum)
+    // must dispatch to the USER method, not be intercepted by `emit_builtin_method` (which
+    // is keyed on the method NAME, not the receiver type — so `b.get()` on a `Bag` with a
+    // `fn get` would otherwise emit collection/index garbage → rustc E0599/parse error). A
+    // real user method exists exactly when `recv_type == Some(T)` and `(T, method)` is in
+    // `cx.method_sigs`. Fall through to the user-method dispatch below.
+    let is_user_method = recv_type
+        .is_some_and(|rt| cx.method_sigs.contains_key(&(rt.to_string(), method.to_string())));
     // Built-in collection/string methods take precedence when they match.
-    if let Some(s) = emit_builtin_method(cx, receiver, method, method_span, args, recv_type, env) {
-        return s;
+    if !is_user_method {
+        if let Some(s) =
+            emit_builtin_method(cx, receiver, method, method_span, args, recv_type, env)
+        {
+            return s;
+        }
     }
     if let Expr::Ident(type_name, _) = receiver {
         if is_json_type_name(type_name) {

@@ -3543,24 +3543,32 @@ fn method_call_in_subset(
     let Some(ty) = recv_type else {
         return false;
     };
-    // A name a core/stdlib/builtin/special lowering would intercept *before* the
-    // user-method dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/alloc
-    // special cases) is excluded — those have bespoke lowering keyed on the method
-    // name, not on `method_sigs`, so routing them through the user-method TIR would
-    // miscompile. Conservative: exclude any name the AST path special-cases.
-    if is_intercepted_method_name(method) {
+    // The method must be a user-defined method on that type (in `method_sigs`). A real
+    // `method_sigs` entry is the TOTAL "this is a user method on `ty`" signal: the AST
+    // `emit_method_call` now dispatches to the user method (`user_<method>`) BEFORE
+    // `emit_builtin_method` whenever `recv_type == Some(T)` and `(T, method) ∈ method_sigs`
+    // (the builtin-name-collision fix), so a user method SHADOWING a builtin name
+    // (`get`/`len`/…) routes here, not through the name-keyed builtin path.
+    let Some(sig) = cx.method_sigs.get(&(ty.clone(), method.to_string())) else {
+        // No user method: a name a core/stdlib/builtin/special lowering would intercept
+        // *before* the user dispatch (`emit_builtin_method`, the `.raw()`/`.snapshot()`/
+        // alloc special cases) has bespoke name-keyed lowering — exclude it (those are
+        // covered by their own shapes, not the user-method TIR).
         return false;
-    }
+    };
+    // A builtin-name method with NO `method_sigs` entry was already excluded above. With a
+    // real user method present, the intercepted-name check (`is_intercepted_method_name`,
+    // still used by the static-call shape) no longer applies — the AST path dispatches to
+    // the user method. The `clone`/`raw` special forms returned earlier in this function;
+    // `snapshot`/`new` fire their AST special cases only for non-instance receivers (an
+    // `expect(...)` call / a type-name ident), so an INSTANCE method of that name with a
+    // `method_sigs` entry reaches here and routes to the user method on BOTH paths.
     // The receiver type must be a covered struct or enum (so the receiver place
     // emits exactly as the AST path does, and the method is a plain user method).
     let recv_ty = Type::Named(ty.clone());
     if !is_covered_struct_ty(&recv_ty, cx) && !is_covered_enum_ty(&recv_ty, cx) {
         return false;
     }
-    // The method must be a user-defined method on that type (in `method_sigs`).
-    let Some(sig) = cx.method_sigs.get(&(ty.clone(), method.to_string())) else {
-        return false;
-    };
     // The receiver expression must itself be in-subset (a covered local/param/field).
     if !expr_in_subset(receiver, cx, locals) {
         return false;
@@ -10071,10 +10079,13 @@ fn mk() {
 
     #[test]
     fn builtin_method_names_are_excluded() {
-        // A user method whose NAME collides with a collection/string builtin
-        // (`len`, `push`, `map`, …) is intercepted by `emit_builtin_method` on the
-        // AST path — the TIR must NOT claim it. `is_intercepted_method_name` is the
-        // guard; these names stay false regardless of the receiver being a user type.
+        // `is_intercepted_method_name` flags every collection/string/special builtin
+        // name (`len`, `push`, `map`, …). It still guards the STATIC call-site shape
+        // (`static_method_call_in_subset`). For an INSTANCE method, the user-method gate
+        // now keys on a real `method_sigs` entry instead (the builtin-name-collision fix —
+        // see `covers_user_method_shadowing_builtin_name`), so a user instance method
+        // SHADOWING a builtin name routes to the user method on both paths. The predicate
+        // contents are unchanged; assert them.
         for name in [
             "len", "push", "pop", "get", "map", "filter", "each", "find", "sort",
             "join", "to_string", "clone", "raw", "snapshot", "new", "to_i32",
@@ -10089,6 +10100,50 @@ fn mk() {
         assert!(!is_intercepted_method_name("bumped"));
         assert!(!is_intercepted_method_name("combine"));
         assert!(!is_intercepted_method_name("code"));
+    }
+
+    #[test]
+    fn covers_user_method_shadowing_builtin_name() {
+        // c109 (builtin-name collision): a user instance method whose name collides with a
+        // builtin (`get`/`len`) now routes through the TIR when a real `method_sigs` entry
+        // exists. The AST `emit_method_call` dispatches such a call to `user_<method>` BEFORE
+        // `emit_builtin_method` (the fix), so the gate admits it. `recv_type` is a sema fact
+        // (`build_cx` alone leaves the call node's `recv_type` empty), so we drive
+        // `method_call_in_subset` directly with a synthetic `Some("Bag")` receiver — exactly
+        // the node sema produces. (The end-to-end build+run + byte-parity in tests/tir.rs is
+        // the authoritative proof; this exercises the gate's user-vs-builtin decision.)
+        let src = "struct Bag {\n items: [Int]\n fn get(self) -> Int {\n return 1\n }\n fn len(self) -> Int {\n return 2\n }\n}\n";
+        let (toks, _) = crate::Lexer::lex(src);
+        let prog = crate::Parser::parse(&toks).expect("parse failed");
+        let cx = build_cx(&prog, src, "test.jet");
+        let sp = crate::Diagnostics::Span { start: 0, end: 0 };
+        let mk = |method: &str| Expr::MethodCall {
+            receiver: Box::new(Expr::Ident("b".to_string(), sp)),
+            method: method.to_string(),
+            method_span: sp,
+            args: Vec::new(),
+            recv_type: Some("Bag".to_string()),
+            resolved_ret: None,
+        };
+        let mut locals = HashSet::new();
+        locals.insert("b".to_string());
+        // Both builtin-name user methods are admitted (a real `method_sigs` entry exists).
+        for m in ["get", "len"] {
+            if let Expr::MethodCall { receiver, method, args, recv_type, .. } = &mk(m) {
+                assert!(
+                    method_call_in_subset(receiver, method, args, recv_type, &cx, &locals),
+                    "user method `{m}` shadowing a builtin name should be covered"
+                );
+            }
+        }
+        // A builtin name with NO user method on the type stays excluded (`push` isn't a
+        // method on `Bag`), so the builtin/name-keyed path keeps it on the AST side.
+        if let Expr::MethodCall { receiver, method, args, recv_type, .. } = &mk("push") {
+            assert!(
+                !method_call_in_subset(receiver, method, args, recv_type, &cx, &locals),
+                "a builtin name with no user method must stay excluded"
+            );
+        }
     }
 
     // c109 Phase 7: method bodies + static methods.
