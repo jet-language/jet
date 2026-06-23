@@ -2146,8 +2146,17 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
                 #[allow(unreachable_patterns)]
                 Some(_) => false,
                 None => {
-                    let ok =
-                        !b.is_comptime && !b.uninit && expr_in_subset(&b.init, cx, locals);
+                    // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. Sema
+                    // evaluates the value into `b.ct` and the AST `emit_let` emits it as
+                    // literal data (`let <name>[: <ty>] = <ct.serialize()>;`) — the runtime
+                    // `init` expr is NEVER emitted, so it need not be in-subset. Covered
+                    // whenever the resolved value is present (`b.ct.is_some()`); the literal
+                    // serialization is total. `b.uninit` cannot co-occur with comptime.
+                    let ok = if b.is_comptime {
+                        !b.uninit && b.ct.is_some()
+                    } else {
+                        !b.uninit && expr_in_subset(&b.init, cx, locals)
+                    };
                     // The binding's name is in scope for subsequent statements.
                     locals.insert(b.name.clone());
                     ok
@@ -4885,6 +4894,45 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     name: b.name.clone(),
                     kw: "let",
                     ty_clause: String::new(),
+                    init,
+                };
+            }
+            // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. The AST `emit_let`
+            // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
+            // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
+            // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
+            // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
+            // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
+            // facts are pre-resolved (I3): no inference here.
+            if b.is_comptime {
+                let serialized = b
+                    .ct
+                    .as_ref()
+                    .map(|v| v.serialize())
+                    .unwrap_or_else(|| "Default::default()".to_string());
+                // Mirror `emit_let`'s type clause exactly (a Fn type via `rust_fn_trait`,
+                // others via `rust_type`). A comptime value is never fn-typed, but match
+                // the AST shape verbatim for total byte-parity.
+                let ty_clause = b
+                    .ty
+                    .as_ref()
+                    .map(|t| {
+                        if let Type::Fn { params, ret } = t {
+                            format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), false))
+                        } else {
+                            format!(": {}", cx.rust_type(t))
+                        }
+                    })
+                    .unwrap_or_default();
+                let init = TExpr {
+                    ty: b.ty.clone().unwrap_or(Type::Int),
+                    kind: TExprKind::ConstInline(serialized),
+                };
+                env.bind(&b.name, mangle(&b.name), b.ty.clone());
+                return TStmt::Let {
+                    name: b.name.clone(),
+                    kw: "let",
+                    ty_clause,
                     init,
                 };
             }
@@ -9765,6 +9813,49 @@ mod tests {
         tir_covers(f, &cx)
     }
 
+    /// Like `covers`, but runs the FULL front end (sema) on `src` first, so
+    /// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
+    /// (S57/M9.5) — are present before gating. Builds a single-module bundle the
+    /// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
+    /// then runs `tir_covers` on the sema-enriched function.
+    fn covers_after_sema(src: &str, fn_name: &str) -> bool {
+        let (toks, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
+        let mut prog = crate::Parser::parse(&toks).expect("parse failed");
+        let mut bundle = crate::AST::ProgramBundle {
+            entry: 0,
+            project_root: std::path::PathBuf::from("."),
+            modules: vec![crate::AST::LoadedModule {
+                path: std::path::PathBuf::from("test.jet"),
+                display: "test.jet".to_string(),
+                alias: "main".to_string(),
+                imports: std::mem::take(&mut prog.imports),
+                items: std::mem::take(&mut prog.items),
+                source: src.to_string(),
+            }],
+            parse_teaching: Vec::new(),
+            used_core: std::collections::HashSet::new(),
+            cffi: crate::CFFI::CFfi::default(),
+        };
+        bundle.cffi = crate::CFFI::assemble(&mut bundle).expect("cffi assemble failed");
+        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        assert!(
+            !diags.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            "sema errors: {diags:?}"
+        );
+        let module = &bundle.modules[bundle.entry];
+        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+        let f = module
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Func(f) if f.name == fn_name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        tir_covers(f, &cx)
+    }
+
     /// c109 Phase 7: parse `src` and return whether the named method on `type_name`
     /// (a struct or enum inherent method) is covered by the method gate. Looks up
     /// the method in the type's `methods` list. As with `covers`, the
@@ -11072,6 +11163,29 @@ fn wrap(s: String) -> String {
 }
 ";
         assert!(covers(src, "wrap"));
+    }
+
+    #[test]
+    fn covers_comptime_local_binding() {
+        // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr` in a function body
+        // routes once sema fills `b.ct`. The runtime `init` (`build()`) is NOT in-subset
+        // on its own merits, but the comptime path never emits it — it emits the
+        // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
+        // full sema pass, hence `covers_after_sema`.
+        let src = "\
+fn build() -> List<Int> {
+    xs: List<Int> := []
+    loop i in 1..3 {
+        xs.push(i * 10)
+    }
+    return xs
+}
+fn main() {
+    comptime xs = build()
+    print(\"{xs}\")
+}
+";
+        assert!(covers_after_sema(src, "main"));
     }
 
     #[test]

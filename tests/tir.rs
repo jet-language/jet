@@ -4088,3 +4088,32 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n");
 }
+
+/// c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr` in a function body. Sema
+/// evaluates `build()` at compile time and codegen emits the result as literal data
+/// (`let user_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
+/// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors
+/// `tests/comptime_diff.rs::local_comptime_is_literal_data`.
+#[test]
+fn comptime_local_is_literal_data() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn build() -> List<Int> {
+    xs: List<Int> := []
+    loop i in 1..3 {
+        xs.push(i * 10)
+    }
+    return xs
+}
+fn main() {
+    comptime xs = build()
+    print(\"{xs}\")
+    print(\"{xs[1]}\")
+}
+";
+    let (code, stdout) = build_and_run("tir_comptime_local", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "[10, 20, 30]\n20\n");
+}
