@@ -4117,3 +4117,74 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "[10, 20, 30]\n20\n");
 }
+
+/// c109 Phase 6b: a `Shared<T>` value passed to a FREE (non-method) call inside a loop
+/// auto-clones the Arc — `emit_call_args` emits `Arc::clone(&…)` and the receiving
+/// `Shared<T>` `Read` param borrows it (`&(…)`). The gate previously excluded
+/// `shared_auto_clone` on plain `Call` args, routing `loop_user`/`noop` through the AST
+/// path; both now route through the TIR with a byte-identical emit. A `Shared<T>` value
+/// has no surface constructor (it only ever arrives as a param), so this is a compile +
+/// byte-exact-Rust assertion (the same surface `tests/ownership.rs` and `tests/ui_lint`
+/// exercise) rather than a build+run. rustc accepting the output proves I2.
+#[test]
+fn shared_auto_clone_in_free_call_arg() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn noop(h: Shared<Int>) {
+    print(0)
+}
+fn loop_user(h: Shared<Int>) {
+    loop {
+        noop(h)
+    }
+}
+fn main() {
+    print(0)
+}
+";
+    let dir = std::env::temp_dir().join(format!("jet_tir_shared_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("shared.jet");
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    // Byte-exact auto-clone emit: the free-call arg auto-clones the Arc, then the
+    // `Read` non-scalar `Shared<Int>` param borrows it.
+    assert!(
+        out.rust.contains("user_noop(&(std::sync::Arc::clone(&(*user_h))));"),
+        "shared auto-clone free-call arg not byte-exact:\n{}",
+        out.rust
+    );
+    // The receiving param signature is the shared `rust_param_type` form.
+    assert!(
+        out.rust.contains("pub fn user_noop(user_h: &std::sync::Arc<i64>)"),
+        "Shared<Int> param signature not byte-exact:\n{}",
+        out.rust
+    );
+    // I2: rustc accepts the generated Rust.
+    let rs = dir.join("shared.rs");
+    let bin = dir.join("shared");
+    fs::write(&rs, &out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected generated code (I2 violation):\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+}

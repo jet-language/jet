@@ -1428,6 +1428,18 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_foreign_value_ty(ty, cx)
         || is_covered_generic_struct_ty(ty, cx)
         || is_covered_concurrency_ty(ty, cx)
+        || is_covered_shared_ty(ty, cx)
+}
+
+/// c109 Phase 6b: a `Shared<T>` (`Type::Shared`) usable as a param/return/local value
+/// type. `cx.rust_type` already renders it to `std::sync::Arc<{T}>` and `rust_param_type`
+/// borrows a `Read` non-scalar to `&std::sync::Arc<{T}>` — both shared with the AST path,
+/// so the signature is byte-identical. A `Read` param reads as `(*user_h)` (`param_place`'s
+/// non-scalar deref). The element `T` must itself be a covered value type. Admitting the
+/// type is what lets a fn with a `Shared<T>` param route; passing one to a free call
+/// auto-clones the Arc via `lower_one_call_arg`'s `arc_clone` (the gate now admits it).
+fn is_covered_shared_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(ty, Type::Shared(inner) if is_subset_param_ty(inner, cx))
 }
 
 /// c109 Phase 21: a concurrency handle type `Task<T>` / `Channel<T>` / `Sender<T>`
@@ -2926,8 +2938,16 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
             (is_print || is_ambient_input || is_require || is_require_eq || is_panic || is_plain_fn || is_distinct_ctor || is_extern || is_unqual_inline || is_unqual_file)
                 && c.args.iter().all(|a| {
-                    // No shared-auto-clone (Arc) in the subset; labels are sema-only.
-                    !a.flags.shared_auto_clone
+                    // c109 Phase 6b: a `Shared<T>` arg auto-cloning the Arc
+                    // (`shared_auto_clone`) is COVERED for the plain-fn / distinct-ctor /
+                    // unqualified-import paths — all route through `lower_one_call_arg`,
+                    // which reproduces `emit_call_args`' `Arc::clone(&…)` from the total
+                    // flag (and the receiving `Shared<T>` param renders identically via the
+                    // shared `rust_param_type`). It stays EXCLUDED on the `is_extern` path
+                    // only: extern args use `lower_extern_call_arg`, which does not carry
+                    // the Arc form (the FFI boundary takes a `(…).clone()`, not an Arc).
+                    // Labels are sema-only (documentation), checked at their own position.
+                    (!a.flags.shared_auto_clone || !is_extern)
                         && arg_conv_in_subset(a)
                         && expr_in_subset(&a.expr, cx, locals)
                 })
@@ -11186,6 +11206,32 @@ fn main() {
 }
 ";
         assert!(covers_after_sema(src, "main"));
+    }
+
+    #[test]
+    fn covers_shared_auto_clone_in_free_call_arg() {
+        // c109 Phase 6b: a fn with a `Shared<T>` param (`is_covered_shared_ty`) passing
+        // that handle to a FREE call inside a loop — sema sets `a.flags.shared_auto_clone`
+        // (auto-clone across the loop boundary) — now routes. The gate admits the Arc form
+        // on the plain-`Call` path (it lowers via `lower_one_call_arg`'s `arc_clone`). Both
+        // `noop` (a `Shared<T>` param) and `loop_user` (the auto-clone call site) are
+        // covered. Needs the full sema pass (the flag is sema-resolved), hence
+        // `covers_after_sema`.
+        let src = "\
+fn noop(h: Shared<Int>) {
+    print(0)
+}
+fn loop_user(h: Shared<Int>) {
+    loop {
+        noop(h)
+    }
+}
+fn main() {
+    print(0)
+}
+";
+        assert!(covers_after_sema(src, "noop"));
+        assert!(covers_after_sema(src, "loop_user"));
     }
 
     #[test]
