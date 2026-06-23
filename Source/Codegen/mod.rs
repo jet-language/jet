@@ -19,7 +19,6 @@ use crate::FFI::FfiLink;
 use crate::Traits;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-use std::collections::HashMap;
 
 
 mod CModule;
@@ -278,8 +277,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     for (i, test) in tests.iter().enumerate() {
         out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
-        let mut env: HashMap<String, Slot> = HashMap::new();
-        emit_stmts(&cx, &test.body, &mut env, &mut out, 1, false);
+        emit_test_body(&cx, &test.body, &mut out);
         out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
     }
@@ -311,6 +309,20 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     out.push_str("    if failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
     strip_unused_mem_prelude(out)
+}
+
+/// c109: emit a `#Test` block body through the TIR (R7 — the only codegen seam). A test
+/// body is a bare statement list (no params, unit context), emitted at indent 1 inside the
+/// `fn jet_test_N()` wrapper the caller opened. A gate-miss is an internal compiler error
+/// (I2-class), never an AST fallback — every `#Test` body routes through the TIR.
+fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
+    if TIR::tir_covers_test_body(body, cx) {
+        TIR::emit_tir_test_body(body, cx, out);
+        return;
+    }
+    panic!(
+        "internal compiler error: codegen reached a #Test body construct the typed IR does not cover — compiler bug (I2/R7)"
+    );
 }
 
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
@@ -482,8 +494,7 @@ pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> Stri
 
     for (i, test) in tests.iter().enumerate() {
         out.push_str(&format!("fn jet_test_{}() -> Result<(), String> {{\n", i));
-        let mut env: HashMap<String, Slot> = HashMap::new();
-        emit_stmts(&cx, &test.body, &mut env, &mut out, 1, false);
+        emit_test_body(&cx, &test.body, &mut out);
         out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
     }

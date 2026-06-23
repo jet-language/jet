@@ -1258,6 +1258,15 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     f.body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
+/// c109: is a `#Test` block body fully inside the TIR subset? A test body is a bare
+/// statement list (no params, unit context), emitted at indent 1 inside the generated
+/// `fn jet_test_N() -> Result<(), String>`. No param/return-type gates apply (the wrapper
+/// signature is fixed by `emit_*_tests`); only the body statements must be in-subset.
+pub(crate) fn tir_covers_test_body(body: &[Stmt], cx: &Cx) -> bool {
+    let mut locals: HashSet<String> = HashSet::new();
+    body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
+}
+
 /// c109 Phase 7: is this method (an inherent method of `type_name`) fully inside
 /// the TIR subset? Covers two method classes:
 ///   - **instance methods** — a `self` first parameter (`self`/`mut self`/`view
@@ -4592,6 +4601,20 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
         kind: TFuncKind::TopLevel,
     }
 }
+
+/// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
+/// `emit_stmts(cx, body, &mut env, out, 1, false)` byte-for-byte. The body is a bare
+/// statement list with no params and an empty env, emitted at indent 1 inside the
+/// `fn jet_test_N() -> Result<(), String>` the caller already opened. The env's
+/// `fn_name` is taken LIVE from `cx.current_fn` — exactly the value the legacy `?`/panic
+/// emitters read (`emit_*_tests` never resets `cx.current_fn` before the test loop, so
+/// both paths embed the same trailing function name in any `?`/panic frame).
+pub(crate) fn emit_tir_test_body(body: &[Stmt], cx: &Cx, out: &mut String) {
+    let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
+    let tbody = lower_stmts(body, cx, &mut env);
+    emit_tir_stmts(&tbody, cx, out, 1);
+}
+
 
 /// c109 Phase 17: render the Rust generic clause exactly as `emit_func` does — every type
 /// param carries an extra `Clone` bound (`rust_extra_clone_bounds`), so `<T>` → `<T: Clone>`
