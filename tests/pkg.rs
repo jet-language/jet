@@ -1075,6 +1075,52 @@ fn semver_break_e2601() {
 }
 
 #[test]
+fn capability_sigil_frozen_in_public_api() {
+    // c129 (D-CAP7/D-CAP8): the resolved capability sigil is part of a pub fn's
+    // published signature, and a read -> write drift is a breaking change.
+    use jet::Publish::{diff_public_api, extract_public_api};
+
+    let dir = tmp_dir("cap_api_freeze");
+
+    let write_src = "\
+struct Account { balance: Int }
+pub fn deposit(a: ~Account, amount: Int) -> Int {
+    a.balance = a.balance + amount
+    return a.balance
+}
+";
+    let f = dir.join("write.jet");
+    fs::write(&f, write_src).unwrap();
+    let write_api = extract_public_api(write_src, f.to_str().unwrap());
+    let deposit = write_api
+        .iter()
+        .find(|i| i.name == "deposit")
+        .expect("deposit must be in the public API");
+    assert!(
+        deposit.signature.contains("a: ~"),
+        "the write sigil must be frozen onto the param type in the published signature, got `{}`",
+        deposit.signature
+    );
+
+    // Same signature, only the capability sigil differs (read instead of write).
+    let read_src = "\
+struct Account { balance: Int }
+pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
+";
+    let f2 = dir.join("read.jet");
+    fs::write(&f2, read_src).unwrap();
+    let read_api = extract_public_api(read_src, f2.to_str().unwrap());
+
+    let changes = diff_public_api(&read_api, &write_api);
+    assert!(
+        !changes.is_empty(),
+        "a read -> write capability drift on a pub fn must be a breaking change"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resolver_conflict_e2602() {
     // Two packages requiring incompatible versions of a shared dep → E2602.
     use jet::Publish::{VersionConstraint, VersionReq, check_conflicts};
