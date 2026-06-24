@@ -1,5 +1,5 @@
 {
-  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Consider how to improve using concepts from Zig build system",
+  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Cross platform raylib builtin\n- Consider how to improve using concepts from Zig build system",
   "cards": [
     {
       "id": "c26",
@@ -201,7 +201,7 @@
       "type": "idea",
       "title": "Qualifier system: traits vs attributes vs tags",
       "body": "Fix the trait/attribute/tag boundary (the owner’s “one primary note”) as a decision rule, then maturity tags, capabilities/prohibitions, and uncertainty/cost as policies on one shared tag engine. Linchpin: §1 taxonomy can be ratified alone. `pure fn` (S60) is already a tag; capabilities reopen S60’s rejected full effects system. Report: tools/Tower/docs/proposals/P1-qualifier-system.md",
-      "stage": "building",
+      "stage": "deciding",
       "plan": "qualifier-system-implementation",
       "notes": [
         {
@@ -226,6 +226,10 @@
         },
         {
           "t": "Effect #(...) surface ships; the parameterized value-tag surface (powers c68) remains.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] FOUNDATION built + committed a406fdd: the `tag` keyword + dispatch-vs-marker enforcement (E0731/E0732), end-to-end with snapshots + example — the D-QUAL2 taxonomy linchpin (§1), shipped. The remaining parameterized value-tag *application* surface (type-position spelling, parameterized-tag declaration, tagged<->untagged coercion) is NOT pinned by any ratified decision; building it would mean inventing owner-facing syntax. Drafted as ballot D-QUAL3 rather than guessed. Blocked on owner.",
           "at": "2026-06-24"
         }
       ],
@@ -318,6 +322,10 @@
         },
         {
           "t": "Rides c62 value-tag surface — build after c62.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] c62 tag foundation shipped (a406fdd). c68 is blocked on D-QUAL3 — the single open pick of how a unit-tagged number is spelled in a type annotation (rec: family mints a named type, Usd). Coercion/literal/arithmetic already pinned by D-UNIT1. Build units once D-QUAL3 ratifies.",
           "at": "2026-06-24"
         }
       ],
@@ -451,7 +459,7 @@
       "type": "idea",
       "title": "Safe schema changes (compile-time migration check)",
       "body": "Compiler refuses a breaking data-shape change without a declared migration; the check is core (comptime shape diff), up/down conversion is the Build-tier versioning library (#11).",
-      "stage": "building",
+      "stage": "done",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-MIGRATE1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -471,6 +479,10 @@
         },
         {
           "t": "D-MIGRATE1 (rename) ships; D-MIGRATE2A-E ratified but not built.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] BUILT + committed 0d0d59c. All ratified D-MIGRATE2 ops shipped: add/remove/change migration verbs, converter resolution (inline via > impl Old->New > E0910), jet schema status/squash. ui+golden+decisions green; arena/pkg failures pre-existing (verified on clean HEAD). Runtime data conversion stays the named Build-tier #11 follow-on (I3). Done.",
           "at": "2026-06-24"
         }
       ],
@@ -531,7 +543,7 @@
       "type": "idea",
       "title": "Three-mode execution + JIT dev runtime (hot-reload)",
       "body": "Jai-borrowed three-mode framing reconciled with shipped jet run/build/dev (D-DEV4) + planned jet serve JIT (D-DEV2). Ballots the open design Qs: JIT backend, hot-swap+state semantics, hot-reload home + dev/release consistency. Plan: plans/epoch-3/jit-runtime-type-server.md (updated).",
-      "stage": "building",
+      "stage": "done",
       "decisions": [
         "D-JIT1",
         "D-HOTSWAP1",
@@ -544,6 +556,10 @@
         },
         {
           "t": "Interpreter dev runtime ships; JitBackend, hot-swap, and jet serve remain.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] BUILT + committed efd09d1. JitBackend seam + InterpreterBackend, detect_dev_mode, Sema/HotSwap type_stable_check + E2210, [hot-swap]/[restart] gate, jet serve, dev battery widened to all 110 examples (30 byte-identical, 80 named-boundary). All UNBLOCKED scope shipped. Only gated remainder = Cranelift tier-1 (needs separate owner runtime-dep approval, D-JIT1 D+); seam is landed so that approval is the sole gate. Done.",
           "at": "2026-06-24"
         }
       ],
@@ -1360,6 +1376,46 @@
       "status": "answered",
       "answer": "Honest answer: A's only real cost is key custody, and it lands entirely on PUBLISHERS — never on consumers, never on beginners, never on simple projects. (1) Consuming a package (the common case + every beginner): zero friction — `jet add` verifies the signature silently and only ever speaks on a MISMATCH (a normal Jet diagnostic, not crypto). Strictly better than checksum-only for the same effort. (2) Simpler/local/unpublished projects: nothing changes — signing is only on the registry-publish path; path/git/unpublished deps are never signed or asked about. (3) Publishing (the one place friction exists): mitigated by the dual-facet rule — `jet publish` auto-generates+stores a keypair on first publish (no separate keygen on the magic path), then prints one line nudging `jet key backup`. The beginner's required action is the command they were already running. What stays genuinely hard is key LOSS/THEFT/ROTATION — the inherent cost of authenticity. Prior art is a warning: PyPI REMOVED GPG signing in 2023 (nobody verified, so publisher pain bought nothing); npm/Go/crates.io all moved authenticity OFF author-managed keys; Maven Central's mandatory GPG is the canonical 'publishing is painful' complaint. Lesson: never make key management mandatory or visible on the magic path. Bearing on the decision: this argues for A as an OPT-IN / non-blocking layer with SHA-256 checksum (B) as the always-on floor — `require_signed` stays an org policy, OFF by default — not a hard gate that refuses unsigned packages. That keeps A's unique win (offline authorship proof) while spending friction only on publishers who opt in. Full Owner Q&A block added to the D-PKGSIGN1 card.",
       "created": "2026-06-24T10:01:40.639Z"
+    },
+    {
+      "id": "cmqs8xldn5mu",
+      "decisionId": "D-SERDE2",
+      "text": "I want this to be easily translatable -> one core lib to support csv, json, toml, yaml, etc. Is that what serde is? I don't want the \"SerdeError\" - because that engrains a rust package name into our new language. Show me how this is handled in rust & how other languages that are lauded for their handling of this are done",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-24T15:46:48.059Z"
+    },
+    {
+      "id": "cmqs8zavw1iz",
+      "decisionId": "D-SERDE3",
+      "text": "Please analyze community sentiment on different cases. I STRONGLY prefer PascalCase for everything in general, but want to know what most people think",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-24T15:48:07.772Z"
+    },
+    {
+      "id": "cmqs91z03bz",
+      "decisionId": "D-NOSTD1",
+      "text": "I'm not entirely clear on what you are saying. I want to support embedded ssystems. I may have intended to defer this until later or not understood the context... If someone wants to opt out, then I'm fine with that, but we need to match syntax for jet not presume outdated syntax",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-24T15:50:12.339Z"
+    },
+    {
+      "id": "cmqs97t5s3jg",
+      "decisionId": "D-JSONVERB1",
+      "text": "Please update the options to use other options with string in the name. I want it to be clear on its face that it is a to string conversion, but I want to keep the pretty printing as an option. Give multiple examples - maybe even based on other langs that have popular, lauded versions, just translate to jet syntax",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-24T15:54:44.704Z"
+    },
+    {
+      "id": "cmqs9e9e4kl",
+      "decisionId": "D-SIMD2",
+      "text": "What language handles this the best per community sentiment? Show me what that looks like. I want the best version for everything in jet -> if there's already a \"perfect\" system, lets not reinvent the wheel, just ensure the syntax lets us put it on our axel",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-24T15:59:45.676Z"
     }
   ],
   "ingest": []
