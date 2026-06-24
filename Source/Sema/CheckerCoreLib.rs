@@ -1413,8 +1413,7 @@ pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
         "this operation can violate memory safety, so it must sit in an audited region"
             .to_string(),
         format!(
-            "wrap it: #{}(\"why this is safe\") #{} {{ … }}",
-            Syntax::ATTR_AUDIT,
+            "wrap it: #{}(\"why this is safe\") {{ … }}",
             Syntax::KW_UNSAFE
         ),
         Some(span),

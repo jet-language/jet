@@ -2263,12 +2263,11 @@ fn main() {
     );
 }
 
-/// c109 Phase 18: the expert low-level tier (S58, E2-M13/D-LL1). A `#Unsafe fn` lowers
-/// to a Rust `unsafe fn`; a `#Unsafe { … }` audited region lowers to `unsafe { … }`
-/// (the `#Audit("…")` annotation emits nothing); `mem.Ptr<T>.from_addr(addr)`,
-/// `mem.address_of(x)`, and `mem.volatile_read(p)` lower to the raw-pointer ops. The
-/// pointer cast + `read_volatile` use std only (no `jet_std`), so this compiles & runs
-/// standalone. I1: every emitted `unsafe` is a gated form tied 1:1 to a source gate.
+/// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
+/// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
+/// audited region lowers to `unsafe { … }` (the reason string emits nothing);
+/// `mem.Ptr<T>.from_addr(addr)`, `mem.address_of(x)`, and `mem.volatile_read(p)` lower
+/// to the raw-pointer ops. I1: every emitted `unsafe` is a gated form tied 1:1 to a source gate.
 #[test]
 fn unsafe_fn_block_and_ptr_ops() {
     if !have_rustc() {
@@ -2276,7 +2275,7 @@ fn unsafe_fn_block_and_ptr_ops() {
     }
     let src = "\
 use core.mem
-#Unsafe
+#Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
 fn read_reg(addr: Int) -> Int {
     p @= mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
@@ -2284,8 +2283,7 @@ fn read_reg(addr: Int) -> Int {
 fn main() {
     cell: Int @= 1337
     addr @= mem.address_of(cell)
-    #Audit(\"addr is the address of `cell`, a live Int on this stack frame\")
-    #Unsafe {
+    #Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {
         p @= mem.Ptr<Int>.from_addr(addr)
         seen @= mem.volatile_read(p)
         print(seen)
@@ -2299,14 +2297,14 @@ fn main() {
     assert_eq!(stdout, "1337\n1337\n");
 }
 
-/// c109 Phase 18: assert the EMITTED Rust for the unsafe tier is byte-exact (the gate
-/// forms + ptr ops), and that EVERY `unsafe` is a gated form (`unsafe fn` / `unsafe {`)
-/// — the I1 self-check. The `#Audit` annotation must produce no comment/marker.
+/// c109 Phase 18 / D-UNSAFE2: assert the EMITTED Rust for the unsafe tier is byte-exact
+/// (the gate forms + ptr ops), and that EVERY `unsafe` is a gated form (`unsafe fn` /
+/// `unsafe {`) — the I1 self-check. The reason string emits no comment/marker.
 #[test]
 fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
 use core.mem
-#Unsafe
+#Unsafe(\"reads through a raw pointer; addr must be valid\")
 fn read_reg(addr: Int) -> Int {
     p @= mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
@@ -2314,8 +2312,7 @@ fn read_reg(addr: Int) -> Int {
 fn main() {
     cell: Int @= 1337
     addr @= mem.address_of(cell)
-    #Audit(\"safe: cell is live\")
-    #Unsafe {
+    #Unsafe(\"safe: cell is live\") {
         seen @= read_reg(addr)
         print(\"{seen}\")
     }
@@ -2353,9 +2350,10 @@ fn main() {
         "address_of not byte-exact:\n{}",
         out.rust
     );
-    // `#Unsafe { … }` → `unsafe {` (and the `#Audit` annotation emits NOTHING).
+    // `#Unsafe("…") { … }` → `unsafe {` (the reason string emits nothing).
     assert!(out.rust.contains("    unsafe {\n"), "unsafe block not emitted:\n{}", out.rust);
-    assert!(!out.rust.contains("Audit"), "#Audit must emit nothing:\n{}", out.rust);
+    // Reason string emits nothing — "safe: cell is live" must not appear in generated Rust.
+    assert!(!out.rust.contains("safe: cell is live"), "reason string must emit nothing:\n{}", out.rust);
     // I1 self-check: drop the vetted `jet_mem` prelude, then every remaining `unsafe`
     // must be a gated form (`unsafe {` or `unsafe fn`).
     let user = if let Some(s) = out.rust.find("mod jet_mem") {

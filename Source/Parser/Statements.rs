@@ -1,52 +1,78 @@
 use super::*;
 
 impl<'a> Parser<'a> {
-    /// S58 (E2-M13, D-LL2): parse a `#Unsafe { … }` audited region in
-    /// statement position, with an optional `#Audit("…")` reason on the line
-    /// above. The reason is required at runtime by lint L3101, not by the
-    /// grammar, so a missing `#Audit` parses fine and is flagged in sema.
+    /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
+    /// in statement position. The reason string is the argument of `#Unsafe`
+    /// itself; the separate `#Audit` marker is retired (E0055 teaching error).
+    /// A missing reason is allowed by the grammar and flagged in sema (L3101).
     fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        // Optional `#Audit("…")`.
-        let mut audit = None;
+        // E0055: `#Audit("…")` is the retired spelling — teach the new form.
         if matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_AUDIT)
         {
+            let audit_start = self.peek().span;
             self.bump(); // `#`
-            self.bump(); // `audit`
-            self.expect(TokKind::LParen, "after `#Audit`")?;
-            let (reason, _) = self.expect_plain_string(
-                "for the audit reason",
-                "`#Audit` takes one piece of quoted text explaining why the block is safe",
-                "write: #Audit(\"index checked against len\")",
-            )?;
-            self.expect(TokKind::RParen, "after the audit reason")?;
-            audit = Some(reason);
-            // S6-R: `#Audit("…")` ends a line; the synthetic terminator before
-            // the `#Unsafe` it annotates is trivia — skip it.
+            self.bump(); // `Audit`
+            // Consume the optional `("…")` argument so we can keep parsing.
+            if matches!(self.peek().kind, TokKind::LParen) {
+                self.bump(); // `(`
+                // skip the string argument
+                let _ = self.expect_plain_string(
+                    "for the audit reason",
+                    "`#Audit` is retired; write `#Unsafe(\"reason\") { … }` instead",
+                    "write: #Unsafe(\"index checked against len\") { … }",
+                );
+                let _ = self.expect(TokKind::RParen, "after the audit reason");
+            }
+            // Skip synthetic line terminator between `#Audit(…)` and `#Unsafe`.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
+            let audit_span = Span::new(audit_start.start, self.toks[self.pos - 1].span.end);
+            self.diags.push(Diagnostic::error(
+                "E0055",
+                format!(
+                    "`#{}` is retired — merge the reason into `#{}`",
+                    Syntax::ATTR_AUDIT,
+                    Syntax::KW_UNSAFE
+                ),
+                "D-UNSAFE2 merged the audit reason into the gate itself".to_string(),
+                format!(
+                    "write `#{}(\"why this is safe\") {{ … }}` (drop the separate `#{}` line)",
+                    Syntax::KW_UNSAFE,
+                    Syntax::ATTR_AUDIT
+                ),
+                Some(audit_span),
+            ));
         }
-        // Required `#Unsafe { … }`.
+        // Required `#Unsafe`.
         if !(matches!(self.peek().kind, TokKind::Hash)
             && matches!(self.peek2().kind, TokKind::KwUnsafe))
         {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("`#{}` must be followed by a `#{}` block", Syntax::ATTR_AUDIT, Syntax::KW_UNSAFE),
-                "an audit reason annotates the gated region it sits above".to_string(),
-                format!(
-                    "write `#{}(\"…\") #{} {{ … }}`",
-                    Syntax::ATTR_AUDIT,
-                    Syntax::KW_UNSAFE
-                ),
+                format!("expected `#{}` here", Syntax::KW_UNSAFE),
+                "an audited region opens with `#Unsafe(\"reason\") { … }`".to_string(),
+                format!("write `#{}(\"why this is safe\") {{ … }}`", Syntax::KW_UNSAFE),
                 Some(self.peek().span),
             ));
         }
         self.bump(); // `#`
-        self.bump(); // `unsafe`
-        self.expect(TokKind::LBrace, "after `#Unsafe`")?;
+        self.bump(); // `Unsafe`
+        // Optional `("reason")` argument — absent means L3101 fires in sema.
+        let mut audit = None;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // `(`
+            let (reason, _) = self.expect_plain_string(
+                "for the safety reason",
+                "`#Unsafe` takes one piece of quoted text explaining why the block is safe",
+                "write: #Unsafe(\"index checked against len\") { … }",
+            )?;
+            self.expect(TokKind::RParen, "after the safety reason")?;
+            audit = Some(reason);
+        }
+        self.expect(TokKind::LBrace, "after `#Unsafe(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Unsafe {
@@ -638,9 +664,8 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // S58 (E2-M13): the audit + unsafe gate is `#Audit("…")` then
-            // `#Unsafe { … }`. Bare `unsafe { … }` is the rejected former
-            // spelling — point users at the `#` form.
+            // S58 (E2-M13): bare `unsafe { … }` is the rejected former
+            // spelling — point users at the `#Unsafe("…")` form.
             TokKind::Ident(n) if n == Syntax::FOREIGN_UNSAFE => {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
@@ -649,8 +674,7 @@ impl<'a> Parser<'a> {
                     "the expert low-level gate is an attribute marker, never a bare keyword"
                         .to_string(),
                     format!(
-                        "write `#{}(\"why this is safe\") #{} {{ … }}`",
-                        Syntax::ATTR_AUDIT,
+                        "write `#{}(\"why this is safe\") {{ … }}`",
                         Syntax::KW_UNSAFE
                     ),
                     Some(span),
@@ -669,7 +693,7 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
                 }
-                // S58 (E2-M13): `#Audit("…")` / `#Unsafe { … }` — the audited gate.
+                // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
             }
             TokKind::At => {
@@ -701,7 +725,7 @@ impl<'a> Parser<'a> {
                     "E0990",
                     format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
                     "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
-                    "write `#Unsafe`, `#Audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                    "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
                     Some(t.span),
                 ))
             }

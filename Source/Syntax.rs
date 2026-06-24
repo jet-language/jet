@@ -148,11 +148,12 @@ pub const KW_RETURN: &str = "return";
 /// M2: loop statement (for SharedHandle lint checks).
 pub const KW_LOOP: &str = "loop";
 
-/// S58 (ratified 2026-06-12; amended 2026-06-16; PascalCase D-CASING1
-/// 2026-06-21): the audited expert gate, written as the marker `#Unsafe { … }`
-/// (statement) or `#Unsafe fn` (whole-function contract). The bare lowercase
-/// `unsafe` keyword (FOREIGN_UNSAFE) is the rejected foreign spelling,
-/// recognized only to emit a teaching error.
+/// D-UNSAFE2 (ratified 2026-06-22, opt B; prev S58 2026-06-12): the audited
+/// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
+/// `#Unsafe("reason") fn`. The reason is the argument of `#Unsafe` itself;
+/// the separate `#Audit` marker is retired (E0055). The bare lowercase `unsafe`
+/// keyword (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only
+/// to emit a teaching error.
 pub const KW_UNSAFE: &str = "Unsafe";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
@@ -409,9 +410,10 @@ pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
 pub const ATTR_BINDGEN: &str = "bindgen"; // S59
 /// S59 (S82): attribute on user C overlay modules — `#extern module c.…`.
 pub const ATTR_EXTERN_MODULE: &str = "extern"; // S59 — `#extern module`, not `extern rust`
-/// S58 / D-LL2: required reason on `#Unsafe { … }` — `#Audit("…")` (PascalCase
-/// D-CASING1 2026-06-21).
-pub const ATTR_AUDIT: &str = "Audit"; // S58
+/// D-UNSAFE2 (retired marker): `#Audit("…")` is the old two-line form;
+/// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
+/// only to emit the E0055 teaching error.
+pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
 // D-LABEL1: a loop label is `@name` immediately before `loop`
 // (`@outer loop { … }`); `break @name` / `continue @name` target it.
 // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.

@@ -2,12 +2,12 @@
 //
 // FNV-1a is a non-cryptographic hash used to derive stable content keys from
 // note bodies. The implementation drops into the low-level tier via
-// `use core.mem`, `#Unsafe fn`, and an audited `#Unsafe { }` call site.
+// `use core.mem`, `#Unsafe("reason") fn`, and an audited `#Unsafe("reason") { }` call site.
 // Ordinary Jet code never needs any of this; it simply calls `content_key`.
 use core.mem
 // FNV-1a over a byte slice. Marked `#Unsafe` because the caller must ensure
 // `bytes` is a valid, in-bounds slice for the duration of the call.
-#Unsafe
+#Unsafe("caller must ensure `bytes` is a valid, in-bounds slice")
 fn fnv1a(bytes: [U8]) -> Int {
     offset_basis: Int @= 2166136261
     prime: Int @= 16777619
@@ -22,8 +22,7 @@ fn fnv1a(bytes: [U8]) -> Int {
 pub fn content_key(body: String) -> Int {
     bytes @= body.bytes()
     result: Int := 0
-    #Audit("fnv1a reads bytes in bounds")
-    #Unsafe {
+    #Unsafe("fnv1a reads bytes in bounds") {
         result = fnv1a(bytes)
     }
     return result

@@ -1,12 +1,12 @@
-// E2-M13: the expert low-level tier (S58). Everything here is gated:
-// `use core.mem` unlocks the vocabulary, `#Audit(...)` + `#Unsafe { ... }`
-// open the audited region where pointer operations are allowed.
+// E2-M13: the expert low-level tier (D-UNSAFE2). Everything here is gated:
+// `use core.mem` unlocks the vocabulary, `#Unsafe("reason") { ... }`
+// opens the audited region where pointer operations are allowed.
 //
 // Ordinary Jet never needs any of this, and never emits `unsafe`.
 use core.mem
-// `#Unsafe` on the line before `fn` marks a whole-function contract: callers
+// `#Unsafe("reason") fn` marks a whole-function contract: callers
 // must wrap the call in their own `#Unsafe` block.
-#Unsafe
+#Unsafe("reads through a raw pointer; addr must be a live, valid Int")
 fn read_reg(addr: Int) -> Int {
     p @= mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
@@ -16,8 +16,7 @@ fn main() {
     // pointer tier — keeping the example self-contained and deterministic.
     cell: Int @= 1337
     addr @= mem.address_of(cell)
-    #Audit("addr is the address of `cell`, a live Int on this stack frame")
-    #Unsafe {
+    #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
         p @= mem.Ptr<Int>.from_addr(addr)
         seen @= mem.volatile_read(p)
         print(seen)

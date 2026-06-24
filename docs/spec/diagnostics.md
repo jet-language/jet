@@ -115,6 +115,7 @@ before continuing.
 | E0052 | parse | teaching: bare `test "name" { }` → `#Test "name" { }` (D-CASING1 follow-on) |
 | E0053 | parse | teaching: bare `pure fn` → `#Pure fn` (D-CASING1 follow-on) |
 | E0054 | parse | teaching: bare `todo` → `#Todo` (D-CASING1 follow-on) |
+| E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0984 | parse | teaching: `when` → `if subject { arm -> body }` (D-IF1) |
 | E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
@@ -226,11 +227,11 @@ before continuing.
 | E0762 | sema   | `allocator` field given a non-allocator type (D-CTX1, Q1=A2) |
 | E3001 | runtime | panic report with Jet source location, function name, source-line context box, and (in debug builds) safe local values (E2-M12, D-OBS1/D-OBS2) |
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
-| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `#Unsafe` block (S58) |
+| E3101 | sema  | low-level op (`from_addr`/`volatile_read`/…) used outside an `#Unsafe("…")` block (D-UNSAFE2) |
 | E3102 | sema  | `core.mem` item (`Ptr`/`volatile_read`/allocator) named without `use core.mem` (S58) |
-| E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe` block (S58) |
+| E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
-| L3101 | sema  | `#Unsafe` block missing its `#Audit("…")` reason (S58, D-LL2) |
+| L3101 | sema  | `#Unsafe` block missing its reason argument — write `#Unsafe("…") { … }` (D-UNSAFE2) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
 | E3203 | sema  | non-C-ABI type in `@extern` / `@bindgen` fn signature |
