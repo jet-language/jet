@@ -204,7 +204,14 @@ fn handle_request(
     params: Option<&JsonValue>,
     id: &JsonValue,
 ) -> Option<String> {
-    match method {
+    // c121 Step 5: record per-request latency when JET_TIMING=1. Off by
+    // default, so the normal LSP path pays nothing.
+    let started = if crate::PhaseTiming::enabled() {
+        Some(std::time::Instant::now())
+    } else {
+        None
+    };
+    let out = match method {
         "initialize" => Some(initialize_response(id)),
         "shutdown" => {
             server.shutdown = true;
@@ -221,6 +228,24 @@ fn handle_request(
         "textDocument/semanticTokens/full" => semantic_tokens_response(server, params, id),
         "textDocument/inlayHint" => inlay_hint_response(server, params, id),
         _ => Some(response(id, "null")),
+    };
+    if let Some(t0) = started {
+        record_lsp_latency(method, t0.elapsed().as_micros());
+    }
+    out
+}
+
+/// c121 Step 5: append one `{"method":…,"us":…}` JSON line to
+/// `jet-lsp-timing.json` in the cwd. JSON-lines suits an open-ended request
+/// stream; best-effort, so a write failure never disturbs the server.
+fn record_lsp_latency(method: &str, us: u128) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("jet-lsp-timing.json")
+    {
+        let _ = writeln!(f, "{{\"method\":\"{}\",\"us\":{}}}", method, us);
     }
 }
 
