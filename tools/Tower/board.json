@@ -1210,6 +1210,25 @@
       ],
       "priority": "P2",
       "workOrder": null
+    },
+    {
+      "id": "c136",
+      "type": "idea",
+      "title": "Serde expert tier: hand-impl path + generic-type (de)serialization",
+      "body": "Future increments of core.encoding after the shipped typed derive (c104). (1) Expert hand-impl path (D-SERDE2, ratified): user writes `impl T: Encode { fn encode(self) -> DataTree { … } }` / `impl T: Decode { fn decode(tree) -> T ? DecodeError }` over the format-agnostic DataTree tree, plus the dynamic-tree accessor API (D-SERDE-ACCESS, deferred — pattern-match floor vs fluent `tree.field(\"x\").int()?`). (2) Generic-type serde — `#[Codable] struct Box<T>` — currently gated by E2413; needs a design decision (bound propagation). (3) Smaller gaps: `#[Default(expr)]` beyond literals, variant-level `#[RenameAll]`, `#[Flatten]` map catch-all. Plan: tools/Tower/docs/sidequests/serde-model.md (“Not yet built” section).",
+      "stage": "backlog",
+      "plan": "serde-model",
+      "notes": [
+        {
+          "t": "[sweep] Split out from c104 (done) so the ratified-but-unbuilt serde follow-ups don’t orphan. D-SERDE2 (hand-impl names) is ratified; generic serde still needs a decision (E2413 gates it today). serde-model.md retained as the living plan for this card.",
+          "at": "2026-06-24"
+        }
+      ],
+      "created": "2026-06-24",
+      "updated": "2026-06-24",
+      "decisions": [],
+      "priority": "P3",
+      "workOrder": null
     }
   ],
   "questions": [
