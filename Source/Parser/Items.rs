@@ -1083,7 +1083,9 @@ impl<'a> Parser<'a> {
             // D-CAP7: the capability sigil rides the type side — `name: ~T`/`^T`/`&T`.
             // (Receivers carry it on `self` instead: `~self`, parsed above.)
             if let Some(type_cap) = self.parse_capability_sigil() {
-                if convention != AccessConvention::Read {
+                // A real pre-name marker (not the unmarked `Infer` default) plus a
+                // type-side sigil is two markers (E0029).
+                if convention != AccessConvention::Infer {
                     self.diags.push(Diagnostic::error(
                         "E0029",
                         format!("`{}` has two capability markers", name),

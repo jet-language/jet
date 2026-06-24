@@ -534,6 +534,7 @@ mod CheckerOwnership;
 mod CheckerItems;
 mod Diagnostics;
 mod Captures;
+mod Capability;
 mod Purity;
 mod Effects;
 mod SchemaMigration;

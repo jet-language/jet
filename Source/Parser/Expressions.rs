@@ -1548,7 +1548,14 @@ impl<'a> Parser<'a> {
     }
 
     fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
-        let convention = self.parse_access_prefix();
+        // D-CAP8: capability *inference* is for parameter definitions, not call sites.
+        // An unmarked argument is a plain read at the call site (the caller isn't
+        // requesting a stronger capability), so normalize `Infer` → `Read` here. Only
+        // parameters carry `Infer` into Sema::Capability for resolution.
+        let convention = match self.parse_access_prefix() {
+            AccessConvention::Infer => AccessConvention::Read,
+            c => c,
+        };
         let span = self.peek().span;
         // S61: detect `name: expr` label at call site — an ident followed by `:` that is
         // NOT `::` (a Rust path). We must not consume it yet if it is just a variable name.
@@ -1650,13 +1657,17 @@ impl<'a> Parser<'a> {
                     Some(TokKind::LParen)
                 );
                 if is_lambda_take {
-                    AccessConvention::Read
+                    // `take(names)` lambda prefix is not a capability marker — the value
+                    // here is unmarked, so it infers (D-CAP8).
+                    AccessConvention::Infer
                 } else {
                     self.bump();
                     AccessConvention::Move
                 }
             }
-            _ => AccessConvention::Read,
+            // D-CAP8 (= C): an unmarked parameter/argument starts as `Infer` and is
+            // resolved from body usage by Sema::Capability before checks/codegen.
+            _ => AccessConvention::Infer,
         }
     }
 

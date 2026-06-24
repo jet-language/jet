@@ -50,7 +50,9 @@ pub(crate) fn check_extern_fn(ef: &ExternFn, registry: &TypeRegistry, diags: &mu
         ok = false;
     }
     for p in &ef.params {
-        if p.convention != AccessConvention::Read {
+        // D-CAP8: `Infer` (unmarked) is by-value, like `Read` — both are fine at the
+        // boundary; only an explicit `~`/`^`/`&` marker is rejected.
+        if !matches!(p.convention, AccessConvention::Read | AccessConvention::Infer) {
             diags.push(ffi_type_error(
                 &format!("`{}` can't use `{}` at the FFI boundary", p.name, access_keyword(p.convention)),
                 "foreign functions take owned copies — `mut`, `take`, and `view` aren't allowed here",
@@ -204,7 +206,8 @@ pub(crate) fn check_c_module(cm: &CModule, registry: &TypeRegistry, diags: &mut 
             ok = false;
         }
         for p in &ef.params {
-            if p.convention != AccessConvention::Read {
+            // D-CAP8: `Infer` (unmarked) is by-value like `Read`; only explicit markers reject.
+            if !matches!(p.convention, AccessConvention::Read | AccessConvention::Infer) {
                 diags.push(ffi_type_error(
                     &format!("`{}` can't use `{}` at the C boundary", p.name, access_keyword(p.convention)),
                     "C functions take values by copy — `mut`, `take`, and `view` aren't allowed here",

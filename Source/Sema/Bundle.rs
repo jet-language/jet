@@ -248,6 +248,10 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
     // D-MOD2: rewrite inline-module sibling calls to their mangled names before any
     // registration/checking/codegen sees the bodies.
     mangle_inline_sibling_calls(bundle);
+    // D-CAP8 (= C): resolve unmarked (`Infer`) parameter capabilities from body usage
+    // before registration/checking/codegen — they then see resolved conventions, never
+    // `Infer`. Deterministic; mutates the AST param conventions in place.
+    super::Capability::resolve_capabilities(bundle);
     let mut states: Vec<ModuleState> = (0..bundle.modules.len())
         .map(|_| ModuleState {
             funcs: HashMap::new(),
