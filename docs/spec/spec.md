@@ -484,6 +484,28 @@ and exit **1** when any test fails. **`require_eq`** failures print
 Example: `examples/features/20_tests.jet`. Goldens: `examples/features/expected/20_tests.test.out`,
 `tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`.
 
+## `#Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
+
+**`#Bench "name" { … }`** (D-BENCH1) is the exact sibling of `#Test`: a
+top-level block whose body parses like a parameterless function (and may use
+`require`/`require_eq`). **`jet run`** / **`jet build`** ignore bench blocks. A
+file with `#Bench` blocks runs per-region under **`jet bench`** — each region's
+body is warmed, its iteration count auto-scaled to ≥1ms, sampled, and reported
+as `name  <ns> ns/iter (±sd)  <ops> ops/sec`. A file with no `#Bench` blocks
+keeps whole-program `jet bench` timing (5 warmup + 20 trials). The body call is
+`black_box`'d so the optimizer can't elide it. Example:
+`examples/features/105_bench.jet`; golden `examples/features/expected/105_bench.out`
+(the `jet run` `main` output) + structural check in `tests/jet_test.rs`.
+
+**Compiler phase timing** — set **`JET_TIMING=1`** and any build writes
+`jet-timing.json` (load/sema/ffi/codegen µs + generated-Rust bytes), prints
+`jet-timing binary_bytes=…` after link, and the LSP appends per-request latency
+to `jet-lsp-timing.json`. All gated by the env var (zero cost otherwise; I6
+hand-rolled JSON, no external crate). **`tools/perf/dashboard.sh`** aggregates a
+table across representative programs; **`tools/perf/ci-perf-check.sh`** gates
+against the committed **`tools/perf/baseline.json`** (sema time + binary size,
+15% threshold); **`tools/perf/update-baseline.sh`** refreshes it.
+
 **NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
 and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 `jet run …` / `jet lsp` / `cargo test --test lsp`. Editor setup:
