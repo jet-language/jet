@@ -25,21 +25,13 @@ it's time to decide it.
 
 ## Open decisions
 
-_No open full cards. The 2026-06-24 batch-4 drain (note below) cleared the serde
-derive-path surface and the dispatch/formatter/SIMD/embedded cards. New follow-on
-ballots the owner requested in his batch comments are listed under **Pending
-follow-on cards** below._
-
-**Pending follow-on cards (owner-requested, to develop):**
-- **D-EFF1 follow-ons** — owner (D-EFF1 = B): "crosscheck the new subquestions for B
-  against existing ballots, then create new non-duplicate ballots so we can proceed —
-  we need to nail down syntax, which is correlated with another ballot." Effect-tag
-  *spelling* sub-decisions to draft against D-QUAL1's ratified `#(…)` surface.
-- **D-SOA1 follow-ons** — owner (D-SOA1 = A): wants a better name than "SOA", plus three
-  open questions to put to him as cards: (1) whole-struct SOA only in v1 vs
-  `#layout(soa: field, …)` partial annotation; (2) reserve `soa [Particle]` (Option B)
-  as a future spelling for per-container overrides; (3) interaction with `#[Codable]`
-  and reflection — does SOA layout affect the serialized representation?
+_Two open cards (below): the effect-tag **vocabulary** (D-EFF4) and **lattice shape**
+(D-EFF5), developed from the owner's D-EFF1 = B instruction ("crosscheck the subquestions,
+create non-duplicate ballots"). The 2026-06-24 batch-4 drain (note below) cleared the serde
+derive-path / dispatch / formatter / SIMD / embedded cards. The owner's **D-SOA1** follow-on
+asks were already developed + ratified as D-SOA2A–D on 2026-06-22 (name → `#layout(columnar)`,
+whole-struct-only v1, reserve `columnar [Particle]`, serialization-transparent), so no SOA
+cards are open._
 
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
@@ -47,6 +39,135 @@ follow-on cards** below._
   (`tree.field("x").int()?`, `.text()`, `.bool()`, indexing). Only matters for the
   hand-impl / dynamic path (D-SERDE2), not the typed derive. Recommend: keep
   pattern-match as the floor; add minimal fluent accessors if hand-impl ergonomics demand it.
+
+---
+
+## An effect system, expressed as tags on functions — board card c62
+
+### D-EFF4 — The named effect vocabulary: which effects exist, and is the set closed? (rec A)
+
+**Gist:** Pin the exact list of built-in effect names and decide whether users may mint their own.
+
+**Story.** Walter, who maintains a payments library, writes `fn charge(card: Card) #(Net, Db)` and expects the compiler to know `Net` and `Db` as effects — but he also wants to express "this touches our HSM hardware module," which is none of the ten built-ins. Whether he can write `#(Hsm)` and have it mean something, or must overload `Exec`, depends entirely on whether the effect set is closed.
+
+**In the wild:**
+```jet
+// A driver author wants a domain effect the ten built-ins don't cover.
+fn sign(payload: Bytes) #(Hsm) {        // is `Hsm` a known effect, or E0119?
+    hsm.sign(payload)
+}
+
+// A reviewer reads a signature and must know the full vocabulary it can name.
+fn audit_export(rows: [Row]) #(Fs, Net) {   // exactly which words are legal here?
+    write_csv(rows)
+    upload(rows)
+}
+```
+
+**Other languages:**
+```text
+Koka    — effects are OPEN: `effect raise { ctl raise(msg): a }`; rows carry arbitrary labels
+Frank   — open ability set, user-declared interfaces
+Haskell — mtl/effectful/polysemy: fully open; an effect is a user-defined type/class
+Swift   — CLOSED: exactly two ambient effects (`throws`, `async`); no third can be added
+Rust    — no effect system; nearest analog (`const`/`unsafe`/`async`) is a fixed compiler set
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Beginner clarity | One-path | Reviewer can read sig | Covers domain effects | Safe-by-default |
+|---|---|---|---|---|---|
+| A — closed built-in set | high (finite, LSP lists all) | strong | always — vocabulary is fixed | only via the built-ins | strong (no unknown labels) |
+| B — closed core + reserved-extensible later | high now | strong now | yes | not yet, door open | strong |
+| C — open / user-declarable now | lower (unbounded vocabulary) | weaker (two ways to say a thing) | needs import resolution | yes | weaker (label means nothing to caller without def) |
+
+- **Option A — closed built-in set (recommended).** Exactly the ten the implementation already carries (`Net, Fs, Io, Db, Time, Rand, Env, Exec, Log, Gpu`); `#(Hsm)` is E0119 "isn't a known effect."
+  ```jet
+  fn fetch(url: Url) #(Net) { http.get(url) }      // ok
+  fn sign(p: Bytes) #(Hsm) { hsm.sign(p) }         // E0119: `Hsm` isn't a known effect
+  fn sign(p: Bytes) #(Exec) { hsm.sign(p) }        // ok — fold the device into the closest built-in
+  ```
+- **Option B — closed core now, reserve user-extensible effects as a future spelling.** Ship A's ten, but pre-commit that a later `effect Hsm` declaration form is reserved (no syntax minted today).
+  ```jet
+  fn sign(p: Bytes) #(Exec) { hsm.sign(p) }   // today: same as A
+  // RESERVED for a future ballot — not legal yet:
+  // effect Hsm
+  // fn sign(p: Bytes) #(Hsm) { hsm.sign(p) }
+  ```
+- **Option C — open / user-declarable effects now.** A user mints `effect Hsm` and the row machinery carries it like a Koka label.
+  ```jet
+  effect Hsm                                  // user declares a new effect
+  fn sign(p: Bytes) #(Hsm) { hsm.sign(p) }    // legal; `Hsm` now a known label in scope
+  ```
+
+**Recommendation:** A — the ten built-ins already cover every Core-backed source of ambient power, a finite vocabulary is the only one a reviewer can read without import resolution, and a closed set keeps safe-by-default airtight; user-extensible effects are real but are their own ballot, not a thing to ship by accident in code.
+
+**Owner Q — the exact ten.** The implementation carries `Net, Fs, Io, Db, Time, Rand, Env, Exec, Log, Gpu`. Right ten? Candidates: `Async`/`Spawn` (concurrency as an effect?), `Panic`/`Abort` (divergence, like Koka's `div`?). `Unsafe` is already a separate gate (D-LL1) — recommend NOT an effect. Recommend shipping the ten as-is; concurrency/divergence effects are a separate follow-on if wanted.
+
+**Owner Q — extensibility door.** If you lean A but want the door open, that's Option B. Pick B only if domain effects (hardware, custom capabilities) matter before v1; otherwise A, and reopening later costs nothing.
+
+---
+
+### D-EFF5 — Effect lattice shape: is `Io` an umbrella over `Net`/`Fs`, or a flat sibling? (rec A)
+
+**Gist:** Decide whether the ten effects are a flat set or a hierarchy where coarse effects subsume finer ones.
+
+**Story.** Mabel writes a logging helper and tags it `#(Io)` because it does "some I/O." A caller declares `fn handler() #(Io)`. Later someone adds a network call inside Mabel's helper. Should that compile (because `Net` is a kind of `Io`)? Or fail (because `Io` and `Net` are unrelated siblings and the caller never authorized `Net`)? The answer changes whether `#(Io)` is a safe blanket or a precise claim.
+
+**In the wild:**
+```jet
+fn log_line(s: String) #(Io) {     // Io = the print/input console effect
+    print(s)
+}
+
+fn report(rows: [Row]) #(Io) {     // author thinks "Io covers it"
+    log_line("starting")
+    upload(rows)                    // adds Net — does #(Io) cover this, or E0740?
+}
+```
+Today (`Source/Sema/Effects.rs`): `Io`, `Net`, `Fs` are flat siblings — `print` → `Io`, `http.get` → `Net`, `fs.read` → `Fs`. So `report` is **E0740 (Net outside #(Io))** under the current flat lattice. This card asks the owner to ratify that, or choose a hierarchy.
+
+**Other languages:**
+```text
+Koka            — flat labels; `console`, `ndet`, `div` independent rows, no subsumption  (≈ Option A)
+Swift           — flat (the two effects don't subsume each other)
+Haskell effectful— flat; `IOE` is one effect, finer effects are independent — no "IO subsumes all"
+E / Pony (ocaps)— often hierarchical (a coarse capability dominates finer ones)            (≈ Option B)
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Beginner mental model | Precision of a signature | Safe-by-default | Reviewer surprise |
+|---|---|---|---|---|
+| A — flat, all ten independent | "list every kind you do" — literal | high — `#(Io)` means only console | strong — `Net` never hides under `Io` | low — what you wrote is what's checked |
+| B — `Io` umbrella over `Net`/`Fs`/console | "Io = any I/O" — fewer words | low — `#(Io)` silently admits `Net`/`Fs` | weaker — a net call hides under a blanket | high — `#(Io)` authorizes more than it reads |
+| C — flat + explicit `#(AnyIo)` blanket alias | simple + an opt-in shortcut | high by default, blanket only when asked | strong (blanket is explicit) | low |
+
+- **Option A — flat lattice, all ten independent (recommended).** No subsumption; `#(Io)` means console only. A `Net` call under `#(Io)` is E0740.
+  ```jet
+  fn report(rows: [Row]) #(Io, Net) {   // must name both — each effect is its own claim
+      log_line("starting")              // Io
+      upload(rows)                      // Net
+  }
+  ```
+- **Option B — `Io` is an umbrella over `Net`/`Fs`/console.** Declaring `#(Io)` admits any finer I/O effect.
+  ```jet
+  fn report(rows: [Row]) #(Io) {        // Io blanket-covers Net + Fs + console
+      log_line("starting")
+      upload(rows)                      // Net — allowed, it's "a kind of Io"
+  }
+  ```
+- **Option C — flat by default plus an explicit `#(AnyIo)` blanket alias.** Precision stays the default; a caller who wants "any I/O" opts in by name.
+  ```jet
+  fn glue() #(AnyIo) {                  // explicit blanket — expands to all I/O-family effects
+      upload(rows)                      // Net, covered by the named blanket
+      fs.write(path, bytes)             // Fs, covered
+  }
+  ```
+
+**Recommendation:** A — a flat lattice is what the implementation already does, what Koka and the mainstream effect libraries do, and the only shape where a signature's effect list means exactly what it says; an umbrella `Io` quietly authorizes `Net`/`Fs` a reviewer can't see in the word `Io`. If "any I/O" ergonomics ever bite, C adds an opt-in blanket without weakening the default.
+
+**Owner Q — the console effect's name.** Under flat (A), the `print`/`input` console effect is currently named `Io`. Since it no longer means "all I/O," consider renaming it `Console` or `Stdio` so `#(Io)` doesn't read like a blanket it isn't. Recommend `Io` → `Console`.
 
 ---
 
