@@ -944,8 +944,13 @@ the runtime panic code.
 `task.detach()` (D-DETACH1) fire-and-forgets the task — it consumes the
 `Task<T>` handle so **L1101** is suppressed, and the task continues running in
 the background. Detach is sound only when the spawned lambda holds fully-owned
-data; if E1102 already fired at spawn, **E1103** fires at the `.detach()` call
-site to flag the double hazard.
+data. Two detach-site diagnostics guard unsound cases:
+
+- **E1106**: the lambda returned or captured a `view` borrow — a detached task
+  may outlive the borrow's source, so the `view` would dangle. Fix: pass an
+  owned `copy` or `share` instead.
+- **E1103**: the lambda had a different sendability failure at spawn (E1102
+  already fired); detaching an unsound task is doubly dangerous.
 
 `tasks.channel<T>() -> Channel<T>` creates a receive half. `ch.sender() ->
 Sender<T>` creates a clonable send half. `sender.send(value)` moves a `T` into

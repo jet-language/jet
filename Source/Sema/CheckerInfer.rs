@@ -1363,10 +1363,24 @@ impl<'a> Checker<'a> {
                 }
                 ("Task", "detach") => {
                     // D-DETACH1: consume the Task handle (marks it moved → L1101 won't fire).
-                    // E1103 fires if the task had a sendability problem at spawn (E1102 already
-                    // fired); detaching an unsound task is doubly dangerous.
+                    // Two error cases:
+                    //   E1106: task captured a `view` borrow — a detached task can outlive
+                    //          the borrow; fix-it is to pass an owned `copy`/`share`.
+                    //   E1103: task had a general sendability failure at spawn (E1102 already
+                    //          fired); detaching an unsound task is doubly dangerous.
                     if let Expr::Ident(name, _) = receiver {
-                        if self.view_capture_tasks.contains(name.as_str()) {
+                        if self.view_borrow_escape_tasks.contains(name.as_str()) {
+                            self.diags.push(Diagnostic::error(
+                                "E1106",
+                                format!(
+                                    "can't detach task `{}` — it captured a `view` borrow that may not live long enough",
+                                    name
+                                ),
+                                "a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle".to_string(),
+                                "pass an owned `copy` or `share` to the task instead of a `view`".to_string(),
+                                Some(span),
+                            ));
+                        } else if self.view_capture_tasks.contains(name.as_str()) {
                             self.diags.push(Diagnostic::error(
                                 "E1103",
                                 format!(

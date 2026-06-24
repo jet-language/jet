@@ -309,6 +309,7 @@ before continuing.
 | E1103 | sema  | `.detach()` called on a task that had a sendability error at spawn (D-DETACH1) |
 | E1104 | sema  | `#layout(c)` struct contains a growable field (D-REPRC1) |
 | E1105 | sema  | `#layout(…)` variant not yet supported (D-REPRC1 reserved) |
+| E1106 | sema  | `.detach()` called on a task that captured a `view` borrow (D-DETACH1) — the view may outlive the caller |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | E2301 | sema  | returned `view` outlives the local that owns it (E2-M5) |
 | E2302 | sema  | stored `ref` field would point at something that dies first (E2-M5) |
@@ -462,6 +463,7 @@ CLI.
 | E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
 | E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; shared views (`&`), `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the shared-view field, or hand a closure over with `take`. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
+| E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy` or `share` to the task instead of a `view`. |
 | E1104 | `#layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#layout(c)` if C interop is not required. |
 | E1105 | `#layout(packed)`, `#layout(align(N))`, or `#layout(columnar)` written on a struct. | Only `#layout(c)` is implemented in this release; the other variants are reserved for future milestones. | Use `#layout(c)` for C-compatible layout, or omit `#layout` for the default. |
 | L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |

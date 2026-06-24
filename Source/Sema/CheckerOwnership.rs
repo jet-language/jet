@@ -563,12 +563,16 @@ impl<'a> Checker<'a> {
             }
         };
         // D-DETACH1: if this E1102 fires in a task spawn context, record the task
-        // binding name so E1103 fires too when `.detach()` is called on it. A
-        // detached task with sendability problems is doubly dangerous: it can't
-        // safely send the captured value across threads AND it runs unsupervised.
+        // binding name so the right detach diagnostic fires when `.detach()` is called:
+        //   - ViewBorrow → E1106 ("pass an owned copy/share"); view can outlive the borrow
+        //   - other sendability failures → E1103 (general unsound-detach)
         if matches!(crossing, SendCrossing::TaskCapture | SendCrossing::TaskResult) {
             if let Some(name) = &self.current_binding_name {
-                self.view_capture_tasks.insert(name.clone());
+                if matches!(problem.kind, SendProblemKind::ViewBorrow) {
+                    self.view_borrow_escape_tasks.insert(name.clone());
+                } else {
+                    self.view_capture_tasks.insert(name.clone());
+                }
             }
         }
         self.diags.push(Diagnostic::error(

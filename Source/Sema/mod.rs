@@ -483,9 +483,12 @@ pub(crate) struct Checker<'a> {
     lambda_escapes: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
-    /// D-DETACH1: task names whose spawn lambda captured a view borrow (E1102 fired).
-    /// At `.detach()`, if the task is in this set, E1103 fires too.
+    /// D-DETACH1: task names whose spawn lambda had a non-view sendability error (E1102 fired).
+    /// At `.detach()`, if the task is in this set and NOT in view_borrow_escape_tasks, E1103 fires.
     view_capture_tasks: HashSet<String>,
+    /// D-DETACH1: task names whose spawn lambda captured a `view` borrow specifically (E1102/ViewBorrow).
+    /// At `.detach()`, if the task is in this set, E1106 fires instead of E1103.
+    view_borrow_escape_tasks: HashSet<String>,
     /// D-DETACH1: the binding name currently being elaborated (set at check_binding
     /// entry, cleared after). Used to record view-capturing task names.
     current_binding_name: Option<String>,

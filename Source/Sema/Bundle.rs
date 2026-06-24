@@ -1399,6 +1399,7 @@ pub(crate) fn check_func_body_bundle(
         lambda_escapes: true,
         is_task_spawn: false,
         view_capture_tasks: HashSet::new(),
+        view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,
         lambda_binding: None,
         lambda_mut_borrow_stack: vec![HashSet::new()],
