@@ -17,6 +17,12 @@ impl<'a> Fmt<'a> {
             Item::Bench(b) => self.fmt_bench(b),
             Item::ExternRust(b) => self.fmt_extern_rust(b),
             Item::Trait(t) => self.fmt_trait(t),
+            // D-QUAL2: tag declarations are emitted verbatim (non-destructive).
+            Item::Tag(t) => {
+                let text = self.src[t.span.start..t.span.end].to_string();
+                self.write(&text);
+                self.newline();
+            }
             // Stage 1a: modules are emitted verbatim (non-destructive). A
             // canonical module formatter lands with the eval pipeline.
             Item::Module(m) => {

@@ -429,6 +429,11 @@ pub enum Item {
     Distinct(DistinctDef),
     /// S28 (M9): `trait Name { fn sig(self) -> T; … }`.
     Trait(TraitDef),
+    /// D-QUAL2 (ratified 2026-06-21): `tag Name;` or `tag Name { }` — a marker
+    /// qualifier with no methods. It erases at runtime (codegen emits nothing).
+    /// A method in a tag body is E0732; using a tag where dispatch is expected
+    /// is E0731.
+    Tag(TagDef),
     Impl(ImplDef),
     Const(ConstDef),
     /// S43 (M6): `#Test "name" { … }` — only at file top level.
@@ -691,6 +696,21 @@ pub struct TraitDef {
     /// D-LIB2: `type Name;` associated type declarations inside the trait body.
     pub assoc_types: Vec<(String, Span)>,
     pub methods: Vec<TraitMethodSig>,
+}
+
+/// D-QUAL2: `tag Name;` / `tag Name { }` — a marker qualifier. By the taxonomy
+/// rule (methods → trait, no methods → tag) a tag carries no methods; any method
+/// found in its body is reported as E0732. The body is parsed permissively (so a
+/// stray method doesn't derail the parser) and validated in sema.
+#[derive(Debug)]
+pub struct TagDef {
+    pub is_pub: bool,
+    pub name: String,
+    pub name_span: Span,
+    /// Methods erroneously written in a tag body. Always empty for a well-formed
+    /// tag; each entry triggers E0732 in sema.
+    pub methods: Vec<TraitMethodSig>,
+    pub span: Span,
 }
 
 /// S28: method signature inside a trait block (body optional per D-LIB2).

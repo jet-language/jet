@@ -35,6 +35,8 @@ pub enum TokKind {
     KwEnum,
     KwImpl,
     KwTrait,
+    /// D-QUAL2: `tag` — marker qualifier declaration keyword.
+    KwTag,
     KwDerive,
     KwSelf,
     KwNull,
@@ -177,6 +179,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwEnum => format!("the keyword `{}`", Syntax::KW_ENUM),
         TokKind::KwImpl => format!("the keyword `{}`", Syntax::KW_IMPL),
         TokKind::KwTrait => format!("the keyword `{}`", Syntax::KW_TRAIT),
+        TokKind::KwTag => format!("the keyword `{}`", Syntax::KW_TAG),
         TokKind::KwDerive => format!("the keyword `{}`", Syntax::KW_DERIVE),
         TokKind::KwSelf => format!("the keyword `{}`", Syntax::KW_SELF),
         TokKind::KwNull => format!("the keyword `{}`", Syntax::LIT_NULL),

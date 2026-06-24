@@ -365,6 +365,18 @@ pub(crate) fn compute_completions(
                     });
                 }
             }
+            SymKind::Tag => {
+                if seen.insert(def.name.clone()) {
+                    items.push(CompletionItem {
+                        label: def.name.clone(),
+                        kind: ck::INTERFACE,
+                        detail: Some(format!("tag {}", def.name)),
+                        insert_text: None,
+                        insert_text_format: 1,
+                        auto_import: auto_import_for(&def.module_path),
+                    });
+                }
+            }
             SymKind::Local { mutable: _, ty } => {
                 if seen.insert(def.name.clone()) {
                     let detail = ty.as_ref().map(|t| t.name());

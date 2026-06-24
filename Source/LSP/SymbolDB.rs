@@ -20,6 +20,8 @@ pub(crate) enum SymKind {
         variants: Vec<String>,
     },
     Trait,
+    /// D-QUAL2: a `tag` marker qualifier (no methods, erases at runtime).
+    Tag,
     Const,
     EnumVariant {
         parent: String,
@@ -356,6 +358,19 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
                     },
                 });
             }
+        }
+        Item::Tag(t) => {
+            db.defs.push(SymDef {
+                name: t.name.clone(),
+                def_span: t.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Tag,
+            });
+            db.hover.push(HoverEntry {
+                span: t.name_span,
+                module_path: mp.to_string(),
+                text: format!("tag `{}`", t.name),
+            });
         }
         Item::Impl(i) => {
             for meth in &i.methods {

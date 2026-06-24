@@ -379,6 +379,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     }
                 }
                 Item::Trait(_) => {}
+                // D-QUAL2: a tag is a marker; it registers no callable items.
+                Item::Tag(_) => {}
                 Item::Module(_) => {}
                 Item::CodeModule(cm) => {
                     if let Some(body) = &cm.body {
@@ -757,6 +759,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)
+            | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Module(_)
             | Item::Distinct(_)
             | Item::CModule(_) | Item::CodeModule(_)
@@ -954,6 +957,7 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                 Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used),
                 Item::Const(c) => collect_core_expr(&c.value, imports, &mut used),
                 Item::Trait(_)
+                | Item::Tag(_) // D-QUAL2: tags use no core imports
                 | Item::ExternRust(_)
                 | Item::Module(_)
                 | Item::Distinct(_)

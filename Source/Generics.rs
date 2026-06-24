@@ -284,6 +284,34 @@ pub fn e0908(type_name: &str, trait_name: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// D-QUAL2: a method appears in a `tag` body. A tag is a marker that erases at
+/// runtime; only a `trait` carries methods and dispatches.
+pub fn e0732(tag_name: &str, method: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0732",
+        format!("the tag `{tag_name}` declares a method `{method}`, but tags have no methods"),
+        "a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches"
+            .to_string(),
+        format!(
+            "make `{tag_name}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag_name}` a marker tag"
+        ),
+        Some(span),
+    )
+}
+
+/// D-QUAL2: a `tag` is used where dispatch/methods are expected (e.g. `derive`d,
+/// or named as a trait bound). A tag has no methods to attach or dispatch.
+pub fn e0731(tag_name: &str, context: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0731",
+        format!("`{tag_name}` is a tag, but {context} needs a trait"),
+        "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`"
+            .to_string(),
+        format!("declare `{tag_name}` as a `trait` with the method(s) it should provide"),
+        Some(span),
+    )
+}
+
 pub fn e0901(method: &str, bound: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0901",

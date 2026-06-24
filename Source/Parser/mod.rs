@@ -13,7 +13,7 @@ use crate::AST::{
     Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     ModuleDecl, Namespace,
     LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
-    SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
+    SwitchArm, TagDef, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
     Variant, VariantField, VariantPayload,
 };
 use crate::Diagnostics::{Diagnostic, Span};

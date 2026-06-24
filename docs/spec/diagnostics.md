@@ -221,6 +221,8 @@ before continuing.
 | E0740 | sema  | a function's inferred effects exceed its declared `#(…)` bound (D-EFF1) |
 | E0741 | sema  | an effect used inside a `#Caps(…)` region is not in its cap list (D-EFF1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
+| E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
+| E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
 | E0745 | sema  | a `#Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`) |
@@ -628,6 +630,45 @@ reported as **E0119** (unknown name).
 | E0741 | This `#Caps` region uses the effect `{effect}`, which it doesn't allow. | `#Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`#Pure fn hash(self)`, `fn render(self) #(Gpu)`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0745 | `{fn}` is `#Pure` but also declares effects. | `#Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `#Pure` to allow the listed effects. |
+
+## Qualifier taxonomy diagnostics (D-QUAL2)
+
+There are exactly two kinds of qualifier. A **`trait`** has at least one method
+and dispatches via a vtable; a **`tag`** has no methods and erases at runtime.
+The beginner rule is one sentence: *methods → trait, no methods → tag.* A tag is
+a pure marker, so it may not carry methods (E0732) and may not stand where
+dispatch or method attachment is expected — `derive`d, or implemented/used as a
+trait (E0731). Both are compile-time-only; a tag generates no code.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0731 | `{tag}` is a tag, but {context} needs a trait. | A `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`. | Declare `{tag}` as a `trait` with the method(s) it should provide. |
+| E0732 | The tag `{tag}` declares a method `{method}`, but tags have no methods. | A `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches. | Make `{tag}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag}` a marker tag. |
+
+A method written in a tag body (E0732):
+
+```
+Error [E0732]: the tag `Reviewed` declares a method `review`, but tags have no methods
+  --> tags.jet:2:8
+    |
+  2 |     fn review(self) -> Int;
+    |        ^^^^^^
+ Why: a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches
+ Fix: make `Reviewed` a `trait` if `review` should dispatch, or remove the method to keep `Reviewed` a marker tag
+```
+
+Deriving a tag (E0731) — `derive` attaches method impls, so its target must be a
+trait:
+
+```
+Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
+  --> derive.jet:6:12
+    |
+  6 |     derive Reviewed
+    |            ^^^^^^^^
+ Why: a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`
+ Fix: declare `Reviewed` as a `trait` with the method(s) it should provide
+```
 
 ## C FFI diagnostics (E2-M14, S59)
 

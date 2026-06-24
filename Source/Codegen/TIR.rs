@@ -10690,7 +10690,7 @@ fn mk() {
     fn covers_nested_struct() {
         // A struct field whose type is itself a covered struct, with a chained
         // field read and a nested literal.
-        let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n tag: Int }\nfn deep(o: Outer) -> Int {\n return (o.inner.v + o.tag)\n}\n";
+        let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n label: Int }\nfn deep(o: Outer) -> Int {\n return (o.inner.v + o.label)\n}\n";
         assert!(covers(src, "deep"));
     }
 

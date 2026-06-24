@@ -107,6 +107,19 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ));
                 }
             }
+            // D-QUAL2: a `tag` is a marker qualifier with no methods. Name
+            // uniqueness is checked here; E0732 (a method in a tag body) is
+            // reported in `TraitRegistry::register_items` so it fires on every
+            // sema path (single-program and bundle).
+            Item::Tag(t) => {
+                if name_defined(&t.name, &funcs, &registry, &consts) {
+                    diags.push(defined_twice(
+                        &t.name,
+                        "every tag needs a unique name",
+                        t.name_span,
+                    ));
+                }
+            }
             Item::Func(f) => {
                 if f.name == Syntax::BUILTIN_PRINT
                     || f.name == Syntax::BUILTIN_PANIC
@@ -533,6 +546,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)
+            | Item::Tag(_) // D-QUAL2: tags carry no body to check
             | Item::Module(_)
             | Item::CModule(_)
             | Item::CodeModule(_)
@@ -878,6 +892,7 @@ pub(crate) fn comptime_context_from_items(
             | Item::Bench(_)
             | Item::Const(_)
             | Item::Trait(_)
+            | Item::Tag(_) // D-QUAL2: tags contribute no comptime context
             | Item::Module(_)
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::Distinct(_)

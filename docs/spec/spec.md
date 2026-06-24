@@ -370,6 +370,14 @@ impl Circle {
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
   `Printable`/`Equatable`; explicit `@Comparable` / `@Serialize` (S82).
+- **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
+  no methods that erases at runtime (codegen emits nothing). Tags are the second
+  and only other qualifier kind beside traits; the beginner rule is one
+  sentence: *methods → trait, no methods → tag.* A tag carries no methods, so
+  declaring one in a tag body is **E0732**, and using a tag where dispatch or
+  method attachment is expected — `derive`d, or implemented/used as a trait —
+  is **E0731** (fix-it: declare it as a `trait`). All tags are PascalCase
+  (D-CASING1).
 - **Attributes (S82):** `@Marker` or `@[a, b]` on the line before a
   declaration; `@Marker { … }` for scoped effects (`@transact`, `#Unsafe`) or
   in-body config (`@Serialize { rename …; }`). **`#Pure fn`** is a prefix marker

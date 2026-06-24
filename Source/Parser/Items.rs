@@ -312,6 +312,7 @@ impl<'a> Parser<'a> {
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                    TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                     TokKind::KwModule if self.is_code_module_at(2) => {
                         self.code_module(true).map(Item::CodeModule)
                     }
@@ -349,6 +350,7 @@ impl<'a> Parser<'a> {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                 TokKind::KwImpl => self.impl_or_error_conv(),
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
@@ -1513,6 +1515,56 @@ impl<'a> Parser<'a> {
             name_span,
             assoc_types,
             methods,
+        })
+    }
+
+    /// D-QUAL2: `tag Name;` or `tag Name { … }` — a marker qualifier with no
+    /// methods. The body is parsed permissively (it may syntactically contain
+    /// method signatures so a stray method doesn't derail the parser); sema
+    /// reports each method as E0732.
+    pub(super) fn tag_def(&mut self, nested: bool) -> Result<TagDef, Diagnostic> {
+        let is_pub = if nested {
+            false
+        } else {
+            matches!(self.peek().kind, TokKind::KwPub)
+        };
+        if is_pub {
+            self.bump();
+        }
+        let start = self.peek().span;
+        self.expect_kw(TokKind::KwTag, "to start a tag definition")?;
+        let (name, name_span) = self.expect_ident("after `tag`")?;
+        let mut methods = Vec::new();
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                    continue;
+                }
+                // A `tag` carries no methods. We still parse a stray `fn …` so the
+                // parser recovers cleanly; sema flags it as E0732.
+                let is_pure = if self.at_pure_fn() {
+                    self.bump();
+                    self.bump();
+                    true
+                } else {
+                    false
+                };
+                methods.push(self.trait_method_sig(is_pure)?);
+            }
+            self.bump();
+        } else {
+            // Bare `tag Name;` — the common marker spelling.
+            self.finish_stmt()?;
+        }
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(TagDef {
+            is_pub,
+            name,
+            name_span,
+            methods,
+            span: Span::new(start.start, end),
         })
     }
 

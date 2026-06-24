@@ -23,6 +23,10 @@ pub struct TraitRegistry {
     pub derives: HashMap<String, HashSet<String>>,
     pub local_types: HashSet<String>,
     pub local_traits: HashSet<String>,
+    /// D-QUAL2: names declared with the `tag` keyword. A tag is a marker that
+    /// erases at runtime and carries no methods, so it may not be `derive`d or
+    /// used as a dispatching trait bound (E0731).
+    pub local_tags: HashSet<String>,
     pub auto_printable: HashSet<String>,
     pub auto_equatable: HashSet<String>,
     /// D-ERR-CONV: registered `(from_ty, to_ty)` error conversions.
@@ -42,6 +46,14 @@ impl TraitRegistry {
         for item in items {
             match item {
                 Item::Trait(t) => self.register_trait(t, diags),
+                // D-QUAL2: record tag names so derives / bounds can reject them,
+                // and flag any method written in a tag body (E0732).
+                Item::Tag(t) => {
+                    self.local_tags.insert(t.name.clone());
+                    for m in &t.methods {
+                        diags.push(Generics::e0732(&t.name, &m.name, m.name_span));
+                    }
+                }
                 Item::Struct(s) => self.register_struct_meta(s),
                 Item::Enum(e) => {
                     self.local_types.insert(e.name.clone());
@@ -64,6 +76,20 @@ impl TraitRegistry {
                     self.register_error_conv(&ec.from_ty, &ec.to_ty, ec.from_span, diags);
                 }
                 _ => {}
+            }
+        }
+        // D-QUAL2: `derive X` attaches method impls, so X must be a trait. A tag
+        // has no methods — deriving one is E0731.
+        for item in items {
+            let derives: &[(String, Span)] = match item {
+                Item::Struct(s) => &s.derives,
+                Item::Enum(e) => &e.derives,
+                _ => continue,
+            };
+            for (name, span) in derives {
+                if self.local_tags.contains(name) {
+                    diags.push(Generics::e0731(name, "`derive`", *span));
+                }
             }
         }
         for item in items {
@@ -173,6 +199,12 @@ impl TraitRegistry {
         span: Span,
         diags: &mut Vec<Diagnostic>,
     ) {
+        // D-QUAL2: an `impl Type: Tag { … }` attaches methods and dispatches, but
+        // a tag is a marker with no methods — E0731.
+        if self.local_tags.contains(trait_name) {
+            diags.push(Generics::e0731(trait_name, "an `impl` block", span));
+            return;
+        }
         if Generics::is_builtin_trait(trait_name)
             && (trait_name == COMPARABLE || trait_name == EQUATABLE)
         {

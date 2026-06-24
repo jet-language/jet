@@ -532,6 +532,8 @@ pub(crate) fn build_cx_items(
             Item::Trait(t) => {
                 cx.trait_names.insert(t.name.clone());
             }
+            // D-QUAL2: a tag erases — it contributes no codegen names.
+            Item::Tag(_) => {}
             Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
             | Item::Migration(_) => {} // D-MIGRATE1
             Item::Distinct(d) => {

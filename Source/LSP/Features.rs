@@ -80,6 +80,7 @@ pub(crate) fn compute_hover(
                     format!("enum `{}`\n\nVariants: {}", name, variants.join(", "))
                 }
                 SymKind::Trait => format!("trait `{}`", name),
+                SymKind::Tag => format!("tag `{}`", name),
                 SymKind::Const => format!("const `{}`", name),
                 SymKind::EnumVariant { parent } => format!("`{}` — variant of `{}`", name, parent),
                 SymKind::Field { ty, parent } => {
@@ -279,6 +280,7 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwEnum
         | TokKind::KwImpl
         | TokKind::KwTrait
+        | TokKind::KwTag
         | TokKind::KwDerive
         | TokKind::KwConst
         | TokKind::KwComptime

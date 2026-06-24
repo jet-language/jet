@@ -89,6 +89,7 @@ impl<'a> Parser<'a> {
                     | TokKind::KwUse
                     | TokKind::KwModule
                     | TokKind::KwTrait
+                    | TokKind::KwTag
                     | TokKind::KwComptime
                     // D-CASING1 follow-on: `#Test`/`#Pure`/`#Unsafe` markers start
                     // with `#` inside a code-module body.
@@ -181,6 +182,7 @@ impl<'a> Parser<'a> {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+                TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                 TokKind::KwUse => {
                     let span = self.peek().span;
                     self.sync_stmt();
@@ -197,6 +199,7 @@ impl<'a> Parser<'a> {
             TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
             TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
+            TokKind::KwTag => self.tag_def(false).map(Item::Tag),
             TokKind::KwImpl => self.impl_or_error_conv(),
             TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),

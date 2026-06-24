@@ -456,6 +456,12 @@ pub const FOREIGN_CLASS: &str = "class";
 /// S28 (ratified M9): trait declaration keyword.
 pub const KW_TRAIT: &str = "trait";
 
+/// D-QUAL2 (ratified 2026-06-21): tag declaration keyword — a marker qualifier
+/// with no methods that erases at runtime. The beginner rule: methods → trait,
+/// no methods → tag. Declaring a method on a `tag` is E0732; using a tag where
+/// dispatch is expected is E0731.
+pub const KW_TAG: &str = "tag";
+
 /// S55 (ratified M9): opt-in built-in derive line in a type body.
 pub const KW_DERIVE: &str = "derive";
 
@@ -1046,7 +1052,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Control flow (M1, S19, S23, M1/M2)
     KW_IF, KW_ELSE, KW_SWITCH, KW_LOOP, KW_IN, KW_BREAK, KW_CONTINUE, KW_RETURN,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
-    KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
+    KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_TAG, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION, KW_RENAME, KW_ADD, KW_REMOVE, KW_CHANGE, KW_VIA,
     // Ownership / borrow keywords (S10, M2)
