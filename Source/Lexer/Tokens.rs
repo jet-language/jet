@@ -93,6 +93,8 @@ pub enum TokKind {
     Amp,
     Pipe,
     Caret,
+    /// D-CAP7: `~` write/edit capability sigil (prefix). Position-disambiguated.
+    Tilde,
     Shl,
     Shr,
     // Logic & comparison (S13).
@@ -223,6 +225,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Amp => "`&`".to_string(),
         TokKind::Pipe => "`|`".to_string(),
         TokKind::Caret => "`^`".to_string(),
+        TokKind::Tilde => "`~`".to_string(),
         TokKind::Shl => "`<<`".to_string(),
         TokKind::Shr => "`>>`".to_string(),
         TokKind::AndAnd => "`&&`".to_string(),

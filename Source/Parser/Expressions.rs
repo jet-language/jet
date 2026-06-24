@@ -1575,7 +1575,26 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-CAP7: consume a leading capability sigil `~`/`^`/`&` → Write/Move/Share.
+    /// Returns `None` when no sigil is present. Position-disambiguated: infix `^`
+    /// (xor) and `&` (BitAnd) are parsed inside expressions and never reach the
+    /// start of a parameter/argument or a type. `*` (raw) is D-CAP9, handled apart.
+    pub(super) fn parse_capability_sigil(&mut self) -> Option<AccessConvention> {
+        let cap = match self.peek().kind {
+            TokKind::Tilde => AccessConvention::Write,
+            TokKind::Caret => AccessConvention::Move,
+            TokKind::Amp => AccessConvention::Share,
+            _ => return None,
+        };
+        self.bump();
+        Some(cap)
+    }
+
     pub(super) fn parse_access_prefix(&mut self) -> AccessConvention {
+        // D-CAP7 sigils take precedence over the (migrating) keyword forms.
+        if let Some(cap) = self.parse_capability_sigil() {
+            return cap;
+        }
         if let TokKind::Ident(name) = self.peek().kind.clone() {
             match name.as_str() {
                 Syntax::FOREIGN_READ => {

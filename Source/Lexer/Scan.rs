@@ -154,6 +154,9 @@ impl<'a> Lexer<'a> {
                 '%' => toks.push(simple(self, TokKind::Percent, 1)),
                 '^' if next == '=' => toks.push(simple(self, TokKind::CaretEq, 2)),
                 '^' => toks.push(simple(self, TokKind::Caret, 1)),
+                // D-CAP7: `~` is the write/edit capability sigil (prefix). `~` was
+                // previously unlexed; `~~` (S83 trait-attach) is not yet implemented.
+                '~' => toks.push(simple(self, TokKind::Tilde, 1)),
                 '&' if next == '&' => toks.push(simple(self, TokKind::AndAnd, 2)),
                 '&' if next == '=' => toks.push(simple(self, TokKind::AmpEq, 2)),
                 '&' => toks.push(simple(self, TokKind::Amp, 1)),

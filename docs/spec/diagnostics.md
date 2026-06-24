@@ -90,6 +90,7 @@ before continuing.
 | E0026 | parse | teaching: `throw`/`raise` → `err(…)` (M4) |
 | E0027 | parse | teaching: `append` → `push`               |
 | E0028 | parse | teaching: `Vec`/`dict` → `List`/`Map`     |
+| E0029 | parse | two capability markers on one parameter (D-CAP7) |
 | E0030 | parse | teaching: `as` → `.to_float()` etc.       |
 | E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0032 | parse | teaching: `lambda` / `fn(x){…}` → `(x) => …` (S46) |

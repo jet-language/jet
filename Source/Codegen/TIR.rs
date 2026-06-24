@@ -7250,7 +7250,11 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let sig = cx.sigs.get(name);
             let borrow = matches!(
                 sig.and_then(|ps| ps.first()),
-                Some((AccessConvention::Read, t)) if !t.is_scalar()
+                // D-CAP8/9: Infer/Share borrow like Read (see lower_one_call_arg).
+                Some((
+                    AccessConvention::Read | AccessConvention::Infer | AccessConvention::Share,
+                    t,
+                )) if !t.is_scalar()
             );
             let calls: Vec<TExpr> = items
                 .iter()
@@ -8133,9 +8137,12 @@ fn lower_one_call_arg(
     // non-scalar (non-Fn) is `&(…)`; a `Mutate` is `&mut (…)`. A Fn-typed `Read` is
     // NOT borrowed (the AST `match conv` skips it), so the fn-coerce form stands alone.
     let (borrow, mut_borrow) = match &conv {
-        Some((AccessConvention::Read, t)) if !t.is_scalar() && !matches!(t, Type::Fn { .. }) => {
-            (true, false)
-        }
+        // D-CAP8/9: Infer (pre-resolution default) and Share borrow like Read (`&(…)`)
+        // until their phases specialize them; Raw (never produced yet) stays by-value.
+        Some((
+            AccessConvention::Read | AccessConvention::Infer | AccessConvention::Share,
+            t,
+        )) if !t.is_scalar() && !matches!(t, Type::Fn { .. }) => (true, false),
         Some((AccessConvention::Write, _)) => (false, true),
         _ => (false, false),
     };

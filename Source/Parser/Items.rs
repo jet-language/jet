@@ -1071,7 +1071,7 @@ impl<'a> Parser<'a> {
     }
 
     fn param(&mut self) -> Result<Param, Diagnostic> {
-        let convention = self.parse_access_prefix();
+        let mut convention = self.parse_access_prefix();
         let (name, name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
             let span = self.bump().span;
             (Syntax::KW_SELF.to_string(), span)
@@ -1080,6 +1080,22 @@ impl<'a> Parser<'a> {
         };
         let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
             self.bump();
+            // D-CAP7: the capability sigil rides the type side — `name: ~T`/`^T`/`&T`.
+            // (Receivers carry it on `self` instead: `~self`, parsed above.)
+            if let Some(type_cap) = self.parse_capability_sigil() {
+                if convention != AccessConvention::Read {
+                    self.diags.push(Diagnostic::error(
+                        "E0029",
+                        format!("`{}` has two capability markers", name),
+                        "a parameter's access capability is written once — on the type \
+                         (`name: ~Type`), or on `self` for a receiver"
+                            .to_string(),
+                        "keep the sigil on the type and remove the other".to_string(),
+                        Some(name_span),
+                    ));
+                }
+                convention = type_cap;
+            }
             self.type_()?
         } else if name == Syntax::KW_SELF {
             // S27: receiver type is the owning struct/enum; sema fills it in.

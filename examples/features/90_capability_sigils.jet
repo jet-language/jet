@@ -1,0 +1,28 @@
+// Access-capability sigils (D-CAP7): the capability rides the type — `~T` write,
+// `^T` move/take, `&T` share — and the call site mirrors it. Receivers carry the
+// sigil on `self`. Plain `T` / `self` is read.
+
+struct Player { hp: Int, name: String }
+
+// `~Player` = the callee may edit the player; `amount: Int` is plain read.
+fn damage(p: ~Player, amount: Int) {
+    p.hp = p.hp - amount
+}
+
+// `&Player` = shared/read access at a call boundary.
+fn report(p: &Player) {
+    print("{p.name}: {p.hp}")
+}
+
+impl Player {
+    fn show(self) -> Int { return self.hp }
+    fn heal(~self, amount: Int) { self.hp = self.hp + amount }
+}
+
+fn main() {
+    p := Player { hp: 100, name: "Aria" }
+    damage(~p, 30)      // call site mirrors the `~` write capability
+    report(&p)          // `&` share
+    p.heal(10)          // receiver `~self`, clean method-call syntax
+    print(p.show())
+}
