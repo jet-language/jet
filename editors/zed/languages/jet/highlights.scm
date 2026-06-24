@@ -1,22 +1,70 @@
+; Jet syntax highlighting.
+; Node names here MUST match the compiled grammar (grammar-repo/grammar.js →
+; src/node-types.json). A reference to a node the grammar doesn't define makes
+; the WHOLE language fail to load in Zed ("Invalid node type ..."), so keep this
+; query in sync with the grammar whenever keyword/literal nodes change.
+
 ; Comments
 (comment) @comment
 (doc_comment) @comment.doc
 
-; Strings and chars
+; Literals
 (string_literal) @string
+(string_interpolation) @string
+(escape_sequence) @string.escape
 (char_literal) @string.special
+(integer_literal) @number
+(float_literal) @number
+(boolean_literal) @boolean
+(null_literal) @constant.builtin
 
-; Numbers
-(number) @number
+; Types
+(primitive_type) @type.builtin
+(type_identifier) @type
 
-; Keywords — the grammar-repo grammar's `keyword` node covers the full
-; JET_KEYWORD_LIST (see grammar-repo/grammar.js).  Foreign/deprecated
-; spellings (val, var, while, for, switch, test, and, or, not) are absent
-; from that node intentionally and will NOT be highlighted.
-(keyword) @keyword
+; Keywords (the grammar exposes each keyword as its own anonymous token —
+; there is no single `keyword` node). `true`/`false` are `boolean_literal`.
+[
+  "as"
+  "break"
+  "comptime"
+  "const"
+  "continue"
+  "else"
+  "enum"
+  "extern"
+  "fn"
+  "for"
+  "if"
+  "impl"
+  "in"
+  "loop"
+  "mut"
+  "pub"
+  "ref"
+  "return"
+  "rust"
+  "struct"
+  "switch"
+  "take"
+  "test"
+  "trait"
+  "use"
+  "val"
+  "var"
+  "view"
+  "while"
+] @keyword
 
-; User-defined types (PascalCase names not classified as keywords)
-(type_name) @type
+; Operators
+[
+  "+" "-" "*" "/" "%"
+  "=" "==" "!=" "<" ">" "<=" ">="
+  "&&" "||" "!"
+  "&" "|" "^" "<<" ">>"
+  "+=" "-=" "*=" "/=" "%=" "&=" "|=" "^=" "<<=" ">>="
+  "->" "=>" ".." "?"
+] @operator
 
 ; All other identifiers
 (identifier) @variable
