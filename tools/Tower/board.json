@@ -567,7 +567,7 @@
       "type": "task",
       "title": "Typed CSV row structs",
       "body": "Decode CSV rows into typed structs by header name via comptime; no S56 dependency. Elena.",
-      "stage": "building",
+      "stage": "done",
       "plan": "serde-model",
       "notes": [
         {
@@ -585,10 +585,14 @@
         {
           "t": "[merge] Folded into c104 (core.encoding unified serde). CSV/JSON are arms of the one model — implementation + tests tracked on c104. Kept for history.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] Delivered via c104 (folded into the unified core.encoding serde model); csv.decode<Row> typed decode shipped. Plan typed-csv-rows.md retired.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-24T17:00:00.000Z",
+      "updated": "2026-06-24",
       "decisions": [],
       "priority": "P2",
       "workOrder": null,
@@ -599,7 +603,7 @@
       "type": "task",
       "title": "Typed JSON output / struct serialization",
       "body": "json.render(struct) via a built-in #[Serialize] marker (distinct from S56 user-derives). Elena.",
-      "stage": "building",
+      "stage": "done",
       "plan": "serde-model",
       "notes": [
         {
@@ -613,10 +617,14 @@
         {
           "t": "[merge] Folded into c104 (core.encoding unified serde). CSV/JSON are arms of the one model — implementation + tests tracked on c104. Kept for history.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] Delivered via c104 (folded into the unified core.encoding serde model); typed JSON encode + decode<T> shipped. Plan typed-json-output.md retired.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-24T17:00:00.000Z",
+      "updated": "2026-06-24",
       "decisions": [
         "D-JSONOUT1"
       ],
@@ -771,7 +779,7 @@
       "type": "task",
       "title": "core.encoding — unified Serialize/Deserialize (merges c89 + c90)",
       "body": "Owner-requested serde model. ONE library core.encoding with per-format submodules (json/csv/toml/yaml, extensible). One DataValue tree + #[Serialize,Deserialize] built-in derive (compiler-owned codegen field-walk, NOT comptime, NOT S56) drives every format. Generic decode<T>/encode<T>. Full field attrs rename/default/skip/flatten/rename_all. D-ENC1: clean migration off core.json/jet.{csv,toml,yaml}; both `use core.encoding` (encoding.json.*) and leaf `use core.encoding.json as json`. Folds c89 (typed CSV) + c90 (typed JSON out). Plan: sidequests/serde-model.md.",
-      "stage": "building",
+      "stage": "done",
       "plan": "serde-model",
       "notes": [
         {
@@ -789,10 +797,14 @@
         {
           "t": "[impl 2026-06-24] Shipped increment 1: core.encoding library + {json,csv,toml,yaml} submodules; BOTH import surfaces (leaf use core.encoding.json as json AND whole-library use core.encoding -> encoding.json.to_string(x), new nested-namespace access); D-JSONVERB1 to_string/to_string_pretty uniform; clean break off core.json + jet.{csv,toml,yaml,json} (all examples/tests migrated); example 54_encoding + golden; suite green (pre-existing arena.rs failures unrelated). REMAINING (increment 2, the typed-derive heart): DataValue model + Serialize/Deserialize traits, built-in #[Serialize,Deserialize] derive codegen field-walk, generic decode<T>/to_string<T>, field attrs rename/default/skip/flatten/rename_all, diagnostics E2407-E2411, examples serde_basic/serde_derive/csv_typed/json_typed. Plan updated in sidequests/serde-model.md.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] Serde increment 2 shipped end-to-end (D-SERDE1-8, D-ENC1): DataTree model + Encode/Decode derive (structs+enums) + typed decode<T> turbofish + field/container attrs + E2407-E2413 + examples 106/107/108. Golden-verified (rustc accepts every generated impl). Future increments (generic serde, hand-impl path) noted in serde-model.md.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24T18:30:00.000Z",
+      "updated": "2026-06-24",
       "decisions": [
         "D-ENC1",
         "D-SERDE1",
@@ -1143,11 +1155,15 @@
       "type": "idea",
       "title": "if subject == { } explicit value/pattern dispatch (revise D-IF1/D-IF2)",
       "body": "Owner-initiated revision of ratified D-IF1/D-IF2: mark multi-way matching explicitly with `==` between the subject and the block (`if status == { \"active\" -> … }`), and drop the repeated `subject ==` from every arm — primitives AND enum/patterns. `if boolVar { }` stays a plain yes/no test. Plan: tools/Tower/docs/sidequests/if-eq-dispatch.md. Blocked on owner decision D-IF3 (marker spelling + required/optional + arm separator + predicate arms). Couples with D-FMT1 (c135) for single-line arms.",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "if-eq-dispatch",
       "notes": [
         {
           "t": "[sweep] Plan written + vetted by a second agent against the parser/codegen. D-IF3 queued in ballot (rec A = `==` marker, required, keep `->`, no predicate arms). Codegen unchanged (both forms lower to Stmt::Switch). Migration = every dispatch example, one commit. Coupled with D-FMT1.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-IF3 ratified (= A: required `==` dispatch marker, keep `->`, no predicate arms; E0992/E0993). Unblocked, not gated -> building per the implementation standard (ballot answer = go).",
           "at": "2026-06-24"
         }
       ],
@@ -1164,11 +1180,15 @@
       "type": "idea",
       "title": "jet fmt preserves single-line bodies (revise S44)",
       "body": "Owner-initiated revision of ratified S44: stop auto-expanding short single-line brace bodies (`if ready { launch() }`) into multiline. Plan: tools/Tower/docs/sidequests/fmt-single-line.md. Blocked on owner decision D-FMT1 (author-intent vs width-canonical vs status-quo; scope + eligibility floor). Gate that lets D-IF3 (c134) single-line arms survive `jet fmt`.",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "fmt-single-line",
       "notes": [
         {
           "t": "[sweep] Plan written + vetted by a second agent against Source/Formatter + tests/fmt.rs. D-FMT1 queued in ballot (rec A = author-intent preservation, reusing the S69 dot-chain mechanism; idempotent, not canonical — philosophy #4 exempts layout). Coupled with D-IF3.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-FMT1 ratified (= A: author-intent single-line bodies; uniform across brace bodies). Unblocked, not gated -> building.",
           "at": "2026-06-24"
         }
       ],
