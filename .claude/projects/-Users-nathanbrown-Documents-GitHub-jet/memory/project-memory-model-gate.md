@@ -21,6 +21,17 @@ unblocked). Capability spine already exists: `AccessConvention {Read,Mutate,Move
 `Source/AST.rs:7`, single producer `parse_access_prefix` (`Source/Parser/Expressions.rs:1569`,
 unmarked→Read at :1631) — grow it into `AccessCapability {Infer,Read,Write,Move,Share,Raw}`.
 
+**Implementation progress (all green + pushed to origin/master):** Phase 3 (AccessConvention →
+`{Infer,Read,Write,Move,Share,Raw}`), Phase 2 (sigils `~T`/`^T`/`&T` parse at type/call/receiver
+positions; `~`/Tilde lexed; E0029 two-markers), Phase 4 (D-CAP8 solver `Sema/Capability.rs` —
+unmarked params parse as `Infer`, resolved before checks/codegen by a deterministic body scan
+elevating over `Read<Share<Write<Move`; call args normalize `Infer`→`Read`). Marquee works:
+`fn heal(player: Player){ player.hp += amount }` infers `~Player`. Board c125/c126 done, c124
+building. **Remaining:** Phase 6 keyword migration (mut/take/view → teaching errors, formatter →
+sigils); D-CAP9 (`*x` raw-of, postfix `p.*` deref, `*T` replaces `Ptr<T>`); richer Move/Share
+inference (receiver-method mutation not yet detected); c129 api-freeze, c130 region-compose,
+c131 raw reconcile; diagnostics re-voiced to capability language.
+
 Sequencing: the memory-model build touches Parser/Sema/AST/TIR/diagnostics — the same shared
 files as the stdlib burn-down. **Burn-down DONE 2026-06-23**: all 7 agents (c87/c88/c91/c97/
 c105/c106-107/c116) integrated to local master, full suite green (876 tests). Three integration
