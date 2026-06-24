@@ -151,8 +151,9 @@ module.exports = grammar({
         ";"
       ),
 
-    // ── Test block ────────────────────────────────────────────────────────
-    test_block: ($) => seq("test", $.string_literal, $.block),
+    // ── Test block (S43, D-CASING1) ──────────────────────────────────────
+    // `#Test "name" { … }` — the `#` is the attribute prefix (D-ATTR3=B).
+    test_block: ($) => seq("#", "Test", $.string_literal, $.block),
 
     // ── Type params ───────────────────────────────────────────────────────
     type_params: ($) =>

@@ -589,12 +589,12 @@ no `**as**` keyword (E0030 teaches the named forms), and no C-style
 arbitrary-precision integers (C), implicit widening, lowercase Rust
 spellings (`i64`), C/Go cast punctuation.
 
-**S43 — Test syntax (M6)** *(ratified 2026-06-12; amended 2026-06-16, S82)*:
-top-level **`@test fn name { … }`** blocks (S82 attribute form), using
-`**require**` and `**require_eq**` (M4/S36) for assertions. The test name is
-the function identifier (replaces `test "name" { … }`). `jet run`/`build`
-ignore test blocks; `jet test` runs them. Rejected: `#[test]` attributes,
-`fn test_*` naming convention, quoted-name test blocks (former S43 spelling).
+**S43 — Test syntax (M6)** *(ratified 2026-06-12; amended 2026-06-16, S82; amended 2026-06-21, D-CASING1)*:
+top-level **`#Test "name" { … }`** blocks, using `**require**` and `**require_eq**`
+(M4/S36) for assertions. `jet run`/`build` ignore test blocks; `jet test` runs them.
+`test` (lowercase) is a teaching error pointing at `#Test` (E0052). Rejected: `#[test]`
+attributes, `fn test_*` naming convention, `@test fn` (former S82 form), quoted-name
+test blocks without the `#Test` marker (former S43 spelling).
 
 **S44 — Formatter style (M6)** *(ratified 2026-06-12)*: one true style,
 zero config — **4-space indent**, **same-line `{`**, **line width 100**,
@@ -1307,10 +1307,10 @@ share one sigil; **position disambiguates**.
 | `@Marker { … }` | scoped effect region (statement in a function body), **or** in-body config (first lines inside a type body) |
 
 **Declaration markers** — `@Marker` or `@[…]` on the line before `struct`,
-`enum`, or `fn`. Covers derive-like markers (`@Serialize`, `@Comparable`),
-harness markers (`@test`, `@todo`), and whole-item effects (`@transact`,
-`#Unsafe` on a function). **`pure fn`** and **`comptime`** bindings stay prefix
-keywords (not migrated to `@`).
+`enum`, or `fn`. Covers derive-like markers (`@Serialize`, `@Comparable`), and
+whole-item effects (`@transact`, `#Unsafe` on a function). **`comptime`** bindings
+stay prefix keywords. Note: harness markers (`#Test`, `#Todo`, `#Pure`) use `#`
+per D-ATTR3=B and D-CASING1 — they do not use the `@` prefix.
 
 **Scoped effects** — `@Marker { … }` as a statement inside a function (`@transact
 { … }`, `#Unsafe { … }`, `@async { … }` reserved for Epoch 3). Same spelling as
@@ -1337,9 +1337,8 @@ struct Profile {
 @[Comparable, Serialize]
 struct Score { value: Int; }
 
-@test
-fn reversing_twice(xs: [Int]) {
-    require_eq(reverse(reverse(xs)), xs);
+#Test "reversing twice" {
+    require_eq(reverse(reverse([1, 2, 3])), [1, 2, 3])
 }
 
 fn try_move(player: mut Player, target: Point) -> Bool ? {
