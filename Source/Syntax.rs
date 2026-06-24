@@ -964,6 +964,38 @@ pub const KW_MIGRATION: &str = "migration"; // D-MIGRATE1
 /// `migration { }` block — declares that field `old` was renamed to `new`.
 pub const KW_RENAME: &str = "rename"; // D-MIGRATE1
 
+/// D-MIGRATE2A (ratified): `add f: T = default` inside a `migration { }` block —
+/// declares a new field plus the default old records are read with.
+pub const KW_ADD: &str = "add"; // D-MIGRATE2
+
+/// D-MIGRATE2D (ratified): `remove f` inside a `migration { }` block — deletes a
+/// field. The verb is `remove`, NOT `drop` (a `drop` op is taught back to this).
+pub const KW_REMOVE: &str = "remove"; // D-MIGRATE2
+
+/// D-MIGRATE2E (ratified): `change f: Old -> New [via { … }]` inside a
+/// `migration { }` block — a field type change with an optional inline converter.
+pub const KW_CHANGE: &str = "change"; // D-MIGRATE2
+
+/// D-MIGRATE2E (ratified): the `via { expr }` clause that supplies the inline
+/// converter for a `change` op (`change price: Int -> Usd via { (c) => Usd(c) }`).
+pub const KW_VIA: &str = "via"; // D-MIGRATE2
+
+/// D-MIGRATE2F (ratified): the rejected `reorder` verb — field reordering is not
+/// a tracked breaking change and needs no migration. Kept only to teach.
+pub const KW_REORDER_RETIRED: &str = "reorder"; // D-MIGRATE2F
+
+/// D-MIGRATE1: the `drop` verb a user might reach for instead of `remove` — kept
+/// only to emit the E0911 teaching error pointing at `remove`.
+pub const KW_DROP_RETIRED: &str = "drop"; // D-MIGRATE2D
+
+/// D-MIGRATE2C (ratified): `jet schema` subcommand and its verbs. `status`
+/// reports each `#PublishedSchema` type's pinned shape; `squash --before <ver>`
+/// re-baselines snapshots to the current shape. There is NO `check` verb —
+/// `jet build`'s E0910 is already the CI gate.
+pub const CMD_SCHEMA: &str = "schema"; // D-MIGRATE2C
+pub const SCHEMA_VERB_STATUS: &str = "status"; // D-MIGRATE2C
+pub const SCHEMA_VERB_SQUASH: &str = "squash"; // D-MIGRATE2C
+
 /// D-MIGRATE1 (ratified 2026-06-22): subdirectory under the project `.jet/`
 /// managed folder where schema snapshots are stored. Full path is
 /// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.
@@ -1015,8 +1047,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_IF, KW_ELSE, KW_SWITCH, KW_LOOP, KW_IN, KW_BREAK, KW_CONTINUE, KW_RETURN,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
     KW_STRUCT, KW_ENUM, KW_IMPL, KW_TRAIT, KW_DERIVE, KW_CONST, KW_COMPTIME, KW_DISTINCT,
-    // Schema migrations (D-MIGRATE1)
-    KW_MIGRATION, KW_RENAME,
+    // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
+    KW_MIGRATION, KW_RENAME, KW_ADD, KW_REMOVE, KW_CHANGE, KW_VIA,
     // Ownership / borrow keywords (S10, M2)
     KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)

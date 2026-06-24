@@ -1,0 +1,15 @@
+// Tests that `remove legacy_id` (D-MIGRATE2D) unblocks a dropped field.
+// The sibling .published.snapshot has `legacy_id` that the new struct lacks.
+#PublishedSchema
+struct Account {
+    name: String
+}
+
+migration Account {
+    remove legacy_id
+}
+
+fn main() {
+    a @= Account { name: "Alice" }
+    print("{a.name}")
+}

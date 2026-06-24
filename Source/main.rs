@@ -18,6 +18,7 @@ use jet::ExitCodes;
 mod CmdCompile;
 mod CmdDevTools;
 mod CmdPkg;
+mod CmdSchema;
 mod CmdSupply;
 
 use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test};
@@ -29,6 +30,7 @@ use CmdPkg::{
     run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
     run_store_verify, run_update,
 };
+use CmdSchema::run_schema;
 use CmdSupply::{run_audit, run_publish, run_sbom, run_vendor};
 
 /// How diagnostics should be presented this run, resolved once from flags +
@@ -349,7 +351,7 @@ fn main() {
             cmd,
             "lsp" | "install" | "doctor" | "completions" | "man" | "dev"
                 | "publish" | "vendor" | "audit" | "sbom"
-                | "emit" | "bench" | "repl"
+                | "emit" | "bench" | "repl" | "schema"
         );
     if !known {
         if let Some(bin) = find_external(cmd) {
@@ -377,7 +379,7 @@ fn main() {
     let owns_flags = matches!(
         cmd,
         "env" | "dev" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
-            | "publish" | "vendor" | "audit" | "sbom" | "repl"
+            | "publish" | "vendor" | "audit" | "sbom" | "repl" | "schema"
     );
     if !owns_flags {
         check_flags(jet_argv, cmd);
@@ -436,6 +438,13 @@ fn main() {
         }
         "vendor" => {
             run_vendor();
+            return;
+        }
+        "schema" => {
+            // D-MIGRATE2C: `jet schema status` / `jet schema squash --before <ver>`.
+            // Use the unfiltered argv so `--before` and the verb survive.
+            let schema_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_schema(&schema_args);
             return;
         }
         "audit" => {

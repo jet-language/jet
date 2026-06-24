@@ -2027,24 +2027,91 @@ impl<'a> Parser<'a> {
             }
             let op_tok = self.bump();
             match &op_tok.kind {
+                // D-MIGRATE1: `rename old -> new`.
                 TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
                     let (from, from_span) = self.expect_ident("as the field to rename")?;
                     self.expect(TokKind::Arrow, "between the old and new field names in `rename`")?;
                     let (to, to_span) = self.expect_ident("as the new field name")?;
                     ops.push(crate::AST::MigrationOp::Rename { from, from_span, to, to_span });
                 }
-                TokKind::Ident(other) => {
-                    let other = other.clone();
-                    // E0911: staged op → D-MIGRATE2
+                // D-MIGRATE2A: `add field: Type = default`.
+                TokKind::Ident(kw) if kw == Syntax::KW_ADD => {
+                    let (field, field_span) = self.expect_ident("as the field to add")?;
+                    self.expect(TokKind::Colon, "after the added field name")?;
+                    let (ty, ty_span) = self.type_()?;
+                    self.expect(TokKind::Eq, "before the default value of an added field")?;
+                    let default = self.expr()?;
+                    let default_span = default.span();
+                    ops.push(crate::AST::MigrationOp::Add {
+                        field, field_span, ty, ty_span, default, default_span,
+                    });
+                }
+                // D-MIGRATE2D: `remove field`.
+                TokKind::Ident(kw) if kw == Syntax::KW_REMOVE => {
+                    let (field, field_span) = self.expect_ident("as the field to remove")?;
+                    ops.push(crate::AST::MigrationOp::Remove { field, field_span });
+                }
+                // D-MIGRATE2E: `change field: Old -> New [via { expr }]`.
+                TokKind::Ident(kw) if kw == Syntax::KW_CHANGE => {
+                    let (field, field_span) = self.expect_ident("as the field whose type changes")?;
+                    self.expect(TokKind::Colon, "after the changed field name")?;
+                    let (from_ty, from_span) = self.type_()?;
+                    self.expect(TokKind::Arrow, "between the old and new field types in `change`")?;
+                    let (to_ty, to_span) = self.type_()?;
+                    // Optional `via { expr }` inline converter (D-MIGRATE2B).
+                    let (converter, converter_span) = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
+                        let via_start = self.bump().span; // consume `via`
+                        self.expect(TokKind::LBrace, "to open the `via { … }` converter body")?;
+                        // Tolerate a newline-inserted `Semi` after `{`.
+                        while matches!(&self.peek().kind, TokKind::Semi) { self.bump(); }
+                        let body = self.expr()?;
+                        while matches!(&self.peek().kind, TokKind::Semi) { self.bump(); }
+                        let rbrace_end = self.peek().span.end;
+                        self.expect(TokKind::RBrace, "to close the `via { … }` converter body")?;
+                        (Some(body), Some(Span::new(via_start.start, rbrace_end)))
+                    } else {
+                        (None, None)
+                    };
+                    ops.push(crate::AST::MigrationOp::Change {
+                        field, field_span, from_ty, from_span, to_ty, to_span, converter, converter_span,
+                    });
+                }
+                // D-MIGRATE2D: `drop` → teach `remove` (E0911 teaching error).
+                TokKind::Ident(kw) if kw == Syntax::KW_DROP_RETIRED => {
                     self.diags.push(Diagnostic::error(
                         "E0911",
-                        format!("`{}` inside `migration` is not yet supported", other),
-                        "only `rename` is implemented in this release; `add`, `drop`, and type-change ops are staged behind D-MIGRATE2".to_string(),
-                        "use `rename old -> new` for field renames; bump the major version for other shape changes for now".to_string(),
+                        format!("`{}` isn't a migration verb — use `remove`", Syntax::KW_DROP_RETIRED),
+                        "a migration deletes a field with `remove`; `drop` is not a Jet keyword here".to_string(),
+                        "write `remove <field>` to delete a published field".to_string(),
                         Some(op_tok.span),
                     ));
-                    // skip to `}` for recovery
-                    while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                        self.bump();
+                    }
+                }
+                // D-MIGRATE2F: `reorder` → reordering needs no migration.
+                TokKind::Ident(kw) if kw == Syntax::KW_REORDER_RETIRED => {
+                    self.diags.push(Diagnostic::error(
+                        "E0911",
+                        "`reorder` isn't a migration verb — field order isn't a breaking change".to_string(),
+                        "a `#PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration".to_string(),
+                        "delete the `reorder` line; just write the fields in the order you want".to_string(),
+                        Some(op_tok.span),
+                    ));
+                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                        self.bump();
+                    }
+                }
+                TokKind::Ident(other) => {
+                    let other = other.clone();
+                    self.diags.push(Diagnostic::error(
+                        "E0911",
+                        format!("`{}` isn't a known migration verb", other),
+                        "a migration block contains `rename`, `add`, `remove`, or `change` operations".to_string(),
+                        "use `rename old -> new`, `add f: T = default`, `remove f`, or `change f: Old -> New via { … }`".to_string(),
+                        Some(op_tok.span),
+                    ));
+                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
                         self.bump();
                     }
                 }
@@ -2052,12 +2119,12 @@ impl<'a> Parser<'a> {
                     let desc = describe(&op_tok.kind);
                     self.diags.push(Diagnostic::error(
                         "E0003",
-                        format!("expected `rename` inside migration block, found {}", desc),
-                        "a migration block only contains `rename old -> new` operations".to_string(),
-                        "write `rename fieldA -> fieldB`".to_string(),
+                        format!("expected a migration operation, found {}", desc),
+                        "a migration block contains `rename`, `add`, `remove`, or `change` operations".to_string(),
+                        "write `rename fieldA -> fieldB` (or `add` / `remove` / `change`)".to_string(),
                         Some(op_tok.span),
                     ));
-                    while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+                    while !matches!(&self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
                         self.bump();
                     }
                 }

@@ -557,10 +557,11 @@ pub(crate) use Diagnostics::*;
 pub(crate) use Captures::*;
 pub(crate) use Purity::*;
 pub(crate) use Effects::*;
-pub(crate) use SchemaMigration::*;
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Registration::{check, check_with_mode};
 pub use Bundle::{check_bundle, check_bundle_freestanding};
 pub use FFI::{e3202, e3301, e3302, e3303};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
+// D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.
+pub use SchemaMigration::check_schema_migrations;

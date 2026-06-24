@@ -1,0 +1,15 @@
+// Tests E0910: a #PublishedSchema struct adds a field with no `add` migration,
+// so old data has no value for it. The sibling .published.snapshot is the prior shape.
+#PublishedSchema
+struct Account {
+    name: String
+    verified: Bool
+}
+
+fn main() {
+    a @= Account {
+        name: "Alice"
+        verified: true
+    }
+    print("{a.name}")
+}

@@ -31,6 +31,12 @@ pub struct SchemaSnapshot {
     pub schema_version: u32,
     pub type_name: String,
     pub published_version: String,
+    /// D-MIGRATE2C: set by `jet schema squash --before <ver>` to re-baseline this
+    /// record. When present, the snapshot's `fields` are the *current* authoritative
+    /// shape and migration ops for any version `< squashed_before` are no longer
+    /// required — the diff treats this shape as the new baseline. `None` for an
+    /// ordinary publish-time snapshot.
+    pub squashed_before: Option<String>,
     pub fields: Vec<SnapshotField>,
 }
 
@@ -41,6 +47,9 @@ impl SchemaSnapshot {
         out.push_str(&format!("schema_version = {}\n", self.schema_version));
         out.push_str(&format!("type = {}\n", self.type_name));
         out.push_str(&format!("published_version = {}\n", self.published_version));
+        if let Some(before) = &self.squashed_before {
+            out.push_str(&format!("squashed_before = {}\n", before));
+        }
         for f in &self.fields {
             out.push_str(&format!("field {}: {}\n", f.name, f.ty));
         }
@@ -52,6 +61,7 @@ impl SchemaSnapshot {
         let mut schema_version: Option<u32> = None;
         let mut type_name: Option<String> = None;
         let mut published_version: Option<String> = None;
+        let mut squashed_before: Option<String> = None;
         let mut fields = Vec::new();
 
         for line in raw.lines() {
@@ -68,6 +78,8 @@ impl SchemaSnapshot {
                 type_name = Some(rest.to_string());
             } else if let Some(rest) = line.strip_prefix("published_version = ") {
                 published_version = Some(rest.to_string());
+            } else if let Some(rest) = line.strip_prefix("squashed_before = ") {
+                squashed_before = Some(rest.to_string());
             } else if let Some(rest) = line.strip_prefix("field ") {
                 // "field name: TypeStr"
                 let colon = rest
@@ -85,6 +97,7 @@ impl SchemaSnapshot {
             schema_version: schema_version.ok_or("missing schema_version")?,
             type_name: type_name.ok_or("missing type")?,
             published_version: published_version.ok_or("missing published_version")?,
+            squashed_before,
             fields,
         })
     }
@@ -96,6 +109,7 @@ pub fn snapshot_from_struct(s: &StructDef, version: &str) -> SchemaSnapshot {
         schema_version: SNAPSHOT_VERSION,
         type_name: s.name.clone(),
         published_version: version.to_string(),
+        squashed_before: None,
         fields: s
             .fields
             .iter()
@@ -162,6 +176,40 @@ pub fn write_schema_snapshots_for_entry(
     count
 }
 
+/// The schema cache directory for a project (`<root>/.jet/cache/schema/`),
+/// honouring the `JET_SCHEMA_CACHE_DIR` test override.
+pub fn schema_cache_dir(project_root: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(override_dir) = std::env::var("JET_SCHEMA_CACHE_DIR") {
+        std::path::PathBuf::from(override_dir)
+    } else {
+        project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(Syntax::SCHEMA_CACHE_SUBDIR)
+    }
+}
+
+/// Load every `<Type>.snapshot` in the project's schema cache, sorted by type
+/// name. Returns `(type_name, snapshot)` pairs. Used by `jet schema status`.
+pub fn load_all_snapshots(project_root: &std::path::Path) -> Vec<SchemaSnapshot> {
+    let dir = schema_cache_dir(project_root);
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let path = e.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("snapshot") {
+                continue;
+            }
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                if let Ok(snap) = SchemaSnapshot::parse(&raw) {
+                    out.push(snap);
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.type_name.cmp(&b.type_name));
+    out
+}
+
 // ──────────────────────────────────────────────
 // Unit tests
 // ──────────────────────────────────────────────
@@ -175,6 +223,7 @@ mod tests {
             schema_version: SNAPSHOT_VERSION,
             type_name: type_name.to_string(),
             published_version: version.to_string(),
+            squashed_before: None,
             fields: fields
                 .iter()
                 .map(|(n, t)| SnapshotField {
@@ -255,6 +304,26 @@ mod tests {
         let text = "schema_version = 1\ntype = Empty\npublished_version = 1.0.0\n";
         let snap = SchemaSnapshot::parse(text).unwrap();
         assert!(snap.fields.is_empty());
+    }
+
+    #[test]
+    fn schema_squashed_before_round_trips() {
+        // D-MIGRATE2C: `squashed_before` survives write→parse.
+        let mut snap = make_snap("Rec", "2.0.0", &[("name", "String")]);
+        snap.squashed_before = Some("2.0.0".to_string());
+        let text = snap.write();
+        assert!(text.contains("squashed_before = 2.0.0\n"), "got:\n{text}");
+        let parsed = SchemaSnapshot::parse(&text).unwrap();
+        assert_eq!(parsed.squashed_before.as_deref(), Some("2.0.0"));
+        assert_eq!(parsed, snap);
+    }
+
+    #[test]
+    fn schema_no_squash_omits_line() {
+        let snap = make_snap("Rec", "1.0.0", &[("name", "String")]);
+        let text = snap.write();
+        assert!(!text.contains("squashed_before"), "ordinary snapshot must omit the line");
+        assert_eq!(SchemaSnapshot::parse(&text).unwrap().squashed_before, None);
     }
 
     /// Guard: `snapshot_from_struct` must write canonical type names (e.g. "String", not

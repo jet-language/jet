@@ -383,22 +383,51 @@ impl Circle {
   absolute and never escaping the project via `..` (**E0957**). A missing or
   unreadable file is **E0955**; for `embed_file`, a non-UTF-8 file is also
   **E0955**, with a fix pointing at `embed_bytes`.
-- **Published schema migrations (D-MIGRATE1):** `#PublishedSchema struct Name { ... }`
-  marks a public record whose field layout is snapshotted at release under
-  `.jet/cache/schema/`. On later project builds, sema compares the current shape
-  to the saved snapshot; dropping or renaming a field without a matching
-  migration is **E0910**. The implemented migration surface is rename-only:
+- **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `#PublishedSchema struct
+  Name { ... }` marks a public record whose field layout is snapshotted at release
+  under `.jet/cache/schema/`. On later project builds, sema compares the current
+  shape to the saved snapshot (keyed by field name, so order is ignored). A
+  breaking data-shape change is refused — **E0910** — unless a `migration` op
+  declares the intent. The four ops:
 
   ```jet
   migration UserRecord {
-      rename name -> display_name;
+      rename name -> display_name              // D-MIGRATE1: field renamed (same type)
+      remove legacy_id                         // D-MIGRATE2D: field deleted
+      add verified: Bool = false               // D-MIGRATE2A: new field + default for old data
+      change price: Int -> Usd via { (c) => Usd(c) }   // D-MIGRATE2E: type change + converter
   }
   ```
 
-  The rename must target an existing field with the same type. Unsupported
-  operations inside a migration block are **E0911** and are reserved for
-  D-MIGRATE2. Single-file runs accept the marker but only enforce the check
-  when a project snapshot exists.
+  - `rename` must target an existing field with the same type.
+  - `change f: Old -> New` resolves its converter in order (D-MIGRATE2B): the inline
+    `via { … }`, else an `impl Old -> New` in scope (the D-ERR-CONV surface), else
+    E0910 asking for one. The `via` body is single- or multi-line and reuses the
+    `->` arrow and lambda grammar.
+  - `add f: T = default` supplies the value old records (written before the field
+    existed) are read with. A field is only "added" if absent from the snapshot.
+  - There is **no `reorder` verb** (D-MIGRATE2F): reordering is never a breaking
+    change and needs no op (writing `reorder` teaches E0911).
+  - `drop` is not a verb (use `remove`); both `drop` and `reorder` are taught back
+    via **E0911**, as is any other unknown verb.
+
+  A declared op that contradicts the real shape (e.g. `remove f` where `f` still
+  exists, `add f` where `f` already existed, a `change` whose from/to types don't
+  match) is itself an E0910-family teaching error. Codegen never lowers the runtime
+  data conversion — reading old records through a converter/default is the
+  Build-tier versioning library (follow-on #11); E0910 checks *intent* only.
+  Single-file runs accept the marker but only enforce the check when a project
+  snapshot exists.
+
+  **`jet schema` (D-MIGRATE2C):** `jet schema status` lists every snapshotted
+  `#PublishedSchema` type with its pinned published version and fields, flagging any
+  type that has a pending breaking change vs its snapshot (reusing the E0910 diff).
+  `jet schema squash --before <ver>` re-baselines: it rewrites each snapshot to the
+  *current* struct shape and records `squashed_before = <ver>`, so future builds
+  treat the current shape as the authoritative baseline and migration blocks for
+  versions before `<ver>` are no longer required (delete the now-stale blocks). It
+  edits only `.jet/cache/schema/`, never user source. There is **no `jet schema
+  check` verb** — `jet build`'s E0910 is already the CI gate.
 
 - **Struct layout control (D-REPRC1):** `#layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer

@@ -264,8 +264,8 @@ before continuing.
 | E0907 | sema  | trait impl signature mismatch |
 | E0908 | sema  | duplicate trait impl |
 | E0909 | sema  | generic instantiation too deep |
-| E0910 | sema  | `#PublishedSchema` struct dropped or renamed a field since the last release with no migration |
-| E0911 | parse | migration block contains an op not yet implemented (staged → D-MIGRATE2) |
+| E0910 | sema  | `#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
+| E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -778,15 +778,32 @@ The golden transcripts pinning these bytes live in `tests/cli/json_*.txt`
 (blessed with `UPDATE_EXPECT=1 cargo test --test cli`).
 ### E0910 — Published schema breaking change
 
-| Code | What | Why | Fix |
-|------|------|-----|-----|
-| E0910 | The published record `{Type}` dropped (or renamed) `{field}` since version `{version}`, with no migration to bridge it. | `#PublishedSchema` pins a record's saved shape at release. Old data already written with `{field}` could no longer be read, so a build that silently changes the shape would break readers of the published version. | Add `migration {Type} { rename {field} -> {new} }` if you renamed it; or bump the major version to publish a new shape; or mark the old field deprecated to keep reading it. |
+`#PublishedSchema` pins a record's saved shape at release (D-MIGRATE1/2). A
+breaking data-shape change is refused unless a `migration` op declares the intent.
+E0910 is the umbrella for every such case; the what/why/fix is case-specific.
 
-### E0911 — Staged migration op
-
-| Code | What | Why | Fix |
+| Case | What | Why | Fix |
 |------|------|-----|-----|
-| E0911 | `{op}` inside `migration` is not yet supported. | Only `rename` is implemented in this release. Other ops — `add`, `drop`, `type-change` — are gated behind D-MIGRATE2. | Use `rename old -> new` for field renames. For other changes, bump the major version for now. |
+| dropped (D-MIGRATE1) | The published record `{Type}` dropped `{field}` since version `{version}`, with no migration to bridge it. | Old data already written with `{field}` could no longer be read. | Add `migration {Type} { remove {field} }` to delete it, `rename {field} -> {new}` if you renamed it, or bump the major version. |
+| type-changed (D-MIGRATE2E) | The published record `{Type}` changed `{field}` from `{Old}` to `{New}`, with no migration to bridge it. | Old data stored at the previous type could no longer be read. | Add `migration {Type} { change {field}: {Old} -> {New} via { (old) => … } }`, or bump the major version. |
+| change with no converter (D-MIGRATE2B) | The `change {field}: {Old} -> {New}` migration on `{Type}` has no converter. | A type change needs a way to turn an old value into a new one — old data on disk is read through it. | Add an inline `via { (old) => … }`, or declare `impl {Old} -> {New} { … }` in scope. |
+| added (D-MIGRATE2A) | The published record `{Type}` added `{field}`, but old data has no value for it. | Records already written without this field can't be read unless there's a default to fill it. | Add `migration {Type} { add {field}: {Type} = {default} }`, or bump the major version. |
+| invalid op | A `remove`/`add`/`change` op contradicts the real shape (removes a field that still exists, adds one that already existed, or names a field in neither shape). | A migration op must reference a real shape difference. | Fix or delete the offending op. |
+
+D-MIGRATE2B converter resolution for `change`: (1) the inline `via { … }`, else
+(2) an `impl Old -> New` in scope (the same surface as D-ERR-CONV), else (3) E0910.
+D-MIGRATE2F: reordering fields is keyed by name, never a breaking change — no op,
+no error. The runtime `from_vXXX` data conversion (reading old records through the
+declared converter/default) is the Build-tier versioning library (follow-on #11);
+E0910 checks intent only.
+
+### E0911 — Unknown migration verb
+
+| Case | What | Why | Fix |
+|------|------|-----|-----|
+| `drop` (D-MIGRATE2D) | `drop` isn't a migration verb — use `remove`. | A migration deletes a field with `remove`; `drop` is not a Jet keyword here. | Write `remove <field>`. |
+| `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
+| other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
 
 ## Process for a new diagnostic
 

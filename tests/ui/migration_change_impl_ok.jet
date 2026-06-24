@@ -1,0 +1,28 @@
+// Tests D-MIGRATE2B fallback: a `change` op with no inline `via` resolves its
+// converter from an `impl Old -> New` in scope. The .published.snapshot has
+// `note: String`; the struct now stores `note: Label`.
+struct Label {
+    text: String
+}
+
+impl String -> Label {
+    return Label { text: self }
+}
+
+#PublishedSchema
+struct Order {
+    id: Int
+    note: Label
+}
+
+migration Order {
+    change note: String -> Label
+}
+
+fn main() {
+    o @= Order {
+        id: 1
+        note: Label { text: "rush" }
+    }
+    print("{o.id}")
+}

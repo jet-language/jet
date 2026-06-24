@@ -1,7 +1,7 @@
-Error [E0911]: `drop` inside `migration` is not yet supported
+Error [E0911]: `drop` isn't a migration verb — use `remove`
   --> tests/ui/migration_unknown_op.jet:7:5
     |
   7 |     drop x
     |     ^^^^
- Why: only `rename` is implemented in this release; `add`, `drop`, and type-change ops are staged behind D-MIGRATE2
- Fix: use `rename old -> new` for field renames; bump the major version for other shape changes for now
+ Why: a migration deletes a field with `remove`; `drop` is not a Jet keyword here
+ Fix: write `remove <field>` to delete a published field

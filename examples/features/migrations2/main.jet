@@ -1,0 +1,46 @@
+// D-MIGRATE2: every migration op on one #PublishedSchema record.
+//
+// The committed snapshot (.jet/cache/schema/Profile.snapshot) records the
+// 1.0.0 shape: legacy_id: Int, id: Int, name: String, score: Int. This release
+// (2.0.0) reshapes it, and the `migration` block declares every breaking change
+// so the compiler can prove old data still reads:
+//
+//   remove legacy_id          (D-MIGRATE2D) — a field is gone
+//   rename name -> title      (D-MIGRATE1)  — a field changed name
+//   change score: Int -> Rank (D-MIGRATE2E) — a field changed type, with an
+//                                             inline `via` converter
+//   add active: Bool = true   (D-MIGRATE2A) — a new field, with a default for
+//                                             records written before it existed
+//
+// Reordering the fields (title before id, etc.) is NOT a tracked change
+// (D-MIGRATE2F) and needs no op. Without these declarations the compiler would
+// emit E0910 and refuse to build.
+
+struct Rank {
+    value: Int
+}
+
+#PublishedSchema
+struct Profile {
+    title: String
+    id: Int
+    score: Rank
+    active: Bool
+}
+
+migration Profile {
+    remove legacy_id
+    rename name -> title
+    change score: Int -> Rank via { (n) => Rank { value: n } }
+    add active: Bool = true
+}
+
+fn main() {
+    p @= Profile {
+        title: "Ada"
+        id: 7
+        score: Rank { value: 95 }
+        active: true
+    }
+    print("profile: {p.title} #{p.id}, rank {p.score.value}, active {p.active}")
+}

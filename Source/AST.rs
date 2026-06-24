@@ -378,15 +378,44 @@ pub struct MigrationDecl {
     pub span: Span,
 }
 
-/// D-MIGRATE1: one operation inside a `migration { }` block.
+/// D-MIGRATE1 / D-MIGRATE2: one operation inside a `migration { }` block.
 #[derive(Debug)]
 pub enum MigrationOp {
-    /// `rename old_field -> new_field` — declares a field was renamed.
+    /// D-MIGRATE1: `rename old_field -> new_field` — declares a field was renamed.
     Rename {
         from: String,
         from_span: Span,
         to: String,
         to_span: Span,
+    },
+    /// D-MIGRATE2A: `add f: T = default` — a new field with a default for old
+    /// records. The `default` expr is the value old data is read with; sema only
+    /// checks intent here (the runtime fill is the Build-tier versioning library).
+    Add {
+        field: String,
+        field_span: Span,
+        ty: Type,
+        ty_span: Span,
+        default: Expr,
+        default_span: Span,
+    },
+    /// D-MIGRATE2D: `remove f` — deletes a field (verb is `remove`, not `drop`).
+    Remove {
+        field: String,
+        field_span: Span,
+    },
+    /// D-MIGRATE2E: `change f: Old -> New [via { expr }]` — a field type change.
+    /// `converter` is the inline `via { … }` body (an expression, usually a
+    /// lambda); `None` falls back to an `impl Old -> New` in scope (D-MIGRATE2B).
+    Change {
+        field: String,
+        field_span: Span,
+        from_ty: Type,
+        from_span: Span,
+        to_ty: Type,
+        to_span: Span,
+        converter: Option<Expr>,
+        converter_span: Option<Span>,
     },
 }
 
