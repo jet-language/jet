@@ -1628,7 +1628,7 @@
       "type": "task",
       "title": "Sigil access model: adopt ~ ^ & * (supersede mut/take/view + D-CAP1 words)",
       "body": "Owner mandate (2026-06-23): the prefix capability sigils in docs/prompt-memory-model-final.md are FINAL and must not change \u2014 T=infer, ~T=write/edit, ^T=move/take, &T=share/escape, *T=raw. This supersedes the ratified word vocabulary: mut/take/view/ref (S10) and the D-CAP1 view/edit/take/share terms. Action: log a new ratified entry (proposed D-CAP7), amend S10 + D-CAP1 + S58 in docs/spec/syntax-decisions.md, then migrate parser+sema to sigils. No dual vocabulary. Umbrella for c125-c131.",
-      "stage": "ready",
+      "stage": "building",
       "priority": "P2",
       "workOrder": null,
       "plan": "memory-capability-model",
@@ -1644,6 +1644,10 @@
         {
           "t": "D-CAP7 ratified \u2014 sigil spelling frozen.",
           "at": "2026-06-23"
+        },
+        {
+          "t": "D-CAP7 sigils ~T/^T/&T parse at type+call+receiver positions (Phase 2). Remaining: keyword mut/take/view -> teaching errors (Phase 6).",
+          "at": "2026-06-23"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
@@ -1657,7 +1661,7 @@
       "type": "task",
       "title": "Unmarked T = infer-and-elevate (not fixed shared-read)",
       "body": "The new model makes an unmarked param start as Infer and elevate to Read/Write/Move/Share from body usage. Today an unmarked param is FIXED shared-read and mutating it is an error (E0202 needs mut, E0205 needs mut self). Adopting infer-and-elevate removes or repoints those triggers and changes the meaning of existing programs. Needs an owner decision (proposed D-CAP8) plus a differential check that resolution is deterministic.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P1",
       "workOrder": null,
       "plan": "memory-capability-model",
@@ -1673,6 +1677,10 @@
         {
           "t": "D-CAP8 = C ratified: infer in bodies, freeze at api:explicit.",
           "at": "2026-06-23"
+        },
+        {
+          "t": "D-CAP8 implemented: infer-and-elevate solver (Sema/Capability.rs); unmarked param mutating its body infers ~. Green, pushed 4f92886.",
+          "at": "2026-06-23"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
@@ -1686,7 +1694,7 @@
       "type": "task",
       "title": "Capability inference engine: AccessCapability enum + constraint solver",
       "body": "Extend the internal AccessConvention {Read,Mutate,Move} into {Infer,Read,Write,Move,Share,Raw} and build deterministic constraint solving with a stable fixed point (sorted iteration order; no optimizer feedback into semantic resolution). Maps to Phases 3-5 of docs/prompt-memory-model-final.md. Gated on D-CAP7 (c124) and D-CAP8 (c125).",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P2",
       "workOrder": null,
       "plan": "memory-capability-model",
@@ -1697,6 +1705,10 @@
         },
         {
           "t": "Ungated (D-CAP7/8 decided) \u2014 build AccessCapability enum + deterministic constraint solver.",
+          "at": "2026-06-23"
+        },
+        {
+          "t": "AccessCapability {Infer,Read,Write,Move,Share,Raw} + deterministic resolution pass shipped (Phases 3+4). Green.",
           "at": "2026-06-23"
         }
       ],
