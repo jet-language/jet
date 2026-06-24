@@ -57,14 +57,16 @@ model), streaming request body, error types, hot-reload (D-HOTSWAP1 when `jet de
 - `#Test` blocks for the word-counting logic.
 - `pkg.jet` with `jet.http` as a dep.
 - Golden test: spin up server, `curl`, assert JSON output shape.
-- Gate: D-ROUTE1 (ratified 2026-06-22). Partially gated on `jet.http` ring library being
-  functional — check current state in `examples/features/http_service.jet` and
-  `Source/ring/http/` before starting.
+- Gate: D-ROUTE1 (ratified 2026-06-22). Partially gated on the `jet.http` ring library being
+  functional — check current state in `examples/showcase/http_service.jet` (it lives under
+  `showcase/`, not `features/`) and the `jet.http` ring impl in `Source/Prelude/CoreLib.rs` +
+  its registration in `Source/Loader.rs` (there is **no** `Source/ring/http/` directory) before
+  starting.
 
-**NEEDS BALLOT (minor):** The server slice needs `jet dev` to detect it as a resident
-program and use hot-swap. This requires D-DEVMODE1 implementation (c77 / three-mode-execution
-plan). File c77 first; this slice can land in parallel with c77 but full hot-reload demo
-requires c77 to be done.
+**Dependency (not a ballot):** the hot-reload demo needs `jet dev` to detect this as a resident
+program and hot-swap — that is c77 *implementation* (D-DEVMODE1/D-HOTSWAP1 are already ratified),
+not an open decision. The core slice lands in parallel with c77; the full hot-reload demo waits
+on c77.
 
 ---
 

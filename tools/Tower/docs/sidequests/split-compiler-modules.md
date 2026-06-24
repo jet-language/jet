@@ -12,7 +12,7 @@ boundaries so future features touch fewer files and conflicts narrow.
 
 ---
 
-## Measured sizes (as of 2026-06-22)
+## Measured sizes (verified 2026-06-24 via `wc -l Source/**/*.rs | sort -n | tail`)
 
 | File | Lines |
 |------|-------|
@@ -39,23 +39,28 @@ cluster; then Registration.rs.
 
 ### 1. `Source/Codegen/TIR.rs` → 6 modules
 
-Current responsibilities mixed in TIR.rs:
-- TIR node definitions (structs/enums: `TFunc`, `TStmt`, `TExpr`, etc.)
-- `tir_covers` / `tir_covers_test_body` — subset-coverage predicates
-- Expression lowering (`lower_expr`, `lower_call`, all TExprKind arms)
-- Statement lowering (`lower_stmt`, `lower_for`, match/when lowering)
-- Function/item lowering (`lower_fn`, `lower_struct`, `lower_enum`, `lower_trait_impl`)
-- Emit (Rust source string construction) — currently interleaved with lowering
+Current responsibilities mixed in TIR.rs (verified names):
+- TIR node definitions: `TFunc` (`:53`), `TStmt` (`:164`), `TExpr` (`:427`), `TExprKind`
+  (`:432`) — these exist as stated.
+- The subset-coverage predicate is the module-level **`pub(crate) fn n(body, cx) -> bool`**
+  (called from `Codegen/mod.rs`). **There is no `tir_covers` / `tir_covers_test_body` /
+  `tir_covers_error_conv`** — the writer invented those names; the predicate is `n` (plus its
+  helpers).
+- Expression lowering: `lower_expr` (`:6301`), all `TExprKind` arms.
+- Statement lowering: `lower_stmts` (`:5034`), `lower_stmt` (`:5038`), `lower_forin_collection`
+  (`:5496`), `lower_enum_match` (`:5865`)/`lower_enum_arg` (`:6070`). (No `lower_for`/
+  `lower_match` by those names.)
+- Item lowering and emit (16 `emit_*` fns) — currently interleaved with lowering.
 
-Proposed split (`Source/Codegen/` subdirectory, new `mod.rs` re-exports):
+Proposed split (`Source/Codegen/TIR/` subdirectory, new `mod.rs` re-exports):
 
 | New file | Responsibility |
 |----------|---------------|
-| `TIR/Nodes.rs` | All TIR node type definitions (TFunc, TStmt, TExpr, TExprKind, etc.) |
-| `TIR/Coverage.rs` | `tir_covers`, `tir_covers_test_body`, `tir_covers_error_conv` |
-| `TIR/LowerExpr.rs` | Expression lowering (`lower_expr`, all TExprKind arms) |
-| `TIR/LowerStmt.rs` | Statement lowering (`lower_stmt`, `lower_for`, `lower_match`) |
-| `TIR/LowerItems.rs` | Item lowering (`lower_fn`, `lower_struct`, `lower_enum`, `lower_trait_impl`) |
+| `TIR/Nodes.rs` | TIR node type definitions (`TFunc`, `TStmt`, `TExpr`, `TExprKind`, etc.) |
+| `TIR/Coverage.rs` | the `n` coverage predicate and its helpers |
+| `TIR/LowerExpr.rs` | Expression lowering (`lower_expr`, all `TExprKind` arms) |
+| `TIR/LowerStmt.rs` | Statement lowering (`lower_stmts`, `lower_stmt`, `lower_forin_collection`, `lower_enum_match`) |
+| `TIR/LowerItems.rs` | Item lowering (fn/struct/enum/trait-impl lowering) |
 | `TIR/Emit.rs` | Rust string emission (all `emit_*` fns) |
 
 The existing `Source/Codegen/TIR.rs` becomes `Source/Codegen/TIR/mod.rs` re-exporting all
@@ -82,7 +87,7 @@ Proposed split:
 | `Sema/Infer/Methods.rs` | `infer_method_call`, `finish_builtin_method`, `field_type` |
 | `Sema/Infer/Fallible.rs` | `infer_try`, `infer_or_fallback`, `infer_fallible_stmt`, `??` |
 | `Sema/Infer/Collections.rs` | `infer_list_lit`, `infer_map_lit`, `infer_index`, `infer_slice`, `infer_tuple_lit`, `infer_fan_out` |
-| `Sema/Infer/BinaryOps.rs` | `infer_binary`, `infer_binary_inner`, numeric coercion |
+| `Sema/Infer/BinaryOps.rs` | `infer_binary` (`:2554`) + numeric coercion helpers |
 
 `Source/Sema/CheckerInfer.rs` becomes `Source/Sema/Infer/mod.rs`.
 
@@ -102,15 +107,22 @@ fn/module/test parsing.
 
 ### 4. `Source/Sema/Registration.rs` → 2 modules
 
-Current: registers items into the sema registry, AND drives the compilation pipeline
-(`compile_bundle`, `check_bundle`).
+**Correction:** Registration.rs does **not** contain `compile_bundle`/`check_bundle` — that
+pipeline driver lives in `Source/Sema/Bundle.rs` (the `check`/`check_freestanding` entry over
+`ProgramBundle`/`CompileMode`). Registration.rs's actual contents are the top-level entry
+`check`/`check_with_mode` (`:82`/`:86`) plus a large family of `register_*` and `check_*`
+helpers (`register_distinct`, `register_const`, `register_struct`, `register_enum`,
+`register_type_methods`, `register_impl_methods`, `check_func_body`, `check_effect_boundaries`,
+`eval_comptime_items`, …). The natural split is registration vs in-place body/effect checks,
+not registration vs pipeline:
 
 | New file | Responsibility |
 |----------|---------------|
-| `Sema/Register.rs` | Item registration (struct/enum/trait/fn/test into the registry) |
-| `Sema/Pipeline.rs` | `compile_bundle`, `check_bundle`, `CompileMode`, ordering |
+| `Sema/Register.rs` | `register_*` (struct/enum/const/distinct/methods into the registry) |
+| `Sema/CheckBodies.rs` | `check`/`check_with_mode` entry, `check_func_body`, `check_effect_boundaries`, `eval_comptime_items` |
 
-`Registration.rs` → `Register.rs` + `Pipeline.rs`; `Sema/mod.rs` re-exports both.
+`Registration.rs` → `Register.rs` + `CheckBodies.rs`; `Sema/mod.rs` re-exports both. (The
+pipeline already lives separately in `Bundle.rs`, so no `Pipeline.rs` is needed.)
 
 ### 5. `Source/AST.rs` — leave as-is for now
 
@@ -145,7 +157,7 @@ tests must stay green throughout.
 | `Source/Codegen/TIR.rs` | `Source/Codegen/TIR/{mod,Nodes,Coverage,LowerExpr,LowerStmt,LowerItems,Emit}.rs` |
 | `Source/Sema/CheckerInfer.rs` | `Source/Sema/Infer/{mod,Core,Methods,Fallible,Collections,BinaryOps}.rs` |
 | `Source/Parser/Items.rs` | `Source/Parser/ItemsTypes.rs` + `Source/Parser/ItemsFns.rs` |
-| `Source/Sema/Registration.rs` | `Source/Sema/Register.rs` + `Source/Sema/Pipeline.rs` |
+| `Source/Sema/Registration.rs` | `Source/Sema/Register.rs` + `Source/Sema/CheckBodies.rs` |
 
 ---
 

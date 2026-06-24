@@ -28,22 +28,24 @@
 `verify_entry` exists but is not called on every `link_into_project`. Make verification
 mandatory:
 
-In `Store::link_into_project`, before linking, call `verify_entry(store_entry, expected_hash)`
-where `expected_hash` comes from the lockfile's `tree_hash`. If the hash mismatches, emit
-**E1210** (tampered store entry) and abort. This replaces the "best-effort" comment with a
-hard invariant: a package is never used without content verification.
+In `link_into_project` (`Store.rs:72`), before `link_or_copy_tree`, call `verify_entry`
+(`Store.rs:81`, signature `(pkg_name, store_entry, expected_tree_hash)`) with `expected_tree_hash`
+from the lockfile's `tree_hash`. If it mismatches, **`verify_entry` already returns E1204**
+("store entry tree-hash mismatch / tamper", `diagnostics.md:323`) — propagate that, do not
+mint a new code. This makes verification mandatory on every link instead of an opt-in helper.
 
-**Diagnostic (I4):**
-E1210 — store entry content hash mismatch (possible tamper). Add to `docs/spec/diagnostics.md`
-and `tests/ui/e1210_tampered_store.txt`.
+**Diagnostic (I4):** none new — reuse the existing **E1204**. Add a `tests/ui/e1204_tampered_store.txt`
+snapshot if one is missing. *(The writer's proposed E1210 would have collided: E1210 is already
+"unknown/reserved target in `packages:` block", D-TGT1/D-TGT2.)*
 
 ### Step 2 — Lockfile stability: manifest-to-lock completeness check (`Source/Lock.rs`)
 
 Add `verify_all_manifest_deps_locked(manifest, lock)` which checks that every dep named in
 the manifest appears in the lock with a `locked` revision. Currently `verify_lock_matches_manifest`
-only checks the inverse (no extra entries in lock). Make it bidirectional. Emit **E1211**
+only checks the inverse (no extra entries in lock). Make it bidirectional. Emit **E1217**
 (dep in manifest has no locked revision) — this fires in `--locked` CI mode and during
-publish.
+publish. *(E1211, the writer's original pick, is taken: "`packages:` block uses removed
+`kind:` field". E1217 is the first free E12xx slot.)*
 
 ### Step 3 — Semver compatibility tests (`Source/Publish/SemVer.rs`, `Source/Publish/Diff.rs`)
 
@@ -51,17 +53,20 @@ publish.
 gate in `Source/CmdSupply.rs`):
 
 Before a publish:
-1. `Diff::compute_api_diff(old_api, new_api)` — compare public fn signatures and struct
-   fields against the previous published version's API snapshot (`Publish/Schema.rs`).
-2. `SemVer::classify_diff(diff)` → `Patch | Minor | Major`.
-3. If the diff is `Major` but the version bump is only `Minor` or `Patch`, emit **E1212**
+1. `Diff::diff_public_api(old_api, new_api) -> Vec<BreakingChange>` (`Diff.rs:23`) — compare
+   public fn signatures and struct fields against the previous published version's API snapshot
+   (`Publish/Schema.rs` / `API.rs`).
+2. `SemVer::classify_bump(old, new) -> BumpKind` (`SemVer.rs:81`) → Patch | Minor | Major;
+   combine with the breaking-change set from step 1.
+3. If the diff is `Major` but the version bump is only `Minor` or `Patch`, emit **E1218**
    (breaking API change requires major version bump) and abort.
 
 This enforces semver correctness at publish time, not just advisory.
 
 **Diagnostic (I4):**
-E1212 — breaking API change without major version bump. Add to `docs/spec/diagnostics.md`
-and snapshot.
+E1218 — breaking API change without major version bump. Add to `docs/spec/diagnostics.md`
+and snapshot. *(E1212, the writer's pick, is taken: "package declared in `packages:` but no
+`module` found". E1218 is free.)*
 
 ### Step 4 — Package signing (`Source/Publish/`, `Source/Lock.rs`)
 
@@ -69,8 +74,12 @@ and snapshot.
 
 A. **Ed25519 key pair per publisher, signatures in the registry index.** Registry stores
    `<package>-<version>.sig`; `jet fetch` verifies before installing. Requires a key
-   management CLI (`jet keys generate`, `jet keys trust <pub_key>`). Std-only SHA-512 +
-   Ed25519 (I6 — implement Ed25519 natively or delegate to `ssh-keygen`/`signify` subprocess).
+   management CLI (`jet keys generate`, `jet keys trust <pub_key>`). **Capability note:**
+   `jet.crypto` today provides only SHA-256 (`jet_ring_crypto_sha256*` in `CoreLib.rs`) — there
+   is **no** Ed25519 or SHA-512. Under I6 (zero external crates in `Source/`), Option A means
+   implementing Ed25519 + SHA-512 natively in the ring layer, or delegating to a `signify`/
+   `ssh-keygen` subprocess. The ballot must not claim signing "reuses existing `jet.crypto`"
+   beyond the SHA-256 hash.
 
 B. **Checksum-only (no asymmetric signing).** Registry publishes SHA-256 of each tarball;
    `jet fetch` verifies the hash matches the lock. No key management. Weaker than A (a
@@ -132,10 +141,10 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 
 | File | Change |
 |------|--------|
-| `Source/Store.rs` | Mandatory verify on link; E1210 |
-| `Source/Lock.rs` | Bidirectional manifest/lock check; E1211; `signature` field (D-PKGSIGN1) |
+| `Source/Store.rs` | Mandatory `verify_entry` on link; reuse existing E1204 |
+| `Source/Lock.rs` | Bidirectional manifest/lock check; E1217; `signature` field (D-PKGSIGN1) |
 | `Source/Fetch.rs` | Vendor fallback; signature verify call (D-PKGSIGN1) |
-| `Source/CmdSupply.rs` | Semver gate E1212; `jet audit` call; SBOM emit |
+| `Source/CmdSupply.rs` | Semver gate E1218; `jet audit` call; SBOM emit |
 | `Source/CmdCompile.rs` | `--sbom` flag; SBOM write |
 | `Source/Publish/SemVer.rs` | `classify_diff` wired to `jet publish` |
 | `Source/Publish/Diff.rs` | API diff wired to `jet publish` |
@@ -144,8 +153,8 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 | `Source/Publish/SBOM.rs` | Real checksum in PackageChecksum |
 | `Source/Publish/Sign.rs` (new, D-PKGSIGN1-gated) | Signing/verification |
 | `Source/main.rs` | `jet vendor`, `jet audit`, `--sbom` verbs/flags |
-| `docs/spec/diagnostics.md` | E1210, E1211, E1212 entries |
-| `tests/ui/` | e1210, e1211, e1212 snapshots |
+| `docs/spec/diagnostics.md` | E1217, E1218 entries (E1204 already present) |
+| `tests/ui/` | e1204_tampered_store, e1217, e1218 snapshots |
 
 ---
 

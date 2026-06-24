@@ -60,7 +60,10 @@ Walk `Source/main.rs` verb dispatch and `Source/CmdDevTools.rs`. Classify each f
 | **GAP** | Expert flag exposed in the default help or default output |
 
 **Specific checks:**
-- `jet dev --raw-frames` must not appear in default `--help` output (D-DBG2: expert opt-in).
+- `jet debug --raw-frames` (the ratified D-DBG2 spelling — it attaches to `jet debug`, *not*
+  `jet dev`) must not appear in default `--help` output (expert opt-in). Note: as of 2026-06-24
+  no `--raw-frames` flag exists in `Source/` yet — if D-DBG2's debugger surface is unbuilt,
+  record that as a GAP-E (claimed expert gate with no real gate), not a leak.
 - `jet build --profile expert` or similar layout flags: if they exist, are they visible in
   default help?
 - Error output from `jet build`: does it ever mention Rust file paths or Rust error codes? If
@@ -120,8 +123,7 @@ The audit produces:
 ## Execution
 
 The audit is a read-only code + docs sweep. One implementer walks all five axes,
-filling in the map table and gap list. Estimated scope: ~1 day for axes 1–5; then separate
-tasks for each gap.
+filling in the map table and gap list; then files a separate task for each gap.
 
 **Files read (no writes during audit):**
 - `Source/Syntax.rs`, `Source/Sema/CheckerOwnership.rs`, `Source/Sema/CheckerItems.rs`

@@ -26,14 +26,19 @@ both paths.
 ## Current state
 
 `Source/Interpreter.rs` implements the `jet dev` watch-and-rerun loop for run-to-completion
-programs (D-DEV4, E2-M4). `Source/Comptime/` is the interpreter engine. `Source/CmdDevTools.rs`
-wires the CLI. `Source/main.rs` dispatches `jet dev`. What is missing:
+programs (E2-M4); the per-iteration entry is `dev_iteration` (factored off the outer file
+watcher for golden testing) and `run_checked` is the run entry. `Source/Comptime/` is the
+interpreter engine (`Comptime/Interpreter.rs`). `Source/CmdDevTools.rs` wires the CLI.
+`Source/main.rs` dispatches `jet dev`. A byte-identity differential battery **already exists**
+in `tests/dev.rs` (`interpreter_matches_compiled_binary` at `:51`, plus
+`interpreter_matches_expected_golden`) over a curated `BATTERY` program list — Step 5 widens
+it, it does not create it. What is missing:
 
 1. `JitBackend` seam trait — a stable interface so the Cranelift tier can slot in later.
 2. Resident-program detection and hot-swap loop (currently `jet dev` only reruns, never swaps).
-3. `jet serve` verb (currently unimplemented or stub).
+3. `jet serve` verb (no `serve` verb exists in `main.rs` dispatch today).
 4. Module-level type-stability check (D-HOTSWAP1 B).
-5. Byte-identity differential test harness (D-DEVMODE1 Q2).
+5. Widening the existing byte-identity battery to every golden example (D-DEVMODE1 Q2).
 
 ---
 
@@ -109,16 +114,15 @@ E2210 — hot-swap type-stability rejection. Add to `docs/spec/diagnostics.md`; 
 `jet serve <entry>` is an alias for `jet dev <entry> --swap` (force resident mode). Add to
 `main.rs` verb dispatch. `jet serve` without a file emits a teaching error naming `jet dev`.
 
-### Step 5 — Byte-identity differential harness (D-DEVMODE1 Q2)
+### Step 5 — Widen the existing byte-identity differential battery (D-DEVMODE1 Q2)
 
-`tests/dev.rs`: for each `.jet` file in `examples/features/expected/`, run both:
-- `Interpreter::run(bundle)` → stdout
-- `lib::compile_and_run(bundle)` → stdout
-
-Diff the two. Any divergence is a test failure (a release blocker). This replaces the
-aspirational comment in `Source/Interpreter.rs` ("The bytes it produces are identical to the
-compiled program (I2); the differential battery in `tests/dev.rs` is the enforcement.") with
-a real test.
+`tests/dev.rs` **already implements** the differential test (`interpreter_matches_compiled_binary`
+at `:51`: runs `dev_iteration` vs the compiled binary and asserts byte-equal stdout) but only
+over a hand-curated `BATTERY` list of "supported" programs. Widen it: iterate every golden
+program under `examples/` that the dev interpreter can run, and for any it *cannot* run, assert
+it fails with the teaching "can't interpret this yet" path rather than silently skipping — so
+the battery can't quietly shrink. The aspirational comment in `Source/Interpreter.rs` already
+points at this file as the enforcement; this step makes the coverage total, not partial.
 
 ---
 
@@ -134,7 +138,7 @@ a real test.
 | `Source/main.rs` | `jet serve` verb dispatch, new flags |
 | `docs/spec/diagnostics.md` | E2210 entry |
 | `tests/ui/e2210_hotswap_rejected.txt` | snapshot |
-| `tests/dev.rs` | byte-identity differential harness |
+| `tests/dev.rs` | widen the existing byte-identity battery to all golden programs |
 
 ---
 

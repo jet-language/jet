@@ -1,5 +1,5 @@
 # c51 — Testing ergonomics: property tests, doctests, coverage
-**Decisions:** D-TEST1 (ratified 2026-06-22), D-TEST4 (ratified 2026-06-22), D-COV1 (tooling-only, no syntax)
+**Decisions:** D-TEST1 (ratified 2026-06-22), D-TEST4 (ratified 2026-06-22), D-COV1 (tooling-only, no syntax decision — not in syntax-decisions.md; see ballot Coverage note)
 **Gate:** none — both syntax decisions are UNBLOCKED.
 
 ---
@@ -11,8 +11,10 @@ from parameter types with automatic invisible shrinking. A `#Test fn` with no pa
 unit test. Zero new syntax — matches the S82 worked example.
 
 **D-TEST4 (option A):** Code examples inside `///` doc comments (S49) run as tests. Expected
-output is a `// =>` trailing comment on the producing line. A mismatch fires **E2901**. Reuses
-the `//` comment marker (S5); no new tokens.
+output is a `// =>` trailing comment on the producing line. A mismatch fires **E2901**, which
+is *already reserved with this exact meaning* in `docs/spec/diagnostics.md` ("Doctest output
+mismatch", citing D-TEST4) — this phase wires the existing code, it does not mint a new one.
+Reuses the `//` comment marker (S5); no new tokens.
 
 **D-COV1:** `jet test --coverage` is a tooling flag only — no syntax changes.
 
@@ -20,10 +22,14 @@ the `//` comment marker (S5); no new tokens.
 
 ## Current state
 
-`Source/Codegen/mod.rs` already emits `jet_test_N()` harness wrappers for `#Test` blocks (S43,
-E2-M11). `Source/Sema/Registration.rs` registers `Item::Test` items in `CompileMode::Test`.
-`Source/Codegen/TIR.rs` (`tir_covers_test_body`) gates test bodies into the TIR subset. The
-parser (`Parser/Modules.rs`) parses `#Test "name" { … }` via `test_def()`. What is missing:
+`Source/Codegen/mod.rs` already emits `jet_test_N()` harness wrappers for `#Test` blocks
+(`mod.rs:317`, E2-M11). `Source/Sema/Registration.rs` handles `Item::Test` (`Registration.rs:186`)
+under `CompileMode::Test`. The TIR-subset coverage predicate is `TIR::n(body, cx)`
+(`Source/Codegen/TIR.rs`, called from `Codegen/mod.rs`) — there is no `tir_covers_test_body`
+function; test bodies are gated through `TIR::n`. The parser parses `#Test "name" { … }` via
+`test_def()`, which is defined in **`Source/Parser/Items.rs:526`** (`at_test_def`/`test_def`/
+`test_def_after_kw`); `Parser/Modules.rs:203` and `Parser/Items.rs:336` only *dispatch* to it.
+What is missing:
 
 1. Property-test parameter parsing and generator wiring.
 2. Doctest extraction from `///` comments.
@@ -37,9 +43,8 @@ parser (`Parser/Modules.rs`) parses `#Test "name" { … }` via `test_def()`. Wha
 
 **AST (`Source/AST.rs`)**
 
-`TestDef` (line 721) gains an optional `params: Vec<(String, Type)>` field — the named
-parameter list. A `TestDef` with `params.is_empty()` is a unit test; non-empty is a property
-test. Add:
+`TestDef` (`AST.rs:721`) currently has exactly three fields — `name`, `name_span`, `body`
+(no `span` field). Add `params`:
 
 ```rust
 pub struct TestDef {
@@ -47,27 +52,36 @@ pub struct TestDef {
     pub name_span: Span,
     pub params: Vec<(String, Type)>,   // NEW: empty = unit test
     pub body: Vec<Stmt>,
-    pub span: Span,
 }
 ```
 
-**Parser (`Source/Parser/Modules.rs`)**
+A `TestDef` with `params.is_empty()` is a unit test; non-empty is a property test.
 
-`test_def()`: after parsing the name string, optionally parse `(name: Type, …)` before `{`.
-If present, populate `TestDef::params`. No new tokens — reuses the existing `(`, `:`, `,`,
-`)` tokens already in the lexer.
+**Parser (`Source/Parser/Items.rs`)**
+
+`test_def_after_kw()` (`Items.rs:532`): after parsing the name string, optionally parse
+`(name: Type, …)` before `{`. If present, populate `TestDef::params`. No new tokens — reuses
+the existing `(`, `:`, `,`, `)` tokens already in the lexer.
 
 **Sema (`Source/Sema/Registration.rs`, `CheckerItems.rs`)**
 
-In `register_test` / `check_test_def`: if `params` is non-empty, validate each param type is
-a concrete type that the generator table knows (Bool, Int, Float, String, Char, List(_), and
-user structs whose fields are all generatable). Emit **E2301** ("property test parameter `x:
-T` has no generator — use a concrete primitive or a struct whose fields are all primitive")
-for unsupported types.
+In the `Item::Test` registration/check path (`Registration.rs:186`; no `register_test`/
+`check_test_def` fns exist today — add the property-test branch there): if `params` is
+non-empty, validate each param type is a concrete type that the generator table knows (Bool,
+Int, Float, String, Char, List(_), and user structs whose fields are all generatable). Emit
+**E2305** ("property test parameter `x: T` has no generator — use a concrete primitive or a
+struct whose fields are all primitive") for unsupported types.
+
+> Code choice: **E2305** is the first free slot in the E23xx block (E2301–E2304 are taken:
+> E2301/E2302 = view-lifetime, E2303/E2304 in use). E2301 as the writer originally proposed
+> would collide with the ratified view-lifetime diagnostic.
 
 **Codegen (`Source/Codegen/mod.rs`, `TIR.rs`)**
 
-`emit_test_harness` gains a `is_property: bool` path. For property tests, generate:
+The test-harness emitter (the `jet_test_N()` emission in `Codegen/mod.rs:317`; no
+`emit_test_harness` fn exists yet — factor one out or extend the inline emission) gains a
+`is_property: bool` path. For property tests, generate (`JetRng` is a small std-only LCG/xorshift
+to add — no external crate, I6):
 
 ```rust
 fn jet_test_N() -> Result<(), String> {
@@ -90,9 +104,9 @@ length, array length; structs shrink field-by-field. The shrink loop is emitted 
 Trial count is a constant (`256`); expose `#Test(trials: N)` as a follow-on only if evidence
 demands it — simplicity ratchet (I8).
 
-`tir_covers_test_body` is extended to allow `#Test fn` bodies (which may call any sema-clean
-Jet code, not just TIR-subset code). Property-test bodies use a separate codegen path that
-doesn't go through TIR coverage gating.
+The TIR-subset coverage predicate `TIR::n` is extended (or bypassed) so `#Test fn` property
+bodies — which may call any sema-clean Jet code, not just the TIR subset — use a separate
+codegen path that doesn't go through TIR coverage gating.
 
 **Syntax (`Source/Syntax.rs`)**
 
@@ -119,8 +133,8 @@ Add snapshot at `tests/ui/test_property_ok.txt`.
 
 **Diagnostic (I4)**
 
-E2301 — property test parameter type has no generator. Add entry to
-`docs/spec/diagnostics.md` and snapshot at `tests/ui/e2301_no_generator.txt`.
+E2305 — property test parameter type has no generator. Add entry to
+`docs/spec/diagnostics.md` and snapshot at `tests/ui/e2305_no_generator.txt`.
 
 ---
 
@@ -164,7 +178,8 @@ Doctest cases are emitted as additional `jet_test_N()` fns alongside regular tes
 
 **Diagnostic (I4)**
 
-E2901 — doctest output mismatch. Add to `docs/spec/diagnostics.md`; snapshot at
+E2901 — doctest output mismatch. The entry **already exists** in `docs/spec/diagnostics.md`
+(reserved for D-TEST4); wire it and add the missing snapshot at
 `tests/ui/e2901_doctest_mismatch.txt`.
 
 **Example (I5)**
@@ -206,18 +221,18 @@ This is pure tooling glue — no sema, no AST changes. No external Rust crates i
 
 | File | Change |
 |------|--------|
-| `Source/AST.rs` | `TestDef` gains `params` field |
-| `Source/Parser/Modules.rs` | `test_def()` parses optional param list |
-| `Source/Sema/Registration.rs` | property-test param validation, E2301 |
-| `Source/Sema/CheckerItems.rs` | check_test_def property-test path |
-| `Source/Codegen/mod.rs` | `emit_test_harness` property + doctest paths |
-| `Source/Codegen/TIR.rs` | relax `tir_covers_test_body` for property test bodies |
+| `Source/AST.rs` | `TestDef` gains `params` field (currently 3 fields: name/name_span/body) |
+| `Source/Parser/Items.rs` | `test_def_after_kw()` (`:532`) parses optional param list |
+| `Source/Sema/Registration.rs` | property-test param validation in `Item::Test` path (`:186`), E2305 |
+| `Source/Sema/CheckerItems.rs` | property-test body check path |
+| `Source/Codegen/mod.rs` | test-harness emission (`:317`) property + doctest paths; small std-only `JetRng` |
+| `Source/Codegen/TIR.rs` | bypass `TIR::n` coverage gate for property-test bodies |
 | `Source/Syntax.rs` | `TEST_DEFAULT_TRIALS` |
-| `Source/lib.rs` or `Source/Doctest.rs` | `extract_doctests` |
+| `Source/lib.rs` or `Source/Doctest.rs` (new) | `extract_doctests` |
 | `Source/CmdDevTools.rs` | `--coverage` flag and subprocess glue |
 | `Source/main.rs` | wire `--coverage` CLI flag |
-| `docs/spec/diagnostics.md` | E2301, E2901 entries |
-| `tests/ui/` | e2301_no_generator.txt, e2901_doctest_mismatch.txt |
+| `docs/spec/diagnostics.md` | E2305 (new); E2901 already present |
+| `tests/ui/` | e2305_no_generator.txt, e2901_doctest_mismatch.txt |
 | `examples/features/test_property.jet` | golden example (I5) |
 | `examples/features/test_doctest.jet` | golden example (I5) |
 

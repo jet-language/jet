@@ -33,9 +33,10 @@ it's time to decide it.
 
 **Gist:** Pick the surface a developer uses to declare a benchmark.
 
-**Story.** Walter ships a 2D game in Jet and his frame time is creeping up. He wants to
-measure his particle-update loop in isolation, watch it across changes, and have `jet` report
-ops/sec — the same way `#Test` already gives him pass/fail.
+**Story.** Walter ships a 2D game in Jet and his frame time is creeping up. `jet bench` already
+times his *whole program* (warmups + trials, mean±stddev — `run_bench` in `CmdDevTools.rs`), but
+he wants to measure his particle-update loop **in isolation**, watch that one region across
+changes, and have `jet` report per-region ops/sec — the same way `#Test` names a single unit.
 
 **In the wild:**
 
@@ -47,7 +48,7 @@ fn step(p: ~Particle, dt: Float) {
     p.y = p.y + p.vy * dt
 }
 
-// Walter wants to benchmark stepping 100k particles — but Jet has no benchmark surface yet.
+// `jet bench` can time the whole binary, but Walter has no way to benchmark just this region in source.
 ```
 
 **Other languages:**
@@ -133,14 +134,16 @@ exists on RegistryConfig but is unenforced; no signing today)*
 
 | Option | Proves | Offline-verifiable | External infra | Self-contained (I6) |
 |---|---|---|---|---|
-| A Ed25519 sign | authenticity + integrity | yes | none | yes (via `jet.crypto`) |
-| B checksum only | integrity only | yes | none | yes (already have it) |
+| A Ed25519 sign | authenticity + integrity | yes | none | yes — native Ed25519/SHA-512 in the ring layer |
+| B checksum only | integrity only | yes | none | yes (already have SHA-256) |
 | C Sigstore keyless | authenticity | no (needs Rekor/OIDC) | heavy | no |
 
 - **Option A — Ed25519 author key pairs (recommended).** Author signs the package manifest +
   content hash with a private key; the public key is published/pinned; consumers verify
-  offline. Built on the `jet.crypto` ring package (no new external dep). Checksums (B) remain
-  the integrity baseline underneath.
+  offline. **Capability note:** `jet.crypto` today ships only SHA-256 — Ed25519 and SHA-512 do
+  not exist yet, so under I6 this means a native Ed25519/SHA-512 implementation in the ring
+  layer (or a `signify`/`ssh-keygen` subprocess), not a reuse of existing crypto. The existing
+  SHA-256 checksum (B) remains the integrity baseline underneath.
   ```shell
   $ jet keygen                      # writes ~/.jet/keys/ed25519
   $ jet publish                     # signs manifest+hash; uploads signature
@@ -161,8 +164,9 @@ exists on RegistryConfig but is unenforced; no signing today)*
   dependency surface — at odds with Jet's std-only/offline-first stance.
 
 **Recommendation:** **A** — Ed25519 gives offline-verifiable authenticity with zero external
-infrastructure, reuses `jet.crypto`, and keeps checksums as the integrity layer beneath. It is
-the only option that satisfies both "prove authorship" and "works offline / self-contained."
+infrastructure and keeps the existing SHA-256 checksum as the integrity layer beneath. It is
+the only option that satisfies both "prove authorship" and "works offline / self-contained"
+(the Ed25519/SHA-512 primitives are added natively to the ring layer, consistent with I6).
 **Owner Q — key distribution:** publish author public keys in the registry index (TOFU on first
 pin), or require an out-of-band key fingerprint in `pkg.jet`? Rec: TOFU + pinned fingerprint in
 the lockfile.

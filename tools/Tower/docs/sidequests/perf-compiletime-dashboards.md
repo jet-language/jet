@@ -87,21 +87,23 @@ if let Ok(meta) = std::fs::metadata(&output_path) {
 }
 ```
 
-### Step 4 — `jet bench` driver (already stubbed in `Source/CmdDevTools.rs`, line 444)
+### Step 4 — in-source benchmark regions (`jet bench` already exists)
 
-Implement the stub:
+**Correction:** `jet bench` is **not a stub** — `run_bench` (`Source/CmdDevTools.rs:447`,
+labeled "D-TEST1 / D-TOOL5") already builds the program (`build/bench_<stem>`), runs 5 warmups
++ 20 timed trials of the **whole program**, and reports `mean ms ±stddev (N runs, M warmup)`
+(text and `--json`). What is *missing* is a way to benchmark a **named code region in source**
+(e.g. one hot loop) the way `#Test` names a unit, instead of timing the whole binary. That
+region surface is the open question:
 
-- Parse `#Bench` blocks (same grammar as `#Test` but named `Bench`; add `Item::Bench` to
-  AST).
-- Codegen wraps each bench body in a `for _ in 0..N { … }` loop; measure with
-  `std::time::Instant`; report `ns/op`.
-- `jet bench` CLI verb dispatches to `cmd_bench` in `CmdDevTools.rs`.
-- Output format: `bench <name>  <ns/op> ns/op  (<N> iters)` to stdout.
+- If D-BENCH1 lands a `#Bench "name" { … }` block: add `Item::Bench(BenchDef)` to `AST.rs`, a
+  `bench_def()` parser in `Parser/Items.rs` (sibling of `test_def`), codegen that wraps each
+  bench body in a warmup + timed `for _ in 0..N` loop measured with `std::time::Instant`, and
+  extend `run_bench` to discover/run them and report ns/iter per region.
+- Output for regions: `<name>  <ns/iter> ns/iter  (<N> iters)` to stdout.
 
-**NEEDS BALLOT:** `#Bench` block syntax. Current proposal is identical to `#Test` but named
-`Bench`. This is a user-visible syntax choice; the owner must ratify it before implementation.
-The fallback (no new block syntax; bench is just a `#Test` with a timing API) is an
-alternative. File as **D-BENCH1**.
+**NEEDS BALLOT: D-BENCH1** — the in-source benchmark-region surface. Options below. (The
+whole-program `jet bench` already works regardless of the outcome.)
 
 ### Step 5 — LSP latency measurement (`Source/LSP/mod.rs`)
 
@@ -151,9 +153,9 @@ with `tools/perf/update-baseline.sh`.
 | `Source/PhaseTiming.rs` (new) | `PhaseTimer` struct |
 | `Source/lib.rs` | Phase instrumentation; `JET_TIMING` env gate |
 | `Source/CmdCompile.rs` | Binary size stat |
-| `Source/CmdDevTools.rs` | `jet bench` dispatch; `#Bench` item |
+| `Source/CmdDevTools.rs` | extend existing `run_bench` (`:447`) to discover/run in-source bench regions (if D-BENCH1 ratified) |
 | `Source/AST.rs` | `Item::Bench(BenchDef)` (if D-BENCH1 ratified) |
-| `Source/Parser/Modules.rs` | `bench_def()` parser (if D-BENCH1 ratified) |
+| `Source/Parser/Items.rs` | `bench_def()` parser, sibling of `test_def` (if D-BENCH1 ratified) |
 | `Source/LSP/mod.rs` | Request handler timing |
 | `tools/perf/dashboard.sh` (new) | Aggregate dashboard |
 | `tools/perf/ci-perf-check.sh` (new) | CI regression check |
@@ -163,10 +165,11 @@ with `tools/perf/update-baseline.sh`.
 
 ## Decision verdict
 
-**NEEDS BALLOT: D-BENCH1** — what is the user-visible syntax for benchmark blocks? Options:
-1. `#Bench "name" { … }` (mirrors `#Test "name" { … }`, D-TEST1 pattern).
-2. No new block syntax; benchmarks are plain fns called by a `jet bench` runner that measures
-   wall time.
+**NEEDS BALLOT: D-BENCH1** — the user-visible surface for benchmarking a **named code region
+in source** (the whole-program `jet bench`/`run_bench` already exists). Options:
+1. `#Bench "name" { … }` (sibling of `#Test "name" { … }`).
+2. No new block syntax; a `core.time` stopwatch / `bench(name, fn)` timing API.
 3. `#Test(bench: true) fn name()` — reuse the `#Test` fn form with a named argument.
 
-The owner must pick before Step 4 is implemented. Everything else in this plan is unblocked.
+The owner must pick before in-source bench regions are implemented. Everything else in this
+plan — including the existing whole-program `jet bench` — is unblocked.
