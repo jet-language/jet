@@ -1,0 +1,19 @@
+// D-CAP7: &T share — read-access at a boundary; caller keeps ownership.
+struct Config { width: Int, height: Int, label: String }
+
+// &Config = shared read; caller retains ownership
+fn describe(c: &Config) {
+    print("{c.label}: {c.width}x{c.height}")
+}
+
+fn area(c: &Config) -> Int {
+    return c.width * c.height
+}
+
+fn main() {
+    cfg := Config { width: 1920, height: 1080, label: "display" }
+    describe(&cfg)          // share for read
+    a := area(&cfg)         // share again — caller still owns cfg
+    print("area: {a}")
+    print(cfg.label)        // cfg is still valid
+}
