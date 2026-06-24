@@ -97,6 +97,9 @@ pub enum TokKind {
     Caret,
     /// D-CAP7: `~` write/edit capability sigil (prefix). Position-disambiguated.
     Tilde,
+    /// S83: `~~` trait-attach (spec-only; lexed but not yet parsed). Longest-match
+    /// before `~`.
+    TildeTilde,
     Shl,
     Shr,
     // Logic & comparison (S13).
@@ -229,6 +232,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Pipe => "`|`".to_string(),
         TokKind::Caret => "`^`".to_string(),
         TokKind::Tilde => "`~`".to_string(),
+        TokKind::TildeTilde => "`~~`".to_string(),
         TokKind::Shl => "`<<`".to_string(),
         TokKind::Shr => "`>>`".to_string(),
         TokKind::AndAnd => "`&&`".to_string(),
