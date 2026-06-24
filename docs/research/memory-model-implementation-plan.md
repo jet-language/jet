@@ -81,11 +81,32 @@ default, expression-position `*`, or overloading.
 
 ## 4. WAITS ON GATE — sequenced after the owner rules
 
-- **After D-CAP8:** flip `Expressions.rs:1631` default to `Infer`; build the Phase-4
-  deterministic constraint solver (`Sema`, new module) that elevates `Infer →
-  Read/Write/Move/Share` over a **sorted** fixed point; re-point E0202/E0205; add the
-  differential determinism test (same source+flags ⇒ same resolved signatures). If the owner
-  picks **C**, add signature-freeze at `api: explicit` boundaries (Phase: Public API).
+- **After D-CAP8 (= C, ratified):** the resolution pass design (next to build):
+  - **Seam:** flip the parser default from `Read` to `Infer` (`parse_access_prefix`,
+    `Expressions.rs` `_ => AccessConvention::Read`).
+  - **Pass:** a new `Source/Sema/Capability.rs::resolve_capabilities(bundle)`, called at the
+    **top of `check_bundle_opts` (`Bundle.rs:250`), right after `mangle_inline_sibling_calls`**
+    — same AST-mutating pre-pass pattern, runs before checks AND before codegen so both see
+    resolved conventions (matches "resolve before check/optimize").
+  - **Per fn/method** (`Item::Fn`, `Item::Impl` methods, struct/enum-body methods): for each
+    param whose convention is `Infer`, scan the body and elevate, then mutate
+    `param.convention` in place. Signals:
+    - `Stmt::Assign` with `LValue::Field`/`Index` whose **root ident** is the param → `Write`
+    - a `CallArg` with convention `Write`/`Move`/`Share` whose **expr root** is the param →
+      that capability (covers `os.close(^file)`→Move, `cache(&cfg)`→Share, mutate-through-call)
+    - else → `Read`
+    - `expr_root(e)` descends `Field`/`Index`/… to the base `Ident`.
+  - **Lattice (take the max):** `Read < Share < Write < Move` (Move = consumes, strongest).
+    `Raw` never inferred (only the `*` sigil, D-CAP9). Deterministic: iterate params/stmts in
+    source order; no HashMap iteration in the decision.
+  - **Re-point** E0202/E0205: with `Infer` resolved before checks, the existing
+    "mutating a Read param" trigger only fires for an *explicit* `T`/`Read` param, not an
+    inferred one (the marquee `fn heal(player: Player){ player.hp += amount }` now resolves
+    `player: ~Player` and compiles).
+  - **Tests:** differential determinism (same source+flags ⇒ same resolved sigs); the prompt's
+    "Inferred Beginner Code" cases; update any ui snapshot that currently expects E0202 on a
+    mutating unmarked param (those now compile — that IS the D-CAP8 change).
+  - **Then (C):** freeze resolved sigs into `api: explicit` interface metadata (c129).
 - **After D-CAP9:** implement `*x` per the ruling (rec: `*x` = raw-of only, dereference →
   postfix `p.*` per Odin/Jai prior art, `*T` canonical / `Ptr<T>` deprecated alias); update
   E0208 into a teaching error pointing at `p.*`; parse `*T` in type position. (`.read()`/
