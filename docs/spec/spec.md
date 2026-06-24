@@ -185,6 +185,144 @@ nobody else may be looking at it.* Foreign `read`/`write` spellings get
 teaching errors **E0017**/**E0018** (S14). A `view` return may only hand
 back a parameter, a scalar local, or a const — not fresh text (**E0206**).
 
+## Access capability sigils (D-CAP7/D-CAP8)
+
+The capability is a prefix sigil on the **type**, not the name. Five sigils; four ship today:
+
+| Sigil | Capability | Compiles to Rust |
+|-------|-----------|-----------------|
+| `T` (bare) | read/infer — callee reads only; inferred from body (D-CAP8) | `x: &T` |
+| `~T` | edit — exclusive mutable access | `x: &mut T` |
+| `^T` | take — ownership moves to callee | `x: T` |
+| `&T` | share — value may escape the call (stored, cached, spawned) | `x: Arc<T>` / retained ref |
+| `*T` | raw pointer (PLANNED — D-CAP9, not yet shipped) | `x: *mut T` |
+
+### Placement
+
+Capability rides the type on the parameter:
+
+```jet
+fn damage(p: ~Player, amount: Int) {   // ~Player: edit; Int: read (bare)
+    p.hp = p.hp - amount
+}
+
+fn report(p: &Player) {                // &Player: share
+    print("{p.name}: {p.hp}")
+}
+```
+
+The call site mirrors the sigil — the capability is always visible where mutation or movement happens:
+
+```jet
+damage(~p, 30)    // ~ mirrors the parameter's ~Player
+report(&p)        // & mirrors &Player
+close(^file)      // ^ mirrors ^File — file is consumed
+```
+
+Method receivers carry the sigil on `self`; plain `self` is read:
+
+```jet
+impl Player {
+    fn show(self) -> Int { return self.hp }      // read receiver
+    fn heal(~self, amount: Int) { self.hp = self.hp + amount }  // edit receiver
+}
+```
+
+Method call syntax stays clean — the receiver sigil is on the `impl`, not the call site:
+
+```jet
+p.heal(10)    // clean; the ~self is on the method definition, not here
+p.show()      // plain read receiver
+```
+
+### Inference (D-CAP8)
+
+An unmarked parameter is `Infer`: the compiler walks the body and resolves the
+minimum capability the usage requires.
+
+Resolution rules (deterministic, in priority order):
+1. Body assigns a field (`p.field = …`) or calls a `~self` method on the param → resolves to `~`.
+2. Body passes the param to a `^param` position → resolves to `^`.
+3. Body passes the param to a `&param` position → resolves to `&`.
+4. Otherwise → resolves to read (bare `T`, no sigil).
+
+The call site **still requires the resolved sigil** for edits and moves — inference removes
+the annotation from the definition, not the visibility at the call site:
+
+```jet
+// unmarked `c` — body writes c.value → compiler infers ~Counter
+fn bump(c: Counter, by: Int) {
+    c.value = c.value + by
+}
+
+fn main() {
+    c := Counter { value: 0 }
+    bump(~c, 5)    // ~ still required at the call site
+    bump(~c, 3)
+    print(value_of(c))
+}
+```
+
+An unmarked parameter whose body only reads it resolves to plain read; the call site needs
+no sigil:
+
+```jet
+fn value_of(c: Counter) -> Int {
+    return c.value    // read only — resolves to bare T
+}
+// call: value_of(c)  — no sigil
+```
+
+Inference also applies when a param calls a `~self` method on itself:
+
+```jet
+struct Player { hp: Int }
+impl Player { fn damage(~self, n: Int) { self.hp = self.hp - n } }
+
+fn hurt(p: Player) { p.damage(5) }    // p is bare; body calls ~self → infers ~Player
+fn main() { x := Player { hp: 100 }; hurt(~x); print(x.hp) }
+```
+
+### Optional composition
+
+A capability sigil composes with `?` (optional presence) directly: `~User?`
+means "edit access over an optional User", `&Texture?` means "share an optional
+Texture". The sigil and `?` follow the same type-side grammar as any other type
+annotation — the sigil is the parameter prefix, `?` is the type suffix.
+
+### E0029 — two capability markers
+
+Placing more than one capability sigil on a single parameter is a parse error:
+
+```
+error[E0029]: two capability markers on one parameter
+  --> file.jet:3:12
+   |
+ 3 | fn bad(p: ~^Player) { … }
+   |           ^^ remove one capability marker
+```
+
+### Migration: `mut` / `take` / `view` → sigils
+
+The old ownership keywords parse today but are planned to become teaching errors
+(D-CAP7 mandate, not yet enforced):
+
+| Old spelling | New spelling | Notes |
+|---|---|---|
+| `fn f(mut x: T)` | `fn f(x: ~T)` | sigil moves to type side |
+| `fn f(take x: T)` | `fn f(x: ^T)` | same |
+| `fn f() -> view T` | `fn f() -> &T` | return borrow |
+| `fn f(x: T)` (default read) | `fn f(x: T)` | unchanged — bare `T` stays |
+| `mut self` | `~self` | receiver form |
+| `take self` | `^self` | receiver form |
+
+Call-site:
+
+| Old | New |
+|---|---|
+| `f(take x)` | `f(^x)` |
+| `f(mut x)` (was not a Jet spelling) | `f(~x)` |
+
 ## M3 — data & methods (done)
 
 Structs and enums carry fields; methods attach behavior (S27). Ratified

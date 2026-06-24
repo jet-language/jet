@@ -1867,6 +1867,20 @@ The call site mirrors the type — `damage(~player, 10)`, `close(^file)`, `cache
 Rejected: keeping the word vocabulary (D-CAP1/2/3 as-was); a words-in-libraries /
 sigils-in-apps split; a sixth sigil for `copy`.
 
+**Migration note — `mut`/`take`/`view` → sigils.** The old S10 keywords still parse today
+(retained for compatibility) but are planned to become S14 teaching errors once the
+sigil surface is fully validated. Until then, treat them as deprecated spellings:
+
+| Old | New | Position |
+|-----|-----|----------|
+| `fn f(mut x: T)` | `fn f(x: ~T)` | parameter |
+| `fn f(take x: T)` | `fn f(x: ^T)` | parameter |
+| `fn f() -> view T` | `fn f() -> &T` | return borrow |
+| `mut self` | `~self` | receiver |
+| `take self` | `^self` | receiver |
+| `f(take x)` (call site) | `f(^x)` | call site |
+| `fn f(x: T)` (default read) | `fn f(x: T)` | unchanged |
+
 ### Safety tiers — scoped capabilities, units, single-use (ratified 2026-06-21)
 
 Three value/effect-safety features, each **ratified as the target** but **gated** on an
