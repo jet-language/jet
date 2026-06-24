@@ -339,9 +339,8 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // REPL codes: tested in tests/repl.rs (E1802 is there; E1801 is not yet tested).
     // TODO: add a repl test that hits the fuel cap.
     "E1801",
-    // Dev interpreter: E2202 step budget exhausted has no test.
-    // TODO: add a tests/dev.rs test with an infinite loop.
-    "E2202",
+    // E2202 (dev interpreter step budget) is covered by tests/dev.rs
+    // (`infinite_loop_hits_e2202_fuel_stop` + the c77 battery boundary set).
     // Doctest mismatch: E2901 requires `jet test --doctest` support which isn't wired up.
     "E2901",
     // Cross-compilation: E3302 requires a target not in the test environment.

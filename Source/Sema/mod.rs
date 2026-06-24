@@ -548,6 +548,7 @@ mod Capability;
 mod Purity;
 mod Effects;
 mod SchemaMigration;
+pub mod HotSwap;
 
 pub(crate) use FFI::*;
 pub(crate) use Registration::*;

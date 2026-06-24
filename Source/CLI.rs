@@ -38,6 +38,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "test", summary: "compile and run top-level test blocks", headline: true },
     CommandSpec { name: "build", summary: "compile to a native binary in ./build/", headline: false },
     CommandSpec { name: "dev", summary: "watch a file and re-run it on every save", headline: false },
+    CommandSpec { name: "serve", summary: "watch a resident program and hot-swap type-stable edits", headline: false },
     CommandSpec { name: "repl", summary: "interactive REPL — try Jet expressions without a file", headline: false },
     CommandSpec { name: "new", summary: "create a new project folder", headline: false },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", headline: false },
@@ -89,6 +90,9 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
+    FlagSpec { long: "--restart", help: "with dev/serve: always rerun from scratch on save (c77)" },
+    FlagSpec { long: "--swap", help: "with dev/serve: hot-swap type-stable edits, restart on type change (c77)" },
+    FlagSpec { long: "--watch", help: "with dev/serve: --watch=off runs once and exits (c77)" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load pack.jet from this directory for import context (D-REPL10)" },
     // E2-M16 flags.

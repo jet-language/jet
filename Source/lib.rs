@@ -29,6 +29,7 @@ pub mod FixEngine;
 pub mod Formatter;
 pub mod Generics;
 pub mod Interpreter;
+pub mod JitBackend;
 pub mod Jetpack;
 pub mod Lexer;
 pub mod Loader;

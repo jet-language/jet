@@ -12,12 +12,42 @@ use jet::ExitCodes;
 use crate::CmdCompile::{build, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 
-/// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4). Re-checks and
-/// re-runs the entry file on every save, streaming output. The per-iteration
-/// work lives in `jet::Interpreter::dev_iteration` (so it can be golden-tested);
-/// this is the thin std-only watcher around it (I6: no `notify` crate — we
-/// poll the file's mtime in a loop).
-pub(crate) fn run_dev(file: &str, try_anyway: bool, mode: OutputMode) {
+/// c77 (D-DEVMODE1=A): how the watch loop reacts to a save. The default is
+/// auto-detection (`detect_dev_mode`); the three expert overrides force a mode.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WatchPolicy {
+    /// Auto-detect run-to-completion vs resident on each save (the default).
+    Auto,
+    /// `--restart`: always rerun from scratch (force run-to-completion).
+    Restart,
+    /// `--swap`/`jet serve`: always take the swap-or-announced-restart path.
+    Swap,
+    /// `--watch=off`: run once and exit, no loop.
+    Once,
+}
+
+/// Parse the c77 dev/serve flags out of the raw argv. Unknown flags are left
+/// for the caller; this only recognizes `--restart`, `--swap`, `--watch=off`.
+pub(crate) fn watch_policy_from(raw: &[String], default: WatchPolicy) -> WatchPolicy {
+    let mut policy = default;
+    for a in raw {
+        match a.as_str() {
+            "--restart" => policy = WatchPolicy::Restart,
+            "--swap" => policy = WatchPolicy::Swap,
+            "--watch=off" => policy = WatchPolicy::Once,
+            _ => {}
+        }
+    }
+    policy
+}
+
+/// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
+/// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
+/// Re-checks and re-runs the entry file on every save, streaming output. The
+/// per-iteration work lives in `jet::Interpreter::dev_iteration` (so it can be
+/// golden-tested); this is the thin std-only watcher around it (I6: no `notify`
+/// crate — we poll the file's mtime in a loop).
+pub(crate) fn run_dev(file: &str, try_anyway: bool, policy: WatchPolicy, mode: OutputMode) {
     let path = Path::new(file);
     if !path.exists() {
         eprintln!("error: can't find the file `{}`", file);
@@ -28,11 +58,18 @@ pub(crate) fn run_dev(file: &str, try_anyway: bool, mode: OutputMode) {
         exit(ExitCodes::USER_ERROR);
     }
 
+    // `--watch=off`: run once and exit (no loop).
+    if policy == WatchPolicy::Once {
+        render_dev_iteration(file, try_anyway, mode);
+        return;
+    }
+
     println!("watching {} … (Ctrl-C to stop)", file);
 
-    // Run once immediately, then re-run whenever the file's mtime changes.
+    // The bundle from the last successful load, kept so a resident edit can be
+    // diffed against it for type stability (D-HOTSWAP1).
+    let mut prev_bundle = render_dev_iteration(file, try_anyway, mode);
     let mut last_mtime = file_mtime(path);
-    render_dev_iteration(file, try_anyway, mode);
 
     loop {
         std::thread::sleep(std::time::Duration::from_millis(120));
@@ -41,10 +78,139 @@ pub(crate) fn run_dev(file: &str, try_anyway: bool, mode: OutputMode) {
             last_mtime = now;
             // A debounce sleep lets editors finish writing before we read.
             std::thread::sleep(std::time::Duration::from_millis(30));
-            println!("\n— {} changed, re-running —", file);
-            render_dev_iteration(file, try_anyway, mode);
+            prev_bundle =
+                render_dev_change(file, try_anyway, policy, prev_bundle.as_ref(), mode);
         }
     }
+}
+
+/// `jet serve <entry>` (c77) — `jet dev <entry> --swap`: force the resident/
+/// swap path, so a type-stable edit hot-swaps and a type-changing edit announces
+/// a clean restart. Shares the whole watch loop with `jet dev`. `policy`
+/// defaults to `Swap` but `--watch=off` (run once) and the other overrides
+/// still apply.
+pub(crate) fn run_serve(file: &str, try_anyway: bool, policy: WatchPolicy, mode: OutputMode) {
+    run_dev(file, try_anyway, policy, mode);
+}
+
+/// Handle one detected file change: pick swap vs rerun vs restart and render.
+/// Returns the freshly loaded bundle (or `None` if it failed to load) for the
+/// next diff.
+fn render_dev_change(
+    file: &str,
+    try_anyway: bool,
+    policy: WatchPolicy,
+    prev: Option<&jet::AST::ProgramBundle>,
+    mode: OutputMode,
+) -> Option<jet::AST::ProgramBundle> {
+    // Load+check the new bundle so we can both diff its type surface and run it.
+    let new_bundle = match jet::Loader::load_entry(file) {
+        Ok(mut b) => {
+            let diags =
+                jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+            let errs: Vec<_> = diags
+                .into_iter()
+                .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+                .collect();
+            if !errs.is_empty() {
+                let src = fs::read_to_string(file).unwrap_or_default();
+                println!("\n— {} changed —", file);
+                report_problems(mode, file, &src, &errs);
+                // Keep the previous bundle as the swap baseline; the bad edit
+                // never became the running version.
+                return None;
+            }
+            b
+        }
+        Err(diags) => {
+            let src = fs::read_to_string(file).unwrap_or_default();
+            println!("\n— {} changed —", file);
+            report_problems(mode, file, &src, &diags);
+            return None;
+        }
+    };
+
+    // Decide whether this save uses the swap path.
+    let resident = match policy {
+        WatchPolicy::Swap => true,
+        WatchPolicy::Restart => false,
+        WatchPolicy::Once => false, // unreachable here (handled in run_dev)
+        WatchPolicy::Auto => {
+            jet::Interpreter::detect_dev_mode(&new_bundle) == jet::Interpreter::DevMode::Resident
+        }
+    };
+
+    if resident {
+        // The hot-reload unit is the entry module (D-HOTSWAP1).
+        let module_name = new_bundle
+            .modules
+            .get(new_bundle.entry)
+            .map(|m| m.display.clone())
+            .unwrap_or_else(|| file.to_string());
+
+        match prev {
+            Some(old) => {
+                match jet::Sema::HotSwap::type_stable_check(old, &new_bundle, &module_name) {
+                    Ok(()) => {
+                        println!("\n[hot-swap] {} — types stable, code re-applied", module_name);
+                        run_resident_swap(&new_bundle, try_anyway, &module_name, file, mode);
+                    }
+                    Err(diags) => {
+                        // E2210 names what changed; surface it on the restart line.
+                        let what = diags
+                            .first()
+                            .map(|d| d.what.clone())
+                            .unwrap_or_default();
+                        println!("\n[restart] {} — {}", module_name, what);
+                        run_resident_restart(&new_bundle, try_anyway, file, mode);
+                    }
+                }
+            }
+            None => {
+                // No baseline yet (first run after an error): a clean restart.
+                println!("\n[restart] {} — first run", module_name);
+                run_resident_restart(&new_bundle, try_anyway, file, mode);
+            }
+        }
+    } else {
+        // Run-to-completion (default / `--restart`): plain rerun.
+        println!("\n— {} changed, re-running —", file);
+        render_outcome(jet::Interpreter::dev_iteration(file, try_anyway), file, mode);
+    }
+
+    Some(new_bundle)
+}
+
+/// Tier-0 hot-swap: re-apply the new bundle via the `JitBackend` seam and
+/// render. (Live-heap-preserving swap is the future Cranelift tier-1.)
+fn run_resident_swap(
+    bundle: &jet::AST::ProgramBundle,
+    try_anyway: bool,
+    module_name: &str,
+    file: &str,
+    mode: OutputMode,
+) {
+    use jet::JitBackend::{InterpreterBackend, JitBackend};
+    let mut backend = InterpreterBackend::new();
+    match backend.hot_swap(module_name, bundle, try_anyway) {
+        Ok(outcome) => render_outcome(outcome, file, mode),
+        Err(diags) => {
+            let src = fs::read_to_string(file).unwrap_or_default();
+            report_problems(mode, file, &src, &diags);
+        }
+    }
+}
+
+/// Tier-0 restart: a clean fresh evaluation via the seam's `restart` path.
+fn run_resident_restart(
+    bundle: &jet::AST::ProgramBundle,
+    try_anyway: bool,
+    file: &str,
+    mode: OutputMode,
+) {
+    use jet::JitBackend::{InterpreterBackend, JitBackend};
+    let mut backend = InterpreterBackend::new();
+    render_outcome(backend.restart(bundle, try_anyway), file, mode);
 }
 
 /// `jet repl` — interactive REPL session (E2-M18, D-REPL3=A).
@@ -65,17 +231,44 @@ fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
 /// output mode. Diagnostics use the SAME renderer as batch compilation
 /// (D-DEV), so a problem looks identical whether seen via `jet check` or
 /// `jet dev`.
-fn render_dev_iteration(file: &str, try_anyway: bool, mode: OutputMode) {
+fn render_dev_iteration(file: &str, try_anyway: bool, mode: OutputMode) -> Option<jet::AST::ProgramBundle> {
     let started = std::time::Instant::now();
     let outcome = jet::Interpreter::dev_iteration(file, try_anyway);
     let elapsed = started.elapsed();
+    let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
+    render_outcome_timed(outcome, file, Some(elapsed), mode);
+    // Load the checked bundle once more as the swap baseline — only when the
+    // program actually ran (a broken file has no running version to diff).
+    if ran_ok {
+        jet::Loader::load_entry(file).ok().map(|mut b| {
+            let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+            b
+        })
+    } else {
+        None
+    }
+}
+
+/// Render a run outcome with no timing line (used for re-runs/swaps).
+fn render_outcome(outcome: jet::Interpreter::RunOutcome, file: &str, mode: OutputMode) {
+    render_outcome_timed(outcome, file, None, mode);
+}
+
+fn render_outcome_timed(
+    outcome: jet::Interpreter::RunOutcome,
+    file: &str,
+    elapsed: Option<std::time::Duration>,
+    mode: OutputMode,
+) {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr } => {
             print!("{}", stdout);
             if !stderr.is_empty() {
                 eprint!("{}", stderr);
             }
-            println!("✓ ran in {} ms", elapsed.as_millis());
+            if let Some(e) = elapsed {
+                println!("✓ ran in {} ms", e.as_millis());
+            }
         }
         jet::Interpreter::RunOutcome::Problems(diags) => {
             let src = fs::read_to_string(file).unwrap_or_default();

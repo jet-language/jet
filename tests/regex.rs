@@ -7,7 +7,16 @@ use std::process::Command;
 
 /// Compile, FFI-link, and run a regex program; return stdout.
 fn run_regex(src: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("jet_regex_{}", std::process::id()));
+    // Unique dir per call so concurrent regex tests never clobber one another's
+    // `regex_test.{jet,rs,_bin}` (the process id alone is shared across tests in
+    // the same binary).
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "jet_regex_{}_{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("regex_test.jet");
     fs::write(&path, src).unwrap();

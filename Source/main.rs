@@ -24,7 +24,7 @@ mod CmdSupply;
 use CmdCompile::{run_compile_cmd, run_fix, run_fmt, run_new, run_test};
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval, run_explain,
-    run_repl,
+    run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
 use CmdPkg::{
     run_add, run_fetch, run_gc, run_remove, run_store_generations, run_store_rollback,
@@ -103,6 +103,8 @@ usage:
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
+  {bin} dev   <file.{ext}>          watch and re-run on every save (c77 auto-detects mode)
+  {bin} serve <file.{ext}>          watch a resident program; hot-swap type-stable edits (c77)
   {bin} repl                         start an interactive session (E2-M18)
   {bin} repl  --project <dir>        same, with access to a project's imports
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
@@ -349,7 +351,7 @@ fn main() {
     let known = jet::CLI::is_builtin(cmd)
         || matches!(
             cmd,
-            "lsp" | "install" | "doctor" | "completions" | "man" | "dev"
+            "lsp" | "install" | "doctor" | "completions" | "man" | "dev" | "serve"
                 | "publish" | "vendor" | "audit" | "sbom"
                 | "emit" | "bench" | "repl" | "schema"
         );
@@ -378,7 +380,7 @@ fn main() {
     // downstream (so their flags aren't measured against the global set).
     let owns_flags = matches!(
         cmd,
-        "env" | "dev" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
+        "env" | "dev" | "serve" | "add" | "remove" | "bind" | "lsp" | "store" | "update" | "fetch"
             | "publish" | "vendor" | "audit" | "sbom" | "repl" | "schema"
     );
     if !owns_flags {
@@ -501,6 +503,9 @@ fn main() {
             // feedback. The interpreter is a dev convenience only — `jet build`/
             // `jet run` never touch it (I2/I3).
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            // c77 (D-DEVMODE1=A): default auto-detect; experts force a mode with
+            // --restart / --swap / --watch=off.
+            let policy = watch_policy_from(&raw, WatchPolicy::Auto);
             let file = match args.get(1) {
                 Some(f) => f.as_str(),
                 None => {
@@ -512,7 +517,32 @@ fn main() {
                     exit(ExitCodes::USAGE);
                 }
             };
-            run_dev(file, try_anyway, mode);
+            run_dev(file, try_anyway, policy, mode);
+            return;
+        }
+        "serve" => {
+            // c77 (D-DEVMODE1=A): `jet serve <entry>` == `jet dev <entry> --swap`.
+            // Force the resident/swap path — a type-stable edit hot-swaps, a
+            // type-changing edit announces a clean restart (D-HOTSWAP1).
+            let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            let file = match args.get(1) {
+                Some(f) => f.as_str(),
+                None => {
+                    eprintln!(
+                        "error: `jet serve` needs a file to serve: {} serve <file.{}>",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT
+                    );
+                    eprintln!(
+                        " note: `jet serve` is `jet dev <file> --swap` — it keeps a resident program up and hot-swaps type-stable edits"
+                    );
+                    exit(ExitCodes::USAGE);
+                }
+            };
+            // `serve` forces the swap path by default, but `--watch=off` still
+            // runs once and exits.
+            let policy = watch_policy_from(&raw, WatchPolicy::Swap);
+            run_serve(file, try_anyway, policy, mode);
             return;
         }
         "store" => {
