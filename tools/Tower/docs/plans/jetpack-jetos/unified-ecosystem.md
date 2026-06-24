@@ -178,6 +178,19 @@ fallback. The probe never clones a nixpkgs-sized repo: `path@…` stats the dir,
 at **only** `pkg.jet` (raw fetch / shallow `git archive`) before deciding
 whether to do a full fetch.
 
+**Interim policy — nixpkgs is acceptable now, gated on the user having Nix
+(owner, 2026-06-24).** Until jetpack's own realization is complete, native /
+system dependencies (C libraries, math/SIMD backing libs like BLAS, etc.) may
+be provisioned through **nixpkgs** — but *only when the user is on NixOS / has
+Nix available*. This is the `nix` compatibility provider doing real work today
+(`Source/Jetpack/Provider.rs`: "every built-in source routes to `nix`"; C-deps
+auto-provision `nixpkgs#<attr>` in `Source/CFFI.rs`). It is explicitly a
+**stopgap**: long-term, jetpack's first-party **core** provider owns native
+provisioning so a Jet user needs no Nix. A non-Nix user hitting a native dep
+should get a clear "this currently needs Nix; jetpack-native provisioning is
+planned" path, never a silent failure. Track the migration here, not as a new
+ballot — there is no syntax choice, only the provider backend.
+
 ## 6. Merge rules (canonical — one table for all tiers)
 
 Reconciles jetos-design §5.4 and the former pack-abi table into one referee:
