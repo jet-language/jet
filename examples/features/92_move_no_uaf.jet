@@ -1,0 +1,14 @@
+// D-CAP7: move/take (^T) — valid program; caller does not use value after move.
+struct Token { id: Int, kind: String }
+
+// ^Token = caller yields ownership; fn receives it
+fn consume(t: ^Token) {
+    print("consumed token {t.id} ({t.kind})")
+}
+
+fn main() {
+    tok := Token { id: 42, kind: "access" }
+    consume(^tok)   // ownership moves here; tok is gone after this line
+    // no reference to tok below — use-after-move avoided
+    print("done")
+}
