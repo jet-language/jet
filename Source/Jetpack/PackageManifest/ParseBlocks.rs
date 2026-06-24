@@ -49,6 +49,11 @@ pub(super) fn parse_deps(body: &str) -> Result<Vec<Dep>, ManifestError> {
         } else if let Some(inner) = trimmed.strip_prefix('{') {
             let inner = inner.strip_suffix('}').unwrap_or(inner);
             parse_git_dep(&name, inner)?
+        } else if let Some(target) = parse_c_lib_ref(trimmed) {
+            // S59/D-CFFI2: a native C-library link dep — `c@system` /
+            // `c@"vendor/path"`. Detected before the generic provider-ref branch
+            // (which only knows nixpkgs/github/path and would reject `c`).
+            DepSource::CLib { target }
         } else if trimmed.contains(Syntax::REF_PROVIDER_AT) {
             match RefSpec::classify_provider_ref(trimmed) {
                 Ok(r) => DepSource::Provider {
@@ -66,6 +71,19 @@ pub(super) fn parse_deps(body: &str) -> Result<Vec<Dep>, ManifestError> {
         deps.push(Dep { name, source });
     }
     Ok(deps)
+}
+
+/// Detect a native C-library link ref (S59/D-CFFI2): `c@system` or
+/// `c@"vendor/path"`. The provider half (before `@`) must be exactly
+/// `Syntax::DEP_PROVIDER_C`; the target half is unquoted. Returns the target
+/// when matched, else `None` (so the caller falls through to the generic
+/// provider-ref branch).
+fn parse_c_lib_ref(value: &str) -> Option<String> {
+    let (provider, target) = value.split_once(Syntax::REF_PROVIDER_AT)?;
+    if provider.trim() != Syntax::DEP_PROVIDER_C {
+        return None;
+    }
+    Some(unquote(target))
 }
 
 /// Parse an inline git dependency's body (the text inside `{ … }`):

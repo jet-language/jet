@@ -629,7 +629,7 @@ reported as **E0119** (unknown name).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3201 | C library `{lib}` was not found. | Jet tried the hangar dep keyed `{lib}` in `pkg.jet`, then `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or add `{lib}` under `[dependencies:c]` with a pinned hangar ref. |
+| E3201 | C library `{lib}` was not found. | Jet looked for a `{lib}: c@…` dep in `pkg.jet`, then tried `pkg-config {lib}` on the system; neither provided include/link paths. | Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: c@system` in `deps:`. |
 | E3202 | Type `{ty}` cannot cross the C boundary here. | C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe { … }` region (S58). | Move the call inside `#Unsafe`, or change the type to a C-safe value type. |
 | E3203 | `{ty}` is not a C-compatible type for a foreign function parameter or return. | `@extern` / `@bindgen` functions must use types with a stable C ABI at the edge. | Use scalars, `String`, or a struct with C layout; pointers only through the gated tier. |
 | E3204 | Two different `use` forms refer to the same C library `{lib}`. | S59 allows one bring-in per C lib per file — either `use "{header}" as alias` or `use c.{lib} as alias`, not both. | Remove one line; keep the form that matches your workflow. |

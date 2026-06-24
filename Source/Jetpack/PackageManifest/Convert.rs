@@ -16,6 +16,10 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
     let mut dependencies = BTreeMap::new();
     for dep in &pm.deps {
         let spec = match &dep.source {
+            // S59/D-CFFI2: a native C-library link dep is not a Jet package —
+            // it is resolved by Source/CFFI.rs into linker flags, never realized
+            // as source or written to the package lock. Skip it here.
+            DepSource::CLib { .. } => continue,
             DepSource::Version(v) => DepSpec::Registry(v.clone()),
             DepSource::Git { url, selector } => DepSpec::Git {
                 url: url.clone(),

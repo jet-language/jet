@@ -5,9 +5,9 @@
 //! that link against a real C static library (built here with `cc`) and print
 //! deterministic output.
 //!
-//! Phase 2 link discovery is exercised by unit tests over the flag parsers
-//! (`parse_pkg_config`, `parse_c_dep`) and the E3201 path, since the nix dev
-//! shell ships neither `pkg-config` nor a known system lib.
+//! Phase 2 link discovery is exercised by unit tests over the flag parser
+//! (`parse_pkg_config`), the `deps: { lib: c@… }` manifest path, and E3201,
+//! since the nix dev shell ships neither `pkg-config` nor a known system lib.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -545,16 +545,24 @@ fn parse_pkg_config_defaults_link_name() {
 }
 
 #[test]
-fn parse_c_dep_reads_dependencies_table() {
-    let manifest = "[dependencies:c]\nraylib = \"nixpkgs:raylib#5.5.0\"\n";
-    assert_eq!(jet::CFFI::parse_c_dep(manifest, "raylib"), Some(None));
-    assert_eq!(jet::CFFI::parse_c_dep(manifest, "sqlite3"), None);
-
-    let with_path = "[dependencies:c]\nfoo = { path = \"/opt/foo\" }\n";
-    assert_eq!(
-        jet::CFFI::parse_c_dep(with_path, "foo"),
-        Some(Some("/opt/foo".to_string()))
-    );
+fn deps_block_parses_c_lib_refs() {
+    // S59/D-CFFI2: native C deps live in the Jet `deps:` block as `c@<target>`
+    // refs, parsed by the real PackageManifest parser (not an ad-hoc reader).
+    use jet::Jetpack::PackageManifest::{parse, DepSource};
+    let manifest = r#"
+payload: { name: "p", version: "0.1.0" }
+deps: {
+    raylib: c@system,
+    foo:    c@"/opt/foo",
+}
+"#;
+    let pm = parse(manifest).expect("manifest parses");
+    let raylib = pm.deps.iter().find(|d| d.name == "raylib").unwrap();
+    assert_eq!(raylib.source, DepSource::CLib { target: "system".into() });
+    let foo = pm.deps.iter().find(|d| d.name == "foo").unwrap();
+    assert_eq!(foo.source, DepSource::CLib { target: "/opt/foo".into() });
+    // A non-C dep stays a normal Jet dep, not a CLib.
+    assert!(pm.deps.iter().all(|d| d.name != "sqlite3"));
 }
 
 #[test]
@@ -572,8 +580,8 @@ fn resolve_link_unknown_lib_is_e3201() {
     let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
     let expected = "\
 Error [E3201]: C library `nolib` was not found.
- Why: Jet tried the hangar dep keyed `nolib` in `pkg.jet`, then `pkg-config nolib` on the system; neither provided include/link paths.
- Fix: Install the system package (e.g. `pacman -S nolib`), or add `nolib` under `[dependencies:c]` with a pinned hangar ref.
+ Why: Jet looked for a `nolib: c@…` dep in `pkg.jet`, then tried `pkg-config nolib` on the system; neither provided include/link paths.
+ Fix: Install the system package (e.g. `pacman -S nolib`), or declare it as `nolib: c@system` in `deps:`.
 ";
     assert_eq!(rendered, expected);
     let _ = fs::remove_dir_all(&root);

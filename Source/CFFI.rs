@@ -17,8 +17,9 @@
 //!    one form per lib per file (E3204), and record the synthetic target for
 //!    sema's import map.
 //!
-//! Link discovery (hangar vs pkg-config) lives in `link.rs`-style helpers here
-//! and surfaces E3201 when neither finds the library.
+//! Link discovery lives in helpers here: a declared `<lib>: c@…` dep in the
+//! `deps:` block of `pkg.jet` (S59/D-CFFI2) takes precedence, else `pkg-config
+//! <lib>`, else E3201.
 
 use crate::AST::{CModule, CModuleKind, ExternFn, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -577,22 +578,67 @@ fn load_cache_source(
     });
 }
 
-/// Resolve link flags for one C library (D-CFFI2): hangar dep if the manifest
-/// pins it under `[dependencies:c]`, else `pkg-config <lib>`, else E3201.
-/// Returns `(include_dirs, lib_dirs, link_names)`.
+/// Resolve link flags for one C library (S59/D-CFFI2). Order:
+///   1. A declared `<lib>: c@…` dep in the `deps: { … }` block of `pkg.jet`:
+///      `c@system` → pkg-config (with a bare `-l <lib>` fallback when there is
+///      no `.pc`, e.g. libc); `c@"<path>"` → local dir (`-L`/`-I`/`-l`).
+///   2. Else `pkg-config <lib>` (an undeclared `use c.<lib>` keeps this path).
+///   3. Else E3201.
 pub fn resolve_link(
     lib: &str,
     project_root: &Path,
 ) -> Result<LinkFlags, Diagnostic> {
-    // 1. Hangar: a `[dependencies:c]` entry keyed by `<lib>` in pkg.jet.
-    if let Some(flags) = hangar_link(lib, project_root) {
-        return Ok(flags);
+    // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
+    if let Some(target) = declared_c_dep(lib, project_root) {
+        return clib_link(lib, &target);
     }
-    // 2. pkg-config fallback.
+    // 2. pkg-config fallback (undeclared `use c.<lib>`).
     match pkg_config_link(lib) {
         PkgConfig::Found(flags) => Ok(flags),
         PkgConfig::NotFound | PkgConfig::Unavailable => Err(e3201(lib)),
     }
+}
+
+/// Look up a declared `<lib>: c@<target>` dep in the package manifest at
+/// `project_root`, returning its target (`"system"` or a local path) when
+/// present. Uses the real PackageManifest parser — the same one that produces
+/// `pm.deps` — not an ad-hoc reader.
+fn declared_c_dep(lib: &str, project_root: &Path) -> Option<String> {
+    use crate::Jetpack::PackageManifest::{DepSource, PackManifest};
+    let pm: PackManifest = PackManifest::load(project_root)?.ok()?;
+    pm.deps.into_iter().find_map(|dep| {
+        if dep.name != lib {
+            return None;
+        }
+        match dep.source {
+            DepSource::CLib { target } => Some(target),
+            _ => None,
+        }
+    })
+}
+
+/// Resolve a declared `c@<target>` dep into link flags (S59/D-CFFI2).
+///   - `target == "system"` → `pkg-config <lib>`; if pkg-config has no entry or
+///     is unavailable, fall back to a bare `-l <lib>` (this is what makes libc
+///     work — there is no `c.pc`).
+///   - any other `target` → a local dir: `-L <path>`, `-I <path>`, `-l <lib>`.
+fn clib_link(lib: &str, target: &str) -> Result<LinkFlags, Diagnostic> {
+    if target == Syntax::SYSTEM_LIB_TARGET {
+        return Ok(match pkg_config_link(lib) {
+            PkgConfig::Found(flags) => flags,
+            // No `.pc` (e.g. libc) or pkg-config absent: a bare `-l <lib>` is
+            // the declared intent — the lib is on the default search path.
+            PkgConfig::NotFound | PkgConfig::Unavailable => {
+                LinkFlags { link_names: vec![lib.to_string()], ..Default::default() }
+            }
+        });
+    }
+    // Local dir: link from `<path>` with the lib's own name.
+    Ok(LinkFlags {
+        include_dirs: vec![target.to_string()],
+        lib_dirs: vec![target.to_string()],
+        link_names: vec![lib.to_string()],
+    })
 }
 
 /// Native-library link inputs for rustc (`-l`, `-L`, `-I` analog via cc args).
@@ -604,78 +650,21 @@ pub struct LinkFlags {
     pub link_names: Vec<String>,
 }
 
-/// E3201 — C library not found via hangar or pkg-config.
+/// E3201 — C library not found via a declared `c@…` dep or pkg-config.
 fn e3201(lib: &str) -> Diagnostic {
     Diagnostic::error(
         "E3201",
         format!("C library `{}` was not found.", lib),
         format!(
-            "Jet tried the hangar dep keyed `{}` in `{}`, then `pkg-config {}` on the system; neither provided include/link paths.",
-            lib, Syntax::PAYLOAD_FILE, lib,
+            "Jet looked for a `{lib}: {}@…` dep in `{}`, then tried `pkg-config {lib}` on the system; neither provided include/link paths.",
+            Syntax::DEP_PROVIDER_C, Syntax::PAYLOAD_FILE,
         ),
         format!(
-            "Install the system package (e.g. `pacman -S {}`), or add `{}` under `[{}]` with a pinned hangar ref.",
-            lib, lib, Syntax::DEP_TABLE_C,
+            "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}@{}` in `deps:`.",
+            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
         ),
         None,
     )
-}
-
-/// Look up a `[dependencies:c]` entry keyed by `<lib>` in `pkg.jet`. The
-/// hangar realization of C deps is a Jetpack concern (Phase 2 fixture-backed
-/// until jetpack parses C deps); here we only honor an explicit local override
-/// directory recorded in the manifest if present.
-fn hangar_link(lib: &str, project_root: &Path) -> Option<LinkFlags> {
-    let manifest = project_root.join(Syntax::PAYLOAD_FILE);
-    let raw = std::fs::read_to_string(&manifest).ok()?;
-    let entry = parse_c_dep(&raw, lib)?;
-    // A bare `<lib> = "nixpkgs:raylib#5.5.0"` has no local paths yet (hangar
-    // realization pending); a `<lib> = { path = "…" }` override gives a dir to
-    // link from. Either way the lib name is the rustc `-l` name.
-    let mut flags = LinkFlags { link_names: vec![lib.to_string()], ..Default::default() };
-    if let Some(dir) = entry {
-        if !dir.is_empty() {
-            flags.lib_dirs.push(dir.clone());
-            flags.include_dirs.push(dir);
-        }
-    }
-    Some(flags)
-}
-
-/// Minimal `[dependencies:c]` reader: returns `Some(local_dir_or_empty)` when
-/// `<lib>` is declared. Recognizes `<lib> = { path = "…" }` for a local dir and
-/// `<lib> = "ref"` for a pinned (hangar) dep with no local dir yet.
-pub fn parse_c_dep(raw: &str, lib: &str) -> Option<Option<String>> {
-    let mut in_table = false;
-    for line in raw.lines() {
-        let t = line.trim();
-        if t.starts_with('[') && t.ends_with(']') {
-            in_table = t == format!("[{}]", Syntax::DEP_TABLE_C);
-            continue;
-        }
-        if !in_table {
-            continue;
-        }
-        let Some((key, value)) = t.split_once('=') else { continue };
-        if key.trim() != lib {
-            continue;
-        }
-        let v = value.trim();
-        if v.starts_with('{') {
-            // Look for `path = "…"`.
-            if let Some(p) = v.find("path") {
-                if let Some(q1) = v[p..].find('"') {
-                    let start = p + q1 + 1;
-                    if let Some(q2) = v[start..].find('"') {
-                        return Some(Some(v[start..start + q2].to_string()));
-                    }
-                }
-            }
-            return Some(None);
-        }
-        return Some(None);
-    }
-    None
 }
 
 enum PkgConfig {

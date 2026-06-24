@@ -101,6 +101,13 @@ pub enum DepSource {
         url: String,
         selector: crate::Manifest::GitSelector,
     },
+    /// A native C-library link dependency (S59/D-CFFI2): `lib: c@system`
+    /// (pkg-config, bare `-l <lib>` fallback) or `lib: c@"vendor/path"` (local
+    /// dir). `target` is `"system"` or the unquoted local path. A CLib dep is a
+    /// link dep, not a Jet package — it is skipped in package realization and
+    /// never written to the package lock; `Source/CFFI.rs` reads it for `-L`/
+    /// `-I`/`-l` link flags.
+    CLib { target: String },
 }
 
 /// One `name: value` entry in the `deps: { … }` block.
@@ -413,6 +420,47 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
                 provider: Source::Github,
                 target: "NixOS/nixpkgs/nixos-24.05".into(),
             }
+        );
+    }
+
+    #[test]
+    fn c_lib_dep_system_and_path() {
+        // S59/D-CFFI2: `c@system` and `c@"path"` parse to DepSource::CLib.
+        let src = r#"
+payload: { name: "p", version: "0.1.0" }
+deps: {
+    raylib: c@system,
+    mylib:  c@"vendor/mylib",
+    c:      c@system,
+}
+"#;
+        let m = parse(src).unwrap();
+        assert_eq!(m.deps.len(), 3);
+        assert_eq!(m.deps[0].name, "raylib");
+        assert_eq!(m.deps[0].source, DepSource::CLib { target: "system".into() });
+        assert_eq!(m.deps[1].name, "mylib");
+        assert_eq!(
+            m.deps[1].source,
+            DepSource::CLib { target: "vendor/mylib".into() }
+        );
+        assert_eq!(m.deps[2].name, "c");
+        assert_eq!(m.deps[2].source, DepSource::CLib { target: "system".into() });
+    }
+
+    #[test]
+    fn c_lib_dep_is_skipped_in_to_manifest() {
+        // A CLib dep is a link dep, not a Jet package: it must not appear in the
+        // converted Manifest's dependency map (never realized / locked).
+        let src = r#"
+payload: { name: "p", version: "0.1.0" }
+deps: { textkit: "1.2.0", raylib: c@system }
+"#;
+        let m = parse(src).unwrap();
+        let mf = to_manifest(&m, src).unwrap();
+        assert!(mf.dependencies.contains_key("textkit"));
+        assert!(
+            !mf.dependencies.contains_key("raylib"),
+            "C link dep must not be a converted Jet dependency"
         );
     }
 

@@ -774,8 +774,9 @@ registry pins; moving selectors `branch = "main"` and `tag = "@latest"`
 allowed when `jet.lock` is authoritative (`jet update` refreshes;
 `--locked` freezes). Dependency kinds use colon suffixes:
 `[dependencies]`, `[dependencies:rust]` (optional FFI metadata; `extern rust`
-inline pins remain authoritative),
-`[dependencies:c]` (reserved for S59). Reserved, not generated in v1:
+inline pins remain authoritative). (Native C deps later moved into the Jet
+`deps: { lib: c@system }` ref, S59/D-CFFI2 — no separate `[dependencies:c]`
+table.) Reserved, not generated in v1:
 `[dev-dependencies]`, `[patch]`, `[workspace]`, `[tool.*]` (ignored except
 warn on `[tool.jet]`). Lockfile `**jet.lock**` — graph-shaped, schema
 versioned, original+locked per node, content-hash verified. Commands:
@@ -808,12 +809,18 @@ Epoch 2 (E2-M14) ships C import with **auto-generated bindings** (default) and
 optional **user overlay** modules. By-value boundary first; pointers only inside
 the S58 tier.
 
-**Link resolution (D-CFFI2, ratified):**
+**Link resolution (D-CFFI2, ratified):** C deps live in the Jet `deps: { … }`
+block as a `c@<target>` provider ref — `lib: c@system` (pkg-config, with a bare
+`-l <lib>` fallback when there is no `.pc`, e.g. libc) or `lib: c@"vendor/path"`
+(local dir: `-L`/`-I`/`-l`). Order:
 
-1. **Jetpack project** — if `pkg.jet` declares a matching dep (content-hash
-   pinned in hangar), use hangar include/lib paths.
-2. **Otherwise** — `pkg-config <link-name>`.
+1. **Declared `<lib>: c@…` dep** in `pkg.jet`'s `deps:` block → resolve as above.
+2. **Otherwise** — `pkg-config <link-name>` (an undeclared `use c.<lib>`).
 3. **Missing** — **E3201** naming both fixes.
+
+A C dep is a link dep, not a Jet package: it is skipped in package realization
+and never written to the package lock. The retired TOML `[dependencies:c]` table
+is replaced by this `c@…` ref (no alias).
 
 **Surface (D-CFFI2-SYN, ratified 2026-06-16):**
 

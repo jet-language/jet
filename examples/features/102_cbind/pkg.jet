@@ -5,8 +5,9 @@ payload: {
     license: "MIT OR Apache-2.0",
 }
 
-# The link key for `use c.c` — the C standard library, which the Rust backend
-# already links, so this just names it for the link line (`-l c`). A real
-# third-party library would point at a hangar ref or a local `path = "…"`.
-[dependencies:c]
-c = "system"
+// `c@system` names the C standard library for the link line (`-l c`). libc has
+// no `c.pc`, so resolution falls back to a bare `-l c` — which the Rust backend
+// already links anyway. A third-party lib would use `name: c@"vendor/path"`.
+deps: {
+    c: c@system,
+}

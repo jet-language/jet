@@ -59,6 +59,12 @@ fn collect_pkg_resolution(raw: &str) -> PkgResolution {
     let mut declared_deps = HashSet::new();
     if let Ok(pm) = crate::Jetpack::PackageManifest::parse(raw) {
         for dep in &pm.deps {
+            // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
+            // package — it must not shadow `use <pkg>` resolution (e.g. a dep
+            // named `c`). Skip it here; CFFI.rs reads it for link flags.
+            if matches!(dep.source, crate::Jetpack::PackageManifest::DepSource::CLib { .. }) {
+                continue;
+            }
             declared_deps.insert(dep.name.clone());
         }
     }

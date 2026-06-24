@@ -535,8 +535,9 @@ so calls resolve like any namespaced module call. Codegen emits an `extern "C"`
 block plus small per-function wrappers (the only place compiler-vetted `unsafe`
 is emitted, S58); `String`↔`*const c_char` and `Char`↔`u32` convert at the edge.
 
-Link key = last segment `<lib>`: hangar dep (`[dependencies:c]` in `pkg.jet`)
-if declared → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
+Link key = last segment `<lib>`: a declared `<lib>: c@…` dep in the `deps:`
+block of `pkg.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallback;
+`c@"path"` → local `-L`/`-I`/`-l`) → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
 `-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
 structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**;

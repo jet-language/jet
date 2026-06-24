@@ -634,7 +634,20 @@ pub const SOURCE_ROOT_DIR: &str = ".jet";
 /// S52 (ratified M12): dependency kind table suffixes.
 pub const DEP_TABLE_JET: &str = "dependencies";
 pub const DEP_TABLE_RUST: &str = "dependencies:rust";
-pub const DEP_TABLE_C: &str = "dependencies:c";
+
+/// S59 / D-CFFI2 (ratified): the native-C-library dependency provider name,
+/// written as a `provider@target` ref inside the `deps: { … }` block —
+/// `lib: c@system` (pkg-config, with a bare `-l <lib>` fallback) or
+/// `lib: c@"vendor/path"` (local dir: `-L`/`-I`/`-l`). Replaces the retired
+/// TOML `[dependencies:c]` table. A C dep is a link dep, not a Jet package: it
+/// is never realized as source or written to the package lock.
+pub const DEP_PROVIDER_C: &str = "c";
+
+/// S59 / D-CFFI2 (ratified): the `c@<target>` system-library target —
+/// `lib: c@system` resolves via `pkg-config <lib>`, falling back to a bare
+/// `-l <lib>` when there is no `.pc` (e.g. libc). Any other target is a local
+/// directory path.
+pub const SYSTEM_LIB_TARGET: &str = "system";
 
 // ──────────────────────────────────────────────
 // Jetpack (Phase 1) — user-typeable surface (I7).
