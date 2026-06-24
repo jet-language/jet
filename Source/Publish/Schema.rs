@@ -348,6 +348,7 @@ mod tests {
                     name_span: zero,
                     ty: Type::String,
                     ty_span: zero,
+                    serde_markers: Vec::new(),
                 },
                 Field {
                     is_pub: false,
@@ -357,6 +358,7 @@ mod tests {
                     name_span: zero,
                     ty: Type::Int,
                     ty_span: zero,
+                    serde_markers: Vec::new(),
                 },
             ],
             methods: vec![],
@@ -366,6 +368,7 @@ mod tests {
             published_schema_span: None,
             layout: None,
             layout_span: None,
+            serde_markers: Vec::new(),
         };
         let snap = snapshot_from_struct(&s, "2.0.0");
         let text = snap.write();

@@ -1,9 +1,13 @@
 # Owner ballot results
 
-_submitted 2026-06-24 10:08_
+_submitted 2026-06-24 19:03 · **ratified + cards stripped 2026-06-24 (batch 4)**_
 
-Decisions captured from Tower. Tell Claude **"go"** to ratify these
-into syntax-decisions.md, strip the cards, and implement the plans.
+Decisions captured from Tower. **Processed:** the 11 open full cards (D-SIMD2,
+D-SERDE2–8, D-NOSTD1, D-IF3, D-FMT1) + the C-CASING/C-MANIFEST corrections are
+recorded in `docs/spec/syntax-decisions.md` and stripped from `decision-ballots.md`
+(see the batch-4 drain note there). The remaining IDs below were already ratified in
+the 2026-06-22/23/24 batches. Owner follow-on requests (D-EFF1 subquestions, D-SOA1
+name + open questions) are queued as **Pending follow-on cards** in `decision-ballots.md`.
 
 ## Decisions
 
@@ -110,3 +114,65 @@ Decision: **A**
 **D-PKGSIGN1** — what proves a published package is authentic?
 Decision: **B**
 Comment: A as an OPT-IN / non-blocking layer with SHA-256 checksum (B) as the always-on floor — `require_signed` stays an org policy, OFF by default — not a hard gate that refuses unsigned packages. That keeps A's unique win (offline authorship proof) while spending friction only on publishers who opt in
+
+**D-DBG3** — Debugger interactive command surface
+Decision: **A**
+
+**D-LINALG1** — Linear-algebra type & method names
+Decision: **A**
+Comment: Ratify Option A names, with C's Vec<N>/Matrix<M,N> as the underlying generic and A as aliases over it.
+
+**D-SUPPLY1** — Supply-chain command surface
+Decision: **A**
+
+**D-TXN3** — Deferred post-commit effects
+Decision: **A**
+Comment: Can we name the transact scope? Meaning having something like "#Transact(Order) {...
+
+**D-NUMOPS2** — overflow default for sized & unsigned integers *(reconcile)*
+Decision: **A**
+
+**D-QUAL3** — How a parameterized value-tag attaches to a type
+Decision: **C**
+Comment: use PascalCase for the unit family tag -> #UnitFamily
+
+**D-SIMD2** — SIMD lane construction & access surface
+Decision: **A**
+
+**D-SERDE2** — serialize/deserialize hand-impl names
+Decision: **A**
+
+**D-SERDE3** — `rename_all` casing-style menu
+Decision: **C**
+
+**D-NOSTD1** — Embedded / freestanding: how a package opts out of the std baseline
+Decision: **A**
+
+**D-JSONVERB1** — value→JSON string verb
+Decision: **A**
+
+**D-TXN4** — Name the transaction scope so the name is the handle (`#Transact(order) { order.on_commit(…) }`)
+Decision: **A**
+
+**D-IF3** — explicit `if subject == { … }` value/pattern dispatch
+Decision: **A**
+
+**D-FMT1** — `jet fmt` preserves single-line bodies
+Decision: **A**
+
+**D-SERDE4** — derive-marker shape: one marker or two?
+Decision: **B**
+Comment: B, However, I want the collapsed version to be Codable, with Encode & Decode as the one way types
+
+**D-SERDE5** — per-field attribute surface
+Decision: **A**
+
+**D-SERDE6** — typed decode: type argument + verb coherence
+Decision: **C**
+
+**D-SERDE7** — enum wire representation
+Decision: **A**
+Comment: Ship the chooser now, not post v1. How does this collide with the field tagging from DSERDE5? Wouldn't that cover this? If not, then reserve & implement the tag & untagged as a fallback only
+
+**D-SERDE8** — unknown-field policy
+Decision: **A**

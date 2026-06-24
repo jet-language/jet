@@ -670,7 +670,8 @@ pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
         // D-REGEX1: `regex` is now shipped (was staged).
-        "csv" | "toml" | "yaml" | "log" | "json" | "time" | "crypto" | "http" | "regex"
+        // D-ENC1: csv/toml/yaml/json retired from the `jet.` ring root — now `core.encoding.*`.
+        "log" | "time" | "crypto" | "http" | "regex"
     )
 }
 
@@ -701,7 +702,6 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.math",
     "core.random",
     "core.time",
-    "core.json",
     "core.tasks",
     "core.mem",
     // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
@@ -717,12 +717,15 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.args",
     // D-TERM1 (ratified 2026-06-22): terminal direct-input — `term.read_key() -> Key`.
     "core.term",
+    // D-ENC1 (ratified 2026-06-24): unified serialization library `core.encoding` with
+    // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
+    "core.encoding",
+    "core.encoding.json",
+    "core.encoding.csv",
+    "core.encoding.toml",
+    "core.encoding.yaml",
     // E2-M9: first-party ring packages.
-    "jet.csv",
-    "jet.toml",
-    "jet.yaml",
     "jet.log",
-    "jet.json",
     "jet.time",
     "jet.crypto",
     // E2-M10: HTTP client/server ring package.

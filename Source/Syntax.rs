@@ -1025,6 +1025,31 @@ pub const LAYOUT_PACKED: &str = "packed";     // D-REPRC1 (reserved)
 pub const LAYOUT_ALIGN: &str = "align";       // D-REPRC1 (reserved)
 pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA2 (reserved)
 
+// ── Serde derive markers + attributes (D-SERDE2–8, D-ENC1; bracket form D-ATTR2) ──
+// Derive markers (PascalCase per D-CASING1, written `#[…]` before a struct/enum):
+// `#[Codable]` derives BOTH directions (sugar for `#[Encode, Decode]`); `#[Encode]`
+// is write-only; `#[Decode]` is read-only. Owner (D-SERDE4 = B, modified): the
+// collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
+pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
+pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
+pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
+// Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
+pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
+pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
+pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
+pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
+// Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
+pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
+pub const ATTR_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
+pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  #[Tag("type")] internal tagging
+pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
+// D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
+pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
+pub const RENAME_ALL_SNAKE: &str = "snake"; // D-SERDE3
+pub const RENAME_ALL_PASCAL: &str = "pascal"; // D-SERDE3
+pub const RENAME_ALL_KEBAB: &str = "kebab"; // D-SERDE3
+pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Canonical keyword/type/builtin tables (c44: single source of truth).
 //

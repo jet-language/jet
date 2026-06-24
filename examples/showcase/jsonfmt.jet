@@ -2,7 +2,7 @@
 // Usage: jsonfmt FILE
 use core.io as io
 use core.fs as fs
-use core.json as json
+use core.encoding.json as json
 use core.process as process
 fn main() {
     args @= io.args()
@@ -14,7 +14,7 @@ fn main() {
     text @= fs.read(path) ?? panic("cannot read file")
     if json.parse(text) {
         it == ok(data) -> {
-            print(json.render_pretty(data))
+            print(json.to_string_pretty(data))
         }
         it == err(e) -> {
             io.eprint("parse error at line {e.line}: {e.message}")

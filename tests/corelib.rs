@@ -112,7 +112,7 @@ use core.process as process
 use core.math as math
 use core.random as random
 use core.time as time
-use core.json as json
+use core.encoding.json as json
 
 fn main() {
     print("ok")
@@ -218,7 +218,7 @@ use core.process as process
 use core.math as math
 use core.random as random
 use core.time as time
-use core.json as json
+use core.encoding.json as json
 
 fn main() {
     print("ok")
@@ -252,7 +252,7 @@ fn main() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// D-JSON3=B: lenient decode (jet.json.decode) surfaces coercions via log lines.
+// D-JSON3=B: lenient decode (core.encoding.json.decode) surfaces coercions via log lines.
 // Probes: (a) string→number coercion line + plain value; (b) clean JSON = no log lines;
 // (c) multiple coercions = one line each.
 #[test]
@@ -271,7 +271,7 @@ fn json_decode_lenient_surfaces_coercions() {
         &dir,
         "json_coerce_a",
         r#"
-use jet.json as json
+use core.encoding.json as json
 fn main() {
     data @= json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == Object(m) {
@@ -296,7 +296,7 @@ fn main() {
         &dir,
         "json_coerce_b",
         r#"
-use jet.json as json
+use core.encoding.json as json
 fn main() {
     data @= json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
     if data == Object(m) {
@@ -321,7 +321,7 @@ fn main() {
         &dir,
         "json_coerce_c",
         r#"
-use jet.json as json
+use core.encoding.json as json
 fn main() {
     data @= json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == Object(m) {

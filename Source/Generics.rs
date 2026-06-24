@@ -10,8 +10,13 @@ pub const PRINTABLE: &str = "Printable";
 pub const EQUATABLE: &str = "Equatable";
 pub const COMPARABLE: &str = "Comparable";
 pub const SERIALIZE: &str = "Serialize";
+/// D-SERDE4 (= B, owner-modified): the serde derive traits. `#[Codable]` derives
+/// both; `#[Encode]`/`#[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
+pub const ENCODE: &str = "Encode";
+pub const DECODE: &str = "Decode";
 
-pub const BUILTIN_TRAITS: &[&str] = &[PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE];
+pub const BUILTIN_TRAITS: &[&str] =
+    &[PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE];
 
 pub fn is_builtin_trait(name: &str) -> bool {
     BUILTIN_TRAITS.contains(&name)
@@ -24,6 +29,8 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         EQUATABLE => Some("PartialEq"),
         COMPARABLE => Some("PartialOrd"),
         SERIALIZE => Some("user_Serialize"),
+        ENCODE => Some("user_Encode"),
+        DECODE => Some("user_Decode"),
         _ => None,
     }
 }

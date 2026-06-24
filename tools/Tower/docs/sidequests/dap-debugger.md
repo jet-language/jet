@@ -114,14 +114,16 @@ debugger entry point (`jet debug <file>` vs a `jet run --debug` flag vs editor-o
 launch). This is CLI shape, not language syntax, but the owner names commands, so
 it is carded below.
 
-## Proposed decision card(s)
+## Decision — RATIFIED (no owner decision open)
 
-### D-DBG1 — Debugger entry point (rec A)
+### D-DBG1 — Debugger entry point (ratified 2026-06-19 = A; D-DBG2 raw-frame policy ratified 2026-06-22)
 
-You can step through a Jet program in the editor or from the terminal. What does a
-person type to start a debug session, and where does the command live?
+**Ratified: option A — `jet debug <file>`** (a dedicated verb parallel to `jet run`/`jet test`,
+discoverable in `jet --help`; the editor launches the same command). The options below are kept
+for design history. D-OBS1/D-OBS2 (safe-locals) and D-DBG2 (`--raw-frames` expert opt-in) are
+also ratified — this plan is fully unblocked for implementation.
 
-- **Option A — `jet debug <file>`.** A dedicated verb, parallel to `jet run` /
+- **Option A — `jet debug <file>` (ratified).** A dedicated verb, parallel to `jet run` /
   `jet test`. Discoverable in `jet --help`; the editor launches the same command
   under the hood.
 

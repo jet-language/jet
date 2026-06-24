@@ -297,12 +297,58 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// D-SERDE: a value type the `#[Codable]`/`#[Encode]` derive (or a blanket impl)
+    /// can serialize. Primitives, the dynamic `Json` tree, and lists/options/maps of
+    /// encodables qualify; a user type must derive `Encode`.
+    fn is_encodable(&self, t: &Type) -> bool {
+        match t {
+            Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
+            | Type::IntN { .. } | Type::Float32 => true,
+            Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_encodable(e),
+            Type::FixedList { elem, .. } => self.is_encodable(elem),
+            Type::Map { key, value } => matches!(**key, Type::String) && self.is_encodable(value),
+            Type::Named(n) => is_json_type_name(n) || self.trait_reg.implements_trait(n, crate::Generics::ENCODE),
+            // A generic instantiation is checked at its monomorphization site.
+            Type::Apply { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// D-SERDE: a type `decode<T>` can construct. Mirrors [`Self::is_encodable`] but a
+    /// user type must derive `Decode` (the dynamic `Json` tree is reached by bare
+    /// `decode`, not the typed path).
+    fn is_decodable(&self, t: &Type) -> bool {
+        match t {
+            Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
+            | Type::IntN { .. } | Type::Float32 => true,
+            Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
+            Type::FixedList { elem, .. } => self.is_decodable(elem),
+            Type::Map { key, value } => matches!(**key, Type::String) && self.is_decodable(value),
+            Type::Named(n) => self.trait_reg.implements_trait(n, crate::Generics::DECODE),
+            Type::Apply { .. } => true,
+            _ => false,
+        }
+    }
+
+    fn check_encodable(&mut self, t: &Type, span: Span) {
+        if !self.is_encodable(t) {
+            self.diags.push(e2411(&t.show(), true, span));
+        }
+    }
+
+    fn check_decodable(&mut self, t: &Type, span: Span) {
+        if !self.is_decodable(t) {
+            self.diags.push(e2411(&t.show(), false, span));
+        }
+    }
+
     pub(crate) fn infer_core_call(
         &mut self,
         module: &str,
         name: &str,
         alias_span: Span,
         span: Span,
+        type_args: &[Type],
         args: &mut [crate::AST::CallArg],
     ) -> Option<Type> {
         // D-EFF1: record the effect this Core call contributes to the enclosing
@@ -356,6 +402,47 @@ impl<'a> Checker<'a> {
         }
         let sig = core_fixed_sig(module, name);
         match (module, name) {
+            // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
+            // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
+            // `Json` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
+            // codegen routes by the lowered arg type. `decode<T>` is the typed decode
+            // (→ `T`, or `[T]` for CSV) keyed by the call-site type argument.
+            (
+                "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
+                | "core.encoding.yaml",
+                "to_string" | "to_string_pretty",
+            ) => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                for a in args.iter_mut() {
+                    self.borrow_ctx = true;
+                    if let Some(t) = self.infer(&mut a.expr) {
+                        self.check_encodable(&t, a.expr.span());
+                    }
+                }
+                return Some(Type::String);
+            }
+            (
+                "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
+                | "core.encoding.yaml",
+                "decode",
+            ) if !type_args.is_empty() => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                let t = type_args[0].clone();
+                self.check_decodable(&t, span);
+                let inner = if module == "core.encoding.csv" {
+                    Type::List(Box::new(t))
+                } else {
+                    t
+                };
+                return Some(result_ty(inner, decode_error_ty()));
+            }
             ("core.mem", "volatile_read") => {
                 if !self.in_unsafe {
                     self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
@@ -1054,6 +1141,12 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
     name == Syntax::TYPE_JSON || name == "Json"
 }
 
+/// D-SERDE2: the typed-decode error (`{ path, reason }`). Flows as the error arm
+/// of `decode<T>` results; the user composes it with `??` and rarely names it.
+pub(crate) fn decode_error_ty() -> Type {
+    Type::Named("DecodeError".to_string())
+}
+
 pub(crate) fn is_json_error_type_name(name: &str) -> bool {
     name == Syntax::TYPE_JSON_ERROR || name == "JsonError"
 }
@@ -1082,6 +1175,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ArgsSpec" | "ParsedArgs"
         // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
         | "Key"
+        // D-SERDE2: the format-agnostic value tree + typed-decode error.
+        | "DataTree" | "DecodeError"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1099,6 +1194,13 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if is_utf8_error_type_name(type_name) {
         return match field {
             "message" => Some(Type::String),
+            _ => None,
+        };
+    }
+    // D-SERDE2: DecodeError exposes the field path and a plain reason.
+    if type_name == "DecodeError" {
+        return match field {
+            "path" | "reason" => Some(Type::String),
             _ => None,
         };
     }
@@ -1498,6 +1600,13 @@ pub(crate) fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "pick")
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
+            // D-ENC1 / D-SERDE6: typed encode/decode return types depend on the value
+            // type / call-site `<T>`, so codegen reads them from resolved_ret (I3).
+            | (
+                "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
+                | "core.encoding.yaml",
+                "to_string" | "to_string_pretty" | "decode",
+            )
     )
 }
 
@@ -1574,11 +1683,43 @@ pub(crate) fn core_fixed_sig(
         ("core.time", "now") => Some((vec![], Some(Type::Int))),
         ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
-        ("core.json", "parse") => Some((
+        // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
+        // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
+        ("core.encoding.json", "parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), json_error_ty())),
         )),
-        ("core.json", "render" | "render_pretty") => Some((vec![(read, json)], Some(Type::String))),
+        ("core.encoding.json", "decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(json.clone(), json_error_ty())),
+        )),
+        ("core.encoding.json", "to_string" | "to_string_pretty") => {
+            Some((vec![(read, json)], Some(Type::String)))
+        }
+        // jet.csv → core.encoding.csv: parse text into a list of rows (list of fields).
+        ("core.encoding.csv", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+                Type::String,
+            )),
+        )),
+        ("core.encoding.csv", "to_string") => Some((
+            vec![(read, Type::List(Box::new(Type::List(Box::new(Type::String)))))],
+            Some(Type::String),
+        )),
+        // jet.toml / jet.yaml → core.encoding.{toml,yaml}: simplified flat key-value.
+        ("core.encoding.toml" | "core.encoding.yaml", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) },
+                Type::String,
+            )),
+        )),
+        ("core.encoding.toml" | "core.encoding.yaml", "to_string") => Some((
+            vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
+            Some(Type::String),
+        )),
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
             vec![(read, string.clone())],
@@ -1597,43 +1738,6 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::String),
         )),
-        // E2-M9: first-party ring packages.
-        // jet.csv: parse CSV text into a list of rows (each row is a list of fields).
-        ("jet.csv", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(
-                Type::List(Box::new(Type::List(Box::new(Type::String)))),
-                Type::String,
-            )),
-        )),
-        ("jet.csv", "render") => Some((
-            vec![(read, Type::List(Box::new(Type::List(Box::new(Type::String)))))],
-            Some(Type::String),
-        )),
-        // jet.toml: simplified flat key-value parsing.
-        ("jet.toml", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(
-                Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) },
-                Type::String,
-            )),
-        )),
-        ("jet.toml", "render") => Some((
-            vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
-            Some(Type::String),
-        )),
-        // jet.yaml: simplified flat key-value parsing.
-        ("jet.yaml", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(
-                Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) },
-                Type::String,
-            )),
-        )),
-        ("jet.yaml", "render") => Some((
-            vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
-            Some(Type::String),
-        )),
         // jet.log: structured JSON logging to stderr (E2-M12, D-OBS3).
         ("jet.log", "info" | "warn" | "error" | "debug") => Some((vec![(read, string)], None)),
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
@@ -1641,20 +1745,6 @@ pub(crate) fn core_fixed_sig(
         ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
         // D-LOGFMT1=A: override log output format ("json" | "text").
         ("jet.log", "setup") => Some((vec![(read, Type::String)], None)),
-        // jet.json: first-party JSON with coercion surfacing (D-JSON1, D-JSON3).
-        // `decode` is the lenient variant: coerces string→number/bool, emits one log
-        // line per coercion (D-JSON3=B), and returns the value plain.
-        ("jet.json", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(json.clone(), json_error_ty())),
-        )),
-        ("jet.json", "decode") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(json.clone(), json_error_ty())),
-        )),
-        ("jet.json", "render" | "render_pretty") => {
-            Some((vec![(read, json)], Some(Type::String)))
-        }
         // jet.time: extended time utilities.
         ("jet.time", "now") => Some((vec![], Some(Type::Int))),
         ("jet.time", "format") => Some((
@@ -1916,7 +2006,16 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         "core.random" => &["int", "float", "pick", "shuffle", "seed"],
         "core.time" => &["now", "sleep", "start"],
-        "core.json" => &["parse", "render", "render_pretty"],
+        // D-ENC1: unified serialization. `core.encoding` is the library root (no direct
+        // verbs — formats are submodules); each format submodule carries the verbs.
+        "core.encoding" => &[],
+        // D-JSONVERB1: `to_string`/`to_string_pretty` (compact/pretty); `parse` → dynamic
+        // JSON value; `decode` → lenient typed decode (D-JSON3).
+        "core.encoding.json" => &["parse", "decode", "to_string", "to_string_pretty"],
+        // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
+        "core.encoding.csv" => &["parse", "decode", "to_string"],
+        "core.encoding.toml" => &["parse", "decode", "to_string"],
+        "core.encoding.yaml" => &["parse", "decode", "to_string"],
         "core.mem" => &["Ptr", "from_addr", "volatile_read", "address_of",
                         "Arena", "Bump", "Pool", "Fixed"],
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
@@ -1932,11 +2031,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.term" => &["read_key"],
         "core" => &[],
         // E2-M9: ring packages.
-        "jet.csv" => &["parse", "render"],
-        "jet.toml" => &["parse", "render"],
-        "jet.yaml" => &["parse", "render"],
         "jet.log" => &["info", "warn", "error", "debug", "set_level", "set_trace_id", "setup"],
-        "jet.json" => &["parse", "decode", "render", "render_pretty"],
         "jet.time" => &["now", "format"],
         "jet.crypto" => &["sha256", "sha256_bytes"],
         // E2-M10: networking modules.
@@ -2016,6 +2111,213 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
         fix,
         Some(span),
     )
+}
+
+/// E2411 (D-SERDE): a type used with an encoding verb can't be (de)serialized — it
+/// holds something with no wire form (a closure, handle, …), or a user type that
+/// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.
+pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
+    let (verb, marker) = if encode {
+        ("serialized", "`#[Codable]` or `#[Encode]`")
+    } else {
+        ("decoded", "`#[Codable]` or `#[Decode]`")
+    };
+    Diagnostic::error(
+        "E2411",
+        format!("{ty} can't be {verb}"),
+        format!("only types that opt in (and their fields) have a wire form; {ty} does not"),
+        format!("add {marker} to {ty}, or remove it from the encoded value"),
+        Some(span),
+    )
+}
+
+/// E2407: `#[Rename(...)]` needs a single string-literal wire key.
+pub(crate) fn e2407(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2407",
+        "`#[Rename(...)]` needs a string literal".to_string(),
+        "the wire key is a constant string, e.g. `#[Rename(\"customer\")]`".to_string(),
+        "pass one quoted string — `#[Rename(\"wire_name\")]`".to_string(),
+        Some(span),
+    )
+}
+
+/// E2408: `#[Flatten]` needs a field whose type is itself a Codable struct.
+pub(crate) fn e2408(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2408",
+        format!("`#[Flatten]` on `{field}` needs a struct-typed field"),
+        "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map".to_string(),
+        format!("give `{field}` a `#[Codable]` struct type, or drop `#[Flatten]`"),
+        Some(span),
+    )
+}
+
+/// E2409: `#[RenameAll(...)]` names a casing style outside the closed menu.
+pub(crate) fn e2409(style: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2409",
+        format!("`#[RenameAll({style})]` isn't a known casing style"),
+        "the wire-casing menu is `camel`, `snake`, `pascal`, `kebab`, `screaming`".to_string(),
+        "pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`".to_string(),
+        Some(span),
+    )
+}
+
+/// E2413: serde derive on a generic type isn't supported yet.
+pub(crate) fn e2413(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2413",
+        format!("`{name}` is generic, so it can't derive `Encode`/`Decode` yet"),
+        "the built-in serde derive walks concrete fields; generic (de)serialization isn't built yet".to_string(),
+        format!("make `{name}` concrete, or hand-write the (de)serialization for now"),
+        Some(span),
+    )
+}
+
+fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
+        | Type::IntN { .. } | Type::Float32 => true,
+        Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
+        Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
+        Type::Map { key, value } => matches!(**key, Type::String) && is_encodable_ty(value, reg),
+        // A non-local type (imported) is trusted; a local one must derive Encode.
+        Type::Named(n) => {
+            is_json_type_name(n)
+                || !reg.local_types.contains(n)
+                || reg.implements_trait(n, crate::Generics::ENCODE)
+        }
+        Type::Apply { .. } => true,
+        _ => false,
+    }
+}
+
+fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
+    match ty {
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
+        | Type::IntN { .. } | Type::Float32 => true,
+        Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
+        Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
+        Type::Map { key, value } => matches!(**key, Type::String) && is_decodable_ty(value, reg),
+        Type::Named(n) => {
+            !reg.local_types.contains(n) || reg.implements_trait(n, crate::Generics::DECODE)
+        }
+        Type::Apply { .. } => true,
+        _ => false,
+    }
+}
+
+/// True for a `#[Flatten]`-able field type: a named struct (not a primitive/list/map).
+fn is_struct_named(ty: &Type) -> bool {
+    matches!(ty, Type::Named(n) if !is_json_type_name(n))
+}
+
+fn marker_is_string_literal(m: &crate::AST::Marker) -> bool {
+    matches!(
+        m.args.first(),
+        Some(Expr::Str(parts, _)) if parts.len() == 1 && matches!(parts[0], crate::AST::StrPart::Lit(_))
+    )
+}
+
+/// D-SERDE: validate serde markers on every `#[Codable]`/`#[Encode]`/`#[Decode]` type
+/// (E2407–E2413). Runs after the trait registry is built so field types resolve. This
+/// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
+/// by rustc on the emitted `impl`.
+pub(crate) fn validate_serde_items(items: &[crate::AST::Item], reg: &TraitRegistry) -> Vec<Diagnostic> {
+    use crate::AST::Item;
+    let mut out = Vec::new();
+    for item in items {
+        let (name, name_span, derives, container, type_params): (
+            &str,
+            Span,
+            &[(String, Span)],
+            &[crate::AST::Marker],
+            usize,
+        ) = match item {
+            Item::Struct(s) => (&s.name, s.name_span, &s.derives, &s.serde_markers, s.type_params.len()),
+            Item::Enum(e) => (&e.name, e.name_span, &e.derives, &e.serde_markers, e.type_params.len()),
+            _ => continue,
+        };
+        let enc = derives.iter().any(|(t, _)| t == crate::Generics::ENCODE);
+        let dec = derives.iter().any(|(t, _)| t == crate::Generics::DECODE);
+        if !enc && !dec {
+            continue;
+        }
+        if type_params > 0 {
+            out.push(e2413(name, name_span));
+            continue;
+        }
+        // Container `#[RenameAll(style)]` casing menu (E2409).
+        for m in container {
+            if m.name == Syntax::ATTR_RENAME_ALL {
+                match m.args.first() {
+                    Some(Expr::Ident(style, sp)) => {
+                        if !matches!(
+                            style.as_str(),
+                            Syntax::RENAME_ALL_CAMEL
+                                | Syntax::RENAME_ALL_SNAKE
+                                | Syntax::RENAME_ALL_PASCAL
+                                | Syntax::RENAME_ALL_KEBAB
+                                | Syntax::RENAME_ALL_SCREAMING
+                        ) {
+                            out.push(e2409(style, *sp));
+                        }
+                    }
+                    _ => out.push(e2409("?", m.span)),
+                }
+            }
+        }
+        if let Item::Struct(s) = item {
+            for f in &s.fields {
+                let skip = f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP);
+                let flatten = f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_FLATTEN);
+                for m in &f.serde_markers {
+                    // E2407: `#[Rename]` needs a string literal.
+                    if m.name == Syntax::ATTR_RENAME && !marker_is_string_literal(m) {
+                        out.push(e2407(m.span));
+                    }
+                }
+                if flatten && !is_struct_named(&f.ty) {
+                    out.push(e2408(&f.name, f.name_span));
+                    continue;
+                }
+                if skip || flatten {
+                    continue;
+                }
+                // E2411: every encoded/decoded field must have a wire form.
+                if enc && !is_encodable_ty(&f.ty, reg) {
+                    out.push(e2411(&f.ty.show(), true, f.name_span));
+                }
+                if dec && !is_decodable_ty(&f.ty, reg) {
+                    out.push(e2411(&f.ty.show(), false, f.name_span));
+                }
+            }
+        }
+        if let Item::Enum(e) = item {
+            for v in &e.variants {
+                for m in &v.serde_markers {
+                    if m.name == Syntax::ATTR_RENAME && !marker_is_string_literal(m) {
+                        out.push(e2407(m.span));
+                    }
+                }
+                let tys: Vec<&Type> = match &v.payload {
+                    crate::AST::VariantPayload::Unit => vec![],
+                    crate::AST::VariantPayload::Single(t, _) => vec![t],
+                    crate::AST::VariantPayload::Named(fs) => fs.iter().map(|f| &f.ty).collect(),
+                };
+                for t in tys {
+                    if enc && !is_encodable_ty(t, reg) {
+                        out.push(e2411(&t.show(), true, v.name_span));
+                    }
+                    if dec && !is_decodable_ty(t, reg) {
+                        out.push(e2411(&t.show(), false, v.name_span));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) -> Diagnostic {

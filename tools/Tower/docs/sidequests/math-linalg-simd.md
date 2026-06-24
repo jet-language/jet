@@ -1,6 +1,8 @@
 # Plan: Linear algebra + SIMD in the math story (D-MATHLIB1, D-SIMD1)
 
-**Status: plan — awaiting owner decisions D-MATHLIB1 and D-SIMD1.**
+**Status: ratified — D-MATHLIB1 = A and D-SIMD1 = A (2026-06-22). No owner decision open.
+Native-vs-bootstrap-crate is an I6 implementation gate (decided per-package like regex),
+not an owner syntax decision.**
 
 Unblocks: **Marcus** (scientific/numerical computing — matrices, vectors, FFT,
 vectorized kernels without dropping to Rust FFI).
@@ -41,26 +43,20 @@ Two distinct gaps:
   sign-off. Surfaced now so the next persona run isn't a surprise.
 - **I5** examples for both (a matmul demo; a vectorized kernel).
 
-## Open questions
+## Resolved — D-MATHLIB1 = A, D-SIMD1 = A ratified 2026-06-22 (no owner decision open)
 
-### D-MATHLIB1 — the numerics library
-1. **Scope of v1** — `Vec2/3/4` + `Matrix` + basic ops only, or full
-   decompositions + FFT? (game/graphics needs the small vectors; physics sim
-   needs matrices + solvers).
-2. **Fixed vs dynamic dimensions** — `Matrix<3,3>` comptime-sized (rides c82/S76
-   fixed arrays) vs runtime-sized `Matrix(rows, cols)`? Both?
-3. **Implementation source (I6)** — native std-only vs bootstrap an external
-   numerics crate then native-ize. Owner approval gate.
-4. **Naming/home** — `core.math` extension vs a separate `jet.linalg` ring
-   package (consistency with regex/csv/toml being ring packages).
+### D-MATHLIB1 — the numerics library (option A)
+- **Home/naming.** Numerics ship as a first-party **`jet.linalg` ring package** (like
+  regex/csv/toml), keeping Core small (I8). Not a `core.math` extension.
+- **Scope.** Vectors, matrices, dot/cross/matmul now; decompositions/FFT later.
+- **Dimensions.** Comptime-sized matrices ride D-FIXARR1/S76.
+- **Implementation source.** Native-vs-bootstrap-crate is an **I6 impl gate** decided
+  per-package like regex — not an owner syntax decision.
 
-### D-SIMD1 — the SIMD primitive
-1. **Surface** — explicit lane types (`F32x4`) with intrinsic methods, an
-   auto-vectorization hint on a loop, or both? (D-SOA1 layout feeds this.)
-2. **Safety tier** — safe portable SIMD by default (`std::simd`) vs expert-only
-   behind `#Unsafe`? Where's the line for target-specific intrinsics?
-3. **Lane/width portability** — fixed lane counts vs target-detected width;
-   fallback when a target lacks the ISA.
+### D-SIMD1 — the SIMD primitive (option A)
+- **Surface.** First-class portable lane types (`F32x4`/`F64x2`) with safe ops.
+- **Safety tier.** Lowers to portable SIMD with scalar fallback — memory-safe by
+  default (I1). Raw target-specific intrinsics stay available behind `#Unsafe`.
 
 ## Test plan
 

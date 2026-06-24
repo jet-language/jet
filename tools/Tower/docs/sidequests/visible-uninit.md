@@ -27,12 +27,13 @@ a **stack value** of a fixed size. But this codebase lowers `[T#N]` fixed-size l
 here — and the only *safe* `Vec` lowering, `vec![0u8; N]`, **zero-fills**, defeating the
 entire purpose of `#Uninit` (the buffer case `[U8#4096]` is exactly a fixed-size list).
 
-**Therefore D-UNINIT1's codegen + parser-wiring are gated on a prerequisite:** `[T#N]`
+**Therefore D-UNINIT1's codegen + parser-wiring are gated on a build prerequisite:** `[T#N]`
 fixed-size lists must lower to a real stack array (so `MaybeUninit<[T; N]>` is sound
-and skips the fill). That is a user-visible representation change (copy vs move, sizing,
-slicing, passing) and should be an **owner decision** (proposed id **D-FIXARR1**), tracked
-as board card **c82**. Until it lands, `#Uninit` stays parser-unwired and codegen-less —
-the sema proof is ready to switch on the moment the representation supports it.
+and skips the fill). **D-FIXARR1 = B is ratified (2026-06-22, board card c82): `[T#N]`
+lowers to a real fixed-size stack array** — no owner decision open. This is now an
+implementation-sequencing gate (build D-FIXARR1's codegen first), not a decision gate.
+Until that codegen lands, `#Uninit` stays parser-unwired and codegen-less — the sema proof
+is ready to switch on the moment the representation supports it.
 
 Scalars (`Int`/`U8`/…) *would* work with MaybeUninit today, but a single uninitialized
 scalar has no perf benefit — the feature exists for buffers — so shipping a scalars-only

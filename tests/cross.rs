@@ -94,18 +94,18 @@ fn main() {
 
 #[test]
 fn freestanding_allows_core_json() {
-    // core.json does not need an OS.
-    let src = r#"use core.json as json
+    // core.encoding.json does not need an OS.
+    let src = r#"use core.encoding.json as json
 
 fn main() {
-    s @= json.render("hello")
+    s @= json.to_string("hello")
     print(s)
 }
 "#;
     let out = check_freestanding_src(src, "core_json");
     assert!(
         !out.contains("E3301"),
-        "core.json should be allowed in freestanding mode; got:\n{}",
+        "core.encoding.json should be allowed in freestanding mode; got:\n{}",
         out
     );
 }

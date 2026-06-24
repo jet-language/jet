@@ -3,7 +3,7 @@
 // health check, and full-text search.
 use jet.http as http
 use jet.crypto as crypto
-use core.json as json
+use core.encoding.json as json
 use "note"
 use "index"
 use "render"
@@ -44,7 +44,7 @@ fn route(req: HttpRequest, idx: Index) -> HttpResponse {
             }
             if p == "/graph.json" {
                 g @= graph_json(idx)
-                body @= json.render_pretty(g)
+                body @= json.to_string_pretty(g)
                 hdrs: [String, String] @= ["Content-Type": "application/json"]
                 return HttpResponse{status: "200 OK", body: body, headers: hdrs}
             }
@@ -95,7 +95,7 @@ pub fn serve(addr: String, idx: Index) {
 }
 
 pub fn graph_json_str(idx: Index) -> String {
-    return json.render_pretty(graph_json(idx))
+    return json.to_string_pretty(graph_json(idx))
 }
 
 fn main() {

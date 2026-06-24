@@ -219,6 +219,63 @@ impl<'a> Parser<'a> {
     }
 
     /// S33: close `Type<…>`; splits `>>` when nested generics end with `>`.
+    /// D-SERDE6 (= C): true when the cursor (on `<`) begins a call-site turbofish
+    /// `<T, …>(` — a balanced `<…>` immediately followed by `(`. Used to read `<`
+    /// as type arguments on a call (`decode<Order>(s)`) rather than a comparison.
+    pub(super) fn at_turbofish(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::Lt) {
+            return false;
+        }
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        while i < self.toks.len() {
+            match self.toks[i].kind {
+                TokKind::Lt => depth += 1,
+                TokKind::Gt => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return matches!(
+                            self.toks.get(i + 1).map(|t| &t.kind),
+                            Some(TokKind::LParen)
+                        );
+                    }
+                }
+                TokKind::Shr => {
+                    depth -= 2;
+                    if depth <= 0 {
+                        return matches!(
+                            self.toks.get(i + 1).map(|t| &t.kind),
+                            Some(TokKind::LParen)
+                        );
+                    }
+                }
+                // Tokens that never appear inside a type-argument list → not a turbofish.
+                TokKind::Semi | TokKind::LBrace | TokKind::RBrace | TokKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// D-SERDE6: parse a call-site turbofish `<T, …>` (cursor on `<`). Callers must
+    /// first confirm [`Self::at_turbofish`].
+    pub(super) fn parse_turbofish(&mut self) -> Result<Vec<crate::AST::Type>, Diagnostic> {
+        self.expect_type_args_open("for type arguments")?;
+        let mut args = Vec::new();
+        loop {
+            let (t, _) = self.type_()?;
+            args.push(t);
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect_type_args_close("after call type arguments")?;
+        Ok(args)
+    }
+
     fn maybe_close_type_args(&mut self, context: &str) -> Result<(), Diagnostic> {
         if self.type_generic_truncated {
             Ok(())

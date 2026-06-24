@@ -407,6 +407,10 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
         st.trait_reg.register_items(&module.items, &mut diags);
+        // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2413)
+        // now that the trait registry resolves field/variant types — keeps the emitted
+        // `impl`s rustc-clean (I2).
+        diags.extend(validate_serde_items(&module.items, &st.trait_reg));
         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
         diags.extend(check_schema_migrations(&module.items, &bundle.project_root));
     }
@@ -1090,6 +1094,19 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
             if let Expr::Ident(alias, _) = receiver.as_ref() {
                 if let Some(module) = imports.get(alias) {
                     used.insert(format!("{module}::{method}"));
+                }
+            }
+            // D-ENC1: nested-namespace core call `<alias>.<leaf>.method(...)` (e.g.
+            // `encoding.json.to_string(x)`). Record `<ns>.<leaf>::method` so the CoreLib
+            // prelude is emitted and the backing helper is in scope.
+            if let Expr::Field(base, leaf, _) = receiver.as_ref() {
+                if let Expr::Ident(alias, _) = base.as_ref() {
+                    if let Some(ns) = imports.get(alias) {
+                        let submodule = format!("{ns}.{leaf}");
+                        if crate::Loader::is_known_core_module(&submodule) {
+                            used.insert(format!("{submodule}::{method}"));
+                        }
+                    }
                 }
             }
             collect_core_expr(receiver, imports, used);

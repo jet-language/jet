@@ -7,7 +7,7 @@ use crate::AST::{
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{
     self, e0902, e0903, e0906, e0907, e0908, sig_matches_trait, substitute_type, unify_types,
-    BUILTIN_TRAITS, COMPARABLE, EQUATABLE, PRINTABLE, SERIALIZE,
+    BUILTIN_TRAITS, COMPARABLE, DECODE, ENCODE, EQUATABLE, PRINTABLE, SERIALIZE,
 };
 use crate::Sema::FuncSig;
 use crate::Syntax;
@@ -309,7 +309,7 @@ impl TraitRegistry {
         match trait_name {
             PRINTABLE if self.auto_printable.contains(type_name) => true,
             EQUATABLE if self.auto_equatable.contains(type_name) => true,
-            COMPARABLE | SERIALIZE => self
+            COMPARABLE | SERIALIZE | ENCODE | DECODE => self
                 .derives
                 .get(type_name)
                 .is_some_and(|d| d.contains(trait_name)),

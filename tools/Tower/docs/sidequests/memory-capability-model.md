@@ -1,6 +1,15 @@
 # Sidequest: Memory Capability Model
 
-**Status:** plan, awaiting owner sign-off — promoted from owner-todo.md 2026-06-19.
+**Status:** SUPERSEDED — historical design rationale only. No owner decision open.
+
+> The word vocabulary in this doc (`view`/`edit`/`take`/`share` **keywords**) was replaced
+> by the **prefix-sigil model** `T`/`~T`/`^T`/`&T`/`*T` (D-CAP7, ratified 2026-06-23). The
+> four capabilities are unchanged; only the spelling moved from words to sigils. All gating
+> decisions are ratified — D-CAP1/4/5/6 (2026-06-21), D-CAP2/3 (2026-06-22), and the final
+> semantic gate D-CAP8/9/10 (2026-06-23). The **canonical, current build guide** is
+> [`docs/research/memory-model-implementation-plan.md`](../../../../docs/research/memory-model-implementation-plan.md)
+> (sigil spelling, file:line audit, BUILD-NOW vs gated split). Ready cards c124/c127/c129/c131
+> implement that doc, not the word vocabulary below. Keep this file for the design history.
 
 ## Goal
 
@@ -285,10 +294,16 @@ draw(scene)
 party.add(player)
 ```
 
-## Decisions for the owner
+## Decisions — ALL RATIFIED (historical; no ruling needed)
 
-Each decision needs a ruling before implementation. Capability ordering and inference
-rules above are recommendations; the owner has final say on all syntax (I7, I8).
+> Superseded by the sigil model. Outcomes: **D-CAP1** ratified 2026-06-21 (four-capability
+> vocab — spelling later moved to sigils by **D-CAP7**, 2026-06-23: `T`/`~T`/`^T`/`&T`/`*T`).
+> **D-CAP2/D-CAP3** ratified 2026-06-22 (then folded into the sigil spelling). **D-CAP4**
+> ratified 2026-06-21 (option D — `api:` per-target field). **D-CAP5** ratified 2026-06-21
+> (option A — consumable-library targets emit metadata). **D-CAP6** ratified 2026-06-21
+> (option A — inference is the library default forever; `api: explicit` opt-in). The semantic
+> gate **D-CAP8/9/10** ratified 2026-06-23. Build order lives in the canonical impl-plan.
+> The original option write-ups are kept below for design history.
 
 **D-CAP1 — Capability keyword spellings (I7)**
 
@@ -397,7 +412,7 @@ want to make contracts visible in source.
       per inference rule before implementation.
 - [ ] Failing golden example: a feature file exercises all four capabilities
       inferred, compiles, produces expected output.
-- [ ] D-CAP1 through D-CAP6 resolved by owner.
+- [x] D-CAP1 through D-CAP6 resolved by owner (all ratified; see superseding note above).
 - [ ] `Source/Syntax.rs` updated with ratified capability keywords + decision IDs (I7).
 - [ ] `docs/spec/spec.md` section added / updated for capability model.
 - [ ] `Source/AST.rs` `AccessConvention` extended or replaced with four-variant enum.

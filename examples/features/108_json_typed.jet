@@ -1,0 +1,26 @@
+// 57 — typed JSON round-trip (D-SERDE): nested struct + list + optional, with a
+// camelCase wire via #[RenameAll].
+use core.encoding.json as json
+
+#[Codable]
+struct Address {
+    city: String
+    zip: String
+}
+
+#[Codable, RenameAll(camel)]
+struct Person {
+    full_name: String
+    home_address: Address
+    nicknames: [String]
+    age: Int?
+}
+
+fn main() {
+    raw @= "{{\"fullName\":\"Ada\",\"homeAddress\":{{\"city\":\"Reno\",\"zip\":\"89501\"}},\"nicknames\":[\"Addy\"],\"age\":36}}"
+    p @= json.decode<Person>(raw) ?? panic("bad person")
+    print(p.full_name)
+    print(p.home_address.city)
+    print(p.nicknames.len())
+    print(json.to_string(p))
+}

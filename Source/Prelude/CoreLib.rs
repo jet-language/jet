@@ -70,6 +70,61 @@ mod jet_std {
         fn jet_show(&self) -> String { render_json(self, false, 0) }
     }
 
+    // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
+    // The one tree every format adapter speaks. The built-in `#[Codable]` derive
+    // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
+    // into / parses it from wire text. Distinct from the dynamic `Json` enum:
+    // `DataTree` preserves field order (ordered `Object`) and keeps Int vs Float.
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DataTree {
+        Null,
+        Bool(bool),
+        Int(i64),
+        Float(f64),
+        Text(String),
+        Bytes(Vec<u8>),
+        Array(Vec<DataTree>),
+        Object(Vec<(String, DataTree)>),
+    }
+
+    // D-SERDE2 = A: the decode-side error carries a field path (`order.items[2]`)
+    // and a plain reason. Encode is infallible, so no `EncodeError` is minted (I8).
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DecodeError {
+        pub path: String,
+        pub reason: String,
+    }
+
+    impl DecodeError {
+        pub fn new(reason: impl Into<String>) -> DecodeError {
+            DecodeError { path: String::new(), reason: reason.into() }
+        }
+        // Prefix a child error with the field/index segment it occurred under.
+        pub fn under(seg: &str, mut e: DecodeError) -> DecodeError {
+            e.path = if e.path.is_empty() {
+                seg.to_string()
+            } else if e.path.starts_with('[') {
+                format!("{}{}", seg, e.path)
+            } else {
+                format!("{}.{}", seg, e.path)
+            };
+            e
+        }
+    }
+
+    impl super::JetShow for DataTree {
+        fn jet_show(&self) -> String { render_datatree_json(self, false, 0) }
+    }
+    impl super::JetShow for DecodeError {
+        fn jet_show(&self) -> String {
+            if self.path.is_empty() {
+                self.reason.clone()
+            } else {
+                format!("at `{}`: {}", self.path, self.reason)
+            }
+        }
+    }
+
     pub struct JetTask<T: Send + 'static> {
         handle: Option<std::thread::JoinHandle<T>>,
     }
@@ -199,6 +254,101 @@ mod jet_std {
         }
         out.push('"');
         out
+    }
+
+    // Render a DataTree as JSON, preserving Object field order. Int prints with no
+    // decimal (`5`), Float keeps its decimal (`5.0`); Bytes render as a number array.
+    pub fn render_datatree_json(t: &DataTree, pretty: bool, depth: usize) -> String {
+        match t {
+            DataTree::Null => "null".to_string(),
+            DataTree::Bool(b) => b.to_string(),
+            DataTree::Int(n) => format!("{}", n),
+            DataTree::Float(f) => format!("{:?}", f),
+            DataTree::Text(s) => quote_json(s),
+            DataTree::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                format!("[{}]", parts.join(","))
+            }
+            DataTree::Array(items) => {
+                if items.is_empty() {
+                    return "[]".to_string();
+                }
+                if !pretty {
+                    let parts: Vec<String> =
+                        items.iter().map(|x| render_datatree_json(x, false, depth)).collect();
+                    return format!("[{}]", parts.join(","));
+                }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
+                let parts: Vec<String> = items
+                    .iter()
+                    .map(|x| format!("{}{}", pad, render_datatree_json(x, true, depth + 1)))
+                    .collect();
+                format!("[\n{}\n{}]", parts.join(",\n"), end)
+            }
+            DataTree::Object(entries) => {
+                if entries.is_empty() {
+                    return "{}".to_string();
+                }
+                if !pretty {
+                    let parts: Vec<String> = entries
+                        .iter()
+                        .map(|(k, v)| format!("{}:{}", quote_json(k), render_datatree_json(v, false, depth)))
+                        .collect();
+                    return format!("{{{}}}", parts.join(","));
+                }
+                let pad = "  ".repeat(depth + 1);
+                let end = "  ".repeat(depth);
+                let parts: Vec<String> = entries
+                    .iter()
+                    .map(|(k, v)| format!("{}{}: {}", pad, quote_json(k), render_datatree_json(v, true, depth + 1)))
+                    .collect();
+                format!("{{\n{}\n{}}}", parts.join(",\n"), end)
+            }
+        }
+    }
+
+    // Json (dynamic, BTreeMap-keyed) → DataTree. Numbers that are integral collapse
+    // to `Int`, so a round-trip through JSON keeps `5` an Int.
+    pub fn datatree_from_json(j: &Json) -> DataTree {
+        match j {
+            Json::Null => DataTree::Null,
+            Json::Boolean(b) => DataTree::Bool(*b),
+            Json::Number(n) => {
+                if n.fract() == 0.0 && n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
+                    DataTree::Int(*n as i64)
+                } else {
+                    DataTree::Float(*n)
+                }
+            }
+            Json::Text(s) => DataTree::Text(s.clone()),
+            Json::Array(items) => DataTree::Array(items.iter().map(datatree_from_json).collect()),
+            Json::Object(m) => {
+                DataTree::Object(m.iter().map(|(k, v)| (k.clone(), datatree_from_json(v))).collect())
+            }
+        }
+    }
+
+    // A short kind name for decode error messages.
+    pub fn datatree_kind(t: &DataTree) -> &'static str {
+        match t {
+            DataTree::Null => "null",
+            DataTree::Bool(_) => "Bool",
+            DataTree::Int(_) => "Int",
+            DataTree::Float(_) => "Float",
+            DataTree::Text(_) => "Text",
+            DataTree::Bytes(_) => "Bytes",
+            DataTree::Array(_) => "a list",
+            DataTree::Object(_) => "an object",
+        }
+    }
+
+    // Look up a key in an ordered Object.
+    pub fn datatree_get<'a>(t: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+        match t {
+            DataTree::Object(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
     }
 
     struct JsonParser {
@@ -689,6 +839,265 @@ fn jet_int_to_u8(n: i64) -> Result<u8, String> {
 }
 fn jet_stopwatch_elapsed_millis(sw: &jet_std::Stopwatch) -> i64 {
     sw.start.elapsed().as_millis() as i64
+}
+
+// ── core.encoding: Encode / Decode traits + blanket impls (D-SERDE1/2/4) ──────
+// The built-in `#[Codable]`/`#[Encode]`/`#[Decode]` derive (D-ENC1) lowers to
+// these traits. `jet_encode`/`jet_decode` are codegen-internal method names the
+// user never types (they write the verbs `encode`/`decode` only in a hand-impl,
+// D-SERDE2 — a later increment). Pure safe std Rust, no proc-macros (I1/I6).
+#[allow(non_camel_case_types)]
+pub trait user_Encode {
+    fn jet_encode(&self) -> jet_std::DataTree;
+}
+#[allow(non_camel_case_types)]
+pub trait user_Decode: Sized {
+    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>;
+}
+
+impl user_Encode for i64 {
+    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self) }
+}
+impl user_Encode for f64 {
+    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Float(*self) }
+}
+impl user_Encode for bool {
+    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Bool(*self) }
+}
+impl user_Encode for String {
+    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Text(self.clone()) }
+}
+impl user_Encode for char {
+    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Text(self.to_string()) }
+}
+impl<T: user_Encode> user_Encode for Vec<T> {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Array(self.iter().map(|x| x.jet_encode()).collect())
+    }
+}
+impl<T: user_Encode> user_Encode for Option<T> {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        match self {
+            Some(x) => x.jet_encode(),
+            None => jet_std::DataTree::Null,
+        }
+    }
+}
+impl<V: user_Encode> user_Encode for std::collections::BTreeMap<String, V> {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Object(self.iter().map(|(k, v)| (k.clone(), v.jet_encode())).collect())
+    }
+}
+
+impl user_Decode for i64 {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Int(n) => Ok(*n),
+            jet_std::DataTree::Float(f) if f.fract() == 0.0 => Ok(*f as i64),
+            jet_std::DataTree::Text(s) => s.trim().parse::<i64>().map_err(|_| {
+                jet_std::DecodeError::new(format!("expected Int, found text {:?}", s))
+            }),
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected Int, found {}", jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
+impl user_Decode for f64 {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Float(f) => Ok(*f),
+            jet_std::DataTree::Int(n) => Ok(*n as f64),
+            jet_std::DataTree::Text(s) => s.trim().parse::<f64>().map_err(|_| {
+                jet_std::DecodeError::new(format!("expected Float, found text {:?}", s))
+            }),
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected Float, found {}", jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
+impl user_Decode for bool {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Bool(b) => Ok(*b),
+            jet_std::DataTree::Text(s) => match s.trim() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(jet_std::DecodeError::new(format!("expected Bool, found text {:?}", s))),
+            },
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected Bool, found {}", jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
+impl user_Decode for String {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Text(s) => Ok(s.clone()),
+            jet_std::DataTree::Int(n) => Ok(n.to_string()),
+            jet_std::DataTree::Float(f) => Ok(format!("{:?}", f)),
+            jet_std::DataTree::Bool(b) => Ok(b.to_string()),
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected Text, found {}", jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
+impl user_Decode for char {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        let s = String::jet_decode(t)?;
+        let mut it = s.chars();
+        match (it.next(), it.next()) {
+            (Some(c), None) => Ok(c),
+            _ => Err(jet_std::DecodeError::new(format!("expected a single Char, found {:?}", s))),
+        }
+    }
+}
+impl<T: user_Decode> user_Decode for Vec<T> {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Array(items) => {
+                let mut out = Vec::with_capacity(items.len());
+                for (i, item) in items.iter().enumerate() {
+                    out.push(T::jet_decode(item).map_err(|e| jet_std::DecodeError::under(&format!("[{}]", i), e))?);
+                }
+                Ok(out)
+            }
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected a list, found {}", jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
+impl<T: user_Decode> user_Decode for Option<T> {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Null => Ok(None),
+            other => Ok(Some(T::jet_decode(other)?)),
+        }
+    }
+}
+impl<V: user_Decode> user_Decode for std::collections::BTreeMap<String, V> {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        match t {
+            jet_std::DataTree::Object(entries) => {
+                let mut out = std::collections::BTreeMap::new();
+                for (k, v) in entries {
+                    out.insert(k.clone(), V::jet_decode(v).map_err(|e| jet_std::DecodeError::under(k, e))?);
+                }
+                Ok(out)
+            }
+            other => Err(jet_std::DecodeError::new(format!(
+                "expected an object, found {}", jet_std::datatree_kind(other)
+            ))),
+        }
+    }
+}
+
+// ── core.encoding: typed format verbs over Encode/Decode (D-ENC1, D-SERDE6) ────
+// `to_string`/`to_string_pretty` (D-JSONVERB1) and the typed `decode<T>` route
+// every format through the one DataTree model.
+fn jet_enc_json_to_string<T: user_Encode>(v: &T) -> String {
+    jet_std::render_datatree_json(&v.jet_encode(), false, 0)
+}
+fn jet_enc_json_to_string_pretty<T: user_Encode>(v: &T) -> String {
+    jet_std::render_datatree_json(&v.jet_encode(), true, 0)
+}
+fn jet_enc_json_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
+    let j = jet_std::parse_json(text)
+        .map_err(|e| jet_std::DecodeError::new(format!("invalid JSON (line {}): {}", e.line, e.message)))?;
+    T::jet_decode(&jet_std::datatree_from_json(&j))
+}
+
+// CSV typed decode: header row maps columns to fields by name; each data row
+// becomes a DataTree::Object of Text cells, then decodes to `T`. A short row or a
+// per-row decode failure is a typed `DecodeError` naming the 1-based row.
+fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, jet_std::DecodeError> {
+    let rows = jet_ring_csv_parse(text).map_err(jet_std::DecodeError::new)?;
+    let mut it = rows.into_iter();
+    let Some(header) = it.next() else { return Ok(Vec::new()); };
+    let mut out = Vec::new();
+    for (i, row) in it.enumerate() {
+        let obj: Vec<(String, jet_std::DataTree)> = header
+            .iter()
+            .enumerate()
+            .map(|(c, name)| {
+                let cell = row.get(c).cloned().unwrap_or_default();
+                (name.clone(), jet_std::DataTree::Text(cell))
+            })
+            .collect();
+        let tree = jet_std::DataTree::Object(obj);
+        out.push(T::jet_decode(&tree).map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?);
+    }
+    Ok(out)
+}
+
+// CSV typed encode: `[T]` → header row (field names from the first row's Object)
+// + one record per element. Requires every element to encode to a flat Object.
+fn jet_enc_csv_to_string<T: user_Encode>(values: &Vec<T>) -> String {
+    let trees: Vec<jet_std::DataTree> = values.iter().map(|v| v.jet_encode()).collect();
+    let mut header: Vec<String> = Vec::new();
+    if let Some(jet_std::DataTree::Object(entries)) = trees.first() {
+        header = entries.iter().map(|(k, _)| k.clone()).collect();
+    }
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    rows.push(header.clone());
+    for tree in &trees {
+        let mut record = Vec::with_capacity(header.len());
+        for key in &header {
+            let cell = match jet_std::datatree_get(tree, key) {
+                Some(jet_std::DataTree::Text(s)) => s.clone(),
+                Some(jet_std::DataTree::Int(n)) => n.to_string(),
+                Some(jet_std::DataTree::Float(f)) => format!("{:?}", f),
+                Some(jet_std::DataTree::Bool(b)) => b.to_string(),
+                Some(jet_std::DataTree::Null) | None => String::new(),
+                Some(other) => jet_std::render_datatree_json(other, false, 0),
+            };
+            record.push(cell);
+        }
+        rows.push(record);
+    }
+    jet_ring_csv_render(&rows)
+}
+
+// TOML / YAML typed decode: parse flat scalars into a DataTree::Object of Text,
+// then decode to `T`. TOML/YAML typed encode renders a flat Object as key/value.
+fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
+    let map = jet_ring_toml_parse(text).map_err(jet_std::DecodeError::new)?;
+    T::jet_decode(&jet_std::DataTree::Object(
+        map.into_iter().map(|(k, v)| (k, jet_std::DataTree::Text(v))).collect(),
+    ))
+}
+fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
+    let map = jet_ring_yaml_parse(text).map_err(jet_std::DecodeError::new)?;
+    T::jet_decode(&jet_std::DataTree::Object(
+        map.into_iter().map(|(k, v)| (k, jet_std::DataTree::Text(v))).collect(),
+    ))
+}
+fn jet_enc_flat_object_strings<T: user_Encode>(v: &T) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    if let jet_std::DataTree::Object(entries) = v.jet_encode() {
+        for (k, val) in entries {
+            let s = match val {
+                jet_std::DataTree::Text(s) => s,
+                jet_std::DataTree::Int(n) => n.to_string(),
+                jet_std::DataTree::Float(f) => format!("{:?}", f),
+                jet_std::DataTree::Bool(b) => b.to_string(),
+                jet_std::DataTree::Null => String::new(),
+                other => jet_std::render_datatree_json(&other, false, 0),
+            };
+            out.insert(k, s);
+        }
+    }
+    out
+}
+fn jet_enc_toml_to_string<T: user_Encode>(v: &T) -> String {
+    jet_ring_toml_render(&jet_enc_flat_object_strings(v))
+}
+fn jet_enc_yaml_to_string<T: user_Encode>(v: &T) -> String {
+    jet_ring_yaml_render(&jet_enc_flat_object_strings(v))
 }
 
 // ── E2-M9: First-party ring libraries ────────────────────────────────────────

@@ -352,6 +352,8 @@ impl<'a> Parser<'a> {
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                 TokKind::KwImpl => self.impl_or_error_conv(),
+                // D-ATTR2 / D-SERDE: `#[Codable, RenameAll(camel)] struct …`.
+                TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
                 TokKind::Hash if self.at_numeric_distinct_def() => {
@@ -1211,6 +1213,17 @@ impl<'a> Parser<'a> {
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
+            if self.at_marker_list() {
+                let field_markers = self.parse_marker_groups()?;
+                let mut f = self.field()?;
+                f.serde_markers = field_markers;
+                fields.push(f);
+                if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                    self.bump();
+                }
+                continue;
+            }
             if matches!(self.peek().kind, TokKind::KwDerive) {
                 derives.push(self.derive_line()?);
             } else if matches!(self.peek().kind, TokKind::KwImpl) {
@@ -1243,6 +1256,7 @@ impl<'a> Parser<'a> {
             published_schema_span: None,
             layout: None,
             layout_span: None,
+            serde_markers: Vec::new(),
         })
     }
 
@@ -1265,6 +1279,17 @@ impl<'a> Parser<'a> {
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            // D-SERDE5/7: `#[Rename("x")]` on a variant — variant-level serde markers.
+            if self.at_marker_list() {
+                let variant_markers = self.parse_marker_groups()?;
+                let mut v = self.variant()?;
+                v.serde_markers = variant_markers;
+                variants.push(v);
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                continue;
+            }
             if matches!(self.peek().kind, TokKind::KwDerive) {
                 derives.push(self.derive_line()?);
             } else if matches!(self.peek().kind, TokKind::KwImpl) {
@@ -1288,6 +1313,7 @@ impl<'a> Parser<'a> {
             methods,
             trait_impls,
             derives,
+            serde_markers: Vec::new(),
         })
     }
 
@@ -1305,6 +1331,7 @@ impl<'a> Parser<'a> {
             name,
             name_span,
             payload,
+            serde_markers: Vec::new(),
         })
     }
 
@@ -1467,6 +1494,136 @@ impl<'a> Parser<'a> {
         let (trait_name, _) = self.expect_ident("after `derive`")?;
         self.finish_stmt()?;
         Ok((trait_name, start))
+    }
+
+    /// True when the cursor is at a `#[ … ]` bracket-marker group (D-ATTR2).
+    fn at_marker_list(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(self.peek2().kind, TokKind::LBracket)
+    }
+
+    /// D-ATTR2 / D-SERDE2–8: parse one or more stacked `#[ … ]` bracket-marker
+    /// groups. Each group is `#[ Name | Name(arg, …) (, …)* ]`. Returns every marker
+    /// flattened in source order. Args parse as expressions (string literal, bare
+    /// word, or any expression).
+    fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+        let mut out = Vec::new();
+        while self.at_marker_list() {
+            self.bump(); // `#`
+            self.bump(); // `[`
+            loop {
+                let (name, name_span) = self.expect_ident("for a marker name")?;
+                let mut args = Vec::new();
+                let mut end = name_span.end;
+                if matches!(self.peek().kind, TokKind::LParen) {
+                    self.bump(); // `(`
+                    while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                        args.push(self.expr_no_struct_lit()?);
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        } else {
+                            break;
+                        }
+                    }
+                    end = self.peek().span.end;
+                    self.expect(TokKind::RParen, "to close marker arguments")?;
+                }
+                out.push(Marker {
+                    name,
+                    name_span,
+                    args,
+                    span: Span::new(name_span.start, end),
+                });
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+            self.expect(TokKind::RBracket, "to close a `#[…]` marker list")?;
+            // A marker group may end its line; skip the synthetic terminator.
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+        }
+        Ok(out)
+    }
+
+    /// Split parsed markers on a struct/enum: derive-trait markers
+    /// (`Codable`→`Encode`+`Decode`, `Encode`, `Decode`, `Comparable`, user traits)
+    /// are pushed onto `derives`; serde *attribute* markers are returned raw for sema.
+    fn split_type_markers(markers: Vec<Marker>, derives: &mut Vec<(String, Span)>) -> Vec<Marker> {
+        let mut serde = Vec::new();
+        for m in markers {
+            match m.name.as_str() {
+                Syntax::ATTR_CODABLE => {
+                    derives.push((Syntax::ATTR_ENCODE.to_string(), m.name_span));
+                    derives.push((Syntax::ATTR_DECODE.to_string(), m.name_span));
+                }
+                Syntax::ATTR_ENCODE => derives.push((Syntax::ATTR_ENCODE.to_string(), m.name_span)),
+                Syntax::ATTR_DECODE => derives.push((Syntax::ATTR_DECODE.to_string(), m.name_span)),
+                Syntax::ATTR_RENAME_ALL
+                | Syntax::ATTR_DENY_UNKNOWN_FIELDS
+                | Syntax::ATTR_TAG
+                | Syntax::ATTR_UNTAGGED
+                | Syntax::ATTR_RENAME
+                | Syntax::ATTR_SKIP
+                | Syntax::ATTR_DEFAULT
+                | Syntax::ATTR_FLATTEN => serde.push(m),
+                // Any other name is a derive-trait (D-ATTR2: `#[Comparable]`, user traits).
+                _ => derives.push((m.name.clone(), m.name_span)),
+            }
+        }
+        serde
+    }
+
+    /// D-ATTR2: `#[markers] [pub] [#layout|#PublishedSchema] (struct|enum) …`.
+    /// Parses the leading bracket markers, then the type that follows, and attaches
+    /// derives + raw serde markers to it.
+    pub(super) fn type_def_with_markers(&mut self) -> Result<Item, Diagnostic> {
+        let markers = self.parse_marker_groups()?;
+        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
+        if is_pub {
+            self.bump();
+        }
+        let item = match &self.peek().kind {
+            TokKind::KwStruct => self.struct_def(false).map(Item::Struct)?,
+            TokKind::KwEnum => self.enum_def(false).map(Item::Enum)?,
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) =>
+            {
+                self.layout_struct_def(is_pub).map(Item::Struct)?
+            }
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) =>
+            {
+                self.published_schema_struct_def(is_pub).map(Item::Struct)?
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "a `#[…]` marker list must sit before a struct or enum, found {}",
+                        describe(other)
+                    ),
+                    "derive markers like `#[Codable]` and serde attributes attach to a type"
+                        .to_string(),
+                    "write `#[Codable] struct Name { … }`".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        Ok(match item {
+            Item::Struct(mut s) => {
+                s.serde_markers = Self::split_type_markers(markers, &mut s.derives);
+                Item::Struct(s)
+            }
+            Item::Enum(mut e) => {
+                e.serde_markers = Self::split_type_markers(markers, &mut e.derives);
+                Item::Enum(e)
+            }
+            other => other,
+        })
     }
 
     /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
@@ -1675,6 +1832,7 @@ impl<'a> Parser<'a> {
             name_span,
             ty,
             ty_span,
+            serde_markers: Vec::new(),
         })
     }
 
@@ -2029,6 +2187,17 @@ impl<'a> Parser<'a> {
         let mut derives = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) { self.bump(); continue; }
+            // D-SERDE5: `#[Rename("x")] who: String` — field-level serde markers.
+            if self.at_marker_list() {
+                let field_markers = self.parse_marker_groups()?;
+                let mut f = self.field()?;
+                f.serde_markers = field_markers;
+                fields.push(f);
+                if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                    self.bump();
+                }
+                continue;
+            }
             if matches!(self.peek().kind, TokKind::KwDerive) {
                 derives.push(self.derive_line()?);
             } else if matches!(self.peek().kind, TokKind::KwImpl) {
@@ -2061,6 +2230,7 @@ impl<'a> Parser<'a> {
             published_schema_span: None,
             layout: None,
             layout_span: None,
+            serde_markers: Vec::new(),
         })
     }
 

@@ -1,7 +1,8 @@
 use super::*;
 use crate::AST::{
     ConstAttr, DistinctDef, EnumDef, Expr, Field,
-    Func, ImplDef, RustConstKind, StructDef, TraitImplBlock, Type, VariantPayload,
+    Func, ImplDef, Marker, RustConstKind, StrPart, StructDef, TraitImplBlock, Type,
+    Variant, VariantPayload,
 };
 use crate::Generics;
 use std::collections::HashMap;
@@ -163,6 +164,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             lt, s.name, lt
         ));
     }
+    emit_struct_serde(cx, s, out);
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
@@ -203,6 +205,425 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
         e.name
     ));
+    emit_enum_serde(cx, e, out);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// D-SERDE: built-in `Encode`/`Decode` derive codegen.
+//
+// The `#[Codable]`/`#[Encode]`/`#[Decode]` markers lower here to compiler-owned
+// `impl user_Encode`/`impl user_Decode` blocks that walk the type's fields/variants
+// over the `jet_std::DataTree` model. Plain std Rust — no proc-macros, no `unsafe`
+// (I1/I6). Field/container attributes (D-SERDE3/5/7/8) are applied during the walk.
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn serde_marker<'a>(markers: &'a [Marker], name: &str) -> Option<&'a Marker> {
+    markers.iter().find(|m| m.name == name)
+}
+fn serde_has(markers: &[Marker], name: &str) -> bool {
+    markers.iter().any(|m| m.name == name)
+}
+fn marker_str_arg(m: &Marker) -> Option<String> {
+    match m.args.first() {
+        Some(Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
+            StrPart::Lit(s) => Some(s.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+fn lit_rust(e: &Expr) -> String {
+    match e {
+        Expr::Int(n, _, _) => format!("{}i64", n),
+        Expr::Float(f, _, _) => format!("{:?}f64", f),
+        Expr::Bool(b, _) => b.to_string(),
+        Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+            StrPart::Lit(s) => format!("{:?}.to_string()", s),
+            _ => "Default::default()".to_string(),
+        },
+        _ => "Default::default()".to_string(),
+    }
+}
+fn cap_word(w: &str) -> String {
+    let mut c = w.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+// D-SERDE3 (= C): wire-casing transform on a snake_case Jet field name.
+fn apply_rename_all(style: &str, name: &str) -> String {
+    let words: Vec<&str> = name.split('_').filter(|w| !w.is_empty()).collect();
+    match style {
+        crate::Syntax::RENAME_ALL_CAMEL => {
+            let mut it = words.iter();
+            let first = it.next().copied().unwrap_or("").to_string();
+            first + &it.map(|w| cap_word(w)).collect::<String>()
+        }
+        crate::Syntax::RENAME_ALL_PASCAL => words.iter().map(|w| cap_word(w)).collect(),
+        crate::Syntax::RENAME_ALL_KEBAB => words.join("-"),
+        crate::Syntax::RENAME_ALL_SCREAMING => {
+            words.iter().map(|w| w.to_uppercase()).collect::<Vec<_>>().join("_")
+        }
+        // snake (and any unrecognized — sema rejects those with E2409)
+        _ => words.join("_"),
+    }
+}
+fn container_rename_all(markers: &[Marker]) -> Option<String> {
+    serde_marker(markers, crate::Syntax::ATTR_RENAME_ALL).and_then(|m| match m.args.first() {
+        Some(Expr::Ident(n, _)) => Some(n.clone()),
+        _ => None,
+    })
+}
+fn field_wire_key(style: Option<&str>, f: &Field) -> String {
+    if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::ATTR_RENAME) {
+        if let Some(s) = marker_str_arg(m) {
+            return s;
+        }
+    }
+    match style {
+        Some(st) => apply_rename_all(st, &f.name),
+        None => f.name.clone(),
+    }
+}
+fn field_default_rust(f: &Field) -> Option<String> {
+    let m = serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT)?;
+    Some(match m.args.first() {
+        Some(arg) => lit_rust(arg),
+        None => "Default::default()".to_string(),
+    })
+}
+
+fn emit_struct_serde(cx: &Cx, s: &StructDef, out: &mut String) {
+    // Generic serde is gated in sema (E2413); only concrete types reach codegen.
+    if !s.type_params.is_empty() {
+        return;
+    }
+    let enc = s.derives.iter().any(|(t, _)| t == Generics::ENCODE);
+    let dec = s.derives.iter().any(|(t, _)| t == Generics::DECODE);
+    if !enc && !dec {
+        return;
+    }
+    let style = container_rename_all(&s.serde_markers);
+    let style = style.as_deref();
+
+    if enc {
+        out.push_str(&format!(
+            "impl user_Encode for user_{} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        let mut __o: Vec<(String, jet_std::DataTree)> = Vec::new();\n",
+            s.name
+        ));
+        for f in &s.fields {
+            if serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP) {
+                continue;
+            }
+            let m = mangle(&f.name);
+            if serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN) {
+                out.push_str(&format!(
+                    "        if let jet_std::DataTree::Object(mut __es) = (self.{m}).jet_encode() {{ __o.append(&mut __es); }}\n"
+                ));
+                continue;
+            }
+            let key = field_wire_key(style, f);
+            if matches!(f.ty, Type::Option(_)) {
+                // D-SERDE5 owner-Q: an absent optional is omitted from the wire.
+                out.push_str(&format!(
+                    "        if let Some(__v) = &self.{m} {{ __o.push(({key:?}.to_string(), __v.jet_encode())); }}\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "        __o.push(({key:?}.to_string(), (self.{m}).jet_encode()));\n"
+                ));
+            }
+        }
+        out.push_str("        jet_std::DataTree::Object(__o)\n    }\n}\n\n");
+    }
+
+    if dec {
+        let deny = serde_has(&s.serde_markers, crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS);
+        let has_flatten = s
+            .fields
+            .iter()
+            .any(|f| serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN));
+        out.push_str(&format!(
+            "impl user_Decode for user_{} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n",
+            s.name
+        ));
+        // D-SERDE8: `#[DenyUnknownFields]` errors on a wire key the struct doesn't
+        // declare (E2412). Skipped when a `#[Flatten]` field absorbs extra keys.
+        if deny && !has_flatten {
+            let keys: Vec<String> = s
+                .fields
+                .iter()
+                .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP))
+                .map(|f| format!("{:?}", field_wire_key(style, f)))
+                .collect();
+            out.push_str(&format!(
+                "        if let jet_std::DataTree::Object(__es) = __t {{ for (__k, _) in __es {{ if ![{}].contains(&__k.as_str()) {{ return Err(jet_std::DecodeError::new(format!(\"E2412: unknown field `{{}}`\", __k))); }} }} }}\n",
+                keys.join(", ")
+            ));
+        }
+        for f in &s.fields {
+            let m = mangle(&f.name);
+            let rust = cx.rust_type(&f.ty);
+            if serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP) {
+                let d = field_default_rust(f).unwrap_or_else(|| "Default::default()".to_string());
+                out.push_str(&format!("        let {m}: {rust} = {d};\n"));
+                continue;
+            }
+            if serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN) {
+                out.push_str(&format!(
+                    "        let {m}: {rust} = <{rust} as user_Decode>::jet_decode(__t).map_err(|__e| jet_std::DecodeError::under({:?}, __e))?;\n",
+                    f.name
+                ));
+                continue;
+            }
+            let key = field_wire_key(style, f);
+            let absent = if matches!(f.ty, Type::Option(_)) {
+                "None".to_string()
+            } else if let Some(d) = field_default_rust(f) {
+                d
+            } else {
+                // E2410: a required field is missing on the wire.
+                format!(
+                    "return Err(jet_std::DecodeError::new(\"E2410: missing required field `{}`\".to_string()))",
+                    f.name
+                )
+            };
+            out.push_str(&format!(
+                "        let {m}: {rust} = match jet_std::datatree_get(__t, {key:?}) {{ Some(__v) => <{rust} as user_Decode>::jet_decode(__v).map_err(|__e| jet_std::DecodeError::under({key:?}, __e))?, None => {absent} }};\n"
+            ));
+        }
+        let inits: Vec<String> = s.fields.iter().map(|f| mangle(&f.name)).collect();
+        out.push_str(&format!(
+            "        Ok(user_{} {{ {} }})\n    }}\n}}\n\n",
+            s.name,
+            inits.join(", ")
+        ));
+    }
+}
+
+fn variant_wire_name(v: &Variant) -> String {
+    serde_marker(&v.serde_markers, crate::Syntax::ATTR_RENAME)
+        .and_then(marker_str_arg)
+        .unwrap_or_else(|| v.name.clone())
+}
+
+fn emit_enum_serde(cx: &Cx, e: &EnumDef, out: &mut String) {
+    let enc = e.derives.iter().any(|(t, _)| t == Generics::ENCODE);
+    let dec = e.derives.iter().any(|(t, _)| t == Generics::DECODE);
+    if !enc && !dec {
+        return;
+    }
+    // D-SERDE7: externally tagged by default; `#[Tag("k")]` selects internal tagging,
+    // `#[Untagged]` selects untagged. Internal/untagged are validated in sema.
+    let tag = serde_marker(&e.serde_markers, crate::Syntax::ATTR_TAG).and_then(marker_str_arg);
+    let untagged = serde_has(&e.serde_markers, crate::Syntax::ATTR_UNTAGGED);
+
+    if enc {
+        out.push_str(&format!(
+            "impl user_Encode for user_{} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n",
+            e.name
+        ));
+        for v in &e.variants {
+            let vm = mangle(&v.name);
+            let wire = variant_wire_name(v);
+            let body = encode_variant_body(cx, &v.payload, &wire, tag.as_deref(), untagged);
+            match &v.payload {
+                VariantPayload::Unit => {
+                    out.push_str(&format!("            user_{}::{} => {},\n", e.name, vm, body.0));
+                }
+                VariantPayload::Single(..) => {
+                    out.push_str(&format!(
+                        "            user_{}::{}(__0) => {},\n",
+                        e.name, vm, body.0
+                    ));
+                }
+                VariantPayload::Named(fs) => {
+                    let binds: Vec<String> = fs.iter().map(|f| mangle(&f.name)).collect();
+                    out.push_str(&format!(
+                        "            user_{}::{} {{ {} }} => {},\n",
+                        e.name,
+                        vm,
+                        binds.join(", "),
+                        body.0
+                    ));
+                }
+            }
+        }
+        out.push_str("        }\n    }\n}\n\n");
+    }
+
+    if dec {
+        emit_enum_decode(cx, e, tag.as_deref(), untagged, out);
+    }
+}
+
+// Returns the encode expression for one variant arm. Field bindings (`__0` for a
+// single payload, mangled names for a named payload) are already in scope.
+fn encode_variant_body(
+    cx: &Cx,
+    payload: &VariantPayload,
+    wire: &str,
+    tag: Option<&str>,
+    untagged: bool,
+) -> (String, ()) {
+    let _ = cx;
+    let expr = match (payload, tag, untagged) {
+        // ── Untagged: just the payload, no tag wrapper. ──
+        (VariantPayload::Unit, _, true) => "jet_std::DataTree::Null".to_string(),
+        (VariantPayload::Single(..), _, true) => "__0.jet_encode()".to_string(),
+        (VariantPayload::Named(fs), _, true) => {
+            format!("jet_std::DataTree::Object(vec![{}])", named_pairs(fs))
+        }
+        // ── Internally tagged: tag key + inlined fields (unit/named). ──
+        (VariantPayload::Unit, Some(k), false) => format!(
+            "jet_std::DataTree::Object(vec![({k:?}.to_string(), jet_std::DataTree::Text({wire:?}.to_string()))])"
+        ),
+        (VariantPayload::Named(fs), Some(k), false) => {
+            let mut pairs = format!(
+                "({k:?}.to_string(), jet_std::DataTree::Text({wire:?}.to_string()))"
+            );
+            let np = named_pairs(fs);
+            if !np.is_empty() {
+                pairs.push_str(", ");
+                pairs.push_str(&np);
+            }
+            format!("jet_std::DataTree::Object(vec![{pairs}])")
+        }
+        // A single (tuple) payload can't be internally tagged; sema rejects it, so
+        // fall back to the external shape here for safety.
+        (VariantPayload::Single(..), Some(_), false) => format!(
+            "jet_std::DataTree::Object(vec![({wire:?}.to_string(), __0.jet_encode())])"
+        ),
+        // ── Externally tagged (default). ──
+        (VariantPayload::Unit, None, false) => {
+            format!("jet_std::DataTree::Text({wire:?}.to_string())")
+        }
+        (VariantPayload::Single(..), None, false) => format!(
+            "jet_std::DataTree::Object(vec![({wire:?}.to_string(), __0.jet_encode())])"
+        ),
+        (VariantPayload::Named(fs), None, false) => format!(
+            "jet_std::DataTree::Object(vec![({wire:?}.to_string(), jet_std::DataTree::Object(vec![{}]))])",
+            named_pairs(fs)
+        ),
+    };
+    (expr, ())
+}
+
+fn named_pairs(fs: &[crate::AST::VariantField]) -> String {
+    fs.iter()
+        .map(|f| {
+            let m = mangle(&f.name);
+            format!("({:?}.to_string(), {m}.jet_encode())", f.name)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn emit_enum_decode(cx: &Cx, e: &EnumDef, tag: Option<&str>, untagged: bool, out: &mut String) {
+    out.push_str(&format!(
+        "impl user_Decode for user_{} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n",
+        e.name
+    ));
+    if untagged {
+        // Untagged: try each variant's shape in declaration order; first success wins.
+        for v in &e.variants {
+            let cons = decode_variant_from(cx, &e.name, v, "__t");
+            out.push_str(&format!(
+                "        if let Ok(__r) = (|| -> Result<user_{}, jet_std::DecodeError> {{ Ok({}) }})() {{ return Ok(__r); }}\n",
+                e.name, cons
+            ));
+        }
+        out.push_str(
+            "        Err(jet_std::DecodeError::new(\"no untagged variant matched\".to_string()))\n    }\n}\n\n",
+        );
+        return;
+    }
+    if let Some(k) = tag {
+        // Internally tagged: read the tag, then build from the sibling fields.
+        out.push_str(&format!(
+            "        let __tag = match jet_std::datatree_get(__t, {k:?}) {{ Some(jet_std::DataTree::Text(__s)) => __s.clone(), _ => return Err(jet_std::DecodeError::new(\"missing tag `{k}`\".to_string())) }};\n        match __tag.as_str() {{\n"
+        ));
+        for v in &e.variants {
+            let wire = variant_wire_name(v);
+            let cons = decode_variant_from(cx, &e.name, v, "__t");
+            out.push_str(&format!("            {wire:?} => Ok({cons}),\n"));
+        }
+        out.push_str(&format!(
+            "            __other => Err(jet_std::DecodeError::new(format!(\"unknown variant `{{}}`\", __other))),\n        }}\n    }}\n}}\n\n"
+        ));
+        return;
+    }
+    // Externally tagged (default): a unit variant is a bare string; a payload variant
+    // is a single-key object `{{\"Variant\": payload}}`.
+    let has_unit = e.variants.iter().any(|v| matches!(v.payload, VariantPayload::Unit));
+    if has_unit {
+        out.push_str("        if let jet_std::DataTree::Text(__s) = __t {\n            match __s.as_str() {\n");
+        for v in &e.variants {
+            if matches!(v.payload, VariantPayload::Unit) {
+                let wire = variant_wire_name(v);
+                out.push_str(&format!(
+                    "                {wire:?} => return Ok(user_{}::{}),\n",
+                    e.name,
+                    mangle(&v.name)
+                ));
+            }
+        }
+        out.push_str("                _ => {}\n            }\n        }\n");
+    }
+    out.push_str("        if let jet_std::DataTree::Object(__es) = __t {\n            if __es.len() == 1 {\n                let (__k, __v) = &__es[0];\n                match __k.as_str() {\n");
+    for v in &e.variants {
+        if matches!(v.payload, VariantPayload::Unit) {
+            continue;
+        }
+        let wire = variant_wire_name(v);
+        let cons = decode_variant_from(cx, &e.name, v, "__v");
+        out.push_str(&format!("                    {wire:?} => return Ok({cons}),\n"));
+    }
+    out.push_str("                    _ => {}\n                }\n            }\n        }\n");
+    out.push_str(&format!(
+        "        Err(jet_std::DecodeError::new(\"no matching variant for `{}`\".to_string()))\n    }}\n}}\n\n",
+        e.name
+    ));
+}
+
+// Build a variant constructor that decodes its payload from the DataTree expr `src`.
+// For internal tagging, named fields read from the same object as the tag; for the
+// external/untagged shapes, `src` is the payload sub-tree.
+fn decode_variant_from(cx: &Cx, enum_name: &str, v: &Variant, src: &str) -> String {
+    let vm = mangle(&v.name);
+    match &v.payload {
+        VariantPayload::Unit => format!("user_{}::{}", enum_name, vm),
+        VariantPayload::Single(t, _) => {
+            let rust = cx.rust_type(t);
+            format!(
+                "user_{}::{}(<{rust} as user_Decode>::jet_decode({src}).map_err(|__e| jet_std::DecodeError::under({:?}, __e))?)",
+                enum_name, vm, v.name
+            )
+        }
+        VariantPayload::Named(fs) => {
+            let parts: Vec<String> = fs
+                .iter()
+                .map(|f| {
+                    let m = mangle(&f.name);
+                    let rust = cx.rust_type(&f.ty);
+                    let absent = if matches!(f.ty, Type::Option(_)) {
+                        "None".to_string()
+                    } else {
+                        format!(
+                            "return Err(jet_std::DecodeError::new(\"E2410: missing required field `{}`\".to_string()))",
+                            f.name
+                        )
+                    };
+                    format!(
+                        "{m}: match jet_std::datatree_get({src}, {:?}) {{ Some(__fv) => <{rust} as user_Decode>::jet_decode(__fv).map_err(|__e| jet_std::DecodeError::under({:?}, __e))?, None => {absent} }}",
+                        f.name, f.name
+                    )
+                })
+                .collect();
+            format!("user_{}::{} {{ {} }}", enum_name, vm, parts.join(", "))
+        }
+    }
 }
 
 pub(crate) fn emit_type_impl(

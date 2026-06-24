@@ -403,6 +403,7 @@ mod tests {
             name_span: zero(),
             ty,
             ty_span: zero(),
+            serde_markers: Vec::new(),
         }
     }
 
@@ -420,6 +421,7 @@ mod tests {
             published_schema_span: Some(zero()),
             layout: None,
             layout_span: None,
+            serde_markers: Vec::new(),
         })
     }
 

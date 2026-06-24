@@ -1,11 +1,11 @@
 // E2-M9: jet.yaml — parse and render YAML config.
-use jet.yaml as yaml
+use core.encoding.yaml as yaml
 fn main() {
     raw @= "# app config\nname: myapp\nversion: 1.0\nenvironment: production"
     cfg @= yaml.parse(raw) ?? panic("yaml parse failed")
     name @= cfg["name"]
     env @= cfg["environment"]
     print("{name} ({env})")
-    rendered @= yaml.render(cfg)
+    rendered @= yaml.to_string(cfg)
     print((rendered.len() > 0))
 }

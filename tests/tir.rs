@@ -2978,14 +2978,14 @@ fn main() {
 /// round-trip (the coupled prelude-`JSON` slice). `main` routes through the TIR:
 /// `json.parse(raw) ?? panic`, `if data == Object(entries)` (JSON if-let), `JSON.Text`/
 /// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::Json::…`), a Map
-/// index over `[String, JSON]`, and `json.render`. rustc accepting proves byte-parity.
+/// index over `[String, JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
 #[test]
 fn json_value_construct_match_render() {
     if !have_rustc() {
         return;
     }
     let src = "\
-use core.json as json
+use core.encoding.json as json
 fn main() {
     raw @= \"{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}\"
     data @= json.parse(raw) ?? panic(\"bad json\")
@@ -2996,7 +2996,7 @@ fn main() {
     obj[\"name\"] = JSON.Text(\"jet\")
     obj[\"ok\"] = JSON.Boolean(true)
     obj[\"none\"] = JSON.Null
-    print(json.render(JSON.Object(obj)))
+    print(json.to_string(JSON.Object(obj)))
 }
 ";
     let (code, stdout) = build_and_run("tir_json", src);
@@ -3013,7 +3013,7 @@ fn json_nested_variant_matching() {
         return;
     }
     let src = "\
-use jet.json as json
+use core.encoding.json as json
 fn main() {
     raw @= \"{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}\"
     data @= json.decode(raw) ?? panic(\"bad json\")

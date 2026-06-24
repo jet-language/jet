@@ -1,7 +1,9 @@
 # Plan: M12.2 registry + `jet publish` UX (D-PUBLISH1)
 
-**Status: plan — registry INFRA partly tracked (c50/c56, S52); the publish/resolve
-UX needs an owner decision (D-PUBLISH1).**
+**Status: backlog — DEFERRED. D-PUBLISH1 is a real future owner decision but is NOT
+decidable yet: it rides c50 (build-from-source) and c56 (registry upload) infra, both
+unverified/soft-blocked on dep approvals. Promote D-PUBLISH1 to a full ballot card (with
+worked `jet publish` shell examples) once M12.2 infra is verified — not before.**
 
 Unblocks: **Saoirse** (publish a library), **Amara** (reproducible scripts pinned
 to published versions).
@@ -41,7 +43,7 @@ build-from-source + M9 wave-2. No `jet publish` command decision found.
 - This rides **c50** (build-from-source) and **c56** (registry upload) — coordinate
   so the UX ships on top of the real infra, not a stub.
 
-## Open questions (need owner decision — D-PUBLISH1)
+## Open questions (D-PUBLISH1 — DEFERRED; promote to a ballot card only after c50/c56 infra is verified)
 
 1. **`jet publish` command shape** — `jet publish` (infers version from `pkg.jet`),
    `jet publish <version>`, or `jet release`? What does it validate before upload

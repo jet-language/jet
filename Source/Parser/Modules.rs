@@ -178,6 +178,12 @@ impl<'a> Parser<'a> {
             TokKind::KwFn => self.func().map(Item::Func),
             // S60 (D-CASING1 follow-on): `#Pure fn` inside a module body.
             TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+            // D-ATTR2 / D-SERDE: `#[Codable] struct …` inside a module body.
+            TokKind::Hash
+                if matches!(self.peek2().kind, TokKind::LBracket) =>
+            {
+                self.type_def_with_markers()
+            }
             TokKind::KwPub => match self.peek2().kind {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),

@@ -546,6 +546,12 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     }
+                    // D-SERDE6: optional call-site turbofish `decode<Order>(…)`.
+                    let type_args = if self.at_turbofish() {
+                        self.parse_turbofish()?
+                    } else {
+                        Vec::new()
+                    };
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -563,6 +569,7 @@ impl<'a> Parser<'a> {
                             receiver: Box::new(expr),
                             method: member,
                             method_span: member_span,
+                            type_args,
                             args,
                             recv_type: None,
                             resolved_ret: None,
@@ -1119,6 +1126,12 @@ impl<'a> Parser<'a> {
                     if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                         return self.ptr_from_addr(type_name, span);
                     }
+                    // D-SERDE6: optional call-site turbofish `csv.decode<Order>(raw)`.
+                    let type_args = if self.at_turbofish() {
+                        self.parse_turbofish()?
+                    } else {
+                        Vec::new()
+                    };
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -1136,6 +1149,7 @@ impl<'a> Parser<'a> {
                             receiver: Box::new(Expr::Ident(type_name, span)),
                             method: member,
                             method_span: member_span,
+                            type_args,
                             args,
                             recv_type: None,
                             resolved_ret: None,

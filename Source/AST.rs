@@ -828,6 +828,22 @@ pub enum StructLayout {
     C,
 }
 
+/// D-ATTR2 / D-SERDE2–8: one `#[Name]` or `#[Name(arg, …)]` bracket marker.
+/// Derive-trait markers (`Codable`/`Encode`/`Decode`/`Comparable`/…) are lifted
+/// into `derives` at parse time (Codable expands to Encode+Decode); the serde
+/// *attribute* markers — container `RenameAll`/`DenyUnknownFields`/`Tag`/`Untagged`
+/// and field `Rename`/`Skip`/`Default`/`Flatten` — are kept raw here so sema can
+/// validate them (E2407–E2412) and codegen can apply them. Args parse as
+/// expressions: a string literal (`Rename("x")`), a bare word (`RenameAll(camel)`
+/// → `Expr::Ident`), or any expression (`Default(8080)`).
+#[derive(Debug, Clone)]
+pub struct Marker {
+    pub name: String,
+    pub name_span: Span,
+    pub args: Vec<Expr>,
+    pub span: Span,
+}
+
 #[derive(Debug)]
 pub struct StructDef {
     pub is_pub: bool,
@@ -848,6 +864,9 @@ pub struct StructDef {
     /// D-REPRC1 (ratified; D-REPRC1 = B): `#layout(…)` attribute. `None` = default layout.
     pub layout: Option<StructLayout>,
     pub layout_span: Option<Span>,
+    /// D-SERDE3/8: container-level serde attribute markers (`RenameAll`,
+    /// `DenyUnknownFields`) attached before the `struct`. Empty when none.
+    pub serde_markers: Vec<Marker>,
 }
 
 /// D-DIST1/D-DIST3: distinct type declaration — `[#Numeric] Name @= distinct Base`.
@@ -873,6 +892,9 @@ pub struct EnumDef {
     pub methods: Vec<Func>,
     pub trait_impls: Vec<TraitImplBlock>,
     pub derives: Vec<(String, Span)>,
+    /// D-SERDE3/7/8: container-level serde markers (`RenameAll`, `Tag`,
+    /// `Untagged`, `DenyUnknownFields`) attached before the `enum`. Empty when none.
+    pub serde_markers: Vec<Marker>,
 }
 
 #[derive(Debug)]
@@ -880,6 +902,8 @@ pub struct Variant {
     pub name: String,
     pub name_span: Span,
     pub payload: VariantPayload,
+    /// D-SERDE5: per-variant serde markers (`Rename`). Empty when none.
+    pub serde_markers: Vec<Marker>,
 }
 
 #[derive(Debug, Clone)]
@@ -925,6 +949,9 @@ pub struct Field {
     pub name_span: Span,
     pub ty: Type,
     pub ty_span: Span,
+    /// D-SERDE5: per-field serde markers (`Rename`/`Skip`/`Default`/`Flatten`)
+    /// attached before this field. Empty when none.
+    pub serde_markers: Vec<Marker>,
 }
 
 /// D-PATW / D-PATR (ratified 2026-06-19): a single payload slot inside a variant pattern.
@@ -1476,6 +1503,10 @@ pub enum Expr {
         receiver: Box<Expr>,
         method: String,
         method_span: Span,
+        /// D-SERDE6 (= C): call-site type arguments — `decode<Order>(text)`. Jet's
+        /// first turbofish; empty for an ordinary call. Drives the typed encoding
+        /// decoders and is available for any generic call going forward.
+        type_args: Vec<Type>,
         args: Vec<CallArg>,
         /// Filled by sema when the method resolves to a user-defined type,
         /// so codegen can apply the parameter conventions (`&`/`&mut`).

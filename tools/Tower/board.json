@@ -1,5 +1,5 @@
 {
-  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Cross platform raylib builtin\n- Consider how to improve using concepts from Zig build system",
+  "scratch": "- Coroutines\n- Async/Await\n- Analyze vs Typescript - how can we be better\n- Use Jai-style build system\n- Cross platform raylib builtin\n- Consider how to improve using concepts from Zig build system\n- Cleanup old std.mem syntax (Ptr<T>)\n- Relook what labeled ref field in struct\n- Relook original ownership model - outdated example\n- Relook if switch statements -> 07_switch still uses || to check multiple patterns on the input var -> should be | with || for additional expressions alongside the pattern\n- Jet fmt should not drop parenthesis used for visual/functional grouping",
   "cards": [
     {
       "id": "c26",
@@ -330,7 +330,7 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-24T16:48:28.898Z",
       "decisions": [
         "D-UNIT1"
       ],
@@ -567,11 +567,11 @@
       "type": "task",
       "title": "Typed CSV row structs",
       "body": "Decode CSV rows into typed structs by header name via comptime; no S56 dependency. Elena.",
-      "stage": "ready",
-      "plan": "typed-csv-rows",
+      "stage": "building",
+      "plan": "serde-model",
       "notes": [
         {
-          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/typed-csv-rows",
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/serde-model (was typed-csv-rows, folded)",
           "at": "2026-06-21"
         },
         {
@@ -581,38 +581,48 @@
         {
           "t": "Buildable now via comptime reflection — not gated on S56.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[merge] Folded into c104 (core.encoding unified serde). CSV/JSON are arms of the one model — implementation + tests tracked on c104. Kept for history.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-24T17:00:00.000Z",
       "decisions": [],
       "priority": "P2",
-      "workOrder": null
+      "workOrder": null,
+      "merged": "c104"
     },
     {
       "id": "c90",
       "type": "task",
       "title": "Typed JSON output / struct serialization",
       "body": "json.render(struct) via a built-in #[Serialize] marker (distinct from S56 user-derives). Elena.",
-      "stage": "ready",
-      "plan": "typed-json-output",
+      "stage": "building",
+      "plan": "serde-model",
       "notes": [
         {
-          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/typed-json-output",
+          "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/serde-model (was typed-json-output, folded)",
           "at": "2026-06-21"
         },
         {
           "t": "Buildable now (#[Serialize] + comptime reflection) — not gated on S56.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[merge] Folded into c104 (core.encoding unified serde). CSV/JSON are arms of the one model — implementation + tests tracked on c104. Kept for history.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-24T17:00:00.000Z",
       "decisions": [
         "D-JSONOUT1"
       ],
       "priority": "P2",
-      "workOrder": null
+      "workOrder": null,
+      "merged": "c104"
     },
     {
       "id": "c94",
@@ -758,10 +768,10 @@
     },
     {
       "id": "c104",
-      "type": "idea",
-      "title": "Serde-grade serialization: unified Serialize + Deserialize",
-      "body": "Owner-requested (serde). Rec A: one format-agnostic data model (serde architecture) so one #[Serialize, Deserialize] drives JSON/CSV/TOML/binary; add Deserialize counterpart to S55 Serialize; field attrs rename/default/skip/flatten/rename_all. Gated on user-defined derives (S56, Epoch 3) — ratify shape now, build when derives land. Ballot D-SERDE1.",
-      "stage": "ready",
+      "type": "task",
+      "title": "core.encoding — unified Serialize/Deserialize (merges c89 + c90)",
+      "body": "Owner-requested serde model. ONE library core.encoding with per-format submodules (json/csv/toml/yaml, extensible). One DataValue tree + #[Serialize,Deserialize] built-in derive (compiler-owned codegen field-walk, NOT comptime, NOT S56) drives every format. Generic decode<T>/encode<T>. Full field attrs rename/default/skip/flatten/rename_all. D-ENC1: clean migration off core.json/jet.{csv,toml,yaml}; both `use core.encoding` (encoding.json.*) and leaf `use core.encoding.json as json`. Folds c89 (typed CSV) + c90 (typed JSON out). Plan: sidequests/serde-model.md.",
+      "stage": "building",
       "plan": "serde-model",
       "notes": [
         {
@@ -771,12 +781,23 @@
         {
           "t": "Phases 1-3 buildable now; Phases 4-5 gated on S56 (Epoch 3).",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[merge] Owner 2026-06-24: merged c89 + c90 into this card as one cohesive core.encoding vision. Corrected mechanism: built-in derive codegen field-walk (like derive Comparable), NOT comptime reflection (which does not exist for type-level fields) and NOT S56 user-derives — so buildable now, end-to-end, no Epoch-3 gate. D-ENC1 ratified: core.encoding namespace + nested access + clean migration + full field attrs.",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[impl 2026-06-24] Shipped increment 1: core.encoding library + {json,csv,toml,yaml} submodules; BOTH import surfaces (leaf use core.encoding.json as json AND whole-library use core.encoding -> encoding.json.to_string(x), new nested-namespace access); D-JSONVERB1 to_string/to_string_pretty uniform; clean break off core.json + jet.{csv,toml,yaml,json} (all examples/tests migrated); example 54_encoding + golden; suite green (pre-existing arena.rs failures unrelated). REMAINING (increment 2, the typed-derive heart): DataValue model + Serialize/Deserialize traits, built-in #[Serialize,Deserialize] derive codegen field-walk, generic decode<T>/to_string<T>, field attrs rename/default/skip/flatten/rename_all, diagnostics E2407-E2411, examples serde_basic/serde_derive/csv_typed/json_typed. Plan updated in sidequests/serde-model.md.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-24T18:30:00.000Z",
       "decisions": [
-        "D-SERDE1"
+        "D-ENC1",
+        "D-SERDE1",
+        "D-JSONOUT1",
+        "D-CSVROW1"
       ],
       "priority": "P2",
       "workOrder": null
@@ -1008,7 +1029,7 @@
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-24T16:48:26.161Z",
       "decisions": [
         "D-CAP9"
       ]
@@ -1114,6 +1135,48 @@
       ],
       "created": "2026-06-24T00:00:00Z",
       "updated": "2026-06-24",
+      "priority": "P2",
+      "workOrder": null
+    },
+    {
+      "id": "c134",
+      "type": "idea",
+      "title": "if subject == { } explicit value/pattern dispatch (revise D-IF1/D-IF2)",
+      "body": "Owner-initiated revision of ratified D-IF1/D-IF2: mark multi-way matching explicitly with `==` between the subject and the block (`if status == { \"active\" -> … }`), and drop the repeated `subject ==` from every arm — primitives AND enum/patterns. `if boolVar { }` stays a plain yes/no test. Plan: tools/Tower/docs/sidequests/if-eq-dispatch.md. Blocked on owner decision D-IF3 (marker spelling + required/optional + arm separator + predicate arms). Couples with D-FMT1 (c135) for single-line arms.",
+      "stage": "deciding",
+      "plan": "if-eq-dispatch",
+      "notes": [
+        {
+          "t": "[sweep] Plan written + vetted by a second agent against the parser/codegen. D-IF3 queued in ballot (rec A = `==` marker, required, keep `->`, no predicate arms). Codegen unchanged (both forms lower to Stmt::Switch). Migration = every dispatch example, one commit. Coupled with D-FMT1.",
+          "at": "2026-06-24"
+        }
+      ],
+      "created": "2026-06-24",
+      "updated": "2026-06-24",
+      "decisions": [
+        "D-IF3"
+      ],
+      "priority": "P2",
+      "workOrder": null
+    },
+    {
+      "id": "c135",
+      "type": "idea",
+      "title": "jet fmt preserves single-line bodies (revise S44)",
+      "body": "Owner-initiated revision of ratified S44: stop auto-expanding short single-line brace bodies (`if ready { launch() }`) into multiline. Plan: tools/Tower/docs/sidequests/fmt-single-line.md. Blocked on owner decision D-FMT1 (author-intent vs width-canonical vs status-quo; scope + eligibility floor). Gate that lets D-IF3 (c134) single-line arms survive `jet fmt`.",
+      "stage": "deciding",
+      "plan": "fmt-single-line",
+      "notes": [
+        {
+          "t": "[sweep] Plan written + vetted by a second agent against Source/Formatter + tests/fmt.rs. D-FMT1 queued in ballot (rec A = author-intent preservation, reusing the S69 dot-chain mechanism; idempotent, not canonical — philosophy #4 exempts layout). Coupled with D-IF3.",
+          "at": "2026-06-24"
+        }
+      ],
+      "created": "2026-06-24",
+      "updated": "2026-06-24",
+      "decisions": [
+        "D-FMT1"
+      ],
       "priority": "P2",
       "workOrder": null
     }
@@ -1342,6 +1405,14 @@
       "status": "open",
       "answer": "",
       "created": "2026-06-24T15:59:45.676Z"
+    },
+    {
+      "id": "cmqsaglqo3dl",
+      "decisionId": "D-JSONVERB1",
+      "text": "Why not just \"JSON.string(...)\" or JSON.string_pretty(...)\"? Is the \"to_",
+      "status": "open",
+      "answer": "",
+      "created": "2026-06-24T16:29:34.608Z"
     }
   ],
   "ingest": []

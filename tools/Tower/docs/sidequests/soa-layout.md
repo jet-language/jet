@@ -1,7 +1,9 @@
 # Plan: Cache-friendly data layout — SOA (D-SOA1)
 
-**Status: plan — awaiting owner decision D-SOA1.**
-**Tier: Later (deferred — post-v1).**
+**Status: ratified — D-SOA1 + D-SOA2A–D all ratified 2026-06-22. No owner decision open.**
+**Tier: Later (syntax ratified; implementation deferred post-v1).**
+**Keyword: `#layout(columnar)`** (D-SOA2A=C renamed it from `soa`; this doc predates the
+rename — read `soa` below as `columnar`).
 
 ---
 
@@ -127,19 +129,13 @@ after v1 ships and the M12+ roadmap slot opens.
 
 ---
 
-## Open questions
+## Resolved — D-SOA2 follow-ons ratified 2026-06-22 (no owner decision open)
 
-1. **Partial SOA v2:** `#layout(soa: x, y, z)` for hot-field-only SOA. The remaining
-   fields stay AOS in an interleaved tail struct. Lowering is more complex;
-   recommendation: whole-struct v1, partial v2 with its own ballot.
-2. **`soa [Particle]` as a future-reserved form (Option B):** Even if A is ratified,
-   should `soa` be reserved as a future modifier in the type position for
-   per-container layout overrides? Recommend yes — reserve the keyword, emit
-   "not yet supported" rather than a parse error.
-3. **Serialization:** Should `#[Serialize]` on a SOA struct serialize as AOS (one
-   object per element, portable) or as SOA (field arrays, compact but non-standard)?
-   Recommendation: AOS-serialized always in v1; a `#[SerializeSOA]` opt-in for the
-   compact form later.
-4. **Interaction with `take` / `view` / ownership:** Moving or borrowing a SOA
-   collection moves/borrows all field arrays as a unit. Sema treats the collection
-   value atomically; no partial-field borrows in v1.
+1. **Partial SOA → deferred.** D-SOA2B=A: **whole-struct only** in v1. Partial
+   (`#layout(columnar: x, y, z)`) is a future feature with its own ballot.
+2. **Per-container form reserved.** D-SOA2C=A: `columnar [T]` in type position is
+   **reserved** — emits "not yet supported", not a parse error.
+3. **Serialization transparent.** D-SOA2D=A: a `columnar` struct serializes **AOS**
+   (one object per element, portable); the layout is invisible to serde.
+4. **Ownership atomic.** A `columnar` collection moves/borrows all field arrays as a
+   unit; sema treats the value atomically, no partial-field borrows in v1.

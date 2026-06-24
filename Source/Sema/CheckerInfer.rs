@@ -62,6 +62,7 @@ impl<'a> Checker<'a> {
                         receiver: Box::new(old),
                         method: "clone".to_string(),
                         method_span: span,
+                        type_args: Vec::new(),
                         args: Vec::new(),
                         recv_type: None,
                             resolved_ret: None,
@@ -451,13 +452,16 @@ impl<'a> Checker<'a> {
                 receiver,
                 method,
                 method_span,
+                type_args,
                 args,
                 recv_type,
                 resolved_ret,
             } => {
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
                 self.clear_uninit_mut_args(args);
-                self.infer_method_call(receiver, method, *method_span, args, recv_type, resolved_ret)
+                self.infer_method_call(
+                    receiver, method, *method_span, type_args, args, recv_type, resolved_ret,
+                )
             }
             Expr::StructLit {
                 type_name,
@@ -2105,6 +2109,7 @@ impl<'a> Checker<'a> {
         receiver: &mut Box<Expr>,
         method: &str,
         span: Span,
+        type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
@@ -2175,9 +2180,29 @@ impl<'a> Checker<'a> {
                 return None;
             }
         }
+        // D-ENC1: nested-namespace access — `encoding.json.to_string(x)` where `encoding`
+        // is a library alias (`use core.encoding`) and `json` a registered submodule. The
+        // method-call receiver is `Field(Ident(alias), leaf)`; resolve to the submodule
+        // `<ns>.<leaf>` as a core call. Guarded by `is_known_core_module`, so it fires only
+        // for real submodules (e.g. `core.encoding.json`), never plain field access.
+        if let Expr::Field(base, leaf, _) = &**receiver {
+            if let Expr::Ident(alias, alias_span) = &**base {
+                if let Some(ns) = self.core_imports.get(alias).cloned() {
+                    let submodule = format!("{}.{}", ns, leaf);
+                    if crate::Loader::is_known_core_module(&submodule) {
+                        let ret =
+                            self.infer_core_call(&submodule, method, *alias_span, span, type_args, args);
+                        if is_polymorphic_core_special(&submodule, method) {
+                            *resolved_ret_out = ret.clone();
+                        }
+                        return ret;
+                    }
+                }
+            }
+        }
         if let Expr::Ident(alias, alias_span) = &**receiver {
             if let Some(module) = self.core_imports.get(alias).cloned() {
-                let ret = self.infer_core_call(&module, method, *alias_span, span, args);
+                let ret = self.infer_core_call(&module, method, *alias_span, span, type_args, args);
                 // c109 Phase 20: write the resolved return type back onto the node
                 // for the polymorphic core specials whose type is arg-dependent and
                 // NOT in `core_fixed_sig` (so the TIR can read it totally — I3). The

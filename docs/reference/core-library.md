@@ -52,12 +52,12 @@ nix develop -c jet run tool.jet World
 Core modules use `use` — no quotes, unlike file imports.
 
 ```jet
-use core.fs as fs           // one submodule
-use jet.core.json as json   // same module, canonical spelling
+use core.fs as fs                    // one submodule
+use jet.core.encoding.json as json   // same module, canonical spelling
 ```
 
-Both `use core.fs` and `use jet.core.json` resolve to the same compiler-known
-module.
+Both `use core.fs` and `use jet.core.encoding.json` resolve to the same
+compiler-known module.
 
 **Not allowed:**
 
@@ -310,18 +310,27 @@ this to pin output; normal programs ignore it.
 
 ---
 
-### `core.json` — parse and print JSON
+### `core.encoding` — unified serialization (json, csv, toml, yaml)
 
-Dynamic JSON — you walk a `JSON` enum by hand.
+One library, every format a submodule (D-ENC1). Import the whole library and
+reach each format by name, or import a single format directly:
 
 ```jet
-use core.json as json
+use core.encoding                    // encoding.json.*, encoding.csv.*, …
+use core.encoding.json as json       // or just one format
+```
+
+Every format speaks the same two verbs: `parse` (text → value) and `to_string`
+(value → text, D-JSONVERB1). JSON adds `to_string_pretty` and `decode`.
+
+```jet
+use core.encoding
 
 fn main() {
     raw :: "{\"name\":\"jet\",\"ok\":true,\"n\":1.5}"
-    data :: json.parse(raw) ?? return
-    print(json.render(data))                 // compact one line
-    print(json.render_pretty(data))          // indented
+    data :: encoding.json.parse(raw) ?? return
+    print(encoding.json.to_string(data))           // compact one line
+    print(encoding.json.to_string_pretty(data))    // indented
 
     if data == Object(entries) {
         if entries.contains("name") {
@@ -331,16 +340,26 @@ fn main() {
 }
 ```
 
+**`core.encoding.json`** — dynamic JSON; you walk a `JSON` enum by hand.
 **`JSON` variants:** `Null`, `Boolean(b)`, `Number(n)`, `Text(s)`,
 `Array(items)`, `Object(entries: [String, JSON])`.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `parse(text)` | `JSON ? JSONError` | Parse a JSON string |
-| `render(j)` | `String` | Compact JSON text |
-| `render_pretty(j)` | `String` | Indented JSON text |
+| `decode(text)` | `JSON ? JSONError` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
+| `to_string(j)` | `String` | Compact JSON text |
+| `to_string_pretty(j)` | `String` | Indented JSON text |
 
 **`JSONError`** — `line` and `message` pointing at the parse failure.
+
+**`core.encoding.csv`** — `parse(text) -> [[String]] ? String` (rows of fields),
+`to_string(rows) -> String`. **`core.encoding.toml`** / **`core.encoding.yaml`**
+— `parse(text) -> [String, String] ? String` (flat key/value), `to_string(map)`.
+
+> Typed struct (de)serialization — `#[Serialize, Deserialize]`,
+> `encoding.json.decode<T>`, field attributes — is the next increment (D-SERDE1);
+> see `tools/Tower/docs/sidequests/serde-model.md`.
 
 ---
 
@@ -583,10 +602,6 @@ ships as versioned `jet.*` packages. These shipped in Epoch 2:
 |---------|-----------------|
 | `jet.http` | HTTP client + server, blocking networking (plain HTTP; TLS requires `jet.tls`) |
 | `jet.regex` | grep-class tools, text validation |
-| `jet.csv` | CSV data files |
-| `jet.toml` | TOML config files |
-| `jet.yaml` | YAML flat key-value parsing and rendering |
-| `jet.json` | First-party JSON with type-coercion surface (`parse`, `decode`, `render`) |
 | `jet.log` | Structured logging / tracing / metrics |
 | `jet.time` | Calendar dates, time zones, formatted dates |
 | `jet.crypto` | Hash, HMAC, vetted random primitives |

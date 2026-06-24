@@ -25,472 +25,74 @@ it's time to decide it.
 
 ## Open decisions
 
-These cards surface the **naming/spelling layer** that ratified D-codes blessed in
-*principle* but left for an agent to fill into a plan as an assumption. Each is a real
-user-facing choice the owner never made. Queued 2026-06-24 (missing-decision audit).
-Cards A1–A7 are genuine open decisions; the three "reconcile" cards (D-NOSTD1/D-JSONVERB1/
-D-NUMOPS2) plus the two **Clarification ratifications** at the bottom are corrections of
-plan assumptions that contradict an already-ratified rule.
+_No open full cards. The 2026-06-24 batch-4 drain (note below) cleared the serde
+derive-path surface and the dispatch/formatter/SIMD/embedded cards. New follow-on
+ballots the owner requested in his batch comments are listed under **Pending
+follow-on cards** below._
+
+**Pending follow-on cards (owner-requested, to develop):**
+- **D-EFF1 follow-ons** — owner (D-EFF1 = B): "crosscheck the new subquestions for B
+  against existing ballots, then create new non-duplicate ballots so we can proceed —
+  we need to nail down syntax, which is correlated with another ballot." Effect-tag
+  *spelling* sub-decisions to draft against D-QUAL1's ratified `#(…)` surface.
+- **D-SOA1 follow-ons** — owner (D-SOA1 = A): wants a better name than "SOA", plus three
+  open questions to put to him as cards: (1) whole-struct SOA only in v1 vs
+  `#layout(soa: field, …)` partial annotation; (2) reserve `soa [Particle]` (Option B)
+  as a future spelling for per-container overrides; (3) interaction with `#[Codable]`
+  and reflection — does SOA layout affect the serialized representation?
+
+**Still deferred (not blocking; expand to a card when needed):**
+- **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
+  `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
+  (`tree.field("x").int()?`, `.text()`, `.bool()`, indexing). Only matters for the
+  hand-impl / dynamic path (D-SERDE2), not the typed derive. Recommend: keep
+  pattern-match as the floor; add minimal fluent accessors if hand-impl ergonomics demand it.
 
 ---
 
-### D-DBG3 — Debugger interactive command surface
+> **Drained 2026-06-24 (batch 4).** The owner ratified all 11 remaining open full cards:
+> **D-SIMD2 = A** (method-reduce SIMD surface; operator overloading on built-in lane types
+> only), **D-SERDE2 = A** (Swift-plain hand-impl: `encode`/`decode`, `DataTree`, `DecodeError`),
+> **D-SERDE3 = C** (typed `RenameAll` menu camel/snake/pascal/kebab/screaming),
+> **D-SERDE4 = B, owner-modified** (umbrella `#[Codable]`; one-way `#[Encode]`/`#[Decode]`),
+> **D-SERDE5 = A** (per-field bracket markers `#[Rename]`/`#[Skip]`/`#[Default(expr)?]`/`#[Flatten]`,
+> absent-optional omitted, struct-flatten now), **D-SERDE6 = C** (typed `decode<T>` turbofish +
+> expected-type; turbofish blessed as general grammar), **D-SERDE7 = A + ship chooser now**
+> (externally tagged default; `#[Tag("type")]`/`#[Untagged]` container chooser — distinct from
+> D-SERDE5 field attrs), **D-SERDE8 = A** (lenient default + `#[DenyUnknownFields]`),
+> **D-NOSTD1 = A** (platform-implied std opt-out), **D-IF3 = A** (`if x == { … }` required
+> dispatch marker; E0992/E0993), **D-FMT1 = A** (author-intent single-line bodies). The two
+> **clarification corrections** were confirmed: **C-CASING** (plan tags → D-CASING1 PascalCase)
+> and **C-MANIFEST** (`pkg.jet` → `pack.jet`). All recorded in `syntax-decisions.md`, cards
+> stripped. Serde increment-2 implementation unblocked end-to-end (sidequests/serde-model.md).
 
-**Gist:** Pick the one in-session style for the `jet debug` prompt, its step commands, and the breakpoint/locals text a user reads at every pause.
 
-**Story.** Pearl, learning Jet, hits a breakpoint in a loop. She faces a prompt and has to guess what to type to advance one line, and read a `locals:` dump to see why her counter is wrong. D-DBG1 ratified only the launch verb `jet debug <file>`; D-DBG2 only the `--raw-frames` expert flag. The interactive vocabulary, prompt string, and frame/locals layout were never decided — `dap-debugger.md:42-49,64` quietly bakes in `(jet-dbg)`, `step`/`next`/`continue`/`stepIn`/`stepOut`, and a one-line `locals:` format. This decides all three as one coherent style (they're read together every session).
-
-**In the wild:**
-```jet
-fn main() {
-    total := 0
-    loop i in 1..6 {
-        total += i        // breakpoint set here
-    }
-    print("sum {total}")
-}
-```
-
-**Other languages:** lldb uses `s`/`n`/`c`/`finish` at `(lldb)`; gdb mirrors it. Both assume debugger fluency; no mainstream debugger spells the words out for beginners — that space is open for Jet.
-
-**Frame text stays I2-safe in every option:** the prompt only ever shows Jet files, Jet line numbers, and safe Jet locals (D-OBS2). A frame with no Jet line is stepped over transparently (`dap-debugger.md:93-96`). The choice here is the *words and layout*, not what's behind them.
-
-**Tradeoffs:**
-| Option | Step words | Prompt | Aliases | Beginner-readable | Expert speed |
-|--------|---|---|---|---|---|
-| A — debugger-familiar | `step`/`next`/`continue`/`finish` | `(jet)` | `s`/`n`/`c`/`f` | good | high |
-| B — spelled-out | `step-into`/`step-over`/`resume` | `jet debug ▸` | none | best | low (more typing) |
-| C — single-letter | `s`/`n`/`c`/`b` | `(jet)` | words are the aliases | poor | highest |
-
-**Options:**
-- **Option A — debugger-familiar (recommended).** Full words `step`/`next`/`continue`/`finish` + single-letter aliases `s`/`n`/`c`/`f`; prompt `(jet)`; `help` lists everything.
-  ```shell
-  $ jet debug debug_sum.jet
-  breakpoint hit  debug_sum.jet:4  in main()
-     3 |   loop i in 1..6 {
-     4 |     total += i              <- here
-     5 |   }
-  locals:  total = 0   i = 1
-  (jet) next
-     5 |   }
-  locals:  total = 1   i = 1
-  (jet) help
-  step (s) into   next (n) over   continue (c)   finish (f) out   break <line>   list   quit
-  ```
-- **Option B — spelled-out beginner-first.** Hyphenated `step-into`/`step-over`/`resume`, no aliases, prompt `jet debug ▸`. Self-describing; costs experts keystrokes every step.
-  ```shell
-  $ jet debug debug_sum.jet
-  breakpoint hit at debug_sum.jet line 4, in main()
-        3    loop i in 1..6 {
-     →  4      total += i
-     locals
-        total = 0
-        i     = 1
-  jet debug ▸ step-over
-  ```
-- **Option C — terse single-letter primary.** `s`/`n`/`c`/`b` are canonical; full names are the alias. Fast for experts, opaque for a first-timer.
-  ```shell
-  $ jet debug debug_sum.jet
-  brk debug_sum.jet:4 main()
-   4| total += i      <-
-   loc: total=0 i=1
-  (jet) n
-  ```
-
-**Recommendation:** Option A — serves both tiers: readable words + `<- here`/`locals:` layout for beginners, `s`/`n`/`c`/`f` + `(jet)` muscle memory for experts. One surface that needs no second style later (I8).
-
-**Owner Q — single-letter aliases in v1?** Ship `s`/`n`/`c`/`f` from day one, or ship only full words first and add aliases once the verb list settles? Recommend shipping aliases — they're the expert half of A's pitch and lldb's letters are safe to copy.
+> **Drained 2026-06-24 (batch 3).** Two follow-on cards ratified: **D-JSONVERB1 = A**
+> (`json.to_string(v)` + `json.to_string_pretty(v)`, 2-space indent — renames/retires
+> `json.render`; keeps Jet's one `to_`-prefixed conversion idiom, matching ratified `to_float`
+> S42; bare `json.string`/`json.stringify` rejected) and **D-TXN4 = A** (`#Transact(order) { …
+> order.on_commit(…) }` — the scope's name *is* the handle, mirroring ratified `region r { …
+> r.alloc(…) }`; refines D-TXN3's `scope.on_commit` → `<name>.on_commit`, semantics unchanged;
+> the D-TXN2 fix-it string is updated to match). The `.Type()`-conversion idea (`x.Float()`)
+> was discussed and **declined** — `x.to_float()` (S42) stays as ratified and shipping; no
+> reopen. Recorded in `syntax-decisions.md`, cards stripped.
 
 ---
 
-### D-LINALG1 — Linear-algebra type & method names
-
-**Gist:** Decide the user-typed type and method names for `jet.linalg` (`Vec3`/`Matrix`/`.dot`/`.matmul`).
-
-**Story.** Walter, a game-engine programmer porting his renderer, opens `jet.linalg` to build a view matrix and a lighting dot-product. D-MATHLIB1 (`syntax-decisions.md:2190`) blessed the package's existence but not one name he'll type — `Vec3`/`Matrix`/`dot`/`cross`/`matmul` are an agent assumption (`math-linalg-simd.md:49-54`), never balloted.
-
-**Other languages:** glam (Rust gamedev) `Vec3::new`, `a.dot(b)`, `Mat4`, `a * b`; nalgebra `Vector3`/`Matrix4`; GLSL/Unity `vec3`/`Vector3`, `mat4`, `dot(a,b)`.
-
-**Tradeoffs:**
-| Option | Type names | Method spelling | Scales past fixed dims | Reads native to |
-|--------|---|---|---|---|
-| A — fixed-dim family | `Vec2/3/4`, `Mat3/4` | `.dot` `.cross` `.matmul` | no | graphics/game devs |
-| B — spelled-out | `Vector3`, `Matrix4` | `.dot` `.cross` | no | readers/scientists |
-| C — generic sized | `Vec<3>`, `Matrix<3,3>` | `.dot` `.matmul` | yes (N-dim) | expert/numerics |
-| D — operator-forward | A's types + `+ - *` ops | ops + `.dot`/`.matmul` | follows host | math-heavy code |
-
-**Options:**
-- **Option A — fixed-dim named family (recommended).** `Vec2/3/4`, `Mat3/4`; `.dot()`, `.cross()`, `.matmul()`. Mirrors GLSL/glam/Unity.
-  ```jet
-  use jet.linalg as la
-  fn main() {
-      a @= la.Mat2 {r0: la.Vec2 {x: 1.0, y: 2.0}, r1: la.Vec2 {x: 3.0, y: 4.0}}
-      b @= la.Mat2 {r0: la.Vec2 {x: 5.0, y: 6.0}, r1: la.Vec2 {x: 7.0, y: 8.0}}
-      print(a.matmul(b).row(0).x)          // 19.0
-      light @= la.Vec3 {x: 0.0, y: 1.0, z: 0.0}
-      print(light.dot(la.Vec3 {x: 0.0, y: 0.7, z: 0.7}))   // 0.7
-  }
-  ```
-- **Option B — spelled-out.** `Vector3`/`Matrix4`, same methods. Most readable, most keystrokes; diverges from the graphics dialect.
-  ```jet
-  light @= la.Vector3 {x: 0.0, y: 1.0, z: 0.0}
-  print(light.dot(surface))                // 0.7
-  ```
-- **Option C — generic comptime-sized.** `Vec<3>`/`Matrix<3,3>` riding D-FIXARR1/S76; `Vec3` etc. are aliases. One type scales to any N; heavier signatures.
-  ```jet
-  a @= la.Matrix<2,2>(1.0, 2.0, 3.0, 4.0)
-  light @= la.Vec3 {x: 0.0, y: 1.0, z: 0.0}   // alias for Vec<3>
-  ```
-- **Option D — operator-forward.** A's type names, common ops overloaded (`a * 2.0` scale, `a + b`); `.dot`/`.matmul`/`.cross` stay named (no ASCII `·`/`×`). Raises the operator-overloading question.
-  ```jet
-  scaled @= a * 2.0           // elementwise; matmul stays a.matmul(b)
-  ```
-
-**Recommendation:** Option A names, **with C's `Vec<N>`/`Matrix<M,N>` as the underlying generic** and A as aliases over it. Beginners/graphics devs get the short familiar names; the expert reaching for 7-dim uses the generic. One implementation, two reading levels (I8). *Note: the const-generic `<N>` spelling is not yet ratified (today's fixed sizes use `[T#N]`, S76) — picking C also blesses value args in `<…>`, so that spelling is part of this decision, not an assumption.*
-
-**Owner Q — `·`/`×` sigils:** the mathematician's `a · b`/`a × b` are non-ASCII. All options keep `.dot`/`.cross`. Introducing `·`/`×` operators is a separate sigil decision — flag if you want it queued.
-
----
-
-### D-SIMD2 — SIMD lane construction & access surface
-
-**Gist:** Decide how a user builds a SIMD lane vector, reads one lane, and spells lane ops (`F32x4.splat`/`v[0]`/`+` vs `.lane`/`.add`).
-
-**Story.** Dolores, writing a vectorized audio mixer, reaches for `F32x4` to add two 4-lane buffers and take a horizontal sum. D-SIMD1 (`syntax-decisions.md:2196`) gave her the type names and safe-by-default ops, but spelled neither how she constructs a lane vector nor how she reads a lane. The `simd_kernel.jet` example assumes an API never decided (`math-linalg-simd.md:33,57-59`).
-
-**Other languages:** `std::simd` `f32x4::splat`, `from_array`, `a + b`, `v[0]`, `reduce_sum`; Zig `@Vector(4,f32)`, `a + b`, `v[0]`; Swift `SIMD4<Float>(1,2,3,4)`, `a + b`, `v.sum()`.
-
-**Tradeoffs:**
-| Option | Build | Lane read | Op spelling | Ties to `[T#N]` |
-|--------|---|---|---|---|
-| A — constructor + index | `F32x4(1,2,3,4)`, `.splat(0)` | `v[0]` | `a + b` | via widen |
-| B — array adapter | `[F32#4].simd()` | `v.lane(0)` | `v.add(w)` | directly |
-| C — method-only | `F32x4.of(1,2,3,4)` | `v.get(0)` | `v.mul(w)` | via `.of` |
-
-**Options:**
-- **Option A — constructor + index (recommended).** `F32x4(1,2,3,4)`/`F32x4.splat(0.0)`; lane read `v[0]`; ops via `+`/`*`.
-  ```jet
-  fn main() {
-      a @= F32x4(1.0, 2.0, 3.0, 4.0)
-      b @= F32x4(10.0, 20.0, 30.0, 40.0)
-      sum @= a + b                         // 11,22,33,44
-      print(sum[0] + sum[1] + sum[2] + sum[3])   // 110.0
-  }
-  ```
-- **Option B — adapter over fixed arrays.** Build from `[F32#4]` via `.simd()`; lane read `v.lane(0)`; method ops. Cleanest tie to D-FIXARR1; more verbose.
-  ```jet
-  a: [F32#4] @= [1.0, 2.0, 3.0, 4.0]
-  sum @= a.simd().add(b.simd())
-  print(sum.lane(0) + sum.lane(1) + sum.lane(2) + sum.lane(3))
-  ```
-- **Option C — explicit method-only.** `F32x4.of(1,2,3,4)`; lane read `v.get(0)`; named ops `v.add(w)`. Most explicit, most verbose; no operator question to settle.
-  ```jet
-  sum @= F32x4.of(1.0, 2.0, 3.0, 4.0).add(b)
-  print(sum.get(0))
-  ```
-
-**Recommendation:** Option A — `splat` + tuple constructor + `v[0]` + `+`/`*` reads like the math, safe-by-default per D-SIMD1. Keep **B's `[F32#4]` interop as the named bridge** (`arr.simd()`/`v.to_array()`) so lane vectors round-trip with the ratified fixed-array type.
-
-**Owner Q — operator overloading on lane types?** Option A makes `+`/`*` work on `F32x4`. Jet has no general operator-overloading stance; blessing it here (even built-in lane types only) sets precedent. OK for built-in SIMD types only, or hold to named methods (C) until a broader decision? Same question gates D-LINALG1 Option D.
-
----
-
-### D-SUPPLY1 — Supply-chain command surface (vendor / audit / SBOM)
-
-**Gist:** Decide the user-facing verbs and flags for vendoring deps, auditing for advisories, and emitting an SBOM.
-
-**Story.** Walter, a release engineer, is wiring an airgapped CI job: pull every locked dependency into the repo, scan for advisories before publishing, and hand compliance a machine-readable bill of materials. None of those three verbs has a ratified spelling. The plan `package-ecosystem-trust.md:116-150` mints `jet vendor`, `jet audit`, `--sbom`, `--vendor-dir` as if ratified, but the only authority is a roadmap label "D-PKGS1" that **is never defined** in `syntax-decisions.md`. The parent D-PKGSIGN1 (`:2418`) ratified only signing/checksum — not these verbs.
-
-**Tradeoffs:**
-| Option | Top-level verbs added | Discoverable in `jet --help` | Scriptable in CI |
-|--------|---|---|---|
-| A — dedicated verbs + flags | 2 (`vendor`, `audit`) + flags | yes, flat | yes |
-| B — one `supply` umbrella | 1 (`supply`) | grouped | yes, more typing |
-| C — manifest-driven | 1 (`audit`) | minimal | weakest |
-
-**Options:**
-- **Option A — dedicated verbs + flags (recommended).** Each task its own top-level verb, mirroring `jet test`/`jet debug`; SBOM rides as a flag on build/publish.
-  ```shell
-  $ jet vendor --vendor-dir vendor/
-  vendored 2 packages into vendor/ (acme/billing@1.7.2, core.http@3.0.1)
-  $ jet audit
-  acme/billing  1.7.2  CRITICAL  JSA-2026-0044  auth bypass in token parse
-  1 critical advisory found      # exit status 1
-  $ jet build --sbom
-  wrote target/checkout-service.spdx
-  ```
-- **Option B — one `supply` umbrella.** `jet supply vendor` / `audit` / `sbom`. Fewer top-level verbs (I8), more typing.
-  ```shell
-  $ jet supply audit
-  acme/billing 1.7.2  CRITICAL  JSA-2026-0044
-  ```
-- **Option C — manifest-driven + minimal verbs.** Vendoring/SBOM become `pack.jet` settings; only `jet audit` stays a verb. Smallest CLI surface, least scriptable.
-  ```jet
-  // pack.jet (fields illustrative): vendor: true / sbom: true on every build
-  ```
-
-**Recommendation:** Option A — flat, discoverable verbs mirroring the existing surface, scriptable for CI (nonzero exit on CRITICAL), SBOM-as-flag keeps the common build path clean. Pick B only if holding down top-level verb count (I8) outranks discoverability. Supporting diagnostics: **E1204** (store tamper, `diagnostics.md:325`) backs `vendor` integrity today; **E1217**/**E1218** are minted by this same plan.
-
-**Owner Q — SBOM flag home.** `--sbom` on both `jet build` and `jet publish`, or only `build` (publish always emits to the registry index)? Defaulting to "flag on `build`, always-on for `publish`" unless you want it suppressible.
-
----
-
-### D-TXN3 — Deferred post-commit effects (`on_commit`)
-
-**Gist:** Decide how a `#Transact { }` block schedules an irreversible effect (email, network call) to run only after the transaction commits.
-
-**Story.** Dolores, a backend dev, writes an order handler: inside `#Transact { }` she updates the DB, but also needs a confirmation email — which can't be rolled back, so D-TXN2 forbids it inside the block. She needs it to fire *only if* the transaction commits, written next to the DB work. D-TXN2's fix-it string (`syntax-decisions.md:2472`) names `on_commit { }` as the escape hatch — but that construct was never balloted: no keyword, scoping, or ordering semantics. Meanwhile D-DEFER1 already chose a **library** form (`scope.guard(() => {…})`, `67_scope_guard.jet`) over a `defer` keyword. That precedent should govern.
-
-**Tradeoffs:**
-| Option | New keyword (I7) | Consistent with D-DEFER1 | Runs only on commit | In-block locality |
-|--------|---|---|---|---|
-| A — `scope.on_commit(…)` | none | yes (library, Drop-backed) | yes | yes |
-| B — `#OnCommit { }` block | yes | no (2nd cleanup spelling) | yes | yes |
-| C — no construct | none | n/a | n/a | no (move after block) |
-
-**Options:**
-- **Option A — library registration (recommended).** `scope.on_commit(() => {…})` inside the block stores the lambda; runs only after a clean commit, dropped on rollback. Same shape as ratified `scope.guard`.
-  ```jet
-  fn place_order(order: Order) -> OrderId ? OrderErr {
-      #Transact {
-          id @= db.insert("orders", order)?
-          db.decrement_stock(order.sku, order.qty)?
-          scope.on_commit(() => { mail.send(order.email, "Order confirmed") })
-          return ok(id)
-      }
-  }
-  ```
-- **Option B — `#OnCommit { }` block.** A nested PascalCase block (D-CASING1) whose body runs post-commit. Reads clearly; a second cleanup spelling alongside `scope.guard`.
-  ```jet
-  #Transact {
-      id @= db.insert("orders", order)?
-      #OnCommit { mail.send(order.email, "Order confirmed") }
-      return ok(id)
-  }
-  ```
-- **Option C — no construct.** Drop `on_commit`; move the effect after the block. Simplest (I8); loses in-transaction locality.
-  ```jet
-  id @= #Transact { /* … */ return ok(inner) }?
-  mail.send(order.email, "Order confirmed")   // only if commit succeeded
-  ```
-
-**Recommendation:** Option A — reuses the ratified D-DEFER1 `scope.*` model (no new keyword, I7 untouched), same Drop-backed lowering, keeps intent local. Whichever wins, the **D-TXN2 fix-it string at `syntax-decisions.md:2472`** must be rewritten to match.
-
----
-
-### D-SERDE2 — Serde hand-impl names (method, value-tree type, error)
-
-**Gist:** Name the trait methods, abstract value-tree type, and error type a user types when hand-writing a serializer (the non-derive path that ships now).
-
-**Story.** Walter has a `Point` struct and no derives yet (S56 is Epoch 3). To get JSON out today he hand-writes the serialize impl, so he types the value-tree type, its variants, the method, and the error by hand — names D-SERDE1 never balloted (`serde-model.md:81-93,171-180`).
-
-**Anchor — what Core already calls this:** the shipped JSON tree (`Source/Prelude/CoreLib.rs:40`) is type `JSON` with variants `.Text/.Boolean/.Number/.Object/.Array/.Null`; verbs `json.parse`/`json.render`. The abstract tree should rhyme with that.
-
-**Tradeoffs:**
-| Option | Method verbs | Tree type + variants | Error | Consistency w/ Core `JSON` |
-|--------|---|---|---|---|
-| A — Jet-short | `to_data`/`from_data` | `DataValue` · `.Map/.Seq/.Int/.Float/.Text/.Bytes/.Bool/.Null` | `SerdeError` | partial |
-| B — serde-rs familiar | `serialize`/`deserialize` | `Value` · `.Null/.Bool/.Number/.Text/.Seq/.Map` | `DecodeError` | weak (`Value` too generic) |
-| C — plain-English | `encode`/`decode` | `DataNode` | `SerdeFault` | clashes (`decode` = `json.decode`) |
-
-**Options:**
-- **Option A — Jet-short (recommended).** `to_data`/`from_data`; `DataValue`; `SerdeError`; variants aligned to Core's `JSON`.
-  ```jet
-  struct Point { x: Int, y: Int }
-  impl Point: Serialize {
-      fn to_data(self) -> DataValue {
-          return DataValue.Map([("x", DataValue.Int(self.x)), ("y", DataValue.Int(self.y))])
-      }
-  }
-  // json.render(p.to_data())  ->  {"x":1,"y":2}
-  ```
-- **Option B — serde-rs familiar.** `serialize`/`deserialize`; `Value`; `DecodeError`. Lowest surprise for Rust refugees, but `Value` is too generic for a Core public type.
-  ```jet
-  impl Point: Serialize { fn serialize(self) -> Value { return Value.Map([…]) } }
-  ```
-- **Option C — plain-English.** `encode`/`decode`; `DataNode`; `SerdeFault`. Rejected: `decode` already names the lenient JSON entry point (`json.decode`, spec:954).
-
-**Recommendation:** Option A — short teachable verb pair, self-explaining type, `SerdeError` matches the model name, variants echo Core's `JSON.Text`, no clash with `json.decode`.
-
-**Owner Q — variant spelling alignment:** Core's `JSON` spells scalars `.Boolean/.Number/.Text`; the abstract tree above uses shorter `.Bool/.Int/.Float/.Text`. Identical to `JSON`, or shorter on the lower type? (Recommend short — `.Int` vs `.Float` is a real distinction `JSON` collapses into `.Number`.)
-
----
-
-### D-SERDE3 — `rename_all` casing-style menu
-
-**Gist:** Decide the set — and the typed-vs-stringly spelling — of casing styles in `#[rename_all(...)]`.
-
-**Story.** Dolores ships a JSON API. Her Jet fields are `snake_case` (house style), but the wire contract is `camelCase`. She reaches for `rename_all` (D-SERDE1 ratified the attribute name) and must type the style — but which spelling, from which menu, is unratified (`serde-model.md:124,129`; E2409 fires on anything off-menu).
-
-**Other languages:** serde-rs `#[serde(rename_all = "camelCase")]` — magic string, full set incl. `SCREAMING_SNAKE_CASE`, `kebab-case`.
-
-**Tradeoffs:**
-| Option | Form | Accepted menu | Typed vs stringly |
-|--------|---|---|---|
-| A — serde full strings | `rename_all("camelCase")` | 5 styles | stringly |
-| B — curated strings | `rename_all("camelCase")` | camel/snake/pascal | stringly |
-| C — typed keyword | `rename_all(camel)` | camel/snake/pascal | typed, tab-completable |
-
-**Options:**
-- **Option A — serde full string set.** All five styles. Familiar; magic string, typo-prone; ships two styles JSON/CSV almost never use.
-  ```jet
-  #[Serialize, rename_all("camelCase")]
-  struct UserAccount { first_name: String }   // {"firstName": …}
-  ```
-- **Option B — curated string subset.** Only `"camelCase"`/`"snake_case"`/`"PascalCase"`. Simpler menu (I8); still a magic string.
-  ```jet
-  #[Serialize, rename_all("camelCase")]
-  struct UserAccount { first_name: String }
-  ```
-- **Option C — typed keyword arg (recommended).** `#[rename_all(camel)]`/`(snake)`/`(pascal)` — a closed keyword vocabulary, tab-completable in the LSP, no quoting, E2409 shows the full closed list.
-  ```jet
-  #[Serialize, rename_all(camel)]
-  struct UserAccount { first_name: String }   // {"firstName": …}
-  ```
-
-**Recommendation:** Option C — the owner has repeatedly chosen typed values over magic strings; a closed keyword set gives beginners LSP completion and a self-contained error menu, and stays minimal (I8 — add `screaming`/`kebab` only when a wire format proves it needs one). If Rust-refugee familiarity outweighs the typed-pin win, fall back to **B** over A.
-
-**Owner Q — keyword vocabulary, if C:** short `camel`/`snake`/`pascal`, or fuller `camel_case`/`snake_case`/`pascal_case`? (Recommend short — `rename_all` already supplies "case" context.)
-
----
-
-### D-NOSTD1 — `no_std`/freestanding as a user-facing manifest field? *(reconcile)*
-
-**Gist:** Should `pack.jet` get a real `no_std: true` opt-in, or does freestanding stay an internal build mode only?
-
-**Story.** Walter, a firmware engineer, wants to ship a sensor loop with no stdlib and opens `pack.jet` to declare it — the freestanding flagship slice (`flagship-vertical-slices.md:82`) told him to write `no_std: true`. But `philosophy.md:127` lists `no_std`/sub-std as **not pursued in v1**; `:118` says we accept the std baseline. The plan assumed a manifest field the stated v1 stance rules out.
-
-**Tradeoffs:**
-| Option | v1 scope | User surface | Demo still possible? |
-|--------|---|---|---|
-| A — drop the field | honors `philosophy.md:127` | none (internal build mode) | yes, via internal flag |
-| B — ratify the field | reverses the stance | `no_std: true` opt-in | yes, plus an opt-in |
-
-**Options:**
-- **Option A — drop the field, freestanding stays internal (recommended).** No user-facing manifest opt-in in v1; the showcase compiles under an internal build mode.
-  ```jet
-  // pack.jet — unchanged, no special field. The freestanding DEMO still ships,
-  // built with an internal flag, proving @unsafe + #Layout(c) + [U8#N] + no-alloc.
-  ```
-- **Option B — ratify the field, reverse the v1 stance.** Add `no_std:`/`freestanding:`/`core_only:`, accepting v1 now supports a sub-std target.
-  ```jet
-  // pack.jet (field illustrative)
-  no_std: true   // opts the whole package out of the std baseline
-  ```
-
-**Recommendation:** Option A — `philosophy.md:127` already settled `no_std` out of v1; a manifest field would silently reverse a ranked decision and add surface for a capability we don't commit to (I8). The demo loses nothing.
-
----
-
-### D-JSONVERB1 — struct→JSON verb name (`json.render` vs `json.to_string`) *(reconcile)*
-
-**Gist:** One spelling for value→JSON string — keep ratified `json.render`, don't add `json.to_string`.
-
-**Story.** Dolores serializes a struct to send over the wire. The shipped example (`30_json.jet:5`) and spec (`spec.md:953`) say `json.render(data)`. The serde plan (`serde-model.md:179`) invents a third spelling `json.to_string(p)` for the identical operation — two names for one verb.
-
-**Options:**
-- **Option A — keep ratified `json.render`, drop `to_string` (recommended).** One verb; the plan example is the drift and gets fixed.
-  ```jet
-  #[Serialize]
-  struct Point { x: Int, y: Int }
-  fn main() {
-      p @= Point {x: 1, y: 2}
-      print(json.render(p))         // {"x":1,"y":2}
-      print(json.render_pretty(p))  // multi-line, already ratified
-  }
-  ```
-- **Option B — add `json.to_string` as a distinct verb.** Only if there's a real semantic difference worth a second name.
-  ```jet
-  print(json.to_string(p))    // same bytes as render(p)
-  ```
-
-**Recommendation:** Option A — D-JSONOUT1 ratified `json.render`; a synonym producing identical output is the redundant surface I8 rejects. Confirm `render`, fix the plan line.
-
----
-
-### D-NUMOPS2 — overflow default for sized & unsigned integers *(reconcile)*
-
-**Gist:** Do `U8`/`I16`/etc. trap on overflow like `Int` (D-NUMOPS1), or do unsigned/sized types silently wrap?
-
-**Story.** Hank, writing byte-level packet math, increments a `U8` holding `255`. The sized-ints plan (`dsg9-sized-integers-impl.md:23`) says it will "document `U8` wrap/overflow behaviour" — phrased as if `U8` might **wrap** to `0`. But D-NUMOPS1 (`syntax-decisions.md:2285`) ratified **trap-on-overflow by default**, with `wrapping(…)`/`saturating(…)`/`checked(…)` as the visible opt-ins. The plan reads as a divergent default the ratified rule doesn't grant.
-
-**Other languages:** Rust debug panics, release wraps; C: unsigned wraps by spec, signed is UB.
-
-**Options:**
-- **Option A — every width inherits the D-NUMOPS1 trap default (recommended).** `U8`/`I16`/… trap exactly like `Int`; opt-ins are the only way to wrap.
-  ```jet
-  b: U8 := 255
-  b = b + 1            // TRAP: U8 overflow
-  b = wrapping(b + 1)  // 0 — wrap is opt-in, visible at the use site
-  ```
-- **Option B — unsigned/sized types wrap (C-like) by default.** Matches C/Rust-release intuition for byte math; a silent divergent default.
-  ```jet
-  b2: U8 := 255
-  b2 = b2 + 1          // 0, silently, no signal
-  ```
-
-**Recommendation:** Option A — one overflow rule for all widths is simplest to teach (I8) and keeps the safe-by-default trap rail; a width-dependent silent default is the "no silent bugs" footgun philosophy rejects. The plan should document that `U8` *traps* and `wrapping(…)` gives the C behavior.
-
----
-
-## Value-tag application surface — board card c62
-
-### D-QUAL3 — How a unit-tagged number is written in a type annotation
-
-**Gist:** D-UNIT1 ratified the unit *tag* `#Unit(usd)`, the `#UnitFamily` declaration, the `9.99.usd` literal, and the mismatch errors — but never how you write the *type* of a dollar amount in a signature. Pick that one spelling. (Single pick; coercion and the plain-marker-tag case are out of scope — see below.)
-
-**Story.** Della is porting an invoicing module to Jet. `9.99.usd` literals already work and unit-mismatched arithmetic already errors (E0128 unit-vs-unit, E0129 unit-vs-bare). But the moment she writes a function — `fn subtotal(price: ???, qty: Int) -> ???` — she has to name the *type* of a US-dollar amount, and no ratified decision says how that `???` is spelled.
-
-**In the wild:**
-```jet
-#UnitFamily(currency) { usd, eur, gbp }    // D-UNIT1, ratified
-
-fn subtotal(price: ???, qty: Int) -> ??? {  // <- D-QUAL3 decides the `???`
-    price * qty                              // unit-matching arithmetic already pinned
-}
-
-let p = 9.99.usd        // literal carries the unit (ratified)
-let s = subtotal(p, 3)  // s is a usd amount; how is that type written down?
-```
-
-**Other languages:** F# units-of-measure annotate as `float<usd>` (angle param on the base type). Rust uses a newtype — you annotate a distinct `Usd` (`struct Usd(f64)`), no tag surface. Haskell's `tagged` writes `Tagged USD Double` (prefix wrapper).
-
-**Tradeoffs:**
-
-| Option | A usd amount is written | Sigil in everyday signatures | Matches an existing Jet idiom | Beginner readability |
-|---|---|---|---|---|
-| A — postfix marker | `Float #Unit(usd)` | yes, every annotation | no (Jet markers all prefix) | medium |
-| B — prefix marker | `#Unit(usd) Float` | yes, every annotation | yes (`#Test fn`, `#Numeric distinct`) | medium |
-| C — family mints a type | `Usd` | none | yes (D-DIST2 distinct types) | high — reads like English |
-| D — angle param | `Float<usd>` | yes, but light | partial (generics already use `<>`) | medium-high (F#-familiar) |
-
-- **Option A — postfix marker `Float #Unit(usd)`.** The tag rides the base type at the end.
-  ```jet
-  fn subtotal(price: Float #Unit(usd), qty: Int) -> Float #Unit(usd) { price * qty }
-  ```
-- **Option B — prefix marker `#Unit(usd) Float`.** The marker leads, like every other Jet `#Marker`.
-  ```jet
-  fn subtotal(price: #Unit(usd) Float, qty: Int) -> #Unit(usd) Float { price * qty }
-  ```
-- **Option C — the family mints a named type; annotate the name (recommended).** `#UnitFamily(currency) { usd, eur, gbp }` mints one distinct type per member (`usd`→`Usd`), so signatures are plain type names and the `#Unit` machinery stays in the family declaration. This is D-UNIT1's own framing — "the upgrade to D-DIST2," the hand-written `distinct` newtype as the fallback.
-  ```jet
-  #UnitFamily(currency) { usd, eur, gbp }   // mints Usd, Eur, Gbp (distinct, erase to Float)
-  fn subtotal(price: Usd, qty: Int) -> Usd { price * qty }
-  ```
-- **Option D — angle param `Float<usd>` (F#-style).** The unit is a bracketed parameter on the base numeric type.
-  ```jet
-  fn subtotal(price: Float<usd>, qty: Int) -> Float<usd> { price * qty }
-  ```
-
-**Recommendation:** Option C. It makes signatures read like plain English (`price: Usd`), honors D-UNIT1's explicit "upgrade to D-DIST2" intent, keeps the `#Unit` sigil out of everyday code, and reuses the distinct-type machinery already shipped — the `#Unit`/`.usd`/arithmetic surface from D-UNIT1 is unchanged underneath. This unblocks c68. Coercion is already pinned by D-UNIT1 (unit-vs-bare E0129; `.raw()` strips), so this card decides only the annotation spelling. *(Drafted 2026-06-24 after the c62 tag foundation shipped; agent-reviewed — split from the original plain-tag axis, which is deferred as D-QUAL4 below; F# option added.)*
-
----
-
-## Clarification ratifications — confirm the correction (no vote; pure drift vs a ratified rule)
-
-**C-CASING — Tag casing in plans must reconcile to D-CASING1.** `units-tag.md:14` writes `#unit(usd)`, `transact-rollback-semantics.md` writes `#transact`, `c71-typestate-impl.md` writes `#no_copy`. D-CASING1 (`syntax-decisions.md:2040`, ratified, owner-directed) makes all tags PascalCase. **Correction:** reconcile the plans to `#Unit(usd)`, `#Transact`, `#NoCopy`. Nothing user-facing changes.
-
-**C-MANIFEST — `pkg.jet` references must reconcile to `pack.jet`.** `package-ecosystem-trust.md:99` and `flagship-vertical-slices.md` (lines 17/31/58/82/107/127/153/155) write `pkg.jet`; the ratified manifest filename is **`pack.jet`** — a clean break, no alias (`syntax-decisions.md:790`). **Correction:** reconcile all `pkg.jet` references to `pack.jet`.
+> **Drained 2026-06-24 (batch 2).** The owner ratified six cards from the missing-decision
+> audit: **D-DBG3 = A** (`jet debug` interactive surface — `step`/`next`/`continue`/`finish`
+> + `s`/`n`/`c`/`f` aliases, `(jet)` prompt, `<- here`/`locals:` layout); **D-LINALG1 = A**
+> (`jet.linalg` names `Vec2/3/4`/`Mat3/4`, `.dot`/`.cross`/`.matmul` — A names as aliases over
+> a `Vec<N>`/`Matrix<M,N>` generic substrate, per owner); **D-SUPPLY1 = A** (dedicated
+> `jet vendor` / `jet audit` verbs + `--vendor-dir`, SBOM as a `--sbom` flag); **D-TXN3 = A**
+> (`scope.on_commit(() => {…})` library form, no new keyword — the D-TXN2 fix-it string is
+> updated to match; the "name the transact scope" follow-on is now open as **D-TXN4**);
+> **D-NUMOPS2 = A** (sized/unsigned integers inherit the D-NUMOPS1 trap-on-overflow default;
+> `wrapping(…)` is the opt-in); **D-QUAL3 = C** (a `#UnitFamily` mints one distinct type per
+> member — `usd`→`Usd` — so signatures read `price: Usd`; the family tag is PascalCase
+> `#UnitFamily`). All recorded in `syntax-decisions.md`, cards stripped, plans unblocked
+> (dap-debugger, math-linalg, package-ecosystem-trust, transact-rollback, dsg9, units; c68
+> unblocked by D-QUAL3).
 
 ---
 

@@ -666,6 +666,7 @@ impl<'a> Checker<'a> {
                 receiver: Box::new(old),
                 method: "clone".to_string(),
                 method_span: span,
+                type_args: Vec::new(),
                 args: Vec::new(),
                 recv_type: None,
                 resolved_ret: None,

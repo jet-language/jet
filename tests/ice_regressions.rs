@@ -60,10 +60,10 @@ fn b1_json_text_clones_borrowed_view_param() {
     assert_compiles(
         "b1_json_text_view",
         r#"
-use core.json as json
+use core.encoding.json as json
 fn wrap(x: String) -> String {
     j @= JSON.Text(x)
-    return json.render(j)
+    return json.to_string(j)
 }
 fn main() {
     print(wrap("hi"))
@@ -93,12 +93,12 @@ fn b3_map_get_through_object_pattern() {
     assert_compiles(
         "b3_map_get_object_pattern",
         r#"
-use core.json as json
+use core.encoding.json as json
 fn main() {
     data @= json.parse("{{\"a\":1}}") ?? panic("bad")
     if data == Object(root) {
         v @= root.get("a") ?? JSON.Null
-        print(json.render(v))
+        print(json.to_string(v))
     }
 }
 "#,

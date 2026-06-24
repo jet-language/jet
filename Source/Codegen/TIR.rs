@@ -3558,6 +3558,25 @@ fn method_call_in_subset(
     // polymorphic math/random/io specials + every closure-taking / handle-constructor
     // call stay on the AST path.
     if recv_type.is_none() {
+        // D-ENC1: nested-namespace core call `<alias>.<leaf>.method(args)` (e.g.
+        // `encoding.json.to_string(x)`). Mirrors the Ident-alias arm below for the
+        // `Field(Ident(alias), leaf)` receiver shape; covered iff `<ns>.<leaf>` is a real
+        // submodule with a covered method.
+        if let Expr::Field(base, leaf, _) = receiver {
+            if let Expr::Ident(alias, _) = &**base {
+                if !locals.contains(alias) {
+                    if let Some(ns) = cx.core_imports.get(alias) {
+                        let submodule = format!("{}.{}", ns, leaf);
+                        if crate::Loader::is_known_core_module(&submodule) {
+                            return core_call_covered(&submodule, method)
+                                && args.iter().all(|a| {
+                                    a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
+                                });
+                        }
+                    }
+                }
+            }
+        }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
                 if let Some(module) = cx.core_imports.get(alias) {
@@ -6665,7 +6684,9 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
         // exactly the synthetic `.clone()` or a user instance method on a covered
         // type; lower accordingly. Every dispatch fact is resolved here (totality).
-        Expr::MethodCall { receiver, method, method_span, args, recv_type, resolved_ret } => {
+        Expr::MethodCall { receiver, method, method_span, type_args: _, args, recv_type, resolved_ret } => {
+            // D-SERDE6: codegen reads the decode target `T` from `resolved_ret`
+            // (`Result<T,…>`), so the call-site `type_args` need no separate threading.
             lower_method_call(receiver, method, *method_span, args, recv_type, resolved_ret.as_ref(), cx, env)
         }
         Expr::If {
@@ -7596,6 +7617,30 @@ fn lower_method_call(
     // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
     // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).
     if recv_type.is_none() {
+        // D-ENC1: nested-namespace core call `<alias>.<leaf>.method(args)`. The subset
+        // gate admitted it; resolve the submodule and build a plain `CoreCall` (the
+        // encoding calls are all monomorphic, so the type comes from `core_fixed_sig`).
+        if let Expr::Field(base, leaf, _) = receiver {
+            if let Expr::Ident(alias, _) = &**base {
+                if !env.locals.contains_key(alias) {
+                    if let Some(ns) = cx.core_imports.get(alias).cloned() {
+                        let submodule = format!("{}.{}", ns, leaf);
+                        if crate::Loader::is_known_core_module(&submodule) {
+                            let targs: Vec<TExpr> =
+                                args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                            return TExpr {
+                                ty: core_call_return_ty(&submodule, method),
+                                kind: TExprKind::CoreCall {
+                                    module: submodule,
+                                    method: method.to_string(),
+                                    args: targs,
+                                },
+                            };
+                        }
+                    }
+                }
+            }
+        }
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias) {
                 if let Some(module) = cx.core_imports.get(alias).cloned() {
@@ -9511,7 +9556,7 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // per-arm `&(…)`/`&mut (…)`/move wrappers are baked into each arm, exactly
         // as `emit_core_call` does (it ignores `CallArg.flags`).
         TExprKind::CoreCall { module, method, args } => {
-            emit_tir_core_call(module, method, args, cx)
+            emit_tir_core_call(module, method, args, &e.ty, cx)
         }
         TExprKind::Binary {
             op,
@@ -10068,7 +10113,48 @@ fn emit_tir_value_block(stmts: &[TStmt], value: &TExpr, cx: &Cx) -> String {
 /// `cx.root_prefix`/`cx.ffi_crate` are program-level. The gate only ever admits a
 /// `(module, method)` with a matching arm here, so the `/* unknown std call */`
 /// fallthrough is unreachable for a covered call (kept for parity with the AST path).
-fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> String {
+// D-SERDE: encoding-verb routing helpers — read the lowered arg type / resolved
+// return type to pick the dynamic vs typed helper. Total facts, never re-inferred (I3).
+fn enc_is_json_name(n: &str) -> bool {
+    n == "Json" || n == crate::Syntax::TYPE_JSON
+}
+/// A bare `decode` whose result OK arm is the dynamic `Json` tree (lenient path).
+fn enc_ok_is_json(ret_ty: &Type) -> bool {
+    matches!(ret_ty, Type::Result { ok, .. } if matches!(&**ok, Type::Named(n) if enc_is_json_name(n)))
+}
+/// The Rust type a typed `decode<T>` constructs — `T` for json/toml/yaml, the element
+/// `T` for CSV's `[T]`. Read from the resolved `Result<…, DecodeError>` return type.
+fn enc_target_rust(ret_ty: &Type, cx: &Cx) -> String {
+    if let Type::Result { ok, .. } = ret_ty {
+        match &**ok {
+            Type::List(elem) => cx.rust_type(elem),
+            other => cx.rust_type(other),
+        }
+    } else {
+        cx.rust_type(ret_ty)
+    }
+}
+fn enc_arg_is_json(args: &[TExpr]) -> bool {
+    matches!(args.first().map(|a| &a.ty), Some(Type::Named(n)) if enc_is_json_name(n))
+}
+/// `[[String]]` — the dynamic CSV form fed to the row renderer.
+fn enc_arg_is_string_rows(args: &[TExpr]) -> bool {
+    matches!(
+        args.first().map(|a| &a.ty),
+        Some(Type::List(inner))
+            if matches!(&**inner, Type::List(s) if matches!(&**s, Type::String))
+    )
+}
+/// `Map<String, String>` — the dynamic TOML/YAML form fed to the flat renderer.
+fn enc_arg_is_string_map(args: &[TExpr]) -> bool {
+    matches!(
+        args.first().map(|a| &a.ty),
+        Some(Type::Map { key, value })
+            if matches!(&**key, Type::String) && matches!(&**value, Type::String)
+    )
+}
+
+fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret_ty: &Type, cx: &Cx) -> String {
     let arg = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
     let regex_fn = |name: &str| {
@@ -10174,10 +10260,65 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
         ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),
         ("core.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
         ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
-        ("core.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
-        ("core.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
-        ("core.json", "render_pretty") => {
-            format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0))
+        // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms
+        // (`Json` tree / `[[String]]` / `Map`) keep their existing helpers; the typed
+        // forms route through the Encode/Decode model, distinguished by the lowered arg
+        // type (encode) or the resolved return type (decode). `is_json_value` etc. read
+        // those total facts — codegen never re-infers (I3).
+        ("core.encoding.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
+        ("core.encoding.json", "decode") => {
+            if enc_ok_is_json(ret_ty) {
+                format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0))
+            } else {
+                format!("{}::<{}>(&({}))", helper("jet_enc_json_decode"), enc_target_rust(ret_ty, cx), arg(0))
+            }
+        }
+        ("core.encoding.json", "to_string") => {
+            if enc_arg_is_json(args) {
+                format!("{}(&({}))", helper("jet_std_json_render"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_enc_json_to_string"), arg(0))
+            }
+        }
+        ("core.encoding.json", "to_string_pretty") => {
+            if enc_arg_is_json(args) {
+                format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_enc_json_to_string_pretty"), arg(0))
+            }
+        }
+        ("core.encoding.csv", "parse") => format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0)),
+        ("core.encoding.csv", "decode") => {
+            format!("{}::<{}>(&({}))", helper("jet_enc_csv_decode"), enc_target_rust(ret_ty, cx), arg(0))
+        }
+        ("core.encoding.csv", "to_string") => {
+            if enc_arg_is_string_rows(args) {
+                format!("{}(&({}))", helper("jet_ring_csv_render"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_enc_csv_to_string"), arg(0))
+            }
+        }
+        ("core.encoding.toml", "parse") => format!("{}(&({}))", helper("jet_ring_toml_parse"), arg(0)),
+        ("core.encoding.toml", "decode") => {
+            format!("{}::<{}>(&({}))", helper("jet_enc_toml_decode"), enc_target_rust(ret_ty, cx), arg(0))
+        }
+        ("core.encoding.toml", "to_string") => {
+            if enc_arg_is_string_map(args) {
+                format!("{}(&({}))", helper("jet_ring_toml_render"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_enc_toml_to_string"), arg(0))
+            }
+        }
+        ("core.encoding.yaml", "parse") => format!("{}(&({}))", helper("jet_ring_yaml_parse"), arg(0)),
+        ("core.encoding.yaml", "decode") => {
+            format!("{}::<{}>(&({}))", helper("jet_enc_yaml_decode"), enc_target_rust(ret_ty, cx), arg(0))
+        }
+        ("core.encoding.yaml", "to_string") => {
+            if enc_arg_is_string_map(args) {
+                format!("{}(&({}))", helper("jet_ring_yaml_render"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_enc_yaml_to_string"), arg(0))
+            }
         }
         // E2-M7: streaming file handles (D-IO2).
         ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
@@ -10192,12 +10333,6 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
         ("core.path", "extension") => format!("{}(&({}))", helper("jet_std_path_extension"), arg(0)),
         ("core.path", "normalize") => format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0)),
         // E2-M9: first-party ring packages.
-        ("jet.csv", "parse") => format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0)),
-        ("jet.csv", "render") => format!("{}(&({}))", helper("jet_ring_csv_render"), arg(0)),
-        ("jet.toml", "parse") => format!("{}(&({}))", helper("jet_ring_toml_parse"), arg(0)),
-        ("jet.toml", "render") => format!("{}(&({}))", helper("jet_ring_toml_render"), arg(0)),
-        ("jet.yaml", "parse") => format!("{}(&({}))", helper("jet_ring_yaml_parse"), arg(0)),
-        ("jet.yaml", "render") => format!("{}(&({}))", helper("jet_ring_yaml_render"), arg(0)),
         ("jet.log", "info") => format!("{}(&({}))", helper("jet_ring_log_info"), arg(0)),
         ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),
         ("jet.log", "error") => format!("{}(&({}))", helper("jet_ring_log_error"), arg(0)),
@@ -10207,11 +10342,6 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
         ("jet.log", "set_trace_id") => format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0)),
         // D-LOGFMT1=A: explicit log format override.
         ("jet.log", "setup") => format!("{}(&({}))", helper("jet_ring_log_setup"), arg(0)),
-        ("jet.json", "parse") => format!("{}(&({}))", helper("jet_std_json_parse"), arg(0)),
-        // D-JSON3=B: lenient decode emits one log line per coercion; decoded value is plain.
-        ("jet.json", "decode") => format!("{}(&({}))", helper("jet_std_json_decode_lenient"), arg(0)),
-        ("jet.json", "render") => format!("{}(&({}))", helper("jet_std_json_render"), arg(0)),
-        ("jet.json", "render_pretty") => format!("{}(&({}))", helper("jet_std_json_render_pretty"), arg(0)),
         ("jet.time", "now") => format!("{}()", helper("jet_std_time_now")),
         ("jet.time", "format") => format!("{}({}, &({}))", helper("jet_ring_time_format"), arg(0), arg(1)),
         ("jet.crypto", "sha256") => format!("{}(&({}))", helper("jet_ring_crypto_sha256"), arg(0)),
@@ -11000,6 +11130,7 @@ fn mk() {
             receiver: Box::new(Expr::Ident("b".to_string(), sp)),
             method: method.to_string(),
             method_span: sp,
+            type_args: Vec::new(),
             args: Vec::new(),
             recv_type: Some("Bag".to_string()),
             resolved_ret: None,

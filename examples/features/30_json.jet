@@ -1,14 +1,14 @@
-use core.json as json
+use core.encoding.json as json
 fn main() {
     raw @= "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
     data @= json.parse(raw) ?? panic("bad json")
-    print(json.render(data))
-    print(json.render_pretty(data).contains("\n"))
+    print(json.to_string(data))
+    print(json.to_string_pretty(data).contains("\n"))
     if data == Object(entries) {
         print(entries.len())
     }
     obj: [String, JSON] := [:]
     obj["name"] = JSON.Text("jet")
     obj["ok"] = JSON.Boolean(true)
-    print(json.render(JSON.Object(obj)))
+    print(json.to_string(JSON.Object(obj)))
 }

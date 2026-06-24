@@ -12,7 +12,7 @@ use crate::AST::{
     ConstAttr, ConstDef, Contribution, ElseBranch, EnumDef,
     Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     ModuleDecl, Namespace,
-    LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
+    LambdaMeta, LambdaParam, Marker, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
     SwitchArm, TagDef, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
     Variant, VariantField, VariantPayload,
 };
