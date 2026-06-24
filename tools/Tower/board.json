@@ -1068,16 +1068,20 @@
       "type": "task",
       "title": "C-header binding example (use c.<lib>)",
       "body": "Pure I5 gap: add an examples/features entry binding a C header (engine D-CBIND3/c53 shipped). Implement-only, no decision. Yuki.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "cbind-example",
       "notes": [
         {
           "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/cbind-example",
           "at": "2026-06-21"
+        },
+        {
+          "t": "Verified shipped: Source/CBind.rs native C-prototype parser + examples/features/102_cbind (libc, golden .out) + examples/graphics/raylib_hello. use c.<lib> works, String->char* marshalling, no user-facing unsafe. Done.",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-24T10:16:22.030Z",
+      "updated": "2026-06-24",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -1637,6 +1641,10 @@
         {
           "t": "D-PKGSIGN1 ratified = B + A opt-in (2026-06-24): SHA-256 checksum is the always-on integrity floor (mandatory verify_entry, E1204); Ed25519 author signing is an opt-in, non-blocking layer — `require_signed` stays per-registry/per-dep policy, OFF by default, never a hard gate. Consumers auto-verify silently (speak only on mismatch); `jet publish` auto-keygens on first publish + nudges `jet key backup`. Ed25519/SHA-512 added natively to the ring layer (I6) when the opt-in path is built. Card stripped, recorded in syntax-decisions.md. No open gate → ready to build (Sign.rs new + signature field in Lock.rs + verify call in Fetch.rs). Plan: sidequests/package-ecosystem-trust.md §4 (steps 1-7 all unblocked).",
           "at": "2026-06-24"
+        },
+        {
+          "t": "Step 1 (D-PKGSIGN1 checksum floor) DONE: Store::verify_entry now runs at link time for path+git deps in Fetch.rs before link_into_project — the integrity floor is always-on, not just `jet store verify`. Remaining: Ed25519 signing, vendoring, SBOM, jet audit (Steps 4-7).",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
@@ -1693,6 +1701,10 @@
         {
           "t": "D-CAP7 + Phases 2/3/4 shipped; remaining work = keyword retirement (Phase 6), an attended task captured in this card. Ready on go.",
           "at": "2026-06-24 (align with overnight summary)"
+        },
+        {
+          "t": "Audit: core sigil model DONE — parser (parse_capability_sigil), Sema/Capability.rs D-CAP8 inference, codegen, examples 90-98 with .out, tests/capability_determinism. Remaining = Phase 6 keyword retirement (formatter still emits mut/take; ~37 .jet files to migrate).",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
@@ -1786,10 +1798,14 @@
         {
           "t": "D-CAP9=D DECIDED. Deferred from autonomous run (too risky unattended): not a deref-swap but a surface redesign of the unsafe-pointer tier — reconcile mem.Ptr<T>/address_of/volatile_read with *T type, *x=raw-of (prefix, #Unsafe-only), postfix p.* deref, E0208->teach p.*, Ptr<T> deprecated alias. Touches Parser/Expressions(postfix .*),Types(*T),Sema/CheckerInfer(E0208 reword),Codegen(raw-ptr lowering),core.mem. Surface in 48_lowlevel.jet/showcase/lowlevel.jet (~7 files). ATTENDED implementation task.",
           "at": "2026-06-23 (autonomous deferral)"
+        },
+        {
+          "t": "Audit: ~ ^ & disambiguation DONE (position-disambiguated in Parser/Expressions.rs). Remaining: *T raw prefix sigil + postfix deref p.* (D-CAP9), shared with c131.",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-23",
+      "updated": "2026-06-24",
       "decisions": [
         "D-CAP9"
       ]
@@ -1848,10 +1864,14 @@
         {
           "t": "D-CAP4/5/6 ratified. Implement task (deferred unattended — open metadata-format choices risk): emit resolved capability sigs into api=stable|explicit interface metadata; detect read->~/^/& drift as breaking change; include sigs in package pinning/hash. Audit: Manifest.rs:436 parses api field but NO emission exists. If metadata format is undecided, ballot it.",
           "at": "2026-06-23 (autonomous deferral)"
+        },
+        {
+          "t": "Resolved capability sigils now frozen into the published API surface (Publish/API.rs format_fn_sig emits ~/^/&/* on param types; feeds extract_public_api/diff_public_api). A read->write drift is now a breaking change (test: pkg.rs capability_sigil_frozen_in_public_api). Remaining: gate on the library { api: stable|explicit } manifest field (D-CAP4/D-CAP6) if not yet wired.",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-23",
+      "updated": "2026-06-24",
       "decisions": [
         "D-CAP4",
         "D-CAP6"
@@ -1862,7 +1882,7 @@
       "type": "task",
       "title": "&T share composes with region/arena/view (not a new mechanism)",
       "body": "&T (share/escape) must reuse the existing region {} blocks, arena allocators, and scope-bound arena views (D-ALLOC2/D-REGION1) plus task sendability - never silently infer & for performance, only on real escape/retention. Map escape/lifetime errors onto the existing E0631/E0632/E1102 vocabulary instead of adding a parallel set.",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P3",
       "workOrder": null,
       "plan": "memory-capability-model",
@@ -1878,10 +1898,14 @@
         {
           "t": "D-ALLOC2/D-REGION1 ratified. Implement task: wire &T share to compose with region{}/arena/scope-bound views; map escape/lifetime errors onto E0631/E0632/E1102 (not a parallel set); never infer & for performance. Touches Sema/CheckerOwnership.",
           "at": "2026-06-23 (autonomous deferral)"
+        },
+        {
+          "t": "Verified complete: &T Share composes with region/arena/view — AST Region stmt (D-REGION1), Sema CheckerOwnership E0631 escape checks, examples 70_arena/75_arena_regions with golden .out. No new mechanism. Done.",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-23",
+      "updated": "2026-06-24",
       "decisions": [
         "D-ALLOC2",
         "D-REGION1"
@@ -1908,10 +1932,14 @@
         {
           "t": "Folded into c127 (D-CAP9): *T replaces/aliases Ptr<T>; #Unsafe-gated; raw uninferable. Do with c127.",
           "at": "2026-06-23 (autonomous deferral)"
+        },
+        {
+          "t": "Audit: #Unsafe gate + Ptr<T>/core.mem API work (example 48_lowlevel, .out). Remaining: *T raw prefix-sigil parsing + Ptr<T>->*T canonicalization, blocked on the p.* postfix-deref redesign (D-CAP9).",
+          "at": "2026-06-24 (burndown)"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-23",
+      "updated": "2026-06-24",
       "decisions": []
     }
   ],
