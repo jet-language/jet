@@ -15,6 +15,12 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// D-FMT1: render a single simple statement (no leading indent/newline) for
+    /// the inline brace-body path. The caller guarantees `is_simple_stmt`.
+    pub(super) fn fmt_stmt_inline(&mut self, stmt: &Stmt) {
+        self.fmt_stmt(stmt);
+    }
+
     fn fmt_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Expr(e) => {
@@ -53,9 +59,7 @@ impl<'a> Fmt<'a> {
                 self.write("loop ");
                 self.fmt_cond(cond);
                 self.write(" {");
-                self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             Stmt::For {
                 var,
@@ -90,9 +94,7 @@ impl<'a> Fmt<'a> {
                     }
                 }
                 self.write(" {");
-                self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+                self.fmt_body(body);
             }
             // D-IF1: multi-arm dispatch renders as `if subject { head -> body }`
             // (the `Stmt::Switch` IR is shared with the retired `when`).
@@ -133,9 +135,7 @@ impl<'a> Fmt<'a> {
                     self.write(&format!("@{} ", _n));
                 }
                 self.write("loop {");
-                self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(inner));
-                self.end_block();
+                self.fmt_body(inner);
             }
             Stmt::Unsafe { audit, body, .. } => {
                 if let Some(reason) = audit {
@@ -216,8 +216,14 @@ impl<'a> Fmt<'a> {
     }
 
     /// S68 (D-SG2): render an `if`-expression branch `{ stmts… value }`.
-    pub(super) fn fmt_value_block(&mut self, stmts: &[Stmt], value: &Expr) {
+    /// D-FMT1: when `inline` is set and the branch holds only its value
+    /// expression (no leading statements, no inner comment, author wrote it on
+    /// one line, fits width 100), keep it as `{ value }`. Otherwise expand.
+    pub(super) fn fmt_value_block(&mut self, stmts: &[Stmt], value: &Expr, inline: bool) {
         self.write("{");
+        if inline && self.try_inline_value_block(stmts, value) {
+            return;
+        }
         self.newline();
         self.with_indent(|f| {
             f.fmt_block_stmts(stmts);
@@ -229,24 +235,78 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
+    /// D-FMT1: is this if-expression branch (no statements, just `value`)
+    /// eligible to stay on one line? Mirrors `body_inline_eligible`.
+    pub(super) fn value_block_inlineable(&self, stmts: &[Stmt], value: &Expr) -> bool {
+        if !stmts.is_empty() {
+            return false;
+        }
+        self.value_block_braces(value)
+            .is_some_and(|(open, close)| {
+                !self.span_has_comment(open, close)
+                    && self
+                        .src
+                        .get(open..close)
+                        .is_some_and(|s| !s.contains('\n'))
+            })
+    }
+
     fn fmt_if(&mut self, i: &IfStmt) {
+        // D-FMT1: the whole if/else chain shares one line shape. If any branch
+        // is multiline (author broke it, or a gate forces expansion), expand the
+        // entire chain for readability; only a chain whose every branch is
+        // inline-eligible stays inline.
+        let inline = self.chain_inlineable(i);
+        self.fmt_if_chain(i, inline);
+    }
+
+    /// True when every branch of the if/else chain is eligible to render inline
+    /// (D-FMT1 gates a–d) AND the author wrote each on a single source line.
+    fn chain_inlineable(&self, i: &IfStmt) -> bool {
+        let then_ok = i.then_body.len() == 1
+            && self
+                .single_stmt_braces(&i.then_body[0])
+                .is_some_and(|(o, c)| self.body_inline_eligible(&i.then_body, o, c));
+        if !then_ok {
+            return false;
+        }
+        match &i.else_branch {
+            None => true,
+            Some(ElseBranch::ElseIf(inner)) => self.chain_inlineable(inner),
+            Some(ElseBranch::Else(body)) => {
+                body.len() == 1
+                    && self
+                        .single_stmt_braces(&body[0])
+                        .is_some_and(|(o, c)| self.body_inline_eligible(body, o, c))
+            }
+        }
+    }
+
+    /// Render the chain. `inline` is the shared decision from `chain_inlineable`;
+    /// each branch still passes its rendered width through `fmt_body`'s gate (d),
+    /// so an over-wide branch falls back to the expanded form for that branch.
+    fn fmt_if_chain(&mut self, i: &IfStmt, inline: bool) {
         self.write("if ");
         // S68 (D-SG2): conditions use the no-paren house style — the outer
         // redundant parens of `if (cond)` are stripped.
         self.fmt_cond(&i.cond);
         self.write(" {");
-        self.newline();
-        self.with_indent(|f| f.fmt_block_stmts(&i.then_body));
-        self.end_block();
+        if inline {
+            self.fmt_body(&i.then_body);
+        } else {
+            self.fmt_body_expanded(&i.then_body);
+        }
         if let Some(else_b) = &i.else_branch {
             self.write(" else ");
             match else_b {
-                ElseBranch::ElseIf(inner) => self.fmt_if(inner),
+                ElseBranch::ElseIf(inner) => self.fmt_if_chain(inner, inline),
                 ElseBranch::Else(body) => {
                     self.write("{");
-                    self.newline();
-                    self.with_indent(|f| f.fmt_block_stmts(body));
-                    self.end_block();
+                    if inline {
+                        self.fmt_body(body);
+                    } else {
+                        self.fmt_body_expanded(body);
+                    }
                 }
             }
         }
@@ -261,9 +321,7 @@ impl<'a> Fmt<'a> {
         self.write(" ");
         self.write(Syntax::OP_ARM_ARROW);
         self.write(" {");
-        self.newline();
-        self.with_indent(|f| f.fmt_block_stmts(&arm.body));
-        self.end_block();
+        self.fmt_body(&arm.body);
     }
 
     fn fmt_switch_cond(&mut self, subject: &Expr, cond: &Expr, prec: Prec) {

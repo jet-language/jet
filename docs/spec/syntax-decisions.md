@@ -598,10 +598,24 @@ test blocks without the `#Test` marker (former S43 spelling).
 
 **S44 — Formatter style (M6)** *(ratified 2026-06-12)*: one true style,
 zero config — **4-space indent**, **same-line `{`**, **line width 100**,
-spaces around binary operators, one statement per line, single blank line
-max between items, no space before `,`/`(` of a call; no visible `;`
-(S6/S6-R — the lexer inserts terminators). `jet fmt` is the only formatter; no style knobs. Rejected:
-configurable width/indent, significant-indent formatting.
+spaces around binary operators; **one statement per line in multiline bodies,
+but a brace body the author wrote on a single line is preserved as-is when it
+holds one simple statement, contains no inner comment, and fits within the
+100-column width** (author-intent preservation, matching S69 for dot-chains);
+single blank line max between items, no space before `,`/`(` of a call; no
+visible `;` (S6/S6-R — the lexer inserts terminators). `jet fmt` is the only
+formatter; no style knobs. Rejected: configurable width/indent,
+significant-indent formatting.
+
+*Revised by D-FMT1 (owner, 2026-06-24):* `jet fmt` output is **idempotent**
+(`fmt(fmt(x)) == fmt(x)`) but no longer a strict canonical function of the AST —
+a single-statement body's line shape follows the author's source. This is an
+intentional trade of layout canonicality (non-binding per philosophy.md #4,
+which exempts structural arrangement from the "one mechanical path" priority)
+for author-respecting output (philosophy.md #2, beginner experience). The rule
+applies uniformly to all brace bodies — `if`/`else`, `while`/`for`/`loop`,
+`fn`, dispatch arms, and if-expression branches; if any branch of an if/else
+chain is multiline the whole chain expands.
 
 **S49 — Doc comments (M6/M13)** *(ratified 2026-06-12)*: `**///**`
 summary lines immediately above items; plain text in v1; shown by hover/docs

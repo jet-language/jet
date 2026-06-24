@@ -18,6 +18,27 @@ use crate::Syntax;
 
 const INDENT: usize = 4;
 
+/// D-FMT1: the width floor (gate d) for keeping a body on one line. A rendered
+/// inline body whose final column exceeds this expands instead.
+const MAX_WIDTH: usize = 100;
+
+/// D-FMT1: may this statement render inline inside a one-line brace body? Only
+/// non-block statements qualify; every block-bearing variant (`if`, loops,
+/// `switch`, `#unsafe`, etc.) must expand so fmt never nests a block inline.
+fn is_simple_stmt(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Expr(_)
+            | Stmt::Val(_)
+            | Stmt::Assign { .. }
+            | Stmt::Return(..)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::BreakLabel(..)
+            | Stmt::ContinueLabel(..)
+    )
+}
+
 /// Format a parsed program back to canonical Jet source.
 pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> String {
     let comments: Vec<Comment> = comment_toks
@@ -422,6 +443,124 @@ impl<'a> Fmt<'a> {
     fn end_block(&mut self) {
         self.newline();
         self.write("}");
+    }
+
+    /// D-FMT1 (revises S44): is the brace body the author placed between `open`
+    /// (the offset just after `{`) and `close` (the offset of `}`) eligible to
+    /// stay on one line? Mirrors the S69 dot-chain author-intent mechanism
+    /// (`chain_break_between`): the author's line-count choice is preserved, fmt
+    /// only normalizes spacing within it. Gates: exactly one statement, that
+    /// statement is simple (no nested block), no comment inside the braces, and
+    /// the author wrote the whole body on a single source line. The width-100
+    /// floor is enforced after rendering (see `fmt_body`).
+    fn body_inline_eligible(&self, body: &[Stmt], open: usize, close: usize) -> bool {
+        open <= close
+            && body.len() == 1
+            && is_simple_stmt(&body[0])
+            && !self.span_has_comment(open, close)
+            && self
+                .src
+                .get(open..close)
+                .is_some_and(|s| !s.contains('\n'))
+    }
+
+    /// True if any tracked comment falls inside `open..close` (gate c).
+    fn span_has_comment(&self, open: usize, close: usize) -> bool {
+        self.comments
+            .iter()
+            .any(|c| c.span.start >= open && c.span.start < close)
+    }
+
+    /// D-FMT1: render one brace body, choosing inline vs expanded by author
+    /// intent. The caller has already emitted ` {`. On the inline path this emits
+    /// ` <stmt> }`; on the expand path it emits the original newline-indented form
+    /// and the closing `}` via `end_block`. The body's brace offsets are located
+    /// from the lone statement's source span (only single-statement bodies are
+    /// inline-eligible, so an empty/multi body always expands without offsets).
+    fn fmt_body(&mut self, body: &[Stmt]) {
+        if body.len() == 1 {
+            if let Some((open, close)) = self.single_stmt_braces(&body[0]) {
+                if self.try_inline_body(body, open, close) {
+                    return;
+                }
+            }
+        }
+        self.fmt_body_expanded(body);
+    }
+
+    /// The expanded brace-body shape: newline, indented statements, closing `}`.
+    /// The caller has already emitted ` {`.
+    fn fmt_body_expanded(&mut self, body: &[Stmt]) {
+        self.newline();
+        self.with_indent(|f| f.fmt_block_stmts(body));
+        self.end_block();
+    }
+
+    /// Locate the `{ … }` that brackets a lone body statement: `open` is the
+    /// offset just after `{`, `close` the offset of `}`. Returns `None` if the
+    /// braces can't be found (defensive; the body then expands).
+    fn single_stmt_braces(&self, stmt: &Stmt) -> Option<(usize, usize)> {
+        let start = stmt_start(stmt);
+        let end = stmt_end(stmt);
+        let open = self.src.get(..start)?.rfind('{')? + 1;
+        let close = end + self.src.get(end..)?.find('}')?;
+        (open <= close).then_some((open, close))
+    }
+
+    /// Locate the `{ … }` bracketing an if-expression branch whose only content
+    /// is `value`. `open` is the offset just after `{`, `close` the offset of `}`.
+    fn value_block_braces(&self, value: &crate::AST::Expr) -> Option<(usize, usize)> {
+        let start = value.span().start;
+        let end = value.span().end;
+        let open = self.src.get(..start)?.rfind('{')? + 1;
+        let close = end + self.src.get(end..)?.find('}')?;
+        (open <= close).then_some((open, close))
+    }
+
+    /// D-FMT1: attempt the inline if-expression branch `{ value }`. Renders into
+    /// `self.out`, enforces the width-100 floor, rolls back on overflow. The
+    /// caller has already emitted the opening `{`.
+    fn try_inline_value_block(&mut self, stmts: &[Stmt], value: &crate::AST::Expr) -> bool {
+        if !self.value_block_inlineable(stmts, value) {
+            return false;
+        }
+        let saved_out = self.out.len();
+        let saved_col = self.col;
+        let saved_line_start = self.at_line_start;
+        self.write(" ");
+        self.fmt_expr(value, Prec::OrFallback);
+        self.write(" }");
+        if self.col <= MAX_WIDTH {
+            return true;
+        }
+        self.out.truncate(saved_out);
+        self.col = saved_col;
+        self.at_line_start = saved_line_start;
+        false
+    }
+
+    /// Attempt the inline shape `<stmt> }`. Renders into `self.out`, then checks
+    /// the width-100 floor (gate d); if it overflows, rolls the output back and
+    /// returns `false` so the caller expands. The caller has already emitted the
+    /// opening `{` (with its leading space).
+    fn try_inline_body(&mut self, body: &[Stmt], open: usize, close: usize) -> bool {
+        if !self.body_inline_eligible(body, open, close) {
+            return false;
+        }
+        let saved_out = self.out.len();
+        let saved_col = self.col;
+        let saved_line_start = self.at_line_start;
+        self.write(" ");
+        self.fmt_stmt_inline(&body[0]);
+        self.write(" }");
+        if self.col <= MAX_WIDTH {
+            return true;
+        }
+        // Width floor failed: roll back to the state right after the `{`.
+        self.out.truncate(saved_out);
+        self.col = saved_col;
+        self.at_line_start = saved_line_start;
+        false
     }
 }
 

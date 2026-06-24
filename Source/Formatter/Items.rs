@@ -261,10 +261,8 @@ impl<'a> Fmt<'a> {
             self.fmt_return_type(ret);
         }
         self.write(" {");
-        self.newline();
-        let body = &f.body;
-        self.with_indent(|f| f.fmt_block_stmts(body));
-        self.end_block();
+        // D-FMT1: a one-line `fn` body the author wrote inline survives.
+        self.fmt_body(&f.body);
     }
 
     fn fmt_param(&mut self, p: &Param) {

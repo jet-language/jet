@@ -4,6 +4,55 @@ use crate::AST::{
 };
 
 impl<'a> Fmt<'a> {
+    /// D-FMT1: render an `if`-expression chain with a shared `inline` decision.
+    /// `expr` must be `Expr::If`.
+    fn fmt_if_expr(&mut self, expr: &Expr, inline: bool) {
+        let Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } = expr
+        else {
+            unreachable!("fmt_if_expr called on non-if expression");
+        };
+        self.write("if ");
+        self.fmt_cond(cond);
+        self.write(" ");
+        self.fmt_value_block(then_body, then_value, inline);
+        self.write(" else ");
+        if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
+            self.fmt_if_expr(else_value, inline);
+        } else {
+            self.fmt_value_block(else_body, else_value, inline);
+        }
+    }
+
+    /// D-FMT1: every branch of an `if`-expression chain is inline-eligible (gates
+    /// a–d, author wrote each on one line). A nested `else if` recurses.
+    fn if_expr_chain_inlineable(&self, expr: &Expr) -> bool {
+        let Expr::If {
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        if !self.value_block_inlineable(then_body, then_value) {
+            return false;
+        }
+        if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
+            self.if_expr_chain_inlineable(else_value)
+        } else {
+            self.value_block_inlineable(else_body, else_value)
+        }
+    }
+
     pub(super) fn fmt_type(&mut self, ty: &Type) {
         match ty {
             Type::Int => self.write(Syntax::TYPE_INT),
@@ -111,24 +160,11 @@ impl<'a> Fmt<'a> {
     pub(super) fn fmt_expr(&mut self, expr: &Expr, prec: Prec) {
         match expr {
             // S68 (D-SG2): `if` used as a value.
-            Expr::If {
-                cond,
-                then_body,
-                then_value,
-                else_body,
-                else_value,
-                ..
-            } => {
-                self.write("if ");
-                self.fmt_cond(cond);
-                self.write(" ");
-                self.fmt_value_block(then_body, then_value);
-                self.write(" else ");
-                if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
-                    self.fmt_expr(else_value, Prec::OrFallback);
-                } else {
-                    self.fmt_value_block(else_body, else_value);
-                }
+            Expr::If { .. } => {
+                // D-FMT1: the whole if-expression chain shares one line shape —
+                // inline only when every branch is inline-eligible.
+                let inline = self.if_expr_chain_inlineable(expr);
+                self.fmt_if_expr(expr, inline);
             }
             Expr::Str(parts, span) => {
                 // S70 (D-SG5): re-derive the triple-quoted shape from the source.

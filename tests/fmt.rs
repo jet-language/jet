@@ -399,3 +399,119 @@ fn fmt_is_idempotent_on_ui_fixes() {
         }
     }
 }
+
+// --- D-FMT1 (revises S44): author-intent single-line brace bodies ---
+//
+// A brace body the author wrote on one line stays one line when it holds one
+// simple statement, has no inner comment, and fits width 100; a body broken
+// across lines stays multiline. fmt only normalizes spacing within the shape
+// the author chose. Idempotent (second pass == first), not canonical.
+
+/// Assert `src` formats to itself byte-for-byte and is idempotent.
+fn assert_fmt_stable(src: &str, label: &str) {
+    let out = jet::format_source(src).unwrap_or_else(|d| {
+        panic!(
+            "fmt failed for {label}:\n{}",
+            jet::render_diagnostics(label, src, &d)
+        )
+    });
+    assert_eq!(out, src, "{label}: fmt changed the source\n--- got ---\n{out}");
+    let twice = jet::format_source(&out).expect("second fmt should succeed");
+    assert_eq!(out, twice, "{label}: fmt is not idempotent");
+}
+
+#[test]
+fn fmt_preserves_single_line_if() {
+    // A one-line `if` body the author placed inline survives unchanged.
+    let src = "fn main() {\n    ready @= true\n    if ready { launch() }\n}\n";
+    assert_fmt_stable(src, "single-line if");
+}
+
+#[test]
+fn fmt_preserves_multiline_if() {
+    // The 3-line form the author chose stays 3 lines.
+    let src = "fn main() {\n    ready @= true\n    if ready {\n        launch()\n    }\n}\n";
+    assert_fmt_stable(src, "multiline if");
+}
+
+#[test]
+fn fmt_if_else_chain_one_multiline_expands_all() {
+    // D-FMT1 chain rule: if any branch is multiline, the whole chain expands.
+    // Author wrote `then` inline but `else` multiline → whole chain goes
+    // multiline; the expanded form is then stable.
+    let src = "fn main() {\n    if a { x() } else {\n        y()\n    }\n}\n";
+    let out = jet::format_source(src).expect("fmt should accept the mixed chain");
+    assert_eq!(
+        out,
+        "fn main() {\n    if a {\n        x()\n    } else {\n        y()\n    }\n}\n",
+        "mixed if/else chain should expand wholesale, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("expanded chain should re-fmt");
+    assert_eq!(out, twice, "expanded chain must be idempotent");
+}
+
+#[test]
+fn fmt_single_line_comment_forces_expand() {
+    // Gate (c): a comment inside the braces forces the body multiline.
+    let src = "fn main() {\n    if ready { launch() /* go */ }\n}\n";
+    let out = jet::format_source(src).expect("fmt should accept the commented body");
+    assert!(
+        out.contains("if ready {\n"),
+        "inner comment should force expansion, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("expanded body should re-fmt");
+    assert_eq!(out, twice, "comment-forced expansion must be idempotent");
+}
+
+#[test]
+fn fmt_single_line_over_width_forces_expand() {
+    // Gate (d): a one-line body whose rendered width exceeds 100 expands.
+    let long = "x".repeat(120);
+    let src = format!("fn main() {{\n    if ready {{ print(\"{long}\") }}\n}}\n");
+    let out = jet::format_source(&src).expect("fmt should accept the wide body");
+    assert!(
+        out.contains("if ready {\n"),
+        "over-width body should expand, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("expanded wide body should re-fmt");
+    assert_eq!(out, twice, "over-width expansion must be idempotent");
+}
+
+#[test]
+fn fmt_single_line_nested_forces_expand() {
+    // Gate (b): the lone statement is itself a block (`if`), so it cannot stay
+    // inline — the outer body expands.
+    let src = "fn main() {\n    if a { if b { x() } }\n}\n";
+    let out = jet::format_source(src).expect("fmt should accept the nested if");
+    assert!(
+        out.contains("if a {\n"),
+        "outer body should expand around a nested block, got:\n{out}"
+    );
+    // The inner one-line `if b { x() }` is itself simple and stays inline.
+    assert!(
+        out.contains("if b { x() }"),
+        "inner single-line if should survive, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("nested output should re-fmt");
+    assert_eq!(out, twice, "nested expansion must be idempotent");
+}
+
+#[test]
+fn fmt_preserves_single_line_loops_and_fn() {
+    // The rule applies uniformly to `while`/`for`/`fn` bodies.
+    let while_src = "fn main() {\n    n @= 0\n    loop n < 3 { n += 1 }\n}\n";
+    assert_fmt_stable(while_src, "single-line while/loop");
+
+    let for_src = "fn main() {\n    loop i in 0..3 { print(\"{i}\") }\n}\n";
+    assert_fmt_stable(for_src, "single-line for/loop");
+
+    let fn_src = "fn one() -> Int { return 1 }\n";
+    assert_fmt_stable(fn_src, "single-line fn body");
+}
+
+#[test]
+fn fmt_preserves_single_line_if_expr_branch() {
+    // If-expression branches (routed through fmt_value_block) follow the rule.
+    let src = "fn main() {\n    a @= true\n    n @= if a { 1 } else { 2 }\n    print(\"{n}\")\n}\n";
+    assert_fmt_stable(src, "single-line if-expression");
+}
