@@ -77,10 +77,14 @@ fn examples_compile_and_run() {
         //   - `mod jet_mem`        (D-ALLOC2 — arena lifetime-extension)
         //   - `mod jet_term_unix`  (D-TERM1 — POSIX termios via extern "C")
         //   - `mod jet_term_windows` (D-TERM1 — Windows console API via extern "system")
+        //   - `mod user___c_<lib>`  (S58 — C-FFI wrappers: the only place
+        //                            compiler-vetted `unsafe` calls extern "C")
         // These are audited platform-FFI blocks, not user code. All other `unsafe`
         // in the file must come from the gated `#Unsafe` tier only.
         let user_code: String = {
-            // Helper: strip one named `mod <name> { … }` block (brace-matched).
+            // Helper: strip one `mod <name> { … }` block (brace-matched), where
+            // `name` is matched as a prefix so families like `user___c_*` can be
+            // removed regardless of the library segment.
             fn strip_mod(src: &str, name: &str) -> String {
                 if let Some(start) = src.find(&format!("mod {}", name)) {
                     let bytes = src.as_bytes();
@@ -109,7 +113,18 @@ fn examples_compile_and_run() {
             // Strip all vetted prelude modules (order doesn't matter).
             let s = strip_mod(&rust_code, "jet_mem");
             let s = strip_mod(&s, "jet_term_unix");
-            strip_mod(&s, "jet_term_windows")
+            let mut s = strip_mod(&s, "jet_term_windows");
+            // Strip every C-FFI wrapper module (`user___c_<lib>` and the cache
+            // module `user___c_cache_<lib>`) — their `unsafe` is the vetted S58
+            // boundary shim, not user code. Loop until none remain.
+            while s.contains("mod user___c_") {
+                let before = s.clone();
+                s = strip_mod(&s, "user___c_");
+                if s == before {
+                    break;
+                }
+            }
+            s
         };
         if stem == "48_lowlevel" {
             assert!(
@@ -166,6 +181,14 @@ fn examples_compile_and_run() {
                         .arg("-L")
                         .arg(format!("dependency={}", link.deps_dir.display()));
                 }
+            }
+            // S59/E2-M14: native C-library link flags (`-L native=…`, `-l <lib>`),
+            // resolved the same way `jet build` does. Examples that bind a C
+            // header (e.g. 102_cbind) need these threaded into the link line.
+            let clinks = jet::resolve_c_links(path.to_str().unwrap())
+                .expect("resolve_c_links should succeed for example C bindings");
+            for arg in &clinks {
+                rustc_cmd.arg(arg);
             }
             let out = rustc_cmd.output().unwrap();
             assert!(

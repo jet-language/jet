@@ -215,6 +215,43 @@ fn main() {
     let _ = fs::remove_dir_all(&root);
 }
 
+/// Regression (c95): a `String` parameter must emit its `CString` conversion
+/// line in the wrapper body. The codegen built `call_args` referencing `c{i}`
+/// but dropped the `let c{i} = …` conversion, so rustc rejected the wrapper
+/// (`cannot find value c0`) — an I2 violation. Pin that the temp is declared.
+#[test]
+fn cffi_string_param_emits_cstring_conversion() {
+    let root = std::env::temp_dir().join(format!("jet_cffi_strparam_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let cache = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(
+        cache.join("strlib.jet"),
+        "#bindgen module c.strlib.__bindgen__ { fn slen(s: String) -> Int = \"strlen\"; }\n",
+    )
+    .unwrap();
+    let main = root.join("main.jet");
+    fs::write(
+        &main,
+        "use c.strlib as s;\nfn main() { print(s.slen(\"hello\")); }\n",
+    )
+    .unwrap();
+    let src = fs::read_to_string(&main).unwrap();
+    let out = jet::compile_with_path(&src, main.to_str().unwrap())
+        .unwrap_or_else(|d| panic!("string-param C FFI rejected:\n{:?}", d));
+    assert!(
+        out.rust.contains("let c0 = std::ffi::CString::new"),
+        "wrapper must declare the CString temp for a String param; got:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("strlen(c0.as_ptr())"),
+        "wrapper must call through the declared temp; got:\n{}",
+        out.rust
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 #[test]
 fn cffi_empty_overlay_is_bindgen_only() {
     // D-CFFI2-SYN-2: an empty `@extern module` adds nothing; the full bindgen

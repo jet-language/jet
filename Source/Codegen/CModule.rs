@@ -49,7 +49,7 @@ pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
             .map(|t| format!(" -> {}", c_wrapper_ret_type(t)))
             .unwrap_or_default();
         let call = format!("{}({})", ef.rust_path, call_args.join(", "));
-        let body = match &ef.return_type {
+        let call_body = match &ef.return_type {
             None => format!("    unsafe {{ {}; }}", call),
             Some(Type::String) => format!(
                 "    let p = unsafe {{ {} }};\n    if p.is_null() {{ return String::new(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(p) }}.to_string_lossy().into_owned()",
@@ -60,6 +60,14 @@ pub(crate) fn emit_c_module(cm: &crate::AST::CModule, out: &mut String) {
                 call
             ),
             Some(_) => format!("    unsafe {{ {} }}", call),
+        };
+        // Emit any argument-conversion lines (e.g. `String` → `CString`) before
+        // the call. These bind the `c{i}` temporaries that `call_args` reference;
+        // without them the wrapper references an undeclared variable (I2 bug).
+        let body = if conv_lines.is_empty() {
+            call_body
+        } else {
+            format!("{}\n{}", conv_lines.join("\n"), call_body)
         };
         out.push_str(&format!(
             "pub fn {}({}){} {{\n{}\n}}\n\n",
