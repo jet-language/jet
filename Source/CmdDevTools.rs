@@ -452,6 +452,15 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
+
+    // D-BENCH1: when the file declares `#Bench` blocks, time each region via
+    // the bench harness (its generated `main` reports ns/iter + ops/sec).
+    // Otherwise fall through to whole-program timing (the original behaviour).
+    if jet::has_bench_blocks(file) {
+        run_bench_regions(file, &src, mode);
+        return;
+    }
+
     let (rust_code, ffi_link, _capabilities) = match jet::compile_with_path(&src, file) {
         Ok(out) => (out.rust, out.ffi, out.capabilities),
         Err(diags) => {
@@ -505,5 +514,42 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
             "{}  {:.2} ms ±{:.2}  ({} runs, {} warmup)",
             stem_name, mean, stddev, trials, warmups
         );
+    }
+}
+
+/// D-BENCH1: build and run the per-region bench harness. The harness binary's
+/// `main` warms up, auto-scales, times each `#Bench` region, and prints a line
+/// per region (ns/iter + ops/sec), so this just compiles, runs it once, and
+/// relays its output.
+fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
+    let (rust_code, ffi_link) = match jet::compile_benches_with_path(file) {
+        Ok(r) => r,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
+    build(
+        file,
+        &rust_code,
+        bin.clone(),
+        BuildProfile::Default,
+        ffi_link.as_ref(),
+        &[],
+        false,
+        None,
+        mode,
+    );
+    let out = Command::new(&bin).output().unwrap_or_else(|e| {
+        eprintln!("bench: couldn't run `{}`: {}", bin.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    if !out.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    }
+    if !out.status.success() {
+        exit(ExitCodes::USER_ERROR);
     }
 }

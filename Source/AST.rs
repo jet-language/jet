@@ -404,6 +404,9 @@ pub enum Item {
     Const(ConstDef),
     /// S43 (M6): `#Test "name" { … }` — only at file top level.
     Test(TestDef),
+    /// D-BENCH1 (ratified 2026-06-24): `#Bench "name" { … }` — a region
+    /// benchmark, the exact sibling of `#Test`. Run by `jet bench`.
+    Bench(BenchDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
     ExternRust(ExternRustBlock),
     /// U3 (unified-ecosystem §4): `module name { … }` — a named, composable
@@ -719,6 +722,15 @@ pub struct ExternFn {
 
 #[derive(Debug)]
 pub struct TestDef {
+    pub name: String,
+    pub name_span: Span,
+    pub body: Vec<Stmt>,
+}
+
+/// D-BENCH1: `#Bench "name" { … }` — identical structure to `TestDef`. The
+/// body is a bare statement list timed by the generated bench harness.
+#[derive(Debug)]
+pub struct BenchDef {
     pub name: String,
     pub name_span: Span,
     pub body: Vec<Stmt>,

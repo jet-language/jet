@@ -345,6 +345,44 @@ pub fn compile_tests_with_path(
     Ok((Codegen::emit_bundle_tests(&bundle, ffi.as_ref()), ffi))
 }
 
+/// D-BENCH1: compile for `jet bench` when the file has `#Bench` blocks —
+/// optional `main`, bodies type-checked in `Bench` mode, then lowered to the
+/// timing harness.
+pub fn compile_benches_with_path(
+    file: &str,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    let mut bundle = Loader::load_entry_with_overlay(file, None, false)?;
+    let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Bench);
+    let mut errors = Vec::new();
+    for d in diags {
+        if d.severity == Severity::Error {
+            errors.push(d);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let ffi = match FFI::prepare(&bundle) {
+        Ok(link) => link,
+        Err(ffi_diags) => return Err(ffi_diags),
+    };
+    Ok((Codegen::emit_bundle_benches(&bundle, ffi.as_ref()), ffi))
+}
+
+/// D-BENCH1: does this entry file declare any `#Bench` blocks? `jet bench`
+/// uses per-region timing when it does, and falls back to whole-program timing
+/// otherwise. A load failure returns `false` so the caller surfaces the real
+/// compile error on its normal path.
+pub fn has_bench_blocks(file: &str) -> bool {
+    match Loader::load_entry_with_overlay(file, None, false) {
+        Ok(bundle) => bundle.modules[bundle.entry]
+            .items
+            .iter()
+            .any(|i| matches!(i, AST::Item::Bench(_))),
+        Err(_) => false,
+    }
+}
+
 fn compile_with_mode(
     src: &str,
     file: &str,

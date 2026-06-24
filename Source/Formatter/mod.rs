@@ -143,6 +143,9 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Test(t) => src[..t.name_span.start]
             .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_TEST))
             .unwrap_or(t.name_span.start),
+        Item::Bench(b) => src[..b.name_span.start]
+            .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_BENCH))
+            .unwrap_or(b.name_span.start),
         Item::ExternRust(b) => src[..b.crate_span.start]
             .rfind(Syntax::KW_EXTERN)
             .unwrap_or(b.span.start),
@@ -216,6 +219,7 @@ fn item_span_end(item: &Item) -> usize {
             .unwrap_or(i.type_span.end),
         Item::Const(c) => c.value.span().end,
         Item::Test(t) => t.body.last().map(stmt_end).unwrap_or(t.name_span.end),
+        Item::Bench(b) => b.body.last().map(stmt_end).unwrap_or(b.name_span.end),
         Item::ExternRust(b) => b.span.end,
         Item::Trait(t) => t
             .methods

@@ -334,6 +334,8 @@ impl<'a> Parser<'a> {
                 },
                 // S43 (D-CASING1 follow-on): `#Test "name" { … }`.
                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
+                // D-BENCH1: `#Bench "name" { … }`.
+                TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
                 // S14: bare lowercase `test "name" { … }` is the retired spelling (E0052).
                 TokKind::Ident(n) if n == Syntax::FOREIGN_TEST && self.foreign_test_follows() => {
                     let t = self.bump();
@@ -540,6 +542,28 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-BENCH1: true when the cursor is at the `#Bench` marker — the exact
+    /// sibling of `at_test_def`.
+    pub(super) fn at_bench_def(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_BENCH)
+    }
+
+    /// Parse `#Bench "name" { … }` (D-BENCH1). Structurally identical to
+    /// `test_def`; there is no retired lowercase spelling for benches.
+    pub(super) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
+        self.expect(TokKind::Hash, "before `Bench`")?;
+        self.bump(); // the `Bench` marker ident (guaranteed by at_bench_def)
+        let (name, name_span) = self.expect_marker_name(Syntax::KW_BENCH)?;
+        self.expect(TokKind::LBrace, "to open the benchmark body")?;
+        let body = self.block_stmts();
+        Ok(crate::AST::BenchDef {
+            name,
+            name_span,
+            body,
+        })
+    }
+
     /// S14: a bare lowercase `test` introduces a test block only when followed by
     /// a quoted name (so an ordinary identifier named `test` is unaffected).
     fn foreign_test_follows(&self) -> bool {
@@ -595,21 +619,24 @@ impl<'a> Parser<'a> {
 
     /// Test names are plain string literals — no interpolation (S43).
     fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
+        self.expect_marker_name(Syntax::KW_TEST)
+    }
+
+    /// A `#Test`/`#Bench` block name: one plain string literal, no
+    /// interpolation. `kw` is the marker keyword for the error copy.
+    fn expect_marker_name(&mut self, kw: &str) -> Result<(String, Span), Diagnostic> {
         let parts = match &self.peek().kind {
             TokKind::Str(parts) => parts.clone(),
             other => {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "expected a test name in quotes after `#{}`, found {}",
-                        Syntax::KW_TEST,
+                        "expected a name in quotes after `#{}`, found {}",
+                        kw,
                         describe(other)
                     ),
-                    "each test block needs a name so failures are easy to find".to_string(),
-                    format!(
-                        "write: #{} \"describes what this checks\" {{ ... }}",
-                        Syntax::KW_TEST
-                    ),
+                    "each block needs a name so results are easy to find".to_string(),
+                    format!("write: #{} \"describes this block\" {{ ... }}", kw),
                     Some(self.peek().span),
                 ));
             }
@@ -618,9 +645,9 @@ impl<'a> Parser<'a> {
         if parts.len() != 1 {
             return Err(Diagnostic::error(
                 "E0003",
-                "a test name must be one piece of quoted text".to_string(),
-                "test names are labels, not interpolated messages".to_string(),
-                format!("write: #{} \"my test name\" {{ ... }}", Syntax::KW_TEST),
+                "a block name must be one piece of quoted text".to_string(),
+                "names are labels, not interpolated messages".to_string(),
+                format!("write: #{} \"my name\" {{ ... }}", kw),
                 Some(span),
             ));
         }
@@ -628,9 +655,9 @@ impl<'a> Parser<'a> {
             StrTokPart::Lit(s) => Ok((s.clone(), span)),
             StrTokPart::Interp(_) => Err(Diagnostic::error(
                 "E0003",
-                "a test name can't contain `{ }` interpolation".to_string(),
-                "test names are fixed labels".to_string(),
-                format!("write: #{} \"my test name\" {{ ... }}", Syntax::KW_TEST),
+                "a block name can't contain `{ }` interpolation".to_string(),
+                "names are fixed labels".to_string(),
+                format!("write: #{} \"my name\" {{ ... }}", kw),
                 Some(span),
             )),
         }

@@ -375,6 +375,9 @@ pub enum CompileMode {
     Run,
     /// `jet test` — needs at least one test; `main` is optional.
     Test,
+    /// `jet bench` (D-BENCH1) — type-check `#Bench` block bodies and emit the
+    /// timing harness; `main` is optional, like `Test`.
+    Bench,
     /// `jet check` / LSP — type-check only; imported modules and library files
     /// need not define `main`.
     Check,

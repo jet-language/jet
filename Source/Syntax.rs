@@ -1021,8 +1021,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_MUTATE, KW_MOVE, KW_VIEW, KW_STORED, KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)
     KW_UNSAFE, KW_REGION, CTX_BLOCK, KW_LIVE,
-    // Test / tooling (S43, S60, D-TOOL2)
-    KW_TEST, KW_PURE, KW_TODO,
+    // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
+    KW_TEST, KW_BENCH, KW_PURE, KW_TODO,
     // Literals: boolean (S11), option (S32), result (S34), synthetic (M4)
     LIT_TRUE, LIT_FALSE, LIT_NULL, LIT_OK, LIT_ERR, KW_IT,
     // Binding sigils (SIGIL_BIND_IMMUT / SIGIL_BIND_MUT) are not words; omitted.

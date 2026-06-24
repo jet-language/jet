@@ -403,6 +403,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::Test(t) => {
             collect_stmts(&t.body, mp, module, db);
         }
+        Item::Bench(b) => {
+            collect_stmts(&b.body, mp, module, db);
+        }
         Item::ExternRust(_) => {}
         // Stage 1a: modules aren't yet indexed for symbols/hover.
         Item::Module(_) => {}

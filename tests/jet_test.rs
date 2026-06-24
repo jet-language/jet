@@ -37,6 +37,46 @@ fn jet_test_example_output() {
 }
 
 #[test]
+fn jet_bench_example_regions() {
+    // D-BENCH1: `jet bench` on a file with `#Bench` blocks times each region
+    // and reports `<name>  <ns> ns/iter (...)  <ops> ops/sec`. Timing values
+    // are non-deterministic, so this asserts structure: every block runs and
+    // every name + the ns/iter and ops/sec labels appear.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        eprintln!("note: rustc not found; skipping jet bench integration");
+        return;
+    }
+
+    let example = root.join("examples/features/105_bench.jet");
+    let out = Command::new(&jet).arg("bench").arg(&example).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "jet bench examples/features/105_bench.jet failed:\nstdout: {}\nstderr: {}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for needle in ["fib(10)", "sum to 100", "ns/iter", "ops/sec"] {
+        assert!(
+            stdout.contains(needle),
+            "bench output missing `{}`:\n{}",
+            needle,
+            stdout
+        );
+    }
+    // One report line per `#Bench` block.
+    assert_eq!(
+        stdout.lines().filter(|l| l.contains("ns/iter")).count(),
+        2,
+        "expected exactly two bench region lines:\n{}",
+        stdout
+    );
+}
+
+#[test]
 fn jet_test_fail_then_fixed() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();

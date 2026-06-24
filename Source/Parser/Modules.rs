@@ -201,6 +201,8 @@ impl<'a> Parser<'a> {
             TokKind::KwConst | TokKind::At => self.const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
+            // D-BENCH1: `#Bench "name" { … }`.
+            TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
             TokKind::KwUse => {
                 let span = self.peek().span;
                 self.sync_stmt();

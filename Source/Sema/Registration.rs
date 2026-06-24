@@ -195,6 +195,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     tests.insert(t.name.clone(), t.name_span);
                 }
             }
+            // D-BENCH1: `#Bench` blocks are compiled by the bundle path; this
+            // legacy single-Program path neither names nor runs them.
+            Item::Bench(_) => {}
             Item::ExternRust(block) => {
                 if check_extern_block(block, &registry, &mut diags) {
                     for ef in &block.functions {
@@ -317,7 +320,11 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 None,
             ));
         }
-        CompileMode::Test | CompileMode::Run | CompileMode::Check | CompileMode::Eval => {}
+        CompileMode::Bench
+        | CompileMode::Test
+        | CompileMode::Run
+        | CompileMode::Check
+        | CompileMode::Eval => {}
     }
 
     // S57 (M9.5): evaluate comptime bindings before bodies are checked, so
@@ -530,6 +537,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::CModule(_)
             | Item::CodeModule(_)
             | Item::Distinct(_)
+            | Item::Bench(_)
             | Item::Migration(_) => {} // D-MIGRATE1
         }
     }
@@ -867,6 +875,7 @@ pub(crate) fn comptime_context_from_items(
                 }
             }
             Item::Test(_)
+            | Item::Bench(_)
             | Item::Const(_)
             | Item::Trait(_)
             | Item::Module(_)

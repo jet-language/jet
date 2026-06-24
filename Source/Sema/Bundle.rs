@@ -346,6 +346,9 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                         st.tests.insert(t.name.clone(), t.name_span);
                     }
                 }
+                // D-BENCH1: `#Bench` blocks define no referenceable name; codegen
+                // discovers them straight from the AST, so registration is a no-op.
+                Item::Bench(_) => {}
                 Item::ExternRust(block) => {
                     if check_extern_block(block, &st.registry, &mut diags) {
                         for ef in &block.functions {
@@ -748,6 +751,9 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 Item::Test(t) => {
                     walk_stmts_for_const_refs(&t.body, &const_names, &mut address_taken)
                 }
+                Item::Bench(b) => {
+                    walk_stmts_for_const_refs(&b.body, &const_names, &mut address_taken)
+                }
                 Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)
@@ -835,7 +841,14 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                 None,
             ));
         }
-        CompileMode::Test | CompileMode::Run | CompileMode::Check | CompileMode::Eval => {}
+        // `jet bench` checks the AST for `#Bench` blocks before entering Bench
+        // mode and falls back to whole-program timing otherwise, so an empty
+        // bench set is never an error here.
+        CompileMode::Bench
+        | CompileMode::Test
+        | CompileMode::Run
+        | CompileMode::Check
+        | CompileMode::Eval => {}
     }
 
     // D-EFF1: collect effect summaries across every module, then run the
@@ -938,6 +951,7 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                     }
                 }
                 Item::Test(t) => collect_core_stmts(&t.body, imports, &mut used),
+                Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used),
                 Item::Const(c) => collect_core_expr(&c.value, imports, &mut used),
                 Item::Trait(_)
                 | Item::ExternRust(_)
@@ -1319,6 +1333,37 @@ pub(crate) fn check_module_bodies(
                     summaries,
                 ));
                 t.body = synthetic.body;
+            }
+            // D-BENCH1: a `#Bench` body type-checks exactly like a `#Test` body
+            // (a bare statement list, no params, unit context) — only the mode
+            // gate differs.
+            Item::Bench(b) if mode == CompileMode::Bench => {
+                let mut synthetic = Func {
+                    is_pub: false,
+                    name: format!("__bench_{}", b.name),
+                    name_span: b.name_span,
+                    type_params: Vec::new(),
+                    params: Vec::new(),
+                    return_type: None,
+                    is_view_return: false,
+                    is_unsafe: false,
+                    is_pure: false,
+                    declared_effects: None,
+                    body: std::mem::take(&mut b.body),
+                };
+                diags.extend(check_func_body_bundle(
+                    &mut synthetic,
+                    module_idx,
+                    states,
+                    None,
+                    &ct_funcs,
+                    &ct_externs,
+                    &ct_base_dir,
+                    &ct_globals,
+                    freestanding,
+                    summaries,
+                ));
+                b.body = synthetic.body;
             }
             Item::CodeModule(cm) => {
                 // D-MOD2: type-check inline-module function bodies. Sibling calls were

@@ -14,6 +14,7 @@ impl<'a> Fmt<'a> {
             Item::Impl(i) => self.fmt_impl(i),
             Item::Const(c) => self.fmt_const(c),
             Item::Test(t) => self.fmt_test(t),
+            Item::Bench(b) => self.fmt_bench(b),
             Item::ExternRust(b) => self.fmt_extern_rust(b),
             Item::Trait(t) => self.fmt_trait(t),
             // Stage 1a: modules are emitted verbatim (non-destructive). A
@@ -160,6 +161,19 @@ impl<'a> Fmt<'a> {
         self.write(Syntax::BLOCK_OPEN);
         self.newline();
         self.with_indent(|f| f.fmt_block_stmts(&t.body));
+        self.end_block();
+    }
+
+    fn fmt_bench(&mut self, b: &crate::AST::BenchDef) {
+        self.write(&format!("#{}", Syntax::KW_BENCH));
+        self.write(" ");
+        self.write("\"");
+        self.write(&b.name.replace('\\', "\\\\").replace('"', "\\\""));
+        self.write("\"");
+        self.write(" ");
+        self.write(Syntax::BLOCK_OPEN);
+        self.newline();
+        self.with_indent(|f| f.fmt_block_stmts(&b.body));
         self.end_block();
     }
 
