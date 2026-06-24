@@ -3,6 +3,22 @@
 Summary of the unattended burn-down for morning planning. Everything below is on
 `origin/master`, every commit green (full-suite or flake-tolerant gate; see Env notes).
 
+## Post-run sweep updates (later 2026-06-24 — supersede where noted)
+- **CI reverted (owner directive):** the c113 subagent wrongly created an active
+  `.github/workflows/ci.yml` that ran twice. CI must **not** be enabled until post-Epoch-3
+  (no Epoch-3 work has actually started). Removed; **c113 → frozen** (the flake.nix version
+  sync + truthfulness version-check stay). Supersedes the "c113 done" line below.
+- **Tower planning sweep done:** every implementable card now has a plan. 8 plans written +
+  agent-vetted (c51 testing-ergonomics, c77 three-mode-execution, c104 serde-model, c119
+  split-compiler-modules, c120 beginner-expert-mode-audit, c121 perf-compiletime-dashboards,
+  c122 package-ecosystem-trust, c123 flagship-vertical-slices). Board reconciled: **31 done,
+  19 ready, 2 deciding, 13 frozen, 4 building/backlog**. Queues drained.
+- **Two ballots drafted (ready for owner review):** **D-BENCH1** (c121 — benchmark-block
+  syntax, rec `#Bench`) and **D-PKGSIGN1** (c122 — package signing, rec Ed25519). c121/c122 →
+  **deciding**. The ballot is otherwise correctly drained (all other cards' decisions ratified).
+- **c62** (qualifier system) is **ready**, not "needs ballot": its decisions (D-QUAL1/D-QUAL2)
+  are ratified and it has a plan; effect-specific parts gate on D-EFF2/D-EFF3 (ratified).
+
 ## Done — memory/access-capability model (the headline work)
 
 The core is implemented and shipping:
