@@ -1191,15 +1191,15 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Unsafe { audit, body, span } => {
-                // L3101 (D-LL2): every `#Unsafe` block needs a `#Audit("…")`
-                // reason on the line above so the safety case is on record.
+                // L3101 (D-UNSAFE2): every `#Unsafe` block needs a reason argument
+                // so the safety case is on record.
                 if audit.is_none() {
                     self.diags.push(Diagnostic::lint(
                         "L3101",
-                        "this `#Unsafe` block has no `#Audit` reason".to_string(),
-                        "every gated region records, in one line, why it can't break memory safety"
+                        "this `#Unsafe` block has no reason".to_string(),
+                        "every gated region records why it can't break memory safety"
                             .to_string(),
-                        "add `#Audit(\"why this is safe\")` on the line above".to_string(),
+                        "add the reason: `#Unsafe(\"why this is safe\") { … }`".to_string(),
                         Some(*span),
                     ));
                 }

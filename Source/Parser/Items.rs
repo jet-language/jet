@@ -372,7 +372,7 @@ impl<'a> Parser<'a> {
                         "E0990",
                         format!("attributes use `{}`, not `@`", Syntax::ATTR_PREFIX),
                         "in Jet, `@` is for loop labels; attributes and markers use `#` (D-ATTR1)".to_string(),
-                        "write `#Unsafe`, `#Audit(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
+                        "write `#Unsafe(\"…\")`, `#Numeric`, or `#[Marker, …]` instead of `@…`".to_string(),
                         Some(t.span),
                     ));
                     self.sync_top();
@@ -733,19 +733,54 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S58 (E2-M13): is the cursor at `#Unsafe fn …`? The whole-function
-    /// unsafe contract — `#` then the `unsafe` keyword then `fn`/`pub fn`.
+    /// D-UNSAFE2: is the cursor at `#Unsafe fn …` or `#Unsafe("…") fn …`?
     fn at_unsafe_fn(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(self.peek2().kind, TokKind::KwUnsafe)
-            && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+        if !matches!(self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        if !matches!(self.peek2().kind, TokKind::KwUnsafe) {
+            return false;
+        }
+        // `#Unsafe fn` or `#Unsafe pub fn` (no reason arg)
+        if matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub) {
+            return true;
+        }
+        // `#Unsafe("…") fn` or `#Unsafe("…") pub fn`
+        // tokens (same line): `#`[0] `Unsafe`[1] `(`[2] `"str"`[3] `)`[4] `fn`/`pub`[5]
+        // tokens (split line): `#`[0] `Unsafe`[1] `(`[2] `"str"`[3] `)`[4] `;`[5] `fn`/`pub`[6]
+        // S6-R inserts a synthetic `;` after `)` when the reason and `fn` are on separate lines.
+        if matches!(self.peek3().kind, TokKind::LParen) {
+            let after_close = if matches!(self.peek6().kind, TokKind::Semi) {
+                &self.peek7().kind
+            } else {
+                &self.peek6().kind
+            };
+            return matches!(after_close, TokKind::KwFn | TokKind::KwPub);
+        }
+        false
     }
 
-    /// S58 (E2-M13): parse `#Unsafe fn name(...) { ... }`. The body is checked
-    /// like any other; the contract is enforced at call sites (E3103).
+    /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") fn …`
+    /// or bare `#Unsafe fn …` (reason-less; L3101 fires in sema). The body is
+    /// checked like any other fn; the contract is enforced at call sites (E3103).
     fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
-        self.expect(TokKind::Hash, "before `unsafe`")?;
+        self.expect(TokKind::Hash, "before `Unsafe`")?;
         self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
+        // Optional `("reason")` argument.
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump(); // `(`
+            let _ = self.expect_plain_string(
+                "for the safety reason",
+                "`#Unsafe` takes one piece of quoted text explaining why the function is safe to call",
+                "write: #Unsafe(\"caller must ensure …\") fn …",
+            )?;
+            self.expect(TokKind::RParen, "after the safety reason")?;
+            // S6-R: when `#Unsafe("reason")` is on its own line above `fn`,
+            // the lexer inserts a synthetic `;` after `)`. Skip it.
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+        }
         let is_pub = matches!(self.peek().kind, TokKind::KwPub);
         if is_pub {
             self.bump();

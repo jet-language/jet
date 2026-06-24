@@ -10560,10 +10560,9 @@ fn mk() {
 
     #[test]
     fn covers_unsafe_block_and_address_of() {
-        // c109 Phase 18: a `#Unsafe { … }` audited region + `mem.address_of` (the inert
-        // address cast, legal outside unsafe) are covered. The `#Audit("…")` annotation
-        // emits nothing.
-        let src = "use core.mem\nfn main() {\n cell: Int @= 7\n addr @= mem.address_of(cell)\n #Audit(\"live\")\n #Unsafe {\n p @= mem.Ptr<Int>.from_addr(addr)\n seen @= mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
+        // c109 Phase 18: a `#Unsafe("…") { … }` audited region + `mem.address_of` (the
+        // inert address cast, legal outside unsafe) are covered.
+        let src = "use core.mem\nfn main() {\n cell: Int @= 7\n addr @= mem.address_of(cell)\n #Unsafe(\"live\") {\n p @= mem.Ptr<Int>.from_addr(addr)\n seen @= mem.volatile_read(p)\n print(\"{seen}\")\n }\n}\n";
         assert!(covers_with_mem(src, "main"));
     }
 

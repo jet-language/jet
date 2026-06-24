@@ -141,6 +141,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0049"
             | "E0050"
             | "E0051"
+            | "E0055"
             | "E0984"
             | "E0985"
             | "E0986"
@@ -213,6 +214,22 @@ impl<'a> Parser<'a> {
 
     fn peek3(&self) -> &Token {
         &self.toks[(self.pos + 2).min(self.toks.len() - 1)]
+    }
+
+    fn peek4(&self) -> &Token {
+        &self.toks[(self.pos + 3).min(self.toks.len() - 1)]
+    }
+
+    fn peek5(&self) -> &Token {
+        &self.toks[(self.pos + 4).min(self.toks.len() - 1)]
+    }
+
+    fn peek6(&self) -> &Token {
+        &self.toks[(self.pos + 5).min(self.toks.len() - 1)]
+    }
+
+    fn peek7(&self) -> &Token {
+        &self.toks[(self.pos + 6).min(self.toks.len() - 1)]
     }
 
     /// End byte of the most recently consumed token (the one before the cursor).

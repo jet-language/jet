@@ -426,11 +426,13 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 - **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`Ptr<T>`,
   `mem.volatile_read`, `mem.address_of`, allocators). Naming one of these without
   the import → **E3102**.
-- **Audit gate** — `#Audit("reason")` on the line above an `#Unsafe { … }` block
-  opens the operations that can violate memory safety (pointer build/deref,
-  volatile access). A missing audit is lint **L3101**. `#Unsafe` on the line
-  before `fn` marks a whole-function contract; its body is itself an audited
-  region, and calling it requires an enclosing `#Unsafe` block → **E3103**.
+- **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
+  violate memory safety (pointer build/deref, volatile access). The reason
+  string is the argument to `#Unsafe` itself (D-UNSAFE2; the former separate
+  `#Audit("…")` line is retired → **E0055**). A missing reason argument is
+  lint **L3101**. `#Unsafe("reason") fn` marks a whole-function contract; its
+  body is itself an audited region, and calling it requires an enclosing
+  `#Unsafe` block → **E3103**.
 - **Operations** — `mem.Ptr<T>.from_addr(addr)` builds a typed pointer from an
   `Int` address (`Ptr<T>` lowers to a Rust `*mut T`); `mem.volatile_read(p)`
   reads through it (lowers to `std::ptr::read_volatile`); `mem.address_of(x)` is

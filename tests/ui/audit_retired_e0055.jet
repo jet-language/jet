@@ -1,0 +1,11 @@
+// E0055: `#Audit("…")` is retired — the reason is now the argument of `#Unsafe`.
+use core.mem
+fn main() {
+    cell: Int @= 1
+    addr @= mem.address_of(cell)
+    #Audit("addr is valid")
+    #Unsafe("addr is valid") {
+        p @= mem.Ptr<Int>.from_addr(addr)
+        print(mem.volatile_read(p))
+    }
+}

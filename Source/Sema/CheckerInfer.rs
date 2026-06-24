@@ -3168,8 +3168,7 @@ impl<'a> Checker<'a> {
                 "its contract can't be checked by the compiler, so the caller must vouch for it"
                     .to_string(),
                 format!(
-                    "call it inside `#{}(\"…\") #{} {{ … }}`",
-                    Syntax::ATTR_AUDIT,
+                    "call it inside `#{}(\"…\") {{ … }}`",
                     Syntax::KW_UNSAFE
                 ),
                 Some(call.name_span),
