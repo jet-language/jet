@@ -397,8 +397,8 @@ impl<'a> Checker<'a> {
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
                         "E0208",
-                        "`*` isn't allowed here".to_string(),
-                        "dereferencing with `*` is only for expert code inside an `#Unsafe` block"
+                        "raw memory access requires unsafe".to_string(),
+                        "`*` is a raw access operation; it is only valid inside a `#Unsafe { ... }` block"
                             .to_string(),
                         "remove `*`, or wrap this code in `#Unsafe { ... }`".to_string(),
                         Some(*span),
@@ -1259,10 +1259,10 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0120",
                                 format!(
-                                    "`{}` is only borrowed here, so the lambda can't take it",
+                                    "`{}` was not moved here, so the lambda cannot take it (`^`)",
                                     name
                                 ),
-                                "this function reads the value but doesn't own it".to_string(),
+                                "this function has read access only and does not own the value".to_string(),
                                 format!(
                                     "take ownership in this function with `{} {}: {}`",
                                     Syntax::KW_MOVE,
@@ -1323,7 +1323,7 @@ impl<'a> Checker<'a> {
                         let (what, fix) = if root == Syntax::KW_SELF {
                             (
                                 format!(
-                                    "`.{}()` changes `{}`, but this method only reads it",
+                                    "`.{}()` edits `{}`, but this method has read access only",
                                     method,
                                     Syntax::KW_SELF
                                 ),
@@ -1336,9 +1336,8 @@ impl<'a> Checker<'a> {
                         } else {
                             (
                                 format!(
-                                    "`{}` must be declared mutable (`{}`) before calling `.{}()`",
+                                    "cannot write to `{}` — it does not have edit access (`~`); required before calling `.{}()`",
                                     root,
-                                    Syntax::SIGIL_BIND_MUT,
                                     method
                                 ),
                                 format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
@@ -1347,7 +1346,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             what,
-                            "this method changes the collection".to_string(),
+                            "this method edits the collection in place; write access (`~`) is required".to_string(),
                             fix,
                             Some(rspan),
                         ));
@@ -2432,7 +2431,7 @@ impl<'a> Checker<'a> {
                         let (what, fix) = if root == Syntax::KW_SELF {
                             (
                                 format!(
-                                    "`.{}()` changes `{}`, but this method only reads it",
+                                    "`.{}()` edits `{}`, but this method has read access only",
                                     method,
                                     Syntax::KW_SELF
                                 ),
@@ -2445,9 +2444,8 @@ impl<'a> Checker<'a> {
                         } else {
                             (
                                 format!(
-                                    "`{}` must be declared mutable (`{}`) before calling `.{}()`",
+                                    "cannot write to `{}` — it does not have edit access (`~`); required before calling `.{}()`",
                                     root,
-                                    Syntax::SIGIL_BIND_MUT,
                                     method
                                 ),
                                 format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
@@ -2456,7 +2454,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             what,
-                            "this method changes the value it's called on".to_string(),
+                            "this method edits the value it's called on; write access (`~`) is required".to_string(),
                             fix,
                             Some(span),
                         ));
@@ -2483,10 +2481,10 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0120",
                             format!(
-                                "`{}` is only borrowed here, so `.{}()` can't consume it",
+                                "`{}` was not moved here, so `.{}()` cannot take it (`^`)",
                                 n, method
                             ),
-                            "this function reads the value but doesn't own it".to_string(),
+                            "this function has read access only and does not own the value".to_string(),
                             format!(
                                 "call it on a copy: `{}.clone().{}(...)` — or take ownership with `{} {}: {}`",
                                 n,
@@ -3376,10 +3374,10 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0202",
                     format!(
-                        "`{}` needs a plain mutable name after it",
+                        "`{}` needs a plain named binding after it",
                         Syntax::KW_MUTATE
                     ),
-                    "only a named binding can be handed out for changing".to_string(),
+                    "write access (`~`) can only be granted to a named binding, not an expression".to_string(),
                     format!(
                         "bind the value first: `x {} ...` then pass `{} x`",
                         Syntax::SIGIL_BIND_MUT,
@@ -3452,15 +3450,16 @@ impl<'a> Checker<'a> {
                                     Syntax::KW_MOVE
                                 ),
                                 format!(
-                                    "parameter `{}` takes ownership; passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                    "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
                                     i + 1,
                                     name,
                                     Syntax::KW_MOVE
                                 ),
                                 format!(
-                                    "write `{} {}` to transfer ownership",
+                                    "write `{} {}` to move ownership to `{}`",
                                     Syntax::KW_MOVE,
-                                    name
+                                    name,
+                                    call.name
                                 ),
                                 Some(*span),
                             ));
@@ -3480,13 +3479,13 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0202",
                             format!(
-                                "parameter `{}` requires `{}` at the call site",
-                                name,
-                                Syntax::KW_MUTATE
+                                "parameter `{}` requires write access (`~`) at the call site",
+                                name
                             ),
                             format!(
-                                "`{}` needs to change this value while it borrows it",
-                                call.name
+                                "`{}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
+                                call.name,
+                                Syntax::KW_MUTATE
                             ),
                             format!(
                                 "write `{} {}` when calling `{}`",

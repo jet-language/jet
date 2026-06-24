@@ -170,8 +170,9 @@ impl<'a> Checker<'a> {
                                     Syntax::KW_MUTATE
                                 ),
                                 format!(
-                                    "`{}` needs to change this value while it borrows it",
-                                    name
+                                    "`{}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
+                                    name,
+                                    Syntax::KW_MUTATE
                                 ),
                                 format!(
                                     "write `{} {}` when calling `{}`",
@@ -536,8 +537,8 @@ impl<'a> Checker<'a> {
                 if arg.convention != AccessConvention::Write {
                     self.diags.push(Diagnostic::error(
                         "E0202",
-                        "`shuffle` changes its list".to_string(),
-                        "a changing argument must be passed with `mut`".to_string(),
+                        "`shuffle` edits its list in place".to_string(),
+                        "write access (`~`) is required; the list must be passed with `mut`".to_string(),
                         "write `random.shuffle(mut xs)`".to_string(),
                         Some(arg.span),
                     ));
@@ -815,8 +816,8 @@ impl<'a> Checker<'a> {
             if *conv == AccessConvention::Write && arg.convention != AccessConvention::Write {
                 self.diags.push(Diagnostic::error(
                     "E0202",
-                    format!("argument {} to `{}` must be passed with `mut`", i + 1, name),
-                    "this standard library call changes that value".to_string(),
+                    format!("argument {} to `{}` requires write access (`~`)", i + 1, name),
+                    "this standard library call edits that value in place".to_string(),
                     format!("write `{} value` for this argument", Syntax::KW_MUTATE),
                     Some(arg.span),
                 ));

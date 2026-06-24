@@ -200,10 +200,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0202",
                         format!(
-                            "`{}` needs a plain mutable name after it",
+                            "`{}` needs a plain named binding after it",
                             Syntax::KW_MUTATE
                         ),
-                        "only a named binding can be handed out for changing".to_string(),
+                        "write access (`~`) can only be granted to a named binding, not an expression".to_string(),
                         format!(
                             "bind the value first: `x {} ...` then pass `{} x`",
                             Syntax::SIGIL_BIND_MUT,
@@ -252,15 +252,16 @@ impl<'a> Checker<'a> {
                                         Syntax::KW_MOVE
                                     ),
                                     format!(
-                                        "parameter `{}` takes ownership; passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                        "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
                                         arg_idx + 1,
                                         name,
                                         Syntax::KW_MOVE
                                     ),
                                     format!(
-                                        "write `{} {}` to transfer ownership",
+                                        "write `{} {}` to move ownership to `{}`",
                                         Syntax::KW_MOVE,
-                                        name
+                                        name,
+                                        method
                                     ),
                                     Some(*span),
                                 ));
@@ -279,12 +280,12 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0202",
                                 format!(
-                                    "parameter `{}` requires `{}` at the call site",
-                                    name,
-                                    Syntax::KW_MUTATE
+                                    "parameter `{}` requires write access (`~`) at the call site",
+                                    name
                                 ),
                                 format!(
-                                    "`{method}` needs to change this value while it borrows it"
+                                    "`{method}` needs to edit (`~`) this value; passing it without `{}` grants only read access",
+                                    Syntax::KW_MUTATE
                                 ),
                                 format!(
                                     "write `{} {}` when calling `{method}`",

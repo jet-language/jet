@@ -4,4 +4,4 @@ Error [E1102]: `cfg` can't cross into a task because `Config` isn't sendable
  11 |     t @= tasks.spawn(take(cfg) () => cfg.id)
     |                                ^^^^^^^^^^^^
  Why: `Config` contains `logger`, which holds a `ref` field at `logger.sink`; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or remove the borrowed field before spawning
+ Fix: give the task plain owned data, or remove the shared-view field before spawning

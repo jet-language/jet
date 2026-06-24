@@ -142,7 +142,7 @@ before continuing.
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
 | E0119 | sema  | unknown type name                         |
-| E0120 | sema  | moving/returning a borrowed parameter     |
+| E0120 | sema  | moving/returning a parameter without move (`^`) access |
 | E0121 | sema  | value used after it was given away        |
 | E0122 | sema  | `main` with parameters or a return type   |
 | E0123 | sema  | `for` range `step` must be a positive Int (S22, D-SG8) |
@@ -152,14 +152,14 @@ before continuing.
 | E0127 | sema  | arithmetic on a distinct type without `@Numeric` (D-DIST3) |
 | E0128 | sema  | implicit coercion between a distinct type and its base (D-DIST3) |
 | E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
-| E0201 | sema  | `take` required; value can't be copied    |
-| E0202 | sema  | `mut` required at call site               |
+| E0201 | sema  | `take` (`^`) required; value can't be copied |
+| E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
 | E0204 | sema  | same value used while `mut` is active in one call |
-| E0205 | sema  | `self.field = v` in a non-`mut self` method (D-MUTSELF1) |
+| E0205 | sema  | `self.field = v` without write access (`~`) on the receiver (D-MUTSELF1) |
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | multiple unlabeled `ref` fields           |
-| E0208 | sema  | `*` outside `unsafe`                      |
+| E0208 | sema  | `*` raw access outside `#Unsafe`          |
 | L0201 | sema  | implicit `.clone()` at call site — fired only when the value is dead after the call (D-L0201 liveness gate) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | E0301 | sema  | `impl` for unknown type                   |
@@ -460,7 +460,7 @@ CLI.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
-| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; `view` borrows, `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the borrowed field, or hand a closure over with `take`. |
+| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; shared views (`&`), `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the shared-view field, or hand a closure over with `take`. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
 | E1104 | `#layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#layout(c)` if C interop is not required. |
 | E1105 | `#layout(packed)`, `#layout(align(N))`, or `#layout(columnar)` written on a struct. | Only `#layout(c)` is implemented in this release; the other variants are reserved for future milestones. | Use `#layout(c)` for C-compatible layout, or omit `#layout` for the default. |
@@ -483,7 +483,7 @@ E2303` points there and the soundness matrix has a named cell.
 |------|------|-----|-----|
 | E2301 | A `-> view` function returns a view into a field of a value this function owns. | The owning local is made inside the call and freed when it returns, so a view into its fields would outlive what owns it — there'd be nothing left to look at. | Return an owned copy (`.clone()` the field into an owned return type), or accept the source as a parameter so the caller keeps owning it. |
 | E2302 | A `ref` field is filled from a value that won't outlive the struct. | A `ref` field stores a view, not its own copy, so its source must outlive the struct; a local or a fresh literal lives only as long as the call. | Store an owned value (drop `ref` so the struct keeps its own copy, or `.clone()` into it), or fill the `ref` from a parameter the caller keeps owning. |
-| E2303 | A `view` borrow or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A borrowed value points into something another scope owns; a task or channel moves owned data between threads, so a borrow can't go with it. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the borrowed field before crossing, or rebuild the value as an owned copy. |
+| E2303 | A `view` or a `ref`-holding struct crosses a `tasks.spawn` or `Sender.send` boundary. | A shared view (`&`) points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, remove the shared-view field before crossing, or rebuild the value as an owned copy. |
 | E2304 | A `-> view` function returns an indexed or sliced piece of a value (e.g. `text[0..2]` or `items[i]`). | Indexing or slicing builds a fresh, owned piece — there's no longer-lived value for a view to point at, so the piece would vanish the moment the function returns. A `view` into a whole *field* of a parameter is fine (the caller still owns the field); only the freshly-cut piece is the problem. | Return the piece owned (drop `view`; the caller keeps its own copy), or hand back a whole field with `view` and let the caller index it. |
 | L2301 | This return hands back a borrowed `view`; the advisory names the source it borrows. | Borrowed returns are easy to miss; surfacing the source (the parameter or value the view points into) makes the borrow visible without reading the signature. This is an inlay/advisory hint, on by default (D-REF3). | No action needed — it's informational. To return owned data instead, drop `view` and `.clone()` the value. |
 
@@ -603,7 +603,7 @@ already-freed arena), these track the views themselves.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0631 | `{view}` can't {escape} — it's a view into `{arena}`. | A view borrows storage owned by the arena; if it left the region it would outlive the arena and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `.clone()` before it leaves. |
+| E0631 | `{view}` cannot be shared — it does not live long enough to {escape}. | `{view}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `.clone()` before it leaves. |
 | E0632 | `{arena}` was {reset/freed} here, so the value `{view}` points into is gone. | `reset`/`free` invalidate every value allocated in the arena; reading the view afterward would read freed memory. | Use the view before `reset`/`free`, or re-`alloc` after to get a fresh value. |
 
 ## Effect system diagnostics (D-EFF1, D-QUAL1)

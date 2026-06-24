@@ -4,4 +4,4 @@ Error [E1102]: `cfg` can't be sent because `Config` isn't sendable
  13 |     sender.send(take cfg)
     |                      ^^^
  Why: `Config` contains `logger`, which holds a `ref` field at `logger.sink`; tasks and channels move owned values between threads
- Fix: send plain data instead, or rebuild the value without borrowed fields before calling `.send()`
+ Fix: send plain owned data instead, or rebuild the value without shared-view fields before calling `.send()`

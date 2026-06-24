@@ -1,7 +1,7 @@
-Error [E1102]: this task returns a borrowed view, which can't cross into a task
+Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
   --> tests/ui/task_view_result.jet:6:28
     |
   6 |     t @= tasks.spawn(() => borrow_msg("hi"))
     |                            ^^^^^^^^^^
- Why: `view` results are borrowed, not owned; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or remove the borrowed field before spawning
+ Why: `view` results are shared views, not owned values; tasks and channels move owned values between threads
+ Fix: give the task plain owned data, or remove the shared-view field before spawning

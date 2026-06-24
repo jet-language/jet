@@ -592,11 +592,10 @@ impl<'a> Checker<'a> {
                                         self.diags.push(Diagnostic::error(
                                             "E0202",
                                             format!(
-                                                "`{}` must be declared mutable (`{}`) to change it",
-                                                root,
-                                                Syntax::SIGIL_BIND_MUT
+                                                "cannot write to `{}` — it does not have edit access (`~`)",
+                                                root
                                             ),
-                                            "assigning into a collection changes it".to_string(),
+                                            "assigning into a collection edits it; the binding must be declared mutable".to_string(),
                                             format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
                                             Some(*span),
                                         ));
@@ -726,29 +725,29 @@ impl<'a> Checker<'a> {
                                     let is_self = root == Syntax::KW_SELF;
                                     let what = if is_self {
                                         format!(
-                                            "can't change `{}` through a shared `{}` receiver",
+                                            "cannot edit `{}` — `{}` has read access only; write access (`~`) is required",
                                             field,
                                             Syntax::KW_SELF
                                         )
                                     } else {
-                                        format!("can't change `{}` — `{}` isn't changeable", field, root)
+                                        format!("cannot edit `{}` — `{}` does not have write access (`~`)", field, root)
                                     };
                                     let fix = if is_self {
                                         format!(
-                                            "write the receiver as `{} {}` so the method may change it",
+                                            "write the receiver as `{} {}` to grant write access",
                                             Syntax::KW_MUTATE,
                                             Syntax::KW_SELF
                                         )
                                     } else if info.param_conv.is_some() {
                                         format!(
-                                            "mark the parameter `{} {}: {}` if the function should change it",
+                                            "mark the parameter `{} {}: {}` to grant write access",
                                             Syntax::KW_MUTATE,
                                             root,
                                             info.ty.name()
                                         )
                                     } else {
                                         format!(
-                                            "declare it with `{} {} ...` so it can change",
+                                            "declare it with `{} {} ...` to give it write access",
                                             root,
                                             Syntax::SIGIL_BIND_MUT
                                         )
@@ -756,7 +755,7 @@ impl<'a> Checker<'a> {
                                     self.diags.push(Diagnostic::error(
                                         "E0205",
                                         what,
-                                        "while something is being changed in place, the place that owns it must be changeable".to_string(),
+                                        "editing a field requires write access (`~`) on the owning place".to_string(),
                                         fix,
                                         Some(*span),
                                     ));
@@ -833,10 +832,10 @@ impl<'a> Checker<'a> {
                                     self.diags.push(Diagnostic::error(
                                         "E0120",
                                         format!(
-                                            "`{}` is only borrowed here, so it can't be given back as-is",
+                                            "`{}` was not moved here, so it cannot be returned as-is",
                                             n
                                         ),
-                                        "this function reads the value but doesn't own it"
+                                        "this function has read access only and does not own the value"
                                             .to_string(),
                                         format!(
                                             "return a copy: `return {}.clone();` — or take ownership with `{} {}: {}`",
@@ -1921,8 +1920,8 @@ impl<'a> Checker<'a> {
                     ) {
                         self.diags.push(Diagnostic::error(
                             "E0120",
-                            format!("`{}` is only borrowed here, so it can't be moved", n),
-                            "this function reads the value but doesn't own it".to_string(),
+                            format!("`{}` was not moved here, so it cannot be taken (`^`)", n),
+                            "this function has read access only and does not own the value".to_string(),
                             format!(
                                 "copy it instead: `{} {} {}.clone()`",
                                 b.name,

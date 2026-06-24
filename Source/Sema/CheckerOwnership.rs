@@ -257,9 +257,9 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| "its arena".to_string());
         self.diags.push(Diagnostic::error(
             "E0631",
-            format!("`{}` can't {} — it's a view into `{}`", name, what, arena),
+            format!("`{}` cannot be shared — it does not live long enough to {}", name, what),
             format!(
-                "`{}` borrows storage owned by `{}`; if it left this scope it would outlive `{}` and point into freed memory",
+                "`{}` is a view into `{}`; sharing it outside the region would let it outlive `{}` and point into freed memory",
                 name, arena, arena
             ),
             format!(
@@ -524,15 +524,15 @@ impl<'a> Checker<'a> {
         let what = match (crossing, &problem.kind) {
             (SendCrossing::TaskCapture, SendProblemKind::ViewBorrow) => {
                 format!(
-                    "{} can't cross into a task because it is a borrowed view",
+                    "{} cannot be shared into a task — it is a view that does not live long enough",
                     value_text
                 )
             }
             (SendCrossing::TaskResult, SendProblemKind::ViewBorrow) => {
-                "this task returns a borrowed view, which can't cross into a task".to_string()
+                "this task returns a view that cannot be shared — it does not live long enough to cross into a task".to_string()
             }
             (SendCrossing::ChannelSend, SendProblemKind::ViewBorrow) => {
-                format!("{} can't be sent because it is a borrowed view", value_text)
+                format!("{} cannot be shared across channels — it is a view that does not live long enough", value_text)
             }
             (SendCrossing::TaskCapture, _) => {
                 format!(
@@ -556,10 +556,10 @@ impl<'a> Checker<'a> {
         );
         let fix = match crossing {
             SendCrossing::ChannelSend => {
-                "send plain data instead, or rebuild the value without borrowed fields before calling `.send()`"
+                "send plain owned data instead, or rebuild the value without shared-view fields before calling `.send()`"
             }
             SendCrossing::TaskCapture | SendCrossing::TaskResult => {
-                "give the task plain owned data, or remove the borrowed field before spawning"
+                "give the task plain owned data, or remove the shared-view field before spawning"
             }
         };
         // D-DETACH1: if this E1102 fires in a task spawn context, record the task
@@ -592,10 +592,10 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0120",
                         format!(
-                            "`{}` is only borrowed here, so `.{}()` can't consume it",
+                            "`{}` was not moved here, so `.{}()` can't take it",
                             name, method
                         ),
-                        "this function reads the value but doesn't own it".to_string(),
+                        "this function has read access only and does not own the value".to_string(),
                         format!(
                             "call it on a copy, or take ownership with `{} {}: {}`",
                             Syntax::KW_MOVE,
@@ -678,12 +678,12 @@ impl<'a> Checker<'a> {
                                 Syntax::KW_MOVE
                             ),
                             format!(
-                                "parameter `{}` takes ownership; passing `{}` without `{}` would have to copy it, but this type can't be copied",
+                                "parameter {} takes ownership (`^`); passing `{}` without `{}` would have to copy it, but this type can't be copied",
                                 idx + 1,
                                 name,
                                 Syntax::KW_MOVE
                             ),
-                            format!("write `{} {}` to transfer ownership", Syntax::KW_MOVE, name),
+                            format!("write `{} {}` to move ownership to `{}`", Syntax::KW_MOVE, name, call_name),
                             Some(*span),
                         ));
                     }
