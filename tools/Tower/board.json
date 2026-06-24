@@ -1090,8 +1090,8 @@
     {
       "id": "c131",
       "type": "task",
-      "title": "*T raw reconcile with Ptr<T> + core.mem + #Audit (S58)",
-      "body": "*T is the surface form for today's Ptr<T> behind the core.mem gate. Reconcile the two spellings; require an enclosing #Unsafe context plus an #Audit(\"...\") justification on memory-unsafe ops; keep raw uninferable in safe code. Decide whether *T replaces or aliases Ptr<T> - ties into the *x deref/address-of rule (D-CAP9, c127).",
+      "title": "*T raw reconcile with Ptr<T> + core.mem + #Unsafe gate (S58)",
+      "body": "*T is the surface form for today's Ptr<T> behind the core.mem gate. Reconcile the two spellings; require an enclosing #Unsafe(\"reason\") context on memory-unsafe ops (the reason is the #Unsafe arg; the separate #Audit marker was retired by D-UNSAFE2); keep raw uninferable in safe code. Decide whether *T replaces or aliases Ptr<T> - ties into the *x deref/address-of rule (D-CAP9, c127).",
       "stage": "ready",
       "priority": "P3",
       "workOrder": null,
@@ -1112,10 +1112,14 @@
         {
           "t": "#Unsafe gate + Ptr<T>/core.mem ship; *T raw parsing + p.* deref remains (D-CAP9).",
           "at": "2026-06-24"
+        },
+        {
+          "t": "Audit fix 2026-06-24: corrected retired #Audit(\"…\") reference — D-UNSAFE2 (2026-06-22) folded the reason into #Unsafe(\"reason\") and retired #Audit (E0055). Ensure the *T-raw/Ptr<T> reconcile does NOT re-introduce a separate audit marker.",
+          "at": "2026-06-24T22:45:02.236Z"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-24",
+      "updated": "2026-06-24T22:45:02.236Z",
       "decisions": []
     },
     {
@@ -1162,8 +1166,8 @@
       "type": "idea",
       "title": "if subject == { } explicit value/pattern dispatch (revise D-IF1/D-IF2)",
       "body": "Owner-initiated revision of ratified D-IF1/D-IF2: mark multi-way matching explicitly with `==` between the subject and the block (`if status == { \"active\" -> … }`), and drop the repeated `subject ==` from every arm — primitives AND enum/patterns. `if boolVar { }` stays a plain yes/no test. Plan: tools/Tower/docs/sidequests/if-eq-dispatch.md. Blocked on owner decision D-IF3 (marker spelling + required/optional + arm separator + predicate arms). Couples with D-FMT1 (c135) for single-line arms.",
-      "stage": "building",
-      "plan": "if-eq-dispatch",
+      "stage": "done",
+      "plan": null,
       "notes": [
         {
           "t": "[sweep] Plan written + vetted by a second agent against the parser/codegen. D-IF3 queued in ballot (rec A = `==` marker, required, keep `->`, no predicate arms). Codegen unchanged (both forms lower to Stmt::Switch). Migration = every dispatch example, one commit. Coupled with D-FMT1.",
@@ -1171,6 +1175,10 @@
         },
         {
           "t": "[sweep] D-IF3 ratified (= A: required `==` dispatch marker, keep `->`, no predicate arms; E0992/E0993). Unblocked, not gated -> building per the implementation standard (ballot answer = go).",
+          "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-IF3 built end-to-end: required `if subject == { … }` dispatch marker (Q1-Q5=A). Subject parsed below comparison precedence so `== {` survives; bare pattern arm heads bound to subject; E0992 (missing ==), E0993 (predicate arm), E0994 (redundant subject ==) + ui snapshots; ~15 dispatch examples + switch/match ui snapshots migrated; codegen extended for value+range mixed switch. Verified: D-IF3 introduced zero regressions (stash baseline). Plan deleted (rationale in syntax-decisions.md + diagnostics.md).",
           "at": "2026-06-24"
         }
       ],
@@ -1229,6 +1237,50 @@
       "decisions": [],
       "priority": "P3",
       "workOrder": null
+    },
+    {
+      "id": "c137",
+      "type": "task",
+      "title": "Zed/tree-sitter grammar is a stale dialect — fix broken highlighting",
+      "body": "The Zed extension highlights an OLD dialect, so keywords light up inside identifiers (format->for, inner->in, asset->as, reference->ref, mutable->mut, usage->use, tests->test). Two multiplicative root causes. (1) grammar.js has NO `word: $ => $.identifier` token, so tree-sitter does no keyword extraction and keyword tokens match as PREFIXES of identifiers, worst in the ERROR/partial states that dominate live editing. (2) the grammar still defines retired constructs (val/var bindings, switch_stmt) and CANNOT parse modern ratified syntax real examples use (@=/:= sigil bindings, multi-arm `if subj == { pat -> {} }`, enum/or/range/wildcard patterns, ~^&* capability sigils, fan-out f.[…]/s.{…}, ??, dotted `use core.x.y`, map literals, self/~self, #Unsafe/#Uninit/#-attributes, block comments /* */) and REQUIRES `;` terminators modern Jet omits — so nearly every file is full of ERROR nodes, compounding (1). highlights/outline/indents.scm still tag retired switch/val/var. No new user-facing syntax — the grammar just needs to track already-ratified syntax, so NO ballot. Authoritative source: editors/tree-sitter/grammar.js; ship via FORCE=1 editors/zed/install.sh (regen parser.c + wasm + re-pin extension.toml), update the four .scm/config.toml query files in lockstep (a dangling node ref is a hard Zed load failure). Plan: tools/Tower/docs/sidequests/zed-grammar-modernization.md.",
+      "stage": "ready",
+      "plan": "zed-grammar-modernization",
+      "notes": [
+        {
+          "t": "Filed from codebase audit 2026-06-24. No existing editor/grammar card — genuine gap. User-reported pain point.",
+          "at": "2026-06-24T22:45:02.236Z"
+        },
+        {
+          "t": "Coordinate with c124/c127/c131 (D-CAP7/D-CAP9): the grammar must land on the FINAL ~^&* sigil vocabulary, not the transitional mut/take/view keywords (c124 Phase 6 retires those). Track ratified syntax only.",
+          "at": "2026-06-24T22:45:02.236Z"
+        },
+        {
+          "t": "An implementing agent is already active in the repo — this card is for tracking/coordination; verify the live multi-arm-if spelling against Source/Syntax.rs (D-IF1/D-IF3, c134) before encoding it.",
+          "at": "2026-06-24T22:45:02.236Z"
+        }
+      ],
+      "created": "2026-06-24T22:45:02.236Z",
+      "updated": "2026-06-24T22:45:02.236Z",
+      "priority": "P1",
+      "workOrder": 0
+    },
+    {
+      "id": "c138",
+      "type": "task",
+      "title": "Doc & path consistency sweep (#Audit→#Unsafe drift, R1–R7→R1–R10, dead links, src/→Source)",
+      "body": "Mechanical doc cleanup, no decision — code is correct, docs lag. (1) D-UNSAFE2 (2026-06-22) retired the separate #Audit(\"…\") marker (E0055) and folded the reason into #Unsafe(\"reason\"), but 8 doc sites still teach the retired two-marker (or older @unsafe/@audit) form: README.md:41/69, diagnostics.md:599/604/606/608 (self-contradicts E0055 at :118), architecture.md:63-64, roadmap.md:63/128, and CLAUDE.md I1 (~51/53/55). (2) CLAUDE.md:14 & docs/README.md:23 say architecture.md is 'rules R1–R7'; it defines R1–R10. (3) Dead links: docs/reference/errors/*.md (13 files) footer -> ../admin/04-diagnostics.md (should be ../../spec/diagnostics.md); roadmap.md:24 & syntax-decisions.md:888 link decision-ballots.md at wrong path. (4) Stale src/->Source/ path comments: CLI.rs:9, Prelude/CoreLib.rs:1446, CBind.rs:11, Comptime/Methods.rs:67, Comptime/mod.rs:85, Manifest.rs:3. (5) Example comments teaching retired :: / when (CODE is clean): 03_values.jet:2, 69_distinct_types.jet:2, 75_arena_regions.jet:40 (:: -> @=), 11_enums.jet:1 ('exhaustive when'). CLAUDE.md and docs/README.md are owner-owned — surface those fixes, don't edit unilaterally. Plan: tools/Tower/docs/sidequests/doc-consistency-sweep.md.",
+      "stage": "ready",
+      "plan": "doc-consistency-sweep",
+      "notes": [
+        {
+          "t": "Filed from codebase audit 2026-06-24. Folds in the minor example-comment :: / when stragglers (example CODE is fully modern; only header comments lag).",
+          "at": "2026-06-24T22:45:02.236Z"
+        }
+      ],
+      "created": "2026-06-24T22:45:02.236Z",
+      "updated": "2026-06-24T22:45:02.236Z",
+      "priority": "P2",
+      "workOrder": 0
     }
   ],
   "questions": [

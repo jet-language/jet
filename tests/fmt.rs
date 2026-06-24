@@ -118,8 +118,8 @@ fn fmt_canonicalizes_switch_arms_to_pipe_syntax() {
 "#;
     let out = jet::format_source(src).expect("fmt should parse legacy switch syntax");
     assert!(
-        out.contains("if fruit {"),
-        "expected `when` lowered to `if SUBJECT {{`, got:\n{out}"
+        out.contains("if fruit == {"),
+        "expected `when` lowered to `if SUBJECT == {{` (D-IF3), got:\n{out}"
     );
     assert!(
         out.contains("apple -> {"),

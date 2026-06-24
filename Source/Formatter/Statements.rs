@@ -96,8 +96,9 @@ impl<'a> Fmt<'a> {
                 self.write(" {");
                 self.fmt_body(body);
             }
-            // D-IF1: multi-arm dispatch renders as `if subject { head -> body }`
-            // (the `Stmt::Switch` IR is shared with the retired `when`).
+            // D-IF3: multi-arm dispatch renders as `if subject == { head -> body }`
+            // (the `Stmt::Switch` IR is shared with the retired `when`). The `==`
+            // marker enters dispatch; arm heads carry no repeated `subject ==`.
             Stmt::Switch {
                 subject,
                 arms,
@@ -107,7 +108,7 @@ impl<'a> Fmt<'a> {
                 self.write(Syntax::KW_IF);
                 self.write(" ");
                 self.fmt_expr(subject, Prec::OrFallback);
-                self.write(" {");
+                self.write(" == {");
                 self.newline();
                 self.with_indent(|f| {
                     for arm in arms {
@@ -349,14 +350,10 @@ impl<'a> Fmt<'a> {
                 pattern,
                 ..
             } => {
-                // D-IF1: a pattern arm keeps its `subject == pattern` shape (a
-                // bare pattern would re-parse as a value comparison and drop the
-                // binding names, e.g. `ok(n)` wouldn't bind `n`). Emit the real
-                // subject expression as written. `it` is preserved only when the
-                // source already used it (a complex subject sema declares as
-                // `it`); a plain subject identifier prints itself — no collapse.
-                self.fmt_expr(lhs, Prec::Cmp);
-                self.write(" == ");
+                // D-IF3: a pattern arm head is bare — the `==` marker on the `if`
+                // already binds it to the subject, so the head prints just the
+                // pattern (`Active(id)`, `ok(n)`, `null`), no repeated `subject ==`.
+                let _ = lhs;
                 self.fmt_pattern(pattern);
             }
             _ => self.fmt_expr(cond, prec),

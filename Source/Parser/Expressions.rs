@@ -232,6 +232,17 @@ impl<'a> Parser<'a> {
         self.with_nesting(span, |p| p.expr_or_fallback(false))
     }
 
+    /// D-IF3: parse a subject expression that stops *below* comparison
+    /// precedence, so a trailing `==` is left for `if_or_dispatch` to detect as
+    /// the dispatch marker (`if subject == { … }`). `expr_cmp` would otherwise
+    /// consume the `==` (as a comparison or a `PatternTest`) and then choke on
+    /// the `{`. Struct literals are disallowed, like `expr_no_struct_lit`, so
+    /// `if subject {` never reads `subject { … }` as a struct value.
+    pub(super) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
+        let span = self.peek().span;
+        self.with_nesting(span, |p| p.expr_bitor(false))
+    }
+
     /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
     fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let mut lhs = self.expr_or(allow_struct_lit)?;
@@ -1299,7 +1310,7 @@ impl<'a> Parser<'a> {
     /// `Variant(bindings)`. A bare identifier is ordinary value equality
     /// (`a == b`); unit-variant tests like `light == Red` are resolved in
     /// sema when `Red` is not a variable but is a variant on the subject.
-    fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+    pub(super) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwNull => {
                 let span = self.bump().span;

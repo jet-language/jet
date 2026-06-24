@@ -12,11 +12,11 @@ fn main() {
         process.exit(1)
     }
     text @= fs.read(path) ?? panic("cannot read file")
-    if json.parse(text) {
-        it == ok(data) -> {
+    if json.parse(text) == {
+        ok(data) -> {
             print(json.to_string_pretty(data))
         }
-        it == err(e) -> {
+        err(e) -> {
             io.eprint("parse error at line {e.line}: {e.message}")
             process.exit(1)
         }

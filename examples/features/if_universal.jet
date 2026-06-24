@@ -1,13 +1,14 @@
-// if_universal — D-IF1. `if` is the one branching keyword. Beyond the familiar
-// two-arm form, `if subject { arm -> body }` is multi-arm dispatch:
+// if_universal — D-IF3. `if` is the one branching keyword. Beyond the familiar
+// two-arm form, `if subject == { arm -> body }` is multi-arm dispatch:
+//   - the `==` marker enters value/pattern dispatch;
 //   - a bare value arm compares against the subject (`subject == value`);
-//   - an arm with a comparison/logical operator is a full Bool condition;
+//   - a range arm `lo..hi ->` matches a band (Q4: no free predicates here);
 //   - an arm body is a braceless single statement OR a `{ … }` block;
 //   - `else -> …` is the catch-all.
 fn classify(code: Int) -> String {
-    // Bare-value arms (inferred `code == …`), a full-condition arm, braceless
-    // and block bodies, and an `else` catch-all — mixed freely.
-    if code {
+    // Bare-value arms (inferred `code == …`), a range arm, braceless and block
+    // bodies, and an `else` catch-all — mixed freely.
+    if code == {
         200 -> {
             return "ok"
         }
@@ -15,7 +16,7 @@ fn classify(code: Int) -> String {
             note @= "not found"
             return note
         }
-        (code >= 500) -> {
+        500..599 -> {
             return "server error"
         }
         else -> {

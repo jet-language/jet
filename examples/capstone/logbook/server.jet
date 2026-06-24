@@ -35,7 +35,7 @@ fn html_response(body: String) -> HttpResponse {
 
 fn route(req: HttpRequest, idx: Index) -> HttpResponse {
     method @= req.method()
-    if method {
+    if method == {
         "GET" -> {
             p @= req.path()
             if p == "/" {
@@ -56,8 +56,8 @@ fn route(req: HttpRequest, idx: Index) -> HttpResponse {
                 name @= p.slice(6, (p.len() - 1))
                 notes_map: [String, Note] @= idx.notes
                 maybe_note: Note? @= notes_map.get(name)
-                if maybe_note {
-                    maybe_note == value(note_val) -> {
+                if maybe_note == {
+                    value(note_val) -> {
                         bls_map: [String, [String]] @= idx.backlinks
                         bls: [String] @= bls_map.get(name) ?? []
                         body @= render.note_to_html(note_val, bls)
@@ -66,7 +66,7 @@ fn route(req: HttpRequest, idx: Index) -> HttpResponse {
                         hdrs.insert("ETag", etag)
                         return HttpResponse{status: "200 OK", body: body, headers: hdrs}
                     }
-                    maybe_note == null -> {
+                    null -> {
                         empty_hdrs: [String, String] @= [:]
                         return HttpResponse{status: "404 Not Found", body: "note not found: {name}", headers: empty_hdrs}
                     }

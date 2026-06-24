@@ -617,13 +617,13 @@ impl<'a> Parser<'a> {
                         Syntax::LANG_NAME
                     ),
                     format!(
-                        "`{}` is the one branching keyword — multi-arm dispatch is `{} subject {{ arm {} body }}`",
+                        "`{}` is the one branching keyword — multi-arm dispatch is `{} subject == {{ arm {} body }}`",
                         Syntax::KW_IF,
                         Syntax::KW_IF,
                         Syntax::OP_ARM_ARROW
                     ),
                     format!(
-                        "write `{} subject {{ value {} body … }}` (an `{} {} body` catch-all)",
+                        "write `{} subject == {{ value {} body … }}` (an `{} {} body` catch-all)",
                         Syntax::KW_IF,
                         Syntax::OP_ARM_ARROW,
                         Syntax::KW_ELSE,
@@ -826,24 +826,58 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-IF1: `if subject { … }` is either a conventional two-arm `if` (its body
-    /// is statements, optional `else`) or a multi-arm dispatch when the body's
-    /// first item is an arm `head -> body`. One token of lookahead after the
-    /// arm head decides: `->` is not a valid expression operator, so an arm head
-    /// followed by `->` unambiguously marks arm mode. Multi-arm `if` lowers to
-    /// the same `Stmt::Switch` IR the former `when` used.
+    /// D-IF3: `if subject == { … }` is multi-arm value/pattern dispatch; a plain
+    /// `if cond { … }` is a conventional boolean test. The `==` marker between
+    /// the subject and `{` is *required* to enter dispatch (Q2); an old-style
+    /// `if subject { head -> body }` with no `==` is teaching error E0992, which
+    /// recovers by parsing the body as arms so the rest of the file still checks.
+    /// Multi-arm `if` lowers to the same `Stmt::Switch` IR the former `when` used.
     fn if_or_dispatch(&mut self) -> Result<Stmt, Diagnostic> {
         let span = self.bump().span; // `if`
-        let subject = self.expr_no_struct_lit()?;
+
+        // Parse the subject below comparison precedence so a trailing `==` marker
+        // is left in the token stream (`expr_cmp` would eat it). If `== {`
+        // follows, this is explicit dispatch.
+        let probe = self.pos;
+        let probe_diags = self.diags.len();
+        if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
+            if matches!(self.peek().kind, TokKind::EqEq)
+                && matches!(self.peek2().kind, TokKind::LBrace)
+            {
+                self.bump(); // `==`
+                self.expect(TokKind::LBrace, "to open the `if` dispatch body")?;
+                return self.if_arms(subject, span);
+            }
+        }
+        // Not dispatch — rewind and parse the full boolean condition.
+        self.pos = probe;
+        self.diags.truncate(probe_diags);
+
+        let cond = self.expr_no_struct_lit()?;
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
-        // Peek for arm mode: an `else ->` first arm, or an arm head followed by
-        // `->`. Speculatively parse the head and look for `->`.
+        // D-IF3 / E0992: an old implicit-dispatch body (first item is `head ->`)
+        // with no `==` marker. Teach the explicit form, then recover by parsing
+        // the body as arms so the rest of the file's errors still surface (S14).
         if self.if_body_is_arms() {
-            return self.if_arms(subject, span);
+            self.diags.push(Diagnostic::error(
+                "E0992",
+                format!(
+                    "a multi-arm `{}` needs `==` between the subject and `{{`",
+                    Syntax::KW_IF
+                ),
+                format!(
+                    "`{} subject == {{ … }}` marks value dispatch explicitly, so a plain `{} cond {{ … }}` body is always statements",
+                    Syntax::KW_IF,
+                    Syntax::KW_IF
+                ),
+                format!("write `{} subject == {{ … }}`", Syntax::KW_IF),
+                Some(span),
+            ));
+            return self.if_arms(cond, span);
         }
 
-        // Conventional `if`: the subject is the condition.
+        // Conventional `if`: the condition gates a statement body.
         let then_body = self.block_stmts();
         let mut else_branch = None;
         if matches!(self.peek().kind, TokKind::KwElse) {
@@ -856,7 +890,7 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(Stmt::If(IfStmt {
-            cond: subject,
+            cond,
             then_body,
             else_branch,
             span,
@@ -919,15 +953,24 @@ impl<'a> Parser<'a> {
         is_arm
     }
 
-    /// D-IF1: parse the arms of a multi-arm `if` (cursor just past `{`), lowering
-    /// to `Stmt::Switch`. Each arm is `head -> body`; `head` with no top-level
-    /// comparison/logical operator is a bare value compared against the subject
-    /// (`subject == head`), otherwise a full `Bool` condition (D-IF2 Q3).
-    /// `body` is a braceless single statement/expression or a `{ … }` block
-    /// (D-IF2 Q2). `else -> body` is the catch-all (D-IF2 Q1).
+    /// D-IF3: parse the arms of an `if subject == { … }` dispatch (cursor just
+    /// past `{`), lowering to `Stmt::Switch`. Each arm is `head -> body` where
+    /// `head` is a bare value (`200`, `"sat" || "sun"`) compared against the
+    /// subject, a bare range (`400..499`), or a bare pattern (`Active(id)`,
+    /// `value(n)`, `ok(n)`, `null`) — the leading `subject ==` is dropped (Q4)
+    /// and re-bound here. A predicate/Bool head is rejected with E0993; a leftover
+    /// `subject ==` prefix with E0994. `body` is a braceless single statement or a
+    /// `{ … }` block (D-IF2 Q2). `else -> body` is the catch-all (D-IF2 Q1).
     fn if_arms(&mut self, subject: Expr, span: Span) -> Result<Stmt, Diagnostic> {
         let mut arms: Vec<SwitchArm> = Vec::new();
         let mut else_body: Option<Vec<Stmt>> = None;
+        // The scrutinee a pattern arm binds to: a simple ident subject is named
+        // directly; a complex subject (call/field) is the synthesised `it` that
+        // sema declares for fallible/dispatch subjects.
+        let pat_subject = match &subject {
+            Expr::Ident(..) => subject.clone(),
+            _ => Expr::Ident(Syntax::KW_IT.to_string(), subject.span()),
+        };
         loop {
             // Skip synthetic terminators between arms (S6-R).
             if matches!(self.peek().kind, TokKind::Semi) {
@@ -983,7 +1026,7 @@ impl<'a> Parser<'a> {
                                         Some(pat_span),
                                     ));
                                     Expr::PatternTest {
-                                        subject: Box::new(subject.clone()),
+                                        subject: Box::new(pat_subject.clone()),
                                         pattern: Pattern::Range { lo, hi, span: pat_span },
                                         span: pat_span,
                                     }
@@ -1016,7 +1059,7 @@ impl<'a> Parser<'a> {
                                     }
                                 }
                                 Expr::PatternTest {
-                                    subject: Box::new(subject.clone()),
+                                    subject: Box::new(pat_subject.clone()),
                                     pattern: Pattern::Range { lo, hi, span: pat_span },
                                     span: pat_span,
                                 }
@@ -1030,12 +1073,10 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                         } else {
-                            let raw = self.expr_no_struct_lit()?;
-                            Self::switch_pipe_cond(subject.clone(), raw)
+                            self.if_arm_head(&subject, &pat_subject)?
                         }
                     } else {
-                        let raw = self.expr_no_struct_lit()?;
-                        Self::switch_pipe_cond(subject.clone(), raw)
+                        self.if_arm_head(&subject, &pat_subject)?
                     };
                     self.expect(TokKind::Arrow, "after an `if` arm value or condition")?;
                     let body = self.arm_body()?;
@@ -1058,6 +1099,106 @@ impl<'a> Parser<'a> {
             else_body,
             span,
         })
+    }
+
+    /// D-IF3: parse one bare arm head (no leading `subject ==`) and bind it to
+    /// the subject. A pattern head (`Active(id)`, `value(n)`, `ok(n)`, `null`,
+    /// `A(x) | B(x)`) becomes a `PatternTest` on `pat_subject`; a bare value (or
+    /// `||` chain of values) becomes `subject == value`. A predicate head
+    /// (`code >= 500`, `(a) && (b)`) is rejected with E0993; a leftover redundant
+    /// `subject ==` prefix with E0994 (both recover so the file still checks).
+    fn if_arm_head(&mut self, subject: &Expr, pat_subject: &Expr) -> Result<Expr, Diagnostic> {
+        // A bare pattern head: parse it standalone and attach the subject.
+        let save = self.pos;
+        if let Some(pattern) = self.try_pattern_rhs()? {
+            // Only a pattern if it consumed up to the `->`; otherwise it was an
+            // ordinary value (e.g. a `value`-typed local) — rewind and re-parse.
+            if matches!(self.peek().kind, TokKind::Arrow) {
+                let span = pat_span(&pattern);
+                return Ok(Expr::PatternTest {
+                    subject: Box::new(pat_subject.clone()),
+                    pattern,
+                    span,
+                });
+            }
+            self.pos = save;
+        }
+        let raw = self.expr_no_struct_lit()?;
+        // E0994: a leftover `subject ==` prefix on the arm head.
+        match &raw {
+            Expr::PatternTest { subject: lhs, span, .. } if Self::same_subject(lhs, subject) => {
+                self.diags.push(Self::redundant_subject_diag(*span));
+                return Ok(raw);
+            }
+            Expr::Binary(BinOp::Eq, lhs, _, span) if Self::same_subject(lhs, subject) => {
+                self.diags.push(Self::redundant_subject_diag(*span));
+                return Ok(raw);
+            }
+            _ => {}
+        }
+        // E0993: a predicate / Bool head (Q4 disallows free conditions here).
+        if Self::is_predicate_head(&raw) {
+            self.diags.push(Diagnostic::error(
+                "E0993",
+                "an arm head here is matched against the subject, not a free condition".to_string(),
+                format!(
+                    "every arm in `{} subject == {{ … }}` tests the subject; an arbitrary predicate has no subject to match",
+                    Syntax::KW_IF
+                ),
+                format!(
+                    "use a range arm like `400..499 {}` for a band, or a boolean `{} … {{ }} {} {} … {{ }}` for arbitrary predicates",
+                    Syntax::OP_ARM_ARROW,
+                    Syntax::KW_IF,
+                    Syntax::KW_ELSE,
+                    Syntax::KW_IF
+                ),
+                Some(raw.span()),
+            ));
+            // Recover: keep the predicate as a Bool guard arm so the rest checks.
+            return Ok(raw);
+        }
+        // A bare value or `||` chain of values → `subject == value`.
+        Ok(Self::switch_pipe_cond(subject.clone(), raw))
+    }
+
+    fn redundant_subject_diag(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0994",
+            format!(
+                "drop the `subject ==` — the `==` on the `{}` already applies it to every arm",
+                Syntax::KW_IF
+            ),
+            format!(
+                "`{} subject == {{ … }}` matches each arm head against the subject, so repeating `subject ==` on an arm is redundant",
+                Syntax::KW_IF
+            ),
+            "delete the `subject ==` prefix; write just the value or pattern".to_string(),
+            Some(span),
+        )
+    }
+
+    /// D-IF3 (Q4): a head that is a free Bool predicate rather than a value or
+    /// pattern matched against the subject — a top-level `&&`, a comparison, or a
+    /// `||` whose alternatives are themselves predicates.
+    fn is_predicate_head(e: &Expr) -> bool {
+        match e {
+            Expr::Binary(BinOp::And, ..) => true,
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                Self::is_predicate_head(lhs) || Self::is_predicate_head(rhs)
+            }
+            Expr::Binary(op, ..) if op.is_comparison() => true,
+            _ => false,
+        }
+    }
+
+    /// True when `a` denotes the dispatch subject (a byte-equal ident, or the
+    /// synthesised `it`). Mirrors the formatter's `same_subject`.
+    fn same_subject(a: &Expr, subject: &Expr) -> bool {
+        match (a, subject) {
+            (Expr::Ident(n, _), _) if n == Syntax::KW_IT => true,
+            (Expr::Ident(n, _), Expr::Ident(s, _)) => n == s,
+            _ => false,
+        }
     }
 
     /// D-IF2 Q2: an arm body is a `{ … }` block or a single braceless statement.

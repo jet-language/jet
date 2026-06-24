@@ -35,7 +35,7 @@ pub fn parse_query(raw: String) -> Query {
 }
 fn note_type_matches(n: Note, k: NoteType) -> Bool {
     note_kind @= note.kind_str(n)
-    if k {
+    if k == {
         User -> {
             return (note_kind == "user")
         }
@@ -52,31 +52,31 @@ fn note_type_matches(n: Note, k: NoteType) -> Bool {
     }
 }
 fn note_matches(n: Note, q: Query) -> Bool {
-    if q {
-        q == Tag(t) -> {
+    if q == {
+        Tag(t) -> {
             return n.tags.contains(t)
         }
-        q == Kind(k) -> {
+        Kind(k) -> {
             return note_type_matches(n, k)
         }
-        q == Text(s) -> {
+        Text(s) -> {
             return ((n.name.contains(s) || n.description.contains(s)) || n.body.contains(s))
         }
 
     }
 }
 fn note_score(n: Note, q: Query) -> Int {
-    if q {
-        q == Tag(t) -> {
+    if q == {
+        Tag(t) -> {
             if n.name.contains(t) {
                 return 2
             }
             return 1
         }
-        q == Kind(k) -> {
+        Kind(k) -> {
             return 1
         }
-        q == Text(s) -> {
+        Text(s) -> {
             score: Int := 0
             if n.name.contains(s) {
                 score = (score + 3)
@@ -128,8 +128,8 @@ fn main() {
 }
 #Test "tag query parses" {
     raw @= parse_query("#feedback")
-    if raw {
-        raw == Tag(t) -> {
+    if raw == {
+        Tag(t) -> {
             require_eq(t, "feedback")
         }
         else -> {
@@ -139,8 +139,8 @@ fn main() {
 }
 #Test "text query is default" {
     raw @= parse_query("owner")
-    if raw {
-        raw == Text(s) -> {
+    if raw == {
+        Text(s) -> {
             require_eq(s, "owner")
         }
         else -> {

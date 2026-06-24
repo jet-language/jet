@@ -15,14 +15,14 @@ pub struct Index {
     pub errors: [String]
 }
 fn parse_error_msg(e: ParseError) -> String {
-    if e {
-        e == NoFrontmatter(p) -> {
+    if e == {
+        NoFrontmatter(p) -> {
             return "no frontmatter: {p}"
         }
-        e == MissingField(p) -> {
+        MissingField(p) -> {
             return "missing field: {p}"
         }
-        e == BadType(p) -> {
+        BadType(p) -> {
             return "bad type: {p}"
         }
 
@@ -56,12 +56,12 @@ pub fn build(dir: String) -> Index ? String {
     results: [ParsedResult] := []
     loop full in md_files {
         text @= fs.read(full) ?? ""
-        if note.parse(full, text) {
-            it == ok(n) -> {
+        if note.parse(full, text) == {
+            ok(n) -> {
                 no_err: String? @= null
                 results.push(ParsedResult {file_path: full, note: value(n), error_msg: no_err})
             }
-            it == err(e) -> {
+            err(e) -> {
                 msg @= parse_error_msg(e)
                 no_note: Note? @= null
                 results.push(ParsedResult {file_path: full, note: no_note, error_msg: value(msg)})
@@ -73,15 +73,15 @@ pub fn build(dir: String) -> Index ? String {
     errors: [String] := []
     loop r in results {
         maybe_note @= r.note
-        if maybe_note {
-            maybe_note == value(note_val) -> {
+        if maybe_note == {
+            value(note_val) -> {
                 if notes.contains_key(note_val.name) {
                     errors.push("duplicate slug `{note_val.name}` in {r.file_path}")
                 } else {
                     notes.insert(note_val.name, note_val)
                 }
             }
-            maybe_note == null -> {
+            null -> {
                 msg @= r.error_msg ?? "unknown error"
                 errors.push("{r.file_path}: {msg}")
             }

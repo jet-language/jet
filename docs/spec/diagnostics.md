@@ -120,6 +120,9 @@ before continuing.
 | E0985 | parse | teaching: `val`/`var` keyword → `name @=`/`name :=` sigil (D-BIND2) |
 | E0986 | parse | `-> Type`/`{` split from the closing `)` (S6-R layout) |
 | E0991 | parse | teaching: `::` retired immutable-binding sigil → `@=` (D-BIND2) |
+| E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
+| E0993 | parse | a predicate/Bool arm head in `if subject == { … }` — use a range arm or a boolean `if`/`else if` (D-IF3 Q4) |
+| E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
 | E0101 | sema  | no `main` function                        |
 | E0102 | sema  | unknown function (with suggestion)        |
 | E0103 | sema  | `print` arity                             |

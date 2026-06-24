@@ -1,0 +1,17 @@
+// E0994 (D-IF3): the `==` on the `if` already matches each arm head against the
+// subject, so repeating `subject ==` on an arm is redundant. Drop the prefix and
+// write just the value or pattern.
+enum Conn {
+    Active(Int)
+    Closed
+}
+fn describe(c: Conn) -> String {
+    if c == {
+        c == Active(id) -> { return "live:{id}" }
+        c == Closed -> { return "closed" }
+    }
+    return "unknown"
+}
+fn main() {
+    print(describe(Conn.Active(7)))
+}

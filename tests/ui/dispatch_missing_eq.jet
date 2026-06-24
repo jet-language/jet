@@ -1,0 +1,13 @@
+// E0992 (D-IF3): a multi-arm `if` dispatch needs `==` between the subject and
+// the `{`. The old implicit form (no `==`) is a teaching error; the parser
+// recovers by reading the body as arms so the rest of the file still checks.
+fn classify(code: Int) -> String {
+    if code {
+        200 -> { return "ok" }
+        404 -> { return "not found" }
+        else -> { return "other" }
+    }
+}
+fn main() {
+    print(classify(200))
+}

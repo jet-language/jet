@@ -54,14 +54,14 @@ fn cmd_links(dir: String, name: String) {
     idx @= index.build(dir) ?? panic("cannot build index")
     notes_map: [String, Note] @= idx.notes
     maybe_note: Note? @= notes_map.get(name)
-    if maybe_note {
-        maybe_note == value(n) -> {
+    if maybe_note == {
+        value(n) -> {
             print("forward links:")
             loop link in n.links {
                 print("  -> {link}")
             }
         }
-        maybe_note == null -> {
+        null -> {
             io.eprint("note not found: {name}")
             process.exit(1)
         }
@@ -115,7 +115,7 @@ fn main() {
         process.exit(2)
     }
     cmd @= args[1]
-    if cmd {
+    if cmd == {
         "version" -> {
             print(BANNER)
         }

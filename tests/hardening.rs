@@ -262,19 +262,19 @@ enum Shape {
 
 fn main() {
     s @= Shape.Circle("big")
-    if s {
-        s == Circle(label) -> {
+    if s == {
+        Circle(label) -> {
             print(label)
         }
-        s == Empty -> {
+        Empty -> {
             print("empty")
         }
     }
-    if s {
-        s == Circle(label2) -> {
+    if s == {
+        Circle(label2) -> {
             print(label2)
         }
-        s == Empty -> {
+        Empty -> {
             print("still empty")
         }
     }

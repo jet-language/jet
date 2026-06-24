@@ -371,14 +371,14 @@ enum Light {
     Green
 }
 fn next(light: Light) -> Light {
-    if light {
+    if light == {
         Red -> { return Light.Yellow }
         Yellow -> { return Light.Green }
         Green -> { return Light.Red }
     }
 }
 fn label(light: Light) -> String {
-    if light {
+    if light == {
         Red -> { return \"stop\" }
         Yellow -> { return \"caution\" }
         Green -> { return \"go\" }
@@ -411,10 +411,10 @@ enum Conn {
     Closed
 }
 fn describe(c: Conn) -> String {
-    if c {
-        c == Active(id) | Reconnecting(id) -> { return \"live:{id}\" }
-        c == Idle(_) -> { return \"idle\" }
-        c == Closed -> { return \"closed\" }
+    if c == {
+        Active(id) | Reconnecting(id) -> { return \"live:{id}\" }
+        Idle(_) -> { return \"idle\" }
+        Closed -> { return \"closed\" }
     }
     return \"unknown\"
 }
@@ -443,11 +443,11 @@ enum Http {
     Fail(Int)
 }
 fn classify(r: Http) -> String {
-    if r {
-        r == Good(200..299) -> { return \"success\" }
-        r == Good(400..499) -> { return \"client error\" }
-        r == Good(_) -> { return \"other\" }
-        r == Fail(_) -> { return \"network error\" }
+    if r == {
+        Good(200..299) -> { return \"success\" }
+        Good(400..499) -> { return \"client error\" }
+        Good(_) -> { return \"other\" }
+        Fail(_) -> { return \"network error\" }
     }
     return \"unknown\"
 }
@@ -473,7 +473,7 @@ fn arm_head_range_switch() {
     }
     let src = "\
 fn grade(score: Int) -> String {
-    if score {
+    if score == {
         0..59 -> { return \"F\" }
         60..69 -> { return \"D\" }
         70..89 -> { return \"C\" }
@@ -704,7 +704,7 @@ enum Light {
     Green
 
     fn code(self) -> Int {
-        if self {
+        if self == {
             Red -> { return 1 }
             Green -> { return 2 }
         }
@@ -821,7 +821,7 @@ enum Sign {
         return Sign.Pos
     }
     fn to_num(self) -> Int {
-        if self {
+        if self == {
             Pos -> { return 1 }
             Neg -> { return 0 }
             Zero -> { return 0 }
@@ -1157,19 +1157,19 @@ fn classify(x: Int) -> Int ? Error {
     return ok((x + 10))
 }
 fn main() {
-    if classify(5) {
-        it == ok(n) -> {
+    if classify(5) == {
+        ok(n) -> {
             print(n)
         }
-        it == err(e) -> {
+        err(e) -> {
             print(e)
         }
     }
-    if classify(0) {
-        it == ok(n) -> {
+    if classify(0) == {
+        ok(n) -> {
             print(n)
         }
-        it == err(e) -> {
+        err(e) -> {
             print(e)
         }
     }
@@ -1920,9 +1920,11 @@ fn main() {
     assert_eq!(stdout, "6\n");
 }
 
-/// c109 Phase 15: a MIXED comparison `when` switch — the general `emit_mixed_switch`
-/// `if/else if … else` chain (shape D). The arm heads are plain comparisons over the
-/// subject; the body picks the first matching band.
+/// c109 Phase 15 / D-IF3: a MIXED value+range dispatch — the general `emit_mixed_switch`
+/// `if/else if … else` chain (shape D). A bare-value arm (`100 ->` ≡ `score == 100`)
+/// sits next to range arms (`90..99 ->`), which lower to `score >= lo && score <= hi`;
+/// the body picks the first matching band. (Q4 retired free-predicate arm heads; a
+/// value+range mix is the surviving way to reach the mixed if/else chain.)
 #[test]
 fn mixed_comparison_switch() {
     if !have_rustc() {
@@ -1930,9 +1932,10 @@ fn mixed_comparison_switch() {
     }
     let src = "\
 fn grade(score: Int) -> String {
-    if score {
-        score > 89 -> { return \"A\" }
-        score > 79 -> { return \"B\" }
+    if score == {
+        100 -> { return \"A+\" }
+        90..99 -> { return \"A\" }
+        80..89 -> { return \"B\" }
         else -> { return \"F\" }
     }
     return \"?\"
@@ -1940,12 +1943,13 @@ fn grade(score: Int) -> String {
 fn main() {
     print(grade(85))
     print(grade(95))
+    print(grade(100))
     print(grade(50))
 }
 ";
     let (code, stdout) = build_and_run("tir_mixed_switch", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "B\nA\nF\n");
+    assert_eq!(stdout, "B\nA\nA+\nF\n");
 }
 
 /// c109 Phase 15: a DELEGATION trait method (`impl T: Trait using field`). The
@@ -2031,9 +2035,9 @@ fn wrap(s: String) -> Msg {
     return Msg.Text(s)
 }
 fn render(m: Msg) -> String {
-    if m {
-        m == Text(s) -> { return s }
-        m == Code(n) -> { return \"code\" }
+    if m == {
+        Text(s) -> { return s }
+        Code(n) -> { return \"code\" }
     }
     return \"?\"
 }
@@ -2065,9 +2069,9 @@ fn wrap(inner: Tree) -> Tree {
     return Tree.Node(inner)
 }
 fn leaf_val(t: Tree) -> Int {
-    if t {
-        t == Leaf(n) -> { return n }
-        t == Node(inner) -> { return 0 }
+    if t == {
+        Leaf(n) -> { return n }
+        Node(inner) -> { return 0 }
     }
     return 0
 }
@@ -2103,9 +2107,9 @@ fn mk(p: Point) -> Shape {
     return Shape.Dot(p)
 }
 fn first(s: Shape) -> Int {
-    if s {
-        s == Dot(p) -> { return p.x }
-        s == Line(n) -> { return n }
+    if s == {
+        Dot(p) -> { return p.x }
+        Line(n) -> { return n }
     }
     return 0
 }
@@ -3121,7 +3125,7 @@ pub fn make_note(take name: String, take t: NoteType) -> Note {
 }
 pub fn kind_str(n: Note) -> String {
     k @= n.note_type
-    if k {
+    if k == {
         User -> { return \"user\" }
         Feedback -> { return \"feedback\" }
         Project -> { return \"project\" }
@@ -3143,9 +3147,9 @@ fn classify(raw: String) -> Query {
     return Query.Tag(raw)
 }
 fn describe(n: Note, q: Query) -> String {
-    if q {
-        q == Tag(t) -> { return \"tag:{t}\" }
-        q == Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
+    if q == {
+        Tag(t) -> { return \"tag:{t}\" }
+        Kind(k) -> { return \"kind:{note.kind_str(n)}\" }
     }
 }
 fn main() {
@@ -3904,11 +3908,11 @@ struct Tree {
 fn sum(t: Tree) -> Int {
     total := t.value
     kid: Tree? @= t.child
-    if kid {
-        kid == value(c) -> {
+    if kid == {
+        value(c) -> {
             total = total + sum(c)
         }
-        kid == null -> {}
+        null -> {}
     }
     return total
 }
@@ -4040,8 +4044,8 @@ fn mixed_switch_non_ident_subject_binds_payload() {
     let src = "\
 struct Holder { val: Int? }
 fn f(h: Holder) -> Int {
-    if h.val {
-        h.val == value(c) -> { return c }
+    if h.val == {
+        value(c) -> { return c }
         else -> { return 0 }
     }
 }
@@ -4072,7 +4076,7 @@ fn pick() -> Light {
     return Light.Red
 }
 fn classify() -> Int {
-    if pick() {
+    if pick() == {
         Red -> { return 1 }
         Green -> { return 2 }
         else -> { return 0 }

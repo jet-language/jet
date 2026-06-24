@@ -18,13 +18,15 @@ fn main() {}
 
 #[test]
 fn parse_pipe_switch_arms_as_subject_tests() {
+    // D-IF3: explicit `if subject == { … }` dispatch. A bare value arm becomes
+    // `subject == value`; a `||` chain of bare values re-applies the comparison
+    // to each (`orange || mango` ≡ `fruit == orange || fruit == mango`).
     let src = r#"
 fn main() {
     fruit @= "orange"
-    frozen @= false
-    if fruit {
+    if fruit == {
         apple -> { print("Apple Juice") }
-        orange || frozen != true -> { print("Orange Juice") }
+        orange || mango -> { print("Orange Juice") }
         tangerine || yuzu -> { print("Citrus Juice") }
         else -> { print("Water") }
     }
@@ -41,7 +43,7 @@ fn main() {
         arms,
         else_body,
         ..
-    } = &func.body[2]
+    } = &func.body[1]
     else {
         panic!("expected switch");
     };

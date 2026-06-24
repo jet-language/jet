@@ -1,0 +1,13 @@
+// E0993 (D-IF3 Q4): inside `if subject == { … }` every arm head is matched
+// against the subject, so a free-standing predicate (`code >= 500`) has no
+// subject to match. Use a range arm for a band, or a boolean `if`/`else if`.
+fn classify(code: Int) -> String {
+    if code == {
+        200 -> { return "ok" }
+        code >= 500 -> { return "server error" }
+        else -> { return "other" }
+    }
+}
+fn main() {
+    print(classify(503))
+}

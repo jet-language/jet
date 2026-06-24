@@ -2735,12 +2735,25 @@ fn switch_in_subset(
     // variant (shape A), NOT all range (shape B), and NOT all fallible (shape C). Every
     // arm head must be a PLAIN in-subset comparison/Bool expression — i.e. the
     // `_ => emit_expr(cond)` branch of `emit_switch_arm_cond` (NOT a variant/Eq-variant
-    // pattern, which would route through `emit_pattern_matches`, and NOT a range head).
-    // Conservative: a single pattern-test arm in the chain excludes the whole switch
-    // (stays on the AST path). The `else` is optional (`emit_mixed_switch` handles both).
-    if arms.iter().all(|a| arm_is_plain_cond(cx, &a.cond, subject)) {
+    // pattern, which would route through `emit_pattern_matches`).
+    //
+    // D-IF3: a range head (`400..499 ->`) is admitted into this chain too, lowered to
+    // `subject >= lo && subject <= hi`, so a value+range mix (`200 -> …` next to
+    // `400..499 -> …`) is covered — provided the subject is a scalar ident local so the
+    // emitted range condition type-checks (the same constraint shape B imposes).
+    // Conservative: a variant/fallible pattern-test arm in the chain excludes the whole
+    // switch (stays on the AST path). The `else` is optional.
+    let has_range = arms.iter().any(|a| arm_head_range(cx, &a.cond, subject).is_some());
+    let subject_is_scalar_ident = matches!(subject, Expr::Ident(name, _) if locals.contains(name));
+    if arms
+        .iter()
+        .all(|a| arm_is_plain_cond(cx, &a.cond, subject) || arm_head_range(cx, &a.cond, subject).is_some())
+        && (!has_range || subject_is_scalar_ident)
+    {
         for a in arms {
-            if !expr_in_subset(&a.cond, cx, locals) {
+            // A range head lowers to a comparison string from `subject_str`; only the
+            // PLAIN-cond arms carry a sub-expression that must itself be in-subset.
+            if arm_head_range(cx, &a.cond, subject).is_none() && !expr_in_subset(&a.cond, cx, locals) {
                 return false;
             }
             let mut body_locals = locals.clone();
@@ -5744,9 +5757,13 @@ fn lower_switch(
     {
         return lower_fallible_match(subject, arms, else_body, cx, env);
     }
-    // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds → the general
-    // mixed `if/else if … else` chain (`emit_mixed_switch`).
-    if arms.iter().all(|a| arm_is_plain_cond(cx, &a.cond, subject)) {
+    // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
+    // heads mixed in — → the general mixed `if/else if … else` chain. (An all-range +
+    // else switch already routed to shape B above; this catches the value+range mix.)
+    if arms
+        .iter()
+        .all(|a| arm_is_plain_cond(cx, &a.cond, subject) || arm_head_range(cx, &a.cond, subject).is_some())
+    {
         return lower_mixed_switch(subject, arms, else_body, cx, env);
     }
     // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
@@ -5770,8 +5787,14 @@ fn lower_mixed_switch(
     let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
     let mut tarms = Vec::new();
     for arm in arms {
-        // A plain comparison/Bool arm head → `emit_switch_arm_cond`'s `emit_expr(cond)`.
-        let cond_str = emit_tir_expr(&lower_expr(&arm.cond, cx, env), cx);
+        // D-IF3: a range head (`400..499 ->`) becomes `subject >= lo && subject <= hi`,
+        // reusing the subject's emitted form; a plain comparison/Bool head →
+        // `emit_switch_arm_cond`'s `emit_expr(cond)`.
+        let cond_str = if let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) {
+            format!("{0} >= {1} && {0} <= {2}", subject_str, lo, hi)
+        } else {
+            emit_tir_expr(&lower_expr(&arm.cond, cx, env), cx)
+        };
         // The arm body uses the SHARED `&mut env` in `emit_mixed_switch` (leaks).
         let mut branch = clone_env(env);
         let body = lower_stmts(&arm.body, cx, &mut branch);
@@ -10896,28 +10919,28 @@ fn mk() {
     #[test]
     fn covers_enum_unit_match() {
         // A unit-variant enum, an enum literal, and an exhaustive variant match.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) -> Light {\n if light {\n Red -> { return Light.Yellow }\n Yellow -> { return Light.Green }\n Green -> { return Light.Red }\n }\n}\n";
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) -> Light {\n if light == {\n Red -> { return Light.Yellow }\n Yellow -> { return Light.Green }\n Green -> { return Light.Red }\n }\n}\n";
         assert!(covers(src, "next"));
     }
 
     #[test]
     fn covers_enum_payload_or_and_wildcard() {
         // Scalar-payload enum, or-pattern with a shared binding, and a wildcard slot.
-        let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) -> String {\n if c {\n c == Active(id) | Reconnecting(id) -> { return \"live:{id}\" }\n c == Idle(_) -> { return \"idle\" }\n c == Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
+        let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) -> String {\n if c == {\n Active(id) | Reconnecting(id) -> { return \"live:{id}\" }\n Idle(_) -> { return \"idle\" }\n Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
         assert!(covers(src, "d"));
     }
 
     #[test]
     fn covers_enum_payload_range_pattern() {
         // A range pattern in a payload slot (guard-emitted) plus a wildcard slot.
-        let src = "enum Http {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: Http) -> String {\n if r {\n r == Good(200..299) -> { return \"ok\" }\n r == Good(_) -> { return \"other\" }\n r == Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
+        let src = "enum Http {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: Http) -> String {\n if r == {\n Good(200..299) -> { return \"ok\" }\n Good(_) -> { return \"other\" }\n Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
         assert!(covers(src, "classify"));
     }
 
     #[test]
     fn covers_arm_head_range_switch() {
         // An all-range arm-head scalar switch with an `else` (mixed-switch path).
-        let src = "fn grade(score: Int) -> String {\n if score {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
+        let src = "fn grade(score: Int) -> String {\n if score == {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
         assert!(covers(src, "grade"));
     }
 
@@ -10926,17 +10949,17 @@ fn mk() {
         // c109 (B1): a pattern switch over a NON-IDENT subject routes through the
         // exhaustive-match / fallible-match path (the subject is matched by source-text
         // equality, not just an ident name). A call subject with unit-variant arms:
-        let variant = "enum Light { Red Green Yellow }\nfn pick() -> Light { return Light.Red }\nfn classify() -> Int {\n if pick() {\n Red -> { return 1 }\n Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
+        let variant = "enum Light { Red Green Yellow }\nfn pick() -> Light { return Light.Red }\nfn classify() -> Int {\n if pick() == {\n Red -> { return 1 }\n Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
         assert!(covers(variant, "classify"));
         // A field-access subject with a payload-binding (optional) arm:
-        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) -> Int {\n if h.val {\n h.val == value(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) -> Int {\n if h.val == {\n value(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
         assert!(covers(payload, "f"));
     }
 
     #[test]
     fn covers_enum_local_and_literal_in_main() {
         // An enum-typed local bound from a literal, passed to a covered helper.
-        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start @= Light.Red\n print(label(start))\n}\n";
+        let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) -> String {\n if l == {\n Red -> { return \"r\" }\n Yellow -> { return \"y\" }\n Green -> { return \"g\" }\n }\n}\nfn main() {\n start @= Light.Red\n print(label(start))\n}\n";
         assert!(covers(src, "main"));
     }
 
@@ -10945,7 +10968,7 @@ fn mk() {
         // c109 Phase 16: a String-payload enum. The literal's borrowed-payload
         // `.clone()` and pattern bindings are reproduced as total facts
         // (`emit_boxed_enum_arg`), so the match + getter route through the TIR.
-        let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) -> String {\n if m {\n m == Text(s) -> { return s }\n m == Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
+        let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) -> String {\n if m == {\n Text(s) -> { return s }\n Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
         assert!(covers(src, "show"));
     }
 
@@ -10954,7 +10977,7 @@ fn mk() {
         // c109 Phase 16: a self-referential (boxed) enum. The `Box::new(…)` at
         // construction and the auto-deref at pattern/field sites are total facts
         // (`TEnumArg.boxed`), so a covered traversal routes through the TIR.
-        let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) -> Int {\n if t {\n t == Leaf(n) -> { return n }\n t == Node(inner) -> { return 1 }\n }\n return 0\n}\n";
+        let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) -> Int {\n if t == {\n Leaf(n) -> { return n }\n Node(inner) -> { return 1 }\n }\n return 0\n}\n";
         assert!(covers(src, "depth"));
     }
 
@@ -10976,7 +10999,7 @@ fn mk() {
         // struct value flows through the variant construction + pattern binding
         // without a clone/box decision the subset can't make (the value's own move/
         // clone facts live in its sub-expression).
-        let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) -> Int {\n if s {\n s == Dot(p) -> { return p.x }\n s == Line(n) -> { return n }\n }\n return 0\n}\n";
+        let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) -> Int {\n if s == {\n Dot(p) -> { return p.x }\n Line(n) -> { return n }\n }\n return 0\n}\n";
         assert!(covers(src, "area"));
     }
 
@@ -10990,10 +11013,13 @@ fn mk() {
     }
 
     #[test]
-    fn rejects_mixed_comparison_switch() {
-        // A switch mixing a comparison/Bool arm with a range arm is the general
-        // mixed-switch the subset does not cover (only all-range + else).
-        let src = "fn f(n: Int) -> String {\n if n {\n 0..10 -> { return \"low\" }\n n > 100 -> { return \"high\" }\n else -> { return \"mid\" }\n }\n}\n";
+    fn rejects_range_switch_over_non_ident_subject() {
+        // D-IF3: a value+range mixed switch (shape D) lowers each range head to
+        // `subject >= lo && subject <= hi`, so the subject must be a scalar ident
+        // local for the emitted condition to type-check. A NON-IDENT subject (a
+        // call) with a range arm is excluded from the subset (stays on the AST
+        // path), even though the value arm alone would be fine.
+        let src = "fn pick() -> Int { return 5 }\nfn f() -> String {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
         assert!(!covers(src, "f"));
     }
 
@@ -11183,7 +11209,7 @@ fn mk() {
     #[test]
     fn covers_enum_instance_method() {
         // A `when self` match in an enum method body is covered.
-        let src = "enum Dir {\n North\n South\n fn code(self) -> Int {\n if self {\n North -> { return 0 }\n South -> { return 1 }\n }\n }\n}\n";
+        let src = "enum Dir {\n North\n South\n fn code(self) -> Int {\n if self == {\n North -> { return 0 }\n South -> { return 1 }\n }\n }\n}\n";
         assert!(covers_method(src, "Dir", "code"));
     }
 
@@ -11281,9 +11307,11 @@ fn mk() {
 
     #[test]
     fn covers_mixed_bool_switch() {
-        // c109 Phase 15: a mixed comparison/Bool `when` switch (shape D) routes via the
-        // TIR's `MixedSwitch` (the general `emit_mixed_switch` if/else chain).
-        let src = "fn f(x: Int) -> Int {\n if x {\n x > 10 -> {\n return 2\n }\n x > 0 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
+        // c109 Phase 15 / D-IF3: a mixed value+range dispatch (shape D) routes via the
+        // TIR's `MixedSwitch` (the general `emit_mixed_switch` if/else chain) — a
+        // bare-value arm (`0 ->` ≡ `x == 0`) beside range arms (`1..10 ->`), each
+        // range lowered to `x >= lo && x <= hi`. (Q4 retired free-predicate arms.)
+        let src = "fn f(x: Int) -> Int {\n if x == {\n 0 -> {\n return 2\n }\n 1..10 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -12117,11 +12145,11 @@ struct Tree {
 }
 fn first_child(t: Tree) -> Int {
     kid: Tree? @= t.child
-    if kid {
-        kid == value(c) -> {
+    if kid == {
+        value(c) -> {
             return c.value
         }
-        kid == null -> {
+        null -> {
             return 0
         }
     }

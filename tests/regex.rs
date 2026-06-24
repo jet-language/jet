@@ -142,9 +142,9 @@ fn bad_pattern_is_a_recoverable_error_not_a_crash() {
 use jet.regex as re
 
 fn main() {
-    if re.is_match("(unclosed", "abc") {
-        it == ok(_) -> { print("unexpected-ok") }
-        it == err(e) -> { print("caught") }
+    if re.is_match("(unclosed", "abc") == {
+        ok(_) -> { print("unexpected-ok") }
+        err(e) -> { print("caught") }
     }
 }
 "##;

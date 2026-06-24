@@ -12,13 +12,13 @@ pub fn load(path: String) -> Config {
     level: String := "info"
     if fs.exists(path.clone()) {
         raw @= fs.read(path.clone()) ?? ""
-        if toml.parse(raw) {
-            it == ok(table) -> {
+        if toml.parse(raw) == {
+            ok(table) -> {
                 addr = table.get("addr") ?? addr
                 notes_dir = table.get("notes_dir") ?? notes_dir
                 level = table.get("level") ?? level
             }
-            it == err(e) -> {
+            err(e) -> {
 
             }
 

@@ -1,12 +1,13 @@
-// 07 — Choosing one branch from many: multi-arm `if` (D-IF1).
-// `if subject { arm -> body }`: a bare-value arm compares against the subject,
-// the first matching arm runs, and `else ->` catches the rest.
+// 07 — Choosing one branch from many: multi-arm `if` (D-IF3).
+// `if subject == { arm -> body }`: the `==` marker enters value dispatch, a
+// bare-value arm compares against the subject, the first matching arm runs, and
+// `else ->` catches the rest.
 // The backend lowers value-equality chains to a native Rust match (jump
 // tables where profitable), so this is never slower than if/else.
 // S25: in a `||` chain, a plain value re-applies the nearest comparison —
-// `day == "sat" || "sun"` means `day == "sat" || day == "sun"`.
+// `"sat" || "sun"` means `day == "sat" || day == "sun"`.
 fn day_type(day: String) -> String {
-    if day {
+    if day == {
         "sat" || "sun" -> {
             return "weekend"
         }
@@ -20,14 +21,15 @@ fn day_type(day: String) -> String {
 }
 fn main() {
     code @= 404
-    if code {
+    // D-IF3 Q4: a band uses a range arm, not a predicate.
+    if code == {
         200 -> {
             print("ok")
         }
         301 || 302 -> {
             print("redirected")
         }
-        (code >= 400) && (code <= 499) -> {
+        400..499 -> {
             print("client error")
         }
         else -> {

@@ -251,9 +251,9 @@ fn double(raw: String) -> Int ? ParseError {
     return ok((n * 2))
 }
 fn main() {
-    if double("") {
-        it == ok(n) -> { print(n) }
-        it == err(e) -> { print("failed") }
+    if double("") == {
+        ok(n) -> { print(n) }
+        err(e) -> { print("failed") }
     }
 }
 "#;
