@@ -428,7 +428,8 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         Type::Apply { .. } | Type::TraitObject(_) | Type::Tuple(_) => {
             "Box<dyn std::any::Any>".to_string()
         }
-        Type::FixedList { elem, .. } => format!("Vec<{}>", rust_type(elem, user_types)),
+        // D-FIXARR1: [T#N] lowers to a real Rust array [T; N] in FFI too.
+        Type::FixedList { elem, len } => format!("[{}; {}]", rust_type(elem, user_types), len),
     }
 }
 
@@ -504,4 +505,69 @@ fn tool_error(msg: &str) -> Vec<Diagnostic> {
         "check disk permissions and try again".to_string(),
         None,
     )]
+}
+
+// c43: U32/IntN FFI type-mapping tests.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AST::Type;
+    use std::collections::HashSet;
+
+    #[test]
+    fn intn_u32_maps_to_rust_u32() {
+        // c43: `Type::IntN { signed: false, bits: 32 }` (Jet `U32`) must lower
+        // to Rust `u32` in the FFI bridge — not `i64` or any other type.
+        let empty = HashSet::new();
+        assert_eq!(
+            rust_type(&Type::IntN { signed: false, bits: 32 }, &empty),
+            "u32",
+            "U32 must map to Rust u32 in FFI"
+        );
+    }
+
+    #[test]
+    fn intn_i32_maps_to_rust_i32() {
+        // c43: signed 32-bit maps to Rust i32 (S44 signed-integer subset).
+        let empty = HashSet::new();
+        assert_eq!(
+            rust_type(&Type::IntN { signed: true, bits: 32 }, &empty),
+            "i32",
+            "I32 must map to Rust i32 in FFI"
+        );
+    }
+
+    #[test]
+    fn intn_width_family_round_trip() {
+        // c43: verify all supported fixed-width integer types map correctly.
+        let empty = HashSet::new();
+        for &(signed, bits, expected) in &[
+            (false, 8_u8, "u8"),
+            (true, 8, "i8"),
+            (false, 16, "u16"),
+            (true, 16, "i16"),
+            (false, 32, "u32"),
+            (true, 32, "i32"),
+            (false, 64, "u64"),
+            (true, 64, "i64"),
+        ] {
+            assert_eq!(
+                rust_type(&Type::IntN { signed, bits }, &empty),
+                expected,
+                "IntN {{ signed:{}, bits:{} }} should map to {}",
+                signed,
+                bits,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn int_maps_to_i64_and_float_maps_to_f64() {
+        // Regression guard: base types haven't drifted.
+        let empty = HashSet::new();
+        assert_eq!(rust_type(&Type::Int, &empty), "i64");
+        assert_eq!(rust_type(&Type::Float, &empty), "f64");
+        assert_eq!(rust_type(&Type::Float32, &empty), "f32");
+    }
 }

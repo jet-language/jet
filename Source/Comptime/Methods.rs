@@ -310,6 +310,18 @@ impl<'a> Interp<'a> {
                 ));
             }
         }
+        // D-CTCORE1 (ratified 2026-06-22): module alias calls like `math.sqrt(x)`.
+        // Check *before* evaluating the receiver so unknown aliases don't fail.
+        if let Expr::Ident(alias, _) = receiver {
+            if let Some(module) = self.core_imports.get(alias.as_str()).cloned() {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
+                return apply_core_call(&module, method, argv, span);
+            }
+        }
+
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
             "push", "pop", "insert", "remove", "clear", "reverse", "sort",
@@ -335,5 +347,137 @@ impl<'a> Interp<'a> {
             argv.push(self.eval(&a.expr, scope)?);
         }
         apply_method(&recv, method, argv, span)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// D-CTCORE1 (ratified 2026-06-22): curated pure Core whitelist for comptime.
+//
+// Only deterministic, pure functions may run at comptime. I/O (`fs.read`,
+// `env.get`, etc.) is rejected here with a teaching diagnostic; the user
+// can get build-time I/O via the explicit `embed_file`/`embed_bytes` tier.
+//
+// The whitelist grows with tests; start with core.math and core.string.
+// ---------------------------------------------------------------------------
+
+fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
+    match v {
+        CtValue::Float(f) => Ok(*f),
+        CtValue::Int(n) => Ok(*n as f64),
+        _ => Err(unsupported("non-numeric argument to comptime math call", span)),
+    }
+}
+
+fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
+    match v {
+        CtValue::Str(s) => Ok(s.as_str()),
+        _ => Err(unsupported("non-string argument to comptime string call", span)),
+    }
+}
+
+/// Evaluate a whitelisted pure Core call at comptime.
+/// `module` is the full path (e.g. `"core.math"`, `"core.string"`).
+fn apply_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let one = |i: usize| {
+        args.get(i)
+            .ok_or_else(|| unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span))
+    };
+
+    match (module, method) {
+        // --- core.math whitelist ---
+        ("core.math", "sqrt") => Ok(CtValue::Float(as_float(one(0)?, span)?.sqrt())),
+        ("core.math", "floor") => Ok(CtValue::Float(as_float(one(0)?, span)?.floor())),
+        ("core.math", "ceil") => Ok(CtValue::Float(as_float(one(0)?, span)?.ceil())),
+        ("core.math", "round") => Ok(CtValue::Int(as_float(one(0)?, span)?.round() as i64)),
+        ("core.math", "abs") => {
+            match one(0)? {
+                CtValue::Int(n) => Ok(CtValue::Int(n.abs())),
+                CtValue::Float(f) => Ok(CtValue::Float(f.abs())),
+                _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
+            }
+        }
+        ("core.math", "pow") => {
+            let a = as_float(one(0)?, span)?;
+            let b = as_float(one(1)?, span)?;
+            Ok(CtValue::Float(a.powf(b)))
+        }
+        ("core.math", "min") => {
+            let a = as_float(one(0)?, span)?;
+            let b = as_float(one(1)?, span)?;
+            Ok(CtValue::Float(a.min(b)))
+        }
+        ("core.math", "max") => {
+            let a = as_float(one(0)?, span)?;
+            let b = as_float(one(1)?, span)?;
+            Ok(CtValue::Float(a.max(b)))
+        }
+        ("core.math", "clamp") => {
+            let v = as_float(one(0)?, span)?;
+            let lo = as_float(one(1)?, span)?;
+            let hi = as_float(one(2)?, span)?;
+            Ok(CtValue::Float(v.clamp(lo, hi)))
+        }
+        ("core.math", "log2") => Ok(CtValue::Float(as_float(one(0)?, span)?.log2())),
+        ("core.math", "log10") => Ok(CtValue::Float(as_float(one(0)?, span)?.log10())),
+        // --- core.string whitelist ---
+        ("core.string", "len") | ("core.string", "length") => {
+            let s = as_string(one(0)?, span)?;
+            Ok(CtValue::Int(s.chars().count() as i64))
+        }
+        ("core.string", "to_upper") | ("core.string", "upper") => {
+            let s = as_string(one(0)?, span)?.to_uppercase();
+            Ok(CtValue::Str(s))
+        }
+        ("core.string", "to_lower") | ("core.string", "lower") => {
+            let s = as_string(one(0)?, span)?.to_lowercase();
+            Ok(CtValue::Str(s))
+        }
+        ("core.string", "trim") => {
+            let s = as_string(one(0)?, span)?.trim().to_string();
+            Ok(CtValue::Str(s))
+        }
+        ("core.string", "starts_with") => {
+            let s = as_string(one(0)?, span)?;
+            let prefix = as_string(one(1)?, span)?;
+            Ok(CtValue::Bool(s.starts_with(prefix)))
+        }
+        ("core.string", "ends_with") => {
+            let s = as_string(one(0)?, span)?;
+            let suffix = as_string(one(1)?, span)?;
+            Ok(CtValue::Bool(s.ends_with(suffix)))
+        }
+        ("core.string", "contains") => {
+            let s = as_string(one(0)?, span)?;
+            let needle = as_string(one(1)?, span)?;
+            Ok(CtValue::Bool(s.contains(needle)))
+        }
+        ("core.string", "replace") => {
+            let s = as_string(one(0)?, span)?.to_string();
+            let from = as_string(one(1)?, span)?.to_string();
+            let to = as_string(one(2)?, span)?.to_string();
+            Ok(CtValue::Str(s.replace(&from, &to)))
+        }
+        // --- impure / build-time I/O → teaching diagnostic ---
+        ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.net", _) => {
+            Err(Diagnostic::error(
+                "E0958",
+                format!("`{}.{}()` cannot run at comptime — it performs I/O", module, method),
+                "comptime is pure and deterministic; I/O functions are not".to_string(),
+                "use `embed_file(\"path\")` or `embed_bytes(\"path\")` for build-time \
+                 file reads; other I/O must remain in runtime code"
+                    .to_string(),
+                Some(span),
+            ))
+        }
+        // --- unknown / not yet whitelisted ---
+        _ => Err(unsupported(
+            &format!("`{}.{}()` at comptime", module, method),
+            span,
+        )),
     }
 }

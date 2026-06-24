@@ -1,0 +1,20 @@
+// D-CTCORE1 (ratified 2026-06-22): the comptime interpreter evaluates a curated
+// whitelist of deterministic, pure Core functions at compile time.
+// `core.math` is whitelisted; I/O modules (`core.fs`, etc.) are not.
+// The results are constant-folded into the binary — no runtime math involved.
+
+use core.math as math
+
+comptime SQRT4 = math.sqrt(4.0)
+comptime POW2 = math.pow(2.0, 8.0)
+comptime FLOORED = math.floor(3.7)
+comptime CEILED = math.ceil(2.1)
+comptime MAXI = math.max(10.0, 20.0)
+
+fn main() {
+    print(SQRT4)
+    print(POW2)
+    print(FLOORED)
+    print(CEILED)
+    print(MAXI)
+}

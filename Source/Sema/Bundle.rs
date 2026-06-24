@@ -129,7 +129,7 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
         Expr::Ident(_, _)
         | Expr::Char(_, _)
         | Expr::Int(_, _, _)
-        | Expr::Float(_, _)
+        | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Absent(_)
         | Expr::Todo { .. } => {}
@@ -463,6 +463,25 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
 
     // S57 (M9.5): evaluate comptime bindings per module. `embed_file` paths
     // resolve against each module file's own directory (S16 convention).
+    // D-CTCORE1: pre-collect core_imports (alias→module) per module so the
+    // comptime interpreter can evaluate whitelisted pure Core calls. Build a
+    // SEPARATE local map — not `states[idx].core_imports` — so the duplicate
+    // import check in the full import-resolution loop (below) is unaffected.
+    let ct_core_imports: Vec<HashMap<String, String>> = bundle
+        .modules
+        .iter()
+        .map(|module| {
+            module
+                .imports
+                .iter()
+                .filter_map(|imp| {
+                    let path = Loader::core_module_path(imp)?;
+                    let alias = Loader::import_alias(imp);
+                    Some((alias, path))
+                })
+                .collect()
+        })
+        .collect();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let base = module
             .path
@@ -474,6 +493,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             &mut states[idx].consts,
             &base,
             &mut diags,
+            &ct_core_imports[idx],
         );
     }
 
@@ -1183,7 +1203,7 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
             }
         }
         Expr::Int(_, _, _)
-        | Expr::Float(_, _)
+        | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Ident(_, _)

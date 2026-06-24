@@ -139,7 +139,7 @@ impl<'a> Fmt<'a> {
                 }
             }
             Expr::Int(n, _, _) => self.write(&n.to_string()),
-            Expr::Float(v, _) => self.write(&fmt_float(*v)),
+            Expr::Float(v, _, _) => self.write(&fmt_float(*v)),
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),
             Expr::ListLit(elems, _) => {

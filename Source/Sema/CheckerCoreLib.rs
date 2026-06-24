@@ -421,6 +421,60 @@ impl<'a> Checker<'a> {
                 }
                 return Some(result_ty(Type::String, io_error_ty()));
             }
+            // D-FLOATW1 (ratified 2026-06-22): sqrt/floor/ceil/pow are width-generic —
+            // they return the same float width they receive (Float→Float, F32→F32).
+            // Mixing widths is a compile error; explicit .to_f32()/.to_f64() converts.
+            ("core.math", "sqrt" | "floor" | "ceil") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Float);
+                };
+                let ty = self.infer(&mut arg.expr)?;
+                if !matches!(ty, Type::Float | Type::Float32) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                        "transcendental functions operate on floating-point numbers".to_string(),
+                        "pass a Float or F32 value".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                    return None;
+                }
+                return Some(ty);
+            }
+            ("core.math", "pow") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    for a in args.iter_mut().skip(1) { self.infer(&mut a.expr); }
+                    return None;
+                };
+                if !matches!(first, Type::Float | Type::Float32) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`pow` needs Float or F32, not {}", first.show()),
+                        "pow operates on floating-point numbers".to_string(),
+                        "pass a Float or F32 base".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                    return None;
+                }
+                if let Some(second) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    if second != first {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`pow` needs both arguments to have the same float type, but base is {} and exponent is {}", first.show(), second.show()),
+                            "D-FLOATW1: mixing float widths is not allowed — use the same width for both".to_string(),
+                            format!("convert with `.to_f32()` or `.to_float()` to match"),
+                            Some(args[1].expr.span()),
+                        ));
+                    }
+                }
+                return Some(first);
+            }
             ("core.math", "abs") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -429,12 +483,13 @@ impl<'a> Checker<'a> {
                     return Some(Type::Int);
                 };
                 let ty = self.infer(&mut arg.expr)?;
-                if !matches!(ty, Type::Int | Type::Float) {
+                // D-FLOATW1: abs also works on F32.
+                if !matches!(ty, Type::Int | Type::Float | Type::Float32) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!("`abs` needs Int or Float, not {}", ty.show()),
+                        format!("`abs` needs Int, Float, or F32, not {}", ty.show()),
                         "absolute value is only defined for numbers".to_string(),
-                        "pass an Int or Float".to_string(),
+                        "pass an Int, Float, or F32".to_string(),
                         Some(arg.expr.span()),
                     ));
                     return None;
@@ -1434,6 +1489,12 @@ pub(crate) fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "min")
             | ("core.math", "max")
             | ("core.math", "clamp")
+            // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
+            // their return type is arg-type-dependent, so they use resolved_ret.
+            | ("core.math", "sqrt")
+            | ("core.math", "floor")
+            | ("core.math", "ceil")
+            | ("core.math", "pow")
             | ("core.random", "pick")
             | ("core.random", "shuffle")
             | ("core.io", "eprint")

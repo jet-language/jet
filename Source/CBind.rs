@@ -401,4 +401,40 @@ mod tests {
         let r = generate("int f(int, double);", "m").unwrap();
         assert!(r.source.contains("fn f(arg0: Int, arg1: Float) -> Int = \"f\";"));
     }
+
+    // c43: U32/uint32_t boundary — C integers of all widths map to Jet `Int`.
+    // uint32_t is the archetypal case: a 32-bit unsigned type that fits in Int
+    // (i64) without loss. Verify the CBind layer produces a correct signature
+    // and does NOT map uint32_t to a fixed-width type on the Jet surface.
+    #[test]
+    fn uint32_t_maps_to_int_in_cbind() {
+        let h = r#"
+            #include <stdint.h>
+            uint32_t add_u32(uint32_t a, uint32_t b);
+            int32_t sub_i32(int32_t a, int32_t b);
+            uint64_t identity_u64(uint64_t x);
+        "#;
+        let r = generate(h, "lib").unwrap();
+        // All C integer fixed-width types unify to Jet's `Int` (i64) at the FFI
+        // surface; signed vs unsigned and width are transparent to Jet callers.
+        assert!(
+            r.source
+                .contains("fn add_u32(a: Int, b: Int) -> Int = \"add_u32\";"),
+            "uint32_t must map to Int: got:\n{}",
+            r.source
+        );
+        assert!(
+            r.source
+                .contains("fn sub_i32(a: Int, b: Int) -> Int = \"sub_i32\";"),
+            "int32_t must map to Int: got:\n{}",
+            r.source
+        );
+        assert!(
+            r.source
+                .contains("fn identity_u64(x: Int) -> Int = \"identity_u64\";"),
+            "uint64_t must map to Int: got:\n{}",
+            r.source
+        );
+        assert_eq!(r.bound, vec!["add_u32", "sub_i32", "identity_u64"]);
+    }
 }

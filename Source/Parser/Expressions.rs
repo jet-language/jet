@@ -955,7 +955,7 @@ impl<'a> Parser<'a> {
             }
             TokKind::Float(v) => {
                 let span = self.bump().span;
-                Ok(Expr::Float(v, span))
+                Ok(Expr::Float(v, span, false))
             }
             TokKind::Char(ch) => {
                 let span = self.bump().span;

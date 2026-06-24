@@ -872,7 +872,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, db: &mut SymbolDB) {
             }
         }
         AST::Expr::Int(_, _, _)
-        | AST::Expr::Float(_, _)
+        | AST::Expr::Float(_, _, _)
         | AST::Expr::Bool(_, _)
         | AST::Expr::Char(_, _)
         | AST::Expr::Absent(_)

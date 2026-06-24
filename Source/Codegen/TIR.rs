@@ -1246,6 +1246,9 @@ pub(crate) struct TCallArg {
     /// borrow/clone wrappers (a Fn param is never borrowed/cloned — `emit_call_args`
     /// skips `&(…)` for `Type::Fn`).
     pub(crate) fn_coerce: Option<TFnCoerce>,
+    /// D-FIXARR1: a `[T#N]` argument passed to a `[T]` (Vec) slot is widened by
+    /// copying into a growable list. When true, emit wraps with `.to_vec()`.
+    pub(crate) widen_to_vec: bool,
 }
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).
@@ -1813,11 +1816,11 @@ fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
 /// element/key/value types must themselves be covered *value* types — scalar,
 /// Char, String, a covered struct/enum, or a nested covered collection — so the
 /// literal/index/iteration lowerings reproduce the AST path without any clone/box
-/// decision the subset can't make from total facts. A `FixedList` (`[E#N]`, B2) is
-/// covered exactly like a `List`: `cx.rust_type` renders it to `Vec<E>` (identical
-/// to a list), indexing reads the element type off the base, and a fan-out
-/// expression already produces a `[T#N]` value — so a `[E#N]` param/return/element
-/// is byte-identical to the list case once its element type is covered.
+/// decision the subset can't make from total facts. A `FixedList` (`[E#N]`, D-FIXARR1) is
+/// covered exactly like a `List`: indexing reads the element type off the base, and a fan-out
+/// expression already produces a `[T#N]` value (Rust `[E; N]`). Widening to `[T]` (Vec)
+/// when passed to a List slot is handled by `TCallArg.widen_to_vec` — so a `[E#N]`
+/// param/return/element is covered once its element type is covered.
 fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
     match ty {
         Type::List(inner) => collection_elem_covered(inner, cx),
@@ -5189,6 +5192,14 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 };
             }
             let mut init = lower_expr(&b.init, cx, env);
+            // D-FIXARR1: if the binding annotation is `[T#N]` and the init lowered as a
+            // growable list (e.g. a plain list literal), re-tag the TExpr type so the emit
+            // produces a Rust array literal `[e1, …]` instead of `vec![…]`.
+            if let Some(fl @ Type::FixedList { .. }) = &b.ty {
+                if matches!(init.ty, Type::List(_)) && matches!(init.kind, TExprKind::ListLit(_)) {
+                    init.ty = fl.clone();
+                }
+            }
             // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
             // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
             // a `: <fn-trait(mut)>` annotation. Decided here from `Lambda.meta`.
@@ -6293,8 +6304,10 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: int_lit_type(width),
             kind: TExprKind::IntLit(*n, *width),
         },
-        Expr::Float(v, _) => TExpr {
-            ty: Type::Float,
+        Expr::Float(v, _, is_f32) => TExpr {
+            // D-FLOATW1: sema resolves F32 context and writes `is_f32=true` on the
+            // node; carry that width through to TIR so emit produces the right suffix.
+            ty: if *is_f32 { Type::Float32 } else { Type::Float },
             kind: TExprKind::FloatLit(*v),
         },
         Expr::Bool(b, _) => TExpr {
@@ -7271,15 +7284,17 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 clone: false,
                                 arc_clone: false,
                                 fn_coerce: None,
+                                widen_to_vec: false,
                             }],
                         },
                     }
                 })
                 .collect();
-            // S76: result is `[T#N]` (a fixed-size list), erased to `Vec<T>`.
+            // D-FIXARR1: fan-out result is `[T#N]` — a real Rust stack array.
             let elem_ty = call_return_type(cx, name);
+            let len = items.len() as u64;
             TExpr {
-                ty: Type::List(Box::new(elem_ty)),
+                ty: Type::FixedList { elem: Box::new(elem_ty), len },
                 kind: TExprKind::FanOut { calls },
             }
         }
@@ -8133,9 +8148,17 @@ fn lower_one_call_arg(
         }
         _ => None,
     };
+    // D-FIXARR1: when a [T#N] (Rust [T; N]) is passed where a [T] (Vec<T>) is expected,
+    // widen by copying into a growable list (`.to_vec()`).
+    let widen_to_vec = matches!(
+        (&value.ty, conv.as_ref().map(|(_, t)| t)),
+        (Type::FixedList { elem: arg_elem, .. }, Some(Type::List(param_elem)))
+            if arg_elem == param_elem
+    );
     // Borrow wrappers (applied after the clone + fn-coerce wrappers). A `Read`
     // non-scalar (non-Fn) is `&(…)`; a `Mutate` is `&mut (…)`. A Fn-typed `Read` is
     // NOT borrowed (the AST `match conv` skips it), so the fn-coerce form stands alone.
+    // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
     let (borrow, mut_borrow) = match &conv {
         // D-CAP8/9: Infer (pre-resolution default) and Share borrow like Read (`&(…)`)
         // until their phases specialize them; Raw (never produced yet) stays by-value.
@@ -8153,6 +8176,7 @@ fn lower_one_call_arg(
         clone,
         arc_clone,
         fn_coerce,
+        widen_to_vec,
     }
 }
 
@@ -9279,7 +9303,14 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             Some((signed, bits)) => format!("{}{}{}", n, if *signed { 'i' } else { 'u' }, bits),
             None => format!("{}i64", n),
         },
-        TExprKind::FloatLit(v) => format!("{:?}", v),
+        // D-FLOATW1: emit `f32` suffix when the sema-resolved width is F32.
+        TExprKind::FloatLit(v) => {
+            if matches!(&e.ty, Type::Float32) {
+                format!("{:?}f32", v)
+            } else {
+                format!("{:?}f64", v)
+            }
+        }
         TExprKind::BoolLit(b) => b.to_string(),
         TExprKind::CharLit(c) => format!("{:?}", c),
         TExprKind::StrLit(parts) => emit_tir_str(parts, cx),
@@ -9615,14 +9646,19 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let else_block = emit_tir_value_block(else_body, else_value, cx);
             format!("if {} {} else {}", c, then_block, else_block)
         }
-        // c109 Phase 5: `[a, b, c]` → `vec![a, b, c]`. Mirrors the AST `Expr::ListLit`.
+        // c109 Phase 5: `[a, b, c]` → `vec![a, b, c]` (growable) or `[a, b, c]` (fixed).
+        // D-FIXARR1: if the expression type is FixedList, emit a Rust array literal `[…]`.
         TExprKind::ListLit(elems) => {
             let parts = elems
                 .iter()
                 .map(|e| emit_tir_expr(e, cx))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("vec![{}]", parts)
+            if matches!(&e.ty, Type::FixedList { .. }) {
+                format!("[{}]", parts)
+            } else {
+                format!("vec![{}]", parts)
+            }
         }
         // c109 Phase 23: a named-tuple literal → `JetTup_<hash> { user_<f>: <v>, … }`.
         // Mirrors `emit_expr`'s `TupleLit` arm byte-for-byte (fields canonical-ordered,
@@ -9759,14 +9795,14 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 11: fan-out `f.[a, b, c]` → `vec![f(a), f(b), f(c)]`. The
         // per-item calls were lowered at lowering; emit only wraps them in `vec![…]`,
-        // byte-for-byte the AST `Expr::FanOut` Ident-callee form.
+        // D-FIXARR1: fan-out `f.[a, b, c]` produces `[T#N]` — a Rust array literal `[…]`.
         TExprKind::FanOut { calls } => {
             let elems = calls
                 .iter()
                 .map(|c| emit_tir_expr(c, cx))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("vec![{}]", elems)
+            format!("[{}]", elems)
         }
         // c109 Phase 11: a closure-taking collection method. The receiver-type +
         // Fn-vs-FnMut dispatch was resolved into `op` at lowering; emit only formats,
@@ -10108,10 +10144,27 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], cx: &Cx) -> St
         ("core.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
         ("core.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
         ("core.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
-        ("core.math", "sqrt") => format!("{}({})", helper("jet_std_math_sqrt"), arg(0)),
-        ("core.math", "pow") => format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)),
-        ("core.math", "floor") => format!("{}({})", helper("jet_std_math_floor"), arg(0)),
-        ("core.math", "ceil") => format!("{}({})", helper("jet_std_math_ceil"), arg(0)),
+        // D-FLOATW1: width-generic math — choose the f32 helper when the arg is F32.
+        ("core.math", "sqrt") => {
+            let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
+            if f32_path { format!("{}({})", helper("jet_std_math_sqrt_f32"), arg(0)) }
+            else { format!("{}({})", helper("jet_std_math_sqrt"), arg(0)) }
+        }
+        ("core.math", "pow") => {
+            let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
+            if f32_path { format!("{}({}, {})", helper("jet_std_math_pow_f32"), arg(0), arg(1)) }
+            else { format!("{}({}, {})", helper("jet_std_math_pow"), arg(0), arg(1)) }
+        }
+        ("core.math", "floor") => {
+            let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
+            if f32_path { format!("{}({})", helper("jet_std_math_floor_f32"), arg(0)) }
+            else { format!("{}({})", helper("jet_std_math_floor"), arg(0)) }
+        }
+        ("core.math", "ceil") => {
+            let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
+            if f32_path { format!("{}({})", helper("jet_std_math_ceil_f32"), arg(0)) }
+            else { format!("{}({})", helper("jet_std_math_ceil"), arg(0)) }
+        }
         ("core.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
         ("core.random", "int") => {
             format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1))
@@ -10253,6 +10306,11 @@ fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 s = format!("({}).clone()", s);
             } else if a.arc_clone {
                 s = format!("std::sync::Arc::clone(&{})", s);
+            }
+            // D-FIXARR1: widen a [T#N] (Rust [T; N]) to [T] (Vec<T>) before passing.
+            // Applied AFTER clone, BEFORE fn-coerce and borrow wrappers.
+            if a.widen_to_vec {
+                s = format!("({}).to_vec()", s);
             }
             // c109 Phase 13: the Fn-typed Box-coercion, applied AFTER the clone wrapper
             // and BEFORE the borrow wrapper — exactly `emit_call_args`' order. `Box::new`

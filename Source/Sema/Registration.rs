@@ -323,11 +323,22 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // S57 (M9.5): evaluate comptime bindings before bodies are checked, so
     // references to them resolve. Single-file mode has no path; embed_file
     // resolves against the current directory.
+    // D-CTCORE1: build core_imports from the file's `use` declarations so the
+    // comptime interpreter can dispatch whitelisted pure Core calls.
+    let single_core_imports: HashMap<String, String> = prog
+        .imports
+        .iter()
+        .filter_map(|imp| {
+            let module = crate::Loader::core_module_path(imp)?;
+            Some((imp.alias.clone(), module))
+        })
+        .collect();
     eval_comptime_items(
         &mut prog.items,
         &mut consts,
         std::path::Path::new("."),
         &mut diags,
+        &single_core_imports,
     );
 
     let const_names: Vec<String> = consts.keys().cloned().collect();
@@ -752,6 +763,9 @@ pub(crate) fn eval_comptime_items(
     consts: &mut HashMap<String, Type>,
     base_dir: &std::path::Path,
     diags: &mut Vec<Diagnostic>,
+    // D-CTCORE1: module alias → Core path so the interpreter can evaluate
+    // whitelisted pure Core calls (e.g. `comptime X = math.sqrt(4.0)`).
+    core_imports: &HashMap<String, String>,
 ) {
     if !items
         .iter()
@@ -781,8 +795,10 @@ pub(crate) fn eval_comptime_items(
         for item in items.iter() {
             if let Item::Const(c) = item {
                 if c.is_comptime {
-                    match crate::Comptime::evaluate(&c.value, &funcs, &externs, base_dir, &globals)
-                    {
+                    // D-CTCORE1: evaluate_with_imports so Core whitelist calls work.
+                    match crate::Comptime::evaluate_with_imports(
+                        &c.value, &funcs, &externs, base_dir, &globals, core_imports,
+                    ) {
                         Ok(v) => {
                             consts.insert(c.name.clone(), v.jet_type());
                             globals.insert(c.name.clone(), v.clone());
@@ -885,7 +901,7 @@ pub(crate) fn register_const(
     }
     let ty = match &c.value {
         Expr::Int(_, _, _) => Some(Type::Int),
-        Expr::Float(_, _) => Some(Type::Float),
+        Expr::Float(_, _, _) => Some(Type::Float),
         Expr::Bool(_, _) => Some(Type::Bool),
         _ => None,
     };

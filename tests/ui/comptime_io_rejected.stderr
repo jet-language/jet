@@ -1,0 +1,15 @@
+Error [E0958]: `core.fs.read()` cannot run at comptime — it performs I/O
+  --> tests/ui/comptime_io_rejected.jet:4:20
+    |
+  4 | comptime DATA = fs.read("config.txt")
+    |                    ^^^^
+ Why: comptime is pure and deterministic; I/O functions are not
+ Fix: use `embed_file("path")` or `embed_bytes("path")` for build-time file reads; other I/O must remain in runtime code
+
+Error [E0107]: nothing named `DATA` exists here
+  --> tests/ui/comptime_io_rejected.jet:7:11
+    |
+  7 |     print(DATA)
+    |           ^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `DATA @= ...`

@@ -271,6 +271,7 @@ before continuing.
 | E0955 | sema  | `embed_file`/`embed_bytes`: missing / unreadable file (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
 | E0957 | sema  | `embed_file`/`embed_bytes` path not a literal, absolute, or escaping via `..` |
+| E0958 | sema  | an I/O Core call (`core.fs`/`io`/`env`/`net`) can't run at comptime (D-CTCORE1) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | sema  | fan-out callee is not callable with exactly one argument (S75) |
 | E0962 | sema  | fan-out item doesn't fit the parameter type (S75) |

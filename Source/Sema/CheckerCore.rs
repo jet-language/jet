@@ -329,6 +329,12 @@ impl<'a> Checker<'a> {
             return true;
         }
         match (want, got) {
+            // D-FIXARR1: a `[T#N]` widens to `[T]` — codegen emits `.to_vec()`.
+            (Type::List(want_elem), Type::FixedList { elem: got_elem, .. })
+                if want_elem == got_elem =>
+            {
+                return false;
+            }
             (Type::TraitObject(trait_name), Type::Named(type_name)) => {
                 if self.trait_reg.implements_trait(type_name, trait_name) {
                     return false;
@@ -1414,13 +1420,15 @@ impl<'a> Checker<'a> {
             return;
         };
         // Step 1: evaluate the condition at comptime.
+        // D-CTCORE1: pass core_imports for whitelisted pure Core calls.
         let globals = self.current_ct_globals();
-        let selected = match crate::Comptime::evaluate_owned(
+        let selected = match crate::Comptime::evaluate_owned_with_imports(
             cond,
             self.ct_funcs,
             self.ct_externs,
             self.ct_base_dir,
             &globals,
+            self.core_imports,
         ) {
             Ok(crate::Comptime::CtValue::Bool(b)) => b,
             Ok(_) => {
@@ -2047,12 +2055,15 @@ impl<'a> Checker<'a> {
         }
         if b.is_comptime {
             let globals = self.current_ct_globals();
-            match crate::Comptime::evaluate_owned(
+            // D-CTCORE1: pass core_imports so the interpreter can evaluate
+            // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
+            match crate::Comptime::evaluate_owned_with_imports(
                 &b.init,
                 self.ct_funcs,
                 self.ct_externs,
                 self.ct_base_dir,
                 &globals,
+                self.core_imports,
             ) {
                 Ok(v) => {
                     b.ct = Some(v.clone());

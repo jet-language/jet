@@ -551,6 +551,12 @@ fn jet_std_math_pow(a: f64, b: f64) -> f64 { a.powf(b) }
 fn jet_std_math_floor(x: f64) -> f64 { x.floor() }
 fn jet_std_math_ceil(x: f64) -> f64 { x.ceil() }
 fn jet_std_math_round(x: f64) -> i64 { x.round() as i64 }
+// D-FLOATW1 (ratified 2026-06-22): F32 variants — sqrt(F32)->F32, pow(F32,F32)->F32 etc.
+// F32 is a real precision choice, not just storage; no silent widening to f64 (I3).
+fn jet_std_math_sqrt_f32(x: f32) -> f32 { x.sqrt() }
+fn jet_std_math_pow_f32(a: f32, b: f32) -> f32 { a.powf(b) }
+fn jet_std_math_floor_f32(x: f32) -> f32 { x.floor() }
+fn jet_std_math_ceil_f32(x: f32) -> f32 { x.ceil() }
 
 thread_local! { static JET_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173); }
 fn jet_rng_next() -> u64 {

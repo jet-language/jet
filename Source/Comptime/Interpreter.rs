@@ -75,6 +75,10 @@ pub(super) struct Interp<'a> {
     /// `Some` in whole-program dev mode (E2-M4): `print`/`eprint` write here
     /// instead of being rejected. `None` in pure comptime mode (M9.5).
     pub(super) sink: Option<&'a mut DevSink>,
+    /// D-CTCORE1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
+    /// Enables the comptime interpreter to evaluate whitelisted pure Core calls.
+    /// Empty for contexts that have no `use` declarations (e.g. module-level consts).
+    pub(super) core_imports: &'a HashMap<String, String>,
 }
 
 impl<'a> Interp<'a> {
@@ -515,7 +519,7 @@ impl<'a> Interp<'a> {
         self.burn(e.span())?;
         match e {
             Expr::Int(n, _, _) => Ok(CtValue::Int(*n)),
-            Expr::Float(f, _) => Ok(CtValue::Float(*f)),
+            Expr::Float(f, _, _) => Ok(CtValue::Float(*f)),
             Expr::Bool(b, _) => Ok(CtValue::Bool(*b)),
             Expr::Char(c, _) => Ok(CtValue::Char(*c)),
             Expr::Str(parts, _) => {

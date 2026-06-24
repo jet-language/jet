@@ -197,9 +197,11 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-SG9/D-FLOATW1: a float literal is `Float` (f64) by default, but
-            // adopts `F32` when that width is expected here.
-            Expr::Float(_, _) => {
+            // adopts `F32` when that width is expected here. Write the resolution
+            // back onto the AST so TIR lowering can read the width from the node.
+            Expr::Float(_, _, is_f32) => {
                 if matches!(self.expected_type, Some(Type::Float32)) {
+                    *is_f32 = true;
                     Some(Type::Float32)
                 } else {
                     Some(Type::Float)
@@ -1482,6 +1484,35 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
             return None;
+        }
+        // D-FIXARR1: a list literal in a `[T#N]` binding context keeps the fixed-size type.
+        // Sema validates element types and count, codegen emits a Rust array `[e1, …]`.
+        if let Some(Type::FixedList { elem: expected_inner, len }) = self.expected_type.clone() {
+            if elems.len() as u64 != len {
+                self.diags.push(Diagnostic::error(
+                    "E0963",
+                    format!(
+                        "this list has {} element{}, but `[T#{}]` expects exactly {}",
+                        elems.len(),
+                        if elems.len() == 1 { "" } else { "s" },
+                        len,
+                        len,
+                    ),
+                    "a fixed-size list `[T#N]` requires exactly N elements".to_string(),
+                    format!("provide exactly {} element{}", len, if len == 1 { "" } else { "s" }),
+                    Some(span),
+                ));
+                return None;
+            }
+            let saved = self.expected_type.clone();
+            self.expected_type = Some((*expected_inner).clone());
+            for e in elems.iter_mut() {
+                if let Some(t) = self.infer(e) {
+                    self.check_type_assignable(&expected_inner, &t, e.span());
+                }
+            }
+            self.expected_type = saved;
+            return Some(Type::FixedList { elem: expected_inner, len });
         }
         if let Some(Type::List(expected_inner)) = self.expected_type.clone() {
             if let Type::TraitObject(trait_name) = expected_inner.as_ref() {
@@ -3405,7 +3436,12 @@ impl<'a> Checker<'a> {
                 let param_ty = self.resolve_type(param_ty.clone());
                 let arg_ty = self.resolve_type(arg_ty.clone());
                 let reported = self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
+                // will emit .to_vec() on the argument.
+                let fixed_widens = matches!((&param_ty, &arg_ty),
+                    (Type::List(pe), Type::FixedList { elem: ae, .. }) if pe == ae);
                 let compatible = arg_ty == param_ty
+                    || fixed_widens
                     || (matches!(&param_ty, Type::Fn { .. })
                         && matches!(&arg_ty, Type::Fn { .. })
                         && fn_types_compatible(&param_ty, &arg_ty));

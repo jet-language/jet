@@ -1367,7 +1367,9 @@ pub enum Expr {
     /// context; `None` means the default `Int` (i64). Codegen reads it to pick
     /// the Rust literal suffix.
     Int(i64, Span, Option<(bool, u8)>),
-    Float(f64, Span),
+    /// D-FLOATW1: the bool is `true` when the literal is resolved as F32 in a
+    /// typed context (e.g. `x: F32 = 1.5`). `false` = default F64/Float.
+    Float(f64, Span, bool),
     Bool(bool, Span),
     /// S41: single-quoted `'a'`.
     Char(char, Span),
@@ -1526,7 +1528,7 @@ impl Expr {
         match self {
             Expr::Str(_, s)
             | Expr::Int(_, s, _)
-            | Expr::Float(_, s)
+            | Expr::Float(_, s, _)
             | Expr::Bool(_, s)
             | Expr::Char(_, s)
             | Expr::ListLit(_, s)

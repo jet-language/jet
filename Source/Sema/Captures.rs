@@ -152,7 +152,7 @@ pub(crate) fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], take
             walk_expr_for_const_refs(l, const_names, taken);
             walk_expr_for_const_refs(r, const_names, taken);
         }
-        Expr::Char(_, _) | Expr::Int(_, _, _) | Expr::Float(_, _) | Expr::Bool(_, _) => {}
+        Expr::Char(_, _) | Expr::Int(_, _, _) | Expr::Float(_, _, _) | Expr::Bool(_, _) => {}
         Expr::ListLit(elems, _) => {
             for e in elems {
                 walk_expr_for_const_refs(e, const_names, taken);
@@ -291,7 +291,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             expr_refs_name(callee, name) || items.iter().any(|e| expr_refs_name(e, name))
         }
         Expr::Int(_, _, _)
-        | Expr::Float(_, _)
+        | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)

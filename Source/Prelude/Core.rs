@@ -17,6 +17,12 @@ impl<T: JetShow> JetShow for Vec<T> { fn jet_show(&self) -> String {
     let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
     format!("[{}]", parts.join(", "))
 } }
+// D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`; render it like a list
+// so printing/interpolating a fixed array (or a fan-out result) works.
+impl<T: JetShow, const N: usize> JetShow for [T; N] { fn jet_show(&self) -> String {
+    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+    format!("[{}]", parts.join(", "))
+} }
 impl JetShow for char { fn jet_show(&self) -> String { self.to_string() } }
 impl<T: JetShow> JetShow for Option<T> {
     fn jet_show(&self) -> String {
@@ -104,20 +110,22 @@ fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) ->
     }
     r
 }
-fn jet_index_vec<T: Clone>(xs: &Vec<T>, i: i64, file: &str, line: u32) -> T {
+// D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
+// `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
+fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     let len = xs.len() as i64;
     if i < 0 || i >= len {
         jet_panic(file, line, &format!("the list has {} items, so position {} doesn't exist", len, i));
     }
     xs[i as usize].clone()
 }
-fn jet_unpack_vec<T: Clone>(xs: &Vec<T>, want: usize, i: usize, file: &str, line: u32) -> T {
+fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
         jet_panic(file, line, &format!("this pattern needs exactly {} item{}, but the list has {}", want, if want == 1 { "" } else { "s" }, xs.len()));
     }
     xs[i].clone()
 }
-fn jet_slice_vec<T: Clone>(xs: &Vec<T>, a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
+fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
     let len = xs.len() as i64;
     if a < 0 || b < 0 || a > b || b >= len {
         jet_panic(file, line, &format!("can't slice {} items from {} to {} (inclusive)", len, a, b));

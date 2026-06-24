@@ -96,7 +96,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut BTreeMap<String, Vec<(S
         }
         Expr::Ident(_, _)
         | Expr::Int(_, _, _)
-        | Expr::Float(_, _)
+        | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)

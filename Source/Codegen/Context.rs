@@ -294,8 +294,9 @@ impl Cx {
             Type::TraitObject(t) => format!("Box<dyn {}>", Generics::user_trait_rust(t)),
             Type::Fn { params, ret } => self.rust_fn_trait(params, ret.as_deref(), false),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
-            // S76: [T#N] erases to Vec<T> at codegen (I3 — all size checks live in sema).
-            Type::FixedList { elem, .. } => format!("Vec<{}>", self.rust_type(elem)),
+            // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
+            // All size/bounds checks live in sema (I3). The Rust type is [E; N].
+            Type::FixedList { elem, len } => format!("[{}; {}]", self.rust_type(elem), len),
         }
     }
 

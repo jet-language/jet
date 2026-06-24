@@ -34,6 +34,13 @@ pub use Value::CtValue;
 use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};
 use Purity::check_purity;
 
+// An empty core_imports map for paths that don't have `use` declarations.
+static EMPTY_IMPORTS: std::sync::OnceLock<HashMap<String, String>> =
+    std::sync::OnceLock::new();
+fn empty_imports() -> &'static HashMap<String, String> {
+    EMPTY_IMPORTS.get_or_init(HashMap::new)
+}
+
 // --- public entry ---------------------------------------------------------
 
 /// Type-check happens elsewhere (every function body goes through sema);
@@ -45,12 +52,25 @@ pub fn evaluate(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
 ) -> Result<CtValue, Diagnostic> {
+    evaluate_with_imports(init, funcs, extern_names, base_dir, globals, &HashMap::new())
+}
+
+/// Like `evaluate` but with module alias map for D-CTCORE1 whitelisted Core calls.
+pub fn evaluate_with_imports(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+) -> Result<CtValue, Diagnostic> {
     check_purity(init, funcs, extern_names)?;
     let mut interp = Interp {
         funcs,
         base_dir,
         fuel: FUEL_BUDGET,
         sink: None,
+        core_imports,
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
@@ -77,6 +97,7 @@ pub fn run_main(
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
+        core_imports: empty_imports(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -98,6 +119,7 @@ pub fn run_main_value(
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
+        core_imports: empty_imports(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -122,6 +144,7 @@ pub fn run_main_with_fuel(
         base_dir,
         fuel,
         sink: Some(sink),
+        core_imports: empty_imports(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -154,6 +177,7 @@ pub fn run_repl_step(
         base_dir,
         fuel,
         sink: Some(sink),
+        core_imports: empty_imports(),
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.
@@ -203,6 +227,18 @@ pub fn evaluate_owned(
     base_dir: &Path,
     globals: &HashMap<String, CtValue>,
 ) -> Result<CtValue, Diagnostic> {
+    evaluate_owned_with_imports(init, funcs, extern_names, base_dir, globals, &HashMap::new())
+}
+
+/// Like `evaluate_owned` but with module alias map for D-CTCORE1 whitelisted Core calls.
+pub fn evaluate_owned_with_imports(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+) -> Result<CtValue, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
-    evaluate(init, &refs, extern_names, base_dir, globals)
+    evaluate_with_imports(init, &refs, extern_names, base_dir, globals, core_imports)
 }
