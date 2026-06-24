@@ -37,6 +37,7 @@ pub mod LSP;
 pub mod Traits;
 pub mod Manifest;
 pub mod Parser;
+pub mod PhaseTiming;
 pub mod Publish;
 pub mod REPL;
 pub mod Sema;
@@ -251,12 +252,20 @@ fn compile_bundle_path_opts(
     mode: Sema::CompileMode,
     freestanding: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let timing = PhaseTiming::enabled();
+    let mut timer = PhaseTiming::PhaseTimer::new();
     let mut bundle = Loader::load_entry_with_overlay(file, None, false)?;
+    if timing {
+        timer.lap("load"); // lex + parse + module resolution
+    }
     let diags = if freestanding {
         Sema::check_bundle_freestanding(&mut bundle, mode)
     } else {
         Sema::check_bundle(&mut bundle, mode)
     };
+    if timing {
+        timer.lap("sema");
+    }
     let mut errors = Vec::new();
     let mut lints = Vec::new();
     for d in diags {
@@ -272,7 +281,15 @@ fn compile_bundle_path_opts(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
+    if timing {
+        timer.lap("ffi");
+    }
     let rust = Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    if timing {
+        timer.lap("codegen");
+        timer.metric("rust_bytes", rust.len() as u128);
+        timer.write_to(&bundle.project_root);
+    }
     // c110: capabilities are derived from semantic facts (resolved Core calls,
     // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
     let capabilities = Capabilities::from_sema(

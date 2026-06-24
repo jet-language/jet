@@ -434,6 +434,13 @@ pub(crate) fn build(
     if let Some(ref key) = cache_key {
         if jet::BuildCache::try_copy_cached(key, &bin) {
             step("cache hit -> reused cached binary".to_string());
+            // c121: still report size on a cache hit so the dashboard always
+            // has a binary-size data point.
+            if jet::PhaseTiming::enabled() {
+                if let Ok(meta) = std::fs::metadata(&bin) {
+                    eprintln!("jet-timing binary_bytes={}", meta.len());
+                }
+            }
             return;
         }
     }
@@ -537,6 +544,14 @@ pub(crate) fn build(
     }
 
     step(format!("link       -> {}", bin.display()));
+
+    // c121: report final binary size when timing is requested. The dashboard
+    // tool captures this `binary_bytes=` line from build stderr.
+    if jet::PhaseTiming::enabled() {
+        if let Ok(meta) = std::fs::metadata(&bin) {
+            eprintln!("jet-timing binary_bytes={}", meta.len());
+        }
+    }
 
     if let Some(key) = cache_key {
         jet::BuildCache::store_cached(&key, &bin);
