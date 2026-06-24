@@ -55,11 +55,13 @@ pub(crate) struct MethodSig {
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
+        #[allow(dead_code)] // stored for future duplicate-name diagnostics
         name_span: Span,
         fields: Vec<(String, Span, Type, bool, bool)>,
         methods: HashMap<String, MethodSig>,
     },
     Enum {
+        #[allow(dead_code)] // stored for future duplicate-name diagnostics
         name_span: Span,
         variants: HashMap<String, (Span, VariantPayload)>,
         variant_order: Vec<String>,
@@ -69,6 +71,7 @@ pub(crate) enum TypeDef {
     /// a base type. No implicit coercion either direction (E0128). Arithmetic
     /// only when `is_numeric` (D-DIST3, E0127).
     Distinct {
+        #[allow(dead_code)] // stored for future duplicate-name diagnostics
         name_span: Span,
         base: Type,
         is_numeric: bool,
@@ -321,6 +324,7 @@ pub(crate) struct LocalInfo {
     task_lint_span: Option<Span>,
     /// D-DETACH1: set when the task's spawn lambda captured a view borrow (E1102
     /// fired at spawn time). Used by the `detach()` handler to emit E1103.
+    #[allow(dead_code)] // D-DETACH1 reader (E1103 path) not yet implemented
     task_has_view_capture: bool,
 }
 

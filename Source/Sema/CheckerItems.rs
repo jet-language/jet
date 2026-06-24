@@ -1102,7 +1102,6 @@ impl<'a> Checker<'a> {
                                     Some(span),
                                 ));
                             }
-                            _ => {}
                         }
                     }
                     return result;

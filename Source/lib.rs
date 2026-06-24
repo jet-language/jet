@@ -8,6 +8,8 @@
 // Source files/modules use PascalCase names (owner decision), which trips the
 // non_snake_case lint at module-name level.
 #![allow(non_snake_case)]
+// Warnings are errors: keeps the build warning-clean (card c115).
+#![deny(warnings)]
 
 pub mod AST;
 pub mod BuildCache;

@@ -8,10 +8,10 @@ use std::path::Path;
 use crate::AST::{BinOp, BindPattern, EnumLitArg, Expr, Func, OrFallback as FallbackKind, Stmt, StrPart, Type, UnOp};
 use crate::Diagnostics::{Diagnostic, Span};
 
-use super::Builtins::{apply_static_type_method, as_bool, as_int, eval_binop};
+use super::Builtins::{as_bool, as_int, eval_binop};
 use super::Diagnostics::{
     comptime_panic, early_return_sentinel, err_propagate_sentinel, index_oob, map_missing,
-    overflow, slice_oob, unsupported, unsupported_expr, ERR_PROPAGATE_CODE,
+    overflow, slice_oob, unsupported, unsupported_expr,
 };
 use super::Value::{CtKey, CtValue};
 
@@ -742,7 +742,7 @@ impl<'a> Interp<'a> {
                 }
             }
             // c97/D-STRPARSE1: `value ?? fallback` — use fallback on failure/absence.
-            Expr::OrFallback { value, fallback, is_option, span } => {
+            Expr::OrFallback { value, fallback, is_option, span: _ } => {
                 let v = self.eval(value, scope)?;
                 // Determine if the value is "absent" (needs fallback).
                 let is_absent = if *is_option {

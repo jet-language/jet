@@ -13,6 +13,7 @@ struct ParsedDiag {
     what: String,
     why: String,
     fix: String,
+    #[allow(dead_code)] // parsed for completeness; assertions use code/what/why/fix
     location: String,
 }
 

@@ -159,7 +159,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::TupleLit(fields, Span::new(open.start, close.end), None))
     }
 
-    fn parse_paren_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+    fn parse_paren_primary(&mut self, _allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
         let open = self.bump().span;
         if self.looks_like_named_tuple(true) {
             return self.parse_tuple_lit(open);

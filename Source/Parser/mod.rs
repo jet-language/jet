@@ -10,7 +10,7 @@
 use crate::AST::{
     AccessConvention, BinOp, Binding, BindName, BindPattern, Call, CallArg, CodeModule,
     ConstAttr, ConstDef, Contribution, ElseBranch, EnumDef,
-    EnumLitArg, Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
+    Expr, Field, ForKind, Func, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     ModuleDecl, Namespace,
     LambdaMeta, LambdaParam, OrFallback, Param, Pattern, Program, Stmt, StrPart, StructDef,
     SwitchArm, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
@@ -216,10 +216,12 @@ impl<'a> Parser<'a> {
         &self.toks[(self.pos + 2).min(self.toks.len() - 1)]
     }
 
+    #[allow(dead_code)] // lookahead helpers kept for symmetry with peek6/peek7
     fn peek4(&self) -> &Token {
         &self.toks[(self.pos + 3).min(self.toks.len() - 1)]
     }
 
+    #[allow(dead_code)] // lookahead helpers kept for symmetry with peek6/peek7
     fn peek5(&self) -> &Token {
         &self.toks[(self.pos + 4).min(self.toks.len() - 1)]
     }

@@ -1291,7 +1291,7 @@ impl<'a> Checker<'a> {
                 }
                 self.check_block(body, true);
             }
-            Stmt::ContextBlock { fields, body, span } => {
+            Stmt::ContextBlock { fields, body, span: _ } => {
                 for (field_name, value_expr, field_span) in fields.iter_mut() {
                     let ty = self.infer(value_expr);
                     match field_name.as_str() {

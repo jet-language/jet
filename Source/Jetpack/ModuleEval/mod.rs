@@ -37,7 +37,7 @@ use crate::AST::Namespace;
 #[cfg(test)]
 use super::Merge::{self, Scalar};
 #[cfg(test)]
-use super::RefSpec::{self, ProviderKind};
+use super::RefSpec::ProviderKind;
 
 #[cfg(test)]
 mod tests {

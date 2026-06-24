@@ -80,6 +80,7 @@ mod transcript_parser {
     }
 
     pub struct Transcript {
+        #[allow(dead_code)] // parsed from JSON; used for test output context if needed
         pub description: String,
         pub source: String,
         pub steps: Vec<Step>,

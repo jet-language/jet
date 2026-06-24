@@ -11,14 +11,14 @@
 //!   - `jet vendor` (copy resolved deps into a `vendor/` tree).
 //!   - Private / mirror registry configuration.
 
-mod Advisory;
+pub mod Advisory;
 mod API;
 mod Diff;
 mod Registry;
 mod Resolve;
 mod SBOM;
 mod Schema;
-mod SemVer;
+pub mod SemVer;
 mod Vendor;
 
 pub use Advisory::*;

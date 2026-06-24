@@ -979,7 +979,7 @@ fn cmd_load(
     path_str: &str,
     session: &mut Session,
     base_dir: &Path,
-    color: bool,
+    _color: bool,
     out_sink: &mut impl Write,
 ) {
     let src = match std::fs::read_to_string(path_str) {

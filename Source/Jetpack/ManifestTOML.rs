@@ -262,7 +262,7 @@ pub fn load(dir: &Path) -> Option<(JetpackToml, Vec<TomlError>)> {
 
 /// Render a list of `TomlError`s as a multi-line string using the standard
 /// Jet diagnostic format (spanless — no source file context block).
-pub fn render_errors(path: &str, errors: &[TomlError]) -> String {
+pub fn render_errors(_path: &str, errors: &[TomlError]) -> String {
     errors
         .iter()
         .map(|e| format!("Error [{}]: {}\n", e.code, e.message))

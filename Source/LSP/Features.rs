@@ -131,7 +131,7 @@ fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
 pub(crate) fn compute_definition(
     db: &SymbolDB,
     tokens: &[Token],
-    src: &str,
+    _src: &str,
     path: &str,
     offset: usize,
 ) -> Option<(String, Span)> {
@@ -156,7 +156,7 @@ pub(crate) fn compute_definition(
 pub(crate) fn compute_references(
     db: &SymbolDB,
     tokens: &[Token],
-    path: &str,
+    _path: &str,
     offset: usize,
     include_declaration: bool,
 ) -> Vec<(String, Span)> {
@@ -201,7 +201,7 @@ fn is_valid_ident(name: &str) -> bool {
 pub(crate) fn compute_rename(
     db: &SymbolDB,
     tokens: &[Token],
-    path: &str,
+    _path: &str,
     offset: usize,
     new_name: &str,
 ) -> Result<Vec<(String, Span)>, String> {
