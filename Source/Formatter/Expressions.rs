@@ -105,6 +105,12 @@ impl<'a> Fmt<'a> {
                 }
             }
             Type::Named(n) => self.write(n),
+            // D-CAP9: the raw-pointer type renders as the canonical `*T`, never
+            // the deprecated `Ptr<T>` alias.
+            Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
+                self.write("*");
+                self.fmt_type(&args[0]);
+            }
             Type::Apply { name, args } => {
                 self.write(name);
                 self.write("<");
@@ -262,7 +268,13 @@ impl<'a> Fmt<'a> {
                     self.write(")");
                 }
             }
+            // D-CAP9: postfix `p.*` deref.
             Expr::Deref(inner, _) => {
+                self.fmt_expr(inner, Prec::Postfix);
+                self.write(".*");
+            }
+            // D-CAP9: prefix `*x` raw-pointer-of.
+            Expr::RawOf(inner, _) => {
                 self.write("*");
                 self.fmt_expr(inner, Prec::Unary);
             }

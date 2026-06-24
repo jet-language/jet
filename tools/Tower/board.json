@@ -1021,10 +1021,10 @@
       "type": "task",
       "title": "Parser: prefix sigil disambiguation (~ ^ & *) vs existing operators",
       "body": "Lex/parse ~T ^T &T *T in type position and ~x ^x &x *x in expression position. Resolve collisions: ~ vs ~~ trait-attach (S83); ^ vs ^/^= bitwise xor; & vs &&/&=; * vs * multiply AND the current * dereference. Critically, pin the *x address-of vs dereference rule: bare *x outside #Unsafe is a deref today (E0208). Needs a decision on *x meaning (proposed D-CAP9).",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P1",
       "workOrder": null,
-      "plan": "memory-capability-model",
+      "plan": null,
       "notes": [
         {
           "t": "GATING FACTOR (D-CAP9) — the &/* collision with S58 must resolve before any expression-position sigil parsing. Raised to P1 2026-06-23.",
@@ -1045,10 +1045,14 @@
         {
           "t": "~ ^ & disambiguation ships; *T raw + postfix p.* (D-CAP9) remains, with c131.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-CAP9=D shipped: prefix *x = raw-of (#Unsafe-only), postfix p.* deref, *T canonical raw-pointer type, Ptr<T> deprecated alias teaching *T (E0210), E0208 reworded. New ui snapshots + example 100_rawptr. Verified zero regressions vs baseline.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-24T16:48:26.161Z",
+      "updated": "2026-06-24",
       "decisions": [
         "D-CAP9"
       ]
@@ -1092,10 +1096,10 @@
       "type": "task",
       "title": "*T raw reconcile with Ptr<T> + core.mem + #Unsafe gate (S58)",
       "body": "*T is the surface form for today's Ptr<T> behind the core.mem gate. Reconcile the two spellings; require an enclosing #Unsafe(\"reason\") context on memory-unsafe ops (the reason is the #Unsafe arg; the separate #Audit marker was retired by D-UNSAFE2); keep raw uninferable in safe code. Decide whether *T replaces or aliases Ptr<T> - ties into the *x deref/address-of rule (D-CAP9, c127).",
-      "stage": "ready",
+      "stage": "done",
       "priority": "P3",
       "workOrder": null,
-      "plan": "memory-capability-model",
+      "plan": null,
       "notes": [
         {
           "t": "Couples to c127's deref/address-of decision; resolve together.",
@@ -1116,10 +1120,14 @@
         {
           "t": "Audit fix 2026-06-24: corrected retired #Audit(\"…\") reference — D-UNSAFE2 (2026-06-22) folded the reason into #Unsafe(\"reason\") and retired #Audit (E0055). Ensure the *T-raw/Ptr<T> reconcile does NOT re-introduce a separate audit marker.",
           "at": "2026-06-24T22:45:02.236Z"
+        },
+        {
+          "t": "[sweep] D-CAP9=D shipped: prefix *x = raw-of (#Unsafe-only), postfix p.* deref, *T canonical raw-pointer type, Ptr<T> deprecated alias teaching *T (E0210), E0208 reworded. New ui snapshots + example 100_rawptr. Verified zero regressions vs baseline.",
+          "at": "2026-06-24"
         }
       ],
       "created": "2026-06-23T00:00:00Z",
-      "updated": "2026-06-24T22:45:02.236Z",
+      "updated": "2026-06-24",
       "decisions": []
     },
     {

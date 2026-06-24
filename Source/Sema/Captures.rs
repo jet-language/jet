@@ -104,7 +104,10 @@ pub(crate) fn walk_expr_for_const_refs(expr: &Expr, const_names: &[String], take
                 walk_expr_for_const_refs(&a.expr, const_names, taken);
             }
         }
-        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::Field(inner, _, _) => {
+        Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Field(inner, _, _) => {
             walk_expr_for_const_refs(inner, const_names, taken)
         }
         Expr::OptField { base, .. } => walk_expr_for_const_refs(base, const_names, taken),
@@ -224,7 +227,9 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
     match e {
         Expr::PtrFromAddr { addr, .. } => expr_refs_name(addr, name),
         Expr::Ident(n, _) => n == name,
-        Expr::Unary(_, inner, _) => expr_refs_name(inner, name),
+        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
+            expr_refs_name(inner, name)
+        }
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::Call(c) => c.args.iter().any(|a| expr_refs_name(&a.expr, name)),
         Expr::CallValue { callee, args, .. } => {
@@ -295,8 +300,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Bool(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)
-        | Expr::Todo { .. }
-        | Expr::Deref(_, _) => false,
+        | Expr::Todo { .. } => false,
     }
 }
 

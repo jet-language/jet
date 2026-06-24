@@ -528,6 +528,14 @@ pub(crate) enum TExprKind {
         elem_rust: String,
         addr: Box<TExpr>,
     },
+    /// D-CAP9: postfix `p.*` — dereference a raw pointer. Emits Rust `(*(p))`. The
+    /// `unsafe` needed to read through a raw pointer is supplied by the enclosing
+    /// `#Unsafe` region/fn (sema-gated by E0208), so this node adds no `unsafe`.
+    Deref(Box<TExpr>),
+    /// D-CAP9: prefix `*x` — take a raw pointer to `x`. Emits `(&(x) as *const _)`.
+    /// Forming a pointer is safe Rust; *using* it needs the surrounding `#Unsafe`
+    /// region. Gated by E0208 in sema (raw-of only legal inside `#Unsafe`).
+    RawOf(Box<TExpr>),
     /// c109 Phase 19: an arena allocator constructor `mem.Arena.new([capacity: N])`
     /// (D-ALLOC1). The receiver is `Field(Ident(mem-alias), <AllocType>)` with method
     /// `new`. `rust_type` is the resolved `jet_mem::Jet<Alloc>` head; `ctor` is the fully
@@ -3414,7 +3422,11 @@ fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // E3101/E3102), so it never appears in a non-unsafe context. `elem` is a total
         // type on the node — emit needs no inference.
         Expr::PtrFromAddr { addr, .. } => expr_in_subset(addr, cx, locals),
-        // Everything else (tuples, deref, …) is out.
+        // D-CAP9: postfix `p.*` deref and prefix `*x` raw-of. Both only appear
+        // inside `use core.mem` + an `#Unsafe` region (sema-gated by E0208); the
+        // deref/cast forms are byte-for-byte the AST path (no convention facts).
+        Expr::Deref(inner, _) | Expr::RawOf(inner, _) => expr_in_subset(inner, cx, locals),
+        // Everything else (tuples, …) is out.
         _ => false,
     }
 }
@@ -6440,6 +6452,18 @@ fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     operand: Box::new(operand),
                 },
             }
+        }
+        // D-CAP9: postfix `p.*` deref. Result type is the pointer's element type.
+        Expr::Deref(inner, _) => {
+            let operand = lower_expr(inner, cx, env);
+            let ty = crate::Sema::ptr_elem(&operand.ty).unwrap_or_else(|| operand.ty.clone());
+            TExpr { ty, kind: TExprKind::Deref(Box::new(operand)) }
+        }
+        // D-CAP9: prefix `*x` raw-pointer-of. Result type is `*T` (`Ptr<T>`).
+        Expr::RawOf(inner, _) => {
+            let operand = lower_expr(inner, cx, env);
+            let ty = crate::Sema::ptr_type(operand.ty.clone());
+            TExpr { ty, kind: TExprKind::RawOf(Box::new(operand)) }
         }
         Expr::Binary(op, l, r, span) => {
             let lhs = lower_expr(l, cx, env);
@@ -9656,6 +9680,16 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `unsafe`); `elem_rust` was resolved at lowering.
         TExprKind::PtrFromAddr { elem_rust, addr } => {
             format!("(({}) as usize as *mut {})", emit_tir_expr(addr, cx), elem_rust)
+        }
+        // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
+        // the enclosing `#Unsafe` region (sema-gated); this node adds no `unsafe`.
+        TExprKind::Deref(operand) => format!("(*({}))", emit_tir_expr(operand, cx)),
+        // D-CAP9: prefix `*x` raw-of → `(&({}) as *const _ as *mut _)`. The result
+        // is `*mut T` to match the canonical raw-pointer type (`Ptr<T>` lowers to
+        // `*mut`). Forming the pointer is safe Rust; only dereferencing it needs
+        // the surrounding `#Unsafe`. The const→mut cast is the standard idiom.
+        TExprKind::RawOf(operand) => {
+            format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
         }
         // c109 Phase 19: the arena allocator constructor — the ctor tail was rendered whole
         // at lowering (`jet_mem::Jet<Alloc>::new()` / `::with_capacity(...)`), so emit just

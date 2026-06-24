@@ -317,6 +317,17 @@ impl<'a> Parser<'a> {
     fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
+            // D-CAP9: `*T` is the canonical raw-pointer type. Lowers to the same
+            // internal `Ptr<T>` (`Type::Apply { name: "Ptr", … }`). `Ptr<T>` is
+            // a deprecated alias that teaches `*T` (see the `TYPE_PTR` arm).
+            TokKind::Star => {
+                self.bump();
+                let (elem, _) = self.type_()?;
+                Type::Apply {
+                    name: Syntax::TYPE_PTR.to_string(),
+                    args: vec![elem],
+                }
+            }
             TokKind::KwFn => {
                 self.bump();
                 self.expect(TokKind::LParen, "after `fn` in a function type")?;
@@ -525,6 +536,28 @@ impl<'a> Parser<'a> {
                         let inner = self.type_generic_arg("Shared")?;
                         self.maybe_close_type_args("after a shared element type")?;
                         Type::Shared(Box::new(inner))
+                    }
+                    // D-CAP9: `Ptr<T>` is a deprecated alias for the canonical
+                    // raw-pointer type `*T`. Still parses to the same internal
+                    // type, but teaches the new spelling (E0210).
+                    Syntax::TYPE_PTR => {
+                        self.expect_type_args_open(Syntax::TYPE_PTR)?;
+                        let inner = self.type_generic_arg(Syntax::TYPE_PTR)?;
+                        self.maybe_close_type_args(&format!("after `{}<…>`", Syntax::TYPE_PTR))?;
+                        self.diags.push(Diagnostic::error(
+                            "E0210",
+                            format!("`{}<T>` is the old name for the raw-pointer type", Syntax::TYPE_PTR),
+                            format!(
+                                "the raw-pointer type is now written `*T` — `{}<T>` is a deprecated alias",
+                                Syntax::TYPE_PTR
+                            ),
+                            format!("write `*{}` instead of `{}<{}>`", inner.name(), Syntax::TYPE_PTR, inner.name()),
+                            Some(start),
+                        ));
+                        Type::Apply {
+                            name: Syntax::TYPE_PTR.to_string(),
+                            args: vec![inner],
+                        }
                     }
                     Syntax::TYPE_RESULT => {
                         self.diags.push(Diagnostic::error(

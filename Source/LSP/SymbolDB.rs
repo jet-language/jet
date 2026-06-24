@@ -763,7 +763,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, db: &mut SymbolDB) {
             collect_expr(r, mp, db);
         }
         AST::Expr::Unary(_, inner, _) => collect_expr(inner, mp, db),
-        AST::Expr::Deref(inner, _) => collect_expr(inner, mp, db),
+        AST::Expr::Deref(inner, _) | AST::Expr::RawOf(inner, _) => collect_expr(inner, mp, db),
         AST::Expr::Index { base, index, .. } => {
             collect_expr(base, mp, db);
             collect_expr(index, mp, db);

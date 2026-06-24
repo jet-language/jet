@@ -155,6 +155,10 @@ impl Type {
                 }
             }
             Type::Named(n) => format!("`{}`", n),
+            // D-CAP9: the raw-pointer type shows as the canonical `*T`.
+            Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
+                format!("`*{}`", args[0].name())
+            }
             Type::Apply { name, args } => {
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("`{}`<{}>", name, a)
@@ -210,6 +214,10 @@ impl Type {
                 }
             }
             Type::Named(n) => n.clone(),
+            // D-CAP9: the raw-pointer type names as the canonical `*T`.
+            Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
+                format!("*{}", args[0].name())
+            }
             Type::Apply { name, args } => {
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, a)
@@ -1484,7 +1492,13 @@ pub enum Expr {
     Call(Call),
     Unary(UnOp, Box<Expr>, Span),
     Binary(BinOp, Box<Expr>, Box<Expr>, Span),
+    /// D-CAP9: postfix `p.*` — dereference a raw pointer. Lowers to Rust `*p`;
+    /// gated to `#Unsafe` (E0208). Composes with `.field` as `p.*.field`.
     Deref(Box<Expr>, Span),
+    /// D-CAP9: prefix `*x` — take a raw pointer to `x` (raw-pointer-of). Legal
+    /// only inside an `#Unsafe` region/fn (E0208). Lowers to `&x as *const _`
+    /// inside the gated region.
+    RawOf(Box<Expr>, Span),
     /// Field access: `v.field`.
     Field(Box<Expr>, String, Span),
     /// S71 (D-SG6): `base?.field` optional chaining. Yields a `T?` and
@@ -1632,6 +1646,7 @@ impl Expr {
             | Expr::Unary(_, _, s)
             | Expr::Binary(_, _, _, s)
             | Expr::Deref(_, s)
+            | Expr::RawOf(_, s)
             | Expr::Field(_, _, s)
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }

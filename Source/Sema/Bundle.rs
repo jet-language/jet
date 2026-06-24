@@ -142,6 +142,7 @@ pub(crate) fn rewrite_inline_calls_expr(expr: &mut Expr, siblings: &HashSet<Stri
         }
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
         | Expr::Field(inner, _, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
@@ -1141,6 +1142,7 @@ pub(crate) fn collect_core_expr(expr: &Expr, imports: &HashMap<String, String>, 
         Expr::OptField { base, .. } => collect_core_expr(base, imports, used),
         Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)

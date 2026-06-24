@@ -126,10 +126,14 @@ fn examples_compile_and_run() {
             }
             s
         };
-        if stem == "48_lowlevel" {
+        // Examples that exercise the gated `unsafe` tier (`#Unsafe` blocks /
+        // `#Unsafe fn`). Their generated `unsafe` is allowed, but ONLY in the
+        // gated block/fn form — never ungated (I1).
+        if stem == "48_lowlevel" || stem == "100_rawptr" {
             assert!(
                 user_code.contains("unsafe"),
-                "the low-level example should exercise the gated `unsafe` tier"
+                "the low-level example {} should exercise the gated `unsafe` tier",
+                stem
             );
             // Even in the audited example, every `unsafe` is a gated form.
             for (i, line) in user_code.lines().enumerate() {
@@ -138,7 +142,8 @@ fn examples_compile_and_run() {
                     let after = after.trim_start();
                     assert!(
                         after.starts_with('{') || after.starts_with("fn "),
-                        "48_lowlevel emits an ungated `unsafe` at line {}: {}",
+                        "{} emits an ungated `unsafe` at line {}: {}",
+                        stem,
                         i + 1,
                         line.trim()
                     );

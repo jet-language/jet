@@ -342,9 +342,10 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
             }
             None
         }
-        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::Field(inner, _, _) => {
-            expr_mut_arg(inner)
-        }
+        Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Field(inner, _, _) => expr_mut_arg(inner),
         Expr::Binary(_, l, r, _) => expr_mut_arg(l).or_else(|| expr_mut_arg(r)),
         Expr::Index { base, index, .. } => {
             expr_mut_arg(base).or_else(|| expr_mut_arg(index))
@@ -470,9 +471,10 @@ fn expr_struct_interp(
             .or_else(|| args.iter().find_map(|a| expr_struct_interp(&a.expr, locals))),
         Expr::CallValue { callee, args, .. } => expr_struct_interp(callee, locals)
             .or_else(|| args.iter().find_map(|a| expr_struct_interp(&a.expr, locals))),
-        Expr::Unary(_, inner, _) | Expr::Deref(inner, _) | Expr::Field(inner, _, _) => {
-            expr_struct_interp(inner, locals)
-        }
+        Expr::Unary(_, inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Field(inner, _, _) => expr_struct_interp(inner, locals),
         Expr::Binary(_, l, r, _) => {
             expr_struct_interp(l, locals).or_else(|| expr_struct_interp(r, locals))
         }

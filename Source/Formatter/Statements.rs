@@ -139,11 +139,14 @@ impl<'a> Fmt<'a> {
                 self.fmt_body(inner);
             }
             Stmt::Unsafe { audit, body, .. } => {
-                if let Some(reason) = audit {
-                    self.write(&format!("#{}(\"{}\")", Syntax::ATTR_AUDIT, reason));
-                    self.newline();
+                // D-UNSAFE2: the reason is the argument of `#Unsafe` itself; the
+                // separate `#Audit` line is retired.
+                match audit {
+                    Some(reason) => {
+                        self.write(&format!("#{}(\"{}\") {{", Syntax::KW_UNSAFE, reason))
+                    }
+                    None => self.write(&format!("#{} {{", Syntax::KW_UNSAFE)),
                 }
-                self.write(&format!("#{} {{", Syntax::KW_UNSAFE));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();

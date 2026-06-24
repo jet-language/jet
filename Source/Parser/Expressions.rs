@@ -523,9 +523,12 @@ impl<'a> Parser<'a> {
                 self.expr_unary(allow_struct_lit)
             }
             TokKind::Star => {
+                // D-CAP9: prefix `*x` is raw-pointer-of (take a raw pointer to
+                // `x`), gated to `#Unsafe`. Dereference moved to postfix `p.*`.
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
-                Ok(Expr::Deref(Box::new(inner), span))
+                let full = Span::new(span.start, inner.span().end);
+                Ok(Expr::RawOf(Box::new(inner), full))
             }
             _ => self.expr_postfix(allow_struct_lit),
         }
@@ -540,6 +543,15 @@ impl<'a> Parser<'a> {
                     // S75 (2026-06-16): `f.[a, b, c]` fan-out — `.` immediately followed by `[`
                     if matches!(self.peek().kind, TokKind::LBracket) {
                         expr = self.parse_fan_out_bracket(Box::new(expr), dot)?;
+                        continue;
+                    }
+                    // D-CAP9: postfix `p.*` — dereference a raw pointer. The `.`
+                    // followed by `*` reads as deref (it composes with a further
+                    // `.field`, giving `p.*.field`). Gated to `#Unsafe` in sema.
+                    if matches!(self.peek().kind, TokKind::Star) {
+                        let star = self.bump().span;
+                        let full = Span::new(expr.span().start, star.end);
+                        expr = Expr::Deref(Box::new(expr), full);
                         continue;
                     }
                     let (member, member_span) = self.expect_field_name()?;
@@ -1127,6 +1139,17 @@ impl<'a> Parser<'a> {
                     if matches!(self.peek().kind, TokKind::LBracket) {
                         let callee = Box::new(Expr::Ident(type_name, span));
                         return self.parse_fan_out_bracket(callee, dot_span);
+                    }
+                    // D-CAP9: postfix `name.*` — dereference a raw pointer.
+                    // Returning the `Deref` lets `expr_postfix`'s loop pick up a
+                    // following `.field`, giving `name.*.field`.
+                    if matches!(self.peek().kind, TokKind::Star) {
+                        let star = self.bump().span;
+                        let full = Span::new(span.start, star.end);
+                        return Ok(Expr::Deref(
+                            Box::new(Expr::Ident(type_name, span)),
+                            full,
+                        ));
                     }
                     let (member, member_span) = self.expect_field_name()?;
                     // S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)` — a typed

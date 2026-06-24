@@ -98,9 +98,11 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
             walk_calls(l, f);
             walk_calls(r, f);
         }
-        Expr::Unary(_, x, _) | Expr::Present(x, _) | Expr::Try(x, _, _) | Expr::Deref(x, _) => {
-            walk_calls(x, f)
-        }
+        Expr::Unary(_, x, _)
+        | Expr::Present(x, _)
+        | Expr::Try(x, _, _)
+        | Expr::Deref(x, _)
+        | Expr::RawOf(x, _) => walk_calls(x, f),
         Expr::Index { base, index, .. } => {
             walk_calls(base, f);
             walk_calls(index, f);

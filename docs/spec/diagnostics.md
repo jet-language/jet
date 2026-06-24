@@ -162,7 +162,8 @@ before continuing.
 | E0205 | sema  | `self.field = v` without write access (`~`) on the receiver (D-MUTSELF1) |
 | E0206 | sema  | `view` return can't point at this value   |
 | E0207 | sema  | multiple unlabeled `ref` fields           |
-| E0208 | sema  | `*` raw access outside `#Unsafe`          |
+| E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
+| E0210 | parse | teaching: `Ptr<T>` is the deprecated alias → write `*T` (D-CAP9) |
 | L0201 | sema  | implicit `.clone()` at call site — fired only when the value is dead after the call (D-L0201 liveness gate) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | E0301 | sema  | `impl` for unknown type                   |
@@ -604,7 +605,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3101 | `{op}` can only run inside an `#Unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `#Audit("why this is safe") #Unsafe { … }`. |
+| E3101 | `{op}` can only run inside an `#Unsafe` block. | This operation can violate memory safety, so it must sit in an audited region. | Wrap it: `#Unsafe("why this is safe") { … }`. |
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
 | E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Audit("…") #Unsafe { … }`. |
 | E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |

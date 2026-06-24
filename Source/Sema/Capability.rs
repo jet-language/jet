@@ -308,7 +308,9 @@ fn scan_expr(
             scan_expr(rhs, caps, method_map, param_types);
         }
         Expr::Unary(_, inner, _) => scan_expr(inner, caps, method_map, param_types),
-        Expr::Deref(inner, _) => scan_expr(inner, caps, method_map, param_types),
+        Expr::Deref(inner, _) | Expr::RawOf(inner, _) => {
+            scan_expr(inner, caps, method_map, param_types)
+        }
         Expr::Str(parts, _) => {
             for p in parts {
                 if let crate::AST::StrPart::Interp(pe) = p {

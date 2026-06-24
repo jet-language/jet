@@ -397,17 +397,41 @@ impl<'a> Checker<'a> {
                 self.infer_binary(op, lhs, rhs, span)
             }
             Expr::Deref(inner, span) => {
+                // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw
+                // memory access, gated to `#Unsafe`. The result type is the
+                // pointer's element type.
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
                         "E0208",
-                        "raw memory access requires unsafe".to_string(),
-                        "`*` is a raw access operation; it is only valid inside a `#Unsafe { ... }` block"
+                        "reading through a raw pointer requires `#Unsafe`".to_string(),
+                        "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region"
                             .to_string(),
-                        "remove `*`, or wrap this code in `#Unsafe { ... }`".to_string(),
+                        "wrap this in `#Unsafe(\"why this is safe\") { … }`".to_string(),
                         Some(*span),
                     ));
                 }
-                self.infer(inner)
+                let inner_t = self.infer(inner)?;
+                match crate::Sema::ptr_elem(&inner_t) {
+                    Some(elem) => Some(elem),
+                    None => Some(inner_t),
+                }
+            }
+            Expr::RawOf(inner, span) => {
+                // D-CAP9: prefix `*x` takes a raw pointer to `x` (raw-pointer-of),
+                // legal only inside `#Unsafe`. Result type is `*T` (`Ptr<T>`).
+                if !self.in_unsafe {
+                    self.diags.push(Diagnostic::error(
+                        "E0208",
+                        "taking a raw pointer requires `#Unsafe`".to_string(),
+                        "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region"
+                            .to_string(),
+                        "wrap this in `#Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`"
+                            .to_string(),
+                        Some(*span),
+                    ));
+                }
+                let inner_t = self.infer(inner)?;
+                Some(crate::Sema::ptr_type(inner_t))
             }
             Expr::PtrFromAddr {
                 alias,

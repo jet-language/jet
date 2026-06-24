@@ -669,26 +669,28 @@ where one suffices), `const` (a second binding keyword competing with
 `val`), silent const-folding with no keyword (invisible, unpredictable,
 and kills the comptime-panic feature).
 
-**S58 — Expert low-level tier** *(ratified 2026-06-12; **amended 2026-06-16,
-S82, D-LL2**)*: **two gates, one keyword.**
+**S58 — Expert low-level tier** *(ratified 2026-06-12; **amended 2026-06-16
+(S82, D-LL2), 2026-06-22 (D-UNSAFE2), 2026-06-23 (D-CAP9)**)*: **two gates, one keyword.**
 `**use core.mem**` is the discovery gate — unlocks the low-level
 vocabulary: explicit **Zig-style allocators** (allocating APIs take an
-allocator parameter; a fixed arena works on embedded), `**Ptr<T>**`,
+allocator parameter; a fixed arena works on embedded), the raw-pointer type
+`**\*T**` (D-CAP9; `Ptr<T>` is a deprecated alias that teaches `*T` — **E0210**),
 layout/repr control, volatile wrappers. The audit gate for operations that can
-violate memory safety — pointer **deref**, pointer math, transmute-class casts,
-FFI pointer crossings — uses **`#Audit("…")`** then **`#Unsafe { … }`** (D-LL2:
-audit required; lint **L3101** if missing). **`#Unsafe`** on the line before `fn`
-marks a whole-function contract; calling one requires an enclosing `#Unsafe`
-block. Taking a pointer (`&x`) is legal outside a block (a pointer is inert
-data); *using* one (`*p`, `.offset`) requires the block. `&`/`*` are **core
-grammar, sema-gated**: outside the gates they keep producing E0208-family
-teaching errors. **Collision flagged (D-CAP7, 2026-06-23):** D-CAP7 reuses `&`/`*` as
-the share/raw access sigils, where `&x`=share and `*x`=raw-pointer-of clash with this
-tier's `&x`=address-of / `*p`=deref. Reconciliation (and whether `*T` replaces or aliases
-`Ptr<T>`) is **deferred to D-CAP9 (c127) + c131** — expression-position sigils don't ship
-until it's decided. Codegen lowers blocks to Rust `unsafe`; **I1 is amended** —
-generated `unsafe` appears only inside user-gated regions plus vetted std/mem
-internals. Onboarding materials never mention any of it.
+violate memory safety — pointer **deref** (postfix `p.*`), **raw-pointer-of**
+(prefix `*x`), pointer math, transmute-class casts, FFI pointer crossings — is
+**`#Unsafe("reason") { … }`** (D-UNSAFE2 folded the audit reason into the gate
+itself; the separate `#Audit` marker is retired → **E0055**; lint **L3101** if the
+reason is missing). **`#Unsafe`** on the line before `fn` marks a whole-function
+contract; calling one requires an enclosing `#Unsafe` block. Address-of is
+`mem.address_of(x)` (a call, not a sigil — the earlier "`&x` = address-of" claim
+never shipped). Raw pointer ops are **core grammar, sema-gated**: outside an
+`#Unsafe` region both `p.*` and `*x` emit the **E0208** teaching error. **D-CAP9
+(resolved 2026-06-23):** prefix `*x` means *only* raw-pointer-of; **dereference is
+postfix `p.*`** (Jai precedent), composing with `.field` as `p.*.field`; `*T` is
+the canonical raw-pointer type and `Ptr<T>` its deprecated alias. Codegen lowers
+blocks to Rust `unsafe`; **I1 is amended** — generated `unsafe` appears only inside
+user-gated regions plus vetted std/mem internals. Onboarding materials never
+mention any of it.
 Rejected: bare `unsafe { }` / `unsafe fn` (former S58 spelling), `trust`
 spelling, library-only gating (Swift style), ungated sigils (C/Zig style).
 
