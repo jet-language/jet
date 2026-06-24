@@ -82,17 +82,19 @@ fn format_fn_sig(f: &crate::AST::Func) -> String {
         .params
         .iter()
         .map(|p| {
-            let prefix = match p.convention {
-                // D-CAP8/9: Infer is unmarked; Share/Raw not produced yet. c129 will
-                // freeze resolved sigils (~/^/&) into this api metadata.
-                AccessConvention::Read
-                | AccessConvention::Infer
-                | AccessConvention::Share
-                | AccessConvention::Raw => "",
-                AccessConvention::Write => "mut ",
-                AccessConvention::Move => "take ",
+            // c129: freeze the resolved capability sigil (D-CAP7) onto the
+            // published type. By the time API metadata is emitted, sema
+            // (D-CAP8) has resolved every `Infer` to a concrete convention, so
+            // the published surface carries the sigil the caller must honor.
+            // Plain read is the unmarked default and emits no sigil.
+            let sigil = match p.convention {
+                AccessConvention::Read | AccessConvention::Infer => "",
+                AccessConvention::Write => "~",
+                AccessConvention::Move => "^",
+                AccessConvention::Share => "&",
+                AccessConvention::Raw => "*",
             };
-            format!("{}{}: {}", prefix, p.name, format_type(&p.ty))
+            format!("{}: {}{}", p.name, sigil, format_type(&p.ty))
         })
         .collect();
     let ret = match &f.return_type {

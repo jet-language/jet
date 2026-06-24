@@ -266,6 +266,10 @@ impl<'a> Resolver<'a> {
                 let store_path = Store::ensure_path_dep(dep_name, &dep_version, &fp, &abs_path)
                     .map_err(|d| vec![d])?;
 
+                // Integrity floor (D-PKGSIGN1): the store entry must match its
+                // recorded content hash before it is linked into the build.
+                Store::verify_entry(dep_name, &store_path, &th).map_err(|d| vec![d])?;
+
                 // Link into project build dir.
                 let link_dir = self
                     .project_root
@@ -351,6 +355,10 @@ impl<'a> Resolver<'a> {
                 // Store.
                 let store_path = Store::ensure_git_dep(dep_name, &dep_version, &fp, &clone_dir)
                     .map_err(|d| vec![d])?;
+
+                // Integrity floor (D-PKGSIGN1): the store entry must match its
+                // recorded content hash before it is linked into the build.
+                Store::verify_entry(dep_name, &store_path, &git_tree_hash).map_err(|d| vec![d])?;
 
                 // Link into project build dir.
                 let link_dir = self
