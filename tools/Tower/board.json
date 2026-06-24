@@ -455,49 +455,6 @@
       "workOrder": null
     },
     {
-      "id": "c73",
-      "type": "idea",
-      "title": "Safe schema changes (compile-time migration check)",
-      "body": "Compiler refuses a breaking data-shape change without a declared migration; the check is core (comptime shape diff), up/down conversion is the Build-tier versioning library (#11).",
-      "stage": "done",
-      "notes": [
-        {
-          "t": "[sweep] EVALUATE-tier ballot D-MIGRATE1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
-          "at": "2026-06-20"
-        },
-        {
-          "t": "[sweep] D-MIGRATE1 ratified = A (compile-time `#PublishedSchema` shape check; breaking change w/o migration = E0910 [E0901 was taken]; `migration Type { rename a -> b }` unblocks; conversion fns = lib #11). Unblocked → vetted plan at sidequests/published-schema-migrations.md, core slice in build. Follow-on D-MIGRATE2A/B/C (op vocabulary, converter source, `jet schema` verbs) queued.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "D-MIGRATE1 rename-only slice IMPLEMENTED end-to-end + independently verified green 2026-06-22 (lib 245 pass, ui/decisions/golden pass; arena fails are pre-existing far-horizon work — 7 fail at HEAD). Code uncommitted in working tree. Card stays open: D-MIGRATE2A/B/C split ballots are still open.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "Codex handoff cleanup 2026-06-22: removed the irrefutable-pattern warning in Source/Sema/SchemaMigration.rs, added the missing main-spec D-MIGRATE1 paragraph, and verified cargo check, schema unit tests, UI snapshots, golden examples, decision tests, explain coverage, and `jet explain E0910`. Repo-wide `cargo fmt --check` still fails on existing broad rustfmt drift; SchemaMigration.rs itself is rustfmt-clean.",
-          "at": "2026-06-22"
-        },
-        {
-          "t": "D-MIGRATE1 (rename) ships; D-MIGRATE2A-E ratified but not built.",
-          "at": "2026-06-24"
-        },
-        {
-          "t": "[sweep] BUILT + committed 0d0d59c. All ratified D-MIGRATE2 ops shipped: add/remove/change migration verbs, converter resolution (inline via > impl Old->New > E0910), jet schema status/squash. ui+golden+decisions green; arena/pkg failures pre-existing (verified on clean HEAD). Runtime data conversion stays the named Build-tier #11 follow-on (I3). Done.",
-          "at": "2026-06-24"
-        }
-      ],
-      "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-24",
-      "decisions": [
-        "D-MIGRATE2A",
-        "D-MIGRATE2B",
-        "D-MIGRATE2C"
-      ],
-      "plan": "published-schema-migrations",
-      "priority": "P2",
-      "workOrder": null
-    },
-    {
       "id": "c76",
       "type": "idea",
       "title": "Visible uninitialization (uninit / ---)",
@@ -537,37 +494,6 @@
       "plan": "visible-uninit",
       "priority": "P2",
       "workOrder": null
-    },
-    {
-      "id": "c77",
-      "type": "idea",
-      "title": "Three-mode execution + JIT dev runtime (hot-reload)",
-      "body": "Jai-borrowed three-mode framing reconciled with shipped jet run/build/dev (D-DEV4) + planned jet serve JIT (D-DEV2). Ballots the open design Qs: JIT backend, hot-swap+state semantics, hot-reload home + dev/release consistency. Plan: plans/epoch-3/jit-runtime-type-server.md (updated).",
-      "stage": "done",
-      "decisions": [
-        "D-JIT1",
-        "D-HOTSWAP1",
-        "D-DEVMODE1"
-      ],
-      "notes": [
-        {
-          "t": "[sweep] Jai-borrowed proposal balloted (user story + tradeoffs + per-option code + language comparison). Add-only: cross-checked, nothing shipped duplicated.",
-          "at": "2026-06-20"
-        },
-        {
-          "t": "Interpreter dev runtime ships; JitBackend, hot-swap, and jet serve remain.",
-          "at": "2026-06-24"
-        },
-        {
-          "t": "[sweep] BUILT + committed efd09d1. JitBackend seam + InterpreterBackend, detect_dev_mode, Sema/HotSwap type_stable_check + E2210, [hot-swap]/[restart] gate, jet serve, dev battery widened to all 110 examples (30 byte-identical, 80 named-boundary). All UNBLOCKED scope shipped. Only gated remainder = Cranelift tier-1 (needs separate owner runtime-dep approval, D-JIT1 D+); seam is landed so that approval is the sole gate. Done.",
-          "at": "2026-06-24"
-        }
-      ],
-      "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-24",
-      "priority": "P2",
-      "workOrder": null,
-      "plan": "three-mode-execution"
     },
     {
       "id": "c78",

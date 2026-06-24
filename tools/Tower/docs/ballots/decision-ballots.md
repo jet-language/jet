@@ -552,6 +552,24 @@ persona run (Saoirse, Amara).
 
 ---
 
+**D-JITDEP1 — Approve the Cranelift runtime dependency for the JIT tier-1 (D-JIT1 D+).**
+*User story:* A dev runs `jet serve` on a large resident program; the tier-0 comptime
+interpreter is correct but slow, and live-heap-preserving hot-swap (true state retention
+across an edit) needs a real JIT. D-JIT1 was ratified as **D+** — Cranelift JIT "this
+Epoch-3," not deferred — but the Cranelift crate is a runtime-side dependency that needs a
+**separate owner dep-approval** (an I6 runtime exception, like the regex/`D-REGEX1` bootstrap).
+*Decision (when promoted):* approve (or decline) adding `cranelift` as a runtime-side dep so a
+`CraneliftBackend` can implement the already-shipped `JitBackend` seam as tier-1; the compiler
+(`Source/`) still takes no crate (I6 holds — the dep lives runtime-side only). Rec direction:
+**approve**, scoped + owner-signed like D-REGEX1, with the standing I6 obligation noted.
+*Why surfaced now:* the prerequisite (the `JitBackend` seam) **shipped with c77** (commit
+efd09d1), so this is the sole remaining gate on the JIT tier — promote to a full card when
+you're ready to take on the Cranelift integration. Recorded so it isn't lost when c77's done
+card is retired (the seam + interpreter tier-0 are complete and durable in
+syntax-decisions.md D-JIT1 + spec).
+
+---
+
 **D-QUAL4 — Plain marker-tag type-position spelling (prefix vs postfix).**
 *User story:* A web dev marks a value `#Tainted` at its source and needs to write
 the *type* of a tainted string in a function signature — `flagged: #Tainted String`
