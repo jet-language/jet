@@ -357,9 +357,82 @@ fn main() {
 `to_string(rows) -> String`. **`core.encoding.toml`** / **`core.encoding.yaml`**
 — `parse(text) -> [String, String] ? String` (flat key/value), `to_string(map)`.
 
-> Typed struct (de)serialization — `#[Serialize, Deserialize]`,
-> `encoding.json.decode<T>`, field attributes — is the next increment (D-SERDE1);
-> see `tools/Tower/docs/sidequests/serde-model.md`.
+#### Typed (de)serialization — one derive, every format (D-SERDE1–8)
+
+Mark a type `#[Codable]` and it crosses the wire in any format. `#[Codable]` is
+both directions; the one-way markers are `#[Encode]` (write-only) and `#[Decode]`
+(read-only). The derive is compiler-owned (like `derive Comparable`) — no macros,
+no runtime reflection.
+
+```jet
+use core.encoding.csv as csv
+use core.encoding.json as json
+
+#[Codable]
+struct Order {
+    id: Int
+    #[Rename("customer")] who: String      // wire key overrides the field name
+    items: [String]
+    note: String?                          // absent optional is omitted on the wire
+}
+
+fn main() {
+    o @= Order { id: 7, who: "Ada", items: ["pen", "ink"], note: null }
+    print(json.to_string(o))               // {"id":7,"customer":"Ada","items":["pen","ink"]}
+
+    raw @= "{{\"id\":9,\"customer\":\"Bo\",\"items\":[\"ink\"],\"note\":\"rush\"}}"
+    back @= json.decode<Order>(raw) ?? panic("bad order")   // typed decode
+    print(back.who)                        // Bo
+}
+```
+
+**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `#[Codable]`/`#[Encode]`
+value (the dynamic `JSON` tree and the `[[String]]`/`Map` forms still work too). Field
+order is preserved.
+
+**Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? DecodeError` for
+json/toml/yaml, and `[T] ? DecodeError` for csv (one struct per row, columns mapped
+to fields by header name). The target type comes from the `<T>` turbofish or an
+expected type (`cfg: Config @= json.decode(text)`). Bare `json.decode(text)` with no
+target stays the lenient dynamic `JSON` (above). `DecodeError` carries a field `path`
+and a `reason`; compose it with `??`.
+
+```jet
+raw @= "item,qty\npen,3\nink,5"
+sales @= csv.decode<Sale>(raw) ?? panic("bad csv")   // [Sale]
+print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}]
+```
+
+**Field attributes** (D-SERDE5):
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[Rename("k")]` | use `k` as the wire key for this field |
+| `#[Skip]` | never serialize; on decode use the field's default |
+| `#[Default]` / `#[Default(8080)]` | when the key is absent, use the type's default (or the given literal) |
+| `#[Flatten]` | inline a `#[Codable]` struct field's keys into the parent object |
+
+**Container attributes:**
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[RenameAll(camel)]` | map every field's wire key — `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3) |
+| `#[DenyUnknownFields]` | a wire key the struct doesn't declare is an error, not ignored (D-SERDE8) |
+| `#[Tag("type")]` / `#[Untagged]` | enum wire representation (D-SERDE7); default is externally tagged |
+
+**Enums** serialize externally tagged by default: a unit variant is its bare name
+(`"Closed"`), a payload variant is `{"Variant": payload}`. `#[Tag("type")]` switches
+to internal tagging (`{"type":"Click", …}`); `#[Untagged]` emits the payload alone.
+
+Unknown wire keys are ignored by default (forward-compatible); opt into strict
+checking with `#[DenyUnknownFields]`. Diagnostics: E2407 (`#[Rename]` non-string),
+E2408 (`#[Flatten]` non-struct), E2409 (bad `#[RenameAll]` style), E2410 (missing
+required field, runtime), E2411 (type isn't serializable), E2412 (unknown field,
+runtime), E2413 (generic serde not yet supported).
+
+> The expert hand-impl path (`impl T: Encode { fn encode … }` over the `DataTree`
+> tree, D-SERDE2) and generic-type serde are future increments; see
+> `tools/Tower/docs/sidequests/serde-model.md`.
 
 ---
 
@@ -625,5 +698,8 @@ the package system fully stabilizes.
 | `examples/features/29_files.jet` | Read, transform, write with errors |
 | `examples/features/30_json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/31_cli.jet` | Args, environment, exit codes |
+| `examples/features/106_serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
+| `examples/features/107_csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
+| `examples/features/108_json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.
