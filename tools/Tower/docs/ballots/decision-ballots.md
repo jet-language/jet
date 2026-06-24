@@ -25,151 +25,17 @@ it's time to decide it.
 
 ## Open decisions
 
-> **Surfaced by the 2026-06-24 plan sweep (c121, c122).** Two implementation plans hit a
-> real user-facing choice. Both are vetted against the codebase; the rest of each card's plan
-> is unblocked.
+**No full decision cards are open.** Submitting a decision records it in
+[`syntax-decisions.md`](syntax-decisions.md) and removes it here.
 
-### D-BENCH1 — how do you write a benchmark? (board card c121, rec A)
+---
 
-**Gist:** Pick the surface a developer uses to declare a benchmark.
-
-**Story.** Walter ships a 2D game in Jet and his frame time is creeping up. `jet bench` already
-times his *whole program* (warmups + trials, mean±stddev — `run_bench` in `CmdDevTools.rs`), but
-he wants to measure his particle-update loop **in isolation**, watch that one region across
-changes, and have `jet` report per-region ops/sec — the same way `#Test` names a single unit.
-
-**In the wild:**
-
-```jet
-struct Particle { x: Float, y: Float, vx: Float, vy: Float }
-
-fn step(p: ~Particle, dt: Float) {
-    p.x = p.x + p.vx * dt
-    p.y = p.y + p.vy * dt
-}
-
-// `jet bench` can time the whole binary, but Walter has no way to benchmark just this region in source.
-```
-
-**Other languages:**
-
-```rust
-#[bench] fn bench_step(b: &mut Bencher) { b.iter(|| step(&mut p, dt)); }   // Rust: attribute + Bencher
-```
-```go
-func BenchmarkStep(b *testing.B) { for i := 0; i < b.N; i++ { step(p, dt) } }  // Go: naming convention + b.N
-```
-Rust uses an attribute, Go a naming convention. Jet already has a first-class `#Test "name" { }`
-block (PascalCase attribute family `#Test`/`#Pure`/`#Todo`), so the question is whether benchmarks
-join that family or take a different shape.
-
-**Tradeoffs:** *(subagent-reviewed against Source/Parser/Items.rs `#Test` parsing + Syntax.rs)*
-
-| Option | Surface | Sits beside `#Test`? | Discoverable | One-path (S14) |
-|---|---|---|---|---|
-| A `#Bench` block | `#Bench "name" { … }` | yes (sibling) | high | yes |
-| B timing API | `core.time` / `bench("name", fn)` | no | medium | competes with `#Test` shape |
-| C `#Test(bench:true)` | parameterised test attr | partial | low | overloads `#Test` semantics |
-
-- **Option A — `#Bench "name" { … }` block (recommended).** A first-class benchmark block,
-  the exact sibling of `#Test "name" { … }`; `jet bench` discovers and runs them, reporting
-  ops/sec + ns/iter. PascalCase attribute, consistent with the `#Test`/`#Pure` family.
-  ```jet
-  #Bench "step 100k particles" {
-      ps := make_particles(100_000)
-      for p in ps { step(~p, 0.016) }
-  }
-  // $ jet bench
-  // step 100k particles    1.84 ms/iter   543 iters/s
-  ```
-- **Option B — no new syntax; a timing API.** Benchmarks are ordinary functions calling a
-  `core.time` stopwatch or a `bench(name, fn)` helper; no attribute.
-  ```jet
-  use core.time
-  fn main() {
-      t := time.stopwatch()
-      for p in ps { step(~p, 0.016) }
-      print("step: {t.elapsed_ms()} ms")
-  }
-  ```
-  Con: every author hand-rolls the loop/reporting; no `jet bench` discovery; competes with the
-  `#Test` shape beginners already know.
-- **Option C — `#Test(bench: true) fn`.** A parameter on the test attribute marks a test as a
-  benchmark.
-  ```jet
-  #Test(bench: true) "step" { for p in ps { step(~p, 0.016) } }
-  ```
-  Con: overloads `#Test` with two semantics (assert vs measure); the parameterised-attribute
-  form isn't used elsewhere in Jet (a new sub-grammar for one flag).
-
-**Recommendation:** **A** — `#Bench` is the one-path sibling of `#Test`, instantly discoverable,
-and needs no new attribute grammar. **Owner Q — runner verb:** `jet bench` (rec, parallels
-`jet test`) or fold into `jet test --bench`?
-
-### D-PKGSIGN1 — what proves a published package is authentic? (board card c122, rec A)
-
-**Gist:** Choose how a consumer verifies a package really came from its author (not just that
-its bytes are intact).
-
-**Story.** Doris publishes a crypto library; Hank pins it in his `pkg.jet`. A checksum proves
-Hank got the bytes Doris uploaded — but not that *Doris* uploaded them (a compromised registry
-could swap both bytes and checksum). Hank wants authenticity, offline-verifiable.
-
-**In the wild:**
-
-```jet
-// pkg.jet — Hank depends on Doris's package
-[deps]
-hashing = "doris/hashing@2.1.0"   // today: resolved + checksum-pinned in the lockfile.
-                                   // Authenticity (who signed it) is not enforced.
-```
-
-**Other languages:** npm/PyPI lean on registry TLS + checksums (integrity); crates.io adds
-checksums; newer ecosystems (npm provenance, Go checksum DB, Sigstore/cosign) add
-authenticity. Jet is std-only (I6) and offline-first by design — the constraint that shapes
-this choice.
-
-**Tradeoffs:** *(subagent-reviewed against Source/Lock.rs, Store.rs, Publish/ — `require_signed`
-exists on RegistryConfig but is unenforced; no signing today)*
-
-| Option | Proves | Offline-verifiable | External infra | Self-contained (I6) |
-|---|---|---|---|---|
-| A Ed25519 sign | authenticity + integrity | yes | none | yes — native Ed25519/SHA-512 in the ring layer |
-| B checksum only | integrity only | yes | none | yes (already have SHA-256) |
-| C Sigstore keyless | authenticity | no (needs Rekor/OIDC) | heavy | no |
-
-- **Option A — Ed25519 author key pairs (recommended).** Author signs the package manifest +
-  content hash with a private key; the public key is published/pinned; consumers verify
-  offline. **Capability note:** `jet.crypto` today ships only SHA-256 — Ed25519 and SHA-512 do
-  not exist yet, so under I6 this means a native Ed25519/SHA-512 implementation in the ring
-  layer (or a `signify`/`ssh-keygen` subprocess), not a reuse of existing crypto. The existing
-  SHA-256 checksum (B) remains the integrity baseline underneath.
-  ```shell
-  $ jet keygen                      # writes ~/.jet/keys/ed25519
-  $ jet publish                     # signs manifest+hash; uploads signature
-  # consumer:
-  $ jet fetch                       # verifies signature against the pinned public key; refuses on mismatch
-  ```
-- **Option B — checksum-only (status quo+).** Keep hash pinning in the lockfile; no signing.
-  ```shell
-  $ jet fetch    # verifies sha256 matches the lockfile — integrity, not authorship
-  ```
-  Con: a compromised/malicious registry can substitute content + checksum; no authenticity.
-- **Option C — Sigstore keyless.** Sign via OIDC identity; signatures logged to a transparency
-  log (Rekor); no long-lived keys.
-  ```shell
-  $ jet publish    # OIDC browser flow; signature -> Rekor transparency log
-  ```
-  Con: requires network at publish + verify, an external transparency-log service, and a heavy
-  dependency surface — at odds with Jet's std-only/offline-first stance.
-
-**Recommendation:** **A** — Ed25519 gives offline-verifiable authenticity with zero external
-infrastructure and keeps the existing SHA-256 checksum as the integrity layer beneath. It is
-the only option that satisfies both "prove authorship" and "works offline / self-contained"
-(the Ed25519/SHA-512 primitives are added natively to the ring layer, consistent with I6).
-**Owner Q — key distribution:** publish author public keys in the registry index (TOFU on first
-pin), or require an out-of-band key fingerprint in `pkg.jet`? Rec: TOFU + pinned fingerprint in
-the lockfile.
+> **Drained 2026-06-24.** The owner ratified the last two open cards: **D-BENCH1 = A**
+> (`#Bench "name" { … }` region-benchmark block, sibling of `#Test`, run by the existing
+> `jet bench` verb) and **D-PKGSIGN1 = B + A opt-in** (SHA-256 checksum is the always-on
+> integrity floor; Ed25519 author signing is an opt-in, non-blocking layer — `require_signed`
+> off by default). Both recorded in `syntax-decisions.md`, cards stripped, plans unblocked
+> (epoch-3/testing-docs-ergonomics.md §4; sidequests/package-ecosystem-trust.md §4).
 
 ---
 

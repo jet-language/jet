@@ -528,6 +528,14 @@ pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
 /// recognized only to emit the E0052 teaching error pointing at `#Test`.
 pub const KW_TEST: &str = "Test";
 
+/// D-BENCH1 (ratified 2026-06-24): top-level region-benchmark block, written as
+/// the marker `#Bench "name" { … }` — the exact sibling of `#Test "name" { … }`.
+/// The existing `jet bench` verb (D-TOOL5) discovers and runs these, reporting
+/// per-region ops/sec + ns/iter (today it times a whole program). PascalCase
+/// marker per D-CASING1, joining the `#Test`/`#Pure`/`#Todo`/`#Caps` family.
+/// `benchmark` stays a reserved target (TARGET_RESERVED).
+pub const KW_BENCH: &str = "Bench";
+
 /// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
 /// 2026-06-21): typed hole `#Todo` — compiles everywhere, panics at runtime with
 /// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the

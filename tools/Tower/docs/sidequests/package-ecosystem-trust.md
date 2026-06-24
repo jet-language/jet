@@ -1,7 +1,7 @@
 # c122 — Strengthen package and ecosystem trust
-**Decision:** none required for the hardening plan. Registry signing protocol choice
-(see D-PKGSIGN1 below) is one unresolved owner decision.
-**Gate:** none — most work is unblocked now.
+**Decision:** D-PKGSIGN1 ratified 2026-06-24 = **B + A opt-in** (checksum floor +
+opt-in Ed25519 signing). See Step 4.
+**Gate:** none — every step (1–7) is now unblocked.
 
 ---
 
@@ -68,36 +68,50 @@ E1218 — breaking API change without major version bump. Add to `docs/spec/diag
 and snapshot. *(E1212, the writer's pick, is taken: "package declared in `packages:` but no
 `module` found". E1218 is free.)*
 
-### Step 4 — Package signing (`Source/Publish/`, `Source/Lock.rs`)
+### Step 4 — Package signing (`Source/Publish/`, `Source/Lock.rs`) — D-PKGSIGN1 = B + A opt-in
 
-**NEEDS BALLOT: D-PKGSIGN1** — signing scheme choice. Options:
+**RATIFIED 2026-06-24 = B (always-on checksum floor) + A as an opt-in, non-blocking
+authenticity layer.** Sigstore/keyless (C) rejected (needs network + a transparency-log
+service, at odds with offline-first/std-only). Build both tiers:
 
-A. **Ed25519 key pair per publisher, signatures in the registry index.** Registry stores
-   `<package>-<version>.sig`; `jet fetch` verifies before installing. Requires a key
-   management CLI (`jet keys generate`, `jet keys trust <pub_key>`). **Capability note:**
-   `jet.crypto` today provides only SHA-256 (`jet_ring_crypto_sha256*` in `CoreLib.rs`) — there
-   is **no** Ed25519 or SHA-512. Under I6 (zero external crates in `Source/`), Option A means
-   implementing Ed25519 + SHA-512 natively in the ring layer, or delegating to a `signify`/
-   `ssh-keygen` subprocess. The ballot must not claim signing "reuses existing `jet.crypto`"
-   beyond the SHA-256 hash.
+**Tier B — checksum integrity (always on, mandatory).** This is Step 1: `verify_entry`
+re-hashes the store tree (SHA-256) on every `link_into_project` and propagates **E1204** on
+mismatch. This is the security model for the default path and needs no key ceremony. Document
+it as the baseline; nothing else is required for a beginner or a simple/local/unpublished
+project.
 
-B. **Checksum-only (no asymmetric signing).** Registry publishes SHA-256 of each tarball;
-   `jet fetch` verifies the hash matches the lock. No key management. Weaker than A (a
-   compromised registry can publish a matching hash for a malicious payload), but zero key
-   ceremony for publishers.
+**Tier A — Ed25519 author signing (opt-in, never a hard gate).** Layers authorship proof on
+top of the checksum:
 
-C. **Sigstore-style keyless signing** (OIDC + Rekor transparency log). Publisher identity
-   is a CI token (GitHub Actions, etc.); no key management. Strongest provenance model.
-   Requires an HTTP client (subprocess to `cosign` CLI — keeps Source/ clean, I6).
+- **Consumer is silent unless it fails.** When a dependency has a pinned author key and a
+  signature, `jet fetch` verifies it offline and says nothing on success; on a mismatch it
+  emits a teaching diagnostic (new code from the free E12xx range at impl) and refuses the
+  install. No key command is ever required to *consume* a package.
+- **`require_signed` stays OFF by default**, a per-registry / per-dependency policy an org can
+  turn on. It is **not** a gate that refuses unsigned packages out of the box — unsigned
+  packages still install with checksum integrity (Tier B).
+- **Publishing auto-keys on the magic path.** `jet publish` generates and stores a keypair on
+  first publish (`~/.jet/keys/ed25519`) — no separate `jet keygen` step — then prints one line
+  nudging `jet key backup`. Experts opt into explicit keygen, hardware keys, and out-of-band
+  fingerprint pinning.
+- **Key distribution:** TOFU on first pin (author public key published in the registry index),
+  with the pinned fingerprint recorded in the lockfile; experts may require an out-of-band
+  fingerprint in `pkg.jet`.
 
-The owner must pick. Until D-PKGSIGN1 is ratified, `require_signed` in `RegistryConfig`
-remains advisory (no enforcement). After ratification:
+**Capability note (I6):** `jet.crypto` today ships only SHA-256 (`jet_ring_crypto_sha256*` in
+`CoreLib.rs`) — there is **no** Ed25519 or SHA-512. Tier A means implementing Ed25519 + SHA-512
+**natively in the ring layer** (preferred), or delegating to a `signify`/`ssh-keygen`
+subprocess. Tier B reuses the existing SHA-256.
 
-- For option A: add `LockedPackage::signature: Option<String>` to `Lock.rs`; implement
-  `verify_signature(pubkey_path, sig, content)` in `Source/Publish/Sign.rs` (new file) using
-  either a native Ed25519 impl or a `signify` subprocess.
-- For option B: `verify_entry` already covers this — document it as the security model.
-- For option C: add a `cosign` subprocess call in `Fetch.rs` after download.
+**Build (Tier A):**
+- add `LockedPackage::signature: Option<String>` + pinned-key fingerprint to `Lock.rs`;
+- implement `verify_signature(pubkey, sig, content)` and keygen/sign in `Source/Publish/Sign.rs`
+  (new file);
+- `jet fetch` verifies opt-in signatures after the mandatory `verify_entry` (Tier B) in
+  `Fetch.rs`;
+- `jet keygen` / `jet key backup` verbs + `jet publish` auto-keygen-on-first-publish in
+  `main.rs`;
+- enforce `require_signed` only where a registry/dep opts in.
 
 ### Step 5 — Offline builds and vendoring (`Source/Publish/Vendor.rs`)
 
@@ -142,8 +156,9 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 | File | Change |
 |------|--------|
 | `Source/Store.rs` | Mandatory `verify_entry` on link; reuse existing E1204 |
-| `Source/Lock.rs` | Bidirectional manifest/lock check; E1217; `signature` field (D-PKGSIGN1) |
-| `Source/Fetch.rs` | Vendor fallback; signature verify call (D-PKGSIGN1) |
+| `Source/Lock.rs` | Bidirectional manifest/lock check; E1217; `signature` + pinned-key fingerprint fields (D-PKGSIGN1 Tier A) |
+| `Source/Fetch.rs` | Vendor fallback; opt-in signature verify after mandatory verify_entry (D-PKGSIGN1) |
+| `Source/Publish/Registry.rs` | enforce `require_signed` only where opted in (off by default) |
 | `Source/CmdSupply.rs` | Semver gate E1218; `jet audit` call; SBOM emit |
 | `Source/CmdCompile.rs` | `--sbom` flag; SBOM write |
 | `Source/Publish/SemVer.rs` | `classify_diff` wired to `jet publish` |
@@ -151,8 +166,8 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 | `Source/Publish/Vendor.rs` | Full implementation |
 | `Source/Publish/Advisory.rs` | `jet audit` implementation |
 | `Source/Publish/SBOM.rs` | Real checksum in PackageChecksum |
-| `Source/Publish/Sign.rs` (new, D-PKGSIGN1-gated) | Signing/verification |
-| `Source/main.rs` | `jet vendor`, `jet audit`, `--sbom` verbs/flags |
+| `Source/Publish/Sign.rs` (new, D-PKGSIGN1 Tier A) | Ed25519 keygen + sign + verify; native ring-layer Ed25519/SHA-512 (I6) |
+| `Source/main.rs` | `jet vendor`, `jet audit`, `jet keygen`, `jet key backup`, `--sbom`; `jet publish` auto-keygen on first publish |
 | `docs/spec/diagnostics.md` | E1217, E1218 entries (E1204 already present) |
 | `tests/ui/` | e1204_tampered_store, e1217, e1218 snapshots |
 
@@ -160,5 +175,6 @@ if found and fingerprint matches, use the local copy. This enables fully offline
 
 ## Decision verdict
 
-**NEEDS BALLOT: D-PKGSIGN1** — package signing scheme (Ed25519 key pairs vs checksum-only
-vs Sigstore keyless). All other steps in this plan are unblocked.
+**D-PKGSIGN1 ratified 2026-06-24 = B + A opt-in** (checksum integrity floor always on;
+Ed25519 author signing opt-in and non-blocking, `require_signed` off by default). **Every
+step (1–7) is now unblocked — this plan is implement-ready for the burn-down.**

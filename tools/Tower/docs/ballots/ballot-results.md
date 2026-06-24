@@ -1,6 +1,6 @@
 # Owner ballot results
 
-_submitted 2026-06-23 22:31_
+_submitted 2026-06-24 10:08_
 
 Decisions captured from Tower. Tell Claude **"go"** to ratify these
 into syntax-decisions.md, strip the cards, and implement the plans.
@@ -103,3 +103,10 @@ Comment: Use your full recommendation
 
 **D-CAP10** — are capability-only overloads in scope at all?
 Decision: **A**
+
+**D-BENCH1** — how do you write a benchmark?
+Decision: **A**
+
+**D-PKGSIGN1** — what proves a published package is authentic?
+Decision: **B**
+Comment: A as an OPT-IN / non-blocking layer with SHA-256 checksum (B) as the always-on floor — `require_signed` stays an org policy, OFF by default — not a hard gate that refuses unsigned packages. That keeps A's unique win (offline authorship proof) while spending friction only on publishers who opt in
