@@ -121,7 +121,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
 - **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
 - **E2-M8** — supply chain: `jet publish` (pre-publish gate), `jet vendor`, `jet audit`, SBOM; PubGrub resolver. Registry upload and `jet gc` deferred (D-PKGS1, M12.2).
-- **E2-M9** — first-party library ring: `jet.regex`, `jet.csv`, `jet.toml`, `jet.log`, `jet.time`, `jet.crypto`. (`jet.archive`, `jet.db` are reserved names but staged — not yet available.)
+- **E2-M9** — first-party library ring: `jet.regex`, `jet.csv`, `jet.toml`, `jet.yaml`, `jet.json`, `jet.log`, `jet.time`, `jet.crypto`. (`jet.archive`, `jet.db` are reserved names but staged — not yet available.)
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`jet.http`, plain HTTP). TLS is delivered as the `jet.tls` package (separate from the core binary, I6).
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.

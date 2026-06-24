@@ -585,6 +585,8 @@ ships as versioned `jet.*` packages. These shipped in Epoch 2:
 | `jet.regex` | grep-class tools, text validation |
 | `jet.csv` | CSV data files |
 | `jet.toml` | TOML config files |
+| `jet.yaml` | YAML flat key-value parsing and rendering |
+| `jet.json` | First-party JSON with type-coercion surface (`parse`, `decode`, `render`) |
 | `jet.log` | Structured logging / tracing / metrics |
 | `jet.time` | Calendar dates, time zones, formatted dates |
 | `jet.crypto` | Hash, HMAC, vetted random primitives |
