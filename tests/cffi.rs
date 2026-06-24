@@ -588,6 +588,35 @@ Error [E3201]: C library `nolib` was not found.
 }
 
 #[test]
+fn e3209_link_time_missing_lib_snapshot() {
+    // I4: link-time "cannot find -l<lib>" diagnostic. Jet-stage (the ui harness
+    // only renders front-end diagnostics), so pin the rendered text here.
+    let d = jet::CFFI::e3209("raylib");
+    assert_eq!(d.code, "E3209");
+    let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
+    let expected = "\
+Error [E3209]: The linker couldn't find C library `raylib`.
+ Why: Your program links against `raylib`, but the linker reported `cannot find -lraylib` — the library isn't on the link search path.
+ Fix: Declare it in `deps:` so Jet provisions it: `raylib: c@system` (host pkg-config, else fetched from nixpkgs), or `raylib: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.
+";
+    assert_eq!(rendered, expected);
+}
+
+#[test]
+fn e3210_nixpkgs_provision_failed_snapshot() {
+    // I4: nixpkgs auto-provision failure diagnostic (jet-stage), pinned here.
+    let d = jet::CFFI::e3210("raylib", "raylib", "error: attribute 'raylib' missing");
+    assert_eq!(d.code, "E3210");
+    let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
+    let expected = "\
+Error [E3210]: Couldn't fetch C library `raylib` from nixpkgs.
+ Why: `raylib: c@system` asked Jet to provision `nixpkgs#raylib`, but `nix build` failed: error: attribute 'raylib' missing
+ Fix: Check the attr exists (`nix build nixpkgs#raylib`), or point at a local build with `raylib: c@\"<path>\"`, or install it and use `system`.
+";
+    assert_eq!(rendered, expected);
+}
+
+#[test]
 fn e3202_pointer_boundary_snapshot() {
     // E3202 belongs to the E2-M13 pointer tier, which is not implemented, so no
     // real source can reach it. Per I4 the diagnostic must still exist with a

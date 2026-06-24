@@ -608,7 +608,9 @@ fn main() {
         "new" => run_new(target, annotated),
         "test" => {
             let update_snapshots = jet_argv.iter().any(|a| a == "--update-snapshots" || a == "-u");
-            run_test(target, update_snapshots, mode);
+            // A directory target is a project root: resolve its entry.
+            let resolved = resolve_source_path(target);
+            run_test(&resolved, update_snapshots, mode);
         }
         "add" => run_add(&raw),
         "remove" => run_remove(target),
@@ -659,7 +661,32 @@ fn main() {
 /// exists, use that. If neither exists, return `raw` unchanged so the normal
 /// file-not-found diagnostic fires with the original name the user typed.
 pub(crate) fn resolve_source_path(raw: &str) -> String {
-    if Path::new(raw).exists() {
+    let path = Path::new(raw);
+    // A directory argument is a project root: resolve its entry
+    // (`.jet/main.jet` else `<dir>/main.jet`). `jet run <dir>` just works.
+    if path.is_dir() {
+        let entry = find_project_entry(path);
+        if entry.is_file() {
+            return entry.to_string_lossy().into_owned();
+        }
+        // No entry: if there's no manifest either, surface a clean error; with
+        // a manifest but no entry, fall through so the file-not-found path
+        // names the missing `main.jet`.
+        if !path.join(jet::Syntax::PAYLOAD_FILE).is_file() {
+            eprintln!(
+                "error: no `main.{ext}` or `.jet/main.{ext}` entry in `{dir}`",
+                ext = jet::Syntax::FILE_EXT,
+                dir = raw,
+            );
+            eprintln!(
+                " fix: add a `main.{}` to that directory, or point at a `.jet` file directly",
+                jet::Syntax::FILE_EXT
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+        return entry.to_string_lossy().into_owned();
+    }
+    if path.exists() {
         return raw.to_string();
     }
     let with_ext = format!("{}.{}", raw, jet::Syntax::FILE_EXT);

@@ -18,26 +18,26 @@ scene, not an empty window.
 
 ## Run it
 
-Needs `pkg-config` on PATH and raylib's `raylib.pc` on `PKG_CONFIG_PATH` so link
-resolution finds `-L<libdir> -lraylib`:
-
 ```
-RL=$(nix build --no-link --print-out-paths nixpkgs#raylib)
-nix develop -c nix shell nixpkgs#pkg-config -c \
-  env PKG_CONFIG_PATH="$RL/lib/pkgconfig" \
-  jet run examples/graphics/raylib_hello/main.jet
+jet run examples/graphics/raylib_hello
 ```
 
-Use `jet build` instead of `jet run` to compile + link without opening the
-window. The binder writes its cache to `.jet/bindings/c/raylib.jet` on first
+That's it — no `PKG_CONFIG_PATH`, no manual `nix build`, no `nix shell`. The
+directory argument is treated as a project root (`main.jet` is the entry).
+
+`pkg.jet` declares `raylib: c@system`. On the first build Jet resolves raylib:
+host `pkg-config raylib` if present, otherwise it auto-fetches `nixpkgs#raylib`,
+caches the store path under `.jet/clinks/raylib`, and bakes that lib dir into the
+binary's rpath so `libraylib.so.600` is found at run time with no
+`LD_LIBRARY_PATH`. The fetch happens once; later builds reuse the cache.
+
+Use `jet build examples/graphics/raylib_hello` to compile + link without opening
+the window. The binder writes its cache to `.jet/bindings/c/raylib.jet` on first
 build (regenerated when `include/raylib.h` changes).
 
-`pkg.jet` declares `raylib: c@system` in its `deps:` block: the `c@system`
-provider resolves raylib through `pkg-config raylib`, which supplies both the lib
-dir and `-lraylib`. The link key is the dep name (`raylib`), matching the bound
-header's basename (`raylib.h`). An undeclared `use c.raylib` would resolve the
-same way (pkg-config), so the dep is explicit documentation of the system
-requirement here.
+To pin a specific nixpkgs attribute (when the link name differs from the attr),
+write `raylib: c@nixpkgs:raylib`. The link key is the dep name (`raylib`),
+matching the bound header's basename (`raylib.h`).
 
 ## Color-as-int ABI note
 

@@ -200,6 +200,13 @@ impl CFfi {
                         args.push("-l".to_string());
                         args.push(name.clone());
                     }
+                    // rpath so the built binary finds shared libs (e.g. a
+                    // /nix/store libraylib.so.600) at run time without any
+                    // LD_LIBRARY_PATH. Each dir is one `-C link-arg=…` pair.
+                    for dir in &flags.rpath_dirs {
+                        args.push("-C".to_string());
+                        args.push(format!("link-arg=-Wl,-rpath,{dir}"));
+                    }
                 }
                 Err(d) => diags.push(d),
             }
@@ -590,7 +597,7 @@ pub fn resolve_link(
 ) -> Result<LinkFlags, Diagnostic> {
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
     if let Some(target) = declared_c_dep(lib, project_root) {
-        return clib_link(lib, &target);
+        return clib_link(lib, &target, project_root);
     }
     // 2. pkg-config fallback (undeclared `use c.<lib>`).
     match pkg_config_link(lib) {
@@ -617,28 +624,151 @@ fn declared_c_dep(lib: &str, project_root: &Path) -> Option<String> {
     })
 }
 
+/// Libc-family names that the platform always links and that have no `.pc`
+/// file: a bare `-l <lib>` on the default search path is correct for these.
+const ALWAYS_LINKED_LIBC: &[&str] = &["c", "m", "pthread", "dl", "rt", "util"];
+
 /// Resolve a declared `c@<target>` dep into link flags (S59/D-CFFI2).
-///   - `target == "system"` → `pkg-config <lib>`; if pkg-config has no entry or
-///     is unavailable, fall back to a bare `-l <lib>` (this is what makes libc
-///     work — there is no `c.pc`).
+///   - `target == "system"` → (a) `pkg-config <lib>`; else (b) a bare `-l <lib>`
+///     for the always-linked libc set (no `.pc`); else (c) auto-provision
+///     `nixpkgs#<lib>`; else (d) E3201.
+///   - `target` of the form `nixpkgs:<attr>` → always auto-provision
+///     `nixpkgs#<attr>` (the nix attr may differ from the link name).
 ///   - any other `target` → a local dir: `-L <path>`, `-I <path>`, `-l <lib>`.
-fn clib_link(lib: &str, target: &str) -> Result<LinkFlags, Diagnostic> {
-    if target == Syntax::SYSTEM_LIB_TARGET {
-        return Ok(match pkg_config_link(lib) {
-            PkgConfig::Found(flags) => flags,
-            // No `.pc` (e.g. libc) or pkg-config absent: a bare `-l <lib>` is
-            // the declared intent — the lib is on the default search path.
-            PkgConfig::NotFound | PkgConfig::Unavailable => {
-                LinkFlags { link_names: vec![lib.to_string()], ..Default::default() }
-            }
-        });
+fn clib_link(lib: &str, target: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+    // Explicit nixpkgs attr: `c@nixpkgs:<attr>`.
+    if let Some(attr) = target.strip_prefix(NIXPKGS_TARGET_PREFIX) {
+        return provision_from_nixpkgs(lib, attr, project_root);
     }
+
+    if target == Syntax::SYSTEM_LIB_TARGET {
+        // (a) host pkg-config.
+        if let PkgConfig::Found(flags) = pkg_config_link(lib) {
+            return Ok(flags);
+        }
+        // (b) always-linked libc: a bare `-l <lib>` is the declared intent.
+        if ALWAYS_LINKED_LIBC.contains(&lib) {
+            return Ok(LinkFlags { link_names: vec![lib.to_string()], ..Default::default() });
+        }
+        // (c) auto-provision from nixpkgs (attr == link name).
+        return provision_from_nixpkgs(lib, lib, project_root);
+    }
+
     // Local dir: link from `<path>` with the lib's own name.
     Ok(LinkFlags {
         include_dirs: vec![target.to_string()],
         lib_dirs: vec![target.to_string()],
         link_names: vec![lib.to_string()],
+        rpath_dirs: Vec::new(),
     })
+}
+
+/// `target` prefix selecting an explicit nixpkgs attribute for a C dep.
+const NIXPKGS_TARGET_PREFIX: &str = "nixpkgs:";
+
+/// Realize `nixpkgs#<attr>` to a store path and build link flags from it.
+/// The store path is cached at `<root>/.jet/clinks/<lib>` so repeat builds skip
+/// the nix call; a stale/missing cached path re-realizes.
+fn provision_from_nixpkgs(lib: &str, attr: &str, project_root: &Path) -> Result<LinkFlags, Diagnostic> {
+    let store = match cached_store_path(lib, project_root) {
+        Some(p) => p,
+        None => {
+            let p = realize_nixpkgs(attr).map_err(|reason| e3210(lib, attr, &reason))?;
+            write_cached_store_path(lib, &p, project_root);
+            p
+        }
+    };
+    let lib_dir = format!("{store}/lib");
+    let include_dir = format!("{store}/include");
+    Ok(LinkFlags {
+        include_dirs: vec![include_dir],
+        lib_dirs: vec![lib_dir.clone()],
+        link_names: vec![lib.to_string()],
+        rpath_dirs: vec![lib_dir],
+    })
+}
+
+/// `<root>/.jet/clinks/<lib>` — the per-lib resolved-store-path cache file.
+fn clink_cache_file(lib: &str, project_root: &Path) -> std::path::PathBuf {
+    project_root
+        .join(Syntax::SOURCE_ROOT_DIR)
+        .join("clinks")
+        .join(lib)
+}
+
+/// Read a cached store path if present and still a valid store dir.
+fn cached_store_path(lib: &str, project_root: &Path) -> Option<String> {
+    let f = clink_cache_file(lib, project_root);
+    let p = std::fs::read_to_string(&f).ok()?;
+    let p = p.trim().to_string();
+    if !p.is_empty() && Path::new(&p).is_dir() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// Persist a resolved store path for next time (best-effort).
+fn write_cached_store_path(lib: &str, store: &str, project_root: &Path) {
+    let f = clink_cache_file(lib, project_root);
+    if let Some(parent) = f.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&f, store);
+}
+
+/// Run `nix build --no-link --print-out-paths nixpkgs#<attr>`; return the store
+/// path (first line of stdout). On any failure return a trimmed reason string.
+fn realize_nixpkgs(attr: &str) -> Result<String, String> {
+    let flake = format!("nixpkgs#{attr}");
+    let out = std::process::Command::new("nix")
+        .args(["build", "--no-link", "--print-out-paths"])
+        .arg(&flake)
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "`nix` is not installed".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let reason = stderr
+            .trim()
+            .lines()
+            .last()
+            .unwrap_or("nix build failed")
+            .to_string();
+        return Err(reason);
+    }
+    let path = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return Err("nix build produced no store path".to_string());
+    }
+    Ok(path)
+}
+
+/// E3210 — a declared C dep could not be auto-provisioned from nixpkgs.
+pub fn e3210(lib: &str, attr: &str, reason: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E3210",
+        format!("Couldn't fetch C library `{}` from nixpkgs.", lib),
+        format!(
+            "`{lib}: {}@{}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}",
+            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+        ),
+        format!(
+            "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {}@\"<path>\"`, or install it and use `{}`.",
+            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+        ),
+        None,
+    )
 }
 
 /// Native-library link inputs for rustc (`-l`, `-L`, `-I` analog via cc args).
@@ -648,6 +778,10 @@ pub struct LinkFlags {
     pub lib_dirs: Vec<String>,
     /// Names passed to `-l` (e.g. `raylib`).
     pub link_names: Vec<String>,
+    /// Dirs to bake into the binary's runtime search path (`-Wl,-rpath`), so a
+    /// shared library realized into `/nix/store` is found at run time with no
+    /// `LD_LIBRARY_PATH`.
+    pub rpath_dirs: Vec<String>,
 }
 
 /// E3201 — C library not found via a declared `c@…` dep or pkg-config.
@@ -662,6 +796,27 @@ fn e3201(lib: &str) -> Diagnostic {
         format!(
             "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}@{}` in `deps:`.",
             Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+        ),
+        None,
+    )
+}
+
+/// E3209 — the linker could not find a C library at link time. Distinct from
+/// E3201 (resolution found no paths up front): here resolution produced a
+/// `-l<name>` but the library is not on the link search path. Kept off the I2
+/// ICE banner — a missing system library is a user/system problem, not
+/// generated code being rejected by rustc.
+pub fn e3209(lib: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E3209",
+        format!("The linker couldn't find C library `{}`.", lib),
+        format!(
+            "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.",
+        ),
+        format!(
+            "Declare it in `deps:` so Jet provisions it: `{lib}: {}@{}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.",
+            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+            Syntax::DEP_PROVIDER_C,
         ),
         None,
     )

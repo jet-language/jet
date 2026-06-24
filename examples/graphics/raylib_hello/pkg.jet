@@ -1,9 +1,10 @@
 // raylib_hello — opens a raylib window from Jet via the native C binder.
 //
-// `raylib: c@system` resolves raylib through pkg-config: the build needs
-// raylib.pc on PKG_CONFIG_PATH and pkg-config on PATH (see README.md).
-// pkg-config supplies both the lib dir (`-L`) and `-lraylib`; the rest
-// (GL/X11/…) come from libraylib.so's own NEEDED entries.
+// `raylib: c@system` resolves raylib with zero manual setup: host pkg-config
+// first, and if that misses, Jet auto-fetches `nixpkgs#raylib`, caches the
+// store path under `.jet/clinks/`, and rpaths it into the binary so it runs
+// with no LD_LIBRARY_PATH. The rest (GL/X11/…) come from libraylib.so's own
+// NEEDED entries.
 payload: {
     name: "raylib_hello",
     version: "0.1.0",

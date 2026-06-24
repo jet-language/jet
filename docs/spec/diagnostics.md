@@ -240,6 +240,8 @@ before continuing.
 | E3206 | parse | user declared reserved `__bindgen__` segment |
 | E3207 | parse | `@bindgen` outside generated `.jet/bindings/c/` file |
 | E3208 | jet   | `jet bind` / header translation failed |
+| E3209 | jet   | linker couldn't find a declared C library at link time |
+| E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
@@ -637,6 +639,8 @@ reported as **E0119** (unknown name).
 | E3206 | Module path `{path}` uses the reserved segment `__bindgen__`. | Autogen lives in `c.{lib}.__bindgen__`; users declare overlays as `@extern module c.{lib}` only. | Drop `__bindgen__` from your module path, or use `@extern module c.{lib} { … }`. |
 | E3207 | `@bindgen` is only allowed in generated cache files. | `.jet/bindings/c/{lib}.jet` is written by `jet bind`; hand-written sources use `@extern module`. | Edit your overlay file with `@extern module`, or regenerate the cache with `jet bind`. |
 | E3208 | Could not generate bindings from `{header}`. | Header parsing or translation failed in the bind backend. | Fix the header path, install dev headers, run `jet bind` manually for details, or hand-write `@extern module c.{lib}`. |
+| E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
+| E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 
 ## Cross-compilation and freestanding diagnostics (E2-M15)
 

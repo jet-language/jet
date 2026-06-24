@@ -460,7 +460,7 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         }
     };
     let bin = PathBuf::from("build").join(format!("bench_{}", stem(file)));
-    build(file, &rust_code, bin.clone(), BuildProfile::Default, ffi_link.as_ref(), &[], false, None);
+    build(file, &rust_code, bin.clone(), BuildProfile::Default, ffi_link.as_ref(), &[], false, None, mode);
 
     let warmups = 5u32;
     let trials = 20u32;

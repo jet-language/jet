@@ -109,7 +109,7 @@ pub(crate) fn run_compile_cmd(
 
     match cmd {
         "build" => {
-            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose, cross_target);
+            build(file, &rust_code, bin_path(file), profile, ffi_link.as_ref(), &clinks, verbose, cross_target, mode);
             println!("built: {}", bin_path(file).display());
             if let Some(triple) = cross_target {
                 println!("target: {}", triple);
@@ -123,7 +123,7 @@ pub(crate) fn run_compile_cmd(
         }
         "run" => {
             let out = bin_path(file);
-            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks, verbose, cross_target);
+            build(file, &rust_code, out.clone(), profile, ffi_link.as_ref(), &clinks, verbose, cross_target, mode);
             if cross_target.is_some() {
                 eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
                 exit(ExitCodes::OK);
@@ -296,6 +296,7 @@ fn run_test_file(path: &Path, mode: OutputMode) -> bool {
         &[],
         false,
         None,
+        mode,
     );
     let out = Command::new(&bin).output().unwrap_or_else(|e| {
         eprintln!("error: couldn't run tests in `{}`: {}", shown, e);
@@ -399,6 +400,7 @@ pub(crate) fn build(
     clinks: &[String],
     verbose: bool,
     cross_target: Option<&str>,
+    mode: OutputMode,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
@@ -512,6 +514,16 @@ pub(crate) fn build(
     };
 
     if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        // I2: a *missing C library* is a user/system problem, not generated-code
+        // rejection. Detect a linker "cannot find -l<name>" and print a clean
+        // E3209 diagnostic naming the lib + fix — NOT the bug-in-jet banner. The
+        // ICE banner stays only for genuine codegen-rejected-by-rustc.
+        if let Some(missing) = missing_c_lib(&stderr) {
+            let diag = jet::CFFI::e3209(&missing);
+            report_problems(mode, file, "", &[diag]);
+            exit(ExitCodes::USER_ERROR);
+        }
         eprintln!("internal compiler error: the generated Rust did not compile.");
         eprintln!(
             "This is a bug in {}, NOT in your program. Please report it,",
@@ -520,7 +532,7 @@ pub(crate) fn build(
         eprintln!("attaching your source file and the generated file below.");
         eprintln!("  generated: {}", rs_path.display());
         eprintln!("--- rustc said ---");
-        eprintln!("{}", String::from_utf8_lossy(&out.stderr));
+        eprintln!("{}", stderr);
         exit(ExitCodes::ICE);
     }
 
@@ -529,5 +541,50 @@ pub(crate) fn build(
     if let Some(key) = cache_key {
         jet::BuildCache::store_cached(&key, &bin);
         step("cache store -> saved binary for next time".to_string());
+    }
+}
+
+/// Scan a failed rustc/linker stderr for a missing C library and return its
+/// link name. Matches the GNU ld / lld phrasing `cannot find -l<name>` (and the
+/// `-l<name>` form some linkers print). Used to keep a missing *system library*
+/// off the I2 ICE path — it's a user/system problem, not generated-code being
+/// rejected.
+fn missing_c_lib(stderr: &str) -> Option<String> {
+    for line in stderr.lines() {
+        // e.g. "cannot find -lraylib" / "cannot find -lraylib: No such file"
+        if let Some(rest) = line.split("cannot find -l").nth(1) {
+            let name: String = rest
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != ':' && *c != '\'' && *c != '"')
+                .collect();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod missing_c_lib_tests {
+    use super::missing_c_lib;
+
+    #[test]
+    fn detects_ld_cannot_find() {
+        // GNU ld / lld phrasing — must be routed to E3209, not the I2 ICE banner.
+        let stderr = "  = note: /usr/bin/ld: cannot find -lraylib: No such file or directory\n  collect2: error: ld returned 1 exit status\n";
+        assert_eq!(missing_c_lib(stderr).as_deref(), Some("raylib"));
+    }
+
+    #[test]
+    fn detects_bare_form() {
+        assert_eq!(missing_c_lib("ld: cannot find -lsqlite3\n").as_deref(), Some("sqlite3"));
+    }
+
+    #[test]
+    fn genuine_codegen_error_is_not_a_missing_lib() {
+        // A real rustc type error must keep the ICE path (returns None here).
+        let stderr = "error[E0308]: mismatched types\n --> build/main.rs:3:5\n";
+        assert_eq!(missing_c_lib(stderr), None);
     }
 }
