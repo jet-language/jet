@@ -275,8 +275,8 @@ use core.encoding.json as json
 fn main() {
     data @= json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == Object(m) {
-        if m["port"] == Number(n) {
-            print(n + 1.0)
+        if m["port"] == Int(n) {
+            print(n + 1)
         }
     }
 }
@@ -285,7 +285,7 @@ fn main() {
         None,
     );
     assert_eq!(code_a, 0, "probe (a) failed: {stderr_a}");
-    assert_eq!(stdout_a, "8081.0\n", "probe (a): decoded value should be plain number + 1");
+    assert_eq!(stdout_a, "8081\n", "probe (a): decoded value should be plain number + 1");
     assert!(
         stderr_a.contains("json coerce") && stderr_a.contains("port") && stderr_a.contains("number"),
         "probe (a): coercion log line missing or malformed; got: {stderr_a}"
@@ -300,7 +300,7 @@ use core.encoding.json as json
 fn main() {
     data @= json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
     if data == Object(m) {
-        if m["port"] == Number(n) {
+        if m["port"] == Int(n) {
             print(n)
         }
     }
@@ -310,7 +310,7 @@ fn main() {
         None,
     );
     assert_eq!(code_b, 0, "probe (b) failed: {stderr_b}");
-    assert_eq!(stdout_b, "8080.0\n", "probe (b): value should be 8080");
+    assert_eq!(stdout_b, "8080\n", "probe (b): value should be 8080");
     assert!(
         !stderr_b.contains("json coerce"),
         "probe (b): spurious coercion line emitted for clean JSON; got: {stderr_b}"
@@ -325,10 +325,10 @@ use core.encoding.json as json
 fn main() {
     data @= json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == Object(m) {
-        if m["port"] == Number(n) {
+        if m["port"] == Int(n) {
             print(n)
         }
-        if m["enabled"] == Boolean(b) {
+        if m["enabled"] == Bool(b) {
             print(b)
         }
     }
@@ -338,7 +338,7 @@ fn main() {
         None,
     );
     assert_eq!(code_c, 0, "probe (c) failed: {stderr_c}");
-    assert_eq!(stdout_c, "8080.0\ntrue\n", "probe (c): both coerced values should come back plain");
+    assert_eq!(stdout_c, "8080\ntrue\n", "probe (c): both coerced values should come back plain");
     let coerce_lines: Vec<&str> = stderr_c.lines().filter(|l| l.contains("json coerce")).collect();
     assert_eq!(
         coerce_lines.len(), 2,
@@ -389,8 +389,10 @@ fn main() {
         None,
     );
     assert_eq!(code_a, 0, "probe (a) failed: {stderr_a}");
+    // D-ENC-DYN1=A+: `json.parse` yields the `Data` value; an integral-valued number
+    // (`1.5e3` == 1500) collapses to `Int`, so it re-serializes as `1500` (not `1500.0`).
     assert_eq!(
-        stdout_a, "{\"acc\":\"café\",\"big\":1500.0,\"grin\":\"😀\",\"tab\":\"a\\tb\"}\n",
+        stdout_a, "{\"acc\":\"café\",\"big\":1500,\"grin\":\"😀\",\"tab\":\"a\\tb\"}\n",
         "probe (a): full parse + re-serialize"
     );
 
@@ -633,5 +635,137 @@ fn main() {
     );
     assert_eq!(code, 0, "generic serde program should run cleanly");
     assert_eq!(stdout, "{\"value\":7}\n42\n{\"raw\":9}\n3\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ── c152: full TOML adapter (D-ENC-DYN1=A+) ──────────────────────────────────
+// Nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars decode into
+// nested `#[Codable]` structs, and the rich tree round-trips through `to_string`.
+#[test]
+fn toml_full_nested_decode_and_round_trip() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping toml_full_nested_decode_and_round_trip (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_toml_full_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    // Typed decode into nested structs + array-of-tables.
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "toml_typed",
+        r#"
+use core.encoding.toml as toml
+#[Codable]
+struct Server { host: String  port: Int }
+#[Codable]
+struct Config { title: String  server: Server  ports: [Int] }
+fn main() {
+    raw @= "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
+    cfg @= toml.decode<Config>(raw) ?? panic("bad toml")
+    print(cfg.title)
+    print(cfg.server.host)
+    print(cfg.server.port)
+    print(cfg.ports.len())
+    print(toml.to_string(cfg))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "toml typed decode failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "jet\ndb.local\n5432\n2\ntitle = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
+    );
+
+    // Dynamic parse → rich tree → round-trip identity for a nested document.
+    let (code2, stdout2, stderr2) = build_and_run(
+        &dir,
+        "toml_dyn",
+        r#"
+use core.encoding.toml as toml
+fn main() {
+    raw @= "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
+    d @= toml.parse(raw) ?? panic("bad")
+    print(toml.to_string(d))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code2, 0, "toml dynamic parse failed: {stderr2}");
+    assert_eq!(stdout2, "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ── c152: full YAML adapter (D-ENC-YAML1 = A) ────────────────────────────────
+// Block mappings + sequences, flow collections, typed scalars, block scalars,
+// comments, document markers, and anchors/aliases.
+#[test]
+fn yaml_full_nested_decode_and_features() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping yaml_full_nested_decode_and_features (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_yaml_full_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    // Typed decode of a nested document with a block sequence of mappings.
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "yaml_typed",
+        r#"
+use core.encoding.yaml as yaml
+#[Codable]
+struct Service { name: String  port: Int }
+#[Codable]
+struct Config { app: String  services: [Service] }
+fn main() {
+    raw @= "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg @= yaml.decode<Config>(raw) ?? panic("bad yaml")
+    print(cfg.app)
+    print(cfg.services.len())
+    print(cfg.services[0].name)
+    print(cfg.services[1].port)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "yaml typed decode failed: {stderr}");
+    assert_eq!(stdout, "myapp\n2\nweb\n5432\n");
+
+    // Advanced features: flow collections, comments, `---`, anchors/aliases, block scalar.
+    let (code2, stdout2, stderr2) = build_and_run(
+        &dir,
+        "yaml_adv",
+        r#"
+use core.encoding.yaml as yaml
+fn main() {
+    raw @= "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
+    d @= yaml.parse(raw) ?? panic("bad yaml")
+    if d == Object(top) {
+        if top["flowlist"] == Array(xs) {
+            print(xs.len())
+        }
+        if top["use"] == Object(u) {
+            print(u.len())
+        }
+        if top["note"] == Text(s) {
+            print(s.contains("one"))
+        }
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code2, 0, "yaml advanced features failed: {stderr2}");
+    assert_eq!(stdout2, "3\n2\ntrue\n");
     let _ = fs::remove_dir_all(&dir);
 }

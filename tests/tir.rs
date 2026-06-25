@@ -2126,7 +2126,7 @@ fn main() {
 
 /// c109 Phase 16: a struct with a covered collection field, and an enum variant
 /// carrying a covered collection payload. Both emit the field/payload value plainly
-/// (`items: vec![…]`, `Data.Nums(xs)`), byte-identical to the AST path.
+/// (`items: vec![…]`, `Holder.Nums(xs)`), byte-identical to the AST path.
 #[test]
 fn collection_field_and_payload() {
     if !have_rustc() {
@@ -2137,12 +2137,12 @@ struct Bag {
     items: [Int]
     label: String
 }
-enum Data {
+enum Holder {
     Nums([Int])
     One(Int)
 }
-fn mk(xs: [Int]) -> Data {
-    return Data.Nums(xs)
+fn mk(xs: [Int]) -> Holder {
+    return Holder.Nums(xs)
 }
 fn main() {
     b @= Bag { items: [1, 2, 3], label: \"x\" }
@@ -2996,11 +2996,11 @@ fn main() {
     if data == Object(entries) {
         print(entries.len())
     }
-    obj: [String, JSON] := [:]
-    obj[\"name\"] = JSON.Text(\"jet\")
-    obj[\"ok\"] = JSON.Boolean(true)
-    obj[\"none\"] = JSON.Null
-    print(json.to_string(JSON.Object(obj)))
+    obj: [String, Json] := [:]
+    obj[\"name\"] = Json.Text(\"jet\")
+    obj[\"ok\"] = Json.Bool(true)
+    obj[\"none\"] = Json.Null
+    print(json.to_string(Json.Object(obj)))
 }
 ";
     let (code, stdout) = build_and_run("tir_json", src);
@@ -3024,8 +3024,8 @@ fn main() {
     if data == Object(entries) {
         port @= entries[\"port\"]
         name @= entries[\"name\"]
-        if port == Number(n) {
-            print(n + 1.0)
+        if port == Int(n) {
+            print(n + 1)
         }
         if name == Text(s) {
             print(s)
@@ -3035,7 +3035,7 @@ fn main() {
 ";
     let (code, stdout) = build_and_run("tir_json_coerce", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "8081.0\napi\n");
+    assert_eq!(stdout, "8081\napi\n");
 }
 
 /// c109 Phase 24: regex `Match` value type + `.group(n)` accessor (`74_regex`). The

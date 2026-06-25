@@ -67,9 +67,17 @@ Commit that as "M0 verified" before anything else.
   Any new stdlib external dep requires owner approval.
 - **I7** Every user-typeable keyword/sigil lives in Source/Syntax.rs with a
   decision ID.
-- **I8** Simplicity ratchet: prefer rejecting a program with a great
-  error + workaround over adding a feature. New features need a roadmap
-  slot or owner sign-off.
+- **I8** One way to mean it, many ways to write it. There is exactly one
+  canonical mechanism for any given semantic job — reject a second feature that
+  does the same thing a different way with a great error + the existing path.
+  But organizing/writing code flexibly is fine and encouraged: code layout, file
+  structure, and formatting are the user's choice, and policy-driven
+  customization (lints, profiles, opt-in strictness a team requires) is welcome.
+  The bar: the default surface stays small enough to be easy to find and easy to
+  learn. Beginners get a magic, batteries-included experience with safe defaults
+  and no footguns; experts get full control through explicit opt-in escape
+  hatches — never make the footgun the default, never deny the expert the reach.
+  New mechanisms need a roadmap slot or owner sign-off.
 
 ## Workflow loop
 

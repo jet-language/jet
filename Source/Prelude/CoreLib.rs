@@ -879,6 +879,1166 @@ mod jet_std {
             }
         }
     }
+
+    // ── core.encoding.toml: full TOML 1.0 → DataTree (D-ENC-DYN1=A+, c152) ────────
+    // A complete std-only TOML 1.0 parser (ported from the compiler's
+    // Source/Jetpack/TOML.rs, which the emitted prelude cannot reach) that lowers a
+    // document onto the one rich `DataTree`. Strings (every escape + multi-line),
+    // integers in every base, floats incl. inf/nan, booleans, datetimes (kept raw),
+    // arrays, inline tables, dotted keys, `[table]` headers, and `[[array-of-tables]]`.
+    pub mod toml {
+        use super::DataTree;
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum Value {
+            String(String),
+            Integer(i64),
+            Float(f64),
+            Boolean(bool),
+            Datetime(String),
+            Array(Vec<Value>),
+            InlineTable(Vec<(String, Value)>),
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum Item {
+            Header { path: Vec<String>, array: bool },
+            KeyVal { path: Vec<String>, value: Value },
+        }
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct ParseError {
+            pub line: usize,
+            pub message: String,
+        }
+
+        pub fn parse_to_tree(raw: &str) -> Result<DataTree, ParseError> {
+            let mut p = Parser { chars: raw.chars().collect(), pos: 0, line: 1 };
+            let mut items = Vec::new();
+            loop {
+                p.skip_between_statements();
+                if p.peek().is_none() {
+                    break;
+                }
+                match p.statement()? {
+                    Some(item) => items.push(item),
+                    None => {}
+                }
+            }
+            Ok(assemble(items))
+        }
+
+        // ── Assembly: a flat Item list → a nested ordered `DataTree::Object` ──────
+        fn assemble(items: Vec<Item>) -> DataTree {
+            let mut root = DataTree::Object(Vec::new());
+            let mut current: Vec<String> = Vec::new();
+            for item in items {
+                match item {
+                    Item::Header { path, array } => {
+                        if array {
+                            push_array_table(&mut root, &path);
+                        } else {
+                            // Ensure the table exists.
+                            let _ = table_at(&mut root, &path);
+                        }
+                        current = path;
+                    }
+                    Item::KeyVal { path, value } => {
+                        set_key(&mut root, &current, &path, value_to_tree(value));
+                    }
+                }
+            }
+            root
+        }
+
+        // Navigate to (creating along the way) the table at `path`. When a segment is
+        // an array-of-tables, descend into its LAST element.
+        fn table_at<'a>(mut node: &'a mut DataTree, path: &[String]) -> &'a mut DataTree {
+            for seg in path {
+                node = child_table_mut(node, seg);
+            }
+            node
+        }
+
+        fn child_table_mut<'a>(node: &'a mut DataTree, seg: &str) -> &'a mut DataTree {
+            let entries = match node {
+                DataTree::Object(entries) => entries,
+                other => return other,
+            };
+            let idx = match entries.iter().position(|(k, _)| k == seg) {
+                Some(i) => i,
+                None => {
+                    entries.push((seg.to_string(), DataTree::Object(Vec::new())));
+                    entries.len() - 1
+                }
+            };
+            // An existing array-of-tables: descend into its last element. Decide the
+            // target index immutably first, then take exactly one mutable borrow per
+            // branch of a match on the (non-borrowing) `Option` — sidesteps the NLL snag.
+            let arr_last: Option<usize> = match &entries[idx].1 {
+                DataTree::Array(arr) if !arr.is_empty() => Some(arr.len() - 1),
+                _ => None,
+            };
+            match arr_last {
+                Some(n) => match &mut entries[idx].1 {
+                    DataTree::Array(arr) => &mut arr[n],
+                    other => other,
+                },
+                None => &mut entries[idx].1,
+            }
+        }
+
+        fn push_array_table(root: &mut DataTree, path: &[String]) {
+            let (parent_path, last) = path.split_at(path.len() - 1);
+            let parent = table_at(root, parent_path);
+            if let DataTree::Object(entries) = parent {
+                let idx = match entries.iter().position(|(k, _)| k == &last[0]) {
+                    Some(i) => i,
+                    None => {
+                        entries.push((last[0].clone(), DataTree::Array(Vec::new())));
+                        entries.len() - 1
+                    }
+                };
+                if let DataTree::Array(arr) = &mut entries[idx].1 {
+                    arr.push(DataTree::Object(Vec::new()));
+                }
+            }
+        }
+
+        fn set_key(root: &mut DataTree, current: &[String], key_path: &[String], value: DataTree) {
+            let mut full: Vec<String> = current.to_vec();
+            full.extend_from_slice(&key_path[..key_path.len() - 1]);
+            let table = table_at(root, &full);
+            let fk = &key_path[key_path.len() - 1];
+            if let DataTree::Object(entries) = table {
+                if let Some(slot) = entries.iter_mut().find(|(k, _)| k == fk) {
+                    slot.1 = value;
+                } else {
+                    entries.push((fk.clone(), value));
+                }
+            }
+        }
+
+        fn value_to_tree(v: Value) -> DataTree {
+            match v {
+                Value::String(s) => DataTree::Text(s),
+                Value::Integer(n) => DataTree::Int(n),
+                Value::Float(f) => DataTree::Float(f),
+                Value::Boolean(b) => DataTree::Bool(b),
+                Value::Datetime(s) => DataTree::Text(s),
+                Value::Array(xs) => DataTree::Array(xs.into_iter().map(value_to_tree).collect()),
+                Value::InlineTable(es) => {
+                    DataTree::Object(es.into_iter().map(|(k, v)| (k, value_to_tree(v))).collect())
+                }
+            }
+        }
+
+        // ── Render: a `DataTree` → TOML text (nested headers, arrays-of-tables) ───
+        pub fn render(t: &DataTree) -> String {
+            let mut out = String::new();
+            render_table(t, &[], &mut out);
+            out.trim_end().to_string()
+        }
+
+        fn is_table(v: &DataTree) -> bool {
+            matches!(v, DataTree::Object(_))
+        }
+        fn is_array_of_tables(v: &DataTree) -> bool {
+            matches!(v, DataTree::Array(arr)
+                if !arr.is_empty() && arr.iter().all(|e| matches!(e, DataTree::Object(_))))
+        }
+
+        fn render_table(t: &DataTree, path: &[String], out: &mut String) {
+            if let DataTree::Object(entries) = t {
+                for (k, v) in entries {
+                    if !is_table(v) && !is_array_of_tables(v) {
+                        out.push_str(&format!("{} = {}\n", k, render_value(v)));
+                    }
+                }
+                for (k, v) in entries {
+                    if is_table(v) {
+                        let mut p = path.to_vec();
+                        p.push(k.clone());
+                        out.push_str(&format!("\n[{}]\n", p.join(".")));
+                        render_table(v, &p, out);
+                    } else if is_array_of_tables(v) {
+                        let mut p = path.to_vec();
+                        p.push(k.clone());
+                        if let DataTree::Array(arr) = v {
+                            for elem in arr {
+                                out.push_str(&format!("\n[[{}]]\n", p.join(".")));
+                                render_table(elem, &p, out);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        fn render_value(v: &DataTree) -> String {
+            match v {
+                DataTree::Null => "\"\"".to_string(),
+                DataTree::Bool(b) => b.to_string(),
+                DataTree::Int(n) => n.to_string(),
+                DataTree::Float(f) => format!("{:?}", f),
+                DataTree::Text(s) => super::quote_json(s),
+                DataTree::Bytes(bs) => {
+                    let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                    format!("[{}]", parts.join(", "))
+                }
+                DataTree::Array(items) => {
+                    let parts: Vec<String> = items.iter().map(render_value).collect();
+                    format!("[{}]", parts.join(", "))
+                }
+                // An inline (non-header) object renders as a TOML inline table.
+                DataTree::Object(entries) => {
+                    let parts: Vec<String> = entries
+                        .iter()
+                        .map(|(k, val)| format!("{} = {}", k, render_value(val)))
+                        .collect();
+                    format!("{{ {} }}", parts.join(", "))
+                }
+            }
+        }
+
+        struct Parser {
+            chars: Vec<char>,
+            pos: usize,
+            line: usize,
+        }
+
+        impl Parser {
+            fn peek(&self) -> Option<char> { self.chars.get(self.pos).copied() }
+            fn peek_at(&self, n: usize) -> Option<char> { self.chars.get(self.pos + n).copied() }
+            fn bump(&mut self) -> Option<char> {
+                let c = self.peek()?;
+                self.pos += 1;
+                if c == '\n' { self.line += 1; }
+                Some(c)
+            }
+            fn err(&self, message: impl Into<String>) -> ParseError {
+                ParseError { line: self.line, message: message.into() }
+            }
+            fn skip_inline_ws(&mut self) {
+                while matches!(self.peek(), Some(' ' | '\t')) { self.pos += 1; }
+            }
+            fn skip_between_statements(&mut self) {
+                loop {
+                    match self.peek() {
+                        Some(' ' | '\t' | '\r' | '\n') => { self.bump(); }
+                        Some('#') => self.skip_comment(),
+                        _ => break,
+                    }
+                }
+            }
+            fn skip_comment(&mut self) {
+                while let Some(c) = self.peek() {
+                    if c == '\n' { break; }
+                    self.pos += 1;
+                }
+            }
+            fn finish_line(&mut self) -> Result<(), ParseError> {
+                self.skip_inline_ws();
+                if self.peek() == Some('#') { self.skip_comment(); }
+                match self.peek() {
+                    None | Some('\n') | Some('\r') => Ok(()),
+                    Some(c) => Err(self.err(format!("unexpected `{c}` after value"))),
+                }
+            }
+            fn statement(&mut self) -> Result<Option<Item>, ParseError> {
+                match self.peek() {
+                    Some('[') => self.header().map(Some),
+                    _ => self.key_value().map(Some),
+                }
+            }
+            fn header(&mut self) -> Result<Item, ParseError> {
+                self.bump(); // first '['
+                let array = self.peek() == Some('[');
+                if array { self.bump(); }
+                self.skip_inline_ws();
+                let path = self.key_path()?;
+                self.skip_inline_ws();
+                if self.peek() != Some(']') {
+                    return Err(self.err("expected `]` to close a table header"));
+                }
+                self.bump();
+                if array {
+                    if self.peek() != Some(']') {
+                        return Err(self.err("expected `]]` to close an array-of-tables header"));
+                    }
+                    self.bump();
+                }
+                if path.is_empty() {
+                    return Err(self.err("a table header must name a table"));
+                }
+                self.finish_line()?;
+                Ok(Item::Header { path, array })
+            }
+            fn key_value(&mut self) -> Result<Item, ParseError> {
+                let path = self.key_path()?;
+                if path.is_empty() {
+                    return Err(self.err("expected a key"));
+                }
+                self.skip_inline_ws();
+                if self.peek() != Some('=') {
+                    return Err(self.err(format!("expected `=` after key `{}`", path.join("."))));
+                }
+                self.bump();
+                self.skip_inline_ws();
+                let value = self.value()?;
+                self.finish_line()?;
+                Ok(Item::KeyVal { path, value })
+            }
+            fn key_path(&mut self) -> Result<Vec<String>, ParseError> {
+                let mut path = Vec::new();
+                loop {
+                    self.skip_inline_ws();
+                    path.push(self.simple_key()?);
+                    self.skip_inline_ws();
+                    if self.peek() == Some('.') { self.bump(); } else { break; }
+                }
+                Ok(path)
+            }
+            fn simple_key(&mut self) -> Result<String, ParseError> {
+                match self.peek() {
+                    Some('"') => self.basic_string(),
+                    Some('\'') => self.literal_string(),
+                    Some(c) if is_bare_key_char(c) => {
+                        let mut s = String::new();
+                        while let Some(c) = self.peek() {
+                            if is_bare_key_char(c) { s.push(c); self.pos += 1; } else { break; }
+                        }
+                        Ok(s)
+                    }
+                    Some(c) => Err(self.err(format!("`{c}` is not a valid key character"))),
+                    None => Err(self.err("expected a key")),
+                }
+            }
+            fn value(&mut self) -> Result<Value, ParseError> {
+                match self.peek() {
+                    Some('"') => Ok(Value::String(self.basic_string()?)),
+                    Some('\'') => Ok(Value::String(self.literal_string()?)),
+                    Some('[') => self.array(),
+                    Some('{') => self.inline_table(),
+                    Some('t') | Some('f') => self.boolean(),
+                    Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => self.number_or_datetime(),
+                    Some(c) => Err(self.err(format!("`{c}` does not start a valid value"))),
+                    None => Err(self.err("expected a value")),
+                }
+            }
+            fn boolean(&mut self) -> Result<Value, ParseError> {
+                if self.try_keyword("true") { Ok(Value::Boolean(true)) }
+                else if self.try_keyword("false") { Ok(Value::Boolean(false)) }
+                else { Err(self.err("expected `true` or `false`")) }
+            }
+            fn try_keyword(&mut self, kw: &str) -> bool {
+                let chars: Vec<char> = kw.chars().collect();
+                for (i, c) in chars.iter().enumerate() {
+                    if self.peek_at(i) != Some(*c) { return false; }
+                }
+                if let Some(after) = self.peek_at(chars.len()) {
+                    if is_bare_key_char(after) || after == '.' { return false; }
+                }
+                for _ in 0..chars.len() { self.bump(); }
+                true
+            }
+            fn basic_string(&mut self) -> Result<String, ParseError> {
+                if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"') {
+                    return self.multiline_basic_string();
+                }
+                self.bump();
+                let mut out = String::new();
+                loop {
+                    match self.bump() {
+                        None | Some('\n') => return Err(self.err("unterminated string")),
+                        Some('"') => return Ok(out),
+                        Some('\\') => out.push(self.string_escape()?),
+                        Some(c) if (c as u32) < 0x20 => return Err(self.err("control character in string")),
+                        Some(c) => out.push(c),
+                    }
+                }
+            }
+            fn multiline_basic_string(&mut self) -> Result<String, ParseError> {
+                self.bump(); self.bump(); self.bump();
+                if self.peek() == Some('\r') { self.bump(); }
+                if self.peek() == Some('\n') { self.bump(); }
+                let mut out = String::new();
+                loop {
+                    if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"') {
+                        self.bump(); self.bump(); self.bump();
+                        return Ok(out);
+                    }
+                    match self.bump() {
+                        None => return Err(self.err("unterminated multi-line string")),
+                        Some('\\') => {
+                            if matches!(self.peek(), Some('\n') | Some('\r') | Some(' ') | Some('\t')) {
+                                let mut sawline = false;
+                                let save = self.pos;
+                                let saveline = self.line;
+                                while matches!(self.peek(), Some(' ') | Some('\t') | Some('\r') | Some('\n')) {
+                                    if self.peek() == Some('\n') { sawline = true; }
+                                    self.bump();
+                                }
+                                if !sawline {
+                                    self.pos = save;
+                                    self.line = saveline;
+                                    out.push(self.string_escape()?);
+                                }
+                            } else {
+                                out.push(self.string_escape()?);
+                            }
+                        }
+                        Some(c) => out.push(c),
+                    }
+                }
+            }
+            fn string_escape(&mut self) -> Result<char, ParseError> {
+                match self.bump() {
+                    Some('"') => Ok('"'),
+                    Some('\\') => Ok('\\'),
+                    Some('b') => Ok('\u{0008}'),
+                    Some('f') => Ok('\u{000c}'),
+                    Some('n') => Ok('\n'),
+                    Some('r') => Ok('\r'),
+                    Some('t') => Ok('\t'),
+                    Some('u') => self.unicode_escape(4),
+                    Some('U') => self.unicode_escape(8),
+                    Some(c) => Err(self.err(format!("invalid escape `\\{c}`"))),
+                    None => Err(self.err("unterminated escape")),
+                }
+            }
+            fn unicode_escape(&mut self, n: usize) -> Result<char, ParseError> {
+                let mut v = 0u32;
+                for _ in 0..n {
+                    let Some(c) = self.peek() else { return Err(self.err("truncated unicode escape")); };
+                    let Some(d) = c.to_digit(16) else { return Err(self.err("invalid unicode escape")); };
+                    v = v * 16 + d;
+                    self.pos += 1;
+                }
+                char::from_u32(v).ok_or_else(|| self.err("invalid unicode scalar value"))
+            }
+            fn literal_string(&mut self) -> Result<String, ParseError> {
+                if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'') {
+                    return self.multiline_literal_string();
+                }
+                self.bump();
+                let mut out = String::new();
+                loop {
+                    match self.bump() {
+                        None | Some('\n') => return Err(self.err("unterminated literal string")),
+                        Some('\'') => return Ok(out),
+                        Some(c) => out.push(c),
+                    }
+                }
+            }
+            fn multiline_literal_string(&mut self) -> Result<String, ParseError> {
+                self.bump(); self.bump(); self.bump();
+                if self.peek() == Some('\r') { self.bump(); }
+                if self.peek() == Some('\n') { self.bump(); }
+                let mut out = String::new();
+                loop {
+                    if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'') {
+                        self.bump(); self.bump(); self.bump();
+                        return Ok(out);
+                    }
+                    match self.bump() {
+                        None => return Err(self.err("unterminated multi-line literal string")),
+                        Some(c) => out.push(c),
+                    }
+                }
+            }
+            fn array(&mut self) -> Result<Value, ParseError> {
+                self.bump();
+                let mut items = Vec::new();
+                loop {
+                    self.skip_ws_newlines_comments();
+                    match self.peek() {
+                        Some(']') => { self.bump(); return Ok(Value::Array(items)); }
+                        None => return Err(self.err("unterminated array")),
+                        _ => {}
+                    }
+                    items.push(self.value()?);
+                    self.skip_ws_newlines_comments();
+                    match self.peek() {
+                        Some(',') => { self.bump(); }
+                        Some(']') => { self.bump(); return Ok(Value::Array(items)); }
+                        Some(c) => return Err(self.err(format!("expected `,` or `]` in array, found `{c}`"))),
+                        None => return Err(self.err("unterminated array")),
+                    }
+                }
+            }
+            fn skip_ws_newlines_comments(&mut self) {
+                loop {
+                    match self.peek() {
+                        Some(' ' | '\t' | '\r' | '\n') => { self.bump(); }
+                        Some('#') => self.skip_comment(),
+                        _ => break,
+                    }
+                }
+            }
+            fn inline_table(&mut self) -> Result<Value, ParseError> {
+                self.bump();
+                let mut entries = Vec::new();
+                self.skip_inline_ws();
+                if self.peek() == Some('}') { self.bump(); return Ok(Value::InlineTable(entries)); }
+                loop {
+                    self.skip_inline_ws();
+                    let path = self.key_path()?;
+                    self.skip_inline_ws();
+                    if self.bump() != Some('=') {
+                        return Err(self.err("expected `=` in inline table"));
+                    }
+                    self.skip_inline_ws();
+                    let value = self.value()?;
+                    entries.push((path.join("."), value));
+                    self.skip_inline_ws();
+                    match self.bump() {
+                        Some(',') => continue,
+                        Some('}') => return Ok(Value::InlineTable(entries)),
+                        Some(c) => return Err(self.err(format!("expected `,` or `}}` in inline table, found `{c}`"))),
+                        None => return Err(self.err("unterminated inline table")),
+                    }
+                }
+            }
+            fn number_or_datetime(&mut self) -> Result<Value, ParseError> {
+                if self.looks_like_date() || self.looks_like_time() {
+                    return self.datetime();
+                }
+                self.number()
+            }
+            fn looks_like_date(&self) -> bool {
+                let d = |n: usize| self.peek_at(n).map_or(false, |c| c.is_ascii_digit());
+                d(0) && d(1) && d(2) && d(3)
+                    && self.peek_at(4) == Some('-')
+                    && d(5) && d(6)
+                    && self.peek_at(7) == Some('-')
+                    && d(8) && d(9)
+            }
+            fn looks_like_time(&self) -> bool {
+                let d = |n: usize| self.peek_at(n).map_or(false, |c| c.is_ascii_digit());
+                d(0) && d(1) && self.peek_at(2) == Some(':') && d(3) && d(4)
+            }
+            fn datetime(&mut self) -> Result<Value, ParseError> {
+                let mut s = String::new();
+                let is_dt = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | ':' | '.' | '+');
+                while let Some(c) = self.peek() {
+                    if is_dt(c) { s.push(c); self.pos += 1; }
+                    else if c == ' '
+                        && self.peek_at(1).map_or(false, |n| n.is_ascii_digit())
+                        && self.peek_at(3) == Some(':')
+                    { s.push(' '); self.pos += 1; }
+                    else { break; }
+                }
+                Ok(Value::Datetime(s))
+            }
+            fn number(&mut self) -> Result<Value, ParseError> {
+                if self.try_keyword("inf") { return Ok(Value::Float(f64::INFINITY)); }
+                if self.try_keyword("nan") { return Ok(Value::Float(f64::NAN)); }
+                let mut tok = String::new();
+                if matches!(self.peek(), Some('+') | Some('-')) {
+                    let sign = self.bump().unwrap();
+                    tok.push(sign);
+                    if self.try_keyword("inf") {
+                        return Ok(Value::Float(if sign == '-' { f64::NEG_INFINITY } else { f64::INFINITY }));
+                    }
+                    if self.try_keyword("nan") { return Ok(Value::Float(f64::NAN)); }
+                }
+                if self.peek() == Some('0') {
+                    if let Some(r) = self.peek_at(1) {
+                        if matches!(r, 'x' | 'o' | 'b') && tok.is_empty() {
+                            return self.radix_integer();
+                        }
+                    }
+                }
+                let mut is_float = false;
+                while let Some(c) = self.peek() {
+                    match c {
+                        '0'..='9' | '_' => { tok.push(c); self.pos += 1; }
+                        '.' | 'e' | 'E' | '+' | '-' => { is_float = true; tok.push(c); self.pos += 1; }
+                        _ => break,
+                    }
+                }
+                let clean: String = tok.chars().filter(|c| *c != '_').collect();
+                if is_float {
+                    clean.parse::<f64>().map(Value::Float).map_err(|_| self.err(format!("invalid number `{tok}`")))
+                } else {
+                    clean.parse::<i64>().map(Value::Integer).map_err(|_| self.err(format!("invalid number `{tok}`")))
+                }
+            }
+            fn radix_integer(&mut self) -> Result<Value, ParseError> {
+                self.bump();
+                let prefix = self.bump().unwrap();
+                let radix = match prefix { 'x' => 16, 'o' => 8, 'b' => 2, _ => 16 };
+                let mut tok = String::new();
+                while let Some(c) = self.peek() {
+                    if c == '_' { self.pos += 1; }
+                    else if c.is_digit(radix) { tok.push(c); self.pos += 1; }
+                    else { break; }
+                }
+                if tok.is_empty() {
+                    return Err(self.err("expected digits after numeric base prefix"));
+                }
+                i64::from_str_radix(&tok, radix)
+                    .map(Value::Integer)
+                    .map_err(|_| self.err(format!("invalid base-{radix} integer `{tok}`")))
+            }
+        }
+
+        fn is_bare_key_char(c: char) -> bool {
+            c.is_ascii_alphanumeric() || c == '_' || c == '-'
+        }
+    }
+
+    // ── core.encoding.yaml: full std-only YAML 1.2 core → DataTree (c152) ─────────
+    // D-ENC-YAML1 = A: block mappings + sequences (indentation-driven), flow `{}`/`[]`,
+    // core-schema typed scalars (null/~, bool, int, float, str), single/double-quoted
+    // + plain + block scalars (`|` literal, `>` folded with chomping), comments,
+    // `---`/`...` document markers, and anchors/aliases (`&a`/`*a`). Explicit/custom
+    // tags (`!!str`, `!MyType`) are deferred to c153 (frozen). No external crates (I6).
+    pub mod yaml {
+        use super::DataTree;
+        use std::collections::BTreeMap;
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct ParseError {
+            pub line: usize,
+            pub message: String,
+        }
+
+        pub fn parse_to_tree(raw: &str) -> Result<DataTree, ParseError> {
+            let lines: Vec<String> = raw.split('\n').map(|l| l.trim_end_matches('\r').to_string()).collect();
+            let mut p = Parser { lines, pos: 0, anchors: BTreeMap::new() };
+            p.skip_ignorable();
+            // Leading document marker(s).
+            while p.at_doc_marker() {
+                p.pos += 1;
+                p.skip_ignorable();
+            }
+            if p.pos >= p.lines.len() || p.at_doc_end() {
+                return Ok(DataTree::Null);
+            }
+            let base = p.indent(p.pos);
+            p.parse_node(base)
+        }
+
+        struct Parser {
+            lines: Vec<String>,
+            pos: usize,
+            anchors: BTreeMap<String, DataTree>,
+        }
+
+        impl Parser {
+            fn indent(&self, i: usize) -> usize {
+                self.lines[i].chars().take_while(|c| *c == ' ').count()
+            }
+            // The line's content with leading indent removed and any trailing comment
+            // stripped (a ` #` outside quotes, or a leading `#`).
+            fn content(&self, i: usize) -> String {
+                let after = &self.lines[i][self.indent(i)..];
+                strip_comment(after)
+            }
+            fn is_ignorable(&self, i: usize) -> bool {
+                let t = self.lines[i].trim();
+                t.is_empty() || t.starts_with('#')
+            }
+            fn skip_ignorable(&mut self) {
+                while self.pos < self.lines.len() && self.is_ignorable(self.pos) {
+                    self.pos += 1;
+                }
+            }
+            fn at_doc_marker(&self) -> bool {
+                self.pos < self.lines.len() && self.lines[self.pos].trim_start().starts_with("---")
+            }
+            fn at_doc_end(&self) -> bool {
+                self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
+            }
+
+            fn parse_node(&mut self, min_indent: usize) -> Result<DataTree, ParseError> {
+                self.skip_ignorable();
+                if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
+                    return Ok(DataTree::Null);
+                }
+                let ind = self.indent(self.pos);
+                if ind < min_indent {
+                    return Ok(DataTree::Null);
+                }
+                let content = self.content(self.pos);
+                if content == "-" || content.starts_with("- ") {
+                    self.parse_block_seq(ind)
+                } else if is_map_entry(&content) {
+                    self.parse_block_map(ind)
+                } else {
+                    // A bare scalar node (possibly anchored/aliased/flow/quoted).
+                    self.pos += 1;
+                    self.parse_inline_value(&content)
+                }
+            }
+
+            fn parse_block_seq(&mut self, indent: usize) -> Result<DataTree, ParseError> {
+                let mut items = Vec::new();
+                loop {
+                    self.skip_ignorable();
+                    if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
+                        break;
+                    }
+                    let ind = self.indent(self.pos);
+                    if ind != indent {
+                        break;
+                    }
+                    let content = self.content(self.pos);
+                    if content != "-" && !content.starts_with("- ") {
+                        break;
+                    }
+                    // Dash trick: blank out `-` so the item content aligns as a normal
+                    // block at indent+1, then parse it uniformly (scalar/map/seq).
+                    let line = &mut self.lines[self.pos];
+                    let bytes: Vec<char> = line.chars().collect();
+                    // The dash sits at char index == indent (indentation is spaces only).
+                    let mut rebuilt: String = bytes.iter().enumerate()
+                        .map(|(i, c)| if i == indent { ' ' } else { *c })
+                        .collect();
+                    // If nothing follows the dash, leave a blank line.
+                    if rebuilt.trim().is_empty() {
+                        rebuilt = String::new();
+                    }
+                    *line = rebuilt;
+                    let item = self.parse_node(indent + 1)?;
+                    items.push(item);
+                }
+                Ok(DataTree::Array(items))
+            }
+
+            fn parse_block_map(&mut self, indent: usize) -> Result<DataTree, ParseError> {
+                let mut entries: Vec<(String, DataTree)> = Vec::new();
+                loop {
+                    self.skip_ignorable();
+                    if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
+                        break;
+                    }
+                    let ind = self.indent(self.pos);
+                    if ind != indent {
+                        break;
+                    }
+                    let content = self.content(self.pos);
+                    if content.starts_with("- ") || content == "-" || !is_map_entry(&content) {
+                        break;
+                    }
+                    let line_no = self.pos + 1;
+                    let (key, rest) = split_key(&content)
+                        .ok_or_else(|| ParseError { line: line_no, message: "expected `key: value`".into() })?;
+                    self.pos += 1;
+                    let rest = rest.trim();
+                    let value = if rest.is_empty() {
+                        // Nested block (deeper indent) or empty → Null.
+                        self.skip_ignorable();
+                        if self.pos < self.lines.len()
+                            && self.indent(self.pos) > indent
+                            && !self.at_doc_marker()
+                            && !self.at_doc_end()
+                        {
+                            self.parse_node(indent + 1)?
+                        } else {
+                            DataTree::Null
+                        }
+                    } else if rest.starts_with('|') || rest.starts_with('>') {
+                        self.parse_block_scalar(indent, rest)
+                    } else {
+                        self.parse_inline_value(rest)?
+                    };
+                    entries.push((key, value));
+                }
+                Ok(DataTree::Object(entries))
+            }
+
+            // A `|`/`>` block scalar. Following lines more-indented than the key form the
+            // body; dedent by the first body line's indent. `>` folds line breaks to spaces.
+            fn parse_block_scalar(&mut self, parent_indent: usize, header: &str) -> DataTree {
+                let folded = header.starts_with('>');
+                let chomp = if header.contains('-') { 'S' } else if header.contains('+') { 'K' } else { 'C' };
+                let mut body_lines: Vec<String> = Vec::new();
+                let mut block_indent: Option<usize> = None;
+                while self.pos < self.lines.len() {
+                    let raw = &self.lines[self.pos];
+                    if raw.trim().is_empty() {
+                        body_lines.push(String::new());
+                        self.pos += 1;
+                        continue;
+                    }
+                    let ind = self.indent(self.pos);
+                    if ind <= parent_indent {
+                        break;
+                    }
+                    let bi = *block_indent.get_or_insert(ind);
+                    let chars: Vec<char> = raw.chars().collect();
+                    let start = bi.min(chars.len());
+                    let dedented: String = chars[start..].iter().collect();
+                    body_lines.push(dedented);
+                    self.pos += 1;
+                }
+                // Drop trailing blank lines for chomping decisions.
+                let mut text = if folded {
+                    fold_lines(&body_lines)
+                } else {
+                    body_lines.join("\n")
+                };
+                let trimmed = text.trim_end_matches('\n').to_string();
+                text = match chomp {
+                    'S' => trimmed,                       // strip: no trailing newline
+                    'K' => text.trim_end_matches('\n').to_string() + "\n", // keep (simplified to one)
+                    _ => trimmed + "\n",                  // clip: single trailing newline
+                };
+                DataTree::Text(text)
+            }
+
+            fn parse_inline_value(&mut self, s: &str) -> Result<DataTree, ParseError> {
+                let s = s.trim();
+                // Anchor: `&name <value?>` — register the parsed value under `name`.
+                if let Some(rest) = s.strip_prefix('&') {
+                    let mut it = rest.splitn(2, char::is_whitespace);
+                    let name = it.next().unwrap_or("").to_string();
+                    let val_str = it.next().unwrap_or("").trim();
+                    let value = if val_str.is_empty() {
+                        // The value is a nested block following this line.
+                        self.parse_node(0)?
+                    } else {
+                        self.parse_inline_value(val_str)?
+                    };
+                    self.anchors.insert(name, value.clone());
+                    return Ok(value);
+                }
+                // Alias: `*name`.
+                if let Some(name) = s.strip_prefix('*') {
+                    return Ok(self.anchors.get(name.trim()).cloned().unwrap_or(DataTree::Null));
+                }
+                if s.starts_with('[') {
+                    return Ok(parse_flow(s).0);
+                }
+                if s.starts_with('{') {
+                    return Ok(parse_flow(s).0);
+                }
+                Ok(scalar_value(s))
+            }
+        }
+
+        // ── Flow `[...]` / `{...}` (single-line) ─────────────────────────────────
+        fn parse_flow(s: &str) -> (DataTree, usize) {
+            let chars: Vec<char> = s.chars().collect();
+            parse_flow_at(&chars, 0)
+        }
+        fn parse_flow_at(chars: &[char], mut i: usize) -> (DataTree, usize) {
+            while i < chars.len() && chars[i].is_whitespace() { i += 1; }
+            if i >= chars.len() {
+                return (DataTree::Null, i);
+            }
+            match chars[i] {
+                '[' => {
+                    i += 1;
+                    let mut items = Vec::new();
+                    loop {
+                        while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') { i += 1; }
+                        if i >= chars.len() || chars[i] == ']' { i += 1; break; }
+                        let (v, ni) = parse_flow_at(chars, i);
+                        items.push(v);
+                        i = ni;
+                        while i < chars.len() && chars[i].is_whitespace() { i += 1; }
+                        if i < chars.len() && chars[i] == ',' { i += 1; }
+                        else if i < chars.len() && chars[i] == ']' { i += 1; break; }
+                    }
+                    (DataTree::Array(items), i)
+                }
+                '{' => {
+                    i += 1;
+                    let mut entries = Vec::new();
+                    loop {
+                        while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ',') { i += 1; }
+                        if i >= chars.len() || chars[i] == '}' { i += 1; break; }
+                        // key up to ':'
+                        let (key, ni) = scan_flow_scalar(chars, i, true);
+                        i = ni;
+                        while i < chars.len() && chars[i].is_whitespace() { i += 1; }
+                        if i < chars.len() && chars[i] == ':' { i += 1; }
+                        let (v, nj) = parse_flow_at(chars, i);
+                        i = nj;
+                        entries.push((key.trim().to_string(), v));
+                        while i < chars.len() && chars[i].is_whitespace() { i += 1; }
+                        if i < chars.len() && chars[i] == ',' { i += 1; }
+                        else if i < chars.len() && chars[i] == '}' { i += 1; break; }
+                    }
+                    (DataTree::Object(entries), i)
+                }
+                _ => {
+                    let (raw, ni) = scan_flow_scalar(chars, i, false);
+                    (scalar_value(raw.trim()), ni)
+                }
+            }
+        }
+        // Read a flow scalar (until `,`/`]`/`}`/`:` when key) honoring quotes.
+        fn scan_flow_scalar(chars: &[char], mut i: usize, as_key: bool) -> (String, usize) {
+            while i < chars.len() && chars[i].is_whitespace() { i += 1; }
+            if i < chars.len() && (chars[i] == '"' || chars[i] == '\'') {
+                let q = chars[i];
+                let mut out = String::new();
+                i += 1;
+                while i < chars.len() {
+                    if chars[i] == q {
+                        if q == '\'' && i + 1 < chars.len() && chars[i + 1] == '\'' {
+                            out.push('\''); i += 2; continue;
+                        }
+                        i += 1; break;
+                    }
+                    if chars[i] == '\\' && q == '"' && i + 1 < chars.len() {
+                        out.push(unescape(chars[i + 1])); i += 2; continue;
+                    }
+                    out.push(chars[i]); i += 1;
+                }
+                return (out, i);
+            }
+            let mut out = String::new();
+            while i < chars.len() {
+                let c = chars[i];
+                if c == ',' || c == ']' || c == '}' { break; }
+                if as_key && c == ':' { break; }
+                out.push(c); i += 1;
+            }
+            (out, i)
+        }
+
+        fn fold_lines(lines: &[String]) -> String {
+            // `>` folding: blank lines become newlines; consecutive non-blank lines join
+            // with a single space.
+            let mut out = String::new();
+            let mut prev_blank = true;
+            for l in lines {
+                if l.trim().is_empty() {
+                    out.push('\n');
+                    prev_blank = true;
+                } else {
+                    if !prev_blank { out.push(' '); }
+                    out.push_str(l);
+                    prev_blank = false;
+                }
+            }
+            out
+        }
+
+        fn unescape(c: char) -> char {
+            match c {
+                'n' => '\n', 't' => '\t', 'r' => '\r', '0' => '\0',
+                '\\' => '\\', '"' => '"', _ => c,
+            }
+        }
+
+        // Strip a trailing ` #...` comment that is outside quotes, or a leading `#`.
+        fn strip_comment(s: &str) -> String {
+            let chars: Vec<char> = s.chars().collect();
+            let mut in_s = false;
+            let mut in_d = false;
+            let mut i = 0;
+            while i < chars.len() {
+                let c = chars[i];
+                match c {
+                    '\'' if !in_d => in_s = !in_s,
+                    '"' if !in_s => in_d = !in_d,
+                    '#' if !in_s && !in_d && (i == 0 || chars[i - 1] == ' ' || chars[i - 1] == '\t') => {
+                        let kept: String = chars[..i].iter().collect();
+                        return kept.trim_end().to_string();
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            s.trim_end().to_string()
+        }
+
+        // Is this content a `key: value` mapping entry (top-level `:` outside flow/quotes)?
+        fn is_map_entry(s: &str) -> bool {
+            top_level_colon(s).is_some()
+        }
+        fn top_level_colon(s: &str) -> Option<usize> {
+            let chars: Vec<char> = s.chars().collect();
+            let mut in_s = false;
+            let mut in_d = false;
+            let mut depth = 0i32;
+            let mut i = 0;
+            while i < chars.len() {
+                let c = chars[i];
+                match c {
+                    '\'' if !in_d => in_s = !in_s,
+                    '"' if !in_s => in_d = !in_d,
+                    '[' | '{' if !in_s && !in_d => depth += 1,
+                    ']' | '}' if !in_s && !in_d => depth -= 1,
+                    ':' if !in_s && !in_d && depth == 0 => {
+                        // A mapping `:` must be followed by space or end-of-line.
+                        if i + 1 >= chars.len() || chars[i + 1] == ' ' {
+                            return Some(i);
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            None
+        }
+        fn split_key(s: &str) -> Option<(String, String)> {
+            let idx = top_level_colon(s)?;
+            let chars: Vec<char> = s.chars().collect();
+            let key_raw: String = chars[..idx].iter().collect();
+            let rest: String = chars[idx + 1..].iter().collect();
+            Some((unquote_key(key_raw.trim()), rest))
+        }
+        fn unquote_key(k: &str) -> String {
+            if (k.starts_with('"') && k.ends_with('"') && k.len() >= 2)
+                || (k.starts_with('\'') && k.ends_with('\'') && k.len() >= 2)
+            {
+                k[1..k.len() - 1].to_string()
+            } else {
+                k.to_string()
+            }
+        }
+
+        // Type a plain/quoted scalar by the YAML core schema.
+        fn scalar_value(s: &str) -> DataTree {
+            let s = s.trim();
+            if s.is_empty() {
+                return DataTree::Null;
+            }
+            // Quoted strings are always text.
+            if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+                let inner = &s[1..s.len() - 1];
+                let mut out = String::new();
+                let mut chars = inner.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '\\' {
+                        if let Some(n) = chars.next() { out.push(unescape(n)); }
+                    } else {
+                        out.push(c);
+                    }
+                }
+                return DataTree::Text(out);
+            }
+            if s.starts_with('\'') && s.ends_with('\'') && s.len() >= 2 {
+                return DataTree::Text(s[1..s.len() - 1].replace("''", "'"));
+            }
+            match s {
+                "null" | "Null" | "NULL" | "~" => return DataTree::Null,
+                "true" | "True" | "TRUE" => return DataTree::Bool(true),
+                "false" | "False" | "FALSE" => return DataTree::Bool(false),
+                ".inf" | ".Inf" | ".INF" => return DataTree::Float(f64::INFINITY),
+                "-.inf" | "-.Inf" => return DataTree::Float(f64::NEG_INFINITY),
+                ".nan" | ".NaN" | ".NAN" => return DataTree::Float(f64::NAN),
+                _ => {}
+            }
+            // Integer (decimal, with optional sign).
+            if let Ok(n) = s.parse::<i64>() {
+                return DataTree::Int(n);
+            }
+            // Float: must contain a `.`, `e`/`E` and parse cleanly.
+            if (s.contains('.') || s.contains('e') || s.contains('E'))
+                && s.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
+            {
+                if let Ok(f) = s.parse::<f64>() {
+                    return DataTree::Float(f);
+                }
+            }
+            DataTree::Text(s.to_string())
+        }
+
+        // ── Render: a `DataTree` → block YAML text ───────────────────────────────
+        pub fn render(t: &DataTree) -> String {
+            let mut out = String::new();
+            render_node(t, 0, &mut out);
+            let s = out.trim_end().to_string();
+            if s.is_empty() { "{}".to_string() } else { s }
+        }
+        fn render_node(t: &DataTree, indent: usize, out: &mut String) {
+            let pad = " ".repeat(indent);
+            match t {
+                DataTree::Object(entries) => {
+                    if entries.is_empty() {
+                        out.push_str(&format!("{}{{}}\n", pad));
+                        return;
+                    }
+                    for (k, v) in entries {
+                        match v {
+                            DataTree::Object(e) if !e.is_empty() => {
+                                out.push_str(&format!("{}{}:\n", pad, render_key(k)));
+                                render_node(v, indent + 2, out);
+                            }
+                            DataTree::Array(a) if !a.is_empty() => {
+                                out.push_str(&format!("{}{}:\n", pad, render_key(k)));
+                                render_seq(a, indent, out);
+                            }
+                            _ => {
+                                out.push_str(&format!("{}{}: {}\n", pad, render_key(k), render_scalar(v)));
+                            }
+                        }
+                    }
+                }
+                DataTree::Array(items) => render_seq(items, indent, out),
+                _ => out.push_str(&format!("{}{}\n", pad, render_scalar(t))),
+            }
+        }
+        fn render_seq(items: &[DataTree], indent: usize, out: &mut String) {
+            let pad = " ".repeat(indent);
+            for item in items {
+                match item {
+                    DataTree::Object(e) if !e.is_empty() => {
+                        out.push_str(&format!("{}-\n", pad));
+                        render_node(item, indent + 2, out);
+                    }
+                    DataTree::Array(a) if !a.is_empty() => {
+                        out.push_str(&format!("{}-\n", pad));
+                        render_seq(a, indent + 2, out);
+                    }
+                    _ => out.push_str(&format!("{}- {}\n", pad, render_scalar(item))),
+                }
+            }
+        }
+        fn render_key(k: &str) -> String {
+            if k.is_empty() || k.contains(':') || k.contains(' ') || k.contains('#') {
+                format!("{:?}", k)
+            } else {
+                k.to_string()
+            }
+        }
+        fn render_scalar(v: &DataTree) -> String {
+            match v {
+                DataTree::Null => "null".to_string(),
+                DataTree::Bool(b) => b.to_string(),
+                DataTree::Int(n) => n.to_string(),
+                DataTree::Float(f) => format!("{:?}", f),
+                DataTree::Text(s) => {
+                    if needs_quote(s) { format!("{:?}", s) } else { s.clone() }
+                }
+                DataTree::Bytes(bs) => {
+                    let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                    format!("[{}]", parts.join(", "))
+                }
+                // An inline collection value renders in flow form.
+                DataTree::Array(items) => {
+                    let parts: Vec<String> = items.iter().map(render_scalar).collect();
+                    format!("[{}]", parts.join(", "))
+                }
+                DataTree::Object(entries) => {
+                    let parts: Vec<String> = entries
+                        .iter()
+                        .map(|(k, val)| format!("{}: {}", render_key(k), render_scalar(val)))
+                        .collect();
+                    format!("{{{}}}", parts.join(", "))
+                }
+            }
+        }
+        fn needs_quote(s: &str) -> bool {
+            if s.is_empty() { return true; }
+            matches!(s, "null" | "Null" | "NULL" | "~" | "true" | "True" | "TRUE"
+                | "false" | "False" | "FALSE")
+                || s.parse::<i64>().is_ok()
+                || s.parse::<f64>().is_ok()
+                || s.starts_with(' ') || s.ends_with(' ')
+                || s.starts_with(['-', '?', ':', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`'])
+                || s.contains(": ") || s.contains(" #") || s.contains('\n')
+        }
+    }
 }
 
 // ── Streaming file handles (E2-M7, D-IO2) ────────────────────────────────────
@@ -1221,19 +2381,25 @@ fn jet_duration_millis(d: &jet_std::Duration) -> i64 {
     d.ms
 }
 
-fn jet_std_json_parse(text: &String) -> Result<jet_std::Json, jet_std::JsonError> {
-    jet_std::parse_json(text)
+// D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
+// user-facing face of `DataTree`). JSON text parses through the internal `Json`
+// enum, then collapses onto `DataTree` (integral numbers become `Int`, fractional
+// `Float`). Object keys arrive in sorted order (the internal `Json` enum is
+// `BTreeMap`-keyed), matching the pre-`Data` dynamic JSON behavior.
+fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
+    jet_std::parse_json(text).map(|j| jet_std::datatree_from_json(&j))
 }
-fn jet_std_json_render(j: &jet_std::Json) -> String { jet_std::render_json(j, false, 0) }
-fn jet_std_json_render_pretty(j: &jet_std::Json) -> String { jet_std::render_json(j, true, 0) }
+fn jet_std_json_render(d: &jet_std::DataTree) -> String { jet_std::render_datatree_json(d, false, 0) }
+fn jet_std_json_render_pretty(d: &jet_std::DataTree) -> String { jet_std::render_datatree_json(d, true, 0) }
 
 // D-JSON1-decode + D-JSON3: lenient JSON decode with coercion surfacing.
 // Parses `text`, then walks the result. Any JSON string that looks like a
 // number or boolean is coerced to that type; one log line is emitted per
-// coercion naming the field and the from→to types.
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::Json, jet_std::JsonError> {
+// coercion naming the field and the from→to types. The coerced value collapses
+// onto `Data` (D-ENC-DYN1=A+).
+fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
     let parsed = jet_std::parse_json(text)?;
-    Ok(jet_std_json_coerce_walk(&parsed, ""))
+    Ok(jet_std::datatree_from_json(&jet_std_json_coerce_walk(&parsed, "")))
 }
 
 fn jet_std_json_coerce_walk(value: &jet_std::Json, path: &str) -> jet_std::Json {
@@ -1635,42 +2801,42 @@ fn jet_enc_csv_to_string<T: user_Encode>(values: &Vec<T>) -> String {
     jet_ring_csv_render(&rows)
 }
 
-// TOML / YAML typed decode: parse flat scalars into a DataTree::Object of Text,
-// then decode to `T`. TOML/YAML typed encode renders a flat Object as key/value.
+// D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
+// `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
+// The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
+// `to_string` renders a `DataTree` back to a nested document.
+fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
+    jet_std::toml::parse_to_tree(text)
+        .map_err(|e| jet_std::JsonError { line: e.line as i64, message: e.message })
+}
+fn jet_std_toml_render(d: &jet_std::DataTree) -> String { jet_std::toml::render(d) }
+
 fn jet_enc_toml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
-    let map = jet_ring_toml_parse(text).map_err(jet_std::DecodeError::new)?;
-    T::jet_decode(&jet_std::DataTree::Object(
-        map.into_iter().map(|(k, v)| (k, jet_std::DataTree::Text(v))).collect(),
-    ))
+    let tree = jet_std::toml::parse_to_tree(text)
+        .map_err(|e| jet_std::DecodeError::new(format!("invalid TOML (line {}): {}", e.line, e.message)))?;
+    T::jet_decode(&tree)
 }
+
+// YAML typed decode: parse flat scalars into a DataTree::Object of Text, then decode.
+// D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
+// rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
+// comments, documents, anchors/aliases. parse → `Data`; decode<T> → typed tree.
+fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
+    jet_std::yaml::parse_to_tree(text)
+        .map_err(|e| jet_std::JsonError { line: e.line as i64, message: e.message })
+}
+fn jet_std_yaml_render(d: &jet_std::DataTree) -> String { jet_std::yaml::render(d) }
+
 fn jet_enc_yaml_decode<T: user_Decode>(text: &String) -> Result<T, jet_std::DecodeError> {
-    let map = jet_ring_yaml_parse(text).map_err(jet_std::DecodeError::new)?;
-    T::jet_decode(&jet_std::DataTree::Object(
-        map.into_iter().map(|(k, v)| (k, jet_std::DataTree::Text(v))).collect(),
-    ))
-}
-fn jet_enc_flat_object_strings<T: user_Encode>(v: &T) -> std::collections::BTreeMap<String, String> {
-    let mut out = std::collections::BTreeMap::new();
-    if let jet_std::DataTree::Object(entries) = v.jet_encode() {
-        for (k, val) in entries {
-            let s = match val {
-                jet_std::DataTree::Text(s) => s,
-                jet_std::DataTree::Int(n) => n.to_string(),
-                jet_std::DataTree::Float(f) => format!("{:?}", f),
-                jet_std::DataTree::Bool(b) => b.to_string(),
-                jet_std::DataTree::Null => String::new(),
-                other => jet_std::render_datatree_json(&other, false, 0),
-            };
-            out.insert(k, s);
-        }
-    }
-    out
+    let tree = jet_std::yaml::parse_to_tree(text)
+        .map_err(|e| jet_std::DecodeError::new(format!("invalid YAML (line {}): {}", e.line, e.message)))?;
+    T::jet_decode(&tree)
 }
 fn jet_enc_toml_to_string<T: user_Encode>(v: &T) -> String {
-    jet_ring_toml_render(&jet_enc_flat_object_strings(v))
+    jet_std::toml::render(&v.jet_encode())
 }
 fn jet_enc_yaml_to_string<T: user_Encode>(v: &T) -> String {
-    jet_ring_yaml_render(&jet_enc_flat_object_strings(v))
+    jet_std::yaml::render(&v.jet_encode())
 }
 
 // ── E2-M9: First-party ring libraries ────────────────────────────────────────
@@ -1744,83 +2910,6 @@ fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
                 })
                 .collect::<Vec<_>>()
                 .join(",")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-// ── jet.toml ──────────────────────────────────────────────────────────────────
-// Simplified: parses flat `key = "value"` and `key = 123` TOML; skips sections
-// and tables. Returns String values for all scalar types.
-fn jet_ring_toml_parse(text: &String) -> Result<std::collections::BTreeMap<String, String>, String> {
-    let mut map = std::collections::BTreeMap::new();
-    for (line_no, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
-            continue;
-        }
-        let Some(eq) = line.find('=') else {
-            return Err(format!("E2701: TOML line {} — expected `key = value`", line_no + 1));
-        };
-        let key = line[..eq].trim().to_string();
-        let val_raw = line[eq + 1..].trim();
-        let val = if val_raw.starts_with('"') && val_raw.ends_with('"') && val_raw.len() >= 2 {
-            val_raw[1..val_raw.len() - 1].replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"")
-        } else {
-            val_raw.to_string()
-        };
-        map.insert(key, val);
-    }
-    Ok(map)
-}
-
-fn jet_ring_toml_render(data: &std::collections::BTreeMap<String, String>) -> String {
-    data.iter()
-        .map(|(k, v)| {
-            if v.parse::<f64>().is_ok() || v == "true" || v == "false" {
-                format!("{} = {}", k, v)
-            } else {
-                format!("{} = \"{}\"", k, v.replace('"', "\\\""))
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-// ── jet.yaml ──────────────────────────────────────────────────────────────────
-// Simplified: parses flat `key: value` YAML (no nesting, no lists).
-fn jet_ring_yaml_parse(text: &String) -> Result<std::collections::BTreeMap<String, String>, String> {
-    let mut map = std::collections::BTreeMap::new();
-    for (line_no, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some(colon) = line.find(':') else {
-            return Err(format!("E2701: YAML line {} — expected `key: value`", line_no + 1));
-        };
-        let key = line[..colon].trim().to_string();
-        let val = line[colon + 1..].trim();
-        let val = if (val.starts_with('"') && val.ends_with('"'))
-            || (val.starts_with('\'') && val.ends_with('\''))
-        {
-            val[1..val.len() - 1].to_string()
-        } else {
-            val.to_string()
-        };
-        map.insert(key, val);
-    }
-    Ok(map)
-}
-
-fn jet_ring_yaml_render(data: &std::collections::BTreeMap<String, String>) -> String {
-    data.iter()
-        .map(|(k, v)| {
-            if v.parse::<f64>().is_ok() || v == "true" || v == "false" {
-                format!("{}: {}", k, v)
-            } else {
-                format!("{}: \"{}\"", k, v.replace('"', "\\\""))
-            }
         })
         .collect::<Vec<_>>()
         .join("\n")

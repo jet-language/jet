@@ -62,7 +62,7 @@ fn b1_json_text_clones_borrowed_view_param() {
         r#"
 use core.encoding.json as json
 fn wrap(x: String) -> String {
-    j @= JSON.Text(x)
+    j @= Json.Text(x)
     return json.to_string(j)
 }
 fn main() {
@@ -97,7 +97,7 @@ use core.encoding.json as json
 fn main() {
     data @= json.parse("{{\"a\":1}}") ?? panic("bad")
     if data == Object(root) {
-        v @= root.get("a") ?? JSON.Null
+        v @= root.get("a") ?? Json.Null
         print(json.to_string(v))
     }
 }

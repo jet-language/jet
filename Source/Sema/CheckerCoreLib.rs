@@ -1108,8 +1108,9 @@ impl<'a> Checker<'a> {
         let json = json_ty();
         let expected = match variant {
             "Null" => Vec::new(),
-            "Boolean" => vec![Type::Bool],
-            "Number" => vec![Type::Float],
+            "Bool" => vec![Type::Bool],
+            "Int" => vec![Type::Int],
+            "Float" => vec![Type::Float],
             "Text" => vec![Type::String],
             "Array" => vec![Type::List(Box::new(json.clone()))],
             "Object" => vec![Type::Map {
@@ -1117,7 +1118,7 @@ impl<'a> Checker<'a> {
                 value: Box::new(json.clone()),
             }],
             _ => {
-                let candidates = ["Null", "Boolean", "Number", "Text", "Array", "Object"]
+                let candidates = ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"]
                     .iter()
                     .map(|s| s.to_string())
                     .collect::<Vec<_>>();
@@ -1127,8 +1128,8 @@ impl<'a> Checker<'a> {
                 }
                 self.diags.push(Diagnostic::error(
                     "E0304",
-                    format!("`{}` has no variant `{}`", Syntax::TYPE_JSON, variant),
-                    "core.json exposes the dynamic JSON variants from the M10 API".to_string(),
+                    format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
+                    "the dynamic `Data` value exposes Null/Bool/Int/Float/Text/Array/Object".to_string(),
                     fix,
                     Some(span),
                 ));
@@ -1143,13 +1144,13 @@ impl<'a> Checker<'a> {
                 "E0306",
                 format!(
                     "`{}.{}` expects {} value{}, got {}",
-                    Syntax::TYPE_JSON,
+                    Syntax::TYPE_DATA,
                     variant,
                     expected.len(),
                     if expected.len() == 1 { "" } else { "s" },
                     args.len()
                 ),
-                "each JSON variant has the payload listed in the M10 std API".to_string(),
+                "each `Data` variant has a fixed payload (Bool/Int/Float→scalar, Text→String, Array→[Data], Object→Map)".to_string(),
                 "check the variant payload".to_string(),
                 Some(span),
             ));
@@ -1229,10 +1230,10 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::lint(
                             "L0201",
                             format!(
-                                "implicit clone of `{}`; this value is borrowed, so it is copied into the JSON value",
+                                "implicit clone of `{}`; this value is borrowed, so it is copied",
                                 name
                             ),
-                            format!("`{}.{}` stores its own copy of this value", Syntax::TYPE_JSON, call_name),
+                            format!("`{}` stores its own copy of this value", call_name),
                             format!("write `{} .clone()` to copy explicitly and silence this warning", name),
                             Some(ispan),
                         ));
@@ -1257,15 +1258,17 @@ pub(crate) fn is_u8_ty(ty: &Type) -> bool {
 }
 
 pub(crate) fn json_ty() -> Type {
-    Type::Named(Syntax::TYPE_JSON.to_string())
+    Type::Named(Syntax::TYPE_DATA.to_string())
 }
 
 pub(crate) fn json_error_ty() -> Type {
     Type::Named(Syntax::TYPE_JSON_ERROR.to_string())
 }
 
+// D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `Json`/`Toml`/
+// `Yaml`/`Csv`).
 pub(crate) fn is_json_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_JSON || name == "Json"
+    Syntax::is_data_type_name(name)
 }
 
 /// D-SERDE2: the typed-decode error (`{ path, reason }`). Flows as the error arm
@@ -1365,8 +1368,9 @@ pub(crate) fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
     let json = json_ty();
     match variant {
         "Null" => Some(Vec::new()),
-        "Boolean" => Some(vec![Type::Bool]),
-        "Number" => Some(vec![Type::Float]),
+        "Bool" => Some(vec![Type::Bool]),
+        "Int" => Some(vec![Type::Int]),
+        "Float" => Some(vec![Type::Float]),
         "Text" => Some(vec![Type::String]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
         "Object" => Some(vec![Type::Map {
@@ -2040,18 +2044,19 @@ pub(crate) fn core_fixed_sig(
             vec![(read, Type::List(Box::new(Type::List(Box::new(Type::String)))))],
             Some(Type::String),
         )),
-        // jet.toml / jet.yaml → core.encoding.{toml,yaml}: simplified flat key-value.
-        ("core.encoding.toml" | "core.encoding.yaml", "parse") => Some((
+        // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
+        // `parse` returns `Toml` (= `Data`); `to_string` takes any encodable value.
+        ("core.encoding.toml", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(
-                Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) },
-                Type::String,
-            )),
+            Some(result_ty(json.clone(), json_error_ty())),
         )),
-        ("core.encoding.toml" | "core.encoding.yaml", "to_string") => Some((
-            vec![(read, Type::Map { key: Box::new(Type::String), value: Box::new(Type::String) })],
-            Some(Type::String),
+        ("core.encoding.toml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
+        // D-ENC-YAML1 = A (c152): YAML is a full adapter over the rich `Data` value.
+        ("core.encoding.yaml", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(json.clone(), json_error_ty())),
         )),
+        ("core.encoding.yaml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
             vec![(read, string.clone())],

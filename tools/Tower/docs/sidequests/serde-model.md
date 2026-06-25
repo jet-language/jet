@@ -255,11 +255,30 @@ Once ratified, build order:
 
 # COMPLETION — full TOML & YAML adapters (the "serde-complete" gap)
 
-**Status (2026-06-25): OPEN. This is the remaining work to make `core.encoding`
-100% serde-equivalent.** Tracked as board card **c152** (card spec at the end of
-this section). One owner decision gates the dynamic surface (**D-ENC-DYN1**);
-everything else is buildable once that's picked. YAML advanced-feature scope is
-**D-ENC-YAML1**.
+**Status (2026-06-25): ✅ DONE (c152).** `core.encoding` is now 100% serde-equivalent.
+Both gating decisions ratified (D-ENC-DYN1=A+, D-ENC-YAML1=A) and implemented end to
+end; impl recorded in `docs/spec/syntax-decisions.md`. Full suite green (1107 passed).
+Shipped:
+- **`Data` value + aliases** — user-facing `Data` (face of `jet_std::DataTree`, variants
+  `.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `Json`/`Toml`/`Yaml`/`Csv` are
+  aliases canonicalized to `Data` in `Sema::resolve_type`; codegen maps all five to
+  `jet_std::DataTree`. The shipped `JSON` enum collapsed into `Data` (clean break);
+  examples 30/73/54 + jsonfmt + capstone server/config migrated, goldens re-blessed.
+  These five are now reserved core type names.
+- **TOML full** — `Source/Jetpack/TOML.rs` ported into the emitted prelude
+  (`jet_std::toml`): nested `[table]`s, `[[array-of-tables]]`, dotted keys, inline
+  tables, typed scalars; `toml.parse`→`Data`, `toml.decode<T>` nested, `toml.to_string`.
+- **YAML full** — new std-only parser+renderer (`jet_std::yaml`): block+flow
+  maps/sequences, core-schema typed scalars, `|`/`>` block scalars with chomping,
+  comments, `---`/`...` documents, `&anchor`/`*alias`; `yaml.parse`→`Data`,
+  `yaml.decode<T>`, `yaml.to_string`. Explicit/custom tags → frozen **c153**.
+- **Examples + tests** — 52_toml / 53_yaml rewritten to typed nested decode + round-trip;
+  `tests/corelib.rs` TOML/YAML round-trip tests; 54_encoding re-blessed.
+
+The historical OPEN notes below are retained for context.
+
+**(historical) Status (2026-06-25): OPEN.** Tracked as board card **c152**. One owner
+decision gated the dynamic surface (**D-ENC-DYN1**); YAML scope was **D-ENC-YAML1**.
 
 ## Where the library actually stands
 

@@ -1002,11 +1002,11 @@ impl<'a> Checker<'a> {
                             format!(
                                 "pattern `{}` doesn't belong to `{}`",
                                 variant,
-                                Syntax::TYPE_JSON
+                                Syntax::TYPE_DATA
                             ),
                             "pattern tests must name a variant on the value's enum type"
                                 .to_string(),
-                            "check the JSON variant spelling".to_string(),
+                            "the `Data` variants are Null/Bool/Int/Float/Text/Array/Object".to_string(),
                             Some(span),
                         ));
                         return HashMap::new();

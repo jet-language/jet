@@ -959,18 +959,37 @@ evaluated at comptime — `ok(v)` / `err(e)` construct `Result` values, and
 `?` / `??` propagate or unwrap them in pure comptime expressions
 (examples/features/86_comptime_parse.jet). Time stays
 unix milliseconds (`time.now()`); random is
-deterministic after `random.seed(n)`. JSON is dynamic (`JSON`) with
-`json.parse`, `json.render`, and `json.render_pretty`. The parser is full
-RFC 8259 (D-PARSE-1): exponents and the strict number grammar, every escape
-including `\uXXXX` with surrogate-pair combining, and it rejects invalid
-escapes, lone surrogates, and raw control characters with a line + message —
-no silently-lossy subset. `jet.json` also exposes
-`json.decode` (D-JSON1-decode + D-JSON3=B): a lenient variant that coerces
-string values that look like numbers or booleans (`"8080"` → `8080`,
-`"true"` → `true`) and emits one structured log line per coercion to stderr
-naming the field and the from→to types. The decoded value comes back plain —
-no wrapper type. Use `jet.json.decode` when consuming externally-produced JSON
-that may encode numbers or booleans as strings.
+deterministic after `random.seed(n)`.
+
+**Serialization (`core.encoding`, D-ENC1 / D-SERDE).** One library, one data model,
+every format an arm. A `#[Codable]` type serializes once and gets JSON, CSV, TOML,
+and YAML for free; each format exposes the same verbs: `parse` (text → dynamic
+value), `decode<T>` (text → typed value), and `to_string` / `to_string_pretty`
+(value → text). Every format's untyped `parse` returns the one rich dynamic value
+**`Data`** (D-ENC-DYN1=A+) — the user-facing face of the internal `DataTree`, with
+variants `.Null` / `.Bool` / `.Int` / `.Float` / `.Text` / `.Array` / `.Object`.
+`Json`, `Toml`, `Yaml`, and `Csv` are type aliases over `Data` (so `json.parse` is
+typed `Json`, `toml.parse` is typed `Toml`, …), but it is one structure with one
+walker and one accessor set. Integral numbers decode to `.Int`, fractional to
+`.Float`; objects keep their fields. The four adapters are full serde equivalents:
+
+- **JSON** — full RFC 8259 (D-PARSE-1): exponents and the strict number grammar,
+  every escape including `\uXXXX` with surrogate-pair combining; rejects invalid
+  escapes, lone surrogates, and raw control characters with a line + message.
+- **CSV** — header-mapped typed rows (`decode<T>` maps columns to fields by name).
+- **TOML** — full TOML 1.0: `[table]` headers, `[[array-of-tables]]`, dotted keys,
+  inline tables, strings (every escape + multi-line), integers in every base,
+  floats incl. `inf`/`nan`, booleans, datetimes, arrays.
+- **YAML** — full YAML 1.2 core (D-ENC-YAML1=A): block + flow maps/sequences,
+  core-schema typed scalars, single/double-quoted + plain + block scalars
+  (`|`/`>` with chomping), comments, `---`/`...` document markers, and
+  anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred
+  to a separate card (full YAML 1.2, c153).
+
+All parsers are std-only (I6). `json.decode` additionally has a lenient mode
+(D-JSON1-decode + D-JSON3=B): it coerces string values that look like numbers or
+booleans (`"8080"` → `8080`, `"true"` → `true`) and emits one structured log line
+per coercion to stderr naming the field and the from→to types.
 
 Codegen invariant: importing core modules is free; sema records reachable core
 calls and codegen emits only those helpers (R10).

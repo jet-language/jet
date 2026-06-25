@@ -772,6 +772,8 @@ impl<'a> Checker<'a> {
             }
         }
         if let Expr::Ident(type_name, _) = &**receiver {
+            // D-ENC-DYN1=A+: `Data`/`Json`/`Toml`/`Yaml`/`Csv` name the one dynamic value;
+            // they are reserved core type names (a user type may not redefine them).
             if is_json_type_name(type_name) {
                 if let Some(ret) = self.check_core_json_lit(method, args, span) {
                     return Some(ret);

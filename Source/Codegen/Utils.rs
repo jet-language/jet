@@ -12,7 +12,7 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
         })
         .unwrap_or_else(|| {
             if is_json_variant(variant) {
-                format!("{}jet_std::Json", cx.root_prefix)
+                format!("{}jet_std::DataTree", cx.root_prefix)
             } else if is_key_variant(variant) {
                 // D-TERM1: `Key` variants are in the top-level prelude as `JetKey`.
                 format!("{}JetKey", cx.root_prefix)
@@ -22,11 +22,9 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
         })
 }
 
+// D-ENC-DYN1=A+: the dynamic `Data` value's variants (face of `jet_std::DataTree`).
 pub(crate) fn is_json_variant(variant: &str) -> bool {
-    matches!(
-        variant,
-        "Null" | "Boolean" | "Number" | "Text" | "Array" | "Object"
-    )
+    crate::Syntax::is_data_variant(variant)
 }
 
 /// D-TERM1 (ratified 2026-06-22): is this variant name a `Key` enum variant?

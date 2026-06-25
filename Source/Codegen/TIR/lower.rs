@@ -1194,7 +1194,7 @@ pub(crate) fn lower_if_cond(
     cond: &Expr,
     cx: &Cx,
     env: &mut LowerEnv,
-) -> (TIfCond, Option<(String, String, Option<Type>)>) {
+) -> (TIfCond, Option<(String, String, Option<Type>)>, Vec<TStmt>) {
     if let Expr::PatternTest {
         subject,
         pattern: Pattern::Absent(_),
@@ -1202,28 +1202,60 @@ pub(crate) fn lower_if_cond(
     } = cond
     {
         let subj = lower_expr(subject, cx, env);
-        return (TIfCond::IsNone { subj }, None);
+        return (TIfCond::IsNone { subj }, None, Vec::new());
     }
-    // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)`). The Rust
-    // if-let pattern is the JSON-aware `emit_if_let_pattern` (`{root}jet_std::Json::Object(
-    // user_entries)`); the binding's type comes from `core_json_pattern_types` (the same
-    // total fact `variant_binding_types` reads, mirroring `add_pattern_bindings`).
+    // D-ENC-DYN1=A+: a dynamic `Data` variant if-let (`if data == Object(entries)` /
+    // `if n == Int(v)`). The Rust if-let pattern is `{root}jet_std::DataTree::<Variant>(…)`;
+    // the binding's type comes from `core_json_pattern_types`. Scalars/`Array` bind their
+    // inner field directly. `Object` is special: `DataTree::Object` is ordered
+    // `Vec<(String, DataTree)>`, but the user-facing payload is a `Map<String, Data>`, so
+    // the pattern binds the pairs to a temp and a then-body prefix `let` collects them into
+    // a `BTreeMap` (the value the body sees).
     if let Expr::PatternTest {
         subject,
-        pattern: pattern @ Pattern::Variant { variant, bindings, .. },
+        pattern: pattern @ Pattern::Variant { variant, bindings, span: pat_span },
         ..
     } = cond
     {
         if is_json_variant(variant) {
             if let Some(PatSlot::Bind(name)) = bindings.first() {
                 let subj = lower_expr(subject, cx, env);
-                let pat_str = emit_if_let_pattern(cx, pattern);
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
+                if variant == "Object" {
+                    let obj_tmp = format!("__jet_obj{}", pat_span.start);
+                    let pat_str = format!(
+                        "{}jet_std::DataTree::Object({})",
+                        cx.root_prefix, obj_tmp
+                    );
+                    let map_ty = ty.clone().unwrap_or(Type::Map {
+                        key: Box::new(Type::String),
+                        value: Box::new(Type::Named(Syntax::TYPE_DATA.to_string())),
+                    });
+                    let prefix = TStmt::Let {
+                        name: name.clone(),
+                        kw: "let",
+                        ty_clause: format!(": {}", cx.rust_type(&map_ty)),
+                        init: TExpr {
+                            ty: map_ty.clone(),
+                            kind: TExprKind::ConstInline(format!(
+                                "{}.into_iter().collect()",
+                                obj_tmp
+                            )),
+                        },
+                    };
+                    return (
+                        TIfCond::IfLet { pat_str, subj },
+                        Some((name.clone(), place, Some(map_ty))),
+                        vec![prefix],
+                    );
+                }
+                let pat_str = emit_if_let_pattern(cx, pattern);
                 return (
                     TIfCond::IfLet { pat_str, subj },
                     Some((name.clone(), place, ty)),
+                    Vec::new(),
                 );
             }
         }
@@ -1241,6 +1273,7 @@ pub(crate) fn lower_if_cond(
                 return (
                     TIfCond::IfLet { pat_str, subj },
                     Some((name.clone(), place, ty)),
+                    Vec::new(),
                 );
             }
             // c109 (D-PATW): a WILDCARD payload slot (`if w == Some(_)`). `_` binds
@@ -1249,7 +1282,7 @@ pub(crate) fn lower_if_cond(
             if let Some(PatSlot::Wildcard) = bindings.first() {
                 let subj = lower_expr(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
-                return (TIfCond::IfLet { pat_str, subj }, None);
+                return (TIfCond::IfLet { pat_str, subj }, None, Vec::new());
             }
         }
     }
@@ -1294,17 +1327,18 @@ pub(crate) fn lower_if_cond(
             return (
                 TIfCond::IfLet { pat_str, subj },
                 Some((name, place, ty)),
+                Vec::new(),
             );
         }
     }
-    (TIfCond::Plain(lower_expr(cond, cx, env)), None)
+    (TIfCond::Plain(lower_expr(cond, cx, env)), None, Vec::new())
 }
 
 pub(crate) fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     // c109 Phase 22: classify the condition (plain / if-let / is_none), reproducing
     // `emit_if`'s three head shapes. The if-let form binds its name into the
     // then-branch scope (mirroring `add_pattern_bindings`).
-    let (cond, then_binding) = lower_if_cond(&ifs.cond, cx, env);
+    let (cond, then_binding, then_prefix) = lower_if_cond(&ifs.cond, cx, env);
     // Each branch gets its own `locals` scope (deep-cloned, so a `let` is not visible
     // after the `if`). The panic-dump replica leaks for a plain/`is_none` `if` (the AST
     // `emit_if` passes the SHARED `&mut env` to `emit_stmts` → `clone_env`), but does
@@ -1320,7 +1354,12 @@ pub(crate) fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         if let Some((name, place, ty)) = then_binding {
             branch.bind(&name, place, ty);
         }
-        lower_stmts(&ifs.then_body, cx, &mut branch)
+        // D-ENC-DYN1=A+: a `Data` `Object(entries)` if-let prepends a `let` that
+        // collects the matched `Vec<(String, DataTree)>` pairs into the `BTreeMap` the
+        // body sees. Emitted before the source body statements.
+        let mut body = then_prefix;
+        body.extend(lower_stmts(&ifs.then_body, cx, &mut branch));
+        body
     };
     let (else_body, else_is_elseif) = match &ifs.else_branch {
         None => (None, false),
@@ -2585,14 +2624,14 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                     };
                 }
-                // c109 Phase 24: `JSON.Null` → `{root}jet_std::Json::Null` (a unit JSON
+                // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
                 // construction reaching codegen as a `Field`, the gate proved it).
                 if env.ty_of(enum_name).is_none()
                     && is_json_type_name(enum_name)
                     && member == "Null"
                 {
                     return TExpr {
-                        ty: Type::Named(Syntax::TYPE_JSON.to_string()),
+                        ty: Type::Named(Syntax::TYPE_DATA.to_string()),
                         kind: TExprKind::JsonLit {
                             variant: "Null".to_string(),
                             arg: None,
@@ -3325,10 +3364,10 @@ pub(crate) fn lower_method_call(
             },
         };
     }
-    // c109 Phase 24: a JSON construction `JSON.<Variant>(arg)` (the gate proved the
-    // receiver is the `Ident("JSON")` type name and `method` is a JSON variant). Lower
-    // to `TExprKind::JsonLit`, carrying the payload's `implicit_clone` flag as a total
-    // fact (reproducing `emit_core_json_lit`). The result type is `JSON`.
+    // D-ENC-DYN1=A+: a dynamic `Data` construction `Data.<Variant>(arg)` (the gate
+    // proved the receiver is a `Data`/`Json`/… type-name ident and `method` is a `Data`
+    // variant). Lower to `TExprKind::JsonLit`, carrying the payload's `implicit_clone`
+    // flag as a total fact. The result type is `Data`.
     if let Expr::Ident(type_name, _) = receiver {
         if !env.locals.contains_key(type_name)
             && is_json_type_name(type_name)
@@ -3338,7 +3377,7 @@ pub(crate) fn lower_method_call(
                 Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone))
             });
             return TExpr {
-                ty: Type::Named(Syntax::TYPE_JSON.to_string()),
+                ty: Type::Named(Syntax::TYPE_DATA.to_string()),
                 kind: TExprKind::JsonLit {
                     variant: method.to_string(),
                     arg,

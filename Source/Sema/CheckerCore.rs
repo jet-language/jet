@@ -863,7 +863,10 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Return(expr, span) => {
-                match (&mut *expr, self.ret.clone()) {
+                // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
+                // (`Json`/`Toml`/…); canonicalize it so it unifies with the returned value.
+                let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
+                match (&mut *expr, resolved_ret) {
                     (Some(e), Some(rt)) => {
                         let saved_expected = self.expected_type.clone();
                         self.expected_type = Some(rt.clone());
@@ -1942,6 +1945,11 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn resolve_type(&self, ty: Type) -> Type {
         match ty {
+            // D-ENC-DYN1=A+: `Json`/`Toml`/`Yaml`/`Csv` are type aliases over the one
+            // dynamic `Data` value — canonicalize every alias to `Data` so they unify.
+            Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
+                Type::Named(crate::Syntax::TYPE_DATA.to_string())
+            }
             Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
                 Type::TraitObject(n)
             }

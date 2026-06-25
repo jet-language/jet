@@ -1,5 +1,5 @@
 // server.jet — HTTP server for the logbook capstone.
-// Routes GET requests to note listing, individual notes, graph JSON,
+// Routes GET requests to note listing, individual notes, graph Json,
 // health check, and full-text search.
 use jet.http as http
 use jet.crypto as crypto
@@ -9,23 +9,23 @@ use "index"
 use "render"
 use "search"
 
-fn graph_json(idx: Index) -> JSON {
-    nodes: [JSON] := []
-    edges: [JSON] := []
+fn graph_json(idx: Index) -> Json {
+    nodes: [Json] := []
+    edges: [Json] := []
     loop name, n in idx.notes {
-        node_fields: [String, JSON] @= ["id": JSON.Text(name.clone())]
-        node @= JSON.Object(node_fields)
+        node_fields: [String, Json] @= ["id": Json.Text(name.clone())]
+        node @= Json.Object(node_fields)
         nodes.push(node)
         loop target in n.links {
-            edge_fields: [String, JSON] @= ["from": JSON.Text(name.clone()), "to": JSON.Text(target)]
-            edge @= JSON.Object(edge_fields)
+            edge_fields: [String, Json] @= ["from": Json.Text(name.clone()), "to": Json.Text(target)]
+            edge @= Json.Object(edge_fields)
             edges.push(edge)
         }
     }
-    arr_nodes: [JSON] @= nodes
-    arr_edges: [JSON] @= edges
-    obj: [String, JSON] @= ["nodes": JSON.Array(arr_nodes), "edges": JSON.Array(arr_edges)]
-    return JSON.Object(obj)
+    arr_nodes: [Json] @= nodes
+    arr_edges: [Json] @= edges
+    obj: [String, Json] @= ["nodes": Json.Array(arr_nodes), "edges": Json.Array(arr_edges)]
+    return Json.Object(obj)
 }
 
 fn html_response(body: String) -> HttpResponse {

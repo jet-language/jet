@@ -1101,8 +1101,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 24: a JSON construction — `{root}jet_std::Json::<Variant>(<arg>)`.
         // Reproduces `emit_core_json_lit` (Expression.rs): the arg is wrapped in
         // `(…).clone()` iff its `implicit_clone` flag was set; `Null` has no arg.
+        // D-ENC-DYN1=A+: a dynamic `Data` construction → `{root}jet_std::DataTree::
+        // <Variant>(<arg>)`. The user-facing `Object` payload is a `Map<String, Data>`
+        // (Rust `BTreeMap`); `DataTree::Object` is ordered `Vec<(String, DataTree)>`, so
+        // the map is collected into pairs at the boundary (sorted-key order, matching the
+        // old BTreeMap-backed dynamic value). Scalars/`Array` bind directly.
         TExprKind::JsonLit { variant, arg } => {
-            let prefix = format!("{}jet_std::Json", cx.root_prefix);
+            let prefix = format!("{}jet_std::DataTree", cx.root_prefix);
             match arg {
                 None => format!("{}::{}", prefix, variant),
                 Some(boxed) => {
@@ -1113,7 +1118,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     } else {
                         s
                     };
-                    format!("{}::{}({})", prefix, variant, arg_str)
+                    if variant == "Object" {
+                        format!("{}::{}(({}).into_iter().collect())", prefix, variant, arg_str)
+                    } else {
+                        format!("{}::{}({})", prefix, variant, arg_str)
+                    }
                 }
             }
         },
@@ -1651,9 +1660,9 @@ pub(crate) fn emit_tir_value_block(stmts: &[TStmt], value: &TExpr, cx: &Cx) -> S
 // D-SERDE: encoding-verb routing helpers — read the lowered arg type / resolved
 // return type to pick the dynamic vs typed helper. Total facts, never re-inferred (I3).
 pub(crate) fn enc_is_json_name(n: &str) -> bool {
-    n == "Json" || n == crate::Syntax::TYPE_JSON
+    crate::Syntax::is_data_type_name(n)
 }
-/// A bare `decode` whose result OK arm is the dynamic `Json` tree (lenient path).
+/// A bare `decode` whose result OK arm is the dynamic `Data` tree (lenient path).
 pub(crate) fn enc_ok_is_json(ret_ty: &Type) -> bool {
     matches!(ret_ty, Type::Result { ok, .. } if matches!(&**ok, Type::Named(n) if enc_is_json_name(n)))
 }
@@ -1680,15 +1689,6 @@ pub(crate) fn enc_arg_is_string_rows(args: &[TExpr]) -> bool {
             if matches!(&**inner, Type::List(s) if matches!(&**s, Type::String))
     )
 }
-/// `Map<String, String>` — the dynamic TOML/YAML form fed to the flat renderer.
-pub(crate) fn enc_arg_is_string_map(args: &[TExpr]) -> bool {
-    matches!(
-        args.first().map(|a| &a.ty),
-        Some(Type::Map { key, value })
-            if matches!(&**key, Type::String) && matches!(&**value, Type::String)
-    )
-}
-
 pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret_ty: &Type, cx: &Cx) -> String {
     let arg = |i: usize| args.get(i).map(|e| emit_tir_expr(e, cx)).unwrap_or_default();
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
@@ -1844,24 +1844,24 @@ pub(crate) fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret
                 format!("{}(&({}))", helper("jet_enc_csv_to_string"), arg(0))
             }
         }
-        ("core.encoding.toml", "parse") => format!("{}(&({}))", helper("jet_ring_toml_parse"), arg(0)),
+        ("core.encoding.toml", "parse") => format!("{}(&({}))", helper("jet_std_toml_parse"), arg(0)),
         ("core.encoding.toml", "decode") => {
             format!("{}::<{}>(&({}))", helper("jet_enc_toml_decode"), enc_target_rust(ret_ty, cx), arg(0))
         }
         ("core.encoding.toml", "to_string") => {
-            if enc_arg_is_string_map(args) {
-                format!("{}(&({}))", helper("jet_ring_toml_render"), arg(0))
+            if enc_arg_is_json(args) {
+                format!("{}(&({}))", helper("jet_std_toml_render"), arg(0))
             } else {
                 format!("{}(&({}))", helper("jet_enc_toml_to_string"), arg(0))
             }
         }
-        ("core.encoding.yaml", "parse") => format!("{}(&({}))", helper("jet_ring_yaml_parse"), arg(0)),
+        ("core.encoding.yaml", "parse") => format!("{}(&({}))", helper("jet_std_yaml_parse"), arg(0)),
         ("core.encoding.yaml", "decode") => {
             format!("{}::<{}>(&({}))", helper("jet_enc_yaml_decode"), enc_target_rust(ret_ty, cx), arg(0))
         }
         ("core.encoding.yaml", "to_string") => {
-            if enc_arg_is_string_map(args) {
-                format!("{}(&({}))", helper("jet_ring_yaml_render"), arg(0))
+            if enc_arg_is_json(args) {
+                format!("{}(&({}))", helper("jet_std_yaml_render"), arg(0))
             } else {
                 format!("{}(&({}))", helper("jet_enc_yaml_to_string"), arg(0))
             }

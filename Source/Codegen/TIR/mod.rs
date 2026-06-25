@@ -1880,9 +1880,9 @@ fn mk() {
     #[test]
     fn covers_collection_payload_enum() {
         // c109 Phase 16: an enum variant carrying a covered collection payload
-        // (`[Int]`). Construction (`Data.Nums(xs)`) routes through the variant
+        // (`[Int]`). Construction (`Holder.Nums(xs)`) routes through the variant
         // MethodCall shape; the borrowed-list `.clone()` is total.
-        let src = "enum Data {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) -> Data {\n return Data.Nums(xs)\n}\n";
+        let src = "enum Holder {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) -> Holder {\n return Holder.Nums(xs)\n}\n";
         assert!(covers(src, "mk"));
     }
 
@@ -2713,19 +2713,19 @@ fn consume(ch: Channel<Int>) -> Int {
 
     #[test]
     fn covers_json_construction_and_collection() {
-        // c109 Phase 24: JSON construction (`JSON.Text`/`JSON.Boolean`/`JSON.Array`/
-        // `JSON.Null`) + a `[JSON]` list value type. A fn that builds JSON values and
-        // returns a JSON routes (the JSON value type is a covered foreign value type;
-        // construction is the `JsonLit` shape). The if-let JSON MATCHING + index-assign
-        // need full sema (the JSON pattern / `IndexKind`), proven by `tests/tir.rs` + the
+        // D-ENC-DYN1=A+: dynamic `Data` construction (`Data.Text`/`Data.Bool`/`Data.Array`/
+        // `Data.Null`) + a `[Data]` list value type. A fn that builds `Data` values and
+        // returns a `Data` routes (the dynamic value type is a covered foreign value type;
+        // construction is the `JsonLit` shape). The if-let MATCHING + index-assign need
+        // full sema (the `Data` pattern / `IndexKind`), proven by `tests/tir.rs` + the
         // whole-suite byte-parity diff; here we gate the sema-independent construction.
         let src = "\
-fn build() -> JSON {
-    items: [JSON] := []
-    items.push(JSON.Text(\"jet\"))
-    items.push(JSON.Boolean(true))
-    items.push(JSON.Null)
-    return JSON.Array(items)
+fn build() -> Data {
+    items: [Data] := []
+    items.push(Data.Text(\"jet\"))
+    items.push(Data.Bool(true))
+    items.push(Data.Null)
+    return Data.Array(items)
 }
 ";
         assert!(covers(src, "build"));
@@ -2733,12 +2733,12 @@ fn build() -> JSON {
 
     #[test]
     fn covers_json_value_param_and_array() {
-        // A JSON-typed param + a `[JSON]` list value type + `JSON.Array` construction.
+        // A `Data`-typed param + a `[Data]` list value type + `Data.Array` construction.
         let src = "\
-fn wrap(x: JSON) -> JSON {
-    items: [JSON] := []
+fn wrap(x: Data) -> Data {
+    items: [Data] := []
     items.push(x)
-    return JSON.Array(items)
+    return Data.Array(items)
 }
 ";
         assert!(covers(src, "wrap"));

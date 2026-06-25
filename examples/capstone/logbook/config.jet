@@ -12,11 +12,21 @@ pub fn load(path: String) -> Config {
     level: String := "info"
     if fs.exists(path.clone()) {
         raw @= fs.read(path.clone()) ?? ""
+        // `toml.parse` returns the rich `Toml` (= Data) value; read each key, keeping
+        // the default when a key is absent.
         if toml.parse(raw) == {
-            ok(table) -> {
-                addr = table.get("addr") ?? addr
-                notes_dir = table.get("notes_dir") ?? notes_dir
-                level = table.get("level") ?? level
+            ok(data) -> {
+                if data == Object(table) {
+                    if table.get("addr") == value(av) {
+                        if av == Text(s) { addr = s }
+                    }
+                    if table.get("notes_dir") == value(nv) {
+                        if nv == Text(s) { notes_dir = s }
+                    }
+                    if table.get("level") == value(lv) {
+                        if lv == Text(s) { level = s }
+                    }
+                }
             }
             err(e) -> {
 

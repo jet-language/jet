@@ -353,6 +353,32 @@ pub const TYPE_UTF8_ERROR: &str = "UTF8Error";
 pub const TYPE_JSON: &str = "JSON";
 pub const TYPE_JSON_ERROR: &str = "JSONError";
 
+/// D-ENC-DYN1=A+ (ratified 2026-06-25): the one dynamic encoding value every
+/// format's `parse` returns. `Data` is canonical (the user-facing face of the
+/// internal `DataTree`); `Json`/`Toml`/`Yaml`/`Csv` are type aliases over it, so
+/// `json.parse` is typed `Json`, `toml.parse` is typed `Toml`, etc., but they are
+/// the same structure (one walker, one accessor set). Variants: `Null`, `Bool`,
+/// `Int`, `Float`, `Text`, `Array`, `Object`.
+pub const TYPE_DATA: &str = "Data";
+pub const TYPE_DATA_JSON: &str = "Json";
+pub const TYPE_DATA_TOML: &str = "Toml";
+pub const TYPE_DATA_YAML: &str = "Yaml";
+pub const TYPE_DATA_CSV: &str = "Csv";
+
+/// The five accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+).
+pub fn is_data_type_name(name: &str) -> bool {
+    matches!(name, "Data" | "Json" | "Toml" | "Yaml" | "Csv")
+}
+
+/// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face
+/// of `DataTree`. `Bytes` stays internal (no dynamic constructor).
+pub fn is_data_variant(variant: &str) -> bool {
+    matches!(
+        variant,
+        "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object"
+    )
+}
+
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
 

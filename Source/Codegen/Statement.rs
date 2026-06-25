@@ -29,7 +29,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let prefix = etype
         .map(|t| {
             if is_json_type_name(t) {
-                format!("{}jet_std::Json", cx.root_prefix)
+                format!("{}jet_std::DataTree", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
             } else if let Some(rust_mod) = cx.foreign_types.get(t) {
@@ -100,16 +100,17 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
 /// enums. Returns `None` when the types aren't known (binding stays untyped).
 pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     if is_json_variant(variant) {
-        let json = Type::Named(Syntax::TYPE_JSON.to_string());
+        let data = Type::Named(Syntax::TYPE_DATA.to_string());
         return match variant {
             "Null" => Some(Vec::new()),
-            "Boolean" => Some(vec![Type::Bool]),
-            "Number" => Some(vec![Type::Float]),
+            "Bool" => Some(vec![Type::Bool]),
+            "Int" => Some(vec![Type::Int]),
+            "Float" => Some(vec![Type::Float]),
             "Text" => Some(vec![Type::String]),
-            "Array" => Some(vec![Type::List(Box::new(json))]),
+            "Array" => Some(vec![Type::List(Box::new(data))]),
             "Object" => Some(vec![Type::Map {
                 key: Box::new(Type::String),
-                value: Box::new(json),
+                value: Box::new(data),
             }]),
             _ => None,
         };

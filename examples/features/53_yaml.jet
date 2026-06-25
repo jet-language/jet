@@ -1,11 +1,25 @@
-// E2-M9: jet.yaml — parse and render YAML config.
+// core.encoding.yaml — full YAML 1.2 core: block + flow, sequences, typed scalars.
+// Decode a nested document (a list of mappings) into typed structs, then round-trip.
 use core.encoding.yaml as yaml
+
+#[Codable]
+struct Service {
+    name: String
+    port: Int
+}
+#[Codable]
+struct Config {
+    app: String
+    version: Float
+    services: [Service]
+}
+
 fn main() {
-    raw @= "# app config\nname: myapp\nversion: 1.0\nenvironment: production"
-    cfg @= yaml.parse(raw) ?? panic("yaml parse failed")
-    name @= cfg["name"]
-    env @= cfg["environment"]
-    print("{name} ({env})")
-    rendered @= yaml.to_string(cfg)
-    print((rendered.len() > 0))
+    raw @= "app: myapp\nversion: 1.5\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg @= yaml.decode<Config>(raw) ?? panic("bad yaml")
+    print(cfg.app)
+    print(cfg.version)
+    print(cfg.services.len())
+    print(cfg.services[0].name)
+    print(yaml.to_string(cfg))
 }

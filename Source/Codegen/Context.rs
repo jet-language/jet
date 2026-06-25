@@ -93,13 +93,15 @@ pub(crate) struct Cx {
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
 
+// D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `Json`/`Toml`/
+// `Yaml`/`Csv`) is the user-facing face of `jet_std::DataTree`.
 pub(crate) fn is_json_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_JSON || name == "Json"
+    Syntax::is_data_type_name(name)
 }
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
-        n if is_json_type_name(n) => Some("Json"),
+        n if is_json_type_name(n) => Some("DataTree"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
         n if n == Syntax::TYPE_IO_ERROR || n == "IoError" => Some("IoError"),
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
