@@ -27,7 +27,7 @@ use std::path::Path;
 use crate::AST::Func;
 use crate::Diagnostics::Diagnostic;
 
-pub use Interpreter::{DevSink, REPL_FUEL_BUDGET};
+pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
 pub use Value::CtValue;
 
@@ -71,6 +71,9 @@ pub fn evaluate_with_imports(
         fuel: FUEL_BUDGET,
         sink: None,
         core_imports,
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
@@ -98,6 +101,38 @@ pub fn run_main(
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
         core_imports: empty_imports(),
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
+    };
+    let mut scope = HashMap::new();
+    interp.exec_block(&main.body, &mut scope)?;
+    Ok(())
+}
+
+/// D-DBG3: whole-program interpretation under the source-level debugger.
+/// Identical to [`run_main`] (same evaluator, same buffered sink, same I2
+/// bytes) except a [`DebugHook`] is attached: the driver is notified before
+/// every statement and may pause to run its `(jet)` prompt. The driver shows
+/// only Jet lines/locals — it never sees generated Rust. Returns the same
+/// E2202 (fuel) / E0956 (unsupported) stops, plus any abort the driver raises
+/// (e.g. the user typed `quit`, surfaced as E2204).
+pub fn run_main_debug(
+    main: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    debugger: &mut dyn DebugHook,
+) -> Result<(), Diagnostic> {
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: DEV_FUEL_BUDGET,
+        sink: Some(sink),
+        core_imports: empty_imports(),
+        debugger: Some(debugger),
+        depth: 0,
+        cur_func: "main".to_string(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -120,6 +155,9 @@ pub fn run_main_value(
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
         core_imports: empty_imports(),
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -145,6 +183,9 @@ pub fn run_main_with_fuel(
         fuel,
         sink: Some(sink),
         core_imports: empty_imports(),
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -178,6 +219,9 @@ pub fn run_repl_step(
         fuel,
         sink: Some(sink),
         core_imports: empty_imports(),
+        debugger: None,
+        depth: 0,
+        cur_func: "main".to_string(),
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.

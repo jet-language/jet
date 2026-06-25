@@ -105,6 +105,7 @@ usage:
   {bin} env   -- cmd                run a command in the project dev shell, then exit
   {bin} dev   <file.{ext}>          watch and re-run on every save (c77 auto-detects mode)
   {bin} serve <file.{ext}>          watch a resident program; hot-swap type-stable edits (c77)
+  {bin} debug <file.{ext}>          step through a program at the Jet source level (D-DBG3)
   {bin} repl                         start an interactive session (E2-M18)
   {bin} repl  --project <dir>        same, with access to a project's imports
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
@@ -351,7 +352,7 @@ fn main() {
     let known = jet::CLI::is_builtin(cmd)
         || matches!(
             cmd,
-            "lsp" | "install" | "doctor" | "completions" | "man" | "dev" | "serve"
+            "lsp" | "install" | "doctor" | "completions" | "man" | "dev" | "serve" | "debug"
                 | "publish" | "vendor" | "audit" | "sbom"
                 | "emit" | "bench" | "repl" | "schema"
         );
@@ -544,6 +545,25 @@ fn main() {
             let policy = watch_policy_from(&raw, WatchPolicy::Swap);
             run_serve(file, try_anyway, policy, mode);
             return;
+        }
+        "debug" => {
+            // D-DBG1/D-DBG3: `jet debug <file>` — the source-level step
+            // debugger. Loads + checks the file, then steps it in the dev
+            // interpreter with an interactive `(jet)` prompt. I2: every line,
+            // frame, and value shown is in Jet terms (never generated Rust).
+            let file = match args.get(1) {
+                Some(f) => f.as_str(),
+                None => {
+                    eprintln!(
+                        "error: `jet debug` needs a file to debug: {} debug <file.{}>",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT
+                    );
+                    exit(ExitCodes::USAGE);
+                }
+            };
+            let resolved = resolve_source_path(file);
+            exit(jet::Debug::run_debug(&resolved));
         }
         "store" => {
             let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");

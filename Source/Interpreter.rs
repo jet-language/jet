@@ -106,6 +106,25 @@ fn boundary_diag(b: &Boundary) -> Diagnostic {
     )
 }
 
+/// D-DBG3: the debugger's boundary scan. The `jet debug` source-level stepper
+/// drives this same dev interpreter, so it declines the same features — but
+/// with **E2203** (debug-specific) so the message names `jet debug` and points
+/// at the real build (the native-backend follow-on, D-DBG3 step 2). Returns
+/// `None` when the whole program is steppable.
+pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
+    boundary_scan(bundle).map(|b| {
+        Diagnostic::error(
+            "E2203",
+            format!("`jet debug` can't step through this program yet — it {}", b.feature),
+            "`jet debug` steps your program in the same interpreter `jet dev` uses; this feature touches threads, foreign code, raw memory, or the outside world, which the source-level stepper doesn't cover yet"
+                .to_string(),
+            "run `jet build` then the binary, or `jet run <file>` to compile and run it; remove the unsupported feature to step the rest, or wait for the native-debugger milestone (D-DBG3 step 2)"
+                .to_string(),
+            b.span,
+        )
+    })
+}
+
 /// Scan the whole bundle for the first feature the interpreter can't run
 /// (D-DEV1). Pure walk over the typed AST — no execution.
 fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {

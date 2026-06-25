@@ -68,6 +68,26 @@ impl Default for DevSink {
     }
 }
 
+/// D-DBG3: a source-level debugger driver. The interpreter calls
+/// [`DebugHook::at_stmt`] before executing each statement, passing the
+/// statement's source span, the current call depth, and the current local
+/// scope. The driver decides whether to pause (and run its `(jet)` prompt);
+/// it never touches generated Rust — every value it shows comes through the
+/// interpreter's own `CtValue::jet_show()` path (I2). `None` outside `jet debug`.
+pub trait DebugHook {
+    /// Called before a statement runs. `func` is the executing function name,
+    /// `depth` the user-function call depth (0 = `main`), `scope` the live
+    /// locals. The driver may print, prompt, and block; it returns when the
+    /// user resumes. An `Err` aborts the run (e.g. the user typed `quit`).
+    fn at_stmt(
+        &mut self,
+        func: &str,
+        depth: usize,
+        span: Span,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic>;
+}
+
 pub(super) struct Interp<'a> {
     pub(super) funcs: &'a HashMap<String, &'a Func>,
     pub(super) base_dir: &'a Path,
@@ -79,6 +99,18 @@ pub(super) struct Interp<'a> {
     /// Enables the comptime interpreter to evaluate whitelisted pure Core calls.
     /// Empty for contexts that have no `use` declarations (e.g. module-level consts).
     pub(super) core_imports: &'a HashMap<String, String>,
+    /// D-DBG3: `Some` under `jet debug` — the source-level debugger driver,
+    /// notified before every statement. `None` for every non-debug path
+    /// (comptime, `jet dev`, `jet repl`), so those keep their exact behavior.
+    pub(super) debugger: Option<&'a mut dyn DebugHook>,
+    /// D-DBG3: user-function call depth (0 = `main`/top level), threaded so the
+    /// debugger can implement `next` (step over a call) and `finish` (run to the
+    /// caller). Incremented around a user-function body in `eval_call`.
+    pub(super) depth: usize,
+    /// D-DBG3: the name of the function whose body is currently executing, for
+    /// the breakpoint banner (`in main()`). Top level / `main` until a call
+    /// swaps it.
+    pub(super) cur_func: String,
 }
 
 impl<'a> Interp<'a> {
@@ -196,6 +228,16 @@ impl<'a> Interp<'a> {
         stmt: &Stmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
+        // D-DBG3: notify the source-level debugger before each statement runs.
+        // The driver may pause, run its `(jet)` prompt, and block here; it sees
+        // only Jet line/scope (I2). Temporarily detach the hook so a re-entrant
+        // call (none today) can't alias the borrow.
+        if let Some(dbg) = self.debugger.take() {
+            let span = stmt.span();
+            let res = dbg.at_stmt(&self.cur_func, self.depth, span, scope);
+            self.debugger = Some(dbg);
+            res?;
+        }
         match stmt {
             Stmt::Expr(e) => {
                 self.eval(e, scope)?;

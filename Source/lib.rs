@@ -19,6 +19,7 @@ pub mod CLI;
 pub mod Codegen;
 pub mod Collections;
 pub mod Comptime;
+pub mod Debug;
 pub mod Diagnostics;
 pub mod Doctest;
 pub mod Doctor;

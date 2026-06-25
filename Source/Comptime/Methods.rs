@@ -165,7 +165,15 @@ impl<'a> Interp<'a> {
             let v = self.eval(&a.expr, scope)?;
             frame.insert(p.name.clone(), v);
         }
+        // D-DBG3: enter a user-function frame — bump the debugger's call depth
+        // and current-function name so `next`/`finish` and the `in fn()` banner
+        // track correctly, then restore both on the way out (every path).
+        let prev_depth = self.depth;
+        let prev_func = std::mem::replace(&mut self.cur_func, name.to_string());
+        self.depth = prev_depth + 1;
         let result = self.exec_block(&func.body, &mut frame);
+        self.depth = prev_depth;
+        self.cur_func = prev_func;
         match result {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(CtValue::Unit),

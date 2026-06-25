@@ -1182,6 +1182,28 @@ pub const CMD_SCHEMA: &str = "schema"; // D-MIGRATE2C
 pub const SCHEMA_VERB_STATUS: &str = "status"; // D-MIGRATE2C
 pub const SCHEMA_VERB_SQUASH: &str = "squash"; // D-MIGRATE2C
 
+/// D-DBG1 (ratified 2026-06-19 = A): `jet debug <file>` — the dedicated
+/// source-level debugger entry verb, parallel to `jet run`/`jet test`. The
+/// editor launches the same command.
+pub const CMD_DEBUG: &str = "debug"; // D-DBG1
+
+/// D-DBG3 (ratified 2026-06-24 = A): the in-session `jet debug` command
+/// surface. The prompt is `(jet)`; the step verbs are lldb-familiar with
+/// single-letter aliases. Only Jet frames/lines/safe-locals are shown by
+/// default (I2; D-DBG2 `--raw-frames` is the expert carve-out).
+pub const DBG_PROMPT: &str = "(jet)"; // D-DBG3
+pub const DBG_STEP: &str = "step"; // D-DBG3 (alias `s`)
+pub const DBG_NEXT: &str = "next"; // D-DBG3 (alias `n`)
+pub const DBG_CONTINUE: &str = "continue"; // D-DBG3 (alias `c`)
+pub const DBG_FINISH: &str = "finish"; // D-DBG3 (alias `f`)
+pub const DBG_BREAK: &str = "break"; // D-DBG3 (alias `b`): set a line breakpoint
+pub const DBG_LIST: &str = "list"; // D-DBG3 (alias `l`): show source around `here`
+pub const DBG_PRINT: &str = "print"; // D-DBG3 (alias `p`): show one local's value
+pub const DBG_LOCALS: &str = "locals"; // D-DBG3: dump all locals in the frame
+pub const DBG_BACKTRACE: &str = "backtrace"; // D-DBG3 (alias `bt`): the Jet call stack
+pub const DBG_HELP: &str = "help"; // D-DBG3 (alias `h`): list the verbs
+pub const DBG_QUIT: &str = "quit"; // D-DBG3 (alias `q`): end the session (E2204)
+
 /// D-MIGRATE1 (ratified 2026-06-22): subdirectory under the project `.jet/`
 /// managed folder where schema snapshots are stored. Full path is
 /// `<project_root>/.jet/cache/schema/<TypeName>.snapshot`.

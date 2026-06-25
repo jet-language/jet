@@ -1477,6 +1477,39 @@ pub enum Stmt {
     },
 }
 
+impl Stmt {
+    /// The source span this statement occupies, used by the source-level
+    /// debugger (D-DBG3) to resolve a Jet line for a breakpoint or `<- here`
+    /// caret. For statements that carry no explicit `span` field, this falls
+    /// back to the span of the expression/sub-part that anchors them.
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Expr(e) => e.span(),
+            Stmt::Val(b) => b.name_span,
+            Stmt::Assign { target, .. } => target.span(),
+            Stmt::Return(_, span)
+            | Stmt::Break(span)
+            | Stmt::Continue(span)
+            | Stmt::BreakLabel(_, span)
+            | Stmt::ContinueLabel(_, span)
+            | Stmt::While { span, .. }
+            | Stmt::For { span, .. }
+            | Stmt::Switch { span, .. }
+            | Stmt::Loop { span, .. }
+            | Stmt::Unsafe { span, .. }
+            | Stmt::Region { span, .. }
+            | Stmt::Caps { span, .. }
+            | Stmt::Grant { span, .. }
+            | Stmt::ComptimeIf { span, .. }
+            | Stmt::ContextBlock { span, .. }
+            | Stmt::Live { span, .. }
+            | Stmt::AssumeDet { span, .. }
+            | Stmt::Transact { span, .. } => *span,
+            Stmt::If(ifs) => ifs.cond.span(),
+        }
+    }
+}
+
 /// Assignment target: local name or indexed collection slot (M5).
 #[derive(Debug, Clone)]
 pub enum LValue {
@@ -1502,6 +1535,16 @@ pub enum LValue {
         field: String,
         span: Span,
     },
+}
+
+impl LValue {
+    /// The source span of an assignment target (for the D-DBG3 debugger line map).
+    pub fn span(&self) -> Span {
+        match self {
+            LValue::Local { name_span, .. } => *name_span,
+            LValue::Index { span, .. } | LValue::Field { span, .. } => *span,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

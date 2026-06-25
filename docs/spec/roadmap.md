@@ -83,6 +83,14 @@ Moved to Epoch 3 (owner, 2026-06-18): DAP step-through / full source-level
 debugger — out of compiler scope for the E2 GA bar. `tests/observe.rs` keeps the
 source-map markers and rich panics as the pre-cursor.
 
+**Debugger step 1 SHIPPED (2026-06-25, c52, D-DBG3):** `jet debug <file>` is a
+source-level step debugger over the existing tree-walking interpreter (the same
+engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
+`step`/`next`/`continue`/`finish`, `break`/`print`/`locals`/`backtrace`, `<- here`
+caret, all in Jet terms (I2). It declines unsteppable native features with E2203,
+pointing at the real build. Step 2 — the native DAP/lldb backend for the full
+native feature set + editor wiring — remains (see `tools/Tower/docs/sidequests/dap-debugger.md`).
+
 **E2-M18 — REPL** verified 2026-06-17. `jet repl` interactive
 session; 16 transcript tests green.
 

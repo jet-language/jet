@@ -1,9 +1,37 @@
 # DAP step-through debugger + adoption docs
 
-**Status:** Draft plan — needs owner review (2026-06-19)
+**Status:** Step 1 SHIPPED (2026-06-25) — interpreter-backed source-level
+debugger; step 2 (native DAP/lldb backend) remains.
 **Card:** c52
 
-## What already shipped
+## Step 1 — SHIPPED (2026-06-25): interpreter-backed source-level debugger
+
+`jet debug <file>` (D-DBG1=A) ships now as a **source-level step debugger over
+the existing tree-walking interpreter** (`Source/Comptime/Interpreter.rs`) — the
+same engine `jet dev`/`jet repl` use, not lldb. This delivers the full D-DBG3
+in-session surface (the ratified, owner-facing part) end to end:
+
+- A `DebugHook` (`Source/Comptime/Interpreter.rs`) is called before every
+  statement, threading the user-function call `depth` and current function name.
+- The driver (`Source/Debug.rs`) runs the `(jet)` prompt: `step`/`next`/
+  `continue`/`finish` (+ `s`/`n`/`c`/`f`), `break N`, `print X`, `locals`,
+  `backtrace`, `list`, `help`, `quit`. Each stop prints
+  `breakpoint hit file:line in fn()`, a source window with the `<- here` caret,
+  and the one-line `locals:` dump.
+- Every value is rendered via `CtValue::jet_show()` — Jet terms, never generated
+  Rust (I2). Std-only, no DAP/JSON crate (I6).
+- It declines the same features `jet dev` can't interpret (FFI/tasks/`#Unsafe`/
+  native std) with **E2203**, pointing at `jet build`/`jet run`; a mid-run
+  `quit` surfaces **E2204**.
+- Example `examples/features/118_debug.jet`; tests `tests/debug.rs`.
+
+**Step 2 (still open):** the native **DAP/lldb backend** below — step-through of
+the *full* native feature set (the cases E2203 declines), the D-DBG2
+`--raw-frames` expert view, and editor DAP wiring. Its command surface is
+already ratified (D-DBG3) and unchanged; only the native backend remains. No new
+owner decision is required to start it.
+
+## What already shipped (pre-existing observability foundation)
 
 - **Source maps.** Codegen emits `// jet:source-map source=<file>` markers at the
   top of every generated Rust file (`Source/Codegen/mod.rs:98,271`). Panic reports

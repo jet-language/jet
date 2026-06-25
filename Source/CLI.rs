@@ -39,6 +39,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "build", summary: "compile to a native binary in ./build/", headline: false },
     CommandSpec { name: "dev", summary: "watch a file and re-run it on every save", headline: false },
     CommandSpec { name: "serve", summary: "watch a resident program and hot-swap type-stable edits", headline: false },
+    CommandSpec { name: "debug", summary: "step through a program at the Jet source level (D-DBG3)", headline: false },
     CommandSpec { name: "repl", summary: "interactive REPL — try Jet expressions without a file", headline: false },
     CommandSpec { name: "new", summary: "create a new project folder", headline: false },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", headline: false },

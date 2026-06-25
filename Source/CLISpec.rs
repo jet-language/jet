@@ -103,6 +103,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec { name: "bench", summary: "benchmark a Jet program (D-TOOL5)", flags: &["json"], arg: Arg::File },
     CommandSpec { name: "new", summary: "create a new project folder", flags: &["annotated"], arg: Arg::Name },
     CommandSpec { name: "dev", summary: "enter the project shell (jetpack enter)", flags: &[], arg: Arg::None },
+    CommandSpec { name: "debug", summary: "step through a program at the Jet source level (D-DBG3)", flags: &[], arg: Arg::File },
     CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", flags: &["check"], arg: Arg::Path },
     CommandSpec { name: "fix", summary: "preview auto-fixable diagnostics (use --write to apply)", flags: &["write", "apply"], arg: Arg::Path },
     CommandSpec { name: "bind", summary: "generate a C binding cache from a header", flags: &["pkg", "out"], arg: Arg::Path },
