@@ -46,7 +46,7 @@
       "type": "task",
       "title": "Package build-from-source + M9 wave-2 (regex/archive/db)",
       "body": "E2 loose end → E3. jetpack step to compile a dependency from its Jet source (provider.rs realize()); wave-2 rings ship on top. Plan: tools/Tower/docs/plans/epoch-3/package-build-from-source.md.",
-      "stage": "building",
+      "stage": "backlog",
       "plan": "package-build-from-source",
       "notes": [
         {
@@ -75,7 +75,7 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T16:21:03.080Z",
       "priority": "P2",
       "workOrder": null,
       "decisions": []
@@ -164,7 +164,7 @@
       "type": "idea",
       "title": "Scoped transactions (#transact rollback semantics)",
       "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "building",
+      "stage": "done",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -204,7 +204,7 @@
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T16:37:09.228Z",
       "decisions": [
         "D-ROLLBACK-TRAIT",
         "D-ASSOC-NOW"
@@ -297,7 +297,7 @@
       "type": "task",
       "title": "M12.2 registry + jet publish UX",
       "body": "jet publish command shape + semver/version-immutability + resolver default. Rides c50/c56 infra. Saoirse, Amara.",
-      "stage": "building",
+      "stage": "backlog",
       "plan": "publish-registry-ux",
       "notes": [
         {
@@ -310,7 +310,7 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T16:20:58.213Z",
       "decisions": [],
       "priority": "P2",
       "workOrder": null
@@ -320,7 +320,7 @@
       "type": "task",
       "title": "Replace hand-rolled parsers where correctness matters",
       "body": "Audit finding: the zero-dependency rule has pushed correctness-sensitive protocol/config/version parsing into hand-written subsets. Decide where I6 should bend, or explicitly narrow the feature contracts. Evidence: Source/LSP/JSON.rs minimal JSON; Source/Jetpack/ManifestTOML.rs TOML subset; Source/Publish/SemVer.rs partial SemVer/ranges; Source/CBind.rs focused C prototype parser; Cargo.toml enforces std-only compiler deps.",
-      "stage": "building",
+      "stage": "done",
       "plan": "c111-parser-consolidation",
       "notes": [
         {
@@ -345,12 +345,53 @@
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-06-25",
+      "updated": "2026-06-25T16:21:24.606Z",
       "priority": "P2",
       "workOrder": null,
       "decisions": [
         "D-ASSOC-NOW"
       ]
+    },
+    {
+      "id": "c152",
+      "type": "task",
+      "title": "Complete core.encoding: full TOML & YAML adapters (serde parity)",
+      "body": "TOML and YAML are the last lossy adapters in core.encoding — flat Map<String,String> subsets that ignore [table] headers / nesting, while json+csv are full serde-equivalents. Make them serde-complete: rich DataTree parse / decode<T> / encode. Reuse Source/Jetpack/TOML.rs (full TOML 1.0 parser, written for D-PARSE-1) for TOML; write a full std-only YAML parser (I6). The derive engine + DataTree decode path are already full (JSON proves nested typed decode) — only these two adapters feed a flat tree. Plan: sidequests/serde-model.md (COMPLETION section) — files, build order, done criteria all there.",
+      "stage": "building",
+      "plan": "serde-model",
+      "notes": [
+        {
+          "t": "[handoff 2026-06-25] Created on owner permission. The encoding library is the serde equivalent; json+csv are full, toml+yaml are flat Map<String,String> subsets (Source/Prelude/CoreLib.rs jet_ring_toml_parse / jet_ring_yaml_parse). Cold-handoff plan: sidequests/serde-model.md COMPLETION section. GATES: D-ENC-DYN1 (dynamic parse return type) + D-ENC-YAML1 (YAML scope) — both queued in decision-ballots.md with recommendations. Once those are ratified the card is 100% buildable with no further decisions; ~90% (the TOML/YAML engines + typed decode<T>) is buildable immediately since decode<T> surface is already ratified (D-SERDE6).",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25T00:00:00Z",
+      "updated": "2026-06-25",
+      "priority": "P2",
+      "workOrder": null,
+      "decisions": [
+        "D-ENC-DYN1",
+        "D-ENC-YAML1"
+      ]
+    },
+    {
+      "id": "c153",
+      "type": "task",
+      "title": "Full YAML 1.2: explicit tags + advanced features (post-c152)",
+      "body": "Deferred tail of D-ENC-YAML1 (owner answered A = core + anchors/aliases + documents for c152; full 1.2 parked here). Extend the std-only YAML parser built in c152 to the rest of YAML 1.2: explicit/custom tags (!!str, !MyType), and any remaining 1.2-core corners not needed for serialized config. Frozen until the core YAML adapter (c152) ships and a real need for tags appears. Plan: sidequests/serde-model.md (COMPLETION section, YAML scope).",
+      "stage": "frozen",
+      "plan": "serde-model",
+      "notes": [
+        {
+          "t": "[handoff 2026-06-25] Created per owner ballot comment on D-ENC-YAML1 ('Add C, full yaml 1.2 as a card in the frozen section to be worked later'). Depends on c152 (core YAML adapter). Frozen.",
+          "at": "2026-06-25"
+        }
+      ],
+      "created": "2026-06-25T00:00:00Z",
+      "updated": "2026-06-25",
+      "priority": "P3",
+      "workOrder": null,
+      "decisions": []
     },
     {
       "id": "c113",
@@ -905,6 +946,14 @@
       "status": "open",
       "answer": "",
       "created": "2026-06-25T10:10:48.983Z"
+    },
+    {
+      "id": "cmqtqd4nf71k",
+      "decisionId": "D-ENC-DYN1",
+      "text": "Can we keep it consistent, like to have json, toml, yaml, and csv all share the same data value?",
+      "status": "answered",
+      "answer": "Yes — and it's the recommended path. The D-ENC-DYN1 card now has Option A+ (one shared `Data` value for ALL four formats: json, toml, yaml, csv) as the recommendation. The internal `DataTree` is already the one universal model every format encodes/decodes through (that IS the serde architecture), so A+ just exposes it as the single dynamic value every `parse` returns. One vocabulary, one walker, no lossy surface. The only real cost: `json.parse` today returns the shipped `JSON` enum — A+ replaces it with `Data` as a clean break (no alias), migrating ~4 examples + the enum rename; cheapest done now, pre-1.0 (same spirit as core.json→core.encoding). Pick A+ on the ballot to lock it; there's a follow-up naming Owner Q (`Data` vs `Value`/`Doc`/`Node`, rec `Data`).",
+      "created": "2026-06-25T16:42:32.523Z"
     }
   ],
   "ingest": []

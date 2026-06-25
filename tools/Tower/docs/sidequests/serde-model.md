@@ -304,9 +304,12 @@ Then map `TOML::Value` → `DataTree` (`Integer→Int`, `Float→Float`,
   - scalars typed by the YAML core schema (`null/~`, `true/false`, int, float,
     str), single/double-quoted + plain + block scalars (`|`, `>`),
   - comments, `---` document markers.
-  - **Decide (D-ENC-YAML1):** anchors/aliases (`&a`/`*a`), explicit tags
-    (`!!str`), multi-document streams. Recommend: support anchors/aliases +
-    document markers; defer custom tags. YAML is the biggest single piece here.
+  - **D-ENC-YAML1 = A (owner, 2026-06-25):** support anchors/aliases (`&a`/`*a`)
+    + `---` document markers; **defer explicit/custom tags (`!!str`, `!MyType`)**
+    to a separate frozen card (**c153**, full YAML 1.2). So c152's YAML scope is:
+    block+flow maps/sequences, typed core scalars, block scalars (`|`/`>`),
+    comments, documents, anchors/aliases — NOT explicit tags. YAML is the biggest
+    single piece here. (Ratification pending the owner's "go" on the ballot batch.)
 
 ## Owner decision that gates the dynamic surface
 

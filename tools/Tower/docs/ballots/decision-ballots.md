@@ -60,39 +60,61 @@ tomllib.loads(text)   # -> nested dict / list / int / str, never flat
 
 **Tradeoffs:**
 
-| Option | Dynamic vocab | New user-facing surface | Cross-format consistency | Keeps shipped `JSON` enum |
+| Option | Dynamic vocab | Cross-format consistency | Migrates shipped `JSON` enum | CSV |
 |---|---|---|---|---|
-| A — one shared `Data` value | one (`Data`) for toml/yaml | one type | high (same walker everywhere) | yes |
-| B — per-format `Toml`/`Yaml` enums | three (`JSON`/`Toml`/`Yaml`) | two new enums | low (three near-identical walkers) | yes |
-| C — keep flat `Map`, only `decode<T>` rich | none | none | n/a — dynamic stays lossy | yes |
+| A+ — one `Data` for **all four** (rec) | **one** (`Data`) everywhere | **highest** — identical walker for json/toml/yaml/csv | yes (clean break, pre-1.0) | `Data.Array` of records |
+| A — shared `Data` for toml/yaml only | two (`JSON` + `Data`) | high for config; json is separate | no | rows `[[String]]` |
+| B — per-format `Toml`/`Yaml` enums | three (`JSON`/`Toml`/`Yaml`) | low (near-identical walkers) | no | rows |
+| C — keep flat `Map`, only `decode<T>` rich | none | n/a — dynamic stays lossy | no | rows |
 
-- **Option A — one shared dynamic `Data` value (recommended).** TOML and YAML
-  `parse` return `Data` (the user-facing face of the internal `DataTree`):
-  `Data.Object/.Array/.Int/.Float/.Text/.Bool/.Null`. One vocabulary, one set of
-  accessors, every config format reads the same way; `json.parse` keeps its
-  shipped, beloved `JSON` enum.
+- **Option A+ — ONE `Data` value across every format (recommended; this is the
+  owner's "keep it consistent" instinct).** `json.parse`, `toml.parse`,
+  `yaml.parse`, and `csv.parse` all return the same dynamic value `Data`
+  (`Data.Object/.Array/.Int/.Float/.Text/.Bool/.Null`) — the user-facing face of
+  the internal `DataTree` that *already* underpins every format's typed
+  encode/decode. One vocabulary, one walker, one set of accessors for the whole
+  library. CSV parses to a shallow `Data.Array` of records (array-of-arrays, or
+  array-of-objects when header-mapped).
   ```jet
-  cfg @= toml.parse(text)?
-  if cfg.get("server")?.get("ports")?[0] == Data.Int(p) { print(p) }   // 80
+  cfg  @= toml.parse(text)?
+  doc  @= json.parse(text)?
+  rows @= csv.parse(text)?
+  // identical shape everywhere:
+  if cfg.get("server")?.get("ports")?[0] == Data.Int(p) { print(p) }
+  if doc.get("stars")? == Data.Int(n) { print(n) }
   ```
+  **Cost (be eyes-open):** `json.parse` today returns the shipped `JSON` enum
+  (`Number(f64)`, `Text`, `Object`, …), used by examples 30/73/108 + the jsonfmt
+  showcase and the pattern users learned. A+ replaces it with `Data` — a *clean
+  break* (no alias), so those examples migrate (`JSON.Text`→`Data.Text`;
+  `Number(n)`→`Data.Int(n)`/`.Float(n)`, since `Data` splits int/float like TOML).
+  Bounded (~4 examples + the enum rename), and **cheapest done now, pre-1.0** —
+  the same clean-break spirit as `core.json`→`core.encoding`. Waiting only grows
+  the migration as more code adopts `JSON`.
+- **Option A — shared `Data` for toml/yaml; json keeps its `JSON` enum.** Zero
+  migration of shipped JSON code, but you permanently carry two dynamic
+  vocabularies (`JSON` + `Data`) — less consistent, which is what the owner is
+  pushing against.
 - **Option B — a dynamic enum per format (`Toml`, `Yaml`).** Mirrors `JSON`
-  exactly, format by format. Maximally familiar, but three near-identical value
-  types and three walkers to learn and maintain.
-  ```jet
-  cfg @= toml.parse(text)?           // -> Toml enum
-  if cfg == Toml.Table(t) { … }
-  ```
-- **Option C — leave `parse` flat; make only `decode<T>` full.** Smallest change;
-  the typed path (`toml.decode<Config>(text)`) becomes fully nested/typed, but
-  the untyped `parse` stays a flat string map. **Rejected:** it keeps a
-  permanently lossy public surface and contradicts "serde-complete."
+  format-by-format. Three near-identical value types and walkers to maintain.
+- **Option C — leave `parse` flat; make only `decode<T>` full.** **Rejected:**
+  keeps a permanently lossy public surface, contradicts "serde-complete."
 
-**Recommendation: A** — one shared `Data` dynamic value for the config formats;
-JSON keeps its own enum. Fewest concepts, one walker, no lossy surface left.
+**Recommendation: A+** — one `Data` value for json, toml, yaml, and csv. Maximum
+consistency (one tree, one walker), no lossy surface, and the `JSON`→`Data`
+migration is bounded and cheapest pre-1.0. This directly answers the owner's
+question: yes, all four can and should share one data value.
 
-**Owner Q — naming.** If A: is `Data` the right name for the shared dynamic
-value, or do you want something else (`Value`, `Doc`, `Node`)? `Data` pairs with
-the internal `DataTree`; `Value` collides with nothing but is generic.
+**Owner Q&A — "Can json/toml/yaml/csv all share the same data value?"** Yes —
+that's Option A+, now the recommendation. The internal `DataTree` is already the
+one universal model all formats encode/decode through (that *is* the serde
+architecture: one value model, every format an adapter); A+ simply exposes it as
+the single dynamic `Data` type every `parse` returns. The only real cost is
+migrating JSON's shipped `JSON` enum to `Data` — a bounded, pre-1.0 clean break
+detailed above.
+
+**Owner Q — naming.** What is the one shared value called? `Data` (pairs with the
+internal `DataTree`), or `Value` / `Doc` / `Node`? Recommend `Data`.
 
 ---
 
