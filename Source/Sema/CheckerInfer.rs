@@ -1244,6 +1244,7 @@ impl<'a> Checker<'a> {
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
                     task_lint_span: None,
+                    single_use_span: None,
                     task_has_view_capture: false,
                 },
             );
@@ -3508,6 +3509,24 @@ impl<'a> Checker<'a> {
                         type_fix_hint(&param_ty, &arg_ty),
                         Some(arg.expr.span()),
                     ));
+                }
+            }
+
+            // D-LIN1 / E0142: a `#SingleUse` value may only be moved/consumed. If
+            // it reaches a parameter that does not take ownership (`^`), the call
+            // would borrow it (`&`/`view`/read) or copy it (an implicit clone) —
+            // both are forbidden, since the value has exactly one use to give.
+            if !matches!(param_conv, AccessConvention::Move) {
+                if let Expr::Ident(name, span) = &arg.expr {
+                    let is_single_use = self
+                        .lookup(name)
+                        .map(|info| info.single_use_span.is_some())
+                        .unwrap_or(false);
+                    if is_single_use {
+                        self.diags
+                            .push(e0142_aliased(name, &call.name, *span));
+                        continue;
+                    }
                 }
             }
 

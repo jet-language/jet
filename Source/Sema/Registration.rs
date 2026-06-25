@@ -32,6 +32,7 @@ impl<'a> Checker<'a> {
                             decl_loop_depth: 0,
                             sendable: true,
                             task_lint_span: None,
+                            single_use_span: None,
                             task_has_view_capture: false,
                         },
                     );
@@ -42,6 +43,12 @@ impl<'a> Checker<'a> {
                 self.diags.push(already_defined(&p.name, p.name_span));
             } else {
                 let pty = self.resolve_type(p.ty.clone());
+                // D-LIN1: a parameter never carries the consume duty. Passing a
+                // `#SingleUse` value to a `^` parameter IS its terminal consumption
+                // (spec: "passed to a take parameter … or returned"), so the `^`
+                // recipient is where linearity is satisfied — making the param
+                // re-consume would be infinite regress. Borrow/read params can't
+                // own it at all. So `single_use_span` stays `None` for every param.
                 self.scopes.last_mut().unwrap().insert(
                     p.name.clone(),
                     LocalInfo {
@@ -51,6 +58,7 @@ impl<'a> Checker<'a> {
                         decl_loop_depth: 0,
                         sendable: true,
                         task_lint_span: None,
+                        single_use_span: None,
                         task_has_view_capture: false,
                     },
                 );
@@ -58,6 +66,9 @@ impl<'a> Checker<'a> {
         }
         self.check_block(&mut f.body, false);
         self.lint_unjoined_tasks_in_current_scope();
+        // D-LIN1: the function body's own scope (parameters + top-level locals) is
+        // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
+        self.check_single_use_consumed_in_current_scope();
         if f.return_type.is_some() && !block_definitely_returns(&f.body) {
             let rt = f.return_type.clone().unwrap();
             self.diags.push(Diagnostic::error(
@@ -997,6 +1008,7 @@ pub(crate) fn register_struct(
             name_span: s.name_span,
             fields,
             methods: HashMap::new(),
+            single_use: s.is_single_use,
         },
     );
     legacy.insert(
@@ -1097,6 +1109,7 @@ pub(crate) fn register_enum(
             variants,
             variant_order,
             methods: HashMap::new(),
+            single_use: e.is_single_use,
         },
     );
 }

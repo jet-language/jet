@@ -419,6 +419,8 @@ mod tests {
             derives: vec![],
             is_published_schema: true,
             published_schema_span: Some(zero()),
+            is_single_use: false,
+            single_use_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),

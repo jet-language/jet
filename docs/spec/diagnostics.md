@@ -158,6 +158,9 @@ before continuing.
 | E0127 | sema  | arithmetic on a distinct type without `@Numeric` (D-DIST3) |
 | E0128 | sema  | implicit coercion between a distinct type and its base (D-DIST3) |
 | E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
+| E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |
+| E0141 | sema  | `#SingleUse` value consumed on only one `if` branch (D-LIN1) |
+| E0142 | sema  | `#SingleUse` value lent/shared instead of moved (D-LIN1) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`~`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |

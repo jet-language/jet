@@ -309,6 +309,13 @@ impl<'a> Parser<'a> {
                         self.bump(); // consume `pub`
                         self.published_schema_struct_def(true).map(Item::Struct)
                     }
+                    // D-LIN1: `pub #SingleUse struct|enum Name { … }`
+                    TokKind::Hash if {
+                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
+                    } => {
+                        self.bump(); // consume `pub`
+                        self.single_use_type_def(true)
+                    }
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
@@ -366,6 +373,10 @@ impl<'a> Parser<'a> {
                 // D-MIGRATE1: `#PublishedSchema struct Name { … }`
                 TokKind::Hash if self.at_published_schema_struct() => {
                     self.published_schema_struct_def(false).map(Item::Struct)
+                }
+                // D-LIN1: `#SingleUse struct|enum Name { … }`
+                TokKind::Hash if self.at_single_use_type() => {
+                    self.single_use_type_def(false)
                 }
                 // D-MIGRATE1: `migration TypeName { rename a -> b }`
                 TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
@@ -1267,6 +1278,8 @@ impl<'a> Parser<'a> {
             derives,
             is_published_schema: false,
             published_schema_span: None,
+            is_single_use: false,
+            single_use_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),
@@ -1282,6 +1295,13 @@ impl<'a> Parser<'a> {
         if is_pub {
             self.bump();
         }
+        self.enum_def_after_pub(is_pub)
+    }
+
+    /// Parse `enum Name { … }` given that pub/is_pub was already handled. Factors
+    /// out the body of `enum_def` (mirrors `struct_def_after_pub`) so the
+    /// `#SingleUse enum` path can reuse it.
+    fn enum_def_after_pub(&mut self, is_pub: bool) -> Result<EnumDef, Diagnostic> {
         self.expect_kw(TokKind::KwEnum, "to start an enum definition")?;
         let (name, name_span) = self.expect_ident("after `enum`")?;
         let type_params = self.parse_opt_type_params()?;
@@ -1326,6 +1346,8 @@ impl<'a> Parser<'a> {
             methods,
             trait_impls,
             derives,
+            is_single_use: false,
+            single_use_span: None,
             serde_markers: Vec::new(),
         })
     }
@@ -2144,6 +2166,70 @@ impl<'a> Parser<'a> {
         false
     }
 
+    /// D-LIN1 (ratified 2026-06-21): true when `#SingleUse struct` / `#SingleUse enum`
+    /// (with an optional newline `Semi` after the marker) is at the cursor. The
+    /// `pub #SingleUse …` case is handled inline in the `KwPub` dispatch arm.
+    fn at_single_use_type(&self) -> bool {
+        if !matches!(&self.peek().kind, TokKind::Hash) {
+            return false;
+        }
+        if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE) {
+            return false;
+        }
+        let peek3 = &self.peek3().kind;
+        if matches!(peek3, TokKind::KwStruct | TokKind::KwEnum | TokKind::KwPub) {
+            return true;
+        }
+        if matches!(peek3, TokKind::Semi) {
+            let peek4 = &self.toks[(self.pos + 3).min(self.toks.len() - 1)].kind;
+            return matches!(peek4, TokKind::KwStruct | TokKind::KwEnum | TokKind::KwPub);
+        }
+        false
+    }
+
+    /// D-LIN1 (ratified 2026-06-21): parse `#SingleUse [pub] (struct|enum) Name { … }`.
+    /// Sets the `is_single_use` flag on the produced struct/enum so sema can enforce
+    /// must-consume-once (E0140/E0141) and no-alias (E0142). The marker erases in
+    /// codegen (I3).
+    fn single_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
+        let attr_start = self.peek().span;
+        self.bump(); // consume `#`
+        let (attr, attr_name_span) = self.expect_ident("after `#`")?;
+        debug_assert_eq!(attr, Syntax::ATTR_SINGLE_USE);
+        let attr_span = Span::new(attr_start.start, attr_name_span.end);
+        // The lexer may insert a `Semi` after the marker identifier when the type
+        // keyword is on the next line. Consume it so the next token is the keyword.
+        while matches!(&self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
+        // optional `pub` after the marker (the `pub #SingleUse` form already ate it)
+        let want_pub = outer_is_pub || matches!(&self.peek().kind, TokKind::KwPub);
+        if !outer_is_pub && matches!(&self.peek().kind, TokKind::KwPub) {
+            self.bump();
+        }
+        match self.peek().kind {
+            TokKind::KwStruct => {
+                let mut def = self.struct_def_after_pub(want_pub)?;
+                def.is_single_use = true;
+                def.single_use_span = Some(attr_span);
+                Ok(crate::AST::Item::Struct(def))
+            }
+            TokKind::KwEnum => {
+                let mut def = self.enum_def_after_pub(want_pub)?;
+                def.is_single_use = true;
+                def.single_use_span = Some(attr_span);
+                Ok(crate::AST::Item::Enum(def))
+            }
+            _ => Err(Diagnostic::error(
+                "E0003",
+                "`#SingleUse` marks a `struct` or `enum`".to_string(),
+                "the marker says values of this type must be used exactly once — only a type can carry that rule".to_string(),
+                "write `#SingleUse struct Name { … }` or `#SingleUse enum Name { … }`".to_string(),
+                Some(attr_span),
+            )),
+        }
+    }
+
     /// D-MIGRATE1: true when `migration <TypeName> {` is at the cursor (contextual).
     fn at_migration_block(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MIGRATION)
@@ -2238,6 +2324,8 @@ impl<'a> Parser<'a> {
             derives,
             is_published_schema: false,
             published_schema_span: None,
+            is_single_use: false,
+            single_use_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),

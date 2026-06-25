@@ -1,0 +1,18 @@
+// D-LIN1 / E0142: a `#SingleUse` value can't be lent (read/`&`) — only moved.
+#SingleUse struct Lock {
+    resource: String,
+}
+fn acquire(resource: String) -> Lock {
+    return Lock { resource: resource }
+}
+fn peek(lock: Lock) {
+    print("peeking {lock.resource}")
+}
+fn release(lock: ^Lock) {
+    print("unlocked {lock.resource}")
+}
+fn main() {
+    db @= acquire("db")
+    peek(db)
+    release(^db)
+}

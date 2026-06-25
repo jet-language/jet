@@ -976,6 +976,15 @@ pub const ATTR_NUMERIC: &str = "Numeric";
 /// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
 pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
+/// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
+/// a type whose values must be consumed exactly once on every reachable path
+/// (moved to a `^` parameter or returned). Using one zero times is E0140
+/// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
+/// with `&`/`view` is E0142. `#SingleUse` implies `#NoCopy`. The tag is
+/// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
+/// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
+pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
+
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
 /// a migration block that declares how a `#PublishedSchema` struct changed between
 /// releases. Used as `migration TypeName { rename old -> new }`.

@@ -20,6 +20,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn pop_scope(&mut self) {
         self.lint_unjoined_tasks_in_current_scope();
+        self.check_single_use_consumed_in_current_scope();
         // D-ALLOC2: arena `view`s declared in the scope being popped leave their
         // region here — drop their bookkeeping so a same-named binding in an
         // outer scope isn't mistaken for the view. The arena binding itself
@@ -86,6 +87,7 @@ impl<'a> Checker<'a> {
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
                     task_lint_span: None,
+                    single_use_span: None,
                     task_has_view_capture: false,
                 },
             );
@@ -1061,6 +1063,7 @@ impl<'a> Checker<'a> {
                             decl_loop_depth: self.loop_depth,
                             sendable: true,
                             task_lint_span: None,
+                            single_use_span: None,
                             task_has_view_capture: false,
                         },
                     );
@@ -1351,12 +1354,34 @@ impl<'a> Checker<'a> {
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
                     task_lint_span: None,
+                    single_use_span: None,
                     task_has_view_capture: false,
                 },
             );
         }
+        // D-LIN1: the `#SingleUse` bindings that outlive this `if` — declared in an
+        // enclosing scope (not the `if`-cond scope just pushed) and not already
+        // consumed before the `if`. These are the candidates for the
+        // consumed-on-one-branch check (E0141).
+        let single_use_live: Vec<(String, Span)> = self
+            .scopes
+            .iter()
+            .rev()
+            .skip(1) // skip the if-cond scope pushed above
+            .flat_map(|s| s.iter())
+            .filter_map(|(name, info)| {
+                let span = info.single_use_span?;
+                if before.contains_key(name) {
+                    None
+                } else {
+                    Some((name.clone(), span))
+                }
+            })
+            .collect();
+
         self.check_block(&mut ifs.then_body, false);
         self.pop_scope();
+        let then_moved = self.moved.clone();
         for (k, v) in self.moved.drain() {
             after.entry(k).or_insert(v);
         }
@@ -1365,6 +1390,8 @@ impl<'a> Checker<'a> {
         }
         self.moved = before.clone();
         self.uninit = before_u.clone();
+        // `None` else: the cond-false path consumes nothing.
+        let mut else_moved = before.clone();
         match &mut ifs.else_branch {
             None => {
                 // The cond-false path runs no branch, so everything stays uninit.
@@ -1374,6 +1401,7 @@ impl<'a> Checker<'a> {
             }
             Some(ElseBranch::Else(else_body)) => {
                 self.check_block(else_body, true);
+                else_moved = self.moved.clone();
                 for (k, v) in self.moved.drain() {
                     after.entry(k).or_insert(v);
                 }
@@ -1383,6 +1411,7 @@ impl<'a> Checker<'a> {
             }
             Some(ElseBranch::ElseIf(next)) => {
                 self.check_if(next);
+                else_moved = self.moved.clone();
                 for (k, v) in self.moved.drain() {
                     after.entry(k).or_insert(v);
                 }
@@ -1390,6 +1419,20 @@ impl<'a> Checker<'a> {
                     after_u.entry(k).or_insert(v);
                 }
             }
+        }
+        // D-LIN1 / E0141: a `#SingleUse` binding consumed on exactly one branch
+        // leaves the other path with the value unused. Report it once, on the
+        // branch where it WAS consumed (asymmetry is the bug), pointing at the
+        // binding. (Both-consumed → fine; neither → falls through to E0140.)
+        let mut diverged: Vec<(String, Span)> = single_use_live
+            .into_iter()
+            .filter(|(name, _)| {
+                then_moved.contains_key(name) != else_moved.contains_key(name)
+            })
+            .collect();
+        diverged.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
+        for (name, span) in diverged {
+            self.diags.push(e0141_unconsumed_branch(&name, span));
         }
         self.moved = after;
         self.uninit = after_u;
@@ -1559,6 +1602,7 @@ impl<'a> Checker<'a> {
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
                         task_lint_span: None,
+                        single_use_span: None,
                         task_has_view_capture: false,
                     },
                 );
@@ -1621,6 +1665,7 @@ impl<'a> Checker<'a> {
                                 decl_loop_depth: self.loop_depth,
                                 sendable: true,
                                 task_lint_span: None,
+                                single_use_span: None,
                                 task_has_view_capture: false,
                             },
                         );
@@ -1653,6 +1698,7 @@ impl<'a> Checker<'a> {
                             decl_loop_depth: self.loop_depth,
                             sendable: true,
                             task_lint_span: None,
+                            single_use_span: None,
                             task_has_view_capture: false,
                         },
                     );
@@ -1858,6 +1904,7 @@ impl<'a> Checker<'a> {
                 decl_loop_depth: self.loop_depth,
                 sendable: true,
                 task_lint_span: None,
+                single_use_span: None,
                 task_has_view_capture: false,
             },
         );
@@ -2083,6 +2130,14 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
+        // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
+        // consume it exactly once. The duty transfers on `y @= x` (the move marks
+        // `x` consumed via `note_move_if_direct_ident`; `y` now owns it).
+        let single_use_span = if self.type_is_single_use(&final_ty) {
+            Some(b.name_span)
+        } else {
+            None
+        };
         // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
         // `arena`. Record it so E0631 (escape) / E0632 (use-after-reset) can
         // fire, and flag the binding for codegen (it lowers to a `&mut T`, read
@@ -2109,6 +2164,7 @@ impl<'a> Checker<'a> {
                 decl_loop_depth: self.loop_depth,
                 sendable: binding_sendable,
                 task_lint_span,
+                single_use_span,
                 task_has_view_capture,
             },
         );
@@ -2343,6 +2399,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn declare_bound(&mut self, name: &str, span: Span, ty: Type, mutable: bool) {
         let sendable = self.sendability_problem(&ty, true).is_none();
         let task_lint_span = if is_task_type(&ty) { Some(span) } else { None };
+        let single_use_span = if self.type_is_single_use(&ty) { Some(span) } else { None };
         self.declare(
             name,
             span,
@@ -2353,6 +2410,7 @@ impl<'a> Checker<'a> {
                 decl_loop_depth: self.loop_depth,
                 sendable,
                 task_lint_span,
+                single_use_span,
                 task_has_view_capture: false,
             },
         );

@@ -1,0 +1,52 @@
+// D-LIN1 (ratified 2026-06-21): single-use (must-consume) values.
+//
+// A type marked `#SingleUse` carries a job that has to be done exactly once:
+// the canonical case is a lock that must be released, or a task handle that
+// must be joined. The compiler proves — at compile time, with the value erased
+// from the generated code (I3) — that every `#SingleUse` value is consumed on
+// every path through its scope:
+//
+//   - dropping it without using it      → E0140
+//   - using it on only one `if` branch  → E0141
+//   - lending it (`&`/read) instead of  → E0142
+//     moving it
+//   - using it twice                    → E0121 (reuses the move tracker)
+//
+// `#SingleUse` implies `#NoCopy`: the value can only be moved (`^`), never
+// copied. The only legal exits are moving it to a `^` parameter or returning it.
+
+#SingleUse struct Lock {
+    resource: String,
+}
+
+// Acquiring the lock hands back an owned `Lock`. The caller now owns the duty
+// to release it exactly once.
+fn acquire(resource: String) -> Lock {
+    print("locked {resource}")
+    return Lock { resource: resource }
+}
+
+// `release` takes the lock by move (`^`) — this is the terminal consumption.
+// After this call the lock is gone, and the duty is discharged.
+fn release(lock: ^Lock) {
+    print("unlocked {lock.resource}")
+}
+
+fn main() {
+    db @= acquire("db")
+    // ... use the locked resource ...
+    release(^db)
+
+    // The duty travels with the value: handing it to another function that
+    // returns it just moves the duty along.
+    cache @= acquire("cache")
+    held @= hold(^cache)
+    release(^held)
+}
+
+// A pass-through: takes the lock and returns it, leaving the consume duty with
+// the caller.
+fn hold(lock: ^Lock) -> Lock {
+    print("holding {lock.resource}")
+    return lock
+}

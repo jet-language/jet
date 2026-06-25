@@ -276,6 +276,29 @@ impl<'a> Checker<'a> {
         self.arena_views.contains_key(name)
     }
 
+    /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
+    /// checking the local registry first and then any imported module that exposes
+    /// the type publicly. A `#SingleUse` value must be consumed exactly once and
+    /// may not be aliased.
+    pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
+        let Some(name) = ty.base_name() else {
+            return false;
+        };
+        if self.registry.is_single_use(name) {
+            return true;
+        }
+        if let Some(mods) = self.modules {
+            for &idx in self.imports.values() {
+                if mods[idx].type_pub.get(name).copied().unwrap_or(false)
+                    && mods[idx].registry.is_single_use(name)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
         if let Some(info) = self.lookup(&name) {
             if info.decl_loop_depth < self.loop_depth {
@@ -327,6 +350,35 @@ impl<'a> Checker<'a> {
                 "call `.join()` on the task before it goes out of scope, or call `.detach()` if fire-and-forget is intentional".to_string(),
                 Some(span),
             ));
+        }
+    }
+
+    /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value that owns the
+    /// consume duty (`single_use_span` set) but is not in `moved` when its scope
+    /// ends was dropped without being used. Mirrors the unjoined-task check: it
+    /// looks only at the innermost (just-closing) scope. The branch-divergence
+    /// case (consumed on one path, dropped on the other) is E0141, raised in
+    /// `check_if`.
+    pub(crate) fn check_single_use_consumed_in_current_scope(&mut self) {
+        let Some(scope) = self.scopes.last() else {
+            return;
+        };
+        let pending: Vec<(String, Span)> = scope
+            .iter()
+            .filter_map(|(name, info)| {
+                let span = info.single_use_span?;
+                if self.moved.contains_key(name) {
+                    None
+                } else {
+                    Some((name.clone(), span))
+                }
+            })
+            .collect();
+        // Deterministic order (HashMap iteration is unordered): by span, then name.
+        let mut pending = pending;
+        pending.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
+        for (name, span) in pending {
+            self.diags.push(e0140_unconsumed(&name, span));
         }
     }
 
@@ -778,4 +830,54 @@ impl<'a> Checker<'a> {
         None
     }
 
+}
+
+/// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value reached the end of
+/// its scope without being consumed. The fix names the three legal exits.
+pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0140",
+        format!("`{}` must be used exactly once, but it is never used", name),
+        "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
+        format!(
+            "give it away exactly once: move it to a `{}` parameter, or `return` it",
+            Syntax::SIGIL_MOVE
+        ),
+        Some(span),
+    )
+}
+
+/// D-LIN1 (ratified 2026-06-21): E0141 — a `#SingleUse` value is consumed on one
+/// branch of an `if` but not the other, so some paths leave it unused.
+pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0141",
+        format!("`{}` must be used exactly once, but one path through this `if` leaves it unused", name),
+        "a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job".to_string(),
+        format!(
+            "use `{}` exactly once on every branch: consume it in the missing arm, or move it out before the `if`",
+            name
+        ),
+        Some(span),
+    )
+}
+
+/// D-LIN1 (ratified 2026-06-21): E0142 — a `#SingleUse` value was passed somewhere
+/// that would borrow or copy it. Such values may only be moved/consumed.
+pub(crate) fn e0142_aliased(name: &str, call: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0142",
+        format!("`{}` can't be shared — it must be used exactly once", name),
+        format!(
+            "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{}` would borrow or copy it, and a `#SingleUse` value has no second use to give",
+            call
+        ),
+        format!(
+            "move it with `{}{}` to give it away, or rework the call so it takes ownership (`{}`)",
+            Syntax::SIGIL_MOVE,
+            name,
+            Syntax::SIGIL_MOVE
+        ),
+        Some(span),
+    )
 }

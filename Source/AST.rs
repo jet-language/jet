@@ -869,6 +869,12 @@ pub struct StructDef {
     /// before `struct`. The span is retained for pointing at the annotation in E0910.
     pub is_published_schema: bool,
     pub published_schema_span: Option<Span>,
+    /// D-LIN1 (ratified 2026-06-21): `#SingleUse` marker before `struct` — values
+    /// of this type must be consumed exactly once on every path (E0140/E0141)
+    /// and may not be aliased (E0142). Implies `#NoCopy`. The span points at the
+    /// marker for diagnostics.
+    pub is_single_use: bool,
+    pub single_use_span: Option<Span>,
     /// D-REPRC1 (ratified; D-REPRC1 = B): `#layout(…)` attribute. `None` = default layout.
     pub layout: Option<StructLayout>,
     pub layout_span: Option<Span>,
@@ -900,6 +906,10 @@ pub struct EnumDef {
     pub methods: Vec<Func>,
     pub trait_impls: Vec<TraitImplBlock>,
     pub derives: Vec<(String, Span)>,
+    /// D-LIN1 (ratified 2026-06-21): `#SingleUse` marker before `enum`. See
+    /// `StructDef::is_single_use`.
+    pub is_single_use: bool,
+    pub single_use_span: Option<Span>,
     /// D-SERDE3/7/8: container-level serde markers (`RenameAll`, `Tag`,
     /// `Untagged`, `DenyUnknownFields`) attached before the `enum`. Empty when none.
     pub serde_markers: Vec<Marker>,

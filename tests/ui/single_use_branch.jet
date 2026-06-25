@@ -1,0 +1,17 @@
+// D-LIN1 / E0141: a `#SingleUse` value consumed on only one `if` branch.
+#SingleUse struct Lock {
+    resource: String,
+}
+fn acquire(resource: String) -> Lock {
+    return Lock { resource: resource }
+}
+fn release(lock: ^Lock) {
+    print("unlocked {lock.resource}")
+}
+fn main() {
+    db @= acquire("db")
+    early @= true
+    if early {
+        release(^db)
+    }
+}

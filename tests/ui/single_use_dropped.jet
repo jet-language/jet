@@ -1,0 +1,13 @@
+// D-LIN1 / E0140: a `#SingleUse` value dropped without being consumed.
+#SingleUse struct Lock {
+    resource: String,
+}
+fn acquire(resource: String) -> Lock {
+    return Lock { resource: resource }
+}
+fn release(lock: ^Lock) {
+    print("unlocked {lock.resource}")
+}
+fn main() {
+    db @= acquire("db")
+}

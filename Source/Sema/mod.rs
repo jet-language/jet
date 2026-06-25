@@ -59,6 +59,10 @@ pub(crate) enum TypeDef {
         name_span: Span,
         fields: Vec<(String, Span, Type, bool, bool)>,
         methods: HashMap<String, MethodSig>,
+        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
+        /// Values of this type must be consumed exactly once (E0140/E0141) and
+        /// may not be aliased (E0142).
+        single_use: bool,
     },
     Enum {
         #[allow(dead_code)] // stored for future duplicate-name diagnostics
@@ -66,6 +70,8 @@ pub(crate) enum TypeDef {
         variants: HashMap<String, (Span, VariantPayload)>,
         variant_order: Vec<String>,
         methods: HashMap<String, MethodSig>,
+        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
+        single_use: bool,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
     /// a base type. No implicit coercion either direction (E0128). Arithmetic
@@ -129,6 +135,16 @@ impl TypeRegistry {
     /// D-DIST1: true when `name` is a registered distinct type.
     pub(crate) fn is_distinct(&self, name: &str) -> bool {
         matches!(self.types.get(name), Some(TypeDef::Distinct { .. }))
+    }
+
+    /// D-LIN1 (ratified 2026-06-21): true when `name` is a `#SingleUse` struct/enum.
+    /// Values of such a type must be consumed exactly once and may not be aliased.
+    pub(crate) fn is_single_use(&self, name: &str) -> bool {
+        matches!(
+            self.types.get(name),
+            Some(TypeDef::Struct { single_use: true, .. })
+                | Some(TypeDef::Enum { single_use: true, .. })
+        )
     }
 
     /// D-DIST1: the base type of a distinct type (None if `name` is not distinct).
@@ -322,6 +338,12 @@ pub(crate) struct LocalInfo {
     sendable: bool,
     /// Binding span for a Task value that must be consumed with `.join()`.
     task_lint_span: Option<Span>,
+    /// D-LIN1 (ratified 2026-06-21): set (to the binding name's span) when this
+    /// local owns a `#SingleUse` value that must be consumed exactly once. `None`
+    /// for ordinary values, for parameters (the caller owns the consume duty), and
+    /// for `view`/`&` borrows (which never own). When still in scope and not in
+    /// `moved` at scope end, E0140 fires.
+    single_use_span: Option<Span>,
     /// D-DETACH1: set when the task's spawn lambda captured a view borrow (E1102
     /// fired at spawn time). Used by the `detach()` handler to emit E1103.
     #[allow(dead_code)] // D-DETACH1 reader (E1103 path) not yet implemented
@@ -558,6 +580,10 @@ pub(crate) use Diagnostics::*;
 pub(crate) use Captures::*;
 pub(crate) use Purity::*;
 pub(crate) use Effects::*;
+// D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
+// `e0140_unconsumed` is referenced only within that module; the other two fire
+// from CheckerCore (E0141) and CheckerInfer (E0142).
+pub(crate) use CheckerOwnership::{e0141_unconsumed_branch, e0142_aliased};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Registration::{check, check_with_mode};
