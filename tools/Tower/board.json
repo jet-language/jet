@@ -182,7 +182,7 @@
       "type": "task",
       "title": "`benchmark` target support",
       "body": "Build the benchmark target backend (reserved by D-TGT2). Until then `benchmark` is a reserved manifest keyword that errors with no-backend.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "benchmark-target",
       "notes": [
         {
@@ -194,7 +194,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[shipped 2026-06-25] Built + merged to master, full suite green. `target: benchmark` now parses to Target::Benchmark and runs the package's #Bench regions via the existing `jet bench` engine (no new mechanism, I8); `plugin` stays reserved (c81). Example examples/features/123_bench_target + golden. (stage left 'ready' — no 'done' stage; archive when convenient.)",
+          "t": "[shipped 2026-06-25] Built + merged to master, full suite green. `target: benchmark` now parses to Target::Benchmark and runs the package's #Bench regions via the existing `jet bench` engine (no new mechanism, I8); `plugin` stays reserved (c81). Example examples/features/123_bench_target + golden. (moved to done.)",
           "at": "2026-06-25"
         }
       ],
@@ -359,7 +359,7 @@
       "type": "task",
       "title": "Inline CoreLib execution in the REPL interpreter",
       "body": "REPL v2 (c55) shipped; this is its one deferred fork. The comptime tree-walker resolves core calls (math.sqrt) across REPL inputs but cant execute them inline (E0956) — only :run/native does. Teach Source/Comptime/ to run the curated-pure CoreLib surface inline, reusing the D-CTCORE1 whitelist so inline-executable == comptime-legal. Large (interpreter, every core module). Plan: repl-inline-core-exec.md.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "repl-inline-core-exec",
       "notes": [
         {
@@ -371,7 +371,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[shipped 2026-06-25] Built + merged, full suite green. core_imports is now threaded into run_repl_step/Interp, so D-CTCORE1-whitelisted core calls (math.sqrt etc.) execute inline in the REPL/comptime path (was E0956); non-whitelisted I/O calls still rejected. 5 tests in tests/repl.rs. (stage left 'ready' — archive when convenient.)",
+          "t": "[shipped 2026-06-25] Built + merged, full suite green. core_imports is now threaded into run_repl_step/Interp, so D-CTCORE1-whitelisted core calls (math.sqrt etc.) execute inline in the REPL/comptime path (was E0956); non-whitelisted I/O calls still rejected. 5 tests in tests/repl.rs. (moved to done.)",
           "at": "2026-06-25"
         }
       ],
@@ -516,7 +516,7 @@
       "type": "idea",
       "title": "Multi-character type-param names mangle wrong in codegen/TIR",
       "body": "Pre-existing (surfaced by c136): Generics::is_type_var_name only recognizes a SINGLE uppercase letter as a type variable, so a multi-char param like `Kind` in a field type mangles to user_Kind (treated as a concrete type) instead of the generic param. Single-letter params (T, K) work fully. Fix is_type_var_name + the TIR/codegen paths to recognize the declared type-param set rather than the single-letter heuristic.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "type-param-mangling",
       "notes": [
         {
@@ -528,7 +528,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[shipped 2026-06-25] Fixed + merged, full suite green. Multi-char type params (Kind/Elem/…) are now recognized via the declared type-param set across sema+codegen (Generics/Traits unify_types, Codegen Context struct_type_params/current_type_params, TIR subset), not the single-letter name heuristic; single-letter cases unchanged. 3 tests in tests/generics.rs. (stage left 'ready' — archive when convenient.)",
+          "t": "[shipped 2026-06-25] Fixed + merged, full suite green. Multi-char type params (Kind/Elem/…) are now recognized via the declared type-param set across sema+codegen (Generics/Traits unify_types, Codegen Context struct_type_params/current_type_params, TIR subset), not the single-letter name heuristic; single-letter cases unchanged. 3 tests in tests/generics.rs. (moved to done.)",
           "at": "2026-06-25"
         }
       ],
@@ -543,7 +543,7 @@
       "type": "idea",
       "title": "Borrowed non-Copy param assigned to a field isn't cloned (I2/E0507)",
       "body": "Pre-existing codegen bug (surfaced while building c149). A method that assigns a Read-convention (borrowed) non-Copy param straight into a field emits a move out of a shared reference, which rustc rejects (E0507) — an I2 violation. REPRO: `struct Ledger { rows: [Int] }  impl Ledger { fn put_back(~self, s: [Int]) { self.rows = s } }` → generated `(*self).user_rows = (*user_s);` fails E0507 'cannot move out of `*user_s` behind a shared reference'. The codegen should clone on assignment-from-borrow (`= user_s.clone()`) for non-Copy types, mirroring how other borrowed-value stores are handled. WORKAROUND: take the param by `^` (owned/move) — then the store is a real move and compiles. Not a hard blocker for c72 layer 2 (Rollback `restore` can take `^Snapshot`), but the Read-convention path is a real correctness hole worth closing.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "borrow-field-clone",
       "notes": [
         {
@@ -555,7 +555,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[shipped 2026-06-25] Fixed (I2 violation) + merged, full suite green. A borrowed non-scalar param assigned to a field/local now clones (new TStmt::Assign.clone_value, predicate mirrors lower_enum_arg) instead of moving out of a shared ref (was rustc E0507 → I2 breach). Test tests/tir.rs borrow_field_clone. (stage left 'ready' — archive when convenient.)",
+          "t": "[shipped 2026-06-25] Fixed (I2 violation) + merged, full suite green. A borrowed non-scalar param assigned to a field/local now clones (new TStmt::Assign.clone_value, predicate mirrors lower_enum_arg) instead of moving out of a shared ref (was rustc E0507 → I2 breach). Test tests/tir.rs borrow_field_clone. (moved to done.)",
           "at": "2026-06-25"
         }
       ],
@@ -760,7 +760,7 @@
       "type": "task",
       "title": "Encode D-CTCODEGEN1=A as a standing architecture rule",
       "body": "D-CTCODEGEN1=A (ratified 2026-06-25) is a standing rule, not a feature: every build-time code generation step (derives, comptime) emits a typed SOURCE fragment that re-enters lexer->parser->sema like hand-written code — no generation path may inject pre-parsed AST past the sema gatekeeper. Keeps I3 (codegen dumb), R2 (sema gatekeeper), I2 (rustc never speaks); errors in generated code surface as real sema diagnostics pinned to the user trigger site. The existing #[Codable] derive already follows this. Task: encode the rule explicitly in docs/spec/architecture.md so future derives/build steps can't quietly reintroduce AST-injection.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "ctcodegen-architecture-rule",
       "notes": [
         {
@@ -772,7 +772,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[shipped 2026-06-25] Done + merged. D-CTCODEGEN1=A is now standing architecture rule R11 in docs/spec/architecture.md (generated code re-enters lexer→parser→sema as a typed source fragment; no AST injection past the sema gatekeeper; errors pin at the user trigger; #[Codable] already follows it, required for S56 derives). (stage left 'ready' — archive when convenient.)",
+          "t": "[shipped 2026-06-25] Done + merged. D-CTCODEGEN1=A is now standing architecture rule R11 in docs/spec/architecture.md (generated code re-enters lexer→parser→sema as a typed source fragment; no AST injection past the sema gatekeeper; errors pin at the user trigger; #[Codable] already follows it, required for S56 derives). (moved to done.)",
           "at": "2026-06-25"
         }
       ],
@@ -814,7 +814,7 @@
       "type": "feature",
       "title": "Typestate `state { }` declaration + `#Transition` marker (D-STATE-DECL=B + D-STATE-TRANS=A)",
       "body": "Both ratified 2026-06-25, unimplemented. D-STATE-DECL=B: states declared in a dedicated `state TypeName { Pending, Confirmed, CheckedIn }` block (bare keyword in the tag/struct/enum family; bounded + typo-checked; erases, zero runtime; dead-end state = warning). D-STATE-TRANS=A: `#Transition(From -> To) fn` advances state via the `->` glyph, `_` from-state marks an entry constructor. Builds on the SHIPPED typestate core (D-STATE1=A loose-tags, example 113, E0150). `#Transition(A -> B)` already parses; the `state {}` block (new Item::StateDecl + KwState token) is the real work. Plan: sidequests/typestate-state-block.md.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "typestate-state-block",
       "notes": [
         {
@@ -822,7 +822,7 @@
           "at": "2026-06-25"
         },
         {
-          "t": "[shipped 2026-06-25] Built + merged, full suite green. `state TypeName { … }` declaration block (D-STATE-DECL=B) parses + validates #State/#Transition markers against the declared set; new diagnostics E0151 (unknown state) + L0151 (dead-end-state warning) coded in diagnostics.md + ui snapshots; erases in codegen (zero runtime); example 113 migrated to the block. Keyword `state` registered in Syntax.rs (I7). (stage left 'ready' — archive when convenient.)",
+          "t": "[shipped 2026-06-25] Built + merged, full suite green. `state TypeName { … }` declaration block (D-STATE-DECL=B) parses + validates #State/#Transition markers against the declared set; new diagnostics E0151 (unknown state) + L0151 (dead-end-state warning) coded in diagnostics.md + ui snapshots; erases in codegen (zero runtime); example 113 migrated to the block. Keyword `state` registered in Syntax.rs (I7). (moved to done.)",
           "at": "2026-06-25"
         }
       ],
