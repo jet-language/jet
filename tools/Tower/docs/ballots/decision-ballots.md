@@ -884,6 +884,36 @@ On the `?`-failure, the debit to `from` must be undone. The three options differ
 | **B — `Rollback` trait the type derives** | `#[Rollback]` on the struct; nothing at the mutation site | the block must snapshot each `Rollback` value on entry and prove a non-`Rollback` value isn't mutated (a new E-code + a "mutated value isn't `Rollback`" diagnostic) | only on types that derive it | new concept (a trait + snapshot pass); `on_commit` stays a closure, so two different mental models |
 | **C — auto-snapshot every mutated value** | nothing | the block must detect *every* mutation in its dynamic extent and deep-copy the pre-state — expensive and hard to bound for heap/collection types; aliasing makes "restore" ambiguous | yes, but with hidden cost | invisible magic vs. explicit `on_commit` — least consistent |
 
+- **Option A — explicit `tx.on_rollback(() => {…})`. (recommended)**
+```jet
+#Transact(tx) {
+    from.balance = from.balance - amt
+    tx.on_rollback(() => { from.balance = from.balance + amt })   // undo, beside the mutation
+    ok_or_freeze(to, amt)?                                        // `?`-fail → runs the undo, LIFO
+    to.balance = to.balance + amt
+    tx.on_rollback(() => { to.balance = to.balance - amt })
+}
+```
+
+- **Option B — a `Rollback` trait the type derives.**
+```jet
+#[Rollback]                          // the block snapshots Account on entry; no undo at the site
+struct Account { balance: Int }
+
+#Transact(tx) {
+    from.balance = from.balance - amt    // mutating a non-Rollback value here = a new E-code
+    ok_or_freeze(to, amt)?               // `?`-fail → block restores the snapshot of `from`
+}
+```
+
+- **Option C — auto-snapshot every mutated value.**
+```jet
+#Transact(tx) {
+    from.balance = from.balance - amt    // nothing written; the block deep-copies `from` pre-state
+    ok_or_freeze(to, amt)?               // `?`-fail → restores all snapshots (hidden cost, aliasing risk)
+}
+```
+
 **Recommendation:** **A** — an explicit `tx.on_rollback(() => { … })` is the precise mirror of the already-shipped, already-ratified `tx.on_commit(() => { … })`: same handle, same Drop-backed mechanism, same LIFO order, just fired on the failure path instead of the commit path. It needs no new trait, no snapshot pass, and no "is this value reversible" proof; it works on plain values; and it keeps one mental model for the whole transaction surface ("register what to do on commit; register what to undo on rollback"). The D-TXN1 ratified phrase "calls `rollback(mut self)` (the `Rollback` trait)" reads toward B, so this fork genuinely needs the owner: keep the `Rollback`-trait spelling (B), or supersede it with the closure-symmetric `on_rollback` (A)?
 
 **Owner Q (D-TXN-ROLLBACK):** D-TXN1 as ratified names a `Rollback` trait and "values mutated so far." After building `on_commit` (D-TXN3/4) as an explicit Drop-backed closure, the symmetric move is an explicit `tx.on_rollback(() => {…})` (A) rather than a trait + auto-snapshot (B). Do you want to (A) supersede the `Rollback`-trait wording with the closure-symmetric `on_rollback`, or (B) keep the trait and have the block auto-snapshot `Rollback`-deriving values? (The `#Transact` block, `on_commit`, and the D-TXN2 irreversible-effect rejection are already built and shipped; only this registration mechanism is held.)
@@ -946,7 +976,7 @@ fn lookup(input: String) {        // `input` arrives #Tainted from the request
 
 **Story.** Priya writes a `#Pure` dice-roller and a `#Pure` retry-with-backoff. Both need time and randomness but must stay reproducible, so she takes a `Clock` and an `Rng` parameter (seeded by the caller). She needs to know the verbs: does she read the clock with `clock.now()`? advance it with `clock.tick(ms)` or `clock.advance(ms)`? draw an int with `rng.int(lo, hi)` (inclusive? half-open?) and a float with `rng.float()` (`[0,1)`?)? The current behavior is reproducible regardless, but the *spelling and ranges* are owner-facing and should be deliberate.
 
-**What shipped (the default to confirm or revise):**
+**In the wild:** (what shipped — the default to confirm or revise)
 ```jet
 use core.time as time;
 use core.random as random;
@@ -986,6 +1016,29 @@ fn main() {
 | **B — widen now** | + `rng.bool`/`pick`/`shuffle`, `clock.advance` absolute form, `Duration` reads | parity with ambient `random.*` + richer clock from day one | mints `Duration`/more API ahead of demand (I8 ratchet); larger snapshot surface |
 | **C — rename + re-spec ranges** | half-open `rng.int`, ns clock, `SeededRng`/`DetClock` names | aligns with Rust-style half-open ranges | diverges from ambient `random.int` (inclusive) → two conventions for one verb |
 
+- **Option A — keep the shipped minimal set. (recommended)**
+```jet
+#Pure fn backoff(attempt: Int, clock: Clock, rng: ~Rng) -> Int {
+    base @= clock.tick(0)          // read current ms
+    return base + rng.int(0, 100)  // inclusive jitter [0,100], matches ambient random.int
+}
+```
+
+- **Option B — widen the surface now.**
+```jet
+#Pure fn shuffle_deck(deck: ~[Card], rng: ~Rng) {
+    rng.shuffle(~deck)             // extra Rng draws shipped from day one
+}
+delay @= clock.advance(Duration.ms(50))   // absolute/Duration clock form, minted now
+```
+
+- **Option C — rename types + half-open ranges.**
+```jet
+#Pure fn pick(rng: ~SeededRng) -> Int {     // type renamed SeededRng / DetClock
+    return rng.int(0, 6)            // half-open [0,6) — diverges from ambient random.int's inclusive
+}
+```
+
 **Recommendation:** **A** — keep the minimal `now`/`tick` + `int`/`float`, inclusive int range (consistent with the already-shipped ambient `random.int`), ms clock. It is whole, reproducible, and learnable; widen (`bool`/`pick`/`shuffle`, absolute clock, `Duration`) on real evidence per the simplicity ratchet (I8). The feature is fully built and shipped on this surface; only the names/ranges are held for the owner.
 
 **Owner Q (D-DET-CAPAPI):** Confirm the shipped minimal `Clock`/`Rng` API (A: `clock.now()`/`clock.tick(ms)`, `rng.int(lo,hi)` inclusive / `rng.float()` `[0,1)`, ms, names `Clock`/`Rng`), or revise via the five sub-questions above (verb, unit, range convention, extra draws, type names)? The injection path and `assume_deterministic` escape are built, tested, and shipped — only this method surface is open.
@@ -1012,50 +1065,162 @@ already shipped. Only the two fn-modifier markers and the arrow glyph below are 
 
 ---
 
-### D-STATE-REQ — the "this method requires state S" marker spelling
+### D-STATE-REQ — the "this method requires state S" marker spelling (rec A)
 
-*User story:* A dev writes `check_in` on a `Reservation` and wants the compiler to
-reject calling it unless the reservation is `#Confirmed`.
+**Gist:** Pick the marker that says "this method is only callable when the receiver is in state S" — `#State(Confirmed) fn`, `#Requires(Confirmed) fn`, or `#In(Confirmed) fn`.
 
-The ratified text says a transition fn "takes the old state tag". A *guarded* method
-(non-transitioning, e.g. `check_in` which is valid only in `Confirmed`) needs a
-require-state marker. Spelling options:
+**Story.** Hank writes a hotel-booking type. `room_key` should hand out a key only after a guest has checked in — calling it on a still-pending reservation is a bug he wants the compiler to catch, not a runtime check. He needs one word to put before `fn room_key` that reads as "this requires the CheckedIn state." The typestate mechanism is already built and shipping `#State(S)`; this confirms or flips that one token.
 
-- **A (implemented default): `#State(Confirmed) fn check_in(self, …)`** — a paren-arg
-  fn-modifier marker, exactly parallel to `#layout(c)` / `#UnitFamily(currency)` and
-  the `#Sanitizer fn` modifier family. Reads "in state Confirmed".
-- B: `#Requires(Confirmed) fn check_in(…)` — more explicit verb, longer.
-- C: `#In(Confirmed) fn` — terse, but `In` collides conceptually with `for x in`.
+**In the wild:**
+```jet
+tag Pending {}
+tag Confirmed {}
+tag CheckedIn {}
 
-Rec: **A**. One marker idiom, shortest that still reads as a noun-state.
+struct Reservation { guest: String }
 
-### D-STATE-TRANS — the transition-fn marker + arrow glyph
+impl Reservation {
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+        return Reservation { guest: guest }
+    }
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation { return self }
+    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation { return self }
 
-*User story:* `confirm_payment` moves a reservation from `#Pending` to `#Confirmed`.
+    // The guarded read — legal ONLY when `self` is CheckedIn. This is the marker the card picks:
+    #State(CheckedIn) fn room_key(self) -> String { return "key for {self.guest}" }
+}
 
-- **A (implemented default): `#Transition(Pending -> Confirmed) fn confirm(self) -> Reservation`**
-  — paren-arg marker; the `->` inside mirrors the fn return arrow the dev already
-  knows. Declares "consumes a value at Pending, yields one at Confirmed".
-- B: `#Transition(Pending => Confirmed)` — `=>` to distinguish from the return arrow.
-- C: two markers `#From(Pending) #To(Confirmed) fn` — no new glyph, but two markers.
+fn main() {
+    r := Reservation.book("Ada")     // r: Pending
+    print(r.room_key())              // E0150 — room_key requires CheckedIn, r is Pending
+}
+```
 
-Rec: **A**. `->` is already the "produces" arrow; reusing it reads naturally.
+**Other languages:** no mainstream language has a first-class require-state marker — typestate is a research feature (Rust models it with the type-state pattern: a separate `Reservation<CheckedIn>` type per state, no annotation; Swift/Kotlin have nothing). So there's no cross-language convention to honor — the only consistency pull is Jet's own paren-arg marker family (`#layout(c)`, `#UnitFamily(currency)`, `#Sanitizer fn`).
 
-### D-STATE-DECL — do states need an explicit grouping declaration?
+**Tradeoffs:** (subagent-reviewed)
 
-*User story:* the dev wants `Pending`, `Confirmed`, `CheckedIn` recognised as the
-state set of `Reservation`, ideally exhaustively (so a typo `#Confrimed` is caught).
+| Option | Reads as | Consistency with marker family | Collision risk |
+|---|---|---|---|
+| A `#State(Confirmed)` (recommended) | "in state Confirmed" | matches `#layout(c)`/`#UnitFamily(…)` paren-arg markers | none |
+| B `#Requires(Confirmed)` | "requires Confirmed" | matches family, longer | none |
+| C `#In(Confirmed)` | "in Confirmed" | matches family, terse | `In` collides conceptually with `for x in …` |
 
-- **A (implemented default): no grouping needed.** Each state is an ordinary `tag`
-  (D-QUAL2). The transition/require markers name them; the checker derives the state
-  set from the markers used. Zero new declaration construct.
-- B: an explicit `states Reservation { Pending, Confirmed, CheckedIn }` block — enables
-  exhaustiveness + a "no transition out of CheckedIn" diagnostic, but is a brand-new
-  owner-facing construct (and a new keyword), heavier than the ratified one-liner.
+- **Option A — `#State(Confirmed) fn`. (recommended)**
+```jet
+#State(Confirmed) fn cancel(self) -> Refund { … }   // callable only on a Confirmed reservation
+```
 
-Rec: **A** for v1 (matches "tags erase, no new runtime/declaration weight"); B is a
-natural follow-on if exhaustive state-machine checking is wanted later (would pair
-with the deferred D-ROLE1 time-varying-roles card).
+- **Option B — `#Requires(Confirmed) fn`.**
+```jet
+#Requires(Confirmed) fn cancel(self) -> Refund { … }   // more explicit verb, longer to type
+```
+
+- **Option C — `#In(Confirmed) fn`.**
+```jet
+#In(Confirmed) fn cancel(self) -> Refund { … }   // terse, but `In` reads like the `for x in` keyword
+```
+
+**Recommendation:** A — one marker idiom, shortest that still reads as a noun-state; it matches the paren-arg marker family already shipping and avoids the `In`/`for … in` overload of C.
+
+### D-STATE-TRANS — the transition-fn marker + arrow glyph (rec A)
+
+**Gist:** Pick how a state-advancing method declares its from/to states — `#Transition(Pending -> Confirmed)`, `#Transition(Pending => Confirmed)`, or two markers `#From(Pending) #To(Confirmed)`.
+
+**Story.** Doris writes the `pay` step of the same booking type: it takes a `Pending` reservation and produces a `Confirmed` one, and calling it on anything else is E0150. She wants the from→to pair on one line above `fn pay`, in a glyph she already knows. The mechanism ships today with `#Transition(From -> To)` reusing the return-arrow glyph; this confirms or flips it.
+
+**In the wild:**
+```jet
+impl Reservation {
+    // entry transition: `_` from-state means "from nothing" — a constructor
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+        return Reservation { guest: guest }
+    }
+    // the transition this card spells: consumes a Pending value, yields a Confirmed one
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+        print("payment received for {self.guest}")
+        return self
+    }
+}
+
+fn main() {
+    r := Reservation.book("Ada")     // r: Pending
+    r = r.pay()                      // r: Confirmed
+    r = r.pay()                      // E0150 — pay needs Pending, r is Confirmed
+}
+```
+
+**Other languages:** no first-class transition syntax in mainstream languages — Rust's type-state pattern encodes the move as a method returning a different `Reservation<S>` type (the from/to live in the type parameters, no arrow); Swift/Kotlin have nothing. The only consistency pull is Jet's own `->` return arrow.
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Glyph | Reuses known syntax | Cost |
+|---|---|---|---|
+| A `#Transition(Pending -> Confirmed)` (recommended) | `->` | yes — same as the fn return arrow | mild overload of `->` (return vs transition), disambiguated by context |
+| B `#Transition(Pending => Confirmed)` | `=>` | partial — `=>` is the lambda arrow | a second arrow glyph to learn; `=>` already means "lambda body" |
+| C `#From(Pending) #To(Confirmed)` | none | yes — plain markers | two markers per transition, more line noise |
+
+- **Option A — `#Transition(Pending -> Confirmed) fn`. (recommended)**
+```jet
+#Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation { return self }
+```
+
+- **Option B — `#Transition(Pending => Confirmed) fn`.**
+```jet
+#Transition(Confirmed => CheckedIn) fn check_in(self: ^Reservation) -> Reservation { return self }
+```
+
+- **Option C — two markers `#From(Pending) #To(Confirmed) fn`.**
+```jet
+#From(Confirmed) #To(CheckedIn) fn check_in(self: ^Reservation) -> Reservation { return self }
+```
+
+**Recommendation:** A — `->` is already the "produces" arrow the dev knows from every fn signature; reusing it for "produces a value in the next state" reads naturally and keeps one transition marker rather than C's two.
+
+### D-STATE-DECL — do states need an explicit grouping declaration? (rec A)
+
+**Gist:** Decide whether a typestate type lists its states in a dedicated `states { … }` block, or whether the states are just the ordinary `tag`s the transition markers happen to name.
+
+**Story.** Earl models a reservation's lifecycle and wonders whether he must declare the set `{ Pending, Confirmed, CheckedIn }` somewhere, or whether writing `#Transition(Pending -> Confirmed)` is enough for the compiler to know the states. He'd like a typo — `#Transition(Pending -> Confrimed)` — caught, but he doesn't want to maintain a separate state list that can drift from the transitions. The mechanism ships with no grouping (states are plain `tag`s); this confirms that or adds the block.
+
+**In the wild:**
+```jet
+// Option A (shipped): no grouping — each state is just a `tag`, the markers name them
+tag Pending {}
+tag Confirmed {}
+tag CheckedIn {}
+
+impl Reservation {
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation { return self }
+    // a typo here — `Confrimed` — is an undefined-tag error from the normal tag resolver,
+    // not a typestate-specific one. No separate state list to keep in sync.
+}
+```
+
+**Other languages:** Rust's type-state pattern has no state declaration — each state is a marker type, and the set is implicit in which `Reservation<S>` impls exist. Statechart libraries (XState in TS, Stateless in C#) *do* declare the full machine up front (states + transitions in one table) precisely to get exhaustiveness and diagrams. The split is "implicit from the code" vs "explicit machine table."
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | New construct | Exhaustiveness check (typo / dead-end states) | Weight |
+|---|---|---|---|
+| A no grouping — states are plain `tag`s (recommended) | none | none beyond the normal undefined-tag error | matches "tags erase, zero declaration weight" |
+| B explicit `states Reservation { Pending, Confirmed, CheckedIn }` block | a new keyword + construct | yes — can flag a typo'd or unreachable state, "no transition out of CheckedIn" | a brand-new owner-facing declaration form |
+
+- **Option A — no grouping; the markers define the state set. (recommended)**
+```jet
+tag Pending {}                       // the states are simply these three tags
+tag Confirmed {}
+tag CheckedIn {}
+// the checker derives the state set from the transition/require markers it sees
+```
+
+- **Option B — explicit `states { … }` grouping block.**
+```jet
+states Reservation { Pending, Confirmed, CheckedIn }   // brand-new construct
+// enables exhaustiveness: a typo state or a state with no outgoing transition can be flagged
+```
+
+**Recommendation:** A for v1 — it matches the ratified "tags erase, no new runtime or declaration weight" stance and adds zero new owner-facing syntax. B is a natural follow-on if exhaustive state-machine checking is later wanted (it would pair with the deferred D-ROLE1 time-varying-roles card).
 
 ---
 
@@ -1140,6 +1305,28 @@ change rather than a risky "behavior-preserving" merge.
 
 **Status:** open · **Card:** c139 (JIT tier-1) · **Rides:** D-JITDEP1 (Cranelift approved, runtime-side, I6 holds), D-REGEX1 (dep-scoping precedent)
 
+**Gist:** D-JITDEP1 approved the Cranelift JIT dep "never in compiler `Source/`," but the repo is one crate — so decide whether the wall is a new `jet-jit` workspace crate (A), a cfg-gated I6 carve-out in the one crate (B), or an out-of-tree optional component (C).
+
+**Story.** Walter maintains the Jet toolchain and runs the I6 check in CI: zero external crates in the compiler. The team wants Cranelift to power fast `jet serve` hot-swap. Walter needs to know where the Cranelift dependency physically goes so that a `cargo tree` (or a lockfile grep) on the compiler still shows nothing external — that the I6 wall is something CI can *prove*, not a comment everyone promises to honor.
+
+**In the wild:**
+```shell
+# The I6 guarantee Walter wants to keep machine-checkable, with Cranelift in the tree somewhere:
+$ cargo tree -p jet | grep -i cranelift        # must print NOTHING for I6 to hold
+$ jet serve                                     # but this dev loop needs the Cranelift JIT
+  watching src/ … hot-swap on save (Cranelift tier-1)
+```
+
+**Other languages:** Rust's own toolchain isolates codegen backends as separate crates (`rustc_codegen_cranelift`, `rustc_codegen_gcc`) behind a stable interface, swapped in at build/run time — the workspace-member model (A). LLVM-based toolchains link the backend as an external library (closer to B/C). Go ships a single self-contained toolchain with its backend in-tree (no external dep to wall off — not Jet's situation, since Cranelift is third-party). The cross-toolchain norm for a *third-party* backend is a separate crate behind a stable seam (A).
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Where Cranelift lives | I6 for the compiler crate | Default `jet serve` UX | Fits frozen c140/c141 successors |
+|---|---|---|---|---|
+| A workspace member `jet-jit/` | own crate, behind `--features jit` | enforced — lockfile-provable | works out of the box | yes — successors are more members behind the same seam |
+| B cfg-gated carve-out in the one crate | `Source/Jit/`, off-by-default `jit` feature | documented exception, not enforced | works out of the box | yes, but each successor widens the carve-out |
+| C out-of-tree optional component | separate installed component | untouched (strongest isolation) | degraded — JIT not present by default | yes, but each successor is another install |
+
 **The problem.** D-JITDEP1 approved Cranelift as a runtime-side dep and said it must
 "never [be] in compiler `Source/`" — I6 holds. But the analogy it draws is to D-REGEX1,
 and that analogy does not fit cleanly: the `regex` dep lives inside a **Jet Core
@@ -1196,6 +1383,12 @@ Keep the single crate. Add `cranelift-*` to `Cargo.toml` under an off-by-default
 gated `#[cfg(feature = "jit")]`. Amend I6's text to name a standing, owner-signed
 runtime-tier exception (exactly as D-REGEX1 carved one for `regex`).
 
+```shell
+$ cargo build                          # default: no jit feature → zero external crates
+$ cargo build --features jit           # pulls cranelift-* into the one `jet` crate
+$ cargo tree -p jet | grep cranelift   # now prints cranelift — I6 true only by convention/feature audit
+```
+
 - Smallest diff; no workspace conversion; TIR stays `pub(crate)` and is reached directly.
 - The JIT backend sits next to the TIR it lowers — arguably the most natural place.
 - Cost: I6 stops being literally true for the compiler crate. The wall is "off by
@@ -1209,6 +1402,14 @@ runtime-tier exception (exactly as D-REGEX1 carved one for `regex`).
 an optional component the user installs (`jetpack add-component jit` / a separate build)
 and the `jet` binary loads/links only when present. I6 is untouched; the compiler never
 even references Cranelift.
+
+```shell
+$ jet serve
+  note: JIT component not installed — `jet serve` runs on the tier-0 interpreter
+        install the fast path: jetpack add-component jit
+$ jetpack add-component jit            # separate build, version-skew managed against the jet binary
+$ jet serve                            # now Cranelift-backed
+```
 
 - Strongest I6 isolation; the JIT is opt-in toolchain surface, philosophically "expert
   tier."
