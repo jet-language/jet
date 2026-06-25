@@ -342,6 +342,17 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-REACT1=B: a reactive `Signal<T>`/`Derived<T>` holds ordinary data that can
+    /// be cloned to its dependents. Reject a function-typed value (E2913); everything
+    /// else is admitted in sema (the codegen coverage gate handles the precise subset).
+    pub(crate) fn reactive_value_ok(&mut self, ty: &Type, span: Span, kind: &str) -> bool {
+        if matches!(ty, Type::Fn { .. }) {
+            self.diags.push(reactive_bad_value_type(kind, ty, span));
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn infer_core_call(
         &mut self,
         module: &str,
@@ -950,6 +961,97 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Named("ScopeGuard".to_string()));
             }
+            // D-REACT1=B: reactive.signal(initial) → Signal<T>. The value type is
+            // inferred from the initial value; an explicit annotation may guide an
+            // empty/ambiguous literal via `expected_type`.
+            ("jet.reactive", "signal") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("signal", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                // If the binding is annotated `Signal<T>`, push `T` as the expected
+                // type for the initial value so an ambiguous literal elaborates.
+                let saved = self.expected_type.clone();
+                if let Some(Type::Apply { name, args: ta }) = &self.expected_type {
+                    if name == crate::Syntax::TYPE_SIGNAL && ta.len() == 1 {
+                        self.expected_type = Some(ta[0].clone());
+                    }
+                }
+                let init_ty = self.infer(&mut args[0].expr);
+                self.expected_type = saved;
+                let elem = init_ty.unwrap_or(Type::Int);
+                if !self.reactive_value_ok(&elem, args[0].expr.span(), "signal") {
+                    return None;
+                }
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_SIGNAL.to_string(),
+                    args: vec![elem],
+                });
+            }
+            // D-REACT1=B: reactive.derived(() => expr) → Derived<T>. The compute
+            // closure takes no parameters; `T` is its return type. Reading a signal
+            // (`.get()`) inside the body subscribes the derived to it.
+            ("jet.reactive", "derived") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("derived", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                let elem = match &lam_ty {
+                    Some(Type::Fn { params, ret, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(reactive_lambda_arity("derived", params.len(), args[0].expr.span()));
+                            return None;
+                        }
+                        match ret {
+                            Some(r) => (**r).clone(),
+                            None => {
+                                self.diags.push(reactive_derived_unit(args[0].expr.span()));
+                                return None;
+                            }
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(reactive_not_lambda("derived", other, args[0].expr.span()));
+                        return None;
+                    }
+                    None => return None,
+                };
+                if !self.reactive_value_ok(&elem, args[0].expr.span(), "derived") {
+                    return None;
+                }
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_DERIVED.to_string(),
+                    args: vec![elem],
+                });
+            }
+            // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
+            // whenever a signal it read changes. The body is a zero-parameter,
+            // unit-returning closure; the call itself yields nothing.
+            ("jet.reactive", "effect") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity("effect", 1, args.len(), span));
+                    for a in args.iter_mut() { self.infer(&mut a.expr); }
+                    return None;
+                }
+                let lam_ty = self.infer(&mut args[0].expr);
+                match &lam_ty {
+                    Some(Type::Fn { params, .. }) => {
+                        if !params.is_empty() {
+                            self.diags.push(reactive_lambda_arity("effect", params.len(), args[0].expr.span()));
+                            return None;
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(reactive_not_lambda("effect", other, args[0].expr.span()));
+                        return None;
+                    }
+                    None => return None,
+                }
+                return None; // effect returns nothing
+            }
             _ => {}
         }
 
@@ -1193,6 +1295,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
         | "F32x4" | "F64x2"
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+        // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
+        | "Signal" | "Derived"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -1796,6 +1900,10 @@ pub(crate) fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode",
             )
+            // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
+            // element type is inferred from the initial value / closure return — not in
+            // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
+            | ("jet.reactive", "signal" | "derived")
     )
 }
 
@@ -2250,6 +2358,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "jet.regex" => &[
             "is_match", "match", "find", "find_all", "replace", "replace_all", "split",
         ],
+        // D-REACT1=B: opt-in reactive library — signals/derived/effects.
+        "jet.reactive" => &["signal", "derived", "effect"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -2537,6 +2647,57 @@ pub(crate) fn wrong_core_arity(name: &str, want: usize, got: usize, span: Span) 
         ),
         "every argument must match a standard library function parameter".to_string(),
         format!("check the call to `{}`", name),
+        Some(span),
+    )
+}
+
+/// D-REACT1=B (E2910): a `reactive.derived`/`effect` argument that isn't a lambda.
+pub(crate) fn reactive_not_lambda(kind: &str, got: &Type, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2910",
+        format!("`reactive.{kind}` needs a lambda, not {}", got.show()),
+        format!(
+            "a reactive {} is built from a `() => …` body so it can re-run when a signal changes",
+            kind
+        ),
+        format!("write `reactive.{kind}(() => {{ … }})`"),
+        Some(span),
+    )
+}
+
+/// D-REACT1=B (E2911): a `reactive.derived`/`effect` lambda that takes parameters.
+pub(crate) fn reactive_lambda_arity(kind: &str, n: usize, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2911",
+        format!(
+            "`reactive.{kind}` needs a zero-parameter lambda, got {} parameter{}",
+            n,
+            if n == 1 { "" } else { "s" }
+        ),
+        "the body takes no arguments — it reads the signals it depends on via `.get()`".to_string(),
+        format!("write `reactive.{kind}(() => {{ … }})` with no parameters"),
+        Some(span),
+    )
+}
+
+/// D-REACT1=B (E2912): a `reactive.derived` whose lambda returns nothing.
+pub(crate) fn reactive_derived_unit(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2912",
+        "`reactive.derived` must compute and return a value".to_string(),
+        "a derived value is recomputed from its signals; its lambda has to return the value".to_string(),
+        "return a value from the body, or use `reactive.effect(() => { … })` for a side effect".to_string(),
+        Some(span),
+    )
+}
+
+/// D-REACT1=B (E2913): a reactive value type the library can't hold (e.g. a function).
+pub(crate) fn reactive_bad_value_type(kind: &str, ty: &Type, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2913",
+        format!("a reactive {} can't hold a {}", kind, ty.show()),
+        "signals and derived values hold ordinary data so they can be copied to dependents".to_string(),
+        "use a data value (number, text, list, struct, …); wrap behaviour in `reactive.effect` instead".to_string(),
         Some(span),
     )
 }

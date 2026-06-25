@@ -4598,3 +4598,52 @@ fn main() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "3\n4\n");
 }
+
+/// D-REACT1=B: a signal + derived + effect reactive flow. A signal change
+/// recomputes the derived and re-runs the effect (a real reactive update).
+#[test]
+fn reactive_signal_derived_effect() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use jet.reactive as reactive
+fn main() {
+    n := reactive.signal(1)
+    doubled := reactive.derived(() => (n.get() * 2))
+    print(doubled.get())
+    reactive.effect(() => {
+        print(doubled.get())
+    })
+    n.set(5)
+    print(doubled.get())
+}
+";
+    let (code, stdout) = build_and_run("tir_reactive_flow", src);
+    assert_eq!(code, 0, "reactive program should run cleanly");
+    // initial derived (2), effect runs now (2), effect re-runs on set (10),
+    // final direct read (10).
+    assert_eq!(stdout, "2\n2\n10\n10\n");
+}
+
+/// D-REACT1=B: a `Signal<String>` carries non-numeric data; `.set` notifies a
+/// derived that concatenates it.
+#[test]
+fn reactive_string_signal() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use jet.reactive as reactive
+fn main() {
+    name := reactive.signal(\"world\")
+    greeting := reactive.derived(() => \"hello, {name.get()}\")
+    print(greeting.get())
+    name.set(\"jet\")
+    print(greeting.get())
+}
+";
+    let (code, stdout) = build_and_run("tir_reactive_string", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "hello, world\nhello, jet\n");
+}

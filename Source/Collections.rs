@@ -59,6 +59,13 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == "Sender" => {
             sender_method_return(args, method, arg_count)
         }
+        // D-REACT1=B: reactive handle methods. `Signal.get()/set(v)`, `Derived.get()`.
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_SIGNAL => {
+            signal_method_return(args, method, arg_count)
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_DERIVED => {
+            derived_method_return(args, method, arg_count)
+        }
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             builtin_static_return(recv_ty, method, arg_count)
         }
@@ -351,6 +358,27 @@ fn sender_method_return(_args: &[Type], method: &str, nargs: usize) -> Option<Op
     }
 }
 
+/// D-REACT1=B: `Signal<T>` methods. `.get()` reads the current value (and, inside a
+/// derived/effect body, subscribes); `.set(v)` writes a new value and notifies.
+fn signal_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let t = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        ("get", 0) => Some(Some(t)),
+        ("set", 1) => Some(None),
+        _ => None,
+    }
+}
+
+/// D-REACT1=B: `Derived<T>` methods. `.get()` reads the latest computed value,
+/// recomputing it from its signals when one of them has changed.
+fn derived_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let t = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        ("get", 0) => Some(Some(t)),
+        _ => None,
+    }
+}
+
 /// Whether a built-in method mutates its receiver (needs `var` binding).
 pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
     match recv_ty {
@@ -453,6 +481,12 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, .. } if name == "Task" || name == "Channel" => Some(vec![]),
+        // D-REACT1=B: `Signal.set(v)` expects a value of the signal's element type.
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_SIGNAL => match method {
+            "set" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            _ => Some(vec![]),
+        },
+        Type::Apply { name, .. } if name == crate::Syntax::TYPE_DERIVED => Some(vec![]),
         _ => None,
     }
 }

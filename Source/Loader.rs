@@ -671,7 +671,8 @@ pub fn is_ring_module(name: &str) -> bool {
         name,
         // D-REGEX1: `regex` is now shipped (was staged).
         // D-ENC1: csv/toml/yaml/json retired from the `jet.` ring root — now `core.encoding.*`.
-        "log" | "time" | "crypto" | "http" | "regex"
+        // D-REACT1=B: opt-in reactive library (signals/derived/effects).
+        "log" | "time" | "crypto" | "http" | "regex" | "reactive"
     )
 }
 
@@ -732,6 +733,9 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "jet.http",
     // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
     "jet.regex",
+    // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
+    // derived values, and effects. Pure std runtime (no external crate).
+    "jet.reactive",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {

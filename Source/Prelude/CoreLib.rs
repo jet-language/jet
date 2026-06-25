@@ -336,6 +336,141 @@ mod jet_std {
     #[derive(Clone, Debug, PartialEq)]
     pub enum Closed { Closed }
 
+    // ── D-REACT1=B: opt-in reactive runtime (signals / derived / effects) ──────
+    // Reactivity is a LIBRARY, not core semantics (option B): ordinary bindings are
+    // unchanged; these types are the explicit, opt-in surface. Pure std — no external
+    // crate (I6) and no raw-memory tier (interior mutability via Rc/RefCell). Dependency
+    // tracking is explicit-by-read: a `.get()` evaluated while an observer (a derived
+    // recompute or an effect run) is on the thread-local stack subscribes that
+    // observer to the signal. A `.set(v)` re-runs every subscribed observer.
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    type Observer = Rc<dyn Fn()>;
+
+    thread_local! {
+        // The stack of observers currently (re)computing. The top is the active one.
+        static JET_REACTIVE_OBSERVERS: RefCell<Vec<Observer>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn jet_reactive_active_observer() -> Option<Observer> {
+        JET_REACTIVE_OBSERVERS.with(|s| s.borrow().last().cloned())
+    }
+
+    fn jet_reactive_run_observed(obs: &Observer, body: &dyn Fn()) {
+        JET_REACTIVE_OBSERVERS.with(|s| s.borrow_mut().push(obs.clone()));
+        body();
+        JET_REACTIVE_OBSERVERS.with(|s| { s.borrow_mut().pop(); });
+    }
+
+    struct SignalCell<T> {
+        value: T,
+        // Subscribers are re-run on set. Held as weak-free Rc closures; an effect or
+        // derived keeps its own observer alive, so these stay valid for the run.
+        subs: Vec<Observer>,
+    }
+
+    pub struct JetSignal<T> {
+        cell: Rc<RefCell<SignalCell<T>>>,
+    }
+
+    impl<T> Clone for JetSignal<T> {
+        fn clone(&self) -> Self { JetSignal { cell: self.cell.clone() } }
+    }
+
+    impl<T: Clone> JetSignal<T> {
+        pub fn new(initial: T) -> JetSignal<T> {
+            JetSignal { cell: Rc::new(RefCell::new(SignalCell { value: initial, subs: Vec::new() })) }
+        }
+        pub fn get(&self) -> T {
+            if let Some(obs) = jet_reactive_active_observer() {
+                let mut c = self.cell.borrow_mut();
+                if !c.subs.iter().any(|s| Rc::ptr_eq(s, &obs)) {
+                    c.subs.push(obs);
+                }
+            }
+            self.cell.borrow().value.clone()
+        }
+        pub fn set(&self, value: T) {
+            let subs = {
+                let mut c = self.cell.borrow_mut();
+                c.value = value;
+                c.subs.clone()
+            };
+            for s in subs {
+                s();
+            }
+        }
+    }
+
+    // A derived value is itself observable: it holds a current value plus its own
+    // subscriber list, so effects (and other deriveds) that read it re-run when it
+    // recomputes. The `_observer` it registers with its source signals recomputes the
+    // value and then notifies the derived's own subscribers.
+    pub struct JetDerived<T> {
+        cell: Rc<RefCell<SignalCell<T>>>,
+        _observer: Observer,
+    }
+
+    impl<T> Clone for JetDerived<T> {
+        fn clone(&self) -> Self {
+            JetDerived { cell: self.cell.clone(), _observer: self._observer.clone() }
+        }
+    }
+
+    impl<T: Clone + 'static> JetDerived<T> {
+        pub fn new<F: Fn() -> T + 'static>(compute: F) -> JetDerived<T> {
+            let compute = Rc::new(compute);
+            let cell: Rc<RefCell<SignalCell<T>>> =
+                Rc::new(RefCell::new(SignalCell { value: (compute)(), subs: Vec::new() }));
+            // The observer recomputes the value, then notifies the derived's own subs.
+            let cell_for_obs = cell.clone();
+            let compute_for_obs = compute.clone();
+            let observer: Observer = Rc::new(move || {
+                let v = (compute_for_obs)();
+                let subs = {
+                    let mut c = cell_for_obs.borrow_mut();
+                    c.value = v;
+                    c.subs.clone()
+                };
+                for s in subs {
+                    s();
+                }
+            });
+            // Run once under observation to record the source-signal dependency set.
+            jet_reactive_run_observed(&observer, &{
+                let cell = cell.clone();
+                let compute = compute.clone();
+                move || {
+                    let v = (compute)();
+                    cell.borrow_mut().value = v;
+                }
+            });
+            JetDerived { cell, _observer: observer }
+        }
+        pub fn get(&self) -> T {
+            // Reading a derived inside an observer subscribes that observer to it.
+            if let Some(obs) = jet_reactive_active_observer() {
+                let mut c = self.cell.borrow_mut();
+                if !c.subs.iter().any(|s| Rc::ptr_eq(s, &obs)) {
+                    c.subs.push(obs);
+                }
+            }
+            self.cell.borrow().value.clone()
+        }
+    }
+
+    /// `reactive.effect(body)` — run `body` now, and again whenever a signal it read
+    /// changes. The first run records the effect's dependencies; each subscribed
+    /// signal then holds an `Rc` to the observer, keeping the effect alive for as long
+    /// as a signal it reads is alive (a long-lived reactive sink). An effect that reads
+    /// no signal simply runs once.
+    pub fn jet_reactive_effect<F: Fn() + 'static>(body: F) {
+        let observer: Observer = Rc::new(body);
+        let run = observer.clone();
+        jet_reactive_run_observed(&observer, &move || { run(); });
+    }
+
     impl super::JetShow for Closed {
         fn jet_show(&self) -> String { "Closed".to_string() }
     }

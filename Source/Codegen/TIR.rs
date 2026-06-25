@@ -932,6 +932,10 @@ pub(crate) enum TCoreClosureKind {
     Guard { closure: String },
     /// D-TXN3: `<handle>.on_commit(<lambda>)` → `<handle>.on_commit(Box::new(<closure>))`.
     OnCommit { handle: String, closure: String },
+    /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
+    ReactiveDerived { closure: String },
+    /// D-REACT1=B: `reactive.effect(<lambda>)` → `{root}jet_std::jet_reactive_effect(<closure>)`.
+    ReactiveEffect { closure: String },
 }
 
 /// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
@@ -1293,6 +1297,10 @@ pub(crate) enum THandleOp {
     /// (e.g. `jet_math_Vec3_dot(&(v), w)`, `jet_math_F32x4_sum(&(v))`). `reduce`
     /// carries the validated marker op so the right fold function is named.
     MathMethod { type_name: String, method: String, reduce_op: Option<String> },
+    /// D-REACT1=B: `Signal.get()`/`Derived.get()` → `(recv).get()` (reads + tracks).
+    ReactiveGet,
+    /// D-REACT1=B: `Signal.set(v)` → `(recv).set(<arg0>)` (writes + notifies).
+    ReactiveSet,
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so
@@ -1600,6 +1608,7 @@ fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_foreign_value_ty(ty, cx)
         || is_covered_generic_struct_ty(ty, cx)
         || is_covered_concurrency_ty(ty, cx)
+        || is_covered_reactive_ty(ty, cx)
         || is_covered_shared_ty(ty, cx)
 }
 
@@ -1633,6 +1642,22 @@ fn is_covered_concurrency_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(name.as_str(), "Task" | "Channel" | "Sender")
         && args.len() == 1
         && concurrency_elem_covered(&args[0], cx)
+}
+
+/// D-REACT1=B: a reactive handle type `Signal<T>` / `Derived<T>` (a single-arg
+/// `Type::Apply`) usable as a param/return/local *value* type. Structurally the
+/// same seam as `is_covered_concurrency_ty`: `cx.rust_type` renders these to
+/// `{root}jet_std::Jet{Signal,Derived}<{T}>` (Source/Codegen/Context.rs), so
+/// binding/passing/returning one is byte-identical to the AST path. The element `T`
+/// must itself be a covered value type. Their methods (`get`/`set`) carry
+/// `recv_type == None` and are covered by the reactive-method shape.
+fn is_covered_reactive_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Apply { name, args } = ty else {
+        return false;
+    };
+    matches!(name.as_str(), "Signal" | "Derived")
+        && args.len() == 1
+        && is_subset_param_ty(&args[0], cx)
 }
 
 /// c109 Phase 21: a `Task<T>`/`Channel<T>`/`Sender<T>` element type. Any covered value
@@ -3831,6 +3856,18 @@ fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // Shape (d5) [D-REACT1=B]: a reactive `Signal`/`Derived` method (`.get()`/`.set(v)`).
+    // Sema sets `recv_type == Some("Signal"|"Derived")` (CheckerInfer's reactive arm), so
+    // these are keyed on recv_type — NOT the bare name (`get`/0 would alias a list `get`).
+    // `Signal.get()`/`Derived.get()` → `(recv).get()`; `Signal.set(v)` → `(recv).set(v)`.
+    if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived"))
+        && is_reactive_method_name(method, args.len())
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
     // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
@@ -4287,6 +4324,13 @@ fn is_concurrency_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+/// D-REACT1=B: is `(method, nargs)` a reactive `Signal`/`Derived` method?
+/// `Signal.get()`/`Derived.get()` (0 args), `Signal.set(v)` (1 arg). Always keyed
+/// together with `recv_type == Some("Signal"|"Derived")`, never on the name alone.
+fn is_reactive_method_name(method: &str, nargs: usize) -> bool {
+    matches!((method, nargs), ("get", 0) | ("set", 1))
+}
+
 /// c109 Phase 12: resolve a numeric method (`is_nan`/`count_ones`/`to_i32`/…) into a
 /// total `TNumericOp`, reproducing `emit_builtin_method`'s numeric arms +
 /// `numeric_conversion`/`conv_rust_target` (Source/Codegen/Expression.rs) EXACTLY.
@@ -4522,6 +4566,9 @@ fn core_closure_call_in_subset(
                 && lambda_arg(1)
         }
         ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-REACT1=B: `reactive.derived(<lambda>)` / `reactive.effect(<lambda>)` —
+        // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).
+        ("jet.reactive", "derived" | "effect") => args.len() == 1 && no_labels && lambda_arg(0),
         _ => false,
     }
 }
@@ -8216,6 +8263,34 @@ fn lower_method_call(
             },
         };
     }
+    // D-REACT1=B: a reactive `Signal`/`Derived` method (gate shape d5). The gate proved
+    // `recv_type == Some("Signal"|"Derived")` + `get`/0 or `set`/1. Resolve the op +
+    // result type HERE from the receiver's already-resolved `Apply<T>` slot (I3):
+    // `Signal.get()`/`Derived.get()` → `T`; `Signal.set(v)` → Unit.
+    if matches!(recv_type.as_deref(), Some("Signal") | Some("Derived"))
+        && is_reactive_method_name(method, args.len())
+    {
+        let recv_t = lower_expr(receiver, cx, env);
+        let elem = match &recv_t.ty {
+            Type::Apply { args, .. } => args.first().cloned(),
+            _ => None,
+        }
+        .unwrap_or_else(unit_type);
+        let (op, ty) = match method {
+            "get" => (THandleOp::ReactiveGet, elem),
+            "set" => (THandleOp::ReactiveSet, unit_type()),
+            _ => unreachable!("is_reactive_method_name admitted only get/set"),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op,
+                args: targs,
+            },
+        };
+    }
     // c109 Phase 21: a Task/Channel/Sender concurrency method (gate shape d3). The gate
     // proved `recv_type == None` + a disjoint concurrency name+arity. Resolve the op +
     // result type HERE (totality). The result type comes from `Collections::
@@ -8580,6 +8655,26 @@ fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             TCoreClosureKind::Guard { closure }
+        }
+        // D-REACT1=B: the `derived` closure's body type is the `Derived<T>` element.
+        ("jet.reactive", "derived") => {
+            let lam = lam_at(0)?;
+            let body_ty = lambda_body_ty(lam, cx, env);
+            let closure = render_lambda_str(lam, cx, env);
+            return Some(TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_DERIVED.to_string(),
+                    args: vec![body_ty],
+                },
+                kind: TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::ReactiveDerived { closure },
+                },
+            });
+        }
+        ("jet.reactive", "effect") => {
+            let lam = lam_at(0)?;
+            let closure = render_lambda_str(lam, cx, env);
+            TCoreClosureKind::ReactiveEffect { closure }
         }
         _ => return None,
     };
@@ -10599,6 +10694,9 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
                 THandleOp::ChannelSender => format!("({}).sender()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
+                // D-REACT1=B: reactive Signal/Derived reads and writes.
+                THandleOp::ReactiveGet => format!("({}).get()", recv),
+                THandleOp::ReactiveSet => format!("({}).set({})", recv, a(0)),
                 // c109 Phase 25: HttpRouter route registration, byte-for-byte the
                 // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
                 // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
@@ -10646,6 +10744,14 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // only after `commit()` (the `JetTransaction` prelude type).
             TCoreClosureKind::OnCommit { handle, closure } => {
                 format!("{}.on_commit(Box::new({}))", handle, closure)
+            }
+            // D-REACT1=B: a derived value recomputed from its signals.
+            TCoreClosureKind::ReactiveDerived { closure } => {
+                format!("{}jet_std::JetDerived::new({})", cx.root_prefix, closure)
+            }
+            // D-REACT1=B: an effect re-run when a signal it read changes.
+            TCoreClosureKind::ReactiveEffect { closure } => {
+                format!("{}jet_std::jet_reactive_effect({})", cx.root_prefix, closure)
             }
         },
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
@@ -10785,6 +10891,10 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret_ty: &Type,
         ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
         // c109 Phase 21: the `tasks.channel()` producer, byte-for-byte `emit_core_call`.
         ("core.tasks", "channel") => format!("{}jet_std::JetChannel::new()", cx.root_prefix),
+        // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
+        ("jet.reactive", "signal") => {
+            format!("{}jet_std::JetSignal::new({})", cx.root_prefix, arg(0))
+        }
         ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
         ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
         ("core.fs", "write") => format!(
@@ -12252,6 +12362,28 @@ fn greet() -> String { return input() }
         assert!(!is_concurrency_method_name("send", 0));
         assert!(!is_concurrency_method_name("receive", 1));
         assert!(!is_concurrency_method_name("len", 0));
+    }
+
+    #[test]
+    fn reactive_method_names_and_value_types() {
+        // D-REACT1=B: the reactive method set (`get`/0, `set`/1) and value types.
+        assert!(is_reactive_method_name("get", 0));
+        assert!(is_reactive_method_name("set", 1));
+        assert!(!is_reactive_method_name("get", 1)); // a list `get(i)` is NOT this shape
+        assert!(!is_reactive_method_name("set", 0));
+        let cx_src = "fn f() {}\n";
+        let (toks, _) = crate::Lexer::lex(cx_src);
+        let prog = crate::Parser::parse(&toks).expect("parse");
+        let cx = build_cx(&prog, cx_src, "t.jet");
+        let apply = |n: &str| Type::Apply { name: n.to_string(), args: vec![Type::Int] };
+        assert!(is_covered_reactive_ty(&apply("Signal"), &cx));
+        assert!(is_covered_reactive_ty(&apply("Derived"), &cx));
+        assert!(is_subset_param_ty(&apply("Signal"), &cx));
+        assert!(is_subset_param_ty(&apply("Derived"), &cx));
+        assert!(!is_covered_reactive_ty(&apply("Channel"), &cx));
+        // The producer + closure-call shapes are covered.
+        assert!(core_call_covered("jet.reactive", "signal"));
+        assert!(crate::Sema::is_polymorphic_core_special("jet.reactive", "derived"));
     }
 
     #[test]

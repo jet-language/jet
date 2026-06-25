@@ -24,6 +24,16 @@ fn contains_tuple_type(ty: &Type) -> bool {
     }
 }
 
+/// D-REACT1=B: a reactive handle type `Signal<T>`/`Derived<T>` — an Rc-backed shared
+/// value whose "copy" shares the same reactive cell (so L0801 doesn't apply).
+fn is_reactive_handle_ty(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, .. }
+            if name == Syntax::TYPE_SIGNAL || name == Syntax::TYPE_DERIVED
+    )
+}
+
 impl<'a> Checker<'a> {
     pub(crate) fn infer_name_or(&mut self, e: &mut Expr, fallback: &str) -> String {
         self.infer(e)
@@ -1231,6 +1241,14 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
+                } else if is_reactive_handle_ty(&cap_ty) {
+                    // D-REACT1=B: a reactive `Signal`/`Derived` is an Rc-backed shared
+                    // handle — capturing a "copy" shares the same reactive cell (that is
+                    // the whole point: a derived/effect reads the live signal, and the
+                    // outer code still `.set`s it). No silent-data-copy to warn about, so
+                    // L0801 is suppressed. The capture is still recorded as a clone so
+                    // codegen moves an Rc clone into the closure.
+                    lam.meta.cloned_captures.push(name.clone());
                 } else if !taken {
                     lam.meta.cloned_captures.push(name.clone());
                     self.diags.push(Diagnostic::lint(
@@ -2557,6 +2575,23 @@ impl<'a> Checker<'a> {
                 if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
                     let handle_ty = handle_ty.clone();
                     let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some(handle_ty);
+                    return result;
+                }
+            }
+        }
+        // D-REACT1=B: methods on the reactive handle types `Signal<T>`/`Derived<T>`
+        // (`.get()`, `.set(v)`). Set `recv_type_out` to the handle name so codegen
+        // routes the call to the reactive-method shape (keyed on recv_type, not the
+        // bare method name — `get`/0 would otherwise alias a list `get`).
+        if let Type::Apply { name, .. } = &recv_ty {
+            if matches!(name.as_str(), "Signal" | "Derived") {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let handle_ty = name.clone();
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some(handle_ty);
                     return result;
                 }

@@ -313,6 +313,21 @@ pub const CORE_TERM_MODULE: &str = "core.term";
 /// `Key.F(n)`, `Key.Ctrl(c)`, `Key.Unknown`.
 pub const TYPE_KEY: &str = "Key";
 
+/// D-REACT1 (ratified 2026-06-22, option B): reactivity is an opt-in *library*,
+/// not core semantics. Ordinary binding semantics are unchanged; runtime
+/// reactivity ships as the `jet.reactive` ring package. The surface is three
+/// explicit producers and their handle types — no new keyword or sigil (reactive
+/// values are ordinary values made with library calls, exactly as option B
+/// requires). `use jet.reactive as reactive` exposes:
+///   reactive.signal(initial) -> Signal<T>   — a mutable reactive source
+///   reactive.derived(() => expr) -> Derived<T> — a value recomputed from signals
+///   reactive.effect(() => { … })             — a side effect re-run on change
+/// Methods: `Signal.get()/set(v)`, `Derived.get()`. Dependency tracking is
+/// explicit-by-read (a `.get()` inside a derived/effect body subscribes to it).
+pub const REACTIVE_MODULE: &str = "jet.reactive";
+pub const TYPE_SIGNAL: &str = "Signal";
+pub const TYPE_DERIVED: &str = "Derived";
+
 /// S33 (ratified M5): legacy list type constructor.
 /// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
 pub const TYPE_LIST: &str = "List";

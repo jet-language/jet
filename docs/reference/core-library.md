@@ -658,6 +658,57 @@ be replaced by an in-house RE2-style engine before the end of Epoch 3.
 
 ---
 
+### `jet.reactive` — signals, derived values, effects (D-REACT1)
+
+`use jet.reactive as reactive`. Reactivity is an **opt-in library**, not core
+language semantics — ordinary bindings stay non-reactive. The library adds three
+explicit reactive values:
+
+- **signal** — a mutable reactive source. `reactive.signal(initial)` infers `T`
+  from the initial value and returns a `Signal<T>`. Read with `.get()`, update
+  with `.set(v)`.
+- **derived** — a value recomputed from the signals it reads.
+  `reactive.derived(() => expr)` returns a `Derived<T>` whose `.get()` reflects
+  the latest computation.
+- **effect** — a side effect. `reactive.effect(() => { … })` runs the body now,
+  and again whenever a signal it read changes.
+
+Dependency tracking is **explicit-by-read**: any `.get()` evaluated inside a
+derived or effect body subscribes that derived/effect to the signal. A `.set(v)`
+re-runs every subscriber.
+
+```jet
+use jet.reactive as reactive
+
+fn main() {
+    price :: reactive.signal(100)
+    qty   :: reactive.signal(2)
+    total :: reactive.derived(() => (price.get() * qty.get()))
+    print(total.get())                       // 200
+
+    reactive.effect(() => print(total.get()))  // prints 200 now
+    price.set(150)                             // effect re-runs → 300
+    qty.set(3)                                 // effect re-runs → 450
+    print(total.get())                         // 450
+}
+```
+
+| Call | Returns | Does |
+|------|---------|------|
+| `reactive.signal(initial)` | `Signal<T>` | a mutable reactive source holding `T` |
+| `reactive.derived(() => expr)` | `Derived<T>` | a value recomputed from the signals it reads |
+| `reactive.effect(() => { … })` | — | a side effect re-run when a read signal changes |
+| `sig.get()` / `der.get()` | `T` | read the current value (and subscribe, inside a derived/effect) |
+| `sig.set(v)` | — | write a new value and re-run subscribers |
+
+`Signal`/`Derived` are cheap shared handles — copying one (e.g. capturing it in a
+lambda) shares the same reactive cell, so a derived/effect reads the live signal
+while outer code keeps `.set`ting it. The runtime is pure std (no external crate);
+the compiler-side dataflow graph for tooling/IDEs is a separate, future tooling
+feature.
+
+---
+
 ### `core.mem` — arenas and regions
 
 Expert-tier explicit allocators, unlocked by `use core.mem` (no `#Unsafe`
@@ -849,6 +900,7 @@ ships as versioned `jet.*` packages. These shipped in Epoch 2:
 | `jet.log` | Structured logging / tracing / metrics |
 | `jet.time` | Calendar dates, time zones, formatted dates |
 | `jet.crypto` | Hash, HMAC, vetted random primitives |
+| `jet.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
 | `jet.archive` | zip / tar / gzip (staged — not yet available) |
 | `jet.db` | SQLite (FFI-tier) (staged — not yet available) |
 

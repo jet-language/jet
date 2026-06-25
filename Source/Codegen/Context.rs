@@ -329,6 +329,21 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            // D-REACT1=B: reactive handle types lower to the std-only jet_std runtime.
+            Type::Apply { name, args } if name == Syntax::TYPE_SIGNAL && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetSignal<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_DERIVED && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetDerived<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
             // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
             // Memory safety is enforced in sema (the `@unsafe` gate); codegen
             // is dumb.

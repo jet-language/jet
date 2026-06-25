@@ -2292,9 +2292,19 @@ fallback — memory-safe by default (I1). Raw target intrinsics stay available b
 `#Unsafe`. UNBLOCKED. (c94)
 
 **D-REACT1 — reactivity is tooling + a library, not core semantics** *(ratified 2026-06-22,
-option B)*: ordinary binding semantics are unchanged; the compiler may expose the derived
-dataflow graph to tooling/IDEs, and runtime reactivity ships as an opt-in `jet.reactive`
-library. UNBLOCKED. (c64)
+option B; implemented 2026-06-25)*: ordinary binding semantics are unchanged; the compiler
+may expose the derived dataflow graph to tooling/IDEs, and runtime reactivity ships as an
+opt-in `jet.reactive` library. Shipped surface (`use jet.reactive as reactive`):
+`reactive.signal(initial) -> Signal<T>` (a mutable reactive source),
+`reactive.derived(() => expr) -> Derived<T>` (a value recomputed from the signals it reads),
+and `reactive.effect(() => { … })` (a side effect re-run when a signal it read changes).
+Methods: `Signal.get()`/`Signal.set(v)`, `Derived.get()`. No new keyword or sigil — reactive
+values are ordinary values produced by library calls, exactly as option B requires; dependency
+tracking is explicit-by-read (a `.get()` inside a derived/effect body subscribes it). The
+runtime is pure std (Rc/RefCell + a thread-local observer stack — no external crate, no
+raw-memory tier). Diagnostics E2910–E2913 guard misuse. The *tooling-side* dataflow-graph
+exposure (LSP/docs/build-invalidation) remains a future tooling task — the library is the
+ratified runtime deliverable and is now in. DONE. (c64)
 
 **D-FANOUT2 — defer namespace/member fan-out** *(ratified 2026-06-22, option B)*: only the
 ratified S75 call fan-out `f.[a,b,c]` ships; a second fan-out axis (`service.{start,stop}`
