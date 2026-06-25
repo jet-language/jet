@@ -647,7 +647,8 @@ pub const KW_TEST: &str = "Test";
 /// The existing `jet bench` verb (D-TOOL5) discovers and runs these, reporting
 /// per-region ops/sec + ns/iter (today it times a whole program). PascalCase
 /// marker per D-CASING1, joining the `#Test`/`#Pure`/`#Todo`/`#Caps` family.
-/// `benchmark` stays a reserved target (TARGET_RESERVED).
+/// The `benchmark` manifest target (TARGET_BENCHMARK, c80) points `jet bench`
+/// at a package entry; it is not a new engine — it reuses this exact machinery.
 pub const KW_BENCH: &str = "Bench";
 
 /// D-TOOL2 (ratified 2026-06-17, E2-M11; PascalCase marker D-CASING1 follow-on
@@ -1075,18 +1076,24 @@ pub const MANIFEST_BLOCK_PAYLOAD: &str = "payload";
 pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
 
 /// D-TGT1/D-TGT2 (ratified 2026-06-21): a package's build targets, replacing the
-/// removed `kind:` (U10). The four shipped targets — `library` is imported for its
+/// removed `kind:` (U10). The five shipped targets — `library` is imported for its
 /// code, `executable` installs a binary on PATH, `test`/`example` build their own
-/// artifacts. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
+/// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry.
+/// Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
 /// `{ targets: [ … ] }` list.
 pub const TARGET_LIBRARY: &str = "library";
 pub const TARGET_EXECUTABLE: &str = "executable";
 pub const TARGET_TEST: &str = "test";
 pub const TARGET_EXAMPLE: &str = "example";
+/// D-TGT2 / c80 (ratified 2026-06-21; backend shipped 2026-06-25): the manifest
+/// target that routes `jet bench` at the package entry — same engine as `#Bench`/
+/// `jet bench file.jet`, now addressable from a `packages:` declaration.
+pub const TARGET_BENCHMARK: &str = "benchmark";
 
 /// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
 /// recognized but rejected (no backend yet) until their tooling lands.
-pub const TARGET_RESERVED: &[&str] = &["benchmark", "plugin"];
+/// `benchmark` shipped (c80); only `plugin` remains reserved (c81/D-DEP-WASM1).
+pub const TARGET_RESERVED: &[&str] = &["plugin"];
 
 /// D-TGT1 (ratified 2026-06-21): the per-package field listing build targets —
 /// `app: { targets: [library, executable { entry: "src/cli.jet" }] }`. A bare

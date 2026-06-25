@@ -248,6 +248,43 @@ fn jet_test_coverage_reports_hit_and_miss() {
 }
 
 #[test]
+fn jet_bench_target_integration() {
+    // c80 / D-TGT2: a package whose pkg.jet declares `target: benchmark` runs
+    // its `#Bench` regions via the existing `jet bench` engine (no new mechanism).
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        eprintln!("note: rustc not found; skipping jet bench target integration");
+        return;
+    }
+    let example = root.join("examples/features/123_bench_target/main.jet");
+    let out = Command::new(&jet).arg("bench").arg(&example).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "jet bench examples/features/123_bench_target/main.jet failed:\nstdout: {}\nstderr: {}",
+        stdout,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for needle in ["sum_to(1000)", "ns/iter", "ops/sec"] {
+        assert!(
+            stdout.contains(needle),
+            "bench output missing `{}`:\n{}",
+            needle,
+            stdout
+        );
+    }
+    // Exactly one `#Bench` region in this example.
+    assert_eq!(
+        stdout.lines().filter(|l| l.contains("ns/iter")).count(),
+        1,
+        "expected exactly one bench region line:\n{}",
+        stdout
+    );
+}
+
+#[test]
 fn jet_new_creates_project() {
     let jet = jet_bin();
     let dir = std::env::temp_dir().join(format!("jet_new_test_{}", std::process::id()));

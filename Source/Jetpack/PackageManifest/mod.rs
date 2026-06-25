@@ -69,14 +69,19 @@ pub enum PackageKind {
     Executable,
 }
 
-/// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The four
-/// shipped targets; `benchmark`/`plugin` are reserved and rejected at parse time.
+/// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The five
+/// shipped targets; `plugin` is still reserved and rejected at parse time (c81).
+/// `benchmark` (c80) routes `jet bench` at the package entry via the existing
+/// `#Bench`/`jet bench` engine — it is not a new mechanism (I8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     Library,
     Executable,
     Test,
     Example,
+    /// c80 / D-TGT2: this package's entry is a benchmark; `jet bench` runs its
+    /// `#Bench` regions via the shipped `compile_benches_with_path` path.
+    Benchmark,
 }
 
 /// The capability-API mode of a library target (D-CAP4/D-CAP6). Default is
@@ -373,7 +378,7 @@ packages: {
 
     #[test]
     fn reserved_target_errors() {
-        // D-TGT2: `plugin`/`benchmark` are reserved until their backends land.
+        // D-TGT2: `plugin` is reserved until c81 ships (D-DEP-WASM1).
         let src = "payload: { name: \"x\", version: \"1\" }\npackages: { web: plugin }";
         let err = parse(src).unwrap_err();
         assert!(
@@ -381,6 +386,17 @@ packages: {
                 if name == "web" && value == "plugin"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn benchmark_target_parses() {
+        // c80 / D-TGT2: `benchmark` is no longer reserved — it now produces
+        // `Target::Benchmark` and wires into the existing `jet bench` engine.
+        let src = "payload: { name: \"x\", version: \"1\" }\npackages: { perf: benchmark }";
+        let m = parse(src).unwrap();
+        assert_eq!(m.packages[0].targets, vec![Target::Benchmark]);
+        // A benchmark-only package has no PackageKind (not library/executable).
+        assert_eq!(m.package_kind("perf"), None);
     }
 
     #[test]
