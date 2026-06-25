@@ -417,6 +417,8 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
         synthesize_impls(&mut module.items);
         register_type_methods(&module.items, &mut st.registry, &mut diags);
         register_impl_methods(&module.items, &mut st.registry, &mut diags);
+        // D-TXN-ROLLBACK layer 2: ensure Rollback is known before user impl blocks.
+        st.trait_reg.register_synthetic_rollback();
         st.trait_reg.register_items(&module.items, &mut diags);
         // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted

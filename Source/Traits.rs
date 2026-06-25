@@ -493,6 +493,78 @@ impl TraitRegistry {
         self.error_conversions
             .contains_key(&(from_ty.to_string(), to_ty.to_string()))
     }
+
+    /// D-TXN-ROLLBACK layer 2: register the synthetic `Rollback` trait so
+    /// `impl T: Rollback` is accepted + validated without the user writing
+    /// `trait Rollback { … }`. Called BEFORE `register_items` on each module
+    /// so the trait is already known when user impl blocks are validated.
+    /// Guard: if the user already wrote `trait Rollback { … }`, skip.
+    pub fn register_synthetic_rollback(&mut self) {
+        if self.traits.contains_key(crate::Syntax::TRAIT_ROLLBACK) {
+            return;
+        }
+        let dummy = Span { start: 0, end: 0 };
+        // snapshot(self) -> Snapshot
+        let snapshot_sig = TraitMethodSig {
+            name: "snapshot".to_string(),
+            name_span: dummy,
+            params: vec![crate::AST::Param {
+                name: crate::Syntax::KW_SELF.to_string(),
+                name_span: dummy,
+                ty: Type::Named(String::new()), // self placeholder
+                ty_span: dummy,
+                convention: AccessConvention::Read,
+                default: None,
+            }],
+            return_type: Some(Type::Named("Snapshot".to_string())),
+            is_view_return: false,
+            span: dummy,
+            default_body: None,
+            is_pure: false,
+            declared_effects: None,
+        };
+        // restore(~self, snap: ^Snapshot)
+        let restore_sig = TraitMethodSig {
+            name: "restore".to_string(),
+            name_span: dummy,
+            params: vec![
+                crate::AST::Param {
+                    name: crate::Syntax::KW_SELF.to_string(),
+                    name_span: dummy,
+                    ty: Type::Named(String::new()),
+                    ty_span: dummy,
+                    convention: AccessConvention::Write,
+                    default: None,
+                },
+                crate::AST::Param {
+                    name: "snap".to_string(),
+                    name_span: dummy,
+                    ty: Type::Named("Snapshot".to_string()),
+                    ty_span: dummy,
+                    convention: AccessConvention::Move,
+                    default: None,
+                },
+            ],
+            return_type: None,
+            is_view_return: false,
+            span: dummy,
+            default_body: None,
+            is_pure: false,
+            declared_effects: None,
+        };
+        let mut methods = HashMap::new();
+        methods.insert("snapshot".to_string(), snapshot_sig);
+        methods.insert("restore".to_string(), restore_sig);
+        self.local_traits.insert(crate::Syntax::TRAIT_ROLLBACK.to_string());
+        self.traits.insert(
+            crate::Syntax::TRAIT_ROLLBACK.to_string(),
+            TraitInfo {
+                methods,
+                assoc_types: vec!["Snapshot".to_string()],
+                span: dummy,
+            },
+        );
+    }
 }
 
 fn struct_auto_derive_ok(s: &StructDef) -> bool {

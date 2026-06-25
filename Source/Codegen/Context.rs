@@ -82,6 +82,10 @@ pub(crate) struct Cx {
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `user_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
+    /// D-TXN-ROLLBACK layer 2: user types that implement the `Rollback` trait.
+    /// Populated in `build_cx_items` from `Item::Impl` blocks with
+    /// `trait_name == Some("Rollback")` and from inline `struct { impl Rollback }`.
+    pub(crate) rollback_types: HashSet<String>,
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
@@ -514,6 +518,7 @@ pub(crate) fn build_cx_items(
         unqualified_inline: HashMap::new(),
         unqualified_file: HashMap::new(),
         trait_methods: HashSet::new(),
+        rollback_types: HashSet::new(),
         current_fn: std::cell::RefCell::new(String::new()),
     };
 
@@ -704,6 +709,31 @@ pub(crate) fn build_cx_items(
                     // S62: track trait-impl methods so call sites know not to mangle.
                     if i.trait_name.is_some() {
                         cx.trait_methods.insert((i.type_name.clone(), m.name.clone()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // D-TXN-ROLLBACK layer 2: collect types that implement `Rollback` so the
+    // TIR lowerer can use snapshot_custom instead of snapshot for those roots.
+    for item in items {
+        match item {
+            Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ROLLBACK) => {
+                cx.rollback_types.insert(i.type_name.clone());
+            }
+            Item::Struct(s) => {
+                for block in &s.trait_impls {
+                    if block.trait_name == Syntax::TRAIT_ROLLBACK {
+                        cx.rollback_types.insert(s.name.clone());
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for block in &e.trait_impls {
+                    if block.trait_name == Syntax::TRAIT_ROLLBACK {
+                        cx.rollback_types.insert(e.name.clone());
                     }
                 }
             }

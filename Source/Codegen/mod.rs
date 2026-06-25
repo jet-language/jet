@@ -363,6 +363,26 @@ pub(crate) fn mangle(name: &str) -> String {
     }
 }
 
+/// D-TXN-ROLLBACK layer 2: emit the `trait user_Rollback { … }` Rust trait
+/// declaration when any impl block in the program references `Rollback`. Programs
+/// with no `Rollback` impl produce zero output here (byte-identical to before).
+pub(crate) fn emit_synthetic_rollback_trait(out: &mut String) {
+    out.push_str("pub trait user_Rollback {\n");
+    out.push_str("    type Snapshot;\n");
+    out.push_str("    fn snapshot(&self) -> Self::Snapshot;\n");
+    out.push_str("    fn restore(&mut self, _snap: Self::Snapshot);\n");
+    out.push_str("}\n\n");
+}
+
+pub(crate) fn program_has_rollback_impl(items: &[Item]) -> bool {
+    items.iter().any(|i| match i {
+        Item::Impl(im) => im.trait_name.as_deref() == Some(Syntax::TRAIT_ROLLBACK),
+        Item::Struct(s) => s.trait_impls.iter().any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
+        Item::Enum(e) => e.trait_impls.iter().any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
+        _ => false,
+    })
+}
+
 pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -386,6 +406,11 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     let cx = build_cx(prog, src, file);
     let tuple_shapes = collect_tuple_shapes(&prog.items);
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
+
+    // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff needed.
+    if program_has_rollback_impl(&prog.items) {
+        emit_synthetic_rollback_trait(&mut out);
+    }
 
     for item in &prog.items {
         match item {
@@ -476,6 +501,11 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     cx.test_mode = true;
     let tuple_shapes = collect_tuple_shapes(&prog.items);
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
+
+    // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff needed.
+    if program_has_rollback_impl(&prog.items) {
+        emit_synthetic_rollback_trait(&mut out);
+    }
 
     for item in &prog.items {
         match item {

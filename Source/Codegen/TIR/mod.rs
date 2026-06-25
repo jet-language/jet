@@ -435,11 +435,11 @@ pub(crate) enum TStmt {
         /// hooks). When `snapshots` is non-empty a handle is synthesized even for a
         /// bare block, so the auto-snapshot has a transaction to register on.
         handle: Option<String>,
-        /// D-TXN-ROLLBACK layer 1: each entry is a `&mut <place>` expression for a
-        /// root local the block mutates and that was in scope at entry. Emitted at
-        /// block entry as `jet_txn::snapshot(&mut <handle>, <place_ref>)` — clone the
-        /// pre-state, restore it on a `?`-failure (Drop-backed, LIFO).
-        snapshots: Vec<String>,
+        /// D-TXN-ROLLBACK layer 1+2: each entry is `(&mut <place>, Option<RustTy>)`.
+        /// `None` → clone-based snapshot via `jet_txn::snapshot`.
+        /// `Some(ty)` → the place implements `Rollback`; use `jet_txn::snapshot_custom`
+        /// with `<ty>::restore` so the custom cheap diff runs instead of a full clone.
+        snapshots: Vec<(String, Option<String>)>,
         body: Vec<TStmt>,
     },
 }

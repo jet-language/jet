@@ -1086,10 +1086,23 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // Each becomes `&mut <place>` so the prelude can clone+restore it.
             let mut roots: Vec<String> = Vec::new();
             collect_txn_mut_roots(body, &mut roots);
-            let snapshots: Vec<String> = roots
+            let snapshots: Vec<(String, Option<String>)> = roots
                 .iter()
                 .filter(|r| env.locals.contains_key(*r))
-                .map(|r| format!("&mut {}", env.place_of(r)))
+                .map(|r| {
+                    let place_ref = format!("&mut {}", env.place_of(r));
+                    // D-TXN-ROLLBACK layer 2: if the root type implements Rollback,
+                    // use snapshot_custom instead of the clone-based snapshot path.
+                    let rollback_ty = env.ty_of(r).and_then(|ty| {
+                        if let crate::AST::Type::Named(n) = ty {
+                            if cx.rollback_types.contains(&n) {
+                                return Some(format!("user_{n}"));
+                            }
+                        }
+                        None
+                    });
+                    (place_ref, rollback_ty)
+                })
                 .collect();
             TStmt::Transact {
                 handle,

@@ -627,15 +627,24 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                         "{}let mut {} = {}jet_transaction();\n",
                         inner_pad, handle, cx.root_prefix
                     ));
-                    // D-TXN-ROLLBACK layer 1: snapshot each mutated root BEFORE the
-                    // body runs, so the captured clone is the pre-mutation state. On a
-                    // `?`-failure the guard's Drop restores them LIFO; on commit they
-                    // drop un-run.
-                    for place_ref in snapshots {
-                        out.push_str(&format!(
-                            "{}{}jet_txn::snapshot(&mut {}, {});\n",
-                            inner_pad, cx.root_prefix, handle, place_ref
-                        ));
+                    // D-TXN-ROLLBACK layer 1+2: snapshot each mutated root BEFORE
+                    // the body runs. Clone-based (None) or custom Rollback (Some).
+                    for (place_ref, rollback_ty) in snapshots {
+                        match rollback_ty {
+                            None => {
+                                out.push_str(&format!(
+                                    "{}{}jet_txn::snapshot(&mut {}, {});\n",
+                                    inner_pad, cx.root_prefix, handle, place_ref
+                                ));
+                            }
+                            Some(ty) => {
+                                let bare = place_ref.trim_start_matches("&mut ").to_string();
+                                out.push_str(&format!(
+                                    "{}{{ let __snap = ({}).snapshot(); {}jet_txn::snapshot_custom(&mut {}, {}, __snap, {}::restore); }}\n",
+                                    inner_pad, bare, cx.root_prefix, handle, place_ref, ty
+                                ));
+                            }
+                        }
                     }
                     emit_tir_stmts(body, cx, out, inner);
                     out.push_str(&format!("{}{}.commit();\n", inner_pad, handle));

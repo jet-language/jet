@@ -399,6 +399,22 @@ mod jet_txn {
             *slot = saved;
         }));
     }
+    /// D-TXN-ROLLBACK layer 2: snapshot a value via its `Rollback` impl instead of
+    /// a full `Clone`. The caller captures the snap by calling `place.snapshot()` and
+    /// passes it together with the type-erased `restore` function pointer. Sound for
+    /// the same reason as `snapshot`: the place outlives the transaction guard (LIFO).
+    pub(crate) fn snapshot_custom<T: 'static, S: 'static>(
+        tx: &mut JetTransaction,
+        place: &mut T,
+        snap: S,
+        restore: fn(&mut T, S),
+    ) {
+        let raw: *mut T = place;
+        tx.on_rollback(Box::new(move || {
+            let slot: &mut T = unsafe { &mut *raw };
+            restore(slot, snap);
+        }));
+    }
 }
 trait user_Serialize { fn to_json(&self) -> String; }
 
