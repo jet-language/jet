@@ -132,7 +132,7 @@ fn examples_compile_and_run() {
         // inside an inline `unsafe { }` block). Their generated `unsafe` is allowed, but
         // ONLY in the gated block/fn form — never ungated (I1).
         if stem == "48_lowlevel" || stem == "100_rawptr" || stem == "121_single_use_discard"
-            || stem == "123_uninit"
+            || stem == "124_uninit"
         {
             assert!(
                 user_code.contains("unsafe"),
