@@ -47,64 +47,60 @@ already shipped. Only the two fn-modifier markers and the arrow glyph below are 
 
 ---
 
-### D-STATE-DECL — what is the state vocabulary: loose tags, or an enum? (rec B — REFRAMED per owner Q 2026-06-25)
+### D-STATE-DECL — how is the state set declared? `state Reservation { … }` block (rec B — owner-directed 2026-06-25)
 
-**Owner answer (your question: "why not just use an enum? could we enhance enums instead of a new tag system?").** Two things first, because they reframe this card:
+**Owner's direction (2026-06-25):** "Isn't one of the markers called `#State`? For D-STATE-DECL we could just do option B with `state Reservation { Pending, Confirmed, CheckedIn }`." Adopted as the recommendation. Two clarifications it settles:
 
-1. **Typestate is not a new tag system.** The shipped feature (c71) does *not* introduce a parallel concept — a "state" is just an ordinary `tag` (the ratified D-QUAL2 `tag` keyword). `#State`/`#Transition` are markers that *point at* existing tags. So there's nothing new to learn beyond the two markers; the vocabulary is tags you already have.
+1. **`#State` vs `state` is cohesion, not collision.** Yes — `#State(CheckedIn) fn` is the ratified require-state *marker* (D-STATE-REQ=A). A bare `state Reservation { … }` *declaration* shares the word on purpose, and it's the **same bare-keyword-declaration vs `#`-marker split Jet already uses everywhere**: `tag Foo {}` declares / `#Tainted` marks; `struct Foo {}` declares / `#Codable` marks. So the three read as one family — **`state` declares the set, `#State(X)` requires one, `#Transition(A -> B)` moves between them.** One word, three consistent forms.
 
-2. **An enum and typestate answer different questions — but you're right that the enum should be the vocabulary.** The fundamental difference:
-   - A plain **enum is a runtime value**. `enum Status { Pending, Confirmed, CheckedIn }` lives in memory as a discriminant; you read it and branch with `if`/match *at runtime*. It answers "what state is this **right now**?"
-   - **Typestate is a compile-time fact that erases to nothing.** It answers "**prove** this operation can't be called in the wrong state." With a plain enum, `r.room_key()` on a `Pending` reservation **compiles** — you only catch it if you remember to write a runtime `if status == CheckedIn { … } else { return err }` in every method. With typestate, the wrong-state call is a **compile error (E0150)** and the check costs zero bytes at runtime.
+2. **Why a dedicated block and not an enum.** (Background, since the earlier reframe weighed an `enum`/`comptime enum` vocabulary.) An `enum` is conceptually a *runtime value* type; using it purely as an erasing typestate vocabulary is a semantic stretch (you'd need a `comptime enum` qualifier to signal "this one has no runtime form"). A purpose-built `state TypeName { … }` says exactly what it is, ties the set to the type it governs by name, erases by definition, and pairs cleanly with `#State`/`#Transition`. It costs one small new keyword — worth it for the cohesion and for not overloading `enum`. (If a user *does* want a queryable/serializable runtime value, that's a plain `enum` + runtime `match` — a different tool, already supported.)
 
-   So they are not competitors: if you want a queryable/serializable runtime value, use a plain enum (already supported, no typestate needed); if you want the compiler to *prove* a misuse can't happen, that's typestate. (Rust agrees: its type-state pattern uses phantom *type* parameters, not a runtime enum — closer to Jet's erasing tags than to a stored discriminant.)
+**Gist:** A typestate type names its states in a dedicated `state TypeName { … }` block; the `#State`/`#Transition` markers reference those names.
 
-   **But your instinct lands exactly on this card's real question.** The mechanism needs a *vocabulary of state names*; it does not care whether those names are loose `tag`s or the *variants of an `enum`*. Using an enum as the vocabulary is the better answer — it gives one named, grouped state set (the enum *is* the grouping the original card wanted) and exhaustiveness/typo-catching **for free, with no new `states { }` keyword**. So I've dropped the bespoke `states { }` block (old Option B) and replaced it with "the enum is the state set."
-
-**Gist:** Decide whether a typestate's states are loose `tag`s (shipped) or the variants of a dedicated `enum` that the markers reference (your enhance-the-enum direction).
-
-**Story.** Earl models a reservation lifecycle. He wants the state set named in one place — `{ Pending, Confirmed, CheckedIn }` — so a typo (`#Transition(Pending -> Confrimed)`) is caught and so "is there a dead-end state?" can be asked, but he does not want to maintain a separate list that drifts from the transitions. An `enum Reservation_State { … }` he already knows how to write *is* that one place.
+**Story.** Earl models a reservation lifecycle. He wants the set `{ Pending, Confirmed, CheckedIn }` named in one place, tied to `Reservation`, so a typo (`#Transition(Pending -> Confrimed)`) is caught and "is there a dead-end state?" can be asked — without maintaining a list that drifts from the transitions. `state Reservation { … }` is that one place, and it reads as "these are Reservation's states."
 
 **In the wild:**
 ```jet
-// Option B (reframed, recommended): the enum is the state vocabulary
-enum ReservationState { Pending, Confirmed, CheckedIn }
+// Option B (recommended): a dedicated state-set declaration, tied to the type by name
+state Reservation { Pending, Confirmed, CheckedIn }
+
+struct Reservation { guest: String }
 
 impl Reservation {
-    #Transition(ReservationState.Pending -> ReservationState.Confirmed)
-    fn pay(self: ^Reservation) -> Reservation { return self }
-
-    #State(ReservationState.CheckedIn) fn room_key(self) -> String { return "key for {self.guest}" }
-    // a typo `Confrimed` is a normal unknown-variant error; the enum bounds the set,
-    // so the checker can also warn on a variant with no outgoing transition.
+    #Transition(_ -> Pending)          fn book(guest: String) -> Reservation { return Reservation { guest: guest } }
+    #Transition(Pending -> Confirmed)  fn pay(self: ^Reservation) -> Reservation { return self }
+    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation { return self }
+    #State(CheckedIn)                  fn room_key(self) -> String { return "key for {self.guest}" }
 }
+// `#Transition(Pending -> Confrimed)` → error: Confrimed is not a state of Reservation
+// the bounded set also lets the checker warn on a state with no outgoing transition (dead end)
 ```
 
-**Other languages:** Rust's type-state pattern has no declaration (each state is a marker type; the set is implicit in which `Reservation<S>` impls exist). Statechart libraries (XState/TS, Stateless/C#) declare the whole machine up front for exhaustiveness + diagrams. An enum-as-state-set sits between: one named set, no separate machine table, and it's a construct the user already has.
+**Other languages:** Rust's type-state pattern has no declaration (each state is a marker type; the set is implicit in which `Reservation<S>` impls exist). Statechart libraries (XState/TS, Stateless/C#) declare the whole machine up front for exhaustiveness + diagrams. `state TypeName { … }` is the lightweight middle: one named set tied to the type, no separate machine table.
 
 **Tradeoffs:** (subagent-reviewed)
 
-| Option | State vocabulary | New construct | Exhaustiveness (typo / dead-end) | Runtime cost |
+| Option | How states are named | New keyword | Exhaustiveness (typo / dead-end) | Reads as |
 |---|---|---|---|---|
-| A loose `tag`s (shipped) | each state a standalone `tag` | none | only the normal undefined-tag error | none (tags erase) |
-| B enum variants (recommended) | one `enum` names the set | none new — reuses `enum` | yes — set is bounded; can flag typo'd/unreachable state | none for the gate (state fact still erases); the enum type exists only if you also store it |
+| A loose `tag`s (shipped) | each state a standalone `tag`, set implicit in the markers | none | only the normal undefined-tag error | scattered; no "these are the states" home |
+| B `state Reservation { … }` block (recommended) | one declaration, tied to the type by name | one (`state`) | yes — bounded set; flags typo'd + dead-end states | "Reservation's states are …"; cohesive with `#State`/`#Transition` |
 
 - **Option A — loose `tag`s define the set (shipped today).**
 ```jet
-tag Pending {}                       // three independent tags; the set is whatever the markers mention
+tag Pending {}                       // three independent tags; the set is whatever the markers happen to mention
 tag Confirmed {}
 tag CheckedIn {}
 ```
 
-- **Option B — an `enum` is the state set. (recommended — your enhance-the-enum direction)**
+- **Option B — a `state TypeName { … }` declaration. (recommended — owner-directed)**
 ```jet
-enum ReservationState { Pending, Confirmed, CheckedIn }   // one named, grouped, typo-checked set
-// markers reference ReservationState.Pending etc.; no new `states { }` keyword
+state Reservation { Pending, Confirmed, CheckedIn }   // one named, grouped, typo-checked, type-scoped set
+// `state` declares · `#State(X)` requires · `#Transition(A -> B)` moves — one family
 ```
 
-**Recommendation:** **B** — use an enum as the state vocabulary. It directly answers your question (enhance the construct we have rather than lean on loose tags), gives the grouping/exhaustiveness the original card wanted with **zero new syntax**, and keeps the compile-time gate free (the state fact still erases; the enum type only materializes if you also choose to store/serialize the state as a value). The shipped feature uses loose tags (A); moving to enum-variants is a contained change to how the `#State`/`#Transition` markers resolve their arguments (the E0150 mechanism, dataflow, and erasure are unchanged). Confirm B and I'll re-point the marker resolver at enum variants and migrate the example/tests.
+**Recommendation:** **B** — `state Reservation { … }`. It gives the grouping, typo-catching, and dead-end detection the card wanted; ties the set to its type by name; erases by definition (pure compile-time, no runtime discriminant); and forms one coherent `state` / `#State` / `#Transition` family rather than overloading `enum`. The one new keyword is small and purpose-fit. The shipped feature uses loose tags (A); moving to `state { }` is a contained change — add the `state` declaration (parse + register the bounded set, in the declaration family alongside `tag`/`struct`), and re-point the `#State`/`#Transition` marker resolver at it (the E0150 gate, dataflow, and erasure are unchanged). Say ratify and I'll build it.
 
-**Owner Q (D-STATE-DECL):** B reuses `enum` as the state set (recommended). Do you also want the state to be optionally *storable* as a real `ReservationState` field (runtime value you can match/serialize) in addition to the compile-time gate — i.e. one enum serving both the "what now?" runtime question and the "prove it" compile-time gate — or keep the gate purely compile-time-erased for v1?
+**Owner Q (D-STATE-DECL):** ratify **B** = `state TypeName { … }`? (One sub-choice if yes: should an unreachable / dead-end state be a hard error or a warning — I'd default it to a warning so a partial machine still compiles during development.)
 
 ---
 
