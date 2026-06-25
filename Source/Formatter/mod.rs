@@ -183,6 +183,8 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             .unwrap_or(cm.span.start),
         // D-DIST1: distinct type declarations use their own span.
         Item::Distinct(d) => d.span.start,
+        // D-QUAL3: unit families use their own span.
+        Item::UnitFamily(uf) => uf.span.start,
         // D-ERR-CONV: use the from_span (start of `impl Source -> Target {}`).
         Item::ErrorConv(ec) => src[..ec.from_span.start]
             .rfind("impl")
@@ -254,6 +256,7 @@ fn item_span_end(item: &Item) -> usize {
         Item::CModule(cm) => cm.span.end,
         Item::CodeModule(cm) => cm.span.end,
         Item::Distinct(d) => d.span.end,
+        Item::UnitFamily(uf) => uf.span.end,
         // D-ERR-CONV: body_span.end is after the closing `}`.
         Item::ErrorConv(ec) => ec.body_span.end,
         // D-MIGRATE1: use the migration block's own span end.

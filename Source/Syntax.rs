@@ -1052,6 +1052,14 @@ pub const METHOD_DISTINCT_RAW: &str = "raw";
 /// before the distinct-type name (uses the `#` attribute prefix D-ATTR1).
 pub const ATTR_NUMERIC: &str = "Numeric";
 
+/// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
+/// declares a family of units. Each member mints one distinct `#Numeric` type
+/// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
+/// (`fn subtotal(price: Usd, qty: Int) -> Usd`). The family is the
+/// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
+/// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
+pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
+
 /// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
 /// field layout is snapshotted at release time. A breaking field change without
 /// a declared migration is E0910. Written `#PublishedSchema` before `struct`.

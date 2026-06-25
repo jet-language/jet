@@ -380,7 +380,7 @@ pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(Stri
                 }
             }
             Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
-            | Item::CodeModule(_) | Item::Distinct(_) | Item::ErrorConv(_)
+            | Item::CodeModule(_) | Item::Distinct(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Migration(_) => {} // D-MIGRATE1
         }

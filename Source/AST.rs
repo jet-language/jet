@@ -486,6 +486,11 @@ pub enum Item {
     /// D-DIST1 (ratified 2026-06-19): `UserId @= distinct Int` — a distinct type
     /// declaration. `distinct`-over-`distinct` base is rejected in sema.
     Distinct(DistinctDef),
+    /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(currency) { usd, eur, gbp }` —
+    /// a unit family. Sugar: each member mints one `#Numeric` distinct type
+    /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
+    /// in sema registration and codegen — it rides the D-DIST1/D-DIST3 machinery.
+    UnitFamily(UnitFamilyDef),
     /// S28 (M9): `trait Name { fn sig(self) -> T; … }`.
     Trait(TraitDef),
     /// D-QUAL2 (ratified 2026-06-21): `tag Name;` or `tag Name { }` — a marker
@@ -957,6 +962,60 @@ pub struct DistinctDef {
     pub base: Type,
     pub base_span: Span,
     pub span: Span,
+}
+
+/// D-QUAL3 (ratified 2026-06-24): unit-family declaration —
+/// `#UnitFamily(currency) { usd, eur, gbp }`. Each member mints a distinct
+/// `#Numeric` type erasing to `Float`. `members` carries each member's source
+/// spelling (lowercase, e.g. `usd`) and span; the minted type name is the
+/// PascalCase form (`Usd`).
+#[derive(Debug)]
+pub struct UnitFamilyDef {
+    pub is_pub: bool,
+    /// The family label, e.g. `currency` — documentation only; not a type name.
+    pub family: String,
+    pub family_span: Span,
+    /// Each member's source spelling and span (e.g. `("usd", span)`).
+    pub members: Vec<(String, Span)>,
+    pub span: Span,
+}
+
+impl UnitFamilyDef {
+    /// PascalCase the member spelling to its minted distinct-type name:
+    /// `usd` → `Usd`, `m_per_s` → `MPerS`. Splits on `_`, uppercases each
+    /// segment's first char. Empty/edge inputs return the input unchanged.
+    pub fn type_name(member: &str) -> String {
+        let mut out = String::with_capacity(member.len());
+        for seg in member.split('_') {
+            let mut chars = seg.chars();
+            if let Some(first) = chars.next() {
+                out.extend(first.to_uppercase());
+                out.push_str(chars.as_str());
+            }
+        }
+        if out.is_empty() {
+            member.to_string()
+        } else {
+            out
+        }
+    }
+
+    /// The minted `DistinctDef` for each member (`#Numeric`, base `Float`).
+    /// Used by sema registration and codegen to lower the family.
+    pub fn distinct_defs(&self) -> Vec<DistinctDef> {
+        self.members
+            .iter()
+            .map(|(member, span)| DistinctDef {
+                is_pub: self.is_pub,
+                is_numeric: true,
+                name: Self::type_name(member),
+                name_span: *span,
+                base: Type::Float,
+                base_span: *span,
+                span: *span,
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]

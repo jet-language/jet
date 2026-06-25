@@ -155,7 +155,7 @@ before continuing.
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |
 | E0126 | sema  | default expression references a later parameter (D-NARG-D2) |
-| E0127 | sema  | arithmetic on a distinct type without `@Numeric` (D-DIST3) |
+| E0127 | sema  | arithmetic on a distinct type without `@Numeric`, or between two different distinct types — incl. cross-unit mixing (D-DIST3, D-QUAL3) |
 | E0128 | sema  | implicit coercion between a distinct type and its base (D-DIST3) |
 | E0129 | sema  | distinct-over-distinct: base type is itself a distinct type (D-DIST1) |
 | E0140 | sema  | `#SingleUse` value dropped without being consumed at scope end (D-LIN1) |

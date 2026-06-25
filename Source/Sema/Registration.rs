@@ -206,6 +206,13 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 }
             }
             Item::Distinct(d) => register_distinct(d, &mut registry, &mut diags, &funcs, &consts),
+            // D-QUAL3: a unit family lowers to one `#Numeric` distinct type per
+            // member, each erasing to `Float` — register them via the same path.
+            Item::UnitFamily(uf) => {
+                for d in uf.distinct_defs() {
+                    register_distinct(&d, &mut registry, &mut diags, &funcs, &consts);
+                }
+            }
             Item::Const(c) => register_const(c, &mut consts, &mut diags, &funcs, &registry),
             Item::Test(t) => {
                 if name_defined(&t.name, &funcs, &registry, &consts) || tests.contains_key(&t.name)
@@ -564,6 +571,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             | Item::CModule(_)
             | Item::CodeModule(_)
             | Item::Distinct(_)
+            | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types at registration
             | Item::Bench(_)
             | Item::Migration(_) => {} // D-MIGRATE1
         }
@@ -963,6 +971,7 @@ pub(crate) fn comptime_context_from_items(
             | Item::Module(_)
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::Distinct(_)
+            | Item::UnitFamily(_) // D-QUAL3: contributes no comptime context
             | Item::ErrorConv(_)
             | Item::Migration(_) => {} // D-MIGRATE1
         }

@@ -430,6 +430,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, db: &mut SymbolDB)
         Item::CodeModule(_) => {}
         // D-DIST1: distinct types aren't yet indexed for symbols/hover.
         Item::Distinct(_) => {}
+        // D-QUAL3: unit families aren't yet indexed for symbols/hover.
+        Item::UnitFamily(_) => {}
         // D-ERR-CONV: error conversions aren't yet indexed for symbols/hover.
         Item::ErrorConv(_) => {}
         // D-MIGRATE1: migration blocks aren't yet indexed for symbols/hover.

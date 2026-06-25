@@ -548,6 +548,15 @@ pub(crate) fn build_cx_items(
                 cx.distinct_types
                     .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
             }
+            // D-QUAL3: each unit-family member registers as a `#Numeric` distinct
+            // type erasing to `Float`.
+            Item::UnitFamily(uf) => {
+                for d in uf.distinct_defs() {
+                    cx.type_names.insert(d.name.clone());
+                    cx.distinct_types
+                        .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                }
+            }
             Item::CodeModule(cm) => {
                 // D-MOD2: register inline module alias and add mangled function sigs.
                 if let Some(body) = &cm.body {

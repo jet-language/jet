@@ -318,6 +318,13 @@ impl<'a> Parser<'a> {
                         self.bump(); // consume `pub`
                         self.single_use_type_def(true)
                     }
+                    // D-QUAL3: `pub #UnitFamily(name) { m, … }`
+                    TokKind::Hash if {
+                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
+                    } => {
+                        self.bump(); // consume `pub`
+                        self.unit_family_def(true).map(Item::UnitFamily)
+                    }
                     TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                     TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                     TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
@@ -365,6 +372,9 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_marker_list() => self.type_def_with_markers(),
                 TokKind::Hash if self.at_c_module() => self.c_module().map(Item::CModule),
                 TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
+                TokKind::Hash if self.at_unit_family_def() => {
+                    self.unit_family_def(false).map(Item::UnitFamily)
+                }
                 TokKind::Hash if self.at_numeric_distinct_def() => {
                     self.distinct_def(false).map(Item::Distinct)
                 }
@@ -2130,6 +2140,53 @@ impl<'a> Parser<'a> {
             name_span,
             base,
             base_span,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    // --- unit families (D-QUAL3) --------------------------------------------
+
+    /// D-QUAL3 (ratified 2026-06-24): true when `#UnitFamily(` is at the cursor.
+    /// Token stream: `# UnitFamily (`.
+    fn at_unit_family_def(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
+            && matches!(&self.peek3().kind, TokKind::LParen)
+    }
+
+    /// D-QUAL3: parse `#UnitFamily(family) { m1, m2, … }`. Each member mints a
+    /// `#Numeric` distinct type erasing to `Float` (lowered in sema/codegen).
+    pub(super) fn unit_family_def(
+        &mut self,
+        is_pub: bool,
+    ) -> Result<crate::AST::UnitFamilyDef, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "before `UnitFamily`")?;
+        // consume the `UnitFamily` marker ident
+        let (marker, _) = self.expect_ident("after `#`")?;
+        debug_assert_eq!(marker, Syntax::ATTR_UNIT_FAMILY);
+        self.expect(TokKind::LParen, "after `#UnitFamily`")?;
+        let (family, family_span) = self.expect_ident("as the unit family name")?;
+        self.expect(TokKind::RParen, "after the unit family name")?;
+        self.expect(TokKind::LBrace, "to open the unit family member list")?;
+        let mut members: Vec<(String, Span)> = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            let (member, member_span) = self.expect_ident("as a unit family member")?;
+            members.push((member, member_span));
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the unit family member list")?;
+        // The closing `}` ends the item; the lexer inserts a synthetic `;`.
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::UnitFamilyDef {
+            is_pub,
+            family,
+            family_span,
+            members,
             span: Span::new(start.start, end),
         })
     }

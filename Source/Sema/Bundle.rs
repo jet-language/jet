@@ -335,6 +335,14 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
                     register_distinct(d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                     st.type_pub.insert(d.name.clone(), d.is_pub);
                 }
+                // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
+                // per member, each erasing to `Float`.
+                Item::UnitFamily(uf) => {
+                    for d in uf.distinct_defs() {
+                        register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                        st.type_pub.insert(d.name.clone(), d.is_pub);
+                    }
+                }
                 Item::Test(t) => {
                     if name_defined(&t.name, &st.funcs, &st.registry, &st.consts)
                         || st.tests.contains_key(&t.name)
@@ -768,6 +776,7 @@ pub(crate) fn check_bundle_opts(bundle: &mut ProgramBundle, mode: CompileMode, f
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::Module(_)
             | Item::Distinct(_)
+            | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
             | Item::CModule(_) | Item::CodeModule(_)
             | Item::ErrorConv(_)
             | Item::Migration(_) => {} // D-MIGRATE1
@@ -1026,6 +1035,7 @@ pub(crate) fn collect_used_core(bundle: &ProgramBundle, states: &[ModuleState]) 
                 | Item::ExternRust(_)
                 | Item::Module(_)
                 | Item::Distinct(_)
+                | Item::UnitFamily(_) // D-QUAL3: lowered to distinct types
                 | Item::CModule(_) | Item::CodeModule(_)
                 | Item::ErrorConv(_)
                 | Item::Migration(_) => {} // D-MIGRATE1

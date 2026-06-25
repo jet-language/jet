@@ -189,6 +189,12 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
+            // D-QUAL3: emit one distinct newtype per unit-family member.
+            Item::UnitFamily(uf) => {
+                for d in uf.distinct_defs() {
+                    emit_distinct(&cx, &d, &mut out);
+                }
+            }
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)
@@ -270,6 +276,12 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             Item::Struct(s) => emit_struct(&cx, s, &mut out),
             Item::Enum(e) => emit_enum(&cx, e, &mut out),
             Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
+            // D-QUAL3: emit one distinct newtype per unit-family member.
+            Item::UnitFamily(uf) => {
+                for d in uf.distinct_defs() {
+                    emit_distinct(&cx, &d, &mut out);
+                }
+            }
             Item::Const(c) => emit_const(c, &mut out),
             Item::CModule(cm) => emit_c_module(cm, &mut out),
             Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::ExternRust(_)

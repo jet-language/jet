@@ -45,6 +45,12 @@ impl<'a> Fmt<'a> {
                 let text = self.src[d.span.start..d.span.end].to_string();
                 self.write(&text);
             }
+            // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
+            // surface is preserved; it is not expanded into per-member distincts).
+            Item::UnitFamily(uf) => {
+                let text = self.src[uf.span.start..uf.span.end].to_string();
+                self.write(&text);
+            }
             // D-ERR-CONV: error conversion declarations are emitted verbatim.
             Item::ErrorConv(ec) => {
                 let text = self.src[ec.body_span.start..ec.body_span.end].to_string();
