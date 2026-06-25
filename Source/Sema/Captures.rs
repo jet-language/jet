@@ -53,6 +53,8 @@ pub(crate) fn walk_stmts_for_const_refs(stmts: &[Stmt], const_names: &[String], 
             Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } | Stmt::AssumeDet { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
+            // D-CTMARKER1: walk comptime block body for const refs.
+            Stmt::ComptimeBlock { body, .. } => walk_stmts_for_const_refs(body, const_names, taken),
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(then_body, const_names, taken);
@@ -351,6 +353,8 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         }
         Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => false,
+        // D-CTMARKER1: comptime block body may reference names.
+        Stmt::ComptimeBlock { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             expr_refs_name(cond, name)
                 || then_body.iter().any(|s| stmt_refs_name(s, name))
@@ -722,6 +726,11 @@ pub(crate) fn stmt_collect_captures(
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) | Stmt::Return(None, _) => {}
+        // D-CTMARKER1: comptime block erases; still walk body for captures (conservative).
+        Stmt::ComptimeBlock { body, .. } => {
+            let mut body_bound = bound.clone();
+            block_collect_captures(body, &mut body_bound, read, mut_cap);
+        }
         Stmt::ComptimeIf { then_body, else_body, .. } => {
             let mut then_bound = bound.clone();
             block_collect_captures(then_body, &mut then_bound, read, mut_cap);

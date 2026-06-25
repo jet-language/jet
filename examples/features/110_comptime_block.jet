@@ -1,0 +1,18 @@
+// D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` execution block.
+// Runs at build time via the comptime interpreter; erases entirely — no runtime
+// Rust is emitted (I3). $name splice (piece 1) deferred to c155.
+
+comptime LIMIT = 1000
+comptime BASE  = 10
+
+fn main() {
+    // Build-time assertion: verify constants are valid before compiling.
+    comptime {
+        comptime ratio = LIMIT / BASE
+        if ratio < 1 { panic("LIMIT must be >= BASE") }
+    }
+
+    // The block ran at build time and produced no runtime code.
+    print("limit: {LIMIT}")
+    print("base: {BASE}")
+}

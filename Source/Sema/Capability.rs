@@ -227,6 +227,8 @@ fn scan_stmt(
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. } => scan_stmts(body, caps, method_map, param_types),
+        // D-CTMARKER1: comptime block erases; walk body conservatively for caps scan.
+        Stmt::ComptimeBlock { body, .. } => scan_stmts(body, caps, method_map, param_types),
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             scan_expr(cond, caps, method_map, param_types);
             scan_stmts(then_body, caps, method_map, param_types);

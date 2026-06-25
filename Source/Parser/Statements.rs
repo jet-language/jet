@@ -479,6 +479,11 @@ impl<'a> Parser<'a> {
                     let stmt = self.comptime_if_stmt()?;
                     return Ok(stmt);
                 }
+                // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` block.
+                if matches!(self.peek2().kind, TokKind::LBrace) {
+                    let stmt = self.comptime_block_stmt()?;
+                    return Ok(stmt);
+                }
                 let binding = self.comptime_binding()?;
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
@@ -1961,6 +1966,19 @@ impl<'a> Parser<'a> {
             }
             _ => Ok(None),
         }
+    }
+
+    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): parse `comptime { … }`.
+    /// Erases at codegen (build-time only). `$name` splice deferred to c155.
+    fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.bump().span; // `comptime`
+        self.expect(TokKind::LBrace, "to open the `comptime` block body")?;
+        let body = self.block_stmts();
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ComptimeBlock {
+            body,
+            span: Span::new(start.start, end),
+        })
     }
 
     /// D-WHEN1 (ratified 2026-06-19): parse `comptime if <cond> { … } else { … }`.

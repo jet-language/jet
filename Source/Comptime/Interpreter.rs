@@ -351,6 +351,11 @@ impl<'a> Interp<'a> {
             Stmt::BreakLabel(_, span) | Stmt::ContinueLabel(_, span) => {
                 Err(unsupported("a labeled `break`/`continue`", *span))
             }
+            // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` already
+            // ran at sema time; it is build-time-only and erases (no runtime code).
+            // In `jet dev` / debugger mode the block is a no-op — consistent with
+            // codegen erasure (I3).
+            Stmt::ComptimeBlock { .. } => Ok(Flow::Normal),
             // D-WHEN1 (ratified 2026-06-19): sema already selected the arm
             // (selected_then = Some(…)); execute only that arm. If sema didn't
             // run (None), skip both — matching codegen's dumb-emit behaviour.

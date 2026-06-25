@@ -200,6 +200,8 @@ pub(crate) fn check_pure_stmt(
             None
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
+        // D-CTMARKER1: comptime block is build-time only; pure by construction.
+        Stmt::ComptimeBlock { .. } => None,
         // D-WHEN1: check both arms of a comptime if for purity (conservative).
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             if let Some(d) = check_pure_expr(cond, pure_fn, funcs) {
@@ -564,6 +566,8 @@ fn check_pure_stmt_with_path(
             None
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
+        // D-CTMARKER1: comptime block is build-time only; pure by construction.
+        Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             if let Some(d) = rec!(cond) {
                 return Some(d);
@@ -946,6 +950,8 @@ fn walk_stmt_for_calls(
             }
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+        // D-CTMARKER1: comptime block is build-time only; no runtime calls to check.
+        Stmt::ComptimeBlock { .. } => {}
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             walk_expr_for_calls(cond, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {

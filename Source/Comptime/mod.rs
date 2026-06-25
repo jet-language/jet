@@ -267,6 +267,33 @@ pub fn run_repl_step(
     }
 }
 
+/// D-CTMARKER1 (ratified 2026-06-25, piece 2): run a `comptime { … }` block at
+/// build time. Purity-checked (E0951/E0958) then tree-walked with fuel cap (E0952).
+/// Pure path only (Stage A); effect tiers wire in c157 (D-CTEFFECT1).
+pub fn run_block_with_imports(
+    stmts: &[crate::AST::Stmt],
+    funcs: &HashMap<String, Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+) -> Result<(), Diagnostic> {
+    let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
+    Purity::check_purity_stmts(stmts, &refs, extern_names)?;
+    let mut interp = Interp {
+        funcs: &refs,
+        base_dir,
+        fuel: FUEL_BUDGET,
+        sink: None,
+        core_imports,
+        debugger: None,
+        depth: 0,
+        cur_func: "comptime block".to_string(),
+    };
+    let mut scope = globals.clone();
+    interp.exec_block(stmts, &mut scope).map(|_| ())
+}
+
 /// Owned-function variant used while sema is mutating function bodies for
 /// local `comptime` bindings. The cloned function map is a snapshot of the
 /// already-parsed program; the interpreter still sees ordinary Jet AST.

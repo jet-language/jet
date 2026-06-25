@@ -81,6 +81,8 @@ pub(crate) fn rewrite_inline_calls_stmts(stmts: &mut [Stmt], siblings: &HashSet<
             Stmt::Loop { body: inner, .. } | Stmt::Unsafe { body: inner, .. } | Stmt::Region { body: inner, .. } | Stmt::Caps { body: inner, .. } | Stmt::Grant { body: inner, .. } | Stmt::Transact { body: inner, .. } | Stmt::AssumeDet { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
+            // D-CTMARKER1: rewrite inline calls in comptime block body.
+            Stmt::ComptimeBlock { body, .. } => rewrite_inline_calls_stmts(body, siblings, modname),
             // D-WHEN1: rewrite calls in both arms so sibling resolution works
             // regardless of which arm is selected at comptime.
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
@@ -1121,6 +1123,8 @@ pub(crate) fn collect_core_stmts(
             }
             Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } | Stmt::Caps { body, .. } | Stmt::Grant { body, .. } | Stmt::Transact { body, .. } | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used),
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+            // D-CTMARKER1: collect Core usage from comptime block body.
+            Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used),
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {

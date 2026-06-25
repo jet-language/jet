@@ -750,3 +750,26 @@ fn fmt_keeps_parens_around_binary_receiver() {
     let twice = jet::format_source(&out).expect("paren fmt must re-fmt");
     assert_eq!(out, twice, "paren fmt must be idempotent");
 }
+
+#[test]
+fn fmt_comptime_block_is_idempotent() {
+    // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` formatting
+    // round-trips — the block keyword, brace, and body all survive a second fmt.
+    let src = r#"comptime LIMIT = 1000
+
+fn main() {
+    comptime {
+        comptime ratio = LIMIT / 10
+        if ratio < 1 { panic("bad") }
+    }
+    print("ok")
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept comptime block");
+    assert!(
+        out.contains("comptime {"),
+        "comptime block keyword + open brace must survive fmt, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("second fmt should succeed");
+    assert_eq!(out, twice, "comptime block formatting must be idempotent");
+}

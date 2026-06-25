@@ -1464,6 +1464,17 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
+    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` — a
+    /// build-time execution block. Runs at compile time via the tree-walking
+    /// comptime interpreter; erases entirely (no runtime Rust emitted, I3).
+    /// Pure-only in Stage A (D-CTCORE1 whitelist + E0951/E0958/E0953/E0956);
+    /// effect tiers (D-CTEFFECT1) wire in c157. Bindings inside do not leak to
+    /// the enclosing scope. `$name` splice (piece 1) deferred to c155.
+    ComptimeBlock {
+        body: Vec<Stmt>,
+        span: Span,
+    },
+
     /// D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
     /// Swaps named ambient fields for the block's lexical+dynamic extent, then
     /// restores them on all exit paths (return, break, ?, panic unwind) via
@@ -1539,6 +1550,7 @@ impl Stmt {
             | Stmt::Caps { span, .. }
             | Stmt::Grant { span, .. }
             | Stmt::ComptimeIf { span, .. }
+            | Stmt::ComptimeBlock { span, .. }
             | Stmt::ContextBlock { span, .. }
             | Stmt::Live { span, .. }
             | Stmt::AssumeDet { span, .. }

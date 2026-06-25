@@ -613,6 +613,8 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, db: &mut Symb
         | AST::Stmt::Continue(_)
         | AST::Stmt::BreakLabel(..)
         | AST::Stmt::ContinueLabel(..) => {}
+        // D-CTMARKER1: collect symbols from comptime block body.
+        AST::Stmt::ComptimeBlock { body, .. } => collect_stmts(body, mp, module, db),
         AST::Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             collect_expr(cond, mp, db);
             collect_stmts(then_body, mp, module, db);

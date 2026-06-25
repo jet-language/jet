@@ -1158,6 +1158,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             else_body,
             ..
         } => switch_in_subset(subject, arms, else_body, cx, locals),
+        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` erases entirely.
+        // Always "in subset" since it emits nothing in Rust (I3).
+        Stmt::ComptimeBlock { .. } => true,
         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema picks the
         // branch (`selected_then`); codegen emits ONLY that branch's statements inline.
         // The gate must classify the SELECTED branch (the unselected one is dropped and

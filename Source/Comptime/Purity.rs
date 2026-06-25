@@ -12,6 +12,19 @@ use super::Diagnostics::impurity_diag;
 /// Walk the call graph reachable from `init`; reject the first impure call
 /// (IO, FFI) with the path that reached it (E0951). `embed_file`, `panic`,
 /// and `require` are allowed.
+pub(super) fn check_purity_stmts(
+    stmts: &[Stmt],
+    funcs: &HashMap<String, &Func>,
+    extern_names: &HashSet<String>,
+) -> Result<(), Diagnostic> {
+    let mut visited = HashSet::new();
+    let mut path = Vec::new();
+    for stmt in stmts {
+        check_purity_stmt(stmt, funcs, extern_names, &mut visited, &mut path)?;
+    }
+    Ok(())
+}
+
 pub(super) fn check_purity(
     init: &Expr,
     funcs: &HashMap<String, &Func>,
@@ -185,6 +198,10 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
             if let Some(eb) = else_body {
                 eb.iter().for_each(|s| walk_stmt_exprs(s, f));
             }
+        }
+        // D-CTMARKER1 (ratified 2026-06-25, piece 2): walk comptime block body.
+        Stmt::ComptimeBlock { body, .. } => {
+            body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }
         // D-CTX1: walk field values and body for purity analysis.
         Stmt::ContextBlock { fields, body, .. } => {

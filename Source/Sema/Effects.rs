@@ -658,6 +658,8 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Live { body, .. } => block(body),
+        // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
+        Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => expr_handle_escape(cond, handle)
             .or_else(|| block(then_body))
             .or_else(|| else_body.as_ref().and_then(|b| block(b))),

@@ -220,6 +220,8 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                     collect_txn_mut_roots(eb, out);
                 }
             }
+            // D-CTMARKER1: build-time block erases; no runtime mutations.
+            Stmt::ComptimeBlock { .. } => {}
             Stmt::ComptimeIf { then_body, else_body, .. } => {
                 collect_txn_mut_roots(then_body, out);
                 if let Some(eb) = else_body {
@@ -1037,6 +1039,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             else_body,
             ..
         } => lower_switch(subject, arms, else_body, cx, env),
+        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` runs at
+        // build time and erases entirely — no runtime Rust is emitted (I3).
+        Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema chose the
         // branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
         // statements INLINE on the SAME `&mut env` at the SAME indent (no `if`, no

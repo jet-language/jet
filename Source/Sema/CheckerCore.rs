@@ -1028,6 +1028,8 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::If(ifs) => self.check_if(ifs),
+            // D-CTMARKER1 (ratified 2026-06-25, piece 2): build-time execution block.
+            Stmt::ComptimeBlock { .. } => self.check_comptime_block(stmt),
             // D-WHEN1/D-WHEN2 (ratified 2026-06-19): compile-time conditional.
             Stmt::ComptimeIf { .. } => self.check_comptime_if(stmt),
             Stmt::While {
@@ -1611,6 +1613,24 @@ impl<'a> Checker<'a> {
     /// 2. Select the arm whose condition is true.
     /// 3. Full type-check + lower the selected arm (`check_block`).
     /// 4. D-WHEN2: run a name-resolution-only pass over the dropped arm —
+    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): run a `comptime { … }` block at
+    /// build time via the comptime interpreter (D-CTCORE1 pure path). Any error
+    /// (E0951 impurity / E0953 panic / E0956 unsupported) is surfaced as a diagnostic.
+    pub(crate) fn check_comptime_block(&mut self, stmt: &mut Stmt) {
+        let Stmt::ComptimeBlock { body, .. } = stmt else { return; };
+        let globals = self.current_ct_globals();
+        if let Err(d) = crate::Comptime::run_block_with_imports(
+            body,
+            self.ct_funcs,
+            self.ct_externs,
+            self.ct_base_dir,
+            &globals,
+            self.core_imports,
+        ) {
+            self.diags.push(d);
+        }
+    }
+
     ///    we enter `in_dropped_comptime_arm` mode, call `check_block`, but
     ///    then keep only `E0107` (unknown name) diagnostics from that pass.
     ///    This catches typos in dead code without requiring the arm to
