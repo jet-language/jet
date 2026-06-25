@@ -783,6 +783,70 @@ supply-chain posture for every D-DEP1 package, not just c50's.
 
 ---
 
+## Single-use deliberate-drop hatch — board card c69 (D-LIN1 follow-on)
+
+### D-LIN1-DROP — how to deliberately discard a `#SingleUse` value (rec A)
+
+**Gist:** A `#SingleUse` value must be consumed exactly once; decide how a user *intentionally* throws one away (the rare, audited escape) now that `#Audit` is retired.
+
+**Story.** Walter holds a `#SingleUse` `Lock` but hits an error path where he must abandon it without the normal `unlock()` consume — a deliberate leak he wants on the record. The ratified D-LIN1 text said this needs an `#Audit("…")` note, but D-UNSAFE2 retired `#Audit` (its reason folded into `#Unsafe("reason")`), so the blessed spelling is now unspecified. Today his only options are the two real consumes (move to a `^` param or `return`); there is no sanctioned discard.
+
+**In the wild:**
+```jet
+#SingleUse struct Lock { id: Int }
+
+fn risky(l: ^Lock) -> () ? Error {
+    if cannot_proceed() {
+        // Walter must abandon `l` here on purpose. What does he write?
+        ???
+        return err(Error("aborted"))
+    }
+    unlock(l)        // normal consume
+}
+```
+
+**Other languages:**
+```text
+Rust    — std::mem::forget(x) / ManuallyDrop — explicit, unsafe-adjacent leak
+Swift   — no linear types; n/a
+Vale/Austral (linear langs) — an explicit `destroy`/`drop` is the only way to end a linear value
+```
+
+**Tradeoffs:** (subagent-reviewed)
+
+| Option | Spelling | Audit trail | Reuses existing surface |
+|--------|----------|-------------|--------------------------|
+| A — `drop(x)` inside `#Unsafe("reason")` (rec) | `#Unsafe("why") { drop(l) }` | the `#Unsafe` reason IS the audit | yes — D-UNSAFE2 already made `#Unsafe("…")` the audited-gate |
+| B — dedicated `discard(x, "reason")` verb | `discard(l, "aborted")` | reason is an inline arg | no — new builtin + its own audit channel |
+| C — method `l.abandon("reason")` | `l.abandon("aborted")` | inline arg | no — new method on every `#SingleUse` type |
+
+- **Option A — `drop(x)` gated by `#Unsafe("reason")` (recommended).** The deliberate discard is `drop(value)`, legal only inside an `#Unsafe("reason")` region/fn — the `#Unsafe` reason is exactly the audit note the original D-LIN1 wanted, with zero new audit surface (D-UNSAFE2 already unified gate+reason).
+  ```jet
+  fn risky(l: ^Lock) -> () ? Error {
+      if cannot_proceed() {
+          #Unsafe("lock deliberately abandoned on the abort path") {
+              drop(l)
+          }
+          return err(Error("aborted"))
+      }
+      unlock(l)
+  }
+  ```
+- **Option B — dedicated `discard(x, "reason")` builtin.** A first-class verb carrying its own reason string. Reads clearly, but mints a new builtin + a parallel audit channel beside `#Unsafe`, fragmenting "the audited-escape story."
+  ```jet
+  discard(l, "lock deliberately abandoned on the abort path")
+  ```
+- **Option C — `x.abandon("reason")` method.** A method auto-provided on every `#SingleUse` type. Object-syntax is familiar, but it's a magic method on a marker tag and again a second audit channel.
+  ```jet
+  l.abandon("lock deliberately abandoned on the abort path")
+  ```
+
+**Recommendation:** A — the deliberate drop is genuinely an unsafe, audited act, and D-UNSAFE2 already made `#Unsafe("reason")` the one audited gate; `drop(x)` inside it reuses that surface and keeps a single escape-and-audit story (no new builtin, no second audit channel). It also matches Rust's "leaking a linear-ish value is an explicit, eyebrow-raising act."
+
+**Owner Q:** Confirm the discard verb name `drop` (vs `forget`/`leak`/`discard`) — `drop` reads as "let it go," but if you'd rather reserve `drop` for a future general destructor, `forget` (Rust precedent) or `leak` are alternatives.
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
