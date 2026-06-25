@@ -994,6 +994,79 @@ fn main() {
 
 ---
 
+# Ballot scratch — D-STATE1 typestate surface spelling forks
+
+D-STATE1 (=A) is ratified: *typestate via transitioning tags — a fn takes the old
+state tag and returns the next; wrong-state call = compile error E0150; tags erase,
+zero runtime cost.* The **mechanism** is pinned. What the one-line ratification does
+NOT pin is the exact owner-facing **spelling** of three surface elements. Per the
+syntax-decision protocol I built the clearly-implied core (E0150, erasing tags,
+forward state dataflow) using the established marker idioms, and queue the spellings
+below for owner confirmation. The implemented spellings are the defaults; nothing
+about the mechanism changes if the owner picks an alternative — only the lexer/parser
+spelling and a re-bless.
+
+The state *value-fact prefix* (`#Pending res`) is NOT in question — it is the
+ratified D-QUAL1/D-TAINT1 value-fact-rides-the-value idiom (`#Tainted expr`),
+already shipped. Only the two fn-modifier markers and the arrow glyph below are forks.
+
+---
+
+### D-STATE-REQ — the "this method requires state S" marker spelling
+
+*User story:* A dev writes `check_in` on a `Reservation` and wants the compiler to
+reject calling it unless the reservation is `#Confirmed`.
+
+The ratified text says a transition fn "takes the old state tag". A *guarded* method
+(non-transitioning, e.g. `check_in` which is valid only in `Confirmed`) needs a
+require-state marker. Spelling options:
+
+- **A (implemented default): `#State(Confirmed) fn check_in(self, …)`** — a paren-arg
+  fn-modifier marker, exactly parallel to `#layout(c)` / `#UnitFamily(currency)` and
+  the `#Sanitizer fn` modifier family. Reads "in state Confirmed".
+- B: `#Requires(Confirmed) fn check_in(…)` — more explicit verb, longer.
+- C: `#In(Confirmed) fn` — terse, but `In` collides conceptually with `for x in`.
+
+Rec: **A**. One marker idiom, shortest that still reads as a noun-state.
+
+### D-STATE-TRANS — the transition-fn marker + arrow glyph
+
+*User story:* `confirm_payment` moves a reservation from `#Pending` to `#Confirmed`.
+
+- **A (implemented default): `#Transition(Pending -> Confirmed) fn confirm(self) -> Reservation`**
+  — paren-arg marker; the `->` inside mirrors the fn return arrow the dev already
+  knows. Declares "consumes a value at Pending, yields one at Confirmed".
+- B: `#Transition(Pending => Confirmed)` — `=>` to distinguish from the return arrow.
+- C: two markers `#From(Pending) #To(Confirmed) fn` — no new glyph, but two markers.
+
+Rec: **A**. `->` is already the "produces" arrow; reusing it reads naturally.
+
+### D-STATE-DECL — do states need an explicit grouping declaration?
+
+*User story:* the dev wants `Pending`, `Confirmed`, `CheckedIn` recognised as the
+state set of `Reservation`, ideally exhaustively (so a typo `#Confrimed` is caught).
+
+- **A (implemented default): no grouping needed.** Each state is an ordinary `tag`
+  (D-QUAL2). The transition/require markers name them; the checker derives the state
+  set from the markers used. Zero new declaration construct.
+- B: an explicit `states Reservation { Pending, Confirmed, CheckedIn }` block — enables
+  exhaustiveness + a "no transition out of CheckedIn" diagnostic, but is a brand-new
+  owner-facing construct (and a new keyword), heavier than the ratified one-liner.
+
+Rec: **A** for v1 (matches "tags erase, no new runtime/declaration weight"); B is a
+natural follow-on if exhaustive state-machine checking is wanted later (would pair
+with the deferred D-ROLE1 time-varying-roles card).
+
+---
+
+**Also still open upstream (named, not blocking the value-prefix core):**
+D-QUAL4 — plain value-tag *type-position* spelling (`#Tag Type` vs `Type #Tag`). The
+typestate core above never writes a state in a type position (states ride the value and
+the markers), so it does not depend on D-QUAL4. If the owner later wants a state written
+in a signature type (`fn f(r: Reservation #Pending)`), that rides D-QUAL4.
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
