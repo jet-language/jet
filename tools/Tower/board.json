@@ -135,9 +135,9 @@
     {
       "id": "c76",
       "type": "idea",
-      "title": "Visible uninitialization (uninit / ---)",
-      "body": "Jai-borrowed: expert opt-out of safe auto-fill for raw speed; read-before-write stays a compile error (the Jet-vs-Jai safety line). Lowers to Rust MaybeUninit. Gated behind use core.mem (S58).",
-      "stage": "ready",
+      "title": "Visible uninitialization (#Uninit binding, D-UNINIT1)",
+      "body": "Jai-borrowed: expert opt-out of safe auto-fill for raw speed; read-before-write stays a compile error (the Jet-vs-Jai safety line). Lowers to Rust MaybeUninit. Gated behind use core.mem (S58). Ratified spelling = the #Uninit marker on the binding (D-UNINIT1=C), not uninit/--- (card title was stale).",
+      "stage": "done",
       "decisions": [
         "D-UNINIT1"
       ],
@@ -168,6 +168,10 @@
         },
         {
           "t": "[sweep 2026-06-25] gate lifted — D-FIXARR1 stack-array lowering verified IMPLEMENTED (Context.rs:380). Remaining = MaybeUninit codegen + wire parser. No open decision → ready.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] Built + merged, full suite green. `#Uninit name: Type` (D-UNINIT1=C) wired: parser recognizes the marker, codegen lowers to MaybeUninit (gated by use core.mem + the audited expert tier, golden unsafe-exempt). The read-before-write proof (E0420) was ALREADY in sema (CheckerCore.rs self.uninit forward-dataflow with branch/loop joins) — this card added only the parser+codegen wiring on top, as the sweep scoped. Diagnostics E0420–E0424 + 5 ui snapshots; example 124_uninit. (moved to done.)",
           "at": "2026-06-25"
         }
       ],
@@ -607,6 +611,10 @@
         {
           "t": "[ratified 2026-06-25] D-METADERIVE1=A — user-derive authoring = `derive Trait for T { … }` whose body emits a Jet SOURCE FRAGMENT that re-enters lexer->parser->sema (the D-CTCODEGEN1=A path), so errors pin at the user's #[…] derive trigger and rustc never speaks (I2); reuses the existing #[…] marker router (split_type_markers), Rust-style local-only orphan rule. Typed-AST return (B) + attribute-skeleton (C) rejected. Matches Rust quote! + Swift @attached. Emit-template quoting left as a deferred sub-decision (Owner Q1). BOTH c155 decisions (D-METAREFLECT1=B read half + D-METADERIVE1=A authoring half) now ratified; D-METADEPTH1=A ceiling already ratified. Recorded in syntax-decisions.md; cards stripped. No open decision -> ready (Epoch 3; rides the S56 reflection + $-splice build, c162).",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[scope 2026-06-25] This card now OWNS the `$name` splice impl (D-CTMARKER1=C piece 1). c162 shipped the standalone `comptime { }` block but deferred the splice here, because `$name` has no meaning without reflection values to weave — so the splice lands as part of this S56 reflection/derive build, not separately. Don't lose it.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-25",
@@ -789,7 +797,7 @@
       "type": "task",
       "title": "Comptime: `$` splice marker + `comptime { }` execution block (D-CTMARKER1=C)",
       "body": "D-CTMARKER1=C (ratified 2026-06-25). Two pieces: (1) `$name` marks a compile-time value being woven into runtime/generated code — the metaprogramming SPLICE site only (NOT a `$if`/`$loop` C3-style duplicate of the `comptime` keyword, so I8 holds); pairs with the S56 reflection/derive surface (c155). (2) Owner: 'Ensure we add a comptime execution block' — add a keyword-spelled `comptime { … }` statement block (Jet's gated equivalent of Jai's free-standing #run { … }, consistent with comptime if), filling the gap where Jet today has comptime bindings + comptime if but no comptime block. Both run inside the D-CTCORE1 pure-Core whitelist + D-CTEFFECT1 reproducible/#Impure tiers. `$` is currently unused in the lexer — verify before code. Parser + sema + (erasure) codegen + formatter + example + diagnostics.",
-      "stage": "ready",
+      "stage": "done",
       "plan": "comptime-marker-block",
       "notes": [
         {
@@ -798,6 +806,10 @@
         },
         {
           "t": "[sweep 2026-06-25] plan written+vetted (D-CTMARKER1=C). $ confirmed FREE in lexer. comptime{} block stands alone; $name splice impl-gated on c155. No open owner decision → ready.",
+          "at": "2026-06-25"
+        },
+        {
+          "t": "[shipped 2026-06-25] PIECE 2 (comptime { } execution block) built + merged, full suite green: parser → comptime eval under the D-CTCORE1 pure-Core whitelist → erases in codegen → formatter round-trip + fmt-idempotence test; example 125_comptime_block. PIECE 1 (the $name splice) is intentionally NOT done — it has no meaning without reflection values, so it is folded into c155 (the S56 reflection/derive surface) and tracked there. Marked done for the block deliverable; the splice rides c155. (moved to done.)",
           "at": "2026-06-25"
         }
       ],
