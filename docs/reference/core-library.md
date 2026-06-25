@@ -701,6 +701,60 @@ Use `fs.read_bytes` / `fs.write` when you need raw file bytes.
 
 ---
 
+## Numeric surface (D-NUMOPS1)
+
+Plain integer arithmetic (`+` `-` `*` `/`) **traps on overflow** at every width —
+a result outside the type's range stops the program with a Jet panic instead of
+silently wrapping. Opt a single op out at the use site:
+
+```jet
+fn main() {
+    hi: U8 :: 200
+    lo: U8 :: 100
+    print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
+    print(saturating(hi + lo))          // 255  — clamps to the type's range
+    print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, null on overflow
+}
+```
+
+| Form | Returns | What it does |
+|------|---------|--------------|
+| `expr` (`a + b`, …) | `T` | Traps on overflow (safe default) |
+| `wrapping(a + b)` | `T` | Wraps around the type's range |
+| `saturating(a + b)` | `T` | Clamps to `MIN`/`MAX` |
+| `checked(a + b)` | `T?` | `null` on overflow |
+
+**Bounds and float constants** — per-type `MIN`/`MAX`, plus float specials:
+
+| Member | On | Value |
+|--------|----|-------|
+| `U8.MAX` / `I32.MIN` / … | any integer type | the type's range ends |
+| `Float.INFINITY` / `.NEG_INFINITY` | floats | ±∞ |
+| `Float.NAN` | floats | not-a-number |
+| `Float.EPSILON` | floats | smallest representable step |
+
+**Predicates and bit queries:**
+
+| Method | On | Returns |
+|--------|----|---------|
+| `x.is_nan()` / `.is_infinite()` / `.is_finite()` | floats | `Bool` |
+| `n.count_ones()` / `.count_zeros()` | integers | `Int` |
+| `n.leading_zeros()` / `.trailing_zeros()` | integers | `Int` |
+
+**Bit operators** — `&` `|` `^` keep the operand width (both sides the same
+type); `<<` `>>` take any integer shift-count and keep the left side's type. A
+shift count past the type's width traps (no leaked Rust panic).
+
+**Width conversions** are named methods — no implicit narrowing or widening:
+
+| Method | Returns | Direction |
+|--------|---------|-----------|
+| `.to_i64()` / `.to_u32()` / … (widening) | `T` | infallible |
+| `.to_u8()` / `.to_i16()` / … (narrowing) | `T ? String` | fallible (`?`/`??`) |
+| `.to_f32()` / `.to_float()` | `F32` / `Float` | infallible |
+
+---
+
 ## Common mistakes (and what Jet suggests)
 
 | You wrote | Jet wants |

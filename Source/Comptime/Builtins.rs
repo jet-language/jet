@@ -51,8 +51,13 @@ pub(super) fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Resul
         (BinOp::BitAnd, Int(a), Int(b)) => Ok(Int(a & b)),
         (BinOp::BitOr, Int(a), Int(b)) => Ok(Int(a | b)),
         (BinOp::BitXor, Int(a), Int(b)) => Ok(Int(a ^ b)),
-        (BinOp::Shl, Int(a), Int(b)) => Ok(Int(a.wrapping_shl(b as u32))),
-        (BinOp::Shr, Int(a), Int(b)) => Ok(Int(a.wrapping_shr(b as u32))),
+        // D-NUMOPS1: a shift count outside the value's width traps (mirrors the
+        // runtime `jet_shl`/`jet_shr`). Comptime only models the default `Int`
+        // (i64), so the width is 64.
+        (BinOp::Shl, Int(_), Int(b)) if !(0..64).contains(&b) => Err(overflow("shift left", span)),
+        (BinOp::Shr, Int(_), Int(b)) if !(0..64).contains(&b) => Err(overflow("shift right", span)),
+        (BinOp::Shl, Int(a), Int(b)) => Ok(Int(a << (b as u32))),
+        (BinOp::Shr, Int(a), Int(b)) => Ok(Int(a >> (b as u32))),
         (BinOp::Add, Float(a), Float(b)) => Ok(Float(a + b)),
         (BinOp::Sub, Float(a), Float(b)) => Ok(Float(a - b)),
         (BinOp::Mul, Float(a), Float(b)) => Ok(Float(a * b)),

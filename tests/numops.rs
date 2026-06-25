@@ -86,3 +86,34 @@ fn overflow_opt_ins_do_not_trap() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines, ["44", "255", "0"], "wrapping/saturating/checked outputs");
 }
+
+#[test]
+fn bit_operators_and_mixed_width_shift() {
+    if !have_rustc() {
+        return;
+    }
+    // `&`/`|`/`^` keep the U8 width; a shift count may be any integer (here the
+    // literal `2`/`1` default to Int) and the result keeps the left side's width.
+    let src = "fn main() {\n    a: U8 @= 12\n    b: U8 @= 10\n    \
+               print(a & b)\n    print(a | b)\n    print(a ^ b)\n    \
+               print(a << 2)\n    print(a >> 1)\n}\n";
+    let (code, stdout, stderr) = build_and_run("u8_bitops", src);
+    assert_eq!(code, 0, "bit ops should succeed: {stderr}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines, ["8", "14", "6", "48", "6"], "bitwise + shift outputs");
+}
+
+#[test]
+fn over_width_shift_traps_cleanly() {
+    if !have_rustc() {
+        return;
+    }
+    // Shifting a U8 by 200 bits is past its width — it must trap with a Jet
+    // panic (exit 70), NOT leak a raw Rust "shift overflow" panic (I2). The
+    // shift goes through a function so the count is a runtime value.
+    let src = "fn shift_it(a: U8, n: U8) -> U8 {\n    r: U8 @= a << n\n    return r\n}\n\
+               fn main() {\n    print(shift_it(4, 200))\n}\n";
+    let (code, _stdout, stderr) = build_and_run("u8_overshift", src);
+    assert_eq!(code, 70, "over-width shift should trap (exit 70): {stderr}");
+    assert!(stderr.contains("out of range"), "panic should explain the shift: {stderr}");
+}

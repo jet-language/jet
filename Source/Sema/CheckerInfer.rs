@@ -2891,9 +2891,33 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                // D-SG9: remainder and bit ops work on any integer width, both
-                // sides the same width, and keep it.
+            BinOp::Shl | BinOp::Shr => {
+                // D-NUMOPS1: a shift's left side carries the value/width; the right
+                // side is a bit-count, so it may be any integer width and does NOT
+                // have to match. The result keeps the left side's type. (Same rule
+                // as Rust/C/Swift — `U8 << 1` shifts a `U8` by an `Int` count.)
+                if lt.is_integer() && rt.is_integer() {
+                    Some(lt)
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E0109",
+                        format!(
+                            "`{}` works on {} only, but this has {} and {}",
+                            op.spell(),
+                            Type::Int.show(),
+                            lt.show(),
+                            rt.show()
+                        ),
+                        compound_why(op),
+                        "use whole numbers here".to_string(),
+                        Some(span),
+                    ));
+                    None
+                }
+            }
+            BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                // D-SG9: remainder and the bitwise ops work on any integer width,
+                // both sides the same width, and keep it.
                 if lt == rt && lt.is_integer() {
                     Some(lt)
                 } else {

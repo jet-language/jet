@@ -47,6 +47,11 @@ trait JetArith: Copy {
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self;
+    // D-NUMOPS1: a shift by a bit-count `>=` the value's width is undefined in C
+    // and a panic in Rust — Jet traps it cleanly instead. The count comes in as
+    // an `i128` so any integer width (signed or unsigned) reaches here losslessly.
+    fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self;
+    fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self;
 }
 macro_rules! jet_arith_impl {
     ($($t:ty),*) => { $(
@@ -66,6 +71,22 @@ macro_rules! jet_arith_impl {
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
                 self.checked_div(rhs).unwrap_or_else(|| jet_panic(file, line,
                     &format!("this division can't be done (dividing by zero, or overflow)")))
+            }
+            fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
+                let w = (Self::BITS) as i128;
+                if bits < 0 || bits >= w {
+                    jet_panic(file, line, &format!(
+                        "shifting left by {} bits is out of range (this type is {} bits wide)", bits, w));
+                }
+                self << (bits as u32)
+            }
+            fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self {
+                let w = (Self::BITS) as i128;
+                if bits < 0 || bits >= w {
+                    jet_panic(file, line, &format!(
+                        "shifting right by {} bits is out of range (this type is {} bits wide)", bits, w));
+                }
+                self >> (bits as u32)
             }
         }
     )* };

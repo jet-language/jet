@@ -44,6 +44,23 @@ fn main() {
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
 
+    // Bit operators (D-NUMOPS1). `&`/`|`/`^` keep the operand width; a shift's
+    // count may be any integer (it's a bit-count, not a value of the same width),
+    // and a count past the type's width traps instead of leaking a Rust panic.
+    mask: U8 @= 12
+    bits: U8 @= 10
+    print(mask & bits)
+    print(mask | bits)
+    print(mask ^ bits)
+    print(mask << 2)
+    print(mask >> 1)
+    print(mask.leading_zeros())
+    print(mask.trailing_zeros())
+
+    // Float predicates (D-NUMOPS1): NaN/EPSILON and the `is_*` queries.
+    print(Float.NAN.is_nan())
+    print(Float.EPSILON.is_finite())
+
     // Overflow is checked by default — `200 + 100` as a U8 would trap. Opt a
     // single op out at the use site: wrap, saturate, or get a checked `T?`.
     hi: U8 @= 200
