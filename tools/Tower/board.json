@@ -1395,18 +1395,22 @@
       "type": "idea",
       "title": "JIT tier-1: Cranelift backend over the JitBackend seam",
       "body": "D-JITDEP1 = approve. Implement a CraneliftBackend satisfying the JitBackend seam (shipped c77) as JIT tier-1 for fast hot-swap / live-state in jet serve. Cranelift is runtime-side ONLY (never compiler Source/) so I6 holds; scoped + owner-signed like D-REGEX1. Production stays AOT (compile-to-Rust); this is the resident dev-loop speedup. Needs a sidequest plan (integration + executable-memory/W^X + tier-0/tier-1 switch).",
-      "stage": "backlog",
-      "plan": null,
+      "stage": "deciding",
+      "plan": "jit-cranelift",
       "notes": [
         {
           "t": "[sweep] From D-JITDEP1 (2026-06-24): approve Cranelift tier-1 now; own bytecode VM then own native JIT are the planned progression, frozen so they are not lost.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] Plan written + independently vetted (jit-cranelift.md): Cranelift JIT tier-1 over the JitBackend seam (c77), TIR->CLIF dumb backend (I3), resident hot-swap for jet serve/dev, AOT path unchanged. Milestones M0-M3 with byte-differential exit criteria. One open gate → ballot D-JIT2: WHERE the Cranelift dep lives (A workspace member jet-jit/ = I6 machine-checkable; B in-crate cfg-gated + I6 carve-out; C out-of-tree). Vet confirmed single-crate w/ jet+jetpack bins, TIR types pub(crate) today, seam construct-point in CmdDevTools run_resident_*.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-24",
-      "updated": "2026-06-24",
+      "updated": "2026-06-25",
       "decisions": [
-        "D-JITDEP1"
+        "D-JIT2"
       ],
       "priority": "P2",
       "workOrder": null

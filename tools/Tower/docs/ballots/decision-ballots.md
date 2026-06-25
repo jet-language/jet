@@ -1136,6 +1136,102 @@ change rather than a risky "behavior-preserving" merge.
 
 ---
 
+### D-JIT2 — where the Cranelift dependency physically lives
+
+**Status:** open · **Card:** c139 (JIT tier-1) · **Rides:** D-JITDEP1 (Cranelift approved, runtime-side, I6 holds), D-REGEX1 (dep-scoping precedent)
+
+**The problem.** D-JITDEP1 approved Cranelift as a runtime-side dep and said it must
+"never [be] in compiler `Source/`" — I6 holds. But the analogy it draws is to D-REGEX1,
+and that analogy does not fit cleanly: the `regex` dep lives inside a **Jet Core
+sub-library** (Jet-language code that compiles to Rust and pulls the crate as a normal
+package dep). The Cranelift JIT is **not** Jet-language code — it is Rust that consumes
+the compiler's TIR, holds executable memory, and satisfies the `JitBackend` trait
+(`Source/JitBackend.rs`). It is part of the toolchain, not a shipped Core package.
+
+And there is a hard structural fact: **the repo is a single crate today** (one root
+`Cargo.toml`, `name = "jet"`, no `[workspace]`, no members). `Source/JitBackend.rs` is
+`pub mod JitBackend` in that one crate. So "Cranelift not in `Source/`" cannot mean
+"a different file in the same crate" — a dep in `Cargo.toml` is reachable from every
+file in the crate; the I6 wall would be by-convention only, not enforced. We need the
+owner to pick how the wall is actually drawn.
+
+The runtime semantics are settled (D-JITDEP1): production is AOT; the JIT is the
+resident dev-loop tier only. This ballot is **only** about *where the crate dependency
+sits* so that I6 ("zero external crates in the compiler") stays true and enforceable.
+
+---
+
+**Option A — new workspace member `jet-jit/` (own crate, owns the Cranelift dep).**
+Convert the repo to a Cargo workspace. `Source/` becomes the `jet` crate and stays
+dep-free. A new sibling crate (e.g. `jit/`, crate name `jet-jit`) depends on Cranelift
+and on `jet` (for the `JitBackend` trait + a TIR view), and implements `CraneliftBackend`.
+The `jet` binary depends on `jet-jit` only behind a `--features jit` flag, so a default
+`cargo build` of the compiler still pulls zero crates.
+
+```
+Cargo.toml            # [workspace] members = ["jet", "jit"]  (or keep Source/ as crate "jet")
+Source/               # crate "jet" — I6: std-only, ENFORCED (no cranelift in its deps)
+  JitBackend.rs       #   trait seam (unchanged) + a TIR accessor for backends
+jit/
+  Cargo.toml          # depends on cranelift-*, and on jet
+  src/lib.rs          # impl JitBackend for CraneliftBackend
+```
+
+- I6 stays literally true and *machine-checkable*: `Source/`/crate `jet` has no
+  Cranelift in its dependency tree; a CI grep on the `jet` crate's lockfile proves it.
+- Matches R7 ("backend is swappable; nothing outside codegen/driver knows the target")
+  and the existing seam design (a second `impl JitBackend` with zero caller churn).
+- The frozen successors (c140 bytecode VM, c141 native JIT) become *additional*
+  workspace members swapped in behind the same trait — no `Source/` churn ever.
+- Cost: a one-time workspace conversion (jetpack bin, zed wasm crate, test layout must
+  still build). The TIR must expose a stable, crate-visible accessor for `jet-jit` to
+  read — today TIR types are `pub(crate)` inside `jet`, so a small surfaced view is new
+  work.
+- Consequence to weigh: this is the only option that keeps I6 an *enforced* invariant
+  rather than a documented promise.
+
+**Option B — explicit, scoped I6 carve-out; Cranelift dep in the one crate behind a feature.**
+Keep the single crate. Add `cranelift-*` to `Cargo.toml` under an off-by-default
+`jit` feature; `CraneliftBackend` lives in `Source/` (e.g. `Source/Jit/Cranelift.rs`)
+gated `#[cfg(feature = "jit")]`. Amend I6's text to name a standing, owner-signed
+runtime-tier exception (exactly as D-REGEX1 carved one for `regex`).
+
+- Smallest diff; no workspace conversion; TIR stays `pub(crate)` and is reached directly.
+- The JIT backend sits next to the TIR it lowers — arguably the most natural place.
+- Cost: I6 stops being literally true for the compiler crate. The wall is "off by
+  default + cfg-gated," enforced by convention and a feature audit, not by crate
+  boundaries. Every future "can this crate go in `Source/`?" question now points at a
+  precedent that says yes-with-a-flag. This is the carve-out the prompt names as
+  option (b), and it is a real softening of I6.
+
+**Option C — `jet-jit` as an out-of-tree optional toolchain component (plugin).**
+`jet-jit` is its own crate (as in A) but NOT a workspace member built by default — it is
+an optional component the user installs (`jetpack add-component jit` / a separate build)
+and the `jet` binary loads/links only when present. I6 is untouched; the compiler never
+even references Cranelift.
+
+- Strongest I6 isolation; the JIT is opt-in toolchain surface, philosophically "expert
+  tier."
+- Cost: most plumbing — a component/loading story, version-skew management between the
+  `jet` binary and the JIT component, and a worse default dev-loop UX (the headline
+  feature of D-JITDEP1 is *fast `jet serve`*, which a non-default component undercuts).
+- Likely over-engineered for a dev-loop accelerator that should "just work."
+
+---
+
+**Recommendation:** lay out, do not decide. **A** keeps I6 enforceable and matches R7 and
+the seam's stated design, at the cost of a one-time workspace conversion; it is the
+cleanest fit for the frozen c140/c141 progression. **B** is the lightest touch but
+converts I6 from an enforced wall into a documented exception. **C** maximizes isolation
+but undercuts the "fast serve, just works" value proposition. The owner's call hinges on
+how literal I6 must stay vs. how much workspace surgery is acceptable.
+
+*(Reviewer note: this card needs a second-agent vet before it reaches the owner — confirm
+the single-crate fact and that `jetpack`/zed-wasm builds survive a workspace conversion
+under Option A.)*
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
