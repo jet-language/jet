@@ -890,6 +890,56 @@ On the `?`-failure, the debit to `from` must be undone. The three options differ
 
 ---
 
+### D-TAINT-SAN — sanitizer-function spelling: bare `sanitizer fn` vs `#Sanitizer fn` (rec B)
+
+**Gist:** Pick the spelling of the taint-strip function modifier — a bare keyword `sanitizer fn` (as the D-TAINT1 card literally wrote it) or the PascalCase marker `#Sanitizer fn` (as D-CASING1 made `pure fn` → `#Pure fn`).
+
+**Story.** Dolores is writing a web handler in Jet. She has a `#Sanitizer fn` that scrubs a raw query param before it reaches a SQL query (a `Db` sink). She just learned `#Pure`, `#Unsafe`, and `#Test` are all `#`-markers, and she's about to type the taint-strip one. Whatever she types, she wants it to look like the family she already knows — and the compiler's teaching error to point her at the one true spelling, not leave her guessing.
+
+**Background.** The D-TAINT1 card (ratified 2026-06-21, same day as D-CASING1) writes the modifier bare: "A function declared **`sanitizer fn`** is the one blessed way to strip it." D-CASING1 rule 1 says *all tags are PascalCase `#`-markers*, and the D-CASING1 **follow-on** explicitly retired the bare `pure`/`test`/`todo` keywords to `#Pure`/`#Test`/`#Todo`. `sanitizer` is a fn-contract modifier of exactly the same shape as `pure` — so the two ratified-same-day cards point in opposite directions on this one word. This is a pure **spelling** decision; semantics (taint cleared by contract, return is untrusted-input-made-trusted) are unchanged either way. The implementation shipped the marker form `#Sanitizer fn` as the default so the feature is whole; this card confirms or flips that one token.
+
+**In the wild:**
+```jet
+use jet.db as db
+
+// The audited cleaning step: untrusted text in, trusted value out.
+#Sanitizer fn safe_name(raw: String) -> String {
+    return raw.replace("'", "")   // (illustrative; a real one rejects, not strips)
+}
+
+fn lookup(input: String) {        // `input` arrives #Tainted from the request
+    name := safe_name(input)      // taint cleared — the result is trusted
+    db.query("select * from users where name = '{name}'") ?? return  // Db sink: OK
+}
+```
+
+**Other languages:** no mainstream language has a first-class sanitizer modifier (taint is usually a linter/annotation, e.g. CodeQL `sanitizer`, or PHP/Perl runtime taint with no keyword). So there's no cross-language convention to honor — the only consistency pull is *Jet's own* `#Pure`/`#Unsafe`/`#Test` marker family.
+
+**Tradeoffs:**
+
+| Option | Consistency with marker family | Matches ratified D-TAINT1 text | New keyword vs marker | Teaching-error story |
+|--------|-------------------------------|-------------------------------|-----------------------|----------------------|
+| A — bare `sanitizer fn` | Breaks it (lone bare modifier after D-CASING1 retired the others) | Yes (literal) | A bare contextual keyword | Must add a *new* "bare → `#`" error to mirror E0053-style teaching, OR accept an outlier |
+| B — `#Sanitizer fn` (recommended) | Matches `#Pure`/`#Unsafe`/`#Test` exactly | No (normalizes per D-CASING1) | Reuses the marker grammar | Bare `sanitizer fn` → teaching error pointing at `#Sanitizer` (the S14/E0053 pattern) |
+
+- **Option A — bare `sanitizer fn`.** Honor the D-TAINT1 card's literal spelling.
+  ```jet
+  sanitizer fn safe_name(raw: String) -> String { return raw.trim() }
+  ```
+  Cost: it's the only bare fn-contract keyword left after D-CASING1 retired `pure`/`test`/`todo`, so Dolores's mental model ("contracts are `#`-markers") breaks on this one word.
+
+- **Option B — `#Sanitizer fn` (recommended).** Spell it as a PascalCase marker, like every other fn-contract modifier.
+  ```jet
+  #Sanitizer fn safe_name(raw: String) -> String { return raw.trim() }
+  ```
+  The bare `sanitizer fn` becomes a teaching error pointing at `#Sanitizer` (mirroring `pure`→`#Pure`/E0053). This is what shipped as the default.
+
+**Recommendation:** **B.** D-CASING1's follow-on already settled this category — a fn-contract modifier is a `#`-marker — and shipping `sanitizer` as the lone bare exception would re-introduce exactly the "is this a keyword or a marker?" inconsistency D-CASING1 erased. The D-TAINT1 card predates seeing that follow-on applied; B is the faithful reconciliation.
+
+**Owner Q — teaching error for the retired spelling.** If B: should bare `sanitizer fn` get a dedicated teaching error (a new E-code in the E005x teaching family, like `pure`→E0053), or is that over-investment for a word no shipped code uses yet? (Default if unanswered: add it for symmetry with `#Pure`/`#Test`/`#Todo`.)
+
+---
+
 **Still deferred (not blocking; expand to a card when needed):**
 - **D-SERDE-ACCESS — dynamic-tree accessor API.** How a user reads an untyped
   `Json`/agnostic `DataTree` by hand: pattern-match (shipped today) vs a fluent accessor
