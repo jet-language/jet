@@ -257,7 +257,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     }
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
-        || is_type_var_param_ty(ty)
+        || is_type_var_param_ty(ty, cx)
         || is_covered_trait_object_ty(ty, cx)
         || is_covered_distinct_ty(ty, cx)
         || is_covered_tuple_ty(ty, cx)
@@ -353,8 +353,9 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
         return false;
     }
     // Every type argument is a covered value type or a bare type variable (`T`).
+    // c148: pass cx so multi-char type params are recognized.
     args.iter()
-        .all(|a| is_type_var_param_ty(a) || is_subset_param_ty(a, cx))
+        .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
 }
 
 /// c109 Phase 23: a DISTINCT type (`UserId @= distinct Int`, D-DIST1) usable as a
@@ -394,8 +395,13 @@ pub(crate) fn is_covered_tuple_ty(ty: &Type, cx: &Cx) -> bool {
 /// concrete types) route through the TIR. A generic STRUCT type (`Pair<T>`, `Type::Apply`)
 /// is NOT admitted here — that surface (turbofish construction, `[T]`-field builtins) is
 /// deferred, so such a function exits the gate at the param/return type check.
-pub(crate) fn is_type_var_param_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if crate::Generics::is_type_var_name(n))
+///
+/// c148: also checks `cx.current_type_params` so multi-char params (`Kind`, `Elem`)
+/// are treated identically to single-char ones.
+pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
+    matches!(ty, Type::Named(n)
+        if crate::Generics::is_type_var_name(n)
+            || cx.current_type_params.borrow().contains(n.as_str()))
 }
 
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
@@ -474,7 +480,7 @@ pub(crate) fn foreign_struct_lit_in_subset(
     }
     type_args
         .iter()
-        .all(|a| is_type_var_param_ty(a) || is_subset_param_ty(a, cx))
+        .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
 }
 
 /// c109 Phase 13: a `fn(…) -> …` parameter/return type the subset lowers. The fn-type
@@ -540,7 +546,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
     // bare letter (`Option<T>`), and `value(best)`/`null` lower to `Some(user_best)`/`None`
     // byte-identically (no clone/box decision). A type var only appears where a type param
     // is in scope (sema guarantees), so an `Option<T>` payload is total.
-    if is_type_var_param_ty(ty) {
+    if is_type_var_param_ty(ty, cx) {
         return true;
     }
     if let Type::Named(n) = ty {
@@ -604,7 +610,8 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // c109 Phase 17: a type-variable element (`[T]` in a generic fn). A type var only
         // appears where a type param is in scope (sema guarantees), and renders by value
         // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.
-        || is_type_var_param_ty(ty)
+        // c148: pass cx so multi-char params are recognized.
+        || is_type_var_param_ty(ty, cx)
         || is_covered_struct_ty(ty, cx)
         || is_covered_enum_ty(ty, cx)
         || is_covered_collection_ty(ty, cx)
@@ -817,29 +824,21 @@ pub(crate) fn boxed_field_payload_constructible(ty: &Type, cx: &Cx, seen: &mut H
     }
 }
 
-/// c109 Phase 19: is `name` a GENERIC user struct (one with a type-var field)? A generic
+/// c109 Phase 19: is `name` a GENERIC user struct (one with declared type params)? A generic
 /// struct's fields reference type vars (`first: T`); `struct_is_covered` now admits those
 /// (so a generic struct is a covered VALUE type — Phase 19 covers turbofish construction +
 /// `Type::Apply` params). But a METHOD on a generic struct (`impl<T> user_<T>`) is a
 /// SEPARATE deferred surface (the inventory's "generic-type method"), so the method gates
 /// exclude an owning type that is generic. (Free generic functions are covered by Phase 17;
 /// generic STRUCT free functions by Phase 19; generic METHODS stay on the AST path.)
+///
+/// c148: uses `cx.struct_type_params` (populated from `StructDef.type_params`) rather
+/// than `ty_mentions_type_var`, so multi-char type params (`Kind`, `Elem`) are recognized.
 pub(crate) fn struct_is_generic(name: &str, cx: &Cx) -> bool {
-    cx.struct_fields
+    cx.struct_type_params
         .get(name)
-        .map(|fields| fields.iter().any(|(_, fty)| ty_mentions_type_var(fty)))
+        .map(|params| !params.is_empty())
         .unwrap_or(false)
-}
-
-/// True if `ty` references a bare type variable anywhere (a `Type::Named(T)` with
-/// `is_type_var_name`, or nested inside a list/map). Used to detect a generic struct.
-pub(crate) fn ty_mentions_type_var(ty: &Type) -> bool {
-    match ty {
-        Type::Named(n) => crate::Generics::is_type_var_name(n),
-        Type::List(inner) => ty_mentions_type_var(inner),
-        Type::Map { key, value } => ty_mentions_type_var(key) || ty_mentions_type_var(value),
-        _ => false,
-    }
 }
 
 pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>) -> bool {
@@ -901,7 +900,8 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     // clone/deref decision — admit it. (A struct with a type-var field is only ever
     // *used* as a `Type::Apply` — `Pair<Int>` — which `is_covered_generic_struct_ty`
     // gates; a bare `Pair` never type-checks in sema.)
-    if is_type_var_param_ty(ty) {
+    // c148: pass cx for multi-char type param recognition.
+    if is_type_var_param_ty(ty, cx) {
         return true;
     }
     // c109 Phase 24: a FOREIGN value-type field/element — a cross-module imported user

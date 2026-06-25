@@ -397,10 +397,13 @@ impl TraitRegistry {
         if type_params.is_empty() {
             return Ok(HashMap::new());
         }
+        // c148: build the declared-param name set so `unify_types` can recognize
+        // multi-char type params (e.g. `Kind`) in addition to single-char ones.
+        let tp_set: HashSet<String> = type_params.iter().map(|p| p.name.clone()).collect();
         let mut subst = HashMap::new();
         for (i, (_, pty)) in sig.params.iter().enumerate() {
             if let Some(arg_ty) = arg_types.get(i) {
-                if !unify_types(pty, arg_ty, &mut subst) {
+                if !unify_types(pty, arg_ty, &mut subst, &tp_set) {
                     return Err(type_params
                         .first()
                         .map(|p| p.name.clone())
@@ -411,7 +414,7 @@ impl TraitRegistry {
         if let Some(expected) = expected_ret {
             if let Some(ret) = &sig.return_type {
                 let inst_ret = substitute_type(ret, &subst);
-                let _ = unify_types(&inst_ret, expected, &mut subst);
+                let _ = unify_types(&inst_ret, expected, &mut subst, &tp_set);
             }
         }
         for p in type_params {

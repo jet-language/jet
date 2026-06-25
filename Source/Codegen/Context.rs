@@ -89,6 +89,15 @@ pub(crate) struct Cx {
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
+    /// c148: struct name → its declared type-parameter names. Populated in
+    /// `build_cx_items` from `StructDef.type_params`. Lets `struct_is_generic` and
+    /// field-type checks recognize multi-char type params (`Kind`, `Elem`, …).
+    pub(crate) struct_type_params: HashMap<String, HashSet<String>>,
+    /// c148: type-parameter names for the function currently being emitted. Set
+    /// from `f.type_params` at the start of `emit_func` so `rust_type` and
+    /// `rust_param_type` can recognize multi-char params without the single-letter
+    /// heuristic. Cleared when emit returns.
+    pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
 }
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
@@ -259,8 +268,11 @@ impl Cx {
             }
             // Items inside an imported file live in `mod user_<alias>`; the
             // module provides the namespace, so item names stay plain.
+            // c148: also recognize multi-char type params from `current_type_params`.
             Type::Named(name)
-                if Generics::is_type_var_name(name) && !self.type_names.contains(name) =>
+                if (Generics::is_type_var_name(name)
+                    || self.current_type_params.borrow().contains(name.as_str()))
+                    && !self.type_names.contains(name) =>
             {
                 name.clone()
             }
@@ -419,7 +431,10 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
             AccessConvention::Move => base,
         };
     }
-    if matches!(ty, Type::Named(n) if Generics::is_type_var_name(n)) {
+    // c148: type-var params are by-value — single-char heuristic + current_type_params.
+    if matches!(ty, Type::Named(n) if Generics::is_type_var_name(n)
+        || cx.current_type_params.borrow().contains(n.as_str()))
+    {
         return base;
     }
     if matches!(ty, Type::Fn { .. }) {
@@ -522,6 +537,8 @@ pub(crate) fn build_cx_items(
         trait_methods: HashSet::new(),
         rollback_types: HashSet::new(),
         current_fn: std::cell::RefCell::new(String::new()),
+        struct_type_params: HashMap::new(),
+        current_type_params: std::cell::RefCell::new(HashSet::new()),
     };
 
     for item in items {
@@ -565,6 +582,12 @@ pub(crate) fn build_cx_items(
                         .filter(|f| !f.is_stored_ref)
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
+                );
+                // c148: record the declared type params so multi-char names are
+                // recognized everywhere (struct_is_generic, field_type_cloneable, …).
+                cx.struct_type_params.insert(
+                    s.name.clone(),
+                    s.type_params.iter().map(|p| p.name.clone()).collect(),
                 );
             }
             Item::Enum(e) => {
@@ -758,74 +781,108 @@ fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
 
 
 pub(crate) fn type_is_cloneable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
+    // c148: pass the struct's declared type-param names so multi-char params are
+    // treated as cloneable (they carry a `T: Clone` bound in the emitted impl).
+    let param_names: HashSet<String> =
+        s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
-        .all(|f| !f.is_stored_ref && field_type_cloneable(&f.ty, types))
+        .all(|f| !f.is_stored_ref && field_type_cloneable(&f.ty, types, &param_names))
 }
 
 pub(crate) fn type_is_cloneable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
+    // c148: pass the enum's declared type-param names.
+    let param_names: HashSet<String> =
+        e.type_params.iter().map(|p| p.name.clone()).collect();
     e.variants.iter().all(|v| match &v.payload {
         VariantPayload::Unit => true,
-        VariantPayload::Single(t, _) => field_type_cloneable(t, types),
-        VariantPayload::Named(fs) => fs.iter().all(|f| field_type_cloneable(&f.ty, types)),
+        VariantPayload::Single(t, _) => field_type_cloneable(t, types, &param_names),
+        VariantPayload::Named(fs) => {
+            fs.iter().all(|f| field_type_cloneable(&f.ty, types, &param_names))
+        }
     })
 }
 
-fn field_type_cloneable(ty: &Type, types: &HashSet<String>) -> bool {
+fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSet<String>) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-            field_type_cloneable(inner, types)
+            field_type_cloneable(inner, types, param_names)
         }
         Type::Map { key, value } => {
-            field_type_cloneable(key, types) && field_type_cloneable(value, types)
+            field_type_cloneable(key, types, param_names)
+                && field_type_cloneable(value, types, param_names)
         }
         Type::Result { ok, err } => {
-            field_type_cloneable(ok, types) && field_type_cloneable(err, types)
+            field_type_cloneable(ok, types, param_names)
+                && field_type_cloneable(err, types, param_names)
         }
-        Type::Named(n) if Generics::is_type_var_name(n) => true,
+        // c148: recognize both single-char heuristic and declared multi-char params.
+        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => {
+            true
+        }
         Type::Named(n) => types.contains(n),
-        Type::Apply { args, .. } => args.iter().all(|a| field_type_cloneable(a, types)),
+        Type::Apply { args, .. } => {
+            args.iter().all(|a| field_type_cloneable(a, types, param_names))
+        }
         Type::Tuple(fields) => fields
             .iter()
-            .all(|(_, t)| field_type_cloneable(t, types)),
+            .all(|(_, t)| field_type_cloneable(t, types, param_names)),
         Type::TraitObject(_) | Type::Fn { .. } => false,
-        Type::FixedList { elem, .. } => field_type_cloneable(elem, types),
+        Type::FixedList { elem, .. } => field_type_cloneable(elem, types, param_names),
     }
 }
 
 pub(crate) fn type_is_comparable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
+    // c148: pass the struct's declared type-param names.
+    let param_names: HashSet<String> =
+        s.type_params.iter().map(|p| p.name.clone()).collect();
     s.fields
         .iter()
-        .all(|f| !f.is_stored_ref && field_type_comparable(&f.ty, types))
+        .all(|f| !f.is_stored_ref && field_type_comparable(&f.ty, types, &param_names))
 }
 
 pub(crate) fn type_is_comparable_enum(e: &EnumDef, types: &HashSet<String>) -> bool {
+    // c148: pass the enum's declared type-param names.
+    let param_names: HashSet<String> =
+        e.type_params.iter().map(|p| p.name.clone()).collect();
     e.variants.iter().all(|v| match &v.payload {
         VariantPayload::Unit => true,
-        VariantPayload::Single(t, _) => field_type_comparable(t, types),
-        VariantPayload::Named(fs) => fs.iter().all(|f| field_type_comparable(&f.ty, types)),
+        VariantPayload::Single(t, _) => field_type_comparable(t, types, &param_names),
+        VariantPayload::Named(fs) => {
+            fs.iter().all(|f| field_type_comparable(&f.ty, types, &param_names))
+        }
     })
 }
 
-pub(crate) fn field_type_comparable(ty: &Type, types: &HashSet<String>) -> bool {
+pub(crate) fn field_type_comparable(
+    ty: &Type,
+    types: &HashSet<String>,
+    param_names: &HashSet<String>,
+) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
-        Type::Option(inner) => field_type_comparable(inner, types),
+        Type::Option(inner) => field_type_comparable(inner, types, param_names),
         Type::Result { ok, err } => {
-            field_type_comparable(ok, types) && field_type_comparable(err, types)
+            field_type_comparable(ok, types, param_names)
+                && field_type_comparable(err, types, param_names)
         }
-        Type::List(inner) => field_type_comparable(inner, types),
-        Type::Named(n) if Generics::is_type_var_name(n) => true,
+        Type::List(inner) => field_type_comparable(inner, types, param_names),
+        // c148: recognize both single-char heuristic and declared multi-char params.
+        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => {
+            true
+        }
         Type::Named(n) => types.contains(n),
-        Type::Apply { args, .. } => args.iter().all(|a| field_type_comparable(a, types)),
+        Type::Apply { args, .. } => {
+            args.iter().all(|a| field_type_comparable(a, types, param_names))
+        }
         Type::Tuple(fields) => fields
             .iter()
-            .all(|(_, t)| field_type_comparable(t, types)),
+            .all(|(_, t)| field_type_comparable(t, types, param_names)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
-        Type::FixedList { elem, .. } => field_type_comparable(elem, types),
+        Type::FixedList { elem, .. } => field_type_comparable(elem, types, param_names),
     }
 }
 

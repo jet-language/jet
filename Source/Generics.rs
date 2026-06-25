@@ -81,14 +81,23 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
 }
 
 /// Unify two types; extend `subst` with inferred type-parameter bindings.
-pub fn unify_types(expected: &Type, found: &Type, subst: &mut HashMap<String, Type>) -> bool {
+///
+/// `type_params` is the declared parameter name set for the current generic context
+/// (e.g. `{"Kind", "Val"}`). A `Type::Named(n)` where `n` is in `type_params` acts as
+/// a unification variable — c148: multi-char params like `Kind` must work like `T`.
+pub fn unify_types(
+    expected: &Type,
+    found: &Type,
+    subst: &mut HashMap<String, Type>,
+    type_params: &HashSet<String>,
+) -> bool {
     let expected = substitute_type(expected, subst);
     let found = substitute_type(found, subst);
     match (&expected, &found) {
         (a, b) if a == b => true,
         (Type::Named(a), Type::Named(b)) if a == b => true,
         (Type::Named(param), concrete) | (concrete, Type::Named(param))
-            if is_type_var_name(param) =>
+            if is_type_var_name(param) || type_params.contains(param.as_str()) =>
         {
             if let Some(existing) = subst.get(param) {
                 existing == concrete
@@ -102,12 +111,13 @@ pub fn unify_types(expected: &Type, found: &Type, subst: &mut HashMap<String, Ty
         {
             a1.iter()
                 .zip(a2.iter())
-                .all(|(x, y)| unify_types(x, y, subst))
+                .all(|(x, y)| unify_types(x, y, subst, type_params))
         }
-        (Type::List(e1), Type::List(e2)) => unify_types(e1, e2, subst),
-        (Type::Option(e1), Type::Option(e2)) => unify_types(e1, e2, subst),
+        (Type::List(e1), Type::List(e2)) => unify_types(e1, e2, subst, type_params),
+        (Type::Option(e1), Type::Option(e2)) => unify_types(e1, e2, subst, type_params),
         (Type::Result { ok: o1, err: e1 }, Type::Result { ok: o2, err: e2 }) => {
-            unify_types(o1, o2, subst) && unify_types(e1, e2, subst)
+            unify_types(o1, o2, subst, type_params)
+                && unify_types(e1, e2, subst, type_params)
         }
         (Type::TraitObject(t1), Type::TraitObject(t2)) if t1 == t2 => true,
         _ => false,

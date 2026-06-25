@@ -988,14 +988,21 @@ pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
 }
 
 pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
+    // c148: expose the current function's type-parameter names so `rust_type` and
+    // `rust_param_type` can recognize multi-char params (e.g. `Kind`) in addition
+    // to the single-letter heuristic. Cleared on exit (normal or panic).
+    *cx.current_type_params.borrow_mut() =
+        f.type_params.iter().map(|p| p.name.clone()).collect();
     // c109 Phase N: the typed IR (TIR) is the only codegen seam (R7). Every
     // reachable function lowers + emits through the TIR; a gate-miss is an
     // internal compiler error (I2-class), never an AST fallback.
     if TIR::tir_covers(f, cx) {
         let tir = TIR::lower_func(f, cx);
         TIR::emit_tir_func(&tir, cx, out);
+        cx.current_type_params.borrow_mut().clear();
         return;
     }
+    cx.current_type_params.borrow_mut().clear();
     panic!(
         "internal compiler error: codegen reached a construct the typed IR does not cover ({}) — compiler bug (I2/R7)",
         f.name
