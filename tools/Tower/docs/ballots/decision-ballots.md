@@ -25,9 +25,135 @@ it's time to decide it.
 
 ## Open decisions
 
-_No cards open. **D-ASSOC-NOW** was decided **C** (fund both streams: complete
-associated types → c149/c72 layer 2, and D-PARSE-1 → c111, in parallel) and recorded
-in [`syntax-decisions.md`](syntax-decisions.md). The earlier batch is recorded there too._
+### D-ENC-DYN1 — what `toml.parse` / `yaml.parse` return with no target type
+
+**Gist:** Finishing the encoding library means TOML & YAML must parse nesting,
+arrays, and typed values — but their *untyped* `parse` today returns a flat
+`Map<String,String>`. Pick the rich dynamic value they should return instead.
+
+**Story.** Diane is wiring up a small web service. She reads `config.toml`, which
+has a `[server]` table, a `[database]` sub-table, and a `ports = [80, 443]`
+array. She calls `toml.parse(text)` to poke at it before she's written a struct.
+Today she gets back a flat string map: the `[server]` header is *silently
+dropped*, `ports` is the literal string `"[80, 443]"`, and `8080` comes back as
+`"8080"`. She expected what `json.parse` gives her — a real tree she can walk.
+
+**In the wild:**
+```jet
+use core.encoding.toml as toml
+
+cfg @= toml.parse(core.fs.read("config.toml")?) ?? panic("bad config")
+// Today: cfg is Map<String,String> — cfg["server"] is missing entirely,
+//        cfg["ports"] == "[80, 443]" (a string), cfg["port"] == "8080".
+// Wanted: a rich value — cfg.server.ports[0] == 80 (an Int), nesting intact.
+```
+
+**Other languages:**
+```rust
+// Rust: one dynamic value per format, all rich.
+let v: toml::Value = toml::from_str(text)?;   // Value::Table / Array / Integer …
+let j: serde_json::Value = serde_json::from_str(text)?;
+```
+```python
+tomllib.loads(text)   # -> nested dict / list / int / str, never flat
+```
+
+**Tradeoffs:**
+
+| Option | Dynamic vocab | New user-facing surface | Cross-format consistency | Keeps shipped `JSON` enum |
+|---|---|---|---|---|
+| A — one shared `Data` value | one (`Data`) for toml/yaml | one type | high (same walker everywhere) | yes |
+| B — per-format `Toml`/`Yaml` enums | three (`JSON`/`Toml`/`Yaml`) | two new enums | low (three near-identical walkers) | yes |
+| C — keep flat `Map`, only `decode<T>` rich | none | none | n/a — dynamic stays lossy | yes |
+
+- **Option A — one shared dynamic `Data` value (recommended).** TOML and YAML
+  `parse` return `Data` (the user-facing face of the internal `DataTree`):
+  `Data.Object/.Array/.Int/.Float/.Text/.Bool/.Null`. One vocabulary, one set of
+  accessors, every config format reads the same way; `json.parse` keeps its
+  shipped, beloved `JSON` enum.
+  ```jet
+  cfg @= toml.parse(text)?
+  if cfg.get("server")?.get("ports")?[0] == Data.Int(p) { print(p) }   // 80
+  ```
+- **Option B — a dynamic enum per format (`Toml`, `Yaml`).** Mirrors `JSON`
+  exactly, format by format. Maximally familiar, but three near-identical value
+  types and three walkers to learn and maintain.
+  ```jet
+  cfg @= toml.parse(text)?           // -> Toml enum
+  if cfg == Toml.Table(t) { … }
+  ```
+- **Option C — leave `parse` flat; make only `decode<T>` full.** Smallest change;
+  the typed path (`toml.decode<Config>(text)`) becomes fully nested/typed, but
+  the untyped `parse` stays a flat string map. **Rejected:** it keeps a
+  permanently lossy public surface and contradicts "serde-complete."
+
+**Recommendation: A** — one shared `Data` dynamic value for the config formats;
+JSON keeps its own enum. Fewest concepts, one walker, no lossy surface left.
+
+**Owner Q — naming.** If A: is `Data` the right name for the shared dynamic
+value, or do you want something else (`Value`, `Doc`, `Node`)? `Data` pairs with
+the internal `DataTree`; `Value` collides with nothing but is generic.
+
+---
+
+### D-ENC-YAML1 — how much YAML to support
+
+**Gist:** YAML has no parser yet (the current one is a flat `key: value` loop).
+Writing a full std-only YAML reader is the big piece of encoding-completion —
+decide how far into YAML's advanced corners to go.
+
+**Story.** Marcus deploys with Kubernetes manifests and CI files — real YAML:
+nested maps, sequences of maps, block scalars for embedded scripts, and the
+occasional `&anchor`/`*alias` to avoid repetition. He wants `yaml.decode<T>` to
+read these into typed Jet structs the way `json.decode<T>` already does.
+
+**In the wild:**
+```yaml
+# the YAML that actually shows up in projects
+services:
+  - name: web
+    ports: [80, 443]
+    env: &base { LOG: info }
+  - name: worker
+    env: *base                # alias — reuse the anchor
+script: |                     # block scalar — newlines preserved
+  set -e
+  echo deploy
+```
+
+**Other languages:** serde_yaml (Rust) and PyYAML both implement the full YAML
+1.1/1.2 core including anchors/aliases and tags; Go's `gopkg.in/yaml` likewise.
+None ship a "flat only" YAML. The cost is a real parser (~1–2k lines).
+
+**Tradeoffs:**
+
+| Option | Block + flow, typed scalars, block scalars, comments, `---` | Anchors/aliases `&a`/`*a` | Explicit tags `!!str` | Multi-doc stream |
+|---|---|---|---|---|
+| A — core (recommended) | yes | **yes** | no (defer) | yes |
+| B — minimal | yes | no | no | no |
+| C — full 1.2 | yes | yes | yes | yes |
+
+- **Option A — YAML core + anchors/aliases + documents (recommended).** Covers
+  everything in the "in the wild" sample. Defers only custom/explicit tags
+  (`!!str`, `!MyType`), which almost never appear in serialized config.
+- **Option B — minimal (block + flow + scalars only).** No anchors/aliases. Fails
+  on real Kubernetes/CI YAML that reuses anchors. Cheapest, but re-creates the
+  "lossy subset" problem we're trying to kill.
+- **Option C — full YAML 1.2** including explicit tags. Most complete; the tag
+  machinery is significant extra work for a feature serialized configs rarely use.
+
+**Recommendation: A** — core schema + anchors/aliases + `---` documents; defer
+explicit tags (reserve, add later if a real need shows up).
+
+**Owner Q.** Do you want `yaml.to_string` (encode) to ever *emit* anchors for
+shared substructures, or always expand them? Recommend: always expand on encode
+(simpler, lossless); only the parser understands anchors.
+
+---
+
+_Background: **D-ASSOC-NOW** was decided **C** (fund both streams: complete
+associated types → c149/c72 layer 2, and D-PARSE-1 → c111) and recorded in
+[`syntax-decisions.md`](syntax-decisions.md)._
 
 ---
 

@@ -250,3 +250,116 @@ Once ratified, build order:
 - **§5:** field attributes (parse + sema + codegen) per D-SERDE5/3/8.
 - **Diagnostics:** E2407–E2411 + docs + ui snapshots.
 - **Examples:** `serde_derive`, `csv_typed`, `json_typed` (+ `serde_basic` only if D-SERDE2 lands).
+
+---
+
+# COMPLETION — full TOML & YAML adapters (the "serde-complete" gap)
+
+**Status (2026-06-25): OPEN. This is the remaining work to make `core.encoding`
+100% serde-equivalent.** Tracked as board card **c152** (card spec at the end of
+this section). One owner decision gates the dynamic surface (**D-ENC-DYN1**);
+everything else is buildable once that's picked. YAML advanced-feature scope is
+**D-ENC-YAML1**.
+
+## Where the library actually stands
+
+| Format | dynamic `parse` | typed `decode<T>` | `to_string` encode | Verdict |
+|---|---|---|---|---|
+| **json** | `JSON` enum, **full RFC 8259** (D-PARSE-1) | nested, arrays, typed — full | full | ✅ complete |
+| **csv** | `[[String]]` rows | header-mapped typed | full | ✅ complete (rows model is correct for CSV) |
+| **toml** | `Map<String,String>` — **flat subset**, ignores `[table]` headers | **flat only** (values arrive as `Text`) | **flat only** | ❌ lossy |
+| **yaml** | `Map<String,String>` — **flat subset** | **flat only** | **flat only** | ❌ lossy |
+
+The derive engine and the `DataTree` decode path are **already full** — JSON
+proves nested structs, arrays, and typed scalars all decode correctly. The TOML
+and YAML *adapters* are the only thing feeding a flat, all-`Text` tree. So
+completion = make those two adapters produce/consume a **rich `DataTree`**, with
+no change to the derive side.
+
+Current adapter code (the lossy part): `Source/Prelude/CoreLib.rs` —
+`jet_ring_toml_parse` / `jet_ring_toml_render` / `jet_ring_yaml_parse` /
+`jet_ring_yaml_render` (each is a `lines()` + `split('=')`/`split(':')` flat
+loop). Sema types: `Source/Sema/CheckerCoreLib.rs` (`core.encoding.{toml,yaml}`
+arms return `Map<String,String>`).
+
+## What "full" means per format
+
+**TOML** — a real parser already exists internally: `Source/Jetpack/TOML.rs`
+(written for D-PARSE-1 / `jetpack.toml`) parses the complete TOML 1.0 grammar
+into a typed `Value` tree. **Reuse it.** The jetpack copy is compiler-internal
+Rust; the encoding adapter lives in the *emitted prelude*, so the parser must be
+available to generated programs. Two implementation options (no owner call):
+  - factor the parser into a small text module included by BOTH the compiler and
+    the prelude, or
+  - port `Source/Jetpack/TOML.rs` into `CoreLib.rs` as `jet_ring_toml_*` (it is
+    std-only and already avoids the bare word "unsafe" — golden-safe).
+Then map `TOML::Value` → `DataTree` (`Integer→Int`, `Float→Float`,
+`Boolean→Bool`, `String→Text`, `Datetime→Text`, `Array→Array`,
+`InlineTable`/header tables→`Object`). Encode = `DataTree` → TOML text (emit
+`[table]` headers for nested objects, `key = typed-value`, arrays).
+
+**YAML** — no engine exists; write a full one (std-only, I6). Scope to the YAML
+1.2 core that serde_yaml covers:
+  - block mappings + sequences (indentation-driven), flow `{}`/`[]`,
+  - scalars typed by the YAML core schema (`null/~`, `true/false`, int, float,
+    str), single/double-quoted + plain + block scalars (`|`, `>`),
+  - comments, `---` document markers.
+  - **Decide (D-ENC-YAML1):** anchors/aliases (`&a`/`*a`), explicit tags
+    (`!!str`), multi-document streams. Recommend: support anchors/aliases +
+    document markers; defer custom tags. YAML is the biggest single piece here.
+
+## Owner decision that gates the dynamic surface
+
+**D-ENC-DYN1 — what does `toml.parse(text)` / `yaml.parse(text)` return with no
+target type?** Today it's `Map<String,String>` (flat, lossy). The typed
+`decode<T>` path can be made full *without* touching this — but leaving the
+dynamic path flat while the typed path is rich is incoherent. Options drafted in
+`decision-ballots.md`:
+  - **(A, recommended)** one shared dynamic value `Data` (the user-facing face of
+    `DataTree`) returned by toml/yaml `parse`; `json.parse` keeps its shipped
+    `JSON` enum. One dynamic-value vocabulary for the config formats.
+  - **(B)** a per-format dynamic enum (`Toml`, `Yaml`) mirroring `JSON`.
+  - **(C)** keep `parse` flat-`Map`; only `decode<T>` is full. (Rejected:
+    incoherent, keeps a lossy public surface.)
+
+## Build order (once D-ENC-DYN1 picked)
+
+1. **TOML adapter full** (reuse `Source/Jetpack/TOML.rs`): parser→`DataTree`,
+   `DataTree`→TOML renderer, wire `toml.decode<T>` to the rich tree, update the
+   `core.encoding.toml` sema return type per D-ENC-DYN1.
+2. **YAML parser** (the big piece): full block+flow parser→`DataTree`, renderer,
+   `yaml.decode<T>`, sema return type. Scope per D-ENC-YAML1.
+3. **Migrate examples** 52_toml / 53_yaml / 54_encoding to exercise nested
+   tables, arrays, typed values (today they show only flat key/value); re-bless
+   goldens. Add `toml_typed` / `yaml_typed` mirroring `108_json_typed` (decode
+   into a nested `#[Codable]` struct).
+4. **Diagnostics:** TOML/YAML parse errors get line+message (reuse the
+   `ParseError` shape from `Source/Jetpack/TOML.rs`); a malformed-document code in
+   the E27xx encoding range, doc'd + ui-snapshotted.
+5. **Verify:** full `cargo test`; round-trip property (parse∘render≈identity) for
+   nested fixtures; confirm generated `impl`s stay rustc-clean (I2).
+
+## Done criteria
+
+- [ ] `toml.parse` / `yaml.parse` return the D-ENC-DYN1 dynamic value (rich, not flat).
+- [ ] `toml.decode<T>` / `yaml.decode<T>` decode nested `#[Codable]` structs with
+      arrays and typed scalar fields (parity with `json.decode<T>`).
+- [ ] `toml.to_string` / `yaml.to_string` emit valid nested documents.
+- [ ] Examples 52/53/54 + `*_typed` exercise nesting; goldens re-blessed.
+- [ ] Full suite green; I6 (no external crates) and I2 (rustc never speaks) intact.
+
+## Card spec (for the owner to add to board.json — agents can't write it)
+
+```json
+{
+  "id": "c152",
+  "type": "task",
+  "title": "Complete core.encoding: full TOML & YAML adapters (serde parity)",
+  "body": "TOML and YAML are the last lossy adapters in core.encoding — flat Map<String,String> subsets that ignore [table] headers / nesting, while json+csv are full. Make them serde-complete: rich DataTree parse/decode<T>/encode. Reuse Source/Jetpack/TOML.rs for TOML; write a full std-only YAML parser. Gated on D-ENC-DYN1 (dynamic parse return type); D-ENC-YAML1 scopes YAML advanced features. Plan: sidequests/serde-model.md (COMPLETION section).",
+  "stage": "deciding",
+  "plan": "serde-model",
+  "decisions": ["D-ENC-DYN1", "D-ENC-YAML1"],
+  "priority": "P2",
+  "workOrder": null
+}
+```
