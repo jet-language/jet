@@ -46,7 +46,7 @@
       "type": "task",
       "title": "Package build-from-source + M9 wave-2 (regex/archive/db)",
       "body": "E2 loose end → E3. jetpack step to compile a dependency from its Jet source (provider.rs realize()); wave-2 rings ship on top. Plan: tools/Tower/docs/plans/epoch-3/package-build-from-source.md.",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "package-build-from-source",
       "notes": [
         {
@@ -68,17 +68,17 @@
         {
           "t": "Soft-blocked: wave-2 deps (regex/archive/db) need I6 external-dep approval. Infra is buildable.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-DEP-ARCHIVE1/DB1/BFS1 ratified A: jet.archive=zip+tar+flate2, jet.db=rusqlite bundled, vendored source in-package hash-pinned. Unblocked → building.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-19T00:00:00Z",
       "updated": "2026-06-25",
       "priority": "P2",
       "workOrder": null,
-      "decisions": [
-        "D-DEP-ARCHIVE1",
-        "D-DEP-DB1",
-        "D-BFS1"
-      ]
+      "decisions": []
     },
     {
       "id": "c51",
@@ -398,13 +398,15 @@
         {
           "t": "[sweep] D-LIN1 #SingleUse shipped: must-consume-exactly-once values (consume via ^ or return); E0140 dropped, E0141 branch-divergent, E0142 aliased (+ E0121 reuse for use-after-move); compile-time tag, erases in codegen. example 109_single_use, 10 integration tests, 3 ui snapshots. Verified vs baseline: zero new failures. The deliberate-drop escape hatch is deferred to ballot D-LIN1-DROP (ratified text referenced the retired #Audit).",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-LIN1-DROP ratified A: drop(x) inside #Unsafe(\"reason\") is the sanctioned #SingleUse discard. Building the hatch as a follow-on.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-24",
-      "decisions": [
-        "D-LIN1"
-      ],
+      "updated": "2026-06-25",
+      "decisions": [],
       "priority": "P2",
       "workOrder": null,
       "plan": null
@@ -431,13 +433,15 @@
         {
           "t": "[sweep] D-TAINT1 shipped (Option A): #Tainted value tag + #Sanitizer fn + E0721 (tainted value reaching a Db/Exec/Net sink unsanitized). Intraprocedural forward dataflow; erases in codegen. example 90_taint, 9 taint tests. Full IFC (Option B) stays deferred (D-IFC1). Spelling fork sanitizer-keyword → ballot D-TAINT-SAN (marker form shipped as default).",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-TAINT-SAN ratified B: #Sanitizer fn confirmed (matches shipped); add teaching error for bare `sanitizer fn`. Building the teaching error.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-24",
-      "decisions": [
-        "D-TAINT-SAN"
-      ],
+      "updated": "2026-06-25",
+      "decisions": [],
       "priority": "P2",
       "workOrder": null,
       "plan": null
@@ -464,15 +468,15 @@
         {
           "t": "[sweep] D-STATE1 typestate shipped: #State(S) fn (require-state guard) + #Transition(From -> To) fn (transition; _ from-state = entry ctor); states are tags, current state is a compile-time fact threaded per-value (forward dataflow, branch-join), wrong-state op = E0150. Erases in codegen. example 113_typestate, 5 tests, fmt round-trips. Marker SPELLINGS (#State/#Transition/states{}) deferred to D-STATE-REQ/TRANS/DECL (defaults shipped; mechanism fully pinned).",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep] D-STATE-REQ/D-STATE-TRANS ratified A (match shipped #State(S)/#Transition(From->To)). D-STATE-DECL still OPEN (enum-as-state-set reframe, rec B, pending owner confirm).",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
       "updated": "2026-06-25",
-      "decisions": [
-        "D-STATE-REQ",
-        "D-STATE-TRANS",
-        "D-STATE-DECL"
-      ],
+      "decisions": [],
       "priority": "P2",
       "workOrder": null,
       "plan": null
@@ -482,7 +486,7 @@
       "type": "idea",
       "title": "Scoped transactions (#transact rollback semantics)",
       "body": "#transact {} surface is ratified (S82); decide rollback semantics: per-type opt-in Rollback trait, reverse-chain on ?-failure, commit on success. After D-EFF1.",
-      "stage": "deciding",
+      "stage": "building",
       "notes": [
         {
           "t": "[sweep] EVALUATE-tier ballot D-TXN1 queued (user story + tradeoffs + per-option code + language comparison). From owner backlog reconciliation.",
@@ -499,13 +503,15 @@
         {
           "t": "[sweep] D-TXN3/4 shipped: #Transact(name){} block + name.on_commit(()=>{}) Drop-backed post-commit hooks (LIFO on commit, dropped on ?-failure). D-TXN1 rollback-REGISTRATION mechanism deferred to ballot D-TXN-ROLLBACK (ratified text named a Rollback trait but the symmetric design vs on_rollback is an owner fork). Block+hooks+rejection all shipped.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-TXN-ROLLBACK ratified C-layered: auto-snapshot default + Rollback trait (expert) + explicit tx.on_rollback (expert). Unblocked → building.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-20T00:00:00Z",
-      "updated": "2026-06-24",
-      "decisions": [
-        "D-TXN-ROLLBACK"
-      ],
+      "updated": "2026-06-25",
+      "decisions": [],
       "plan": "transact-rollback-semantics",
       "priority": "P2",
       "workOrder": null
@@ -731,22 +737,21 @@
       "type": "task",
       "title": "M12.2 registry + jet publish UX",
       "body": "jet publish command shape + semver/version-immutability + resolver default. Rides c50/c56 infra. Saoirse, Amara.",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "publish-registry-ux",
       "notes": [
         {
           "t": "created 2026-06-21 from the 2026-06-20 persona run (docs/plans/persona-status); plan in sidequests/publish-registry-ux",
           "at": "2026-06-21"
+        },
+        {
+          "t": "[sweep] D-PUBLISH1A/VERSION1/RESOLVE1/LOCK1 all ratified A (2026-06-25): jet publish (version from pkg.jet, refuses dirty tree/failing tests), immutable versions + jet yank, highest-compatible resolver frozen in .jet/lock, .jet/lock committed for executables. Unblocked → building.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
       "updated": "2026-06-25",
-      "decisions": [
-        "D-PUBLISH1A",
-        "D-VERSION1",
-        "D-RESOLVE1",
-        "D-LOCK1"
-      ],
+      "decisions": [],
       "priority": "P2",
       "workOrder": null
     },
@@ -773,13 +778,15 @@
         {
           "t": "[sweep] D-DET1 completed: injected deterministic Clock/Rng capabilities (time.clock(seed)/random.rng(seed); clock.now()/tick, rng.int/float) usable in #Pure fn while ambient time/random stay E3403; assume_deterministic{} expert escape suppresses the determinism checks. example 111_determinism, 9 tests. Clock/Rng method-API → ballot D-DET-CAPAPI (minimal surface shipped).",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-DET-CAPAPI ratified B (widen): add rng.bool/pick/shuffle + clock.advance + Duration reads to the shipped Clock/Rng. Building the widen.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-06-24",
-      "decisions": [
-        "D-DET-CAPAPI"
-      ],
+      "updated": "2026-06-25",
+      "decisions": [],
       "priority": "P2",
       "workOrder": null
     },
@@ -916,7 +923,7 @@
       "type": "task",
       "title": "Replace hand-rolled parsers where correctness matters",
       "body": "Audit finding: the zero-dependency rule has pushed correctness-sensitive protocol/config/version parsing into hand-written subsets. Decide where I6 should bend, or explicitly narrow the feature contracts. Evidence: Source/LSP/JSON.rs minimal JSON; Source/Jetpack/ManifestTOML.rs TOML subset; Source/Publish/SemVer.rs partial SemVer/ranges; Source/CBind.rs focused C prototype parser; Cargo.toml enforces std-only compiler deps.",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "c111-parser-consolidation",
       "notes": [
         {
@@ -930,15 +937,17 @@
         {
           "t": "[sweep] Audited all ad-hoc parsers (3 JSON readers, 4 JSON escapers, 2 unquote, SemVer/Lock/RefSpec, CBind, pack.jet/jetpack.toml/env.jet). NONE safely auto-replaceable — each has a distinct accepted-input/error/output contract; a forced merge would change behavior (I8). No code changed. The real question is owner-facing → ballot D-PARSE-1: subset parsers silently mis-parse (SemVer drops +build, TOML subset ignores unknown tables, JSON accepts lone surrogates) — refuse out-of-subset input loudly? Plan: c111-parser-consolidation.md.",
           "at": "2026-06-25"
+        },
+        {
+          "t": "[sweep] D-PARSE-1 ratified C: build FULL native std-only JSON/TOML/SemVer parsers (incl +build metadata) replacing lossy subsets; I6 stays hard. Unblocked → building.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-22T00:00:00Z",
       "updated": "2026-06-25",
       "priority": "P2",
       "workOrder": null,
-      "decisions": [
-        "D-PARSE-1"
-      ]
+      "decisions": []
     },
     {
       "id": "c113",
@@ -1331,22 +1340,21 @@
       "type": "idea",
       "title": "Serde expert tier: hand-impl path + generic-type (de)serialization",
       "body": "Future increments of core.encoding after the shipped typed derive (c104). (1) Expert hand-impl path (D-SERDE2, ratified): user writes `impl T: Encode { fn encode(self) -> DataTree { … } }` / `impl T: Decode { fn decode(tree) -> T ? DecodeError }` over the format-agnostic DataTree tree, plus the dynamic-tree accessor API (D-SERDE-ACCESS, deferred — pattern-match floor vs fluent `tree.field(\"x\").int()?`). (2) Generic-type serde — `#[Codable] struct Box<T>` — currently gated by E2413; needs a design decision (bound propagation). (3) Smaller gaps: `#[Default(expr)]` beyond literals, variant-level `#[RenameAll]`, `#[Flatten]` map catch-all. Plan: tools/Tower/docs/sidequests/serde-model.md (“Not yet built” section).",
-      "stage": "deciding",
+      "stage": "building",
       "plan": "serde-model",
       "notes": [
         {
           "t": "[sweep] Split out from c104 (done) so the ratified-but-unbuilt serde follow-ups don’t orphan. D-SERDE2 (hand-impl names) is ratified; generic serde still needs a decision (E2413 gates it today). serde-model.md retained as the living plan for this card.",
           "at": "2026-06-24"
+        },
+        {
+          "t": "[sweep] D-SERDE9/10/11/12 ratified A: auto Encode/Decode bound propagation on generic #[Codable], bound only wire-reaching params (phantom skip), no manual override now (reserved c147), retire E2413. Unblocked → building.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-24",
       "updated": "2026-06-25",
-      "decisions": [
-        "D-SERDE9",
-        "D-SERDE10",
-        "D-SERDE11",
-        "D-SERDE12"
-      ],
+      "decisions": [],
       "priority": "P3",
       "workOrder": null
     },
