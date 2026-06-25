@@ -224,6 +224,14 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
+            // D-DET1: `assume_deterministic { … }` — the expert determinism escape.
+            Stmt::AssumeDet { body, .. } => {
+                self.write(Syntax::KW_ASSUME_DET);
+                self.write(" {");
+                self.newline();
+                self.with_indent(|f| f.fmt_block_stmts(body));
+                self.end_block();
+            }
             // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` (the handle
             // is optional — a bare `#Transact { … }` with no hooks stays legal).
             Stmt::Transact { name, body, .. } => {

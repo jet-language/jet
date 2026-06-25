@@ -373,6 +373,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
+            | Stmt::AssumeDet { body, .. }
             | Stmt::Live { body, .. } => self.check_block(body),
             Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
                 self.check_expr(cond);

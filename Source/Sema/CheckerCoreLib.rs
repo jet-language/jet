@@ -379,7 +379,9 @@ impl<'a> Checker<'a> {
         // E2-M16 / E3403: a `pure fn` cannot reach a non-deterministic std call
         // (time/random). `jet eval --pure` requires every fn to be `pure`, so
         // this covers the --pure path too.
-        if self.in_pure && is_nondeterministic_core(module, name) {
+        // D-DET1: `assume_deterministic { … }` (det_suppress > 0) suspends the
+        // determinism rejection — the expert escape hatch.
+        if self.in_pure && self.det_suppress == 0 && is_nondeterministic_core(module, name) {
             let api = format!("{}.{}", module_short_name(module), name);
             self.diags.push(e3403(&api, Some(span)));
             for a in args.iter_mut() {
@@ -389,7 +391,7 @@ impl<'a> Checker<'a> {
             return core_fixed_sig(module, name).and_then(|(_, ret)| ret);
         }
         // D-STDIN1=A / E3401: `pure fn` cannot read from stdin.
-        if self.in_pure && is_impure_core(module, name) {
+        if self.in_pure && self.det_suppress == 0 && is_impure_core(module, name) {
             let api = format!("{}.{}", module_short_name(module), name);
             self.diags.push(e3401(&self.fn_name.clone(), &api, &[], span));
             for a in args.iter_mut() {
@@ -401,7 +403,7 @@ impl<'a> Checker<'a> {
         // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `#Pure fn`.
         // (Time/Rand return early above via E3403; stdin via the E3401 check
         // above, so this catches the remaining effect-carrying Core modules.)
-        if self.in_pure && core_effect(module, name).is_some() {
+        if self.in_pure && self.det_suppress == 0 && core_effect(module, name).is_some() {
             let api = format!("{}.{}", module_short_name(module), name);
             self.diags.push(e3401(&self.fn_name.clone(), &api, &[], span));
             for a in args.iter_mut() {
@@ -1172,6 +1174,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
+        // D-DET1: deterministic injected capability handles.
+        | "Clock" | "Rng"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines"
         // D-LSDIR1=A: directory entry value.
@@ -1689,9 +1693,23 @@ pub(crate) fn core_fixed_sig(
         }
         ("core.random", "float") => Some((vec![], Some(Type::Float))),
         ("core.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
+        // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
+        // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
+        // ambient `random.int(…)` stays E3403.
+        ("core.random", "rng") => {
+            Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::RNG_TYPE.to_string()))))
+        }
         ("core.time", "now") => Some((vec![], Some(Type::Int))),
         ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
+        // D-DET1: deterministic injected Clock capability. `time.clock(seed)` builds a
+        // reproducible `Clock` from a caller-supplied start instant (a pure Int, ms);
+        // a `#Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
+        // while the ambient `time.now()` stays E3403.
+        ("core.time", "clock") => {
+            Some((vec![(read, Type::Int)], Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))))
+        }
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse") => Some((
@@ -2013,8 +2031,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.math" => &[
             "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e", "clamp",
         ],
-        "core.random" => &["int", "float", "pick", "shuffle", "seed"],
-        "core.time" => &["now", "sleep", "start"],
+        // D-DET1: `rng` builds a deterministic injected RNG capability.
+        "core.random" => &["int", "float", "pick", "shuffle", "seed", "rng"],
+        // D-DET1: `clock` builds a deterministic injected Clock capability.
+        "core.time" => &["now", "sleep", "start", "clock"],
         // D-ENC1: unified serialization. `core.encoding` is the library root (no direct
         // verbs — formats are submodules); each format submodule carries the verbs.
         "core.encoding" => &[],

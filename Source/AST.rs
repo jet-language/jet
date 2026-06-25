@@ -1283,6 +1283,16 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the expert
+    /// determinism-escape block. Inside a `#Pure fn`, the body's determinism
+    /// rejections (E3401 impure-call / E3403 non-deterministic Core call) are
+    /// **suspended** — the "I know this is deterministic" hatch. A semantic
+    /// footgun, v1-legal per the card. A lexical scope emitted as a plain Rust
+    /// block; the suppression is a compile-time fact, erased in codegen (I3).
+    AssumeDet {
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a
     /// transaction block. `name` binds a user-chosen transaction handle (any
     /// lowercase ident, mirroring `region r { … }`) typed `Transaction`.

@@ -30,6 +30,22 @@ mod jet_std {
         pub start: std::time::Instant,
     }
 
+    // D-DET1: deterministic injected Clock capability. `now` is the current value
+    // in ms (starts at the caller's seed); `tick(ms)` advances it. No wall-clock
+    // read — reproducible by construction.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Clock {
+        pub now: i64,
+    }
+
+    // D-DET1: deterministic injected Rng capability. A SplitMix64 state stream
+    // (std-only, no external crate — I6). The same seed yields the same draws on
+    // every machine.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Rng {
+        pub state: u64,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct JsonError {
         pub line: i64,
@@ -62,6 +78,12 @@ mod jet_std {
     }
     impl super::JetShow for Stopwatch {
         fn jet_show(&self) -> String { format!("{:?}", self.start) }
+    }
+    impl super::JetShow for Clock {
+        fn jet_show(&self) -> String { format!("Clock {{ now: {} }}", self.now) }
+    }
+    impl super::JetShow for Rng {
+        fn jet_show(&self) -> String { format!("Rng {{ .. }}") }
     }
     impl super::JetShow for JsonError {
         fn jet_show(&self) -> String { format!("line {}: {}", self.line, self.message) }
@@ -754,6 +776,43 @@ fn jet_std_time_sleep(millis: i64) {
 }
 fn jet_std_time_start() -> jet_std::Stopwatch {
     jet_std::Stopwatch { start: std::time::Instant::now() }
+}
+
+// ── D-DET1: deterministic injected Clock / Rng capabilities ───────────────────
+// Built from a caller-supplied seed (a pure value), so a `#Pure fn` may read
+// time/randomness THROUGH the handle and stay reproducible. No wall-clock or
+// OS-RNG read; std-only (no external crate, I6).
+fn jet_std_clock_new(seed: i64) -> jet_std::Clock {
+    jet_std::Clock { now: seed }
+}
+fn jet_clock_now(c: &jet_std::Clock) -> i64 {
+    c.now
+}
+fn jet_clock_tick(c: &mut jet_std::Clock, ms: i64) -> i64 {
+    c.now = c.now.wrapping_add(ms);
+    c.now
+}
+fn jet_std_rng_new(seed: i64) -> jet_std::Rng {
+    jet_std::Rng { state: seed as u64 }
+}
+// SplitMix64 step — a small, well-distributed deterministic PRNG (public domain).
+fn jet_det_rng_next(r: &mut jet_std::Rng) -> u64 {
+    r.state = r.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = r.state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+fn jet_rng_int(r: &mut jet_std::Rng, lo: i64, hi: i64) -> i64 {
+    if hi <= lo {
+        return lo;
+    }
+    let span = (hi - lo + 1) as u64;
+    lo + (jet_det_rng_next(r) % span) as i64
+}
+fn jet_rng_float(r: &mut jet_std::Rng) -> f64 {
+    // 53-bit mantissa → [0, 1).
+    (jet_det_rng_next(r) >> 11) as f64 / (1u64 << 53) as f64
 }
 
 fn jet_std_json_parse(text: &String) -> Result<jet_std::Json, jet_std::JsonError> {

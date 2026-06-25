@@ -244,6 +244,10 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
+        // D-DET1: `assume_deterministic { … }` — the expert determinism-escape.
+        // The whole body is asserted deterministic, so the purity post-pass does
+        // not descend into it (E3401/E3403 suspended). A semantic footgun.
+        Stmt::AssumeDet { .. } => None,
     }
 }
 
@@ -601,6 +605,8 @@ fn check_pure_stmt_with_path(
             }
             None
         }
+        // D-DET1: skip `assume_deterministic { … }` bodies (suspension).
+        Stmt::AssumeDet { .. } => None,
     }
 }
 
@@ -974,6 +980,9 @@ fn walk_stmt_for_calls(
                 if !diags.is_empty() { return; }
             }
         }
+        // D-DET1: skip `assume_deterministic { … }` bodies (suspension). The
+        // `jet eval --pure` transitive walk also honors the escape.
+        Stmt::AssumeDet { .. } => {}
     }
 }
 

@@ -492,6 +492,13 @@ pub(crate) struct Checker<'a> {
     /// it via `name.on_commit(…)`. Zeroed and restored around every lambda body
     /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
     txn_depth: usize,
+    /// D-DET1: nesting depth of `assume_deterministic { … }` blocks currently
+    /// being checked. While `> 0`, the determinism rejections inside a `#Pure fn`
+    /// (E3403 non-deterministic Core call, E3401 impure Core call) are suspended —
+    /// the expert "I know this is deterministic" escape. A semantic footgun
+    /// (v1-legal per the card); does not relax memory/type safety, only the
+    /// determinism check. Zeroed/restored around lambda bodies like `txn_depth`.
+    det_suppress: usize,
     in_unsafe: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.

@@ -225,6 +225,7 @@ fn scan_stmt(
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. } => scan_stmts(body, caps, method_map, param_types),
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => {
             scan_expr(cond, caps, method_map, param_types);

@@ -92,6 +92,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
         "ProcessResult" => Some("ProcessResult"),
         "Stopwatch" => Some("Stopwatch"),
+        // D-DET1: deterministic injected capability handles.
+        "Clock" => Some("Clock"),
+        "Rng" => Some("Rng"),
         "Closed" => Some("Closed"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),

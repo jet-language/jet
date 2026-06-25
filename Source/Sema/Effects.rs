@@ -143,7 +143,17 @@ pub fn show_set(set: &EffectSet) -> String {
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
 /// fully-resolved name (`core.fs`, `jet.http`, …).
-pub fn core_effect(module: &str, _method: &str) -> Option<Effect> {
+pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
+    // D-DET1: the deterministic capability constructors carry NO ambient effect —
+    // `time.clock(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
+    // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
+    // the resulting handle (`clock.now()` / `rng.int(…)`) is a method call on a
+    // value, not a module call, so it never reaches `core_effect`. This lets a
+    // `#Pure fn` take and use an injected `Clock`/`Rng` while ambient `time.now()`
+    // / `random.int(…)` stay rejected (E3403).
+    if matches!((module, method), ("core.time", "clock") | ("core.random", "rng")) {
+        return None;
+    }
     Some(match module {
         "core.fs" | "core.files" => Effect::Fs,
         "core.net" | "jet.http" => Effect::Net,
@@ -407,6 +417,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
+        | Stmt::AssumeDet { body, .. }
         | Stmt::Live { body, .. } => block(body),
         Stmt::ComptimeIf { cond, then_body, else_body, .. } => expr_handle_escape(cond, handle)
             .or_else(|| block(then_body))

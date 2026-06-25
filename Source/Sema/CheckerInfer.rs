@@ -2454,6 +2454,20 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-DET1: methods on the deterministic injected Clock/Rng capability (and
+        // Stopwatch). Reading time/randomness THROUGH the handle is reproducible.
+        // Set `recv_type_out` so codegen routes the call to the handle-method op
+        // (TIR shape (h)) rather than failing the typed-IR subset check.
+        if let Type::Named(handle_ty) = &recv_ty {
+            if matches!(handle_ty.as_str(), "Clock" | "Rng" | "Stopwatch") {
+                if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+                    let handle_ty = handle_ty.clone();
+                    let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some(handle_ty);
+                    return result;
+                }
+            }
+        }
         if let Type::Named(n) = &recv_ty {
             if let Some(param) = self.type_param_scope.iter().find(|p| p.name == *n) {
                 for (trait_name, info) in &self.trait_reg.traits {

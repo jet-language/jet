@@ -1176,6 +1176,14 @@ pub(crate) enum THandleOp {
     StdinReadLine,
     /// Stopwatch: `elapsed_millis()` → `{root}jet_stopwatch_elapsed_millis(&(recv))`.
     StopwatchElapsedMillis,
+    /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).
+    ClockNow,
+    /// D-DET1 Clock: `tick(ms)` → `{root}jet_clock_tick(&mut (recv), a0)` (advance + read).
+    ClockTick,
+    /// D-DET1 Rng: `int(lo, hi)` → `{root}jet_rng_int(&mut (recv), a0, a1)` (draw in [lo,hi]).
+    RngInt,
+    /// D-DET1 Rng: `float()` → `{root}jet_rng_float(&mut (recv))` (draw in [0,1)).
+    RngFloat,
     /// TcpListener: `accept()` → `{root}jet_net_tcp_accept(&(recv))`.
     TcpListenerAccept,
     /// TcpListener: `local_addr()` → `{root}jet_net_listener_local_addr(&(recv))`.
@@ -2467,6 +2475,10 @@ fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool {
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         // The body leaks into the outer scope like a region; check it on the SAME `locals`.
         Stmt::Live { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-DET1: `assume_deterministic { … }` erases to a plain Rust block (the
+        // determinism suspension is a compile-time fact, I3). Body leaks like a
+        // region; check it on the SAME `locals`.
+        Stmt::AssumeDet { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` lowers to a
         // transaction-guarded Rust block. The handle `name` is a covered local
         // inside the body (so `name.on_commit(…)` resolves); check the body with it
@@ -4548,6 +4560,11 @@ fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleO
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
         ("StdinHandle", "read_line", 0) => THandleOp::StdinReadLine,
         ("Stopwatch", "elapsed_millis", 0) => THandleOp::StopwatchElapsedMillis,
+        // D-DET1: deterministic injected Clock/Rng capability methods.
+        ("Clock", "now", 0) => THandleOp::ClockNow,
+        ("Clock", "tick", 1) => THandleOp::ClockTick,
+        ("Rng", "int", 2) => THandleOp::RngInt,
+        ("Rng", "float", 0) => THandleOp::RngFloat,
         ("TcpListener", "accept", 0) => THandleOp::TcpListenerAccept,
         ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
         ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,
@@ -5568,6 +5585,10 @@ fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Live { body, .. } => TStmt::Live {
             body: lower_stmts(body, cx, env),
         },
+        // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
+        // (byte-for-byte the `Stmt::Region`/`Stmt::Caps` shape). The determinism
+        // suspension is a sema-only fact; nothing runtime, no `unsafe` (I3).
+        Stmt::AssumeDet { body, .. } => TStmt::Region(lower_stmts(body, cx, env)),
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
         // handle (typed `Transaction`) in `env` so `name.on_commit(…)` lowers against
         // it, then lower the body on the SAME `env` (it leaks like a region). The
@@ -10131,6 +10152,15 @@ fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::StopwatchElapsedMillis => {
                     format!("{}jet_stopwatch_elapsed_millis(&({}))", root, recv)
                 }
+                // D-DET1: deterministic injected Clock/Rng capability methods.
+                THandleOp::ClockNow => format!("{}jet_clock_now(&({}))", root, recv),
+                THandleOp::ClockTick => {
+                    format!("{}jet_clock_tick(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::RngInt => {
+                    format!("{}jet_rng_int(&mut ({}), {}, {})", root, recv, a(0), a(1))
+                }
+                THandleOp::RngFloat => format!("{}jet_rng_float(&mut ({}))", root, recv),
                 THandleOp::TcpListenerAccept => format!("{}jet_net_tcp_accept(&({}))", root, recv),
                 THandleOp::TcpListenerLocalAddr => {
                     format!("{}jet_net_listener_local_addr(&({}))", root, recv)
@@ -10458,9 +10488,13 @@ fn emit_tir_core_call(module: &str, method: &str, args: &[TExpr], ret_ty: &Type,
         }
         ("core.random", "float") => format!("{}()", helper("jet_std_random_float")),
         ("core.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
+        // D-DET1: deterministic injected RNG capability constructor.
+        ("core.random", "rng") => format!("{}({})", helper("jet_std_rng_new"), arg(0)),
         ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),
         ("core.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
         ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
+        // D-DET1: deterministic injected Clock capability constructor.
+        ("core.time", "clock") => format!("{}({})", helper("jet_std_clock_new"), arg(0)),
         // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms
         // (`Json` tree / `[[String]]` / `Map`) keep their existing helpers; the typed
         // forms route through the Encode/Decode model, distinguished by the lowered arg

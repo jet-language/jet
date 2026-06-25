@@ -260,6 +260,27 @@ pub const CTX_FIELD_LOGGER: &str = "logger";
 /// keyword: recognised only when followed by `{`.
 pub const KW_LIVE: &str = "live";
 
+/// D-DET1 (ratified 2026-06-22): the expert determinism-escape block keyword.
+/// `assume_deterministic { … }` inside a `#Pure fn` suspends the determinism
+/// rejections (E3401/E3403) for its body — the "I know this is deterministic"
+/// hatch. A semantic footgun, v1-legal per the card. A contextual keyword:
+/// recognised only when followed by `{`, so a name `assume_deterministic` still
+/// works elsewhere. Erased in codegen (I3) — the block is a plain Rust block.
+pub const KW_ASSUME_DET: &str = "assume_deterministic";
+
+/// D-DET1 (ratified 2026-06-22): the deterministic injected `Clock` capability
+/// type. A `#Pure fn` taking a `Clock` param may read time **through it**
+/// (`clock.now()` / `clock.tick(ms)`) — reproducible, because the caller seeded
+/// it (`time.clock(seed)`) — while the ambient `time.now()` stays E3403. An
+/// ordinary value type, not a module alias; methods are pure-from-the-fn's-view.
+pub const CLOCK_TYPE: &str = "Clock";
+
+/// D-DET1 (ratified 2026-06-22): the deterministic injected `Rng` capability
+/// type. A `#Pure fn` taking an `Rng` param may draw randomness **through it**
+/// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
+/// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
+pub const RNG_TYPE: &str = "Rng";
+
 /// D-TERM1 (ratified 2026-06-22): the Core module that provides key reading.
 /// `use core.term as term` — exposes `term.read_key() -> Key`.
 pub const CORE_TERM_MODULE: &str = "core.term";
@@ -1166,6 +1187,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_STORED, KW_SELF,
     // Memory / expert tier (S58, D-REGION1, D-CTX1, D-TERM1)
     KW_UNSAFE, KW_REGION, CTX_BLOCK, KW_LIVE,
+    // Determinism escape (D-DET1): `assume_deterministic { … }`
+    KW_ASSUME_DET,
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
     KW_TRANSACT,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)

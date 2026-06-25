@@ -1355,6 +1355,17 @@ impl<'a> Checker<'a> {
                 }
                 self.check_block(body, true);
             }
+            // D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the
+            // expert determinism-escape. Raise the suppression depth so the
+            // determinism rejections inside a `#Pure fn` (E3403 non-deterministic
+            // Core call / E3401 impure Core call) are suspended for the body. This
+            // does NOT relax memory/type safety — only the determinism check. A
+            // lexical scope; erased in codegen (I3 — a plain Rust block).
+            Stmt::AssumeDet { body, .. } => {
+                self.det_suppress += 1;
+                self.check_block(body, true);
+                self.det_suppress -= 1;
+            }
             // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }`.
             // Bind the user-chosen handle `name` (typed `Transaction`) so
             // `name.on_commit(() => { … })` resolves inside the block, then check

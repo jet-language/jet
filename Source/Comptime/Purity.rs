@@ -197,6 +197,9 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         Stmt::Live { body, .. } => {
             body.iter().for_each(|s| walk_stmt_exprs(s, f));
         }
+        // D-DET1: `assume_deterministic { … }` suspends the determinism check for
+        // its body — the comptime purity walk does not descend into it (footgun).
+        Stmt::AssumeDet { .. } => {}
     }
 }
 

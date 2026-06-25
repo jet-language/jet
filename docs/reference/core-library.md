@@ -276,6 +276,27 @@ not for tests.
 | `float()` | `Float` | Random float from 0 up to (but not including) 1 |
 | `pick(xs)` | `T?` | Random element, or null if `xs` is empty |
 | `shuffle(mut xs)` | nothing | Randomly reorder a list in place |
+| `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
+
+The ambient calls above (`int`/`float`/…) read a process-global generator, so a
+`#Pure fn` cannot call them (E3403 — they break reproducibility). To use
+randomness inside a `#Pure fn`, take a seeded `Rng` **as a parameter** and draw
+through it — the seed makes the stream reproducible on every machine:
+
+```jet
+#Pure fn roll(rng: ~Rng) -> Int {
+    return rng.int(1, 6)            // inclusive; advances the stream (needs ~Rng)
+}
+fn main() {
+    r := random.rng(42)            // same seed → same draws everywhere
+    print(roll(~r))
+}
+```
+
+| `Rng` method | Returns | What it does |
+|--------------|---------|--------------|
+| `int(lo, hi)` | `Int` | Draw an Int in `[lo, hi]` (inclusive); advances the stream |
+| `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
 
 ---
 
@@ -303,10 +324,37 @@ fn main() {
 | `sleep(millis)` | nothing | Block for about `millis` milliseconds |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
+| `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
 
 **Test hook:** when the environment variable `LEX_TEST_EPOCH` is set to an
 integer, `time.now()` returns that value instead of the real clock. Tests use
 this to pin output; normal programs ignore it.
+
+A `#Pure fn` cannot call ambient `time.now()` (E3403 — the wall clock is not
+reproducible). To use time inside a `#Pure fn`, take a seeded `Clock` **as a
+parameter** and read through it; the clock only moves when you `tick` it, so the
+result is reproducible:
+
+```jet
+#Pure fn at(clock: Clock) -> Int {
+    return clock.now()             // current value in ms; pure read
+}
+fn main() {
+    c @= time.clock(1000)          // a Clock starting at 1000 ms
+    print(at(c))                   // 1000, on every machine
+}
+```
+
+| `Clock` method | Returns | What it does |
+|----------------|---------|--------------|
+| `now()` | `Int` | The clock's current value in ms (read; no `~` needed) |
+| `tick(ms)` | `Int` | Advance the clock by `ms` and return the new value (needs `~Clock`) |
+
+**Expert escape — `assume_deterministic { … }`.** Inside a `#Pure fn`, a block
+written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
+for its body — the "I know this is deterministic" hatch. It is a semantic
+footgun: nothing verifies the claim, so use it only when you can guarantee
+reproducibility yourself. See `examples/features/111_determinism.jet`.
 
 ---
 

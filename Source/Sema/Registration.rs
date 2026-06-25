@@ -1313,6 +1313,7 @@ pub(crate) fn check_func_body(
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
         txn_depth: 0,
+        det_suppress: 0,
         // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
         // statements may use low-level ops directly without a nested `@unsafe`
         // block. Calling such a fn is gated separately (E3103).

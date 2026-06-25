@@ -48,6 +48,10 @@ pub fn builtin_method_return(
         Type::Map { key, value } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
+        // D-DET1: deterministic injected Clock/Rng capability methods. Reading
+        // time/randomness THROUGH the handle is reproducible (caller seeded it).
+        Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
+        Type::Named(n) if n == crate::Syntax::RNG_TYPE => rng_method_return(method, arg_count),
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
         Type::Apply { name, args } if name == "Channel" => {
             channel_method_return(args, method, arg_count)
@@ -292,6 +296,30 @@ fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
+/// D-DET1: methods on the deterministic injected `Clock` capability.
+/// `clock.now()` reads the clock's current value (ms); `clock.tick(ms)` advances
+/// it and returns the new value. Reproducible — the clock starts from the seed
+/// the caller supplied to `time.clock(seed)` and only moves via explicit `tick`.
+fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("now", 0) => Some(Some(Type::Int)),
+        ("tick", 1) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
+/// D-DET1: methods on the deterministic injected `Rng` capability.
+/// `rng.int(lo, hi)` draws an Int in `[lo, hi]`; `rng.float()` draws a Float in
+/// `[0, 1)`. Reproducible — the stream is fixed by the seed passed to
+/// `random.rng(seed)`, so the same seed yields the same draws on every machine.
+fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("int", 2) => Some(Some(Type::Int)),
+        ("float", 0) => Some(Some(Type::Float)),
+        _ => None,
+    }
+}
+
 fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("join", 0) => Some(args.first().cloned()),
@@ -331,6 +359,11 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             "push" | "pop" | "insert" | "remove" | "reverse" | "sort" | "sort_by" | "clear"
         ),
         Type::Map { .. } => matches!(method, "insert" | "remove" | "clear"),
+        // D-DET1: `clock.tick(ms)` advances the clock; `rng.int`/`rng.float` advance
+        // the PRNG stream — these need an edit-access (`~`) receiver. `clock.now()`
+        // is a pure read (no `~` required).
+        Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => method == "tick",
+        Type::Named(n) if n == crate::Syntax::RNG_TYPE => matches!(method, "int" | "float"),
         _ => false,
     }
 }

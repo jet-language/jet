@@ -1,0 +1,44 @@
+// D-DET1 (ratified 2026-06-22): `#Pure` ⇒ reproducible.
+//
+// A `#Pure fn` rejects ambient wall-clock / OS-RNG (`time.now()`, `random.int()`)
+// because they break reproducibility (E3403). To use time or randomness inside a
+// pure function, take a deterministic capability as a PARAMETER — a `Clock` or
+// `Rng` the caller seeds — and read THROUGH it. The nondeterminism becomes the
+// caller's explicit, seeded choice, so the result is the same on every machine.
+//
+// For the rare case where you KNOW a construct is deterministic but the checker
+// can't prove it, `assume_deterministic { … }` is the expert escape hatch.
+
+use core.time as time;
+use core.random as random;
+
+// Pure: reads time + randomness only through the injected capabilities.
+// `clock` is read-only (`now`); `rng` advances its stream, so it is `~Rng`.
+#Pure fn roll_at(clock: Clock, rng: ~Rng) -> String {
+    ts @= clock.now()
+    die @= rng.int(1, 6)
+    return "t={ts} rolled {die}"
+}
+
+// Pure: same injected caps, deterministic stream — call it twice, get two draws.
+#Pure fn two_rolls(rng: ~Rng) -> String {
+    a @= rng.int(1, 6)
+    b @= rng.int(1, 6)
+    return "{a} then {b}"
+}
+
+fn main() {
+    clock @= time.clock(1000)
+    rng := random.rng(42)
+
+    print(roll_at(clock, ~rng))
+    print(two_rolls(~rng))
+
+    // The expert escape: inside this block the determinism check is suspended.
+    // A footgun — use only when you can guarantee reproducibility yourself.
+    fixed := 0
+    assume_deterministic {
+        fixed = 7
+    }
+    print("escape: {fixed}")
+}

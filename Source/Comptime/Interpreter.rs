@@ -299,6 +299,10 @@ impl<'a> Interp<'a> {
             // D-TERM1 (ratified 2026-06-22): `live { … }` is a runtime/codegen
             // construct; the comptime interpreter has no terminal at compile time.
             Stmt::Live { span, .. } => Err(unsupported("a `live` block", *span)),
+            // D-DET1: `assume_deterministic { … }` is semantically transparent — it
+            // only suspends the sema determinism check. The interpreter just runs
+            // its body (the suspension is a no-op at comptime, which is already pure).
+            Stmt::AssumeDet { body, .. } => self.exec_block(body, scope),
             // D-LABEL1: labeled `break @name`/`continue @name` need the compiled
             // backend's multi-level loop control; the interpreter declines them
             // honestly (like `@unsafe`) rather than approximate them.

@@ -831,6 +831,23 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end),
                 });
             }
+            // D-DET1 (ratified 2026-06-22): `assume_deterministic { … }` — the
+            // expert determinism-escape block. A lowercase contextual keyword
+            // (like `live`): recognised only when immediately followed by `{`, so
+            // a name `assume_deterministic` still works everywhere else.
+            TokKind::Ident(n)
+                if n == Syntax::KW_ASSUME_DET
+                    && matches!(self.peek2().kind, TokKind::LBrace) =>
+            {
+                let start = self.bump().span; // `assume_deterministic`
+                self.expect(TokKind::LBrace, &format!("after `{}`", Syntax::KW_ASSUME_DET))?;
+                let body = self.block_stmts();
+                let end = self.toks[self.pos - 1].span.end;
+                return Ok(Stmt::AssumeDet {
+                    body,
+                    span: Span::new(start.start, end),
+                });
+            }
             // D-REGION1 (opt B): `region r { … }` — an explicit allocation
             // region. `region` is a lowercase contextual keyword (D-CASING1):
             // recognized only when followed by `name {`, so a variable named
