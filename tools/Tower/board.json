@@ -1293,8 +1293,8 @@
       "type": "task",
       "title": "Zed/tree-sitter grammar is a stale dialect — fix broken highlighting",
       "body": "The Zed extension highlights an OLD dialect, so keywords light up inside identifiers (format->for, inner->in, asset->as, reference->ref, mutable->mut, usage->use, tests->test). Two multiplicative root causes. (1) grammar.js has NO `word: $ => $.identifier` token, so tree-sitter does no keyword extraction and keyword tokens match as PREFIXES of identifiers, worst in the ERROR/partial states that dominate live editing. (2) the grammar still defines retired constructs (val/var bindings, switch_stmt) and CANNOT parse modern ratified syntax real examples use (@=/:= sigil bindings, multi-arm `if subj == { pat -> {} }`, enum/or/range/wildcard patterns, ~^&* capability sigils, fan-out f.[…]/s.{…}, ??, dotted `use core.x.y`, map literals, self/~self, #Unsafe/#Uninit/#-attributes, block comments /* */) and REQUIRES `;` terminators modern Jet omits — so nearly every file is full of ERROR nodes, compounding (1). highlights/outline/indents.scm still tag retired switch/val/var. No new user-facing syntax — the grammar just needs to track already-ratified syntax, so NO ballot. Authoritative source: editors/tree-sitter/grammar.js; ship via FORCE=1 editors/zed/install.sh (regen parser.c + wasm + re-pin extension.toml), update the four .scm/config.toml query files in lockstep (a dangling node ref is a hard Zed load failure). Plan: tools/Tower/docs/sidequests/zed-grammar-modernization.md.",
-      "stage": "ready",
-      "plan": "zed-grammar-modernization",
+      "stage": "done",
+      "plan": null,
       "notes": [
         {
           "t": "Filed from codebase audit 2026-06-24. No existing editor/grammar card — genuine gap. User-reported pain point.",
@@ -1307,10 +1307,14 @@
         {
           "t": "An implementing agent is already active in the repo — this card is for tracking/coordination; verify the live multi-arm-if spelling against Source/Syntax.rs (D-IF1/D-IF3, c134) before encoding it.",
           "at": "2026-06-24T22:45:02.236Z"
+        },
+        {
+          "t": "[sweep] Zed/tree-sitter grammar refreshed to modern Jet: @=/:= bindings, ~/^/&/* capability sigils + p.* deref, == dispatch, all #-markers (serde/#Transact/#grant/#SingleUse/#Tainted/#Caps/#(effects)/#(via f)/assume_deterministic), turbofish, fan-out, etc. grammar.js + regenerated src/ + jet.wasm + highlights/indents/outline. 185/187 examples parse (2 are jetos config dialect). install.sh re-pin not run (does git) — grammar files in place + synced.",
+          "at": "2026-06-25"
         }
       ],
       "created": "2026-06-24T22:45:02.236Z",
-      "updated": "2026-06-24T22:45:02.236Z",
+      "updated": "2026-06-25",
       "priority": "P1",
       "workOrder": 0
     },
